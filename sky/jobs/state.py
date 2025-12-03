@@ -11,7 +11,8 @@ import sqlite3
 import threading
 import time
 import typing
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
+from typing import (Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple,
+                    Union)
 import urllib.parse
 
 import colorama
@@ -24,6 +25,7 @@ from sqlalchemy.ext import asyncio as sql_async
 from sqlalchemy.ext import declarative
 
 from sky import exceptions
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -1855,6 +1857,45 @@ def get_nonterminal_job_ids_by_pool(pool: str,
         rows = session.execute(query).fetchall()
         job_ids = [row[0] for row in rows if row[0] is not None]
         return job_ids
+
+
+@_init_db
+def get_pool_worker_used_resources(
+        job_ids: Set[int]) -> Optional['resources_lib.Resources']:
+    """Get the total used resources by running jobs.
+
+    Args:
+        job_ids: Set of spot_job_id values to check
+
+    Returns:
+        Resources object with summed resources from all running jobs, or None
+    """
+    if not job_ids:
+        return None
+
+    assert _SQLALCHEMY_ENGINE is not None
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Query spot_table for running jobs
+        query = sqlalchemy.select(spot_table.c.resources).where(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id.in_(job_ids),
+                spot_table.c.status == ManagedJobStatus.RUNNING.value))
+        rows = session.execute(query).fetchall()
+
+        # Parse resources strings into Resources objects and sum them using +
+        total_resources = None
+        for row in rows:
+            resources_str = row[0]
+            parsed = resources_lib.Resources.from_resources_string(
+                resources_str)
+            if parsed is not None:
+                if total_resources is None:
+                    total_resources = parsed
+                else:
+                    total_resources = total_resources + parsed
+
+        return total_resources
 
 
 @_init_db_async

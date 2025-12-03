@@ -23,6 +23,7 @@ import filelock
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -810,16 +811,25 @@ def get_ready_replicas(
     ]
 
 
-def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
-    """Get the next available cluster name from idle replicas.
+def get_next_cluster_name(
+    service_name: str,
+    job_id: int,
+    task_resources: Optional[typing.Union[
+        'resources_lib.Resources', typing.Set['resources_lib.Resources'],
+        typing.List['resources_lib.Resources']]] = None
+) -> Optional[str]:
+    """Get the next available cluster name from replicas with sufficient
+    resources.
 
     Args:
         service_name: The name of the service.
-        job_id: Optional job ID to associate with the acquired cluster.
-                If None, a placeholder will be used.
+        job_id: Job ID to associate with the acquired cluster.
+        task_resources: Optional task resource requirements. If provided, will
+                check if resources fit in free worker resources. Can be
+                a single Resources object or a set/list of Resources objects.
 
     Returns:
-        The cluster name if an idle replica is found, None otherwise.
+        The cluster name if a suitable replica is found, None otherwise.
     """
     # Check if service exists
     service_status = _get_service_status(service_name,
@@ -834,29 +844,63 @@ def get_next_cluster_name(service_name: str, job_id: int) -> Optional[str]:
     with filelock.FileLock(get_service_filelock_path(service_name)):
         logger.debug(f'Get next cluster name for pool {service_name!r}')
         ready_replicas = get_ready_replicas(service_name)
+
+        logger.debug(f'Ready replicas: {ready_replicas!r}')
+        logger.debug(f'Task resources: {task_resources!r}')
+
         idle_replicas: List['replica_managers.ReplicaInfo'] = []
-        for replica_info in ready_replicas:
-            jobs_on_replica = managed_job_state.get_nonterminal_job_ids_by_pool(
-                service_name, replica_info.cluster_name)
-            # TODO(tian): Make it resources aware. Currently we allow and only
-            # allow one job per replica. In the following PR, we should:
-            #  i) When the replica is launched with `any_of` resources (
-            #     replicas can have different resources), we should check if
-            #     the resources that jobs require are available on the replica.
-            #     e.g., if a job requires A100:1 on a {L4:1, A100:1} pool, it
-            #     should only goes to replica with A100.
-            # ii) When a job only requires a subset of the resources on the
-            #     replica, each replica should be able to handle multiple jobs
-            #     at the same time. e.g., if a job requires A100:1 on a A100:8
-            #     pool, it should be able to run 4 jobs at the same time.
-            if not jobs_on_replica:
-                idle_replicas.append(replica_info)
+
+        # If task_resources is provided, use resource-aware scheduling
+        if task_resources is not None:
+            # Get free resources for all workers
+            free_resources_dict = serve_state.get_free_worker_resources(
+                service_name)
+
+            logger.debug(f'Free resources dictionary: {free_resources_dict!r}')
+            # Normalize task_resources to a list
+            if isinstance(task_resources, resources_lib.Resources):
+                task_resources_list = [task_resources]
+            elif isinstance(task_resources, (set, list)):
+                task_resources_list = list(task_resources)
+            else:
+                task_resources_list = []
+
+            for replica_info in ready_replicas:
+                cluster_name = replica_info.cluster_name
+                free_resources = free_resources_dict.get(cluster_name)
+                logger.debug(f'Free resources for cluster {cluster_name!r}: '
+                             f'{free_resources!r}')
+
+                # Skip if worker has no free resources available
+                if free_resources is None:
+                    continue
+
+                # Check if all of the task resource options fit
+                fits = True
+                for task_res in task_resources_list:
+                    logger.debug(f'Task resources: {task_res!r}')
+                    if not task_res.less_resources_than(free_resources):
+                        logger.debug(f'Task resources {task_res!r} does not fit'
+                                     f' in free resources {free_resources!r}')
+                        fits = False
+                        break
+                if fits:
+                    idle_replicas.append(replica_info)
+        else:
+            # Fall back to resource unaware scheduling if no task resources
+            # are provided.
+            for replica_info in ready_replicas:
+                jobs_on_replica = (
+                    managed_job_state.get_nonterminal_job_ids_by_pool(
+                        service_name, replica_info.cluster_name))
+                if not jobs_on_replica:
+                    idle_replicas.append(replica_info)
+
         if not idle_replicas:
             logger.info(f'No idle replicas found for pool {service_name!r}')
             return None
 
         # Select the first idle replica.
-        # TODO(tian): "Load balancing" policy.
         replica_info = idle_replicas[0]
         logger.info(f'Selected replica {replica_info.replica_id} with cluster '
                     f'{replica_info.cluster_name!r} for job {job_id!r} in pool '

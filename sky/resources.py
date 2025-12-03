@@ -1792,6 +1792,179 @@ class Resources:
             self._docker_login_config is None,
         ])
 
+    @classmethod
+    def from_resources_string(
+            cls, resources_str: Optional[str]) -> Optional['Resources']:
+        """Parse a resources string into a Resources object.
+
+        Args:
+            resources_str: String in format like "CPU:2, V100:1" or "CPU:2" or
+            None
+
+        Returns:
+            Resources object with parsed resources, or None if empty/None string
+        """
+        if not resources_str:
+            return None
+
+        # Parse format like "CPU:2, V100:1" or "CPU:2"
+        cpus = None
+        memory = None
+        accelerators = {}
+
+        parts = [part.strip() for part in resources_str.split(',')]
+        for part in parts:
+            if ':' not in part:
+                continue
+            key, value = part.split(':', 1)
+            key = key.strip()
+            value = value.strip()
+
+            try:
+                if key.upper() == 'CPU':
+                    cpus = value
+                elif key.lower() in ('memory', 'mem'):
+                    memory = value
+                else:
+                    # Treat as accelerator type
+                    try:
+                        acc_count = float(value)
+                        accelerators[key] = acc_count
+                    except ValueError:
+                        # If value is not a number, skip
+                        continue
+            except Exception as e:  # pylint: disable=broad-except
+                # Skip malformed entries
+                logger.error(f'Failed to parse resources string: {e}')
+                continue
+
+        # Only create Resources object if we have at least one resource
+        if cpus is None and memory is None and not accelerators:
+            return None
+
+        return cls(cpus=cpus,
+                   memory=memory,
+                   accelerators=accelerators if accelerators else None)
+
+    def __add__(self, other: Optional['Resources']) -> Optional['Resources']:
+        """Add two Resources objects together.
+
+        Args:
+            other: Another Resources object to add (may be None)
+
+        Returns:
+            New Resources object with summed resources, or None if other is None
+        """
+        if other is None:
+            return self
+
+        # Sum CPUs
+        self_cpus = _parse_value(self.cpus)
+        other_cpus = _parse_value(other.cpus)
+        total_cpus = None
+        if self_cpus is not None or other_cpus is not None:
+            total_cpus = (self_cpus or 0) + (other_cpus or 0)
+
+        # Sum memory
+        self_memory = _parse_value(self.memory)
+        other_memory = _parse_value(other.memory)
+        total_memory = None
+        if self_memory is not None or other_memory is not None:
+            total_memory = (self_memory or 0) + (other_memory or 0)
+
+        # Sum accelerators
+        total_accelerators = {}
+        if self.accelerators:
+            for acc_type, count in self.accelerators.items():
+                total_accelerators[acc_type] = float(count)
+        if other.accelerators:
+            for acc_type, count in other.accelerators.items():
+                if acc_type not in total_accelerators:
+                    total_accelerators[acc_type] = 0
+                total_accelerators[acc_type] += float(count)
+
+        return Resources(
+            cpus=str(total_cpus) if total_cpus is not None else None,
+            memory=str(total_memory) if total_memory is not None else None,
+            accelerators=total_accelerators if total_accelerators else None)
+
+    def __sub__(self, other: Optional['Resources']) -> 'Resources':
+        """Subtract another Resources object from this one.
+
+        Args:
+            other: Resources to subtract (may be None)
+
+        Returns:
+            New Resources object with subtracted resources. If the result for a
+            resource is negative, it will be set to 0.
+        """
+        if other is None:
+            return self
+
+        # Subtract CPUs
+        self_cpus = _parse_value(self.cpus)
+        other_cpus = _parse_value(other.cpus)
+        free_cpus = None
+        if self_cpus is not None:
+            if other_cpus is not None:
+                free_cpus = max(0, self_cpus - other_cpus)
+            else:
+                free_cpus = self_cpus
+
+        # Subtract memory
+        self_memory = _parse_value(self.memory)
+        other_memory = _parse_value(other.memory)
+        free_memory = None
+        if self_memory is not None:
+            if other_memory is not None:
+                free_memory = max(0, self_memory - other_memory)
+            else:
+                free_memory = self_memory
+
+        # Subtract accelerators
+        free_accelerators = {}
+        if self.accelerators:
+            for acc_type, total_count in self.accelerators.items():
+                used_count = (other.accelerators.get(acc_type, 0)
+                              if other.accelerators else 0)
+                free_count = max(0, float(total_count) - float(used_count))
+                if free_count > 0:
+                    free_accelerators[acc_type] = free_count
+
+        # If all resources are exhausted, return None
+        # Check if we have any free resources
+        free_cpus = None if free_cpus == 0 else free_cpus
+        free_memory = None if free_memory == 0 else free_memory
+        free_accelerators = None if not free_accelerators else free_accelerators
+
+        return Resources(cpus=free_cpus,
+                         memory=free_memory,
+                         accelerators=free_accelerators)
+
+    def less_resources_than(self, other: 'Resources') -> bool:
+        """Returns whether this Resources is less demanding than the other.
+        Only checks CPU, memory and accelerators."""
+
+        my_cpus = _parse_value(self.cpus) or 0
+        other_cpus = _parse_value(other.cpus) or 0
+        my_memory = _parse_value(self.memory) or 0
+        other_memory = _parse_value(other.memory) or 0
+        my_accelerators = (self.accelerators
+                           if self.accelerators is not None else {})
+        other_accelerators = (other.accelerators
+                              if other.accelerators is not None else {})
+
+        if my_cpus < other_cpus:
+            return True
+        if my_memory < other_memory:
+            return True
+        for acc in other_accelerators:
+            if (acc not in my_accelerators or
+                    my_accelerators[acc] < other_accelerators[acc]):
+                return True
+
+        return False
+
     def copy(self, **override) -> 'Resources':
         """Returns a copy of the given Resources."""
         use_spot = self.use_spot if self._use_spot_specified else None
@@ -2456,3 +2629,18 @@ def _maybe_add_docker_prefix_to_image_id(
     for k, v in image_id_dict.items():
         if not v.startswith('docker:'):
             image_id_dict[k] = f'docker:{v}'
+
+
+def _parse_value(val):
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        # Remove '+' suffix if present
+        val = val.rstrip('+')
+        try:
+            return float(val)
+        except ValueError:
+            return None
+    return None

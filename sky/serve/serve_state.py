@@ -17,6 +17,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import declarative
 
+from sky.jobs import state as managed_job_state
 from sky.serve import constants
 from sky.utils import common_utils
 from sky.utils.db import db_utils
@@ -25,6 +26,7 @@ from sky.utils.db import migration_utils
 if typing.TYPE_CHECKING:
     from sqlalchemy.engine import row
 
+    from sky import resources as resources_lib
     from sky.serve import replica_managers
     from sky.serve import service_spec
 
@@ -669,6 +671,48 @@ def get_replica_infos(
             sqlalchemy.select(replicas_table.c.replica_info).where(
                 replicas_table.c.service_name == service_name)).fetchall()
     return [pickle.loads(row[0]) for row in rows]
+
+
+@init_db
+def get_free_worker_resources(
+        pool: str) -> Dict[str, Optional['resources_lib.Resources']]:
+    """Get free resources for each worker in a pool.
+
+    Args:
+        pool: Pool name (service name)
+
+    Returns:
+        Dictionary mapping cluster_name (worker) to free Resources object (or
+        None if worker is not available or has no free resources).
+    """
+
+    free_resources: Dict[str, Optional['resources_lib.Resources']] = {}
+    replicas = get_replica_infos(pool)
+
+    for replica_info in replicas:
+        cluster_name = replica_info.cluster_name
+
+        # Get cluster handle
+        handle = replica_info.handle()
+        if handle is None or handle.launched_resources is None:
+            free_resources[cluster_name] = None
+            continue
+
+        total_resources = handle.launched_resources
+
+        # Get job IDs running on this worker
+        job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
+            pool, cluster_name)
+
+        # Get used resources
+        used_resources = managed_job_state.get_pool_worker_used_resources(
+            set(job_ids))
+
+        # Calculate free resources using - operator
+        free = total_resources - used_resources
+        free_resources[cluster_name] = free
+
+    return free_resources
 
 
 @init_db
