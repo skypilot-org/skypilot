@@ -73,8 +73,6 @@ setup_commands:
   # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
-  # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  # TODO(kevin): Move some stuff to skylet/constants.py
   - {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}

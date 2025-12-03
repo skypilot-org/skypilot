@@ -1412,9 +1412,15 @@ class SlurmCommandRunner(SSHCommandRunner):
         # (e.g., JobScheduler._run_job which uses launch_new_process_tree).
         # Note: proctrack/cgroup is enabled by default on Nebius'
         # Managed Soperator.
-        cmd = (f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
-               f'"{self.skypilot_runtime_dir}" && '
-               f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
+        cmd = (
+            f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
+            f'"{self.skypilot_runtime_dir}" && '
+            # Set the uv cache directory to /tmp/uv_cache to speed up
+            # package installation. Otherwise it defaults to ~/.cache/uv.
+            # This also means we can share the uv cache between multiple
+            # SkyPilot clusters.
+            f'export UV_CACHE_DIR=/tmp/uv_cache && '
+            f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
         ssh_options = ('-o StrictHostKeyChecking=no '
                        '-o UserKnownHostsFile=/dev/null '
                        '-o LogLevel=ERROR')

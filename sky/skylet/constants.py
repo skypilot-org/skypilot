@@ -75,7 +75,7 @@ ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # on an NFS takes too long (1-2m slower).
 SKY_CONDA_ROOT = f'{SKY_RUNTIME_DIR}/miniconda3'
 # uv is used for venv and pip, much faster than python implementations.
-SKY_UV_INSTALL_DIR = f'"{SKY_RUNTIME_DIR}/.local/bin"'
+SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
 # set UV_SYSTEM_PYTHON to false in case the
 # user provided docker image set it to true.
 # unset PYTHONPATH in case the user provided docker image set it.
