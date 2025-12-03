@@ -133,7 +133,12 @@ def _cleanup(service_name: str) -> bool:
         if info.cluster_name not in existing_cluster_names:
             logger.info(f'Cluster {info.cluster_name} for replica '
                         f'{info.replica_id} not found. Might be a failed '
-                        'cluster. Skipping.')
+                        'cluster. Removing replica from database.')
+            try:
+                serve_state.remove_replica(service_name, info.replica_id)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'Failed to remove replica {info.replica_id} '
+                               f'from database: {e}')
             continue
         p = multiprocessing.Process(target=replica_managers.terminate_cluster,
                                     args=(info.cluster_name,))
