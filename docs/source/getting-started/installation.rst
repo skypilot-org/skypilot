@@ -1132,6 +1132,9 @@ To access `IBM's VPC service <https://www.ibm.com/cloud/vpc>`__:
 
 Install the necessary dependencies for IBM.
 
+.. note::
+  IBM is only supported for Python <= 3.11
+
 .. tab-set::
   .. tab-item:: pip
     :sync: pip-tab
@@ -1206,6 +1209,9 @@ Samsung Cloud Platform, or SCP, provides cloud services optimized for enterprise
 To configure SCP access:
 
 Install the necessary dependencies for SCP.
+
+.. note::
+  SCP is only supported for Python <= 3.11
 
 .. tab-set::
   .. tab-item:: pip
