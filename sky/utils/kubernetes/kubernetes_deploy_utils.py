@@ -3,7 +3,6 @@ import os
 import random
 import shlex
 import subprocess
-import sys
 import tempfile
 import textwrap
 from typing import List, Optional, Tuple
@@ -21,6 +20,7 @@ from sky.utils import log_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils.kubernetes import deploy_ssh_node_pools
 
 logger = sky_logging.init_logger(__name__)
 
@@ -91,83 +91,34 @@ def deploy_ssh_cluster(cleanup: bool = False,
     """
     check_ssh_cluster_dependencies()
 
-    # Prepare command to call deploy_remote_cluster.py script
-    # TODO(romilb): We should move this to a native python method/class call
-    #  instead of invoking a script with subprocess.
-    path_to_package = os.path.dirname(__file__)
-    up_script_path = os.path.join(path_to_package, 'deploy_remote_cluster.py')
-    cwd = os.path.dirname(os.path.abspath(up_script_path))
+    action = 'Cleanup' if cleanup else 'Deployment'
+    msg_str = f'Initializing SSH Node Pools {action}...'
 
-    deploy_command = [sys.executable, up_script_path]
+    with rich_utils.safe_status(ux_utils.spinner_message(msg_str)):
+        try:
+            deploy_ssh_node_pools.deploy_clusters(
+                infra=infra, cleanup=cleanup, kubeconfig_path=kubeconfig_path)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(str(e))
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Failed to deploy SkyPilot on some Node Pools.') from e
 
+    logger.info('')
     if cleanup:
-        deploy_command.append('--cleanup')
-
-    if infra:
-        deploy_command.extend(['--infra', infra])
-
-    # Use the default kubeconfig path if none is provided
-    kubeconfig_path = kubeconfig_path or DEFAULT_KUBECONFIG_PATH
-    deploy_command.extend(['--kubeconfig-path', kubeconfig_path])
-
-    # Setup logging paths
-    run_timestamp = sky_logging.get_run_timestamp()
-    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
-                            'ssh_up.log')
-
-    if cleanup:
-        msg_str = 'Cleaning up SSH Node Pools...'
+        logger.info(
+            ux_utils.finishing_message(
+                '🎉 SSH Node Pools cleaned up successfully.'))
     else:
-        msg_str = 'Initializing deployment to SSH Node Pools...'
-
-    # Create environment with PYTHONUNBUFFERED=1 to ensure unbuffered output
-    env = os.environ.copy()
-    env['PYTHONUNBUFFERED'] = '1'
-
-    with rich_utils.safe_status(
-            ux_utils.spinner_message(msg_str, log_path=log_path,
-                                     is_local=True)):
-        returncode, _, stderr = log_lib.run_with_log(
-            cmd=deploy_command,
-            log_path=log_path,
-            require_outputs=True,
-            stream_logs=False,
-            line_processor=log_utils.SkySSHUpLineProcessor(log_path=log_path,
-                                                           is_local=False),
-            cwd=cwd,
-            env=env)
-
-    if returncode == 0:
-        success = True
-    else:
-        with ux_utils.print_exception_no_traceback():
-            log_hint = ux_utils.log_path_hint(log_path, is_local=False)
-            raise RuntimeError('Failed to deploy SkyPilot on some Node Pools. '
-                               f'{log_hint}'
-                               f'\nError: {stderr}')
-
-    if success:
-        # Add an empty line to separate the deployment logs from the final
-        # message
-        logger.info('')
-        if cleanup:
-            logger.info(
-                ux_utils.finishing_message(
-                    '🎉 SSH Node Pools cleaned up successfully.',
-                    log_path=log_path,
-                    is_local=True))
-        else:
-            logger.info(
-                ux_utils.finishing_message(
-                    '🎉 SSH Node Pools set up successfully. ',
-                    follow_up_message=(
-                        f'Run `{colorama.Style.BRIGHT}'
-                        f'sky check ssh'
-                        f'{colorama.Style.RESET_ALL}` to verify access, '
-                        f'`{colorama.Style.BRIGHT}sky launch --infra ssh'
-                        f'{colorama.Style.RESET_ALL}` to launch a cluster. '),
-                    log_path=log_path,
-                    is_local=True))
+        logger.info(
+            ux_utils.finishing_message(
+                '🎉 SSH Node Pools set up successfully. ',
+                follow_up_message=(
+                    f'Run `{colorama.Style.BRIGHT}'
+                    f'sky check ssh'
+                    f'{colorama.Style.RESET_ALL}` to verify access, '
+                    f'`{colorama.Style.BRIGHT}sky launch --infra ssh'
+                    f'{colorama.Style.RESET_ALL}` to launch a cluster.')))
 
 
 def generate_kind_config(port_start: int,
