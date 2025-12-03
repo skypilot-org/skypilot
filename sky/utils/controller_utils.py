@@ -300,8 +300,9 @@ def _get_cloud_dependencies_installation_commands(
     python_packages.add('flask')
 
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
-    commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" &&'
-                    f'{constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1')
+    commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" && '
+                    f'{constants.SKY_UV_INSTALL_CMD} || '
+                    f'(echo "\\nERROR: Failed to install uv" && exit 1)')
 
     enabled_compute_clouds = set(
         sky_check.get_cached_enabled_clouds_or_refresh(
@@ -329,9 +330,10 @@ def _get_cloud_dependencies_installation_commands(
 
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
-                f'echo -en "\\r{step_prefix}azure-cli{empty_str}" &&'
+                f'echo -en "\\r{step_prefix}azure-cli{empty_str}" && '
                 f'{constants.SKY_UV_PIP_CMD} install --prerelease=allow '
-                f'"{dependencies.AZURE_CLI}" > /dev/null 2>&1')
+                f'"{dependencies.AZURE_CLI}" || '
+                f'(echo "\\nERROR: Failed to install azure-cli" && exit 1)')
         elif isinstance(cloud, clouds.GCP):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(f'echo -en "\\r{step_prefix}GCP SDK{empty_str}" &&'
@@ -390,8 +392,9 @@ def _get_cloud_dependencies_installation_commands(
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
                 f'echo -en "\\r{step_prefix}cudoctl{empty_str}" && '
-                'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb > /dev/null 2>&1 && '  # pylint: disable=line-too-long
-                'sudo dpkg -i ~/cudoctl.deb > /dev/null 2>&1')
+                'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb && '  # pylint: disable=line-too-long
+                'sudo dpkg -i ~/cudoctl.deb || '
+                '(echo "\\nERROR: Failed to install cudoctl" && exit 1)')
         elif isinstance(cloud, clouds.IBM):
             if controller != Controllers.JOBS_CONTROLLER:
                 # We only need IBM deps on the jobs controller.
@@ -412,8 +415,8 @@ def _get_cloud_dependencies_installation_commands(
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
     commands.append(
         f'echo -en "\\r{step_prefix}cloud python packages{empty_str}" && '
-        f'{constants.SKY_UV_PIP_CMD} install {packages_string} > /dev/null 2>&1'
-    )
+        f'{constants.SKY_UV_PIP_CMD} install {packages_string} || '
+        f'(echo "\\nERROR: Failed to install cloud dependencies" && exit 1)')
 
     total_commands = len(commands)
     finish_prefix = prefix_str.replace('[<step>/<total>] ', '  ')
