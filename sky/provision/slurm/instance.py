@@ -166,10 +166,10 @@ def _create_virtual_instance(
                 kill $(cat "{skypilot_runtime_dir}/.sky/skylet_pid") 2>/dev/null || true
             fi
             echo "Cleaning up sky directories..."
-            rm -rf "{skypilot_runtime_dir}"
-            rm -rf "{sky_dir}"
+            rm -rf {skypilot_runtime_dir}
+            rm -rf {sky_dir}
         }}
-        trap cleanup TERM EXIT
+        trap cleanup TERM
 
         # Create sky directory for the cluster.
         # TODO(kevin): Since this is run inside the sbatch script, failures
@@ -414,7 +414,11 @@ def terminate_instances(
         ssh_private_key,
         ssh_proxy_command=ssh_proxy_command,
     )
-    client.cancel_jobs_by_name(cluster_name_on_cloud)
+    client.cancel_jobs_by_name(
+        cluster_name_on_cloud,
+        signal='TERM',
+        full=True,
+    )
 
 
 def open_ports(

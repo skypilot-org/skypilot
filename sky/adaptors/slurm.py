@@ -82,16 +82,22 @@ class SlurmClient:
 
     def cancel_jobs_by_name(self,
                             job_name: str,
-                            signal: Optional[str] = None) -> None:
+                            signal: Optional[str] = None,
+                            full: bool = False) -> None:
         """Cancel Slurm job(s) by name.
 
         Args:
             job_name: Name of the job(s) to cancel.
             signal: Optional signal to send to the job(s).
+            full: If True, signals the batch script and its children processes.
+                By default, signals other than SIGKILL are not sent to the
+                batch step (the shell script).
         """
         cmd = f'scancel --name {job_name}'
         if signal is not None:
             cmd += f' --signal {signal}'
+        if full:
+            cmd += ' --full'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
                                               stream_logs=False)
