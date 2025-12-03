@@ -439,8 +439,10 @@ async def cleanup_upload_ids():
                 client_file_mounts_dir = (
                     common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
                     user_hash / 'file_mounts')
-                shutil.rmtree(client_file_mounts_dir / upload_id,
-                              ignore_errors=True)
+                await context_utils.to_thread(shutil.rmtree,
+                                              client_file_mounts_dir /
+                                              upload_id,
+                                              ignore_errors=True)
                 (client_file_mounts_dir /
                  upload_id).with_suffix('.zip').unlink(missing_ok=True)
                 upload_ids_to_cleanup.pop((upload_id, user_hash))
