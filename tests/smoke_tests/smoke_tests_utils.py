@@ -75,7 +75,7 @@ LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
         'controller': {
             'resources': {
                 'cpus': '4+',
-                'memory': '8+'
+                'memory': '16+'
             }
         }
     },

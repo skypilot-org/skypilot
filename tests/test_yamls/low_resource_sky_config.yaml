@@ -2,7 +2,7 @@ jobs:
   controller:
     resources:
       cpus: 4+
-      memory: 8+
+      memory: 16+
 serve:
   controller:
     resources:
