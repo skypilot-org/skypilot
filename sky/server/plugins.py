@@ -100,6 +100,10 @@ class BasePlugin(abc.ABC):
         """Hook called by API server to let the plugin install itself."""
         raise NotImplementedError
 
+    def shutdown(self):
+        """Hook called by API server to let the plugin shutdown."""
+        pass
+
 
 def _config_schema():
     plugin_schema = {

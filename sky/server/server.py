@@ -2243,6 +2243,8 @@ if __name__ == '__main__':
 
         for gt in global_tasks:
             gt.cancel()
+        for plugin in plugins.get_plugins():
+            plugin.shutdown()
         subprocess_utils.run_in_parallel(lambda worker: worker.cancel(),
                                          workers,
                                          num_threads=len(workers))
