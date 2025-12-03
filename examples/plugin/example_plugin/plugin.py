@@ -1,9 +1,7 @@
 """Example plugin for SkyPilot API server."""
 import functools
-import inspect
 import logging
 import threading
-from typing import Any
 
 import fastapi
 import starlette.middleware.base
@@ -106,6 +104,7 @@ class ExamplePatchPlugin(plugins.BasePlugin):
                 config: common.ProvisionConfig) -> common.ProvisionRecord:
             result = original_run_instances(region, cluster_name,
                                             cluster_name_on_cloud, config)
+            logger.info('Post action after running instances')
             return result
 
         instance.run_instances = patched_run_instances
