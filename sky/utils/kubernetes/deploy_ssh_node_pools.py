@@ -88,6 +88,7 @@ def run_remote(node,
     if use_ssh_config:
         # Use SSH config for connection parameters
         ssh_cmd = ['ssh', node, cmd]
+        logger.error('!!!!!!!')
     else:
         # Use explicit parameters
         ssh_cmd = [
@@ -428,7 +429,6 @@ def deploy_clusters(
         infra: Optional[str],
         ssh_node_pools_file: str = ssh_utils.DEFAULT_SSH_NODE_POOLS_PATH,
         kubeconfig_path: Optional[str] = None,
-        global_use_ssh_config: bool = False,
         cleanup: bool = True):
 
     kubeconfig_path = kubeconfig_path or DEFAULT_KUBECONFIG_PATH
@@ -511,10 +511,9 @@ def deploy_clusters(
             worker_nodes = [h['ip'] for h in worker_hosts]
             ssh_user = head_host['user']
             ssh_key = head_host['identity_file']
-            head_use_ssh_config = global_use_ssh_config or head_host.get(
-                'use_ssh_config', False)
+            head_use_ssh_config = head_host.get('use_ssh_config', False)
             worker_use_ssh_config = [
-                global_use_ssh_config or h.get('use_ssh_config', False)
+                h.get('use_ssh_config', False)
                 for h in worker_hosts
             ]
             password = head_host['password']
