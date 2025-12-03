@@ -78,6 +78,34 @@ class TestRunningCheck:
         assert attempt_skylet._find_running_skylet_pids() == [7680]
 
 
+class TestVersionMatch:
+    """Test _check_version_match logic."""
+
+    def test_version_match_when_file_matches(self, skylet_env):
+        """Version file with matching version -> _check_version_match returns (True, version)."""
+        skylet_env['version_file'].write_text(constants.SKYLET_VERSION)
+
+        match, version = attempt_skylet._check_version_match()
+        assert match is True
+        assert version == constants.SKYLET_VERSION
+
+    def test_version_mismatch_when_file_stale(self, skylet_env):
+        """Version file with stale version -> _check_version_match returns (False, old_version)."""
+        skylet_env['version_file'].write_text('old_version')
+
+        match, version = attempt_skylet._check_version_match()
+        assert match is False
+        assert version == 'old_version'
+
+    def test_version_match_no_file(self, skylet_env):
+        """No version file -> _check_version_match returns (False, None)."""
+        assert not skylet_env['version_file'].exists()
+
+        match, version = attempt_skylet._check_version_match()
+        assert match is False
+        assert version is None
+
+
 class TestRestartSkylet:
     """Test restart_skylet() function."""
 

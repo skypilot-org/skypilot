@@ -3,7 +3,7 @@
 import os
 import signal
 import subprocess
-from typing import List
+from typing import List, Optional, Tuple
 
 import psutil
 
@@ -71,6 +71,23 @@ def _find_running_skylet_pids() -> List[int]:
         return pids
 
 
+def _check_version_match() -> Tuple[bool, Optional[str]]:
+    """Check if the version file matches the current skylet version.
+
+    Returns:
+        Tuple of (version_match: bool, version: str or None)
+    """
+    version: Optional[str] = None
+    if os.path.exists(VERSION_FILE):
+        try:
+            with open(VERSION_FILE, 'r', encoding='utf-8') as f:
+                version = f.read().strip()
+                return version == constants.SKYLET_VERSION, version
+        except (OSError, IOError):
+            pass
+    return False, version
+
+
 def restart_skylet():
     # Kills old skylet if it is running.
     # TODO(zhwu): make the killing graceful, e.g., use a signal to tell
@@ -110,13 +127,7 @@ def restart_skylet():
 # Check if our skylet is running
 running = bool(_find_running_skylet_pids())
 
-version_match = False
-found_version = None
-if os.path.exists(VERSION_FILE):
-    with open(VERSION_FILE, 'r', encoding='utf-8') as f:
-        found_version = f.read().strip()
-        if found_version == constants.SKYLET_VERSION:
-            version_match = True
+version_match, found_version = _check_version_match()
 
 version_string = (f' (found version {found_version}, new version '
                   f'{constants.SKYLET_VERSION})')
