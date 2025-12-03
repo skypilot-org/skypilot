@@ -1206,14 +1206,23 @@ class V1NodeAddress:
 
 
 @dataclasses.dataclass
+class V1NodeCondition:
+    """Represents a Kubernetes node condition."""
+    type: str
+    status: str
+
+
+@dataclasses.dataclass
 class V1NodeStatus:
     allocatable: Dict[str, str]
     capacity: Dict[str, str]
     addresses: List[V1NodeAddress]
+    conditions: List[V1NodeCondition]
 
 
 @dataclasses.dataclass
 class V1Node:
+    """Represents a Kubernetes node."""
     metadata: V1ObjectMeta
     status: V1NodeStatus
 
@@ -1231,7 +1240,23 @@ class V1Node:
                            V1NodeAddress(type=addr['type'],
                                          address=addr['address'])
                            for addr in data['status'].get('addresses', [])
+                       ],
+                       conditions=[
+                           V1NodeCondition(type=cond['type'],
+                                           status=cond['status'])
+                           for cond in data['status'].get('conditions', [])
                        ]))
+
+    def is_ready(self) -> bool:
+        """Check if the node is ready based on its conditions.
+
+        A node is considered ready if it has a 'Ready' condition with
+        status 'True'.
+        """
+        for condition in self.status.conditions:
+            if condition.type == 'Ready':
+                return condition.status == 'True'
+        return False
 
 
 @annotations.lru_cache(scope='request', maxsize=10)
@@ -3078,16 +3103,23 @@ def get_kubernetes_node_info(
 
         accelerator_count = get_node_accelerator_count(context,
                                                        node.status.allocatable)
+        # Check if node is ready
+        node_is_ready = node.is_ready()
+
         if accelerator_count == 0:
             node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
                 name=node.metadata.name,
                 accelerator_type=accelerator_name,
                 total={'accelerator_count': 0},
                 free={'accelerators_available': 0},
-                ip_address=node_ip)
+                ip_address=node_ip,
+                is_ready=node_is_ready)
             continue
 
-        if not has_accelerator_nodes or error_on_get_allocated_gpu_qty_by_node:
+        if not node_is_ready:
+            # If node is not ready, report 0 available GPUs
+            accelerators_available = 0
+        elif not has_accelerator_nodes or error_on_get_allocated_gpu_qty_by_node:
             accelerators_available = -1
         else:
             allocated_qty = allocated_qty_by_node[node.metadata.name]
@@ -3105,7 +3137,8 @@ def get_kubernetes_node_info(
             accelerator_type=accelerator_name,
             total={'accelerator_count': int(accelerator_count)},
             free={'accelerators_available': int(accelerators_available)},
-            ip_address=node_ip)
+            ip_address=node_ip,
+            is_ready=node_is_ready)
     hint = ''
     if has_multi_host_tpu:
         hint = ('(Note: Multi-host TPUs are detected and excluded from the '

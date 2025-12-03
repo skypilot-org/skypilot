@@ -3867,11 +3867,16 @@ def show_gpus(
                 acc_type = node_info.accelerator_type
                 if acc_type is None:
                     acc_type = '-'
-                node_table.add_row([
-                    context_name, node_name, acc_type,
-                    f'{available} of {node_info.total["accelerator_count"]} '
-                    'free'
-                ])
+                utilization_str = (
+                    f'{available} of '
+                    f'{node_info.total["accelerator_count"]} free')
+                # Check if node is ready (defaults to True for backward
+                # compatibility with older server versions)
+                node_is_ready = getattr(node_info, 'is_ready', True)
+                if not node_is_ready:
+                    utilization_str += ' (Node NotReady)'
+                node_table.add_row(
+                    [context_name, node_name, acc_type, utilization_str])
 
         k8s_per_node_acc_message = (f'{cloud_str} per-node GPU availability')
         if hints:
