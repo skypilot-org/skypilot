@@ -425,9 +425,9 @@ upload_ids_to_cleanup: Dict[Tuple[str, str], datetime.datetime] = {}
 
 
 async def cleanup_upload_ids():
-    """Cleans up the temporary chunks uploaded by the client after a delay."""
-    # Clean up the temporary chunks uploaded by the client after an hour. This
-    # is to prevent stale chunks taking up space on the API server.
+    """Cleans up uploaded files and unzipped directories after a delay."""
+    # Clean up the uploaded files and unzipped directories after an hour. This
+    # is to prevent stale files taking up space on the API server.
     while True:
         await asyncio.sleep(3600)
         current_time = datetime.datetime.now()
@@ -1004,7 +1004,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     if total_chunks == 1:
         zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
     else:
-        chunk_dir = client_file_mounts_dir / upload_id
+        chunk_dir = client_file_mounts_dir / upload_id / '.chunks'
         await anyio.Path(chunk_dir).mkdir(parents=True, exist_ok=True)
         zip_file_path = chunk_dir / f'part{chunk_index}.incomplete'
 
