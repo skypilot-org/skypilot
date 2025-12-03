@@ -5,11 +5,12 @@ on:
     types: [closed]
     branches:
       - 'releases/**'
+      - 'testing-releases/**'
 
 jobs:
   extract-version:
     runs-on: ubuntu-latest
-    if: startsWith(github.head_ref, 'test_releases/')
+    if: startsWith(github.head_ref, 'test_releases/') && startsWith(github.base_ref, 'releases/')
     outputs:
       version: ${{ steps.extract_version.outputs.version }}
     steps:
