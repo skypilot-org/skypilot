@@ -1476,11 +1476,12 @@ def check_instance_fits(context: Optional[str],
             return False, str(e)
         # Get the set of nodes that have the GPU type
         gpu_nodes = [
-            node for node in nodes if gpu_label_key in node.metadata.labels and
+            node for node in nodes
+            if node.is_ready() and gpu_label_key in node.metadata.labels and
             node.metadata.labels[gpu_label_key] in gpu_label_values
         ]
         if not gpu_nodes:
-            return False, f'No GPU nodes found with {acc_type} on the cluster'
+            return False, f'No ready GPU nodes found with {acc_type} on the cluster'
         if is_tpu_on_gke(acc_type):
             # If requested accelerator is a TPU type, check if the cluster
             # has sufficient TPU resource to meet the requirement.
@@ -1504,7 +1505,9 @@ def check_instance_fits(context: Optional[str],
             f'enough CPU (> {k8s_instance_type.cpus} CPUs) and/or '
             f'memory (> {k8s_instance_type.memory} G). ')
     else:
-        candidate_nodes = nodes
+        candidate_nodes = [node for node in nodes if node.is_ready()]
+        if not candidate_nodes:
+            return False, 'No ready nodes found in the cluster.'
         not_fit_reason_prefix = (f'No nodes found with enough '
                                  f'CPU (> {k8s_instance_type.cpus} CPUs) '
                                  'and/or memory '
