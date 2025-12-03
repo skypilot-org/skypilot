@@ -88,7 +88,6 @@ def run_remote(node,
     if use_ssh_config:
         # Use SSH config for connection parameters
         ssh_cmd = ['ssh', node, cmd]
-        logger.error('!!!!!!!')
     else:
         # Use explicit parameters
         ssh_cmd = [
