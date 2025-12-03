@@ -16,9 +16,9 @@ import colorama
 import yaml
 
 from sky import sky_logging
+from sky.ssh_node_pools import utils as ssh_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
-from sky.utils.kubernetes import ssh_utils
 
 # Colors for nicer UX
 RED = '\033[0;31m'
@@ -332,7 +332,7 @@ def setup_kubectl_ssh_tunnel(head_node,
     port = get_available_port()
 
     # Paths to scripts
-    tunnel_script = os.path.join(SCRIPT_DIR, 'ssh-tunnel.sh')
+    tunnel_script = os.path.join(SCRIPT_DIR, 'tunnel', 'ssh-tunnel.sh')
 
     # Make sure scripts are executable
     os.chmod(tunnel_script, 0o755)
@@ -407,7 +407,7 @@ def cleanup_kubectl_ssh_tunnel(cluster_name, context_name):
     progress_message(f'Cleaning up SSH tunnel for `{cluster_name}`...')
 
     # Path to cleanup script
-    cleanup_script = os.path.join(SCRIPT_DIR, 'cleanup-tunnel.sh')
+    cleanup_script = os.path.join(SCRIPT_DIR, 'tunnel', 'cleanup-tunnel.sh')
 
     # Make sure script is executable
     if os.path.exists(cleanup_script):

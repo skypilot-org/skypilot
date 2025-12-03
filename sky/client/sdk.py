@@ -42,6 +42,7 @@ from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
+from sky.ssh_node_pools import utils as ssh_utils
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import annotations
@@ -57,7 +58,6 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
-from sky.utils.kubernetes import ssh_utils
 
 if typing.TYPE_CHECKING:
     import base64
