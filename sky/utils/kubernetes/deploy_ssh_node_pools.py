@@ -513,8 +513,7 @@ def deploy_clusters(
             ssh_key = head_host['identity_file']
             head_use_ssh_config = head_host.get('use_ssh_config', False)
             worker_use_ssh_config = [
-                h.get('use_ssh_config', False)
-                for h in worker_hosts
+                h.get('use_ssh_config', False) for h in worker_hosts
             ]
             password = head_host['password']
 
