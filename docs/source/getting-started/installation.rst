@@ -373,7 +373,7 @@ GCP
           # This will generate ~/.config/gcloud/application_default_credentials.json.
           gcloud auth application-default login
 
-    .. tab-item:: Archive Download
+    .. tab-item:: Manual Install
         :sync: gcp-archive-download-tab
 
         For MacOS with Silicon Chips:
