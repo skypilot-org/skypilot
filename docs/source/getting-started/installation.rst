@@ -376,85 +376,20 @@ GCP
     .. tab-item:: Archive Download
         :sync: gcp-archive-download-tab
 
-        .. dropdown:: Download Instructions for MacOS
+        For MacOS with Silicon Chips:
 
-          Follow the `Google Cloud SDK installation instructions <https://cloud.google.com/sdk/docs/install#installation_instructions>`_ for MacOS.
-          The steps are also provided below for convenience.
+        .. code-block:: shell
 
-          **1. Confirm that you have a supported version of Python.**
+          curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-darwin-arm.tar.gz gcloud.tar.gz
+          tar -xf gcloud.tar.gz
+          ./google-cloud-sdk/install.sh
+          # Update your path with the newly installed gcloud
 
-          The Google Cloud CLI requires Python 3.9 to 3.14.
-          To check your Python version, run either ``python3 -V`` or ``python -V``.
+        If you are using other architecture or OS,
+        follow the `Google Cloud SDK installation instructions <https://cloud.google.com/sdk/docs/install#installation_instructions>`_ to download the appropriate package.
 
-          The installation script can install Python if needed.
-          This requires `Xcode Command Line Tools <https://developer.apple.com/library/archive/technotes/tn2339/_index.html>`_.
-          To install Xcode Command Line Tools, run :code:`sudo xcode-select --install`.
-          Alternatively, you can install a supported Python version from `python.org <https://www.python.org/downloads/macos/>`_.
-
-          For more information about configuring your Python interpreter, especially if you have multiple versions installed, see the `gcloud topic startup documentation <https://docs.cloud.google.com/sdk/gcloud/reference/topic/startup>`_.
-
-          **2. Download one of the following:**
-
-          .. note::
-            
-            To determine your platform, run :code:`uname -m` from a command line.
-
-          * **macOS 64-bit (x86_64)**: `google-cloud-cli-darwin-x86_64.tar.gz <https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-darwin-x86_64.tar.gz>`_
-          * **macOS 64-bit (ARM64, Apple silicon)**: `google-cloud-cli-darwin-arm.tar.gz <https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-darwin-arm.tar.gz>`_
-          * **macOS 32-bit (x86)**: `google-cloud-cli-darwin-x86.tar.gz <https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-darwin-x86.tar.gz>`_
-
-          Alternatively, you can download the archive from the command line. Replace ``FILE_NAME`` with the package name for your platform from above:
-
-          .. code-block:: shell
-
-            curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/FILE_NAME
-
-          **3. Extract the contents of the file to your preferred location on your file system.**
-
-          A common practice is to extract it to your home directory.
-
-          On macOS, you can do this by opening the downloaded .tar.gz file in your preferred location.
-
-          Alternatively, from the command line, run:
-
-          .. code-block:: shell
-
-            tar -xf FILE_NAME
-
-          To replace an existing installation, delete the existing ``google-cloud-sdk`` directory and then extract the archive to the same location.
-
-          **4. Run the installation script from the root of the folder you extracted:**
-
-          .. code-block:: shell
-
-            ./google-cloud-sdk/install.sh
-
-          The script prompts you to perform the following setup actions. To accept, answer ``y`` when prompted:
-
-          * Install Python 3.13 and recommended modules if needed.
-          * Add the ``gcloud CLI`` to your ``PATH`` and enable command completion.
-          * Opt in to send `anonymous usage statistics <https://docs.cloud.google.com/sdk/docs/usage-statistics>`_ to help improve the ``gcloud CLI``.
-
-          You can also perform the installation non-interactively by providing flags. To view available flags, run:
-
-          .. code-block:: shell
-
-            ./google-cloud-sdk/install.sh --help
-          
-          To run the install script with screen reader mode enabled:
-
-          .. code-block:: shell
-
-            ./google-cloud-sdk/install.sh --screen-reader=true
-
-          **5. Optional: If you updated your PATH in the previous step, open a new terminal so that the changes take effect.**
-
-        .. dropdown:: Download Instructions for Other OS
-
-          Follow the `Google Cloud SDK installation instructions <https://cloud.google.com/sdk/docs/install#installation_instructions>`_ for your OS.
-
-          Be sure to complete the optional step that adds ``gcloud`` to your ``PATH``.
-          This step is required for SkyPilot to recognize that your ``gcloud`` installation is configured correctly.
+        Be sure to complete the optional step that adds ``gcloud`` to your ``PATH``.
+        This step is required for SkyPilot to recognize that your ``gcloud`` installation is configured correctly.
 
 .. tip::
 
