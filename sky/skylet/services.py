@@ -497,6 +497,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 total_no_filter=total_no_filter,
                 status_counts=status_counts)
         except Exception as e:  # pylint: disable=broad-except
+            raise e
             logger.error(e, exc_info=True)
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
