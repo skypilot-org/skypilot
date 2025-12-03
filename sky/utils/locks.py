@@ -15,11 +15,14 @@ import psycopg2
 import sqlalchemy
 
 from sky import global_user_state
-from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import common_utils
 from sky.utils.db import db_utils
 
 logger = logging.getLogger(__name__)
+
+# The directory for file locks.
+SKY_LOCKS_DIR = runtime_utils.get_runtime_dir_path('.sky/locks')
 
 
 class LockTimeout(RuntimeError):
@@ -127,9 +130,8 @@ class FileLock(DistributedLock):
             poll_interval: Interval in seconds to poll for lock acquisition.
         """
         super().__init__(lock_id, timeout, poll_interval)
-        os.makedirs(constants.SKY_LOCKS_DIR, exist_ok=True)
-        self.lock_path = os.path.join(constants.SKY_LOCKS_DIR,
-                                      f'.{lock_id}.lock')
+        os.makedirs(SKY_LOCKS_DIR, exist_ok=True)
+        self.lock_path = os.path.join(SKY_LOCKS_DIR, f'.{lock_id}.lock')
         if timeout is None:
             timeout = -1
         self._filelock: filelock.FileLock = filelock.FileLock(self.lock_path,

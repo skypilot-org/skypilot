@@ -90,7 +90,7 @@ Google TPUs
 
 See :ref:`tpu`.
 
-AMG GPUs
+AMD GPUs
 --------
 
 See :ref:`kubernetes-amd-gpu`.
