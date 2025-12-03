@@ -69,7 +69,6 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
-from sky.usage import constants as usage_constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import context
@@ -743,7 +742,8 @@ def override_skypilot_config(
             with _WARNED_DISALLOWED_KEYS_CACHE_LOCK:
                 should_warn = cache_key not in _WARNED_DISALLOWED_KEYS_CACHE
                 if should_warn:
-                    if len(_WARNED_DISALLOWED_KEYS_CACHE) > _WARNED_DISALLOWED_KEYS_CACHE_SIZE:
+                    if (len(_WARNED_DISALLOWED_KEYS_CACHE)
+                            > _WARNED_DISALLOWED_KEYS_CACHE_SIZE):
                         _WARNED_DISALLOWED_KEYS_CACHE.clear()
                     _WARNED_DISALLOWED_KEYS_CACHE.add(cache_key)
 
