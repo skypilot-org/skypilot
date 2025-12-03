@@ -1,5 +1,4 @@
 """Constants for SkyPilot."""
-import os
 from typing import List, Tuple
 
 from packaging import version
@@ -10,12 +9,20 @@ from sky.setup_files import dependencies
 # The base directory for all SkyPilot runtime artifacts.
 # Historically, we have always used $HOME, but we couldn't
 # do that for Slurm, because $HOME typically points to a NFS
-# mounted directory, which does not play nicely with SQLite.
+# mounted directory, which does not work well with SQLite.
 # https://sqlite.org/faq.html#q5
 # Additionally, having the skypilot-runtime python venv be
 # on an NFS makes things very slow.
-SKY_RUNTIME_DIR_ENV_VAR = 'SKY_RUNTIME_DIR'
 SKY_RUNTIME_DIR = '${SKY_RUNTIME_DIR:-$HOME}'
+# Same as above but for use within python code instead of shell commands.
+# Example usage:
+# os.path.join(
+#    os.path.expanduser(os.environ.get(SKY_RUNTIME_DIR_ENV_VAR_KEY, '~')),
+#    '.sky/jobs.db')
+SKY_RUNTIME_DIR_ENV_VAR_KEY = 'SKY_RUNTIME_DIR'
+# We keep sky_logs and sky_workdir in $HOME, because
+# these are artifacts that users can access, and having
+# them be in $HOME makes it more convenient.
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 SKY_IGNORE_FILE = '.skyignore'
@@ -34,8 +41,6 @@ SKY_REMOTE_RAY_PORT_DICT_STR = (
     f'"ray_dashboard_port":{SKY_REMOTE_RAY_DASHBOARD_PORT}}}')
 # The file contains the ports of the Ray cluster that SkyPilot launched,
 # i.e. the PORT_DICT_STR above.
-# Relative path as it is used inside Python code, and thus needs to be
-# resolved at runtime and joined with the runtime directory.
 SKY_REMOTE_RAY_PORT_FILE = '.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.9.3'
@@ -64,7 +69,6 @@ SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
                f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
 # Separate env for SkyPilot runtime dependencies.
 SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
-SKY_CONDA_ROOT = f'{SKY_RUNTIME_DIR}/miniconda3'
 SKY_REMOTE_PYTHON_ENV: str = f'{SKY_RUNTIME_DIR}/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # uv is used for venv and pip, much faster than python implementations.
@@ -112,13 +116,11 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '26'
+SKYLET_VERSION = '27'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
 SKYLET_LIB_VERSION = 4
-# Relative path as it is used inside Python code, and thus needs to be
-# resolved at runtime and joined with the runtime directory.
 SKYLET_VERSION_FILE = '.sky/skylet_version'
 SKYLET_LOG_FILE = '.sky/skylet.log'
 SKYLET_PID_FILE = '.sky/skylet_pid'
@@ -180,10 +182,8 @@ CONDA_INSTALLATION_COMMANDS = (
     # because for some images, conda is already installed, but not initialized.
     # In this case, we need to initialize conda and set auto_activate_base to
     # true.
-    '{ '
-    f'INSTALL_DIR={SKY_CONDA_ROOT}; '
-    'bash Miniconda3-Linux.sh -b -p "${INSTALL_DIR}" || true; '
-    f'eval "$({SKY_CONDA_ROOT}/bin/conda shell.bash hook)" && conda init && '
+    '{ bash Miniconda3-Linux.sh -b || true; '
+    'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
     # Caller should replace {conda_auto_activate} with either true or false.
     'conda config --set auto_activate_base {conda_auto_activate} && '
     'conda activate base; }; '
@@ -204,7 +204,7 @@ CONDA_INSTALLATION_COMMANDS = (
     'fi;'
     # Install uv for venv management and pip installation.
     f'{SKY_UV_INSTALL_CMD};'
-    # Create a separate conda environment for SkyPilot dependencies.
+    # Create a separate python environment for SkyPilot dependencies.
     f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
     # Do NOT use --system-site-packages here, because if users upgrade any
     # packages in the base env, they interfere with skypilot dependencies.
@@ -587,9 +587,6 @@ DEFAULT_PRIORITY = 0
 
 GRACE_PERIOD_SECONDS_ENV_VAR = SKYPILOT_ENV_VAR_PREFIX + 'GRACE_PERIOD_SECONDS'
 COST_REPORT_DEFAULT_DAYS = 30
-
-# The directory for file locks.
-SKY_LOCKS_DIR = os.path.expanduser('~/.sky/locks')
 
 ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +
                                  'DEBUG_LOOP_LAG_THRESHOLD_MS')

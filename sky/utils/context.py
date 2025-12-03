@@ -158,7 +158,7 @@ class ContextualEnviron(MutableMapping[str, str]):
     aware.
 
     Behavior of spawning a subprocess:
-    - The contexual overrides will not be applied to the subprocess by
+    - The contextual overrides will not be applied to the subprocess by
       default.
     - When using env=os.environ to pass the environment variables to the
       subprocess explicitly. The subprocess will inherit the contextual

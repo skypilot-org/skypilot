@@ -59,7 +59,6 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
-from sky.utils import accelerator_registry
 from sky.utils import annotations
 from sky.utils import cluster_utils
 from sky.utils import command_runner
@@ -122,9 +121,6 @@ Path = str
 
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = constants.SKY_REMOTE_WORKDIR
-# Unset RAY_RAYLET_PID to prevent the Ray cluster in the SkyPilot runtime
-# from interfering with the Ray cluster in the user's task (if any).
-UNSET_RAY_ENV_VARS = ['RAY_RAYLET_PID']
 
 logger = sky_logging.init_logger(__name__)
 
@@ -316,391 +312,6 @@ def write_ray_up_script_with_patched_launch_hash_fn(
         f.write(ray_up_no_restart_script)
         logger.debug(f'`ray up` script: {f.name}')
     return f.name
-
-
-# TODO(kevin): Move to task_codegen.py
-# Keeping it here for now to make the diff easier to review.
-class RayCodeGen(task_codegen.TaskCodeGen):
-    """Code generator of a Ray program that executes a sky.Task.
-
-    Usage:
-
-      >> codegen = RayCodegen()
-      >> codegen.add_prologue()
-
-      >> codegen.add_task(...)
-      >> codegen.add_task(...)
-
-      >> codegen.add_epilogue()
-      >> code = codegen.build()
-    """
-
-    def add_prologue(self, job_id: int) -> None:
-        assert not self._has_prologue, 'add_prologue() called twice?'
-        self._has_prologue = True
-        self.job_id = job_id
-        # Should use 'auto' or 'ray://<internal_head_ip>:10001' rather than
-        # 'ray://localhost:10001', or 'ray://127.0.0.1:10001', for public cloud.
-        # Otherwise, ray will fail to get the placement group because of a bug
-        # in ray job.
-        ray_address = 'auto'
-
-        # Add common imports
-        self._add_common_imports()
-
-        # Add Ray-specific setup
-        self._code.append(
-            textwrap.dedent("""\
-            # Set the environment variables to avoid deduplicating logs and
-            # scheduler events. This should be set in driver code, since we are
-            # not using `ray job submit` anymore, and the environment variables
-            # from the ray cluster is not inherited.
-            os.environ['RAY_DEDUP_LOGS'] = '0'
-            os.environ['RAY_SCHEDULER_EVENTS'] = '0'
-
-            import ray
-            import ray.util as ray_util
-            """))
-
-        self._add_skylet_imports()
-
-        self._add_constants()
-
-        # Add Ray configuration
-        self._code.append(
-            textwrap.dedent(f"""\
-            kwargs = dict()
-            # Only set the `_temp_dir` to SkyPilot's ray cluster directory when
-            # the directory exists for backward compatibility for the VM
-            # launched before #1790.
-            if os.path.exists({constants.SKY_REMOTE_RAY_TEMPDIR!r}):
-                kwargs['_temp_dir'] = {constants.SKY_REMOTE_RAY_TEMPDIR!r}
-            ray.init(
-                address={ray_address!r},
-                namespace='__sky__{job_id}__',
-                log_to_driver=True,
-                **kwargs
-            )
-            def get_or_fail(futures, pg) -> List[int]:
-                \"\"\"Wait for tasks, if any fails, cancel all unready.\"\"\"
-                if not futures:
-                    return [], []
-                returncodes = [1] * len(futures)
-                pids = [None] * len(futures)
-                failed = False
-                # Wait for 1 task to be ready.
-                ready = []
-                # Keep invoking ray.wait if ready is empty. This is because
-                # ray.wait with timeout=None will only wait for 10**6 seconds,
-                # which will cause tasks running for more than 12 days to return
-                # before becoming ready.
-                # (Such tasks are common in serving jobs.)
-                # Reference: https://github.com/ray-project/ray/blob/ray-2.9.3/python/ray/_private/worker.py#L2845-L2846
-
-                def handle_ready_tasks(tasks: List[ray.ObjectRef]) -> None:
-                    nonlocal returncodes, pids, failed
-                    for task in tasks:
-                        idx = futures.index(task)
-                        res = ray.get(task)
-                        returncodes[idx] = res['return_code']
-                        pids[idx] = res['pid']
-                        if res['return_code'] != 0:
-                            failed = True
-
-                while not ready:
-                    ready, unready = ray.wait(futures)
-                handle_ready_tasks(ready)
-                while unready:
-                    if failed:
-                        for task in unready:
-                            # ray.cancel without force fails to kill tasks.
-                            # We use force=True to kill unready tasks.
-                            ray.cancel(task, force=True)
-                            # Use SIGKILL=128+9 to indicate the task is forcely
-                            # killed.
-                            idx = futures.index(task)
-                            returncodes[idx] = CANCELLED_RETURN_CODE
-                        break
-                    ready, unready = ray.wait(unready)
-                    handle_ready_tasks(ready)
-                # Remove the placement group after all tasks are done, so that
-                # the next job can be scheduled on the released resources
-                # immediately.
-                ray_util.remove_placement_group(pg)
-                sys.stdout.flush()
-                return returncodes, pids
-
-            futures = []
-            """))
-
-        self._add_logging_functions()
-
-        self._code += [
-            'run_bash_command_with_log = run_bash_command_with_log',
-            'run_bash_command_with_log_and_return_pid = \
-                ray.remote(run_bash_command_with_log_and_return_pid)',
-            'autostop_lib.set_last_active_time_to_now()',
-            f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
-        ]
-
-    def add_setup(
-        self,
-        num_nodes: int,
-        resources_dict: Dict[str, float],
-        stable_cluster_internal_ips: List[str],
-        env_vars: Dict[str, str],
-        setup_cmd: Optional[str] = None,
-        setup_log_path: Optional[str] = None,
-    ) -> None:
-        assert self._has_prologue, ('Call add_prologue() before '
-                                    'add_setup().')
-        self._has_setup = True
-
-        bundles = [copy.copy(resources_dict) for _ in range(num_nodes)]
-        # Set CPU to avoid ray hanging the resources allocation
-        # for remote functions, since the task will request 1 CPU
-        # by default.
-        task_cpu_demand = resources_dict.pop('CPU')
-
-        if resources_dict:
-            assert len(resources_dict) == 1, (
-                'There can only be one type of accelerator per instance. '
-                f'Found: {resources_dict}.')
-            acc_name, acc_count = list(resources_dict.items())[0]
-            gpu_dict = {'GPU': acc_count}
-            # gpu_dict should be empty when the accelerator is not GPU.
-            # TODO(zongheng,zhanghao): an alternative is to start the remote
-            # cluster with custom resource 'GPU': <n> even if the accelerator(s)
-            # are not GPU. We opt for the current solution for now.
-            if accelerator_registry.is_schedulable_non_gpu_accelerator(
-                    acc_name):
-                gpu_dict = {}
-            for bundle in bundles:
-                bundle.update({
-                    # Set the GPU to avoid ray hanging the resources allocation
-                    **gpu_dict,
-                })
-
-        self._code.append(
-            f'pg = ray_util.placement_group({json.dumps(bundles)}, '
-            f'\'STRICT_SPREAD\')')
-        self._add_waiting_for_resources_msg(num_nodes)
-        self._code.append(
-            textwrap.dedent("""\
-            # FIXME: This will print the error message from autoscaler if
-            # it is waiting for other task to finish. We should hide the
-            # error message.
-            ray.get(pg.ready())"""))
-        self._add_job_started_msg()
-
-        job_id = self.job_id
-        if setup_cmd is not None:
-            setup_envs = env_vars.copy()
-            setup_envs[constants.SKYPILOT_NUM_NODES] = str(num_nodes)
-            self._code += [
-                textwrap.dedent(f"""\
-                setup_cmd = {setup_cmd!r}
-                _SETUP_CPUS = 0.0001
-                # The setup command will be run as a ray task with num_cpus=_SETUP_CPUS as the
-                # requirement; this means Ray will set CUDA_VISIBLE_DEVICES to an empty string.
-                # We unset it so that user setup command may properly use this env var.
-                setup_cmd = 'unset CUDA_VISIBLE_DEVICES; ' + setup_cmd
-                job_lib.set_status({job_id!r}, job_lib.JobStatus.SETTING_UP)
-
-                # The schedule_step should be called after the job status is set to non-PENDING,
-                # otherwise, the scheduler will think the current job is not submitted yet, and
-                # skip the scheduling step.
-                job_lib.scheduler.schedule_step()
-
-                # If some nodes are down and then new nodes are added after launching again,
-                # the result of `ray.nodes()` will include all the nodes, so we need to get
-                # the alive nodes.
-                alive_nodes = [n for n in ray.nodes() if 'Alive' in n and n['Alive']]
-                total_num_nodes = len(alive_nodes)
-                setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
-                setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
-                setup_workers = [run_bash_command_with_log_and_return_pid \\
-                    .options(
-                        name='setup',
-                        num_cpus=_SETUP_CPUS,
-                        scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(
-                            placement_group=setup_pg,
-                            placement_group_bundle_index=i)
-                    ) \\
-                    .remote(
-                        setup_cmd,
-                        os.path.expanduser({setup_log_path!r}),
-                        env_vars={setup_envs!r},
-                        stream_logs=True,
-                        with_ray=True,
-                    ) for i in range(total_num_nodes)]
-                setup_returncodes, setup_pids = get_or_fail(setup_workers, setup_pg)
-                success = True
-                failed_workers_and_returncodes = []
-                for i in range(len(setup_returncodes)):
-                    returncode = setup_returncodes[i]
-                    pid = setup_pids[i]
-                    if pid == None:
-                        pid = os.getpid()
-                    if returncode != 0 and returncode != CANCELLED_RETURN_CODE:
-                        success = False
-                        failed_workers_and_returncodes.append((pid, returncode))
-                if not success:
-                    msg = f'ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed. '
-                    msg += f'Failed workers: ' + ', '.join([f'(pid={{pid}}, returncode={{returncode}})' for pid, returncode in failed_workers_and_returncodes])
-                    msg += f'. See error logs above for more details.{colorama.Style.RESET_ALL}'
-                    print(msg, flush=True)
-                    job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
-                    # This waits for all streaming logs to finish.
-                    time.sleep(1)
-                    # Need this to set the job status in ray job to be FAILED.
-                    sys.exit(1)
-                """)
-            ]
-
-        self._code.append(f'job_lib.set_job_started({self.job_id!r})')
-        if setup_cmd is None:
-            # Need to call schedule_step() to make sure the scheduler
-            # schedule the next pending job.
-            self._code.append('job_lib.scheduler.schedule_step()')
-
-        # Export IP and node rank to the environment variables.
-        self._code += [
-            textwrap.dedent(f"""\
-                @ray.remote
-                def check_ip():
-                    return ray.util.get_node_ip_address()
-                gang_scheduling_id_to_ip = ray.get([
-                    check_ip.options(
-                            num_cpus={task_cpu_demand},
-                            scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(
-                                placement_group=pg,
-                                placement_group_bundle_index=i
-                            )).remote()
-                    for i in range(pg.bundle_count)
-                ])
-
-                cluster_ips_to_node_id = {{ip: i for i, ip in enumerate({stable_cluster_internal_ips!r})}}
-                job_ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_to_node_id.get)
-                job_ip_rank_map = {{ip: i for i, ip in enumerate(job_ip_rank_list)}}
-                job_ip_list_str = '\\n'.join(job_ip_rank_list)
-                """),
-        ]
-
-    def add_tasks(self,
-                  num_nodes: int,
-                  bash_script: Optional[str],
-                  task_name: Optional[str],
-                  resources_dict: Dict[str, float],
-                  log_dir: str,
-                  env_vars: Optional[Dict[str, str]] = None) -> None:
-        # TODO(zhwu): The resources limitation for multi-node ray.tune and
-        # horovod should be considered.
-        for i in range(num_nodes):
-            # Ray's per-node resources, to constrain scheduling each command to
-            # the corresponding node, represented by private IPs.
-            self.add_single_task(bash_script=bash_script,
-                                 task_name=task_name,
-                                 resources_dict=resources_dict.copy(),
-                                 log_dir=log_dir,
-                                 env_vars=env_vars,
-                                 gang_scheduling_id=i)
-
-    def add_single_task(self,
-                        bash_script: Optional[str],
-                        task_name: Optional[str],
-                        resources_dict: Dict[str, float],
-                        log_dir: str,
-                        env_vars: Optional[Dict[str, str]] = None,
-                        gang_scheduling_id: int = 0) -> None:
-        """Generates code for a ray remote task that runs a bash command."""
-        assert self._has_setup, 'Call add_setup() before add_task().'
-
-        task_cpu_demand = resources_dict.pop('CPU')
-        # Build remote_task.options(...)
-        #   resources=...
-        #   num_gpus=...
-        options = []
-        options.append(f'num_cpus={task_cpu_demand}')
-
-        acc_name, acc_count = self._get_accelerator_details(resources_dict)
-        num_gpus = 0.0
-        if acc_name is not None:
-            assert resources_dict, ('There can only be one type of accelerator '
-                                    'per instance.')
-            options.append(f'resources={json.dumps(resources_dict)}')
-            if not accelerator_registry.is_schedulable_non_gpu_accelerator(
-                    acc_name):
-                num_gpus = acc_count
-                options.append(f'num_gpus={num_gpus}')
-        options.append(
-            'scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy('  # pylint: disable=line-too-long
-            'placement_group=pg, '
-            f'placement_group_bundle_index={gang_scheduling_id})')
-
-        sky_env_vars_dict_str = [
-            textwrap.dedent(f"""\
-            sky_env_vars_dict = {{}}
-            sky_env_vars_dict['{constants.SKYPILOT_NODE_IPS}'] = job_ip_list_str
-            sky_env_vars_dict['{constants.SKYPILOT_NUM_NODES}'] = len(job_ip_rank_list)
-            """)
-        ]
-
-        if env_vars is not None:
-            sky_env_vars_dict_str.extend(f'sky_env_vars_dict[{k!r}] = {v!r}'
-                                         for k, v in env_vars.items())
-        sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
-
-        options_str = ', '.join(options)
-        logger.debug('Added Task with options: '
-                     f'{options_str}')
-        rclone_flush_script = self._get_rclone_flush_script()
-        unset_ray_env_vars = ' && '.join(
-            [f'unset {var}' for var in UNSET_RAY_ENV_VARS])
-        self._code += [
-            sky_env_vars_dict_str,
-            textwrap.dedent(f"""\
-        script = {bash_script!r}
-        rclone_flush_script = {rclone_flush_script!r}
-
-        if script is not None:
-            script=f'{unset_ray_env_vars}; {{script}}'
-            script += rclone_flush_script
-            sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {int(math.ceil(num_gpus))!r}
-
-            ip = gang_scheduling_id_to_ip[{gang_scheduling_id!r}]
-            rank = job_ip_rank_map[ip]
-
-            if len(cluster_ips_to_node_id) == 1: # Single-node task on single-node cluter
-                name_str = '{task_name},' if {task_name!r} != None else 'task,'
-                log_path = os.path.expanduser(os.path.join({log_dir!r}, 'run.log'))
-            else: # Single-node or multi-node task on multi-node cluster
-                idx_in_cluster = cluster_ips_to_node_id[ip]
-                if cluster_ips_to_node_id[ip] == 0:
-                    node_name = 'head'
-                else:
-                    node_name = f'worker{{idx_in_cluster}}'
-                name_str = f'{{node_name}}, rank={{rank}},'
-                log_path = os.path.expanduser(os.path.join({log_dir!r}, f'{{rank}}-{{node_name}}.log'))
-            sky_env_vars_dict['{constants.SKYPILOT_NODE_RANK}'] = rank
-
-            sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
-
-            futures.append(run_bash_command_with_log_and_return_pid \\
-                    .options(name=name_str, {options_str}) \\
-                    .remote(
-                        script,
-                        log_path,
-                        env_vars=sky_env_vars_dict,
-                        stream_logs=True,
-                        with_ray=True,
-                    ))""")
-        ]
-
-    def add_epilogue(self) -> None:
-        """Generates code that waits for all tasks, then exits."""
-        self._code.append('returncodes, _ = get_or_fail(futures, pg)')
-        super().add_epilogue()
 
 
 class GangSchedulingStatus(enum.Enum):
@@ -3976,7 +3587,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Need this `-i` option to make sure `source ~/.bashrc` work
         setup_cmd = f'/bin/bash -i {remote_setup_file_name} 2>&1'
         unset_ray_env_vars = ' && '.join(
-            [f'unset {var}' for var in UNSET_RAY_ENV_VARS])
+            [f'unset {var}' for var in task_codegen.UNSET_RAY_ENV_VARS])
         setup_cmd = f'{unset_ray_env_vars}; {setup_cmd}'
         runners = handle.get_command_runners(avoid_ssh_control=True)
 
@@ -6232,6 +5843,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         task_env_vars = self._get_task_env_vars(task, job_id, handle)
 
+        codegen: task_codegen.TaskCodeGen
         if isinstance(handle.launched_resources.cloud, clouds.Slurm):
             assert (handle.cached_cluster_info
                     is not None), ('cached_cluster_info must be set')
@@ -6241,11 +5853,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             slurm_job_id = head_instance.tags.get('job_id')
             assert (slurm_job_id
                     is not None), ('job_id tag not found in head instance')
-            codegen: Union[task_codegen.SlurmCodeGen,
-                           RayCodeGen] = task_codegen.SlurmCodeGen(
-                               slurm_job_id=slurm_job_id)
+            codegen = task_codegen.SlurmCodeGen(slurm_job_id=slurm_job_id)
         else:
-            codegen = RayCodeGen()
+            codegen = task_codegen.RayCodeGen()
 
         codegen.add_prologue(job_id)
         codegen.add_setup(
@@ -6257,13 +5867,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_log_path=os.path.join(log_dir, 'setup.log'),
         )
 
-        codegen.add_tasks(
+        codegen.add_task(
             1,
             bash_script=task.run,
+            env_vars=task_env_vars,
             task_name=task.name,
             resources_dict=backend_utils.get_task_demands_dict(task),
-            log_dir=log_dir,
-            env_vars=task_env_vars)
+            log_dir=log_dir)
 
         codegen.add_epilogue()
 
@@ -6291,6 +5901,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         task_env_vars = self._get_task_env_vars(task, job_id, handle)
 
+        codegen: task_codegen.TaskCodeGen
         if isinstance(handle.launched_resources.cloud, clouds.Slurm):
             assert (handle.cached_cluster_info
                     is not None), ('cached_cluster_info must be set')
@@ -6300,11 +5911,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             slurm_job_id = head_instance.tags.get('job_id')
             assert (slurm_job_id
                     is not None), ('job_id tag not found in head instance')
-            codegen: Union[task_codegen.SlurmCodeGen,
-                           RayCodeGen] = task_codegen.SlurmCodeGen(
-                               slurm_job_id=slurm_job_id)
+            codegen = task_codegen.SlurmCodeGen(slurm_job_id=slurm_job_id)
         else:
-            codegen = RayCodeGen()
+            codegen = task_codegen.RayCodeGen()
 
         codegen.add_prologue(job_id)
         codegen.add_setup(
@@ -6316,13 +5925,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_log_path=os.path.join(log_dir, 'setup.log'),
         )
 
-        codegen.add_tasks(
+        codegen.add_task(
             num_actual_nodes,
             bash_script=task.run,
+            env_vars=task_env_vars,
             task_name=task.name,
             resources_dict=backend_utils.get_task_demands_dict(task),
-            log_dir=log_dir,
-            env_vars=task_env_vars)
+            log_dir=log_dir)
 
         codegen.add_epilogue()
         # TODO(zhanghao): Add help info for downloading logs.

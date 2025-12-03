@@ -75,7 +75,7 @@ LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
         'controller': {
             'resources': {
                 'cpus': '4+',
-                'memory': '4+'
+                'memory': '16+'
             }
         }
     },
@@ -83,7 +83,7 @@ LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
         'controller': {
             'resources': {
                 'cpus': '4+',
-                'memory': '4+'
+                'memory': '8+'
             }
         }
     }
@@ -1050,7 +1050,7 @@ def get_dashboard_jobs_queue_request_id() -> str:
     return server_common.get_request_id(response)
 
 
-def get_response_from_request_id(request_id: str) -> Any:
+def get_response_from_request_id_dashboard(request_id: str) -> Any:
     """Waits for and gets the result of a request.
 
     Args:
@@ -1069,7 +1069,7 @@ def get_response_from_request_id(request_id: str) -> Any:
         'GET',
         f'/internal/dashboard/api/get?request_id={request_id}',
         server_url=get_api_server_url(),
-        timeout=15)
+        timeout=25)
     request_task = None
     if response.status_code == 200:
         request_task = requests_lib.Request.decode(

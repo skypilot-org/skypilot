@@ -338,6 +338,57 @@ def test_launch_fast_with_autostop(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+# See cloud exclusion explanations in test_autostop
+@pytest.mark.no_fluidstack
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_ibm
+@pytest.mark.no_kubernetes
+@pytest.mark.no_hyperbolic
+@pytest.mark.no_shadeform
+@pytest.mark.no_seeweb
+def test_start_preserves_autostop(generic_cloud: str):
+    """Test that sky start preserves the autostop setting from the database."""
+    name = smoke_tests_utils.get_cluster_name()
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+    test = smoke_tests_utils.Test(
+        'test_start_preserves_autostop',
+        [
+            # Launch cluster with autostop of 1 minute
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} -i 1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 1 --status',
+            f'sky status -r {name} | grep UP',
+            # Verify autostop is set
+            f'sky status | grep {name} | grep "1m"',
+
+            # Wait for cluster to be STOPPED from autostop
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+
+            # Start the cluster without explicitly setting autostop - it should preserve the previous setting
+            f'sky start -y {name}',
+            # Wait for cluster to be UP
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+            # Verify autostop is still set (preserved from database)
+            f'sky status | grep {name} | grep "1m"',
+
+            # Wait for cluster to be STOPPED again from autostop (proving it was preserved)
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud) +
+        2 * autostop_timeout,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # We override the AWS config to force the cluster to relaunch, so only run the
 # test on AWS.
 @pytest.mark.aws
@@ -644,8 +695,9 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
             cluster_exist = False
             status_request_id = (
                 smoke_tests_utils.get_dashboard_cluster_status_request_id())
-            status_response = (smoke_tests_utils.get_response_from_request_id(
-                status_request_id))
+            status_response = (
+                smoke_tests_utils.get_response_from_request_id_dashboard(
+                    status_request_id))
             for cluster in status_response:
                 if cluster['name'] == name:
                     cluster_exist = True
@@ -707,8 +759,9 @@ def test_jobs_launch_and_logs(generic_cloud: str):
             # Check the job status from the dashboard
             queue_request_id = (
                 smoke_tests_utils.get_dashboard_jobs_queue_request_id())
-            queue_response = (smoke_tests_utils.get_response_from_request_id(
-                queue_request_id))
+            queue_response = (
+                smoke_tests_utils.get_response_from_request_id_dashboard(
+                    queue_request_id))
             job_exist = False
             for job in queue_response:
                 if job['job_id'] == job_id:

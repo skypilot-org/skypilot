@@ -404,6 +404,11 @@ async function getKubernetesGPUsFromContexts(contextNames) {
       const result = contextNodeInfoResults[i];
       if (result.status === 'fulfilled') {
         contextToNodeInfo[contextNames[i]] = result.value;
+        console.log(
+          '[CONTEXT_DEBUG] Context node info result:',
+          contextNames[i],
+          result.value
+        );
       } else {
         // Log the error but continue with other contexts
         const errorMessage =
@@ -412,7 +417,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           'Context may be unavailable or timed out';
         console.warn(
           `Failed to get node info for context ${contextNames[i]}:`,
-          result.reason
+          errorMessage
         );
         contextToNodeInfo[contextNames[i]] = {};
         contextErrors[contextNames[i]] = errorMessage;
@@ -433,7 +438,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             continue;
           }
 
-          const gpuName = nodeData['accelerator_type'];
+          const gpuName = nodeData['accelerator_type'] || '-';
           const totalCount = nodeData['total']?.['accelerator_count'] || 0;
           const freeCount = nodeData['free']?.['accelerators_available'] || 0;
 
@@ -533,22 +538,26 @@ async function getKubernetesGPUsFromContexts(contextNames) {
       }
     }
 
+    console.log('[CONTEXT_DEBUG] All GPUs summary:', allGPUsSummary);
+    console.log('[CONTEXT_DEBUG] Per context GPUs data:', perContextGPUsData);
+    console.log('[CONTEXT_DEBUG] Per node GPUs data:', perNodeGPUs_dict);
+    console.log('[CONTEXT_DEBUG] Context errors:', contextErrors);
     return {
       allGPUs: Object.values(allGPUsSummary).sort((a, b) =>
-        a.gpu_name.localeCompare(b.gpu_name)
+        (a.gpu_name || '').localeCompare(b.gpu_name || '')
       ),
       perContextGPUs: Object.values(perContextGPUsData)
         .flat()
         .sort(
           (a, b) =>
-            a.context.localeCompare(b.context) ||
-            a.gpu_name.localeCompare(b.gpu_name)
+            (a.context || '').localeCompare(b.context || '') ||
+            (a.gpu_name || '').localeCompare(b.gpu_name || '')
         ),
       perNodeGPUs: Object.values(perNodeGPUs_dict).sort(
         (a, b) =>
-          a.context.localeCompare(b.context) ||
-          a.node_name.localeCompare(b.node_name) ||
-          a.gpu_name.localeCompare(b.gpu_name)
+          (a.context || '').localeCompare(b.context || '') ||
+          (a.node_name || '').localeCompare(b.node_name || '') ||
+          (a.gpu_name || '').localeCompare(b.gpu_name || '')
       ),
       contextErrors: contextErrors,
     };
