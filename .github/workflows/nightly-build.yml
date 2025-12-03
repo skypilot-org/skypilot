@@ -237,9 +237,9 @@ jobs:
     with:
       commit: ${{ github.sha }}
       branch: ${{ github.ref_name }}
-      message: "nightly-build-pypi --kubernetes --jobs-consolidation --managed-jobs"
+      message: "nightly-build-pypi --kubernetes --jobs-consolidation --no-resource-heavy"
       pipeline: "smoke-tests"
-      build_env_vars: '{"ARGS": "--kubernetes --jobs-consolidation --managed-jobs"}'
+      build_env_vars: '{"ARGS": "--kubernetes --jobs-consolidation --no-resource-heavy"}'
       timeout_minutes: 60
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
@@ -420,7 +420,7 @@ jobs:
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-jobs-consolidation.outputs.build_number }}|Buildkite Log(--kubernetes --jobs-consolidation --managed-jobs)>"
+              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-jobs-consolidation.outputs.build_number }}|Buildkite Log(--kubernetes --jobs-consolidation --no-resource-heavy)>"
             fi
             if [[ "${{ needs.smoke-tests-shared-gke-api-server.result }}" == "failure" ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then

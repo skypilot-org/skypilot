@@ -273,9 +273,9 @@ jobs:
     with:
       commit: ${{ needs.release-build.outputs.new_commit_sha }}
       branch: ${{ needs.release-build.outputs.test_branch }}
-      message: "Release ${{ needs.release-build.outputs.release_version }} --kubernetes --jobs-consolidation --managed-jobs"
+      message: "Release ${{ needs.release-build.outputs.release_version }} --kubernetes --jobs-consolidation --no-resource-heavy"
       pipeline: "smoke-tests"
-      build_env_vars: '{"ARGS": "--kubernetes --jobs-consolidation --managed-jobs"}'
+      build_env_vars: '{"ARGS": "--kubernetes --jobs-consolidation --no-resource-heavy"}'
       timeout_minutes: 60
       wait: true
       fail_on_buildkite_failure: true
