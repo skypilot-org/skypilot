@@ -731,7 +731,7 @@ def _get_service_status(
             for replica_info in record['replica_info']:
                 job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
                     service_name, replica_info['name'])
-                replica_info['used_by'] = job_ids[0] if job_ids else None
+                replica_info['used_by'] = job_ids if job_ids else None
     return record
 
 
