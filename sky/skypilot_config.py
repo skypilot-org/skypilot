@@ -742,8 +742,8 @@ def override_skypilot_config(
             with _WARNED_DISALLOWED_KEYS_CACHE_LOCK:
                 should_warn = cache_key not in _WARNED_DISALLOWED_KEYS_CACHE
                 if should_warn:
-                    if (len(_WARNED_DISALLOWED_KEYS_CACHE)
-                            > _WARNED_DISALLOWED_KEYS_CACHE_SIZE):
+                    if (len(_WARNED_DISALLOWED_KEYS_CACHE) >
+                            _WARNED_DISALLOWED_KEYS_CACHE_SIZE):
                         _WARNED_DISALLOWED_KEYS_CACHE.clear()
                     _WARNED_DISALLOWED_KEYS_CACHE.add(cache_key)
 
