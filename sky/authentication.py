@@ -382,42 +382,22 @@ def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def setup_novita_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     """Sets up SSH authentication for Novita.
-    - Generates a new SSH key pair if one does not exist.
-    - Adds the public SSH key to the user's Novita account.
-
-    Note: This assumes there is a Novita Python SDK available.
-    If no official SDK exists, this function would need to use direct API calls.
+    
+    Note: Novita only requires API key authentication. SSH keys are generated
+    locally for connecting to instances, but are not uploaded to Novita.
+    Instances are created with default SSH access configured by Novita.
     """
-
+    # Generate SSH key pair for local use (connecting to instances)
+    # Novita doesn't require SSH keys to be uploaded to their platform
     _, public_key_path = auth_utils.get_or_generate_keys()
-    ssh_key_id = None
-
-    with open(public_key_path, 'r', encoding='utf-8') as f:
-        public_key = f.read().strip()
-
-    try:
-        # Add SSH key to Novita using our utility functions
-        ssh_key_id = novita_adaptor.add_ssh_key_to_novita(public_key)
-
-    except ImportError as e:
-        # If required dependencies are missing
-        logger.warning(
-            f'Failed to add Novita SSH key due to missing dependencies: '
-            f'{e}. Manually configure SSH keys in your Novita account.')
-
-    except Exception as e:
-        logger.warning(f'Failed to set up Novita authentication: {e}')
-        raise exceptions.CloudUserIdentityError(
-            'Failed to set up SSH authentication for Novita. '
-            f'Please ensure your Novita credentials are configured: {e}'
-        ) from e
-
-    if ssh_key_id is None:
-        raise Exception('Failed to add SSH key to Novita')
 
     # Configure SSH info in the config
+    # Novita instances use default SSH configuration provided by the platform
+    config.setdefault('auth', {})
     config['auth']['ssh_public_key'] = public_key_path
-    config['auth']['ssh_key_id'] = ssh_key_id
+    # SSH user is typically 'root' or 'ubuntu' depending on the image
+    # This will be determined from the instance metadata
+    config['auth']['ssh_user'] = 'root'  # Default, may be overridden by instance info
 
     return configure_ssh_info(config)
 

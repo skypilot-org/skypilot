@@ -1,4 +1,5 @@
 """Novita instance provisioning."""
+import ast
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -8,6 +9,7 @@ from sky import sky_logging
 from sky.provision import common
 from sky.provision.novita import novita_utils
 from sky.utils import status_lib
+from sky.catalog import novita_catalog
 
 POLL_INTERVAL = 10
 INSTANCE_READY_TIMEOUT = 3600
@@ -58,25 +60,41 @@ def _wait_for_instances_ready(cluster_name_on_cloud: str,
                               timeout: int = INSTANCE_READY_TIMEOUT) -> bool:
     """Wait for instances to be ready (active state with SSH access)."""
     start_time = time.time()
+    last_log_time = 0
+    log_interval = 30  # Log every 30 seconds
 
     while time.time() - start_time < timeout:
         instances = _get_cluster_instances(cluster_name_on_cloud)
         ready_count = 0
+        status_summary = {}
 
         for instance in instances.values():
+            status = instance.get('status', 'unknown')
+            status_summary[status] = status_summary.get(status, 0) + 1
             if (instance.get('status') == 'active' and
                     instance.get('ip') is not None and
                     instance.get('ssh_port') is not None):
                 ready_count += 1
 
-        logger.info(f'Waiting for instances to be ready: '
-                    f'({ready_count}/{expected_count})')
+        elapsed = int(time.time() - start_time)
+        # Log progress every 30 seconds or when status changes
+        if (elapsed - last_log_time >= log_interval or
+                ready_count >= expected_count):
+            logger.info(
+                f'Waiting for instances to be ready: '
+                f'({ready_count}/{expected_count}) after {elapsed}s. '
+                f'Status: {status_summary}')
+            last_log_time = elapsed
 
         if ready_count >= expected_count:
+            logger.info(f'All {expected_count} instances are ready!')
             return True
 
         time.sleep(POLL_INTERVAL)
 
+    logger.error(
+        f'Timeout waiting for instances after {timeout}s. '
+        f'Ready: {ready_count}/{expected_count}, Status: {status_summary}')
     return False
 
 
@@ -133,6 +151,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         # The node_config contains instance specs including InstanceType
         # which follows the format: {cloud_provider}_{instance_type}
         # (e.g., "massedcompute_A6000_basex2")
+        print(f'run_instances config: {config}')
+        print(f'run_instances node_config: {config.node_config}')
         node_config = config.node_config
         assert 'InstanceType' in node_config, \
             'InstanceType must be present in node_config'
@@ -170,16 +190,89 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         assert cloud, 'Cloud provider cannot be empty'
         assert instance_type, 'Instance type cannot be empty'
 
-        # Get SSH key ID for authentication - this is optional and may be None
-        ssh_key_id = config.authentication_config.get('ssh_key_id')
+        # Novita doesn't require SSH key ID - instances use default SSH access
+        # The SSH key is only used locally for connecting to instances
+        # Region name may include parentheses like "AF-ZA-01 (South Africa)"
+        # Extract just the region code (part before parentheses) for API
+        # The Novita API expects just the region code, not the full name
+        region_code = region.split(' (')[0] if ' (' in region else region
+        
+        # Get catalog data and filter by instance type
+        # Note: instance_type_full may include cloud provider prefix (e.g., "massedcompute_1x_RTX 4090 24GB")
+        # but CSV InstanceType is just "1x_RTX 4090 24GB", so we need to match correctly
+        df = novita_catalog._get_df()
+        
+        # Try to match instance_type_full first, then try without cloud prefix
+        df_filtered = df[df['InstanceType'] == instance_type_full]
+        print(f'instance_type_full: {instance_type_full}')
+        if df_filtered.empty and '_' in instance_type_full:
+            # If not found, try matching without the cloud provider prefix
+            # instance_type_full format: "cloud_1x_RTX 4090 24GB" -> "1x_RTX 4090 24GB"
+            instance_type_without_cloud = '_'.join(instance_type_full.split('_')[1:])
+            print(f'instance_type_without_cloud: {instance_type_without_cloud}')
+            df_filtered = df[df['InstanceType'] == instance_type_without_cloud]
+        
+        # Also filter by region to get the correct row for this region
+        if not df_filtered.empty:
+            df_filtered = df_filtered[df_filtered['Region'] == region]
+        
+        if df_filtered.empty:
+            raise ValueError(
+                f'Instance type {instance_type_full} not found in region {region}. '
+                f'Available regions for this instance type: '
+                f'{df[df["InstanceType"] == instance_type_full]["Region"].unique().tolist() if not df[df["InstanceType"] == instance_type_full].empty else "N/A"}')
+        
+        df = df_filtered
+        print(f'df: {df}')
+        rowData = df.iloc[0]
+        print(f'rowData: {rowData}')
+        gpuInfo_str = rowData['GpuInfo']
+        print(f'gpuInfo_str: {gpuInfo_str}')
+        gpuInfo = ast.literal_eval(gpuInfo_str)
+        print(f'gpuInfo: {gpuInfo}')
+        
+        # Extract productId from GpuInfo - this is the instance ID from Novita API
+        productId = gpuInfo['Gpus'][0]['Id']
+        gpuNum = 1
+        imageUrl = 'nginx:latest'
+        imageAuth = ''
+        imageAuthId = ''
+        ports = ''
+        envs = []
+        tools = []
+        command = ''
+        clusterId = ''
+        networkStorages = []
+        networkId = ''
+        kind = 'gpu'
+        min_rootfs = gpuInfo['Gpus'][0].get('MinRootFS') or gpuInfo['Gpus'][0].get('minRootFS', 10)
+        rootfsSize = int(min_rootfs)
 
         create_config = {
-            'cloud': cloud,
-            'region': region,
-            'shade_instance_type': instance_type,
+            'productId': productId,
+            'region': region_code,  # Use region code without parentheses
             'name': instance_name,
-            'ssh_key_id': ssh_key_id
+            'productId': productId,
+            'gpuNum': gpuNum,
+            'rootfsSize': rootfsSize,
+            'imageUrl': imageUrl,
+            'imageAuth': imageAuth,
+            'imageAuthId': imageAuthId,
+            'ports': ports,
+            'envs': envs,
+            'tools': tools,
+            'command': command,
+            'clusterId': clusterId,
+            'networkStorages': networkStorages,
+            'networkId': networkId,
+            'kind': kind,
         }
+        
+        # Only add optional fields if they have meaningful values
+        # Empty strings and empty lists should be omitted
+        # imageUrl = 'nginx:latest'  # Default image, may not be needed
+        # kind = 'gpu'  # May be inferred from productId
+        print(f'create_config: {create_config}')
 
         try:
             logger.info(f'Creating {node_type} instance: {instance_name}')

@@ -231,10 +231,24 @@ class Novita(clouds.Cloud):
         """Make variables for deployment template."""
         del zones, num_nodes, dryrun, volume_mounts  # unused for Novita
 
-        # Get instance type
-        r = resources.copy(accelerators=None)
-        feasible_resources = self._get_feasible_launchable_resources(r)
-        instance_type = feasible_resources.resources_list[0].instance_type
+        # Ensure resources are launchable (have cloud and instance_type)
+        # If resources already has instance_type, use it directly
+        if resources.instance_type is not None:
+            # Ensure cloud is set
+            if resources.cloud is None:
+                resources = resources.copy(cloud=Novita())
+            instance_type = resources.instance_type
+        else:
+            # Otherwise, find feasible resources
+            # Ensure cloud is set before calling _get_feasible_launchable_resources
+            if resources.cloud is None:
+                resources = resources.copy(cloud=Novita())
+            feasible_resources = self._get_feasible_launchable_resources(resources)
+            if not feasible_resources.resources_list:
+                raise ValueError(
+                    f'No feasible resources found. '
+                    f'Hint: {feasible_resources.hint or "Check your resource requirements."}')
+            instance_type = feasible_resources.resources_list[0].instance_type
 
         resources_vars = {}
         if instance_type is not None:
@@ -300,6 +314,9 @@ class Novita(clouds.Cloud):
 
         if resources.instance_type is not None:
             # Instance type is already specified, validate it
+            # Ensure cloud is set if not already set
+            if resources.cloud is None:
+                resources = resources.copy(cloud=Novita())
             assert resources.is_launchable(), resources
             fuzzy_candidate_list = [resources.instance_type]
             return resources_utils.FeasibleResources([resources],

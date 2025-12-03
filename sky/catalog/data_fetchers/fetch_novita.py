@@ -28,18 +28,22 @@ def parse_gpu_info(instance: Dict) -> Dict:
     elif instance['name'] == 'GAUDI2':
         manufacturer = 'Intel'
 
+    # Convert memory from GiB to MiB for compatibility with list_accelerators_impl
+    memory_mib = int(instance['memoryPerGpu'] * 1024)
+
     return {
-        'GpuInfo': {
+        'Gpus': [{
             'Id': instance['id'],
             'Name': instance['name'],
             'Manufacturer': manufacturer,
             'Count': 1,
             'MemoryInfo': {
-                'SizeInGiB': instance['memoryPerGpu']
+                'SizeInMiB': memory_mib
             },
             'MinRootFS': instance['minRootFS'],
-            'MaxRootFS': instance['maxRootFS']
-        }
+            'MaxRootFS': instance['maxRootFS'],
+            'TotalGpuMemoryInMiB': memory_mib
+        }]
     }
 
 
@@ -49,7 +53,6 @@ def create_catalog(api_key: str, output_path: str) -> None:
 
     params = {'available': 'true'}
 
-    print(f'Headers: {headers}')
 
     response = requests.get(ENDPOINT,
                             headers=headers,
@@ -76,14 +79,16 @@ def create_catalog(api_key: str, output_path: str) -> None:
 
         for instance in instance_types:
             name = instance['name']
-            # id = instance['id']
+            id = instance['id']
             vcpus = int(instance['cpuPerGpu'])
             memory_gb = int(instance['memoryPerGpu'])
             # Price is in cents per hour, convert to dollars
             price = float(instance['price']) / 100000
-            spotPrice = float(instance['spotPrice']) / 100000
+            # spotPrice = float(instance['spotPrice']) / 100000
             gpu_count = 1
-            gpu_info = parse_gpu_info(instance)
+            gpu_info_dict = parse_gpu_info(instance)
+            # Convert dict to string for CSV storage (ast.literal_eval can parse repr format)
+            gpu_info = repr(gpu_info_dict)
 
 
             # Write entry for each available region
@@ -91,7 +96,7 @@ def create_catalog(api_key: str, output_path: str) -> None:
                 if gpu_count > 0:
                     region = regionItem
                     writer.writerow([
-                        f'{gpu_count}x_{name}',
+                        f'{gpu_count}x_{name}_{id}',
                         name,
                         # id,
                         gpu_count,
@@ -100,9 +105,9 @@ def create_catalog(api_key: str, output_path: str) -> None:
                         price,
                         region,
                         gpu_info,
-                        spotPrice
+                        ''
                     ])
-                    print(f'wrote row: {f"{gpu_count}x_{name}"}, {name}, {gpu_count}, {vcpus}, {memory_gb}, {price}, {region}, {gpu_info}, {spotPrice}')
+                    print(f'wrote row: {f"{gpu_count}x_{name}"}, {name}, {gpu_count}, {vcpus}, {memory_gb}, {price}, {region}, {gpu_info}')
 
 
 def get_api_key(cmdline_args: argparse.Namespace) -> str:

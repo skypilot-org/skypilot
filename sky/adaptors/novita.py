@@ -40,50 +40,29 @@ def novita():
 
 
 def list_ssh_keys() -> List[Dict[str, Any]]:
-    """List all SSH keys in Novita account."""
-    try:
-        response = novita_utils.get_ssh_keys()
-        return response.get('ssh_keys', [])
-    except (ValueError, KeyError, requests.exceptions.RequestException) as e:
-        logger.warning(f'Failed to list SSH keys from Novita: {e}')
-        return []
+    """List all SSH keys in Novita account.
+    
+    Note: Novita doesn't require SSH key management through their API.
+    This function is kept for compatibility but returns an empty list.
+    """
+    # Novita doesn't require SSH keys to be managed through their API
+    # Instances are created with default SSH access
+    return []
 
 
 def add_ssh_key_to_novita(public_key: str) -> Optional[str]:
     """Add SSH key to Novita if it doesn't already exist.
 
+    Note: Novita doesn't require SSH keys to be uploaded to their platform.
+    This function is kept for compatibility but returns None.
+
     Args:
-        public_key: The SSH public key string.
+        public_key: The SSH public key string (unused).
 
     Returns:
-        The name of the key if added successfully, None otherwise.
+        None, as Novita doesn't require SSH key management.
     """
-    try:
-        # Check if key already exists
-        existing_keys = list_ssh_keys()
-        key_exists = False
-        key_id = None
-        for key in existing_keys:
-            if key.get('public_key') == public_key:
-                key_exists = True
-                key_id = key.get('id')
-                break
-
-        if key_exists:
-            logger.info('SSH key already exists in Novita account')
-            return key_id
-
-        # Generate a unique key name
-        hostname = socket.gethostname()
-        key_name = f'skypilot-{hostname}-{common_utils.get_user_hash()[:8]}'
-
-        # Add the key
-        response = novita_utils.add_ssh_key(name=key_name,
-                                               public_key=public_key)
-        key_id = response['id']
-        logger.info(f'Added SSH key to Novita: {key_name, key_id}')
-        return key_id
-
-    except (ValueError, KeyError, requests.exceptions.RequestException) as e:
-        logger.warning(f'Failed to add SSH key to Novita: {e}')
-        return None
+    # Novita doesn't require SSH keys to be uploaded
+    # Instances are created with default SSH access configured by Novita
+    logger.debug('Novita does not require SSH key upload - using default instance SSH access')
+    return None

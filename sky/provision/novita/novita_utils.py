@@ -3,10 +3,13 @@
 import os
 from typing import Any, Dict
 
+from sky import sky_logging
 from sky.adaptors import common
 
 # Lazy import to avoid dependency on external packages
 requests = common.LazyImport('requests')
+
+logger = sky_logging.init_logger(__name__)
 
 # Novita API configuration
 NOVITA_API_BASE = 'https://api.novita.ai/gpu-instance/openapi/v1/gpu'
@@ -34,7 +37,7 @@ def make_request(method: str, endpoint: str, **kwargs) -> Any:
     """Make a request to the Novita API."""
     url = f'{NOVITA_API_BASE}/{endpoint.lstrip("/")}'
     headers = {
-        'X-API-KEY': get_api_key(),
+        'Authorization': f'Bearer {get_api_key()}',
         'Content-Type': 'application/json',
     }
 
@@ -56,12 +59,20 @@ def get_instances() -> Dict[str, Any]:
 
 def get_instance_info(instance_id: str) -> Dict[str, Any]:
     """Get information about a specific instance."""
-    return make_request('GET', f'/instances/{instance_id}')
+    return make_request('GET', '/instance', json={'instanceId': instance_id})
 
 
 def create_instance(config: Dict[str, Any]) -> Dict[str, Any]:
     """Create a new instance."""
-    return make_request('POST', '/instances/create', json=config)
+    logger.debug(f'Creating instance with config: {config}')
+    try:
+        response = make_request('POST', '/instance/create', json=config)
+        return response
+    except requests.exceptions.HTTPError as e:
+        # Log the full error response for debugging
+        if hasattr(e.response, 'text'):
+            logger.error(f'Novita API error response: {e.response.text}')
+        raise
 
 
 def delete_instance(instance_id: str) -> Dict[str, Any]:
@@ -69,6 +80,4 @@ def delete_instance(instance_id: str) -> Dict[str, Any]:
 
     Note: Novita delete API returns empty response with 200 status.
     """
-    return make_request('POST', '/instances/delete', json={'instanceId': instance_id})
-
-
+    return make_request('POST', '/instance/delete', json={'instanceId': instance_id})
