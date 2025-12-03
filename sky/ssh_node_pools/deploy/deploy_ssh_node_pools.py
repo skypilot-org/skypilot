@@ -692,25 +692,31 @@ def deploy_cluster(cluster_name,
             logger.debug(
                 f'Removing context {context_name!r} from local kubeconfig...')
             run_command(['kubectl', 'config', 'delete-context', context_name],
-                        shell=False)
+                        shell=False,
+                        silent=True)
             run_command(['kubectl', 'config', 'delete-cluster', context_name],
-                        shell=False)
+                        shell=False,
+                        silent=True)
             run_command(['kubectl', 'config', 'delete-user', context_name],
-                        shell=False)
+                        shell=False,
+                        silent=True)
 
             # Update the current context to the first available context
             contexts = run_command([
                 'kubectl', 'config', 'view', '-o',
                 'jsonpath=\'{.contexts[0].name}\''
             ],
-                                   shell=False)
+                                   shell=False,
+                                   silent=True)
             if contexts:
                 run_command(['kubectl', 'config', 'use-context', contexts],
-                            shell=False)
+                            shell=False,
+                            silent=True)
             else:
                 # If no context is available, simply unset the current context
                 run_command(['kubectl', 'config', 'unset', 'current-context'],
-                            shell=False)
+                            shell=False,
+                            silent=True)
 
             logger.debug(
                 f'Context {context_name!r} removed from local kubeconfig.')
@@ -1107,7 +1113,8 @@ def deploy_cluster(cluster_name,
 
         # Set the new context as the current context
         run_command(['kubectl', 'config', 'use-context', context_name],
-                    shell=False)
+                    shell=False,
+                    silent=True)
 
     # Always set up SSH tunnel since we assume only port 22 is accessible
     setup_kubectl_ssh_tunnel(head_node,
