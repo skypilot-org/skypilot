@@ -154,6 +154,7 @@ SKYPILOT_CONFIG_LOCK_PATH = '~/.sky/locks/.skypilot_config.lock'
 
 _WARNED_DISALLOWED_KEYS_CACHE: typing.Set[Tuple[str, Tuple[str, ...]]] = set()
 _WARNED_DISALLOWED_KEYS_CACHE_LOCK = threading.Lock()
+_WARNED_DISALLOWED_KEYS_CACHE_SIZE = 1000
 
 
 def get_skypilot_config_lock_path() -> str:
@@ -735,14 +736,14 @@ def override_skypilot_config(
     # Only warn if there is a diff in disallowed override keys, as the client
     # use the same config file when connecting to a local server.
     if disallowed_diff_keys:
-        run_id = os.environ.get(usage_constants.USAGE_RUN_ID_ENV_VAR)
+        run_id = common_utils.get_usage_run_id()
         should_warn = True
         if run_id:
             cache_key = (run_id, tuple(sorted(disallowed_diff_keys)))
             with _WARNED_DISALLOWED_KEYS_CACHE_LOCK:
                 should_warn = cache_key not in _WARNED_DISALLOWED_KEYS_CACHE
                 if should_warn:
-                    if len(_WARNED_DISALLOWED_KEYS_CACHE) > 1000:
+                    if len(_WARNED_DISALLOWED_KEYS_CACHE) > _WARNED_DISALLOWED_KEYS_CACHE_SIZE:
                         _WARNED_DISALLOWED_KEYS_CACHE.clear()
                     _WARNED_DISALLOWED_KEYS_CACHE.add(cache_key)
 
