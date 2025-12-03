@@ -106,7 +106,7 @@ jobs:
           # PEP440 .post means "after release", but SemVer build metadata has same precedence.
           # TODO(romilb): If both 0.11.0 and 0.11.0+post.1 exist, Helm's "latest" behavior is undefined - some sources claim the newer one wins. Need to verify this.
           semversion=$(echo "$semversion" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)\.post([0-9]+)/\1+post.\2/')
-          
+
           # Update the version and name in the main skypilot chart
           sed -i "s/^version:.*$/version: ${semversion}/" src/charts/skypilot/Chart.yaml
           sed -i "s/^appVersion:.*$/appVersion: ${version}/" src/charts/skypilot/Chart.yaml
@@ -151,4 +151,4 @@ jobs:
           # Show what's being committed for debugging
           git status
           git commit -m "${{ inputs.commit_message || format('Updated from ref: {0}', github.sha) }}"
-          git push origin main
+          git push origin testing-main

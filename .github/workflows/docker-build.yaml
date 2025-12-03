@@ -95,7 +95,7 @@ jobs:
           else
             # Fetch package info from PyPI
             echo "Fetching package info for ${{ inputs.package_name }}"
-            PACKAGE_INFO=$(curl -s https://pypi.org/pypi/${{ inputs.package_name }}/json)
+            PACKAGE_INFO=$(curl -s https://test.pypi.org/pypi/${{ inputs.package_name }}/json)
             # Parse JSON and get the latest version
             LATEST_VERSION=$(echo $PACKAGE_INFO | jq -r '.info.version')
             echo "Latest version found: $LATEST_VERSION"
@@ -104,7 +104,7 @@ jobs:
 
           # Download wheel
           mkdir -p dist
-          pip download --no-deps --dest dist ${{ inputs.package_name }}==$VERSION_TO_DOWNLOAD
+          pip download --no-deps --dest dist --index-url https://test.pypi.org/simple/ ${{ inputs.package_name }}==$VERSION_TO_DOWNLOAD
 
       # For PyPI fetch: upload artifacts for reuse
       - name: Upload artifacts
@@ -223,7 +223,7 @@ jobs:
         with:
           context: .
           platforms: ${{ matrix.platform }}
-          push: true
+          push: false
           tags: "${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-${{ steps.platform.outputs.name }}"
           build-args: |
             INSTALL_FROM_SOURCE=${{ needs.prepare.outputs.install_from_source }}
@@ -249,7 +249,7 @@ jobs:
         run: |
           # Create multi-platform manifest from temporary tags
           VERSION="${{ needs.prepare.outputs.version }}"
-          
+
           # Determine if this is a pre-release version (contains rc, alpha, beta, or dev)
           if [[ "$VERSION" =~ (rc|alpha|beta|dev) ]]; then
             echo "Pre-release version detected ($VERSION), skipping :latest tag"
@@ -258,8 +258,8 @@ jobs:
             echo "Stable release version detected ($VERSION), updating :latest tag"
             TAGS="-t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest -t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:$VERSION"
           fi
-          
-          docker buildx imagetools create \
+
+          echo docker buildx imagetools create \
             $TAGS \
             ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:$VERSION-linux-amd64 \
             ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:$VERSION-linux-arm64
@@ -277,7 +277,7 @@ jobs:
           # Delete temporary tags
           for tag in "${{ needs.prepare.outputs.version }}-linux-amd64" "${{ needs.prepare.outputs.version }}-linux-arm64"; do
             echo "Deleting tag: $tag"
-            curl -X DELETE \
+            echo curl -X DELETE \
               -H "Authorization: JWT $TOKEN" \
               "https://hub.docker.com/v2/repositories/${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}/tags/$tag/" || true
           done
@@ -287,7 +287,7 @@ jobs:
           VERSION="${{ needs.prepare.outputs.version }}"
           echo "✅ Multi-platform tags created:"
           echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:$VERSION"
-          
+
           # Check if latest tag was updated
           if [[ "$VERSION" =~ (rc|alpha|beta|dev) ]]; then
             echo ""
@@ -295,7 +295,7 @@ jobs:
           else
             echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest"
           fi
-          
+
           echo ""
           echo "🚀 Built with native runners for maximum performance!"
           echo "🧹 Temporary tags cleaned up automatically!"
