@@ -398,17 +398,13 @@ def _get_slurm_node_info_list(
                         if gres_job_match:
                             allocated_gpus += int(gres_job_match.group(1))
             except Exception as e:  # pylint: disable=broad-except
-                logger.warning(
-                    f'Failed to get squeue allocation for {node_name}: {e}. '
-                    'Falling back.')
-                # Fallback based on state if squeue fails
                 if state == 'alloc':
+                    # We can infer allocated GPUs only if the node is
+                    # in 'alloc' state.
                     allocated_gpus = total_gpus
-                elif state == 'mix':
-                    allocated_gpus = total_gpus // 2
                 else:
-                    # Conservative for drain/resv/comp
-                    allocated_gpus = total_gpus
+                    # Otherwise, just raise the error.
+                    raise e
         elif state == 'idle':
             allocated_gpus = 0
 
