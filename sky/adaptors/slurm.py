@@ -3,13 +3,28 @@
 import logging
 import re
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
 logger = logging.getLogger(__name__)
+
+# ASCII Unit Separator (\x1f) to handle values with spaces
+# and other special characters.
+SEP = r'\x1f'
+
+
+# TODO(kevin): Add more API types for other client functions.
+class NodeInfo(NamedTuple):
+    """Information about a Slurm node from sinfo."""
+    node: str
+    state: str
+    gres: str
+    cpus: int
+    memory_mb: int
+    partition: str
 
 
 class SlurmClient:
@@ -124,24 +139,43 @@ class SlurmClient:
             rc, cmd, 'Failed to get Slurm cluster information.', stderr=stderr)
         return stdout
 
-    # TODO(kevin): Give the return value a proper type.
-    def info_nodes(self) -> List[str]:
+    def info_nodes(self) -> List[NodeInfo]:
         """Get Slurm node information.
 
         Returns node names, states, GRES (generic resources like GPUs),
         partition, CPUs, and memory (MB) in a single call.
 
         Returns:
-            A list of node info lines. Format:
-            [NodeName State GRES CPUs MemoryMB Partition]
+            List of NodeInfo objects with structured, typed data.
         """
-        cmd = 'sinfo -h --Node -o "%N %t %G %c %m %P"'
+        cmd = (f'sinfo -h --Node -o '
+               f'"%N{SEP}%t{SEP}%G{SEP}%c{SEP}%m{SEP}%P"')
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
                                               stream_logs=False)
         subprocess_utils.handle_returncode(
             rc, cmd, 'Failed to get Slurm node information.', stderr=stderr)
-        return stdout.splitlines()
+
+        nodes = []
+        for line in stdout.splitlines():
+            parts = line.split(SEP)
+            if len(parts) != 6:
+                raise RuntimeError(
+                    f'Unexpected output format from sinfo: {line!r}')
+            try:
+                node_info = NodeInfo(node=parts[0],
+                                     state=parts[1],
+                                     gres=parts[2],
+                                     cpus=int(parts[3]),
+                                     memory_mb=int(parts[4]),
+                                     partition=parts[5])
+                nodes.append(node_info)
+            except ValueError as e:
+                raise RuntimeError(
+                    f'Failed to parse node info from line: {line!r}. '
+                    f'Error: {e}') from e
+
+        return nodes
 
     def node_details(self, node_name: str) -> Dict[str, str]:
         """Get detailed Slurm node information.
@@ -352,9 +386,12 @@ class SlurmClient:
 
         # Extract partition names from PartitionName= fields
         partitions = []
+        # Match until the next field (any word followed by =)
+        partition_regex = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
         for line in stdout.strip().splitlines():
-            if line.startswith('PartitionName='):
-                partition = line.split('=')[1].split()[0]
+            match = partition_regex.search(line)
+            if match:
+                partition = match.group(1).strip()
                 if partition:
                     partitions.append(partition)
         return partitions

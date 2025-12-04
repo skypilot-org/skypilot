@@ -260,8 +260,9 @@ def check_instance_fits(
         Tuple of (fits, reason) where fits is True if available.
     """
 
-    def check_cpu_mem_fits(candidate_instance_type: SlurmInstanceType,
-                           node_list: List[str]) -> Tuple[bool, Optional[str]]:
+    def check_cpu_mem_fits(
+            candidate_instance_type: SlurmInstanceType,
+            node_list: List[slurm.NodeInfo]) -> Tuple[bool, Optional[str]]:
         """Checks if instance fits on candidate nodes based on CPU and memory.
 
         We check capacity (not allocatable) because availability can change
@@ -271,22 +272,9 @@ def check_instance_fits(
         max_cpu = 0
         max_mem_gb = 0.0
 
-        # Extract node capacity from node_list (sinfo format)
-        for node_line in node_list:
-            parts = node_line.split()
-            # parts: [NodeName, State, GRES, CPUs, MemoryMB, Partition]
-            if len(parts) >= 5:
-                try:
-                    node_cpus = int(parts[3])
-                except ValueError:
-                    node_cpus = 0
-                try:
-                    node_mem_gb = float(parts[4]) / 1024.0
-                except ValueError:
-                    node_mem_gb = 0.0
-            else:
-                node_cpus = 0
-                node_mem_gb = 0.0
+        for node_info in node_list:
+            node_cpus = node_info.cpus
+            node_mem_gb = node_info.memory_mb / 1024.0
 
             if node_cpus > max_cpu:
                 max_cpu = node_cpus
@@ -317,17 +305,14 @@ def check_instance_fits(
     partition_suffix = ''
     if partition is not None:
         filtered = []
-        for n in nodes:
-            parts = n.split()
-            if len(parts) < 6:
-                continue
-            node_partition = parts[5]
+        for node_info in nodes:
+            node_partition = node_info.partition
             # Strip '*' from default partition name.
             if (node_partition.endswith('*') and
                     node_partition[:-1] == default_partition):
                 node_partition = node_partition[:-1]
             if node_partition == partition:
-                filtered.append(n)
+                filtered.append(node_info)
         nodes = filtered
         partition_suffix = f' in partition {partition}'
 
@@ -348,12 +333,8 @@ def check_instance_fits(
         # - gpu:a10g:8
         # - gpu:l4:1
         gres_pattern = re.compile(r'^gpu:([^:]+):(\d+)')
-        for node in nodes:
-            # Format: NodeName State GRES CPUs MemoryMB Partition
-            parts = node.split()
-            if len(parts) < 3:
-                continue
-            gres_str = parts[2]
+        for node_info in nodes:
+            gres_str = node_info.gres
             # Extract the GPU type and count from the GRES string
             match = gres_pattern.match(gres_str)
             if not match:
@@ -368,7 +349,7 @@ def check_instance_fits(
             # requested count
             if (node_acc_type == acc_type.lower() and
                     node_acc_count >= acc_count):
-                gpu_nodes.append(node)
+                gpu_nodes.append(node_info)
         if len(gpu_nodes) == 0:
             return (False,
                     f'No GPU nodes found with at least {acc_type}:{acc_count} '
@@ -410,9 +391,9 @@ def _get_slurm_node_info_list(
         slurm_config_dict['identityfile'][0],
         ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
     )
-    sinfo_output = slurm_client.info_nodes()
+    node_infos = slurm_client.info_nodes()
 
-    if not sinfo_output:
+    if not node_infos:
         logger.warning(
             f'`sinfo -N` returned no output on cluster {slurm_cluster_name}. '
             f'No nodes found?')
@@ -422,11 +403,11 @@ def _get_slurm_node_info_list(
     slurm_nodes_info: Dict[str, Dict[str, Any]] = {}
     gres_gpu_pattern = re.compile(r'((gpu)(?::([^:]+))?:(\d+))')
 
-    for line in sinfo_output:
-        parts = line.split()
-        if len(parts) < 6:
-            continue
-        node_name, state, gres_str, _, _, partition = parts[:6]
+    for node_info in node_infos:
+        node_name = node_info.node
+        state = node_info.state
+        gres_str = node_info.gres
+        partition = node_info.partition
 
         if node_name in slurm_nodes_info:
             slurm_nodes_info[node_name]['partitions'].append(partition)
