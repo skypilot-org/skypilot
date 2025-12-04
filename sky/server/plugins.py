@@ -33,7 +33,7 @@ class ExtensionContext:
         ]
     """
 
-    def __init__(self, app: FastAPI):
+    def __init__(self, app: Optional[FastAPI] = None):
         self.app = app
         self.rbac_rules: List[Tuple[str, RBACRule]] = []
 

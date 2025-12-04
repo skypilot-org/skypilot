@@ -30,7 +30,12 @@ class ExamplePlugin(plugins.BasePlugin):
         return router
 
     def install(self, extension_context: plugins.ExtensionContext):
-        extension_context.app.include_router(self.build_router())
+        if extension_context.app:
+            extension_context.app.include_router(self.build_router())
+        extension_context.register_rbac_rule(path='/plugins/example/*',
+                                             method='GET',
+                                             description='Example plugin',
+                                             role='user')
 
 
 class ExampleParameterizedPlugin(plugins.BasePlugin):
@@ -50,7 +55,8 @@ class ExampleParameterizedPlugin(plugins.BasePlugin):
         return router
 
     def install(self, extension_context: plugins.ExtensionContext):
-        extension_context.app.include_router(self.build_router())
+        if extension_context.app:
+            extension_context.app.include_router(self.build_router())
 
 
 class ExampleMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -67,7 +73,8 @@ class ExampleMiddlewarePlugin(plugins.BasePlugin):
     """Example plugin that adds a middleware for SkyPilot API server."""
 
     def install(self, extension_context: plugins.ExtensionContext):
-        extension_context.app.add_middleware(ExampleMiddleware)
+        if extension_context.app:
+            extension_context.app.add_middleware(ExampleMiddleware)
 
 
 class ExampleBackgroundTaskPlugin(plugins.BasePlugin):

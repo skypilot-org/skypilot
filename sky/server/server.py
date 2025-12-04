@@ -656,7 +656,13 @@ app.add_middleware(RequestIDMiddleware)
 
 # Load plugins after all the middlewares are added, to keep the core
 # middleware stack intact if a plugin adds new middlewares.
-plugins.load_plugins(plugins.ExtensionContext(app=app))
+# Note: server.py will be imported twice in server process, once as
+# the top-level entrypoint module and once imported by uvicorn, we only
+# load the plugin when imported by uvicorn for server process.
+# TODO(aylei): move uvicorn app out of the top-level module to avoid
+# duplicate app initialization.
+if __name__ == 'sky.server.server':
+    plugins.load_plugins(plugins.ExtensionContext(app=app))
 
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
