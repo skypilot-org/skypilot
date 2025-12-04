@@ -300,6 +300,7 @@ _current_user: Optional['models.User'] = None
 _current_request_id: Optional[str] = None
 
 
+# TODO(aylei,hailong): request context should be contextual
 def set_request_context(client_entrypoint: Optional[str],
                         client_command: Optional[str],
                         using_remote_api_server: bool,

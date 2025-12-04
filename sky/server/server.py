@@ -744,11 +744,21 @@ async def enabled_clouds(request: fastapi.Request,
                          workspace: Optional[str] = None,
                          expand: bool = False) -> None:
     """Gets enabled clouds on the server."""
+    # Old cli does not send request body for /enabled_clouds API,
+    # to keep backward compatbility, we construct the request body
+    # at server-side with the auth user overridden.
+    # TODO(aylei): enabled_clouds can be a sync handler without background
+    # execution.
+    request_body = payloads.EnabledCloudsBody(workspace=workspace,
+                                              expand=expand)
+    auth_user = request.state.auth_user
+    if auth_user:
+        request_body.env_vars[constants.USER_ID_ENV_VAR] = auth_user.id
+        request_body.env_vars[constants.USER_ENV_VAR] = auth_user.name
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS,
-        request_body=payloads.EnabledCloudsBody(workspace=workspace,
-                                                expand=expand),
+        request_body=request_body,
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
