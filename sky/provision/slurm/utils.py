@@ -462,7 +462,7 @@ def slurm_node_info(
 def get_all_partitions(cluster_name: str) -> List[str]:
     """Gets all partitions in the Slurm cluster."""
     node_list = slurm_node_info(cluster_name)
-    return [node['partition'] for node in node_list]
+    return list({node['partition'] for node in node_list})
 
 
 def is_inside_slurm_job() -> bool:
