@@ -198,7 +198,7 @@ class Slurm(clouds.Cloud):
         del accelerators, use_spot, resources  # unused
         existing_clusters = cls.existing_allowed_clusters()
 
-        regions = []
+        regions: List[clouds.Region] = []
         for cluster in existing_clusters:
             # Fetch partitions for this cluster and attach as zones
             try:
@@ -233,13 +233,13 @@ class Slurm(clouds.Cloud):
             cluster = r.name
 
             # Check each partition (zone) in the cluster
-            partitions_to_check = [z.name for z in r.zones
-                                  ] if r.zones else [None]
+            partitions_to_check = [z.name for z in r.zones] if r.zones else []
             valid_zones = []
 
+            # TODO(kevin): Batch this check to reduce number of roundtrips.
             for partition in partitions_to_check:
                 fits, reason = slurm_utils.check_instance_fits(
-                    cluster, instance_type, partition=partition)
+                    cluster, instance_type, partition)
                 if fits:
                     if partition:
                         valid_zones.append(clouds.Zone(partition))

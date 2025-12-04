@@ -128,12 +128,13 @@ class SlurmClient:
         """Get Slurm node information.
 
         Returns node names, states, GRES (generic resources like GPUs),
-        and partition.
+        partition, CPUs, and memory (MB) in a single call.
 
         Returns:
-            A list of node info lines.
+            A list of node info lines. Format:
+            [NodeName State GRES CPUs MemoryMB Partition]
         """
-        cmd = 'sinfo -h --Node -o "%N %t %G %P"'
+        cmd = 'sinfo -h --Node -o "%N %t %G %c %m %P"'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
                                               stream_logs=False)

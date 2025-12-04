@@ -257,8 +257,48 @@ def check_instance_fits(
         partition: Optional partition name. If None, checks all partitions.
 
     Returns:
-        Tuple of (fits, reason) where fits is True if instance type is available.
+        Tuple of (fits, reason) where fits is True if available.
     """
+
+    def check_cpu_mem_fits(candidate_instance_type: SlurmInstanceType,
+                           node_list: List[str]) -> Tuple[bool, Optional[str]]:
+        """Checks if instance fits on candidate nodes based on CPU and memory.
+
+        We check capacity (not allocatable) because availability can change
+        during scheduling, and we want to let the Slurm scheduler handle that.
+        """
+        # We log max CPU and memory found on the GPU nodes for debugging.
+        max_cpu = 0
+        max_mem_gb = 0.0
+
+        # Extract node capacity from node_list (sinfo format)
+        for node_line in node_list:
+            parts = node_line.split()
+            # parts: [NodeName, State, GRES, CPUs, MemoryMB, Partition]
+            if len(parts) >= 5:
+                try:
+                    node_cpus = int(parts[3])
+                except ValueError:
+                    node_cpus = 0
+                try:
+                    node_mem_gb = float(parts[4]) / 1024.0
+                except ValueError:
+                    node_mem_gb = 0.0
+            else:
+                node_cpus = 0
+                node_mem_gb = 0.0
+
+            if node_cpus > max_cpu:
+                max_cpu = node_cpus
+                max_mem_gb = node_mem_gb
+
+            if (node_cpus >= candidate_instance_type.cpus and
+                    node_mem_gb >= candidate_instance_type.memory):
+                return True, None
+
+        return False, (f'Max found: {max_cpu} CPUs, '
+                       f'{common_utils.format_float(max_mem_gb)}G memory')
+
     # Get Slurm node list in the given cluster (region).
     ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
     ssh_config_dict = ssh_config.lookup(cluster)
@@ -272,21 +312,32 @@ def check_instance_fits(
     )
 
     nodes = client.info_nodes()
+    default_partition = get_cluster_default_partition(cluster)
 
-    # Filter nodes by partition if specified
+    partition_suffix = ''
     if partition is not None:
-        # Partition is the 4th field in sinfo output, may have * suffix for default
-        nodes = [n for n in nodes if n.split()[3].rstrip('*') == partition]
-        if not nodes:
-            partition_suffix = f' in partition {partition}'
-        else:
-            partition_suffix = ''
-    else:
-        partition_suffix = ''
+        filtered = []
+        for n in nodes:
+            parts = n.split()
+            if len(parts) < 6:
+                continue
+            node_partition = parts[5]
+            # Strip '*' from default partition name.
+            if (node_partition.endswith('*') and
+                    node_partition[:-1] == default_partition):
+                node_partition = node_partition[:-1]
+            if node_partition == partition:
+                filtered.append(n)
+        nodes = filtered
+        partition_suffix = f' in partition {partition}'
 
     s = SlurmInstanceType.from_instance_type(instance_type)
     acc_count = s.accelerator_count if s.accelerator_count else 0
     acc_type = s.accelerator_type if s.accelerator_type else None
+    candidate_nodes = nodes
+    not_fit_reason_prefix = (f'No nodes found with enough '
+                             f'CPU (> {s.cpus} CPUs) and/or '
+                             f'memory (> {s.memory} G){partition_suffix}. ')
     if acc_type is not None:
         assert acc_count is not None, (acc_type, acc_count)
 
@@ -298,7 +349,11 @@ def check_instance_fits(
         # - gpu:l4:1
         gres_pattern = re.compile(r'^gpu:([^:]+):(\d+)')
         for node in nodes:
-            _, _, gres_str, _ = node.split()
+            # Format: NodeName State GRES CPUs MemoryMB Partition
+            parts = node.split()
+            if len(parts) < 3:
+                continue
+            gres_str = parts[2]
             # Extract the GPU type and count from the GRES string
             match = gres_pattern.match(gres_str)
             if not match:
@@ -324,25 +379,13 @@ def check_instance_fits(
             f'GPU nodes with {acc_type}{partition_suffix} do not have '
             f'enough CPU (> {s.cpus} CPUs) and/or '
             f'memory (> {s.memory} G). ')
-    else:
-        candidate_nodes = nodes
-        not_fit_reason_prefix = (f'No nodes found with enough '
-                                 f'CPU (> {s.cpus} CPUs) and/or '
-                                 f'memory (> {s.memory} G){partition_suffix}. ')
 
-    # TODO(jwj): Enable CPU and memory check.
-    # fits, reason = check_cpu_mem_fits(s, candidate_nodes)
-    # if not fits:
-    #     if reason is not None:
-    #         reason = not_fit_reason_prefix + reason
-    #     return fits, reason
-    # else:
-    #     return fits, reason
-
-    if len(candidate_nodes) != 0:
-        return True, None
-    else:
-        return False, not_fit_reason_prefix
+    # Check if CPU and memory requirements are met on at least one
+    # candidate node.
+    fits, reason = check_cpu_mem_fits(s, candidate_nodes)
+    if not fits and reason is not None:
+        reason = not_fit_reason_prefix + reason
+    return fits, reason
 
 
 def _get_slurm_node_info_list(
@@ -502,7 +545,7 @@ def get_partitions_for_cluster(cluster_name: str) -> List[str]:
 
     slurm_client = slurm.SlurmClient(
         slurm_config_dict['hostname'],
-        slurm_config_dict.get('port', 22),
+        int(slurm_config_dict.get('port', 22)),
         slurm_config_dict['user'],
         slurm_config_dict['identityfile'][0],
         ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
@@ -511,7 +554,7 @@ def get_partitions_for_cluster(cluster_name: str) -> List[str]:
     try:
         partitions = slurm_client.get_partitions()
         return sorted(partitions)
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         logger.warning(
             f'Failed to get partitions for cluster {cluster_name}: {e}')
         # Fall back to default partition if query fails
