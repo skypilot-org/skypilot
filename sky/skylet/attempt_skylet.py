@@ -98,8 +98,13 @@ def restart_skylet():
     for pid in _find_running_skylet_pids():
         try:
             os.kill(pid, signal.SIGKILL)
-        except (OSError, ProcessLookupError):
-            # Process died between detection and kill
+            # Wait until process fully terminates so its socket gets released.
+            # Without this, find_free_port may race with the kernel closing the
+            # socket and fail to bind to the port that's supposed to be free.
+            psutil.Process(pid).wait(timeout=5)
+        except (OSError, ProcessLookupError, psutil.NoSuchProcess,
+                psutil.TimeoutExpired):
+            # Process died between detection and kill, or timeout waiting
             pass
     # Clean up the PID file
     try:

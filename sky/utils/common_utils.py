@@ -724,7 +724,8 @@ def find_free_port(start_port: int) -> int:
             try:
                 s.bind(('', port))
                 return port
-            except OSError:
+            except OSError as e:
+                logger.debug(f'Error binding port {port}: {e}')
                 pass
     raise OSError('No free ports available.')
 
