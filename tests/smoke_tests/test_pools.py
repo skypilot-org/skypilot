@@ -213,6 +213,43 @@ def check_logs(job_id: int, expected_pattern: str):
     )
 
 
+def check_num_running_jobs(job_names: List[str],
+                           expected_count: int,
+                           timeout: int = 30):
+    """Check that exactly expected_count jobs are in RUNNING state.
+    
+    Args:
+        job_names: List of job names to check.
+        expected_count: Expected number of jobs in RUNNING state.
+        timeout: Timeout in seconds.
+    """
+    job_names_str = ' '.join(job_names)
+    return (
+        'start_time=$SECONDS; '
+        'while true; do '
+        f'if (( $SECONDS - $start_time > {timeout} )); then '
+        f'  echo "Timeout after {timeout} seconds waiting for {expected_count} jobs to be RUNNING"; '
+        '  echo "=== Current job status ==="; '
+        '  sky jobs queue; '
+        '  exit 1; '
+        'fi; '
+        's=$(sky jobs queue); '
+        'echo "$s"; '
+        'running_count=0; '
+        f'for job_name in {job_names_str}; do '
+        '  if echo "$s" | grep "$job_name" | grep "RUNNING"; then '
+        '    running_count=$((running_count + 1)); '
+        '  fi; '
+        'done; '
+        f'if [ "$running_count" -eq {expected_count} ]; then '
+        f'  echo "Found exactly {expected_count} jobs in RUNNING state"; '
+        '  break; '
+        'fi; '
+        f'echo "Found $running_count jobs in RUNNING state, expected {expected_count}"; '
+        'sleep 2; '
+        'done')
+
+
 def wait_until_num_workers(pool_name: str,
                            num_workers: int,
                            timeout: int = 30,
@@ -254,22 +291,27 @@ def check_for_recovery_message_on_controller(job_name: str):
 def basic_pool_conf(
     num_workers: int,
     infra: str,
-    resource_string: Optional[str] = None,
+    accelerator_string: Optional[str] = None,
+    cpus: Optional[str] = None,
+    memory: Optional[str] = None,
     setup_cmd: str = 'echo "setup message"',
     workdir: Optional[str] = None,
 ):
-    resource_string = '    accelerators: ' + resource_string if resource_string else ''
     workdir_section = f'workdir: {workdir}\n' if workdir else ''
+    accelerator_string = '    accelerators: ' + accelerator_string if accelerator_string else ''
+    cpus_string = '    cpus: ' + cpus if cpus else ''
+    memory_string = '    memory: ' + memory if memory else ''
     return textwrap.dedent(f"""
     {workdir_section}
     pool:
         workers: {num_workers}
 
     resources:
-        cpus: 2+
-        memory: 4GB+
         infra: {infra}
-    {resource_string}
+    {accelerator_string}
+    {cpus_string}
+    {memory_string}
+
     setup: |
         {setup_cmd}
     """)
@@ -278,10 +320,19 @@ def basic_pool_conf(
 def basic_job_conf(
     job_name: str,
     run_cmd: str = 'echo "run message"',
+    cpus: Optional[str] = None,
+    memory: Optional[str] = None,
 ):
+    resources_section = ''
+    if cpus is not None or memory is not None:
+        resources_section = '\n    resources:'
+        if cpus is not None:
+            resources_section += f'\n        cpus: {cpus}'
+        if memory is not None:
+            resources_section += f'\n        memory: {memory}'
     return textwrap.dedent(f"""
     name: {job_name}
-
+{resources_section}
     run: |
         {run_cmd}
     """)
@@ -1055,7 +1106,7 @@ def test_heterogeneous_pool(generic_cloud: str):
         pool_name, sky.AWS.max_cluster_name_length())
     pool_config = basic_pool_conf(num_workers=1,
                                   infra=generic_cloud,
-                                  resource_string='{"L4", "A10G"}')
+                                  accelerator_string='{"L4", "A10G"}')
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         write_yaml(pool_yaml, pool_config)
         test = smoke_tests_utils.Test(
@@ -1077,7 +1128,7 @@ def test_heterogeneous_pool_counts(generic_cloud: str):
         pool_name, sky.AWS.max_cluster_name_length())
     pool_config = basic_pool_conf(num_workers=1,
                                   infra=generic_cloud,
-                                  resource_string='{"H100":1, "L40S":1}')
+                                  accelerator_string='{"H100":1, "L40S":1}')
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         write_yaml(pool_yaml, pool_config)
         test = smoke_tests_utils.Test(
@@ -1216,7 +1267,7 @@ def test_pools_setup_num_gpus(generic_cloud: str):
     setup_cmd = 'if [[ "$SKYPILOT_SETUP_NUM_GPUS_PER_NODE" != "2" ]]; then exit 1; fi'
     pool_config = basic_pool_conf(num_workers=1,
                                   infra=generic_cloud,
-                                  resource_string='{L4:2}',
+                                  accelerator_string='{L4:2}',
                                   setup_cmd=setup_cmd)
 
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
@@ -1510,3 +1561,199 @@ def test_pool_scale_with_workdir(generic_cloud: str):
                 teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
             )
             smoke_tests_utils.run_one_test(test)
+
+
+pytest.mark.no_remote_server  # see note 1 above
+def test_pool_multiple_jobs_single_worker(generic_cloud: str):
+    """Test that multiple jobs can run on a single worker when resources allow."""
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+
+    # Pool with 4 CPUs and 8GB memory, single worker
+    pool_config = basic_pool_conf(
+        num_workers=1,
+        infra=generic_cloud,
+        cpus='4+',
+        memory='8GB+',
+    )
+
+    # Two jobs, each taking 2 CPUs and 4GB memory
+    job_name_1 = f'{name}-job-1'
+    job_name_2 = f'{name}-job-2'
+    job_config_1 = basic_job_conf(
+        job_name=job_name_1,
+        run_cmd='echo "Job 1 running" && sleep infinity',
+        cpus='2',
+        memory='4GB',
+    )
+    job_config_2 = basic_job_conf(
+        job_name=job_name_2,
+        run_cmd='echo "Job 2 running" && sleep infinity',
+        cpus='2',
+        memory='4GB',
+    )
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml_1:
+            with tempfile.NamedTemporaryFile(delete=True) as job_yaml_2:
+                write_yaml(pool_yaml, pool_config)
+                write_yaml(job_yaml_1, job_config_1)
+                write_yaml(job_yaml_2, job_config_2)
+
+                test = smoke_tests_utils.Test(
+                    'test_pool_multiple_jobs_single_worker',
+                    [
+                        _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name, pool_yaml=pool_yaml.name),
+                        wait_until_pool_ready(pool_name, timeout=timeout),
+                        # Launch first job
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name, job_yaml=job_yaml_1.name),
+                        # Launch second job
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name, job_yaml=job_yaml_2.name),
+                        # Wait for both jobs to be RUNNING
+                        wait_until_job_status(job_name_1, ['RUNNING'],
+                                              timeout=timeout),
+                        wait_until_job_status(job_name_2, ['RUNNING'],
+                                              timeout=timeout),
+                    ],
+                    timeout=timeout,
+                    teardown=cancel_jobs_and_teardown_pool(pool_name,
+                                                           timeout=5),
+                )
+
+                smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_resource_contention_single_worker(generic_cloud: str):
+    """Test that only one job runs when resources don't allow both."""
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+
+    # Pool with 2 CPUs and 4GB memory, single worker
+    pool_config = basic_pool_conf(
+        num_workers=1,
+        infra=generic_cloud,
+        cpus='2',
+        memory='4GB',
+    )
+
+    # Two jobs, each taking 2 CPUs and 4GB memory (can't both fit)
+    job_name_1 = f'{name}-job-1'
+    job_name_2 = f'{name}-job-2'
+    job_config_1 = basic_job_conf(
+        job_name=job_name_1,
+        run_cmd='echo "Job 1 running" && sleep infinity',
+        cpus='2',
+        memory='4GB',
+    )
+    job_config_2 = basic_job_conf(
+        job_name=job_name_2,
+        run_cmd='echo "Job 2 running" && sleep infinity',
+        cpus='2',
+        memory='4GB',
+    )
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml_1:
+            with tempfile.NamedTemporaryFile(delete=True) as job_yaml_2:
+                write_yaml(pool_yaml, pool_config)
+                write_yaml(job_yaml_1, job_config_1)
+                write_yaml(job_yaml_2, job_config_2)
+
+                test = smoke_tests_utils.Test(
+                    'test_pool_resource_contention_single_worker',
+                    [
+                        _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name, pool_yaml=pool_yaml.name),
+                        wait_until_pool_ready(pool_name, timeout=timeout),
+                        # Launch first job
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name, job_yaml=job_yaml_1.name),
+                        # Launch second job
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name, job_yaml=job_yaml_2.name),
+                        # Verify only one job is RUNNING
+                        check_num_running_jobs(
+                            [job_name_1, job_name_2], 1, timeout=timeout),
+                        # Wait 30 seconds
+                        'sleep 30',
+                        # Verify only one job is RUNNING
+                        check_num_running_jobs(
+                            [job_name_1, job_name_2], 1, timeout=30),
+                    ],
+                    timeout=timeout,
+                    teardown=cancel_jobs_and_teardown_pool(pool_name,
+                                                           timeout=5),
+                )
+
+                smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_resource_reclamation(generic_cloud: str):
+    """Test that resources are reclaimed when jobs finish, allowing queued jobs to run."""
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+
+    # Pool with 2 CPUs and 4GB memory, single worker
+    pool_config = basic_pool_conf(
+        num_workers=1,
+        infra=generic_cloud,
+        cpus='2',
+        memory='4GB',
+    )
+
+    # Two jobs, each taking 2 CPUs and 4GB memory (can't both fit initially)
+    job_name_1 = f'{name}-job-1'
+    job_name_2 = f'{name}-job-2'
+    job_config_1 = basic_job_conf(
+        job_name=job_name_1,
+        run_cmd='echo "hi"',
+        cpus='2',
+        memory='4GB',
+    )
+    job_config_2 = basic_job_conf(
+        job_name=job_name_2,
+        run_cmd='echo "hi"',
+        cpus='2',
+        memory='4GB',
+    )
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml_1:
+            with tempfile.NamedTemporaryFile(delete=True) as job_yaml_2:
+                write_yaml(pool_yaml, pool_config)
+                write_yaml(job_yaml_1, job_config_1)
+                write_yaml(job_yaml_2, job_config_2)
+
+                test = smoke_tests_utils.Test(
+                    'test_pool_resource_reclamation',
+                    [
+                        _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name, pool_yaml=pool_yaml.name),
+                        wait_until_pool_ready(pool_name, timeout=timeout),
+                        # Launch first job
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name, job_yaml=job_yaml_1.name),
+                        # Launch second job
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name, job_yaml=job_yaml_2.name),
+                        # Wait for first job to succeed
+                        wait_until_job_status(job_name_1, ['SUCCEEDED'],
+                                              timeout=timeout),
+                        # Wait for second job to succeed (should run after first finishes)
+                        wait_until_job_status(job_name_2, ['SUCCEEDED'],
+                                              timeout=timeout),
+                    ],
+                    timeout=timeout,
+                    teardown=cancel_jobs_and_teardown_pool(pool_name,
+                                                           timeout=5),
+                )
+
+                smoke_tests_utils.run_one_test(test)

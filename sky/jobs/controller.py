@@ -334,6 +334,13 @@ class JobController:
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
 
+            # Get full_resources_str using to_simple_string from task resources
+            full_resources_str = None
+            if task.resources:
+                # Get the first Resources object from the set/list
+                task_resource = next(iter(task.resources))
+                full_resources_str = task_resource.to_simple_string()
+
             await managed_job_state.set_starting_async(
                 self._job_id,
                 task_id,
@@ -344,7 +351,8 @@ class JobController:
                     'max_restarts_on_errors':
                         self._strategy_executor.max_restarts_on_errors
                 },
-                callback_func=callback_func)
+                callback_func=callback_func,
+                full_resources_str=full_resources_str)
             logger.info(f'Submitted managed job {self._job_id} '
                         f'(task: {task_id}, name: {task.name!r}); '
                         f'{constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
