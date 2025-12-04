@@ -111,7 +111,7 @@ def kill_process_tree(process: psutil.Process,
 
 def main():
     daemonize()
-    
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--parent-pid', type=int, required=True)
     parser.add_argument('--proc-pid', type=int, required=True)
