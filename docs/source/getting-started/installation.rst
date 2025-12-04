@@ -112,34 +112,71 @@ SkyPilot supports installation with ``pip`` or ``uv``.
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
 
-.. note::
+Run locally or connect to a team server
+---------------------------------------
 
-  After upgrading SkyPilot, use ``sky api stop`` to enable the new version.
-  See :ref:`upgrade-skypilot` for more details.
+SkyPilot can be run as a :ref:`standalone application <sky-api-server-local>`, or connect to a :ref:`team API server <sky-api-server-remote>` for multi-user collaboration.
 
-
-Install cloud dependencies
---------------------------
-
-.. note:: This step is not required if connecting to a remote API server.
+**To run SkyPilot locally:**
 
 Refer to the :ref:`cloud setup section <cloud-account-setup>` to download the necessary dependencies for the clouds you want to use.
 
-Connect to a remote API server (optional)
---------------------------------------------------
+.. tip::
 
-If your team has set up a remote :ref:`SkyPilot API server <sky-api-server>`, connect to it by running:
+  You can install dependencies for multiple clouds at once with following commands:
 
-.. code-block:: shell
+  .. tab-set::
+    .. tab-item:: pip
+      :sync: pip-tab
 
-  sky api login
+      .. code-block:: shell
 
-This is an optional step---by default, SkyPilot automatically starts and uses a local API server.  See more details in :ref:`sky-api-server-connect`.
+        # From stable release
+        pip install "skypilot[kubernetes,aws,gcp]"
+        # From nightly build
+        pip install "skypilot-nightly[kubernetes,aws,gcp]"
+        # From source
+        pip install -e ".[kubernetes,aws,gcp]"
+
+    .. tab-item:: uv venv
+      :sync: uv-venv-tab
+
+      .. code-block:: shell
+
+        # From stable release
+        uv pip install "skypilot[kubernetes,aws,gcp]"
+        # From nightly build
+        uv pip install "skypilot-nightly[kubernetes,aws,gcp]"
+
+    .. tab-item:: uv tool
+      :sync: uv-tool-tab
+
+      .. code-block:: shell
+
+        # From stable release
+        uv tool install --with pip "skypilot[kubernetes,aws,gcp]"
+        # From nightly build
+        uv tool install --with pip "skypilot-nightly[kubernetes,aws,gcp]"
+
+.. note::
+
+  When using SkyPilot locally, run :code:`sky api stop` after each upgrade to enable the new version.
+  See :ref:`upgrade-skypilot` for more details.
+
+**To connect to a team API server:**
+
+If your team has set up a :ref:`SkyPilot API server <sky-api-server>`, connect to it by running :code:`sky api login`.
+
+See :ref:`sky-api-server-connect` for more details.
+
+**To deploy a team API server:**
+
+See :ref:`sky-api-server-deploy` for detailed instructions on how to deploy a team API server.
 
 .. _verify-cloud-access:
 
 Verify cloud access
-------------------------------------
+-------------------
 
 After installation, run :code:`sky check` to verify that credentials are correctly set up:
 
@@ -184,10 +221,49 @@ section :ref:`below <cloud-account-setup>`.
 
   To check credentials only for specific clouds, pass the clouds as arguments: :code:`sky check aws gcp`
 
+Request quotas for first time users
+--------------------------------------
+
+If your cloud account has not been used to launch instances before, the
+respective quotas are likely set to zero or a low limit.  This is especially
+true for GPU instances.
+
+Please follow :ref:`Requesting Quota Increase <quota>` to check quotas and request quota
+increases before proceeding.
+
+.. _shell-completion:
+
+Enable shell completion
+-------------------------
+
+SkyPilot supports shell completion for Bash (Version 4.4 and up), Zsh and Fish. This is only available for :code:`click` versions 8.0 and up (use :code:`pip install click==8.0.4` to install).
+
+To enable shell completion after installing SkyPilot, you will need to modify your shell configuration.
+SkyPilot automates this process using the :code:`--install-shell-completion` option, which you should call using the appropriate shell name or :code:`auto`:
+
+.. code-block:: shell
+
+  sky --install-shell-completion auto
+  # sky --install-shell-completion zsh
+  # sky --install-shell-completion bash
+  # sky --install-shell-completion fish
+
+Shell completion may perform poorly on certain shells and machines.
+If you experience any issues after installation, you can use the :code:`--uninstall-shell-completion` option to uninstall it, which you should similarly call using the appropriate shell name or :code:`auto`:
+
+.. code-block:: shell
+
+  sky --uninstall-shell-completion auto
+  # sky --uninstall-shell-completion zsh
+  # sky --uninstall-shell-completion bash
+  # sky --uninstall-shell-completion fish
+
+---------
+
 .. _cloud-account-setup:
 
-Set up Kubernetes or clouds
----------------------------
+Appendix: Set up Kubernetes or clouds for local deployment
+----------------------------------------------------------
 
 SkyPilot supports most major cloud providers.
 If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can access your enabled clouds<verify-cloud-access>`.
@@ -296,6 +372,7 @@ Install the necessary dependencies for AWS.
 
     .. code-block:: shell
       
+      # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[aws]"
       # From nightly build
@@ -308,6 +385,7 @@ Install the necessary dependencies for AWS.
 
     .. code-block:: shell
 
+      # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[aws]"
       # From nightly build
@@ -319,6 +397,7 @@ Install the necessary dependencies for AWS.
 
     .. code-block:: shell
 
+      # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[aws]"
       # From nightly build
@@ -814,6 +893,7 @@ Install the necessary dependencies for Lambda Cloud.
 
     .. code-block:: shell
       
+      # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[lambda]"
       # From nightly build
@@ -826,6 +906,7 @@ Install the necessary dependencies for Lambda Cloud.
 
     .. code-block:: shell
 
+      # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[lambda]"
       # From nightly build
@@ -836,6 +917,7 @@ Install the necessary dependencies for Lambda Cloud.
 
     .. code-block:: shell
 
+      # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[lambda]"
       # From nightly build
@@ -1067,6 +1149,7 @@ Cudo Compute |community-badge|
 
     .. code-block:: shell
       
+      # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[cudo]"
       # From nightly build
@@ -1079,6 +1162,7 @@ Cudo Compute |community-badge|
 
     .. code-block:: shell
 
+      # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       uv pip install "skypilot[cudo]"
       # From nightly build
@@ -1089,6 +1173,7 @@ Cudo Compute |community-badge|
 
     .. code-block:: shell
 
+      # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       uv tool install --with pip "skypilot[cudo]"
       # From nightly build
@@ -1564,21 +1649,10 @@ Seeweb |community-badge|
   [DEFAULT]
   api_key = <your-api-token>
 
-
-Request quotas for first time users
---------------------------------------
-
-If your cloud account has not been used to launch instances before, the
-respective quotas are likely set to zero or a low limit.  This is especially
-true for GPU instances.
-
-Please follow :ref:`Requesting Quota Increase <quota>` to check quotas and request quota
-increases before proceeding.
-
 .. _docker-image:
 
-Using SkyPilot in Docker
--------------------------
+Appendix: Using SkyPilot in Docker
+----------------------------------
 
 As a **quick alternative to installing SkyPilot on your laptop**, we also
 provide a Docker image with SkyPilot main branch automatically cloned.
@@ -1620,30 +1694,3 @@ Finally, you can stop the container with:
 See more details about the dev container image
 ``berkeleyskypilot/skypilot-nightly`` `here
 <https://github.com/skypilot-org/skypilot/blob/master/CONTRIBUTING.md#testing-in-a-container>`_.
-
-.. _shell-completion:
-
-Enable shell completion
--------------------------
-
-SkyPilot supports shell completion for Bash (Version 4.4 and up), Zsh and Fish. This is only available for :code:`click` versions 8.0 and up (use :code:`pip install click==8.0.4` to install).
-
-To enable shell completion after installing SkyPilot, you will need to modify your shell configuration.
-SkyPilot automates this process using the :code:`--install-shell-completion` option, which you should call using the appropriate shell name or :code:`auto`:
-
-.. code-block:: shell
-
-  sky --install-shell-completion auto
-  # sky --install-shell-completion zsh
-  # sky --install-shell-completion bash
-  # sky --install-shell-completion fish
-
-Shell completion may perform poorly on certain shells and machines.
-If you experience any issues after installation, you can use the :code:`--uninstall-shell-completion` option to uninstall it, which you should similarly call using the appropriate shell name or :code:`auto`:
-
-.. code-block:: shell
-
-  sky --uninstall-shell-completion auto
-  # sky --uninstall-shell-completion zsh
-  # sky --uninstall-shell-completion bash
-  # sky --uninstall-shell-completion fish
