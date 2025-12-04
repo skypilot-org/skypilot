@@ -124,6 +124,7 @@ class SlurmClient:
             rc, cmd, 'Failed to get Slurm cluster information.', stderr=stderr)
         return stdout
 
+    # TODO(kevin): Give the return value a proper type.
     def info_nodes(self) -> List[str]:
         """Get Slurm node information.
 

@@ -418,20 +418,15 @@ def _get_slurm_node_info_list(
             f'No nodes found?')
         return []
 
-    # 2. Process each node
-    slurm_nodes_info = []
-    unique_nodes_processed = set()
+    # 2. Process each node, aggregating partitions per node
+    slurm_nodes_info: Dict[str, Dict[str, Any]] = {}
     gres_gpu_pattern = re.compile(r'((gpu)(?::([^:]+))?:(\d+))')
 
     for line in sinfo_output:
         parts = line.split()
-        if len(parts) < 4:
+        if len(parts) < 6:
             continue
-        node_name, state, gres_str, partition = parts[:4]
-
-        if node_name in unique_nodes_processed:
-            continue
-        unique_nodes_processed.add(node_name)
+        node_name, state, gres_str, _, _, partition = parts[:6]
 
         # Extract GPU info from GRES
         gres_match = gres_gpu_pattern.search(gres_str)
@@ -490,19 +485,28 @@ def _get_slurm_node_info_list(
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(
                 f'Failed to get CPU/memory info for {node_name}: {e}')
-        slurm_nodes_info.append({
+
+        if node_name in slurm_nodes_info:
+            slurm_nodes_info[node_name]['partitions'].append(partition)
+            continue
+
+        slurm_nodes_info[node_name] = {
             'node_name': node_name,
             'slurm_cluster_name': slurm_cluster_name,
-            'partition': partition,
+            'partitions': [partition],
             'node_state': state,
             'gpu_type': gpu_type_from_sinfo,
             'total_gpus': total_gpus,
             'free_gpus': free_gpus,
             'vcpu_count': vcpu_total,
             'memory_gb': round(mem_gb, 2),
-        })
+        }
 
-    return slurm_nodes_info
+    for node_info in slurm_nodes_info.values():
+        partitions = node_info.pop('partitions')
+        node_info['partition'] = ','.join(str(p) for p in partitions)
+
+    return list(slurm_nodes_info.values())
 
 
 def slurm_node_info(
