@@ -179,8 +179,10 @@ def _with_interactive(cmd):
 def _redact_docker_password(cmd: str) -> str:
     parts = shlex.split(cmd)
     for i, part in enumerate(parts):
-        if part == '--password':
-            if i + 1 < len(parts):
+        if '--password' in part:
+            if part.startswith('--password='):
+                parts[i] = '--password=<redacted>'
+            elif i + 1 < len(parts):
                 parts[i + 1] = '<redacted>'
     return ' '.join(parts)
 
