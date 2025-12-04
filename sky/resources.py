@@ -1943,7 +1943,8 @@ class Resources:
 
     def less_resources_than(self, other: 'Resources') -> bool:
         """Returns whether this Resources is less demanding than the other.
-        Only checks CPU, memory and accelerators."""
+        Only checks CPU, memory and accelerators. Returns True if this Resources
+        object is less than or equal to the other."""
 
         my_cpus = _parse_value(self.cpus) or 0
         other_cpus = _parse_value(other.cpus) or 0
@@ -1954,16 +1955,29 @@ class Resources:
         other_accelerators = (other.accelerators
                               if other.accelerators is not None else {})
 
-        if my_cpus < other_cpus:
+        if my_cpus <= other_cpus:
             return True
-        if my_memory < other_memory:
+        if my_memory <= other_memory:
             return True
         for acc in other_accelerators:
             if (acc not in my_accelerators or
-                    my_accelerators[acc] < other_accelerators[acc]):
+                    my_accelerators[acc] <= other_accelerators[acc]):
                 return True
 
         return False
+
+    def to_simple_string(self) -> str:
+        """Returns a simple string representation of the Resources that can be
+        parsed by Resources.from_resources_string."""
+        resource_list = []
+        if self.cpus is not None:
+            resource_list.append(f'CPU:{self.cpus}')
+        if self.memory is not None:
+            resource_list.append(f'Memory:{self.memory}')
+        if self.accelerators is not None:
+            for acc, count in self.accelerators.items():
+                resource_list.append(f'{acc}:{count}')
+        return ','.join(resource_list)
 
     def copy(self, **override) -> 'Resources':
         """Returns a copy of the given Resources."""

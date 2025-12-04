@@ -97,6 +97,7 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('local_log_file', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
     sqlalchemy.Column('logs_cleaned_at', sqlalchemy.Float, server_default=None),
+    sqlalchemy.Column('full_resources', sqlalchemy.Text, server_default=None),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -1869,6 +1870,7 @@ def get_pool_worker_used_resources(
 
     Returns:
         Resources object with summed resources from all running jobs, or None
+        if we couldn't parse the resources string for any job.
     """
     if not job_ids:
         return None
@@ -1876,24 +1878,34 @@ def get_pool_worker_used_resources(
     assert _SQLALCHEMY_ENGINE is not None
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        # Query spot_table for running jobs
-        query = sqlalchemy.select(spot_table.c.resources).where(
-            sqlalchemy.and_(
-                spot_table.c.spot_job_id.in_(job_ids),
-                spot_table.c.status == ManagedJobStatus.RUNNING.value))
+        # Query spot_table for full_resources. Use full_resources if available,
+        # otherwise fall back to resources for backward compatibility.
+        # Don't check for running status because we want to include jobs that
+        # may have just been scheduled. The job_ids come from
+        # get_nonterminal_job_ids_by_pool anyway so we don't need to worry
+        # about removing old jobs.
+        query = sqlalchemy.select(spot_table.c.full_resources).where(
+            sqlalchemy.and_(spot_table.c.spot_job_id.in_(job_ids)))
         rows = session.execute(query).fetchall()
 
         # Parse resources strings into Resources objects and sum them using +
         total_resources = None
         for row in rows:
-            resources_str = row[0]
-            parsed = resources_lib.Resources.from_resources_string(
-                resources_str)
-            if parsed is not None:
-                if total_resources is None:
-                    total_resources = parsed
-                else:
-                    total_resources = total_resources + parsed
+            if row[0] is None:
+                # We don't have full_resources for this job. We should return
+                # none since we can't make any guarantees about what resources
+                # are being used.
+                return None
+            parsed = resources_lib.Resources.from_resources_string(row[0])
+            if parsed is None:
+                # We couldn't parse the resources string. We should return
+                # none since we can't make any guarantees about what resources
+                # are being used.
+                return None
+            if total_resources is None:
+                total_resources = parsed
+            else:
+                total_resources = total_resources + parsed
 
         return total_resources
 
@@ -2005,14 +2017,27 @@ async def get_latest_task_id_status_async(
 
 
 @_init_db_async
-async def set_starting_async(job_id: int, task_id: int, run_timestamp: str,
-                             submit_time: float, resources_str: str,
+async def set_starting_async(job_id: int,
+                             task_id: int,
+                             run_timestamp: str,
+                             submit_time: float,
+                             resources_str: str,
                              specs: Dict[str, Union[str, int]],
-                             callback_func: AsyncCallbackType):
+                             callback_func: AsyncCallbackType,
+                             full_resources_str: Optional[str] = None):
     """Set the task to starting state."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     logger.info('Launching the spot cluster...')
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        values = {
+            spot_table.c.resources: resources_str,
+            spot_table.c.submitted_at: submit_time,
+            spot_table.c.status: ManagedJobStatus.STARTING.value,
+            spot_table.c.run_timestamp: run_timestamp,
+            spot_table.c.specs: json.dumps(specs),
+        }
+        if full_resources_str is not None:
+            values[spot_table.c.full_resources] = full_resources_str
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -2020,13 +2045,7 @@ async def set_starting_async(job_id: int, task_id: int, run_timestamp: str,
                     spot_table.c.task_id == task_id,
                     spot_table.c.status == ManagedJobStatus.PENDING.value,
                     spot_table.c.end_at.is_(None),
-                )).values({
-                    spot_table.c.resources: resources_str,
-                    spot_table.c.submitted_at: submit_time,
-                    spot_table.c.status: ManagedJobStatus.STARTING.value,
-                    spot_table.c.run_timestamp: run_timestamp,
-                    spot_table.c.specs: json.dumps(specs),
-                }))
+                )).values(values))
         count = result.rowcount
         await session.commit()
         if count != 1:
