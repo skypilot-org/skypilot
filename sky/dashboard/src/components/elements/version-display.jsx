@@ -34,11 +34,12 @@ export function VersionDisplay() {
   if (!version) return null;
 
   // Deduce if it's a nightly version and generate upgrade command
-  const isNightly = latestVersion && latestVersion.toLowerCase().includes('.dev');
+  const isNightly =
+    latestVersion && latestVersion.toLowerCase().includes('.dev');
   const upgradeCommand = latestVersion
-    ? (isNightly
-        ? 'pip install --upgrade --pre skypilot-nightly'
-        : 'pip install --upgrade skypilot')
+    ? isNightly
+      ? 'pip install --upgrade --pre skypilot-nightly'
+      : 'pip install --upgrade skypilot'
     : null;
 
   // Create tooltip text
