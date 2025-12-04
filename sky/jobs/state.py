@@ -1176,7 +1176,7 @@ def get_job_controller_process(job_id: int) -> Optional[ControllerPidRecord]:
 def is_legacy_controller_process(job_id: int) -> bool:
     """Check if the controller process is a legacy single-job controller process
 
-    This should return True for jobs after #7051.
+    This should return True for jobs before #7051.
     After #7051, the controller process pid is negative to indicate a new
     multi-job controller process.
     After #7847, the controller process pid is changed back to positive, but
