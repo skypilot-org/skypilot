@@ -428,6 +428,10 @@ def _get_slurm_node_info_list(
             continue
         node_name, state, gres_str, _, _, partition = parts[:6]
 
+        if node_name in slurm_nodes_info:
+            slurm_nodes_info[node_name]['partitions'].append(partition)
+            continue
+
         # Extract GPU info from GRES
         gres_match = gres_gpu_pattern.search(gres_str)
 
@@ -485,10 +489,6 @@ def _get_slurm_node_info_list(
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(
                 f'Failed to get CPU/memory info for {node_name}: {e}')
-
-        if node_name in slurm_nodes_info:
-            slurm_nodes_info[node_name]['partitions'].append(partition)
-            continue
 
         slurm_nodes_info[node_name] = {
             'node_name': node_name,
