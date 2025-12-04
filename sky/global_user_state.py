@@ -15,6 +15,7 @@ import pickle
 import re
 import threading
 import time
+import traceback
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
@@ -420,6 +421,10 @@ def add_or_update_user(
         If return_user=True: Tuple[bool, models.User]
     """
     assert _SQLALCHEMY_ENGINE is not None
+
+    stacktrace = ''.join(traceback.format_stack()[:-1])
+    logger.info('Adding or updating user: %s (%s)\nCaller stacktrace:\n%s',
+                user.name, user.id, stacktrace)
 
     if user.name is None:
         return (False, user) if return_user else False
