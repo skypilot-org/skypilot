@@ -213,9 +213,6 @@ You can verify that this notebook has access to the mounted storage bucket.
 marimo notebooks
 ~~~~~~~~~~~~~~~~~
 
-marimo notebooks are a modern alternative to traditional Jupyter notebooks, stored
-as Python scripts on disk. They are also fully reproducible thanks to the ``uv`` integration.
-
 To start a marimo notebook interactively via ``sky``, you can connect to the machine and forward the
 port that you want marimo to use:
 
@@ -257,8 +254,7 @@ the terminal that marimo provides from the browser.
 marimo as SkyPilot jobs
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-Because marimo notebooks are stored as Python scripts on disk. This means that once you've
-written your code interactively, you can immediately use it as a SkyPilot job.
+Because marimo notebooks are stored as Python scripts on disk, you can immediately use it as a SkyPilot job too.
 
 To demonstrate this, let's consider the following marimo notebook:
 
