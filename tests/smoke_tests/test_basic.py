@@ -1852,3 +1852,80 @@ def test_launch_retry_until_up():
         teardown=f'sky down -y {cluster_name}',
     )
     smoke_tests_utils.run_one_test(test)
+
+
+def test_cancel_job_reliability(generic_cloud: str):
+    """Test that sky cancel properly terminates running jobs."""
+    name = smoke_tests_utils.get_cluster_name()
+
+    # Create a temporary YAML file with a long-running sleep command
+    cancel_test_yaml = textwrap.dedent("""
+    run: |
+        sleep 10000
+    """)
+
+    # Helper function to check process count with timeout
+    def check_process_count(expected_lines: int, timeout: int = 30) -> str:
+        """Check that ps aux | grep 'sleep 10000' shows expected number of lines.
+        
+        Note: ps aux | grep includes the grep process itself, so:
+        - 3 lines = sleep process + grep process + ssh process to check the process count
+        - 2 line = grep process (sleep is gone) + ssh process to check the process count
+        
+        Returns a command that will check the process count with retries.
+        """
+        return (
+            f'for i in $(seq 1 {timeout}); do '
+            f'  s=$(ssh {name} "ps aux | grep \'sleep 10000\'" 2>/dev/null); '
+            f'  count=$(echo "$s" | wc -l || echo 0); '
+            f'  if [ "$count" -eq {expected_lines} ]; then '
+            f'    echo "Found {expected_lines} line(s) as expected"; '
+            f'    exit 0; '
+            f'  fi; '
+            f'  echo "Waiting for {expected_lines} line(s), found $count, attempt $i/{timeout}"; '
+            f'  echo "Output was: $s"; '
+            f'  sleep 1; '
+            f'done; '
+            f'echo "ERROR: Expected {expected_lines} line(s) but found $count"; '
+            f'exit 1')
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+        f.write(cancel_test_yaml)
+        f.flush()
+
+        disk_size_param, _ = smoke_tests_utils.get_disk_size_and_validate_launch_output(
+            generic_cloud)
+
+        # Build commands for the test
+        commands = [
+            # Launch the cluster
+            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {disk_size_param} {f.name} -d',
+            check_process_count(3, timeout=30),
+            f'sky cancel {name} 1 -y',
+            check_process_count(2, timeout=30),
+        ]
+
+        num_iterations = 10
+        # Run the cancel test num_iterations times
+        # Note: Job 1 is from the cluster launch, so exec jobs start at job 2
+        for iteration in range(1, num_iterations):
+            job_num = iteration + 1  # Job 1 is from cluster launch
+            commands.extend([
+                # Launch a new job with the sleep command
+                f'sky exec {name} --infra {generic_cloud} {f.name} -d',
+                # Check that we see 3 lines (sleep process + grep process itself + ssh process to check the process count)
+                check_process_count(3, timeout=30),
+                # Cancel the job
+                f'sky cancel {name} {job_num} -y',
+                # Check that we now see only 2 lines (grep process + ssh process to check the process count)
+                check_process_count(2, timeout=30),
+            ])
+
+        test = smoke_tests_utils.Test(
+            'test_cancel_job_reliability',
+            commands,
+            f'sky down -y {name}',
+            timeout=smoke_tests_utils.get_timeout(generic_cloud) *
+            2,  # Longer timeout for 10 iterations
+        )
+        smoke_tests_utils.run_one_test(test)
