@@ -3,7 +3,7 @@
 .. |community-badge| image:: https://img.shields.io/badge/Community%20Maintained-EAFAFF?style=flat
    :alt: Community Maintained
 
-.. |early-access-badge| image:: https://img.shields.io/badge/Early%20Access-B2FBA5?style=flat
+.. |early-access-badge| image:: https://img.shields.io/badge/Early%20Access-652A02?style=flat
    :alt: Early Access
 
 Installation
@@ -225,7 +225,7 @@ section :ref:`below <cloud-account-setup>`.
   To check credentials only for specific clouds, pass the clouds as arguments: :code:`sky check aws gcp`
 
 Request quotas for first time users
---------------------------------------
+-----------------------------------
 
 If your cloud account has not been used to launch instances before, the
 respective quotas are likely set to zero or a low limit.  This is especially
@@ -237,7 +237,7 @@ increases before proceeding.
 .. _shell-completion:
 
 Enable shell completion
--------------------------
+-----------------------
 
 SkyPilot supports shell completion for Bash (Version 4.4 and up), Zsh and Fish. This is only available for :code:`click` versions 8.0 and up (use :code:`pip install click==8.0.4` to install).
 
@@ -265,13 +265,16 @@ If you experience any issues after installation, you can use the :code:`--uninst
 
 .. _cloud-account-setup:
 
-Appendix: Set up Kubernetes or clouds for local deployment
-----------------------------------------------------------
+Appendix: Set up infra for local deployment
+-------------------------------------------
 
-SkyPilot supports most major cloud providers.
-If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can access your enabled clouds<verify-cloud-access>`.
+SkyPilot can be run as a :ref:`standalone application <sky-api-server-local>`, or connect to a :ref:`team API server <sky-api-server-remote>` for multi-user collaboration.
 
-Otherwise, configure access to at least one cloud using the following guides.
+When running SkyPilot locally, necessary dependencies and credentials need to be set up for the clouds you want to use. You can configure access to at least one cloud using the guides below.
+
+To configure infra access for team deployment instead, see :ref:`sky-api-server-configure-credentials`.
+
+SkyPilot supports most major cloud providers, Kubernetes, and Slurm.
 
 
 .. _kubernetes-installation:
@@ -1709,7 +1712,7 @@ You can simply run:
 
   docker exec -it sky /bin/bash
 
-If your cloud CLIs are already setup, your credentials (AWS and GCP) will be
+If your cloud CLIs are already set up, your credentials (AWS and GCP) will be
 mounted to the container and you can proceed to :ref:`Quickstart <quickstart>`.
 Otherwise, you can follow the instructions in :ref:`Cloud account setup
 <cloud-account-setup>` inside the container to set up your cloud accounts.
