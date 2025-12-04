@@ -32,7 +32,6 @@ from sky.provision import volume as provision_volume
 from sky.skylet import constants
 from sky.utils import common
 from sky.utils import common_utils
-from sky.utils import config_utils
 from sky.utils import message_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
@@ -49,12 +48,6 @@ logger = sky_logging.init_logger('sky.provisioner')
 # teardown instances when provisioning fails.
 _MAX_RETRY = 3
 _TITLE = '\n\n' + '=' * 20 + ' {} ' + '=' * 20 + '\n'
-
-# These fields are sensitive and should be redacted from the config for logging
-# purposes.
-SENSITIVE_FIELDS = [
-    ('docker_config', 'docker_login_config', 'password'),
-]
 
 
 def _bulk_provision(
@@ -164,8 +157,7 @@ def bulk_provision(
             logger.debug(f'SkyPilot version: {sky.__version__}; '
                          f'commit: {sky.__commit__}')
             logger.debug(_TITLE.format('Provisioning'))
-            redacted_config = get_redacted_config(
-                dataclasses.asdict(bootstrap_config))
+            redacted_config = bootstrap_config.get_redacted_config()
             logger.debug('Provision config:\n'
                          f'{json.dumps(redacted_config, indent=2)}')
             return _bulk_provision(cloud, region, cluster_name,
@@ -778,11 +770,3 @@ def post_provision_runtime_setup(
                 logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
             with ux_utils.print_exception_no_traceback():
                 raise
-
-
-def get_redacted_config(config: Dict) -> Dict:
-    config_copy = config_utils.Config(config)
-
-    for field_list in SENSITIVE_FIELDS:
-        config_copy.set_nested(field_list, '<redacted>')
-    return dict(**config_copy)
