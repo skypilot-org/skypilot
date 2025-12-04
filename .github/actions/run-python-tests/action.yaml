@@ -35,6 +35,7 @@ runs:
         uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 buildkite-test-collector
     - name: Set branch name and commit message
       id: set_env
+      shell: bash
       run: |
         if [ "${{ github.event_name }}" == "pull_request" ]; then
           echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
