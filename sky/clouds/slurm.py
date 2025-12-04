@@ -78,6 +78,10 @@ class Slurm(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
+    def uses_ray(cls) -> bool:
+        return False
+
+    @classmethod
     def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,

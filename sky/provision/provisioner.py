@@ -639,9 +639,10 @@ def _post_provision_setup(
         ray_port = constants.SKY_REMOTE_RAY_PORT
         head_ray_needs_restart = True
         ray_cluster_healthy = False
-        if cloud_name.lower() == 'slurm':
+        if (launched_resources.cloud is not None and
+                not launched_resources.cloud.uses_ray()):
             skip_ray_setup = True
-            logger.debug('Skip Ray cluster setup for the Slurm cluster.')
+            logger.debug('Skip Ray cluster setup as cloud does not use Ray.')
         elif (not provision_record.is_instance_just_booted(
                 head_instance.instance_id)):
             # Check if head node Ray is alive

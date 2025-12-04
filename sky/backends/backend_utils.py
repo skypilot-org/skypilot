@@ -2396,7 +2396,7 @@ def _update_cluster_status(
     cloud = handle.launched_resources.cloud
 
     # For Slurm, skip Ray health check since it doesn't use Ray.
-    should_check_ray = not isinstance(cloud, clouds.Slurm)
+    should_check_ray = cloud is not None and cloud.uses_ray()
     if all_nodes_up and (not should_check_ray or
                          run_ray_status_to_check_ray_cluster_healthy()):
         # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;

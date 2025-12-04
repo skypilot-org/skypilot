@@ -335,8 +335,8 @@ class AutostopEvent(SkyletEvent):
 
         # Stop the ray autoscaler to avoid scaling up, during
         # stopping/terminating of the cluster.
-        if isinstance(cloud, clouds.Slurm):
-            logger.info('Skipping ray stop for Slurm cluster.')
+        if not cloud.uses_ray():
+            logger.info('Skipping ray stop as cloud does not use Ray.')
         else:
             logger.info('Stopping the ray cluster.')
             subprocess.run(f'{constants.SKY_RAY_CMD} stop',
