@@ -743,6 +743,8 @@ async def enabled_clouds(request: fastapi.Request,
                          workspace: Optional[str] = None,
                          expand: bool = False) -> None:
     """Gets enabled clouds on the server."""
+    env_vars = ', '.join(f'{key}={value}' for key, value in os.environ.items())
+    logger.info('Environment variables: %s', env_vars)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS,
