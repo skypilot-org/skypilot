@@ -143,10 +143,7 @@ class SlurmClient:
         """Get Slurm node information.
 
         Returns node names, states, GRES (generic resources like GPUs),
-        partition, CPUs, and memory (MB) in a single call.
-
-        Returns:
-            List of NodeInfo objects with structured, typed data.
+        CPUs, memory (MB), and partitions.
         """
         cmd = (f'sinfo -h --Node -o '
                f'"%N{SEP}%t{SEP}%G{SEP}%c{SEP}%m{SEP}%P"')
