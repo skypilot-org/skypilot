@@ -3,7 +3,7 @@
 .. |community-badge| image:: https://img.shields.io/badge/Community%20Maintained-EAFAFF?style=flat
    :alt: Community Maintained
 
-.. |early-access-badge| image:: https://img.shields.io/badge/Early%20Access-652A02?style=flat
+.. |early-access-badge| image:: https://img.shields.io/badge/Early%20Access-F66A0A?style=flat
    :alt: Early Access
 
 Installation
