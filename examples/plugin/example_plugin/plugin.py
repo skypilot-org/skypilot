@@ -1,9 +1,12 @@
 """Example plugin for SkyPilot API server."""
 import functools
 import logging
+import os
 import threading
+import time
 
 import fastapi
+import filelock
 import starlette.middleware.base
 
 from sky import check as sky_check
@@ -55,8 +58,8 @@ class ExampleMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def dispatch(self, request: fastapi.Request, call_next):
         client = request.client
-        logger.info('Audit request %s %s from %s', request.method,
-                    request.url.path, client.host if client else 'unknown')
+        logger.info(f'Audit request {request.method} {request.url.path} '
+                    f'from {client.host if client else "unknown"}')
         return await call_next(request)
 
 
@@ -72,21 +75,24 @@ class ExampleBackgroundTaskPlugin(plugins.BasePlugin):
 
     def install(self, extension_context: plugins.ExtensionContext):
 
-        def check_contexts(stop_event: threading.Event):
-            while not stop_event.wait(timeout=60):
-                try:
-                    sky_check.check(clouds=['kubernetes'])
-                except Exception as e:
-                    logger.error('Error checking contexts: %s', e)
+        lock_path = os.path.expanduser('~/.sky/plugins/check_context_task.lock')
+        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
 
-        self.stop_event = threading.Event()
-        self.thread = threading.Thread(target=check_contexts,
-                                       args=(self.stop_event,))
-        self.thread.start()
+        def check_contexts():
+            lock = filelock.FileLock(lock_path)
+            try:
+                with lock.acquire(blocking=False):
+                    while True:
+                        try:
+                            sky_check.check(clouds=['kubernetes'])
+                        except Exception as e:
+                            logger.error('Error checking contexts: %s', e)
+                        time.sleep(60)
+            except filelock.Timeout:
+                # Other process is already running the task, skip it.
+                pass
 
-    def shutdown(self):
-        self.stop_event.set()
-        self.thread.join()
+        threading.Thread(target=check_contexts, daemon=True).start()
 
 
 class ExamplePatchPlugin(plugins.BasePlugin):
