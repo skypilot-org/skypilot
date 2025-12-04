@@ -521,17 +521,11 @@ def slurm_node_info(
     return node_list
 
 
-def get_all_partitions(cluster_name: str) -> List[str]:
-    """Gets all partitions in the Slurm cluster (with duplicates per node)."""
-    node_list = slurm_node_info(cluster_name)
-    return list({node['partition'] for node in node_list})
-
-
 def is_inside_slurm_job() -> bool:
     return os.environ.get('SLURM_JOB_ID') is not None
 
 
-def get_partitions_for_cluster(cluster_name: str) -> List[str]:
+def get_partitions(cluster_name: str) -> List[str]:
     """Get unique partition names available in a Slurm cluster.
 
     Args:
@@ -543,7 +537,7 @@ def get_partitions_for_cluster(cluster_name: str) -> List[str]:
     slurm_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
     slurm_config_dict = slurm_config.lookup(cluster_name)
 
-    slurm_client = slurm.SlurmClient(
+    client = slurm.SlurmClient(
         slurm_config_dict['hostname'],
         int(slurm_config_dict.get('port', 22)),
         slurm_config_dict['user'],
@@ -552,7 +546,7 @@ def get_partitions_for_cluster(cluster_name: str) -> List[str]:
     )
 
     try:
-        partitions = slurm_client.get_partitions()
+        partitions = client.get_partitions()
         return sorted(partitions)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(

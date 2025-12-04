@@ -202,7 +202,7 @@ class Slurm(clouds.Cloud):
         for cluster in existing_clusters:
             # Fetch partitions for this cluster and attach as zones
             try:
-                partitions = slurm_utils.get_partitions_for_cluster(cluster)
+                partitions = slurm_utils.get_partitions(cluster)
                 zones = [clouds.Zone(p) for p in partitions]
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to get partitions for {cluster}: {e}')
@@ -537,7 +537,7 @@ class Slurm(clouds.Cloud):
                     'Cannot specify partition (zone) without specifying '
                     'cluster (region) for Slurm.')
 
-            partitions = slurm_utils.get_partitions_for_cluster(region)
+            partitions = slurm_utils.get_partitions(region)
             if zone not in partitions:
                 raise ValueError(
                     f'Partition {zone!r} not found in cluster {region!r}. '
@@ -571,7 +571,7 @@ class Slurm(clouds.Cloud):
         infras = []
         for cluster in cls.existing_allowed_clusters(silent=True):
             try:
-                partitions = slurm_utils.get_partitions_for_cluster(cluster)
+                partitions = slurm_utils.get_partitions(cluster)
                 for partition in partitions:
                     infras.append(
                         f'{cls.canonical_name()}/{cluster}/{partition}')
