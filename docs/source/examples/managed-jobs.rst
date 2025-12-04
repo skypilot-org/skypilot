@@ -522,11 +522,14 @@ The jobs controller is a small on-demand CPU VM or pod created by SkyPilot to ma
 It is automatically launched when the first managed job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all managed jobs finish and no new managed job is submitted in that duration).
 Thus, **no user action is needed** to manage its lifecycle.
 
-You can see the controller with :code:`sky status` and refresh its status by using the :code:`-r/--refresh` flag.
+.. note::
+  If you are using a SkyPilot API server, you can run the controller within the same pod as your API server by enabling :ref:`consolidation mode <jobs-consolidation-mode>`.
+
+You can see the controller with :code:`sky status -u` and refresh its status by using the :code:`-r/--refresh` flag.
 
 While the cost of the jobs controller is negligible (~$0.25/hour when running and less than $0.004/hour when stopped),
 you can still tear it down manually with
-:code:`sky down <job-controller-name>`, where the ``<job-controller-name>`` can be found in the output of :code:`sky status`.
+:code:`sky down <job-controller-name>`, where the ``<job-controller-name>`` can be found in the output of :code:`sky status -u`.
 
 .. note::
   Tearing down the jobs controller loses all logs and status information for the finished managed jobs. It is only allowed when there are no in-progress managed jobs to ensure no resource leakage.
@@ -611,11 +614,11 @@ The :code:`resources` field has the same spec as a normal SkyPilot job; see `her
   stopped or live).  For them to take effect, tear down the existing controller
   first, which requires all in-progress jobs to finish or be canceled.
 
-To see your current jobs controller, use :code:`sky status`.
+To see your current jobs controller, use :code:`sky status -u`.
 
 .. code-block:: console
 
-  $ sky status --refresh
+  $ sky status -u --refresh
 
   Clusters
   NAME                          INFRA             RESOURCES                                  STATUS   AUTOSTOP  LAUNCHED
@@ -715,3 +718,35 @@ For absolute maximum parallelism, the following per-cloud configurations are rec
   Remember to tear down your controller to apply these changes, as described above.
 
 With this configuration, you can launch up to 512 jobs at once. Once the jobs are launched, up to 2000 jobs can be running in parallel.
+
+.. _jobs-consolidation-mode:
+
+Run the controller within the API server
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you have deployed a :ref:`remote API server <sky-api-server>`, you can avoid needing to launch a separate VM/pod for the controller. We call this deployment mode "consolidation mode", as the API server and jobs controller are consolidated onto the same pod.
+
+.. warning::
+  Because the jobs controller must stay alive to manage running jobs, it's required to use an external API server to enable consolidation mode.
+
+To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml-jobs-controller-consolidation-mode>` in the API server config.
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      consolidation_mode: true
+      # any specified resources will be ignored
+
+.. note::
+  You must **restart the API server** after making this change for it to take effect.
+
+.. code-block:: bash
+
+   # Update NAMESPACE / RELEASE_NAME if you are using custom values.
+   NAMESPACE=skypilot
+   RELEASE_NAME=skypilot
+   # Restart the API server to pick up the config change
+   kubectl -n $NAMESPACE rollout restart deployment $RELEASE_NAME-api-server
+
+The jobs controller will use a bit of overhead - it reserves an extra 2GB of memory for itself, which may reduce the amount of requests your API server can handle. To counteract, you can increase the amount of CPU and memory allocated to the API server: See :ref:`sky-api-server-resources-tuning`.
