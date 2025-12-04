@@ -333,6 +333,33 @@ class SlurmClient:
 
         return nodes, node_ips
 
+    def get_partitions(self) -> List[str]:
+        """Get unique partition names in the Slurm cluster.
+
+        Returns:
+            List of partition names. Note: default partition has '*' suffix
+            in sinfo output which we strip.
+        """
+        # Use sinfo to get partition names
+        # Format: "%P" gives partition name (default partition has * suffix)
+        # TODO(kevin): Use scontrol show partition instead.
+        cmd = 'sinfo -h -o "%P" | sort -u'
+        rc, stdout, stderr = self._runner.run(cmd,
+                                              require_outputs=True,
+                                              stream_logs=False)
+        subprocess_utils.handle_returncode(rc,
+                                           cmd,
+                                           'Failed to get Slurm partitions.',
+                                           stderr=stderr)
+
+        # Strip '*' suffix from default partition and dedupe
+        partitions = []
+        for line in stdout.strip().splitlines():
+            partition = line.strip().rstrip('*')  # Remove default marker
+            if partition:
+                partitions.append(partition)
+        return list(set(partitions))
+
     def submit_job(
         self,
         partition: str,

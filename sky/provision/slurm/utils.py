@@ -245,9 +245,20 @@ def get_all_slurm_cluster_names() -> List[str]:
     return cluster_names
 
 
-def check_instance_fits(cluster: str,
-                        instance_type: str) -> Tuple[bool, Optional[str]]:
-    """Check if the given instance type fits in the given cluster."""
+def check_instance_fits(
+        cluster: str,
+        instance_type: str,
+        partition: Optional[str] = None) -> Tuple[bool, Optional[str]]:
+    """Check if the given instance type fits in the given cluster/partition.
+
+    Args:
+        cluster: Name of the Slurm cluster.
+        instance_type: The instance type to check.
+        partition: Optional partition name. If None, checks all partitions.
+
+    Returns:
+        Tuple of (fits, reason) where fits is True if instance type is available.
+    """
     # Get Slurm node list in the given cluster (region).
     ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
     ssh_config_dict = ssh_config.lookup(cluster)
@@ -261,6 +272,17 @@ def check_instance_fits(cluster: str,
     )
 
     nodes = client.info_nodes()
+
+    # Filter nodes by partition if specified
+    if partition is not None:
+        # Partition is the 4th field in sinfo output, may have * suffix for default
+        nodes = [n for n in nodes if n.split()[3].rstrip('*') == partition]
+        if not nodes:
+            partition_suffix = f' in partition {partition}'
+        else:
+            partition_suffix = ''
+    else:
+        partition_suffix = ''
 
     s = SlurmInstanceType.from_instance_type(instance_type)
     acc_count = s.accelerator_count if s.accelerator_count else 0
@@ -298,14 +320,15 @@ def check_instance_fits(cluster: str,
                     f'on the cluster.')
 
         candidate_nodes = gpu_nodes
-        not_fit_reason_prefix = (f'GPU nodes with {acc_type} do not have '
-                                 f'enough CPU (> {s.cpus} CPUs) and/or '
-                                 f'memory (> {s.memory} G). ')
+        not_fit_reason_prefix = (
+            f'GPU nodes with {acc_type}{partition_suffix} do not have '
+            f'enough CPU (> {s.cpus} CPUs) and/or '
+            f'memory (> {s.memory} G). ')
     else:
         candidate_nodes = nodes
         not_fit_reason_prefix = (f'No nodes found with enough '
                                  f'CPU (> {s.cpus} CPUs) and/or '
-                                 f'memory (> {s.memory} G). ')
+                                 f'memory (> {s.memory} G){partition_suffix}. ')
 
     # TODO(jwj): Enable CPU and memory check.
     # fits, reason = check_cpu_mem_fits(s, candidate_nodes)
@@ -456,10 +479,40 @@ def slurm_node_info(
 
 
 def get_all_partitions(cluster_name: str) -> List[str]:
-    """Gets all partitions in the Slurm cluster."""
+    """Gets all partitions in the Slurm cluster (with duplicates per node)."""
     node_list = slurm_node_info(cluster_name)
     return list({node['partition'] for node in node_list})
 
 
 def is_inside_slurm_job() -> bool:
     return os.environ.get('SLURM_JOB_ID') is not None
+
+
+def get_partitions_for_cluster(cluster_name: str) -> List[str]:
+    """Get unique partition names available in a Slurm cluster.
+
+    Args:
+        cluster_name: Name of the Slurm cluster.
+
+    Returns:
+        Sorted list of unique partition names available in the cluster.
+    """
+    slurm_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
+    slurm_config_dict = slurm_config.lookup(cluster_name)
+
+    slurm_client = slurm.SlurmClient(
+        slurm_config_dict['hostname'],
+        slurm_config_dict.get('port', 22),
+        slurm_config_dict['user'],
+        slurm_config_dict['identityfile'][0],
+        ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
+    )
+
+    try:
+        partitions = slurm_client.get_partitions()
+        return sorted(partitions)
+    except Exception as e:
+        logger.warning(
+            f'Failed to get partitions for cluster {cluster_name}: {e}')
+        # Fall back to default partition if query fails
+        return [DEFAULT_PARTITION]

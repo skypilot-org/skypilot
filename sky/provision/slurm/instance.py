@@ -123,7 +123,7 @@ def _create_virtual_instance(
         nodes, _ = client.get_job_nodes(job_id, wait=True)
         return common.ProvisionRecord(provider_name='slurm',
                                       region=region,
-                                      zone=None,
+                                      zone=partition,
                                       cluster_name=cluster_name_on_cloud,
                                       head_instance_id=slurm_utils.instance_id(
                                           job_id, nodes[0]),
@@ -228,7 +228,7 @@ def _create_virtual_instance(
 
     return common.ProvisionRecord(provider_name='slurm',
                                   region=region,
-                                  zone=None,
+                                  zone=partition,
                                   cluster_name=cluster_name_on_cloud,
                                   head_instance_id=created_instance_ids[0],
                                   resumed_instance_ids=[],
