@@ -12,9 +12,11 @@ import sys
 from typing import Dict, List, Optional, Tuple
 
 import requests
+
 from sky import sky_logging
 
 logger = sky_logging.init_logger('fetch_verda')
+
 
 def _get_oauth_token(base_url: str, client_id: str, client_secret: str) -> str:
     """Get OAuth access token using client credentials.

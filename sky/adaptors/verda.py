@@ -1,54 +1,41 @@
 """Verda Cloud adaptor."""
 
-import functools
 from json import load as json_load
 import os
-
 from typing import TYPE_CHECKING
+
+from sky.adaptors import common
+
+_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Verda Cloud. '
+                         'Try pip install "skypilot[verda]"')
+
+verda = common.LazyImport('verda', import_error_message=_IMPORT_ERROR_MESSAGE)
 
 if TYPE_CHECKING:
     from verda import VerdaClient
 
-
 _verda_client = None
 
 
-def import_package(func):
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        global _verda_client
-
-        if _verda_client is None:
-            try:
-                configured, error, config = get_configuration()
-                if not configured:
-                    raise Exception(error)
-
-                from verda import VerdaClient  # pylint: disable=import-outside-toplevel
-                _verda_client = VerdaClient(
-                    client_id=config['client_id'],
-                    client_secret=config['client_secret'],
-                    base_url=(config['base_url'] if 'base_url' in config else
-                              'https://api.verda.com/v1'),
-                    inference_key=config.get('inference_key', None),
-                )
-            except ImportError as e:
-                raise ImportError(
-                    f'Failed to import dependencies for Verda Cloud: {e}\n'
-                    'Try pip install "skypilot[verda]"') from None
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
-@import_package
 def verda_client() -> 'VerdaClient':
     """Return the configured Verda Client.
     See https://github.com/verda-cloud/sdk-python for more details.
     """
+    global _verda_client
+
     if _verda_client is None:
-        raise Exception('Verda Client is not configured')
+        configured, error, config = get_configuration()
+        if not configured:
+            raise Exception(error)
+
+        # LazyImport will handle the ImportError with the appropriate message
+        _verda_client = verda.VerdaClient(
+            client_id=config['client_id'],
+            client_secret=config['client_secret'],
+            base_url=(config['base_url']
+                      if 'base_url' in config else 'https://api.verda.com/v1'),
+            inference_key=config.get('inference_key', None),
+        )
     return _verda_client
 
 
