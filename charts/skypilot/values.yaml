@@ -512,6 +512,11 @@ r2Credentials:
   # Name of the secret containing the r2 credentials. Only used if enabled is true.
   r2SecretName: r2-credentials
 
+coreweaveCredentials:
+  enabled: false
+  # Name of the secret containing the coreweave credentials. Only used if enabled is true.
+  coreweaveSecretName: coreweave-credentials
+
 # Extra init containers to run before the api container
 # @schema type: [array, null]; item: object
 extraInitContainers: null

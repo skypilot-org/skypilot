@@ -433,6 +433,8 @@ CoreWeave
 
   CoreWeave also offers InfiniBand networking for high-performance distributed training. You can enable InfiniBand support by adding ``network_tier: best`` to your SkyPilot task configuration.
 
+.. _coreweave-caios-installation:
+
 CoreWeave Object Storage (CAIOS)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
