@@ -150,8 +150,9 @@ def get_latest_version_for_current() -> Optional[str]:
 
     Returns:
         Latest nightly version if current is nightly, latest release
-        version otherwise. Returns None if current version is dev or if
-        no latest version is available.
+        version otherwise. Returns None if current version is dev, if
+        no latest version is available, or if latest version is not newer
+        than current version.
     """
     # Skip for dev versions - cache should handle this, but double-check
     if _is_dev_version(sky.__version__):
@@ -163,9 +164,17 @@ def get_latest_version_for_current() -> Optional[str]:
     # otherwise return release_version
     is_current_nightly = '.dev' in sky.__version__.lower()
     if is_current_nightly:
-        return nightly_version
+        latest_version = nightly_version
     else:
-        return release_version
+        latest_version = release_version
+
+    # Only return if latest version exists and is newer than current
+    if latest_version:
+        if version_lib.parse(latest_version) > version_lib.parse(
+                sky.__version__):
+            return latest_version
+
+    return None
 
 
 async def check_versions_periodically():
