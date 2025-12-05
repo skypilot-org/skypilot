@@ -210,7 +210,7 @@ def start_agent_node(node,
     logger.info(f'Deploying worker node ({node}).')
     cmd = f"""
             {askpass_block}
-            curl -sfL https://get.k3s.io | sed 's/RestartSec=5/RestartSec={K3S_RESTART_DELAY}/' | \
+            curl -sfL https://get.k3s.io | sed 's/RestartSec=[0-9]*/RestartSec={K3S_RESTART_DELAY}/' | \
                 K3S_NODE_NAME={node} INSTALL_K3S_EXEC='agent --node-label skypilot-ip={node}' \
                 K3S_URL=https://{master_addr}:6443 K3S_TOKEN={k3s_token} sudo -E -A sh -
         """
@@ -774,7 +774,7 @@ def deploy_cluster(cluster_name,
         f'Deploying SkyPilot runtime on head node ({head_node}).')
     cmd = f"""
         {askpass_block}
-        curl -sfL https://get.k3s.io | sed 's/RestartSec=5/RestartSec={K3S_RESTART_DELAY}/' | K3S_TOKEN={k3s_token} K3S_NODE_NAME={head_node} sudo -E -A sh - &&
+        curl -sfL https://get.k3s.io | sed 's/RestartSec=[0-9]*/RestartSec={K3S_RESTART_DELAY}/' | K3S_TOKEN={k3s_token} K3S_NODE_NAME={head_node} sudo -E -A sh - &&
         mkdir -p ~/.kube &&
         sudo -A cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
         sudo -A chown $(id -u):$(id -g) ~/.kube/config &&
