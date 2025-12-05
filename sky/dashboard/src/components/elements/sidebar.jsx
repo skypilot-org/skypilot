@@ -21,8 +21,20 @@ import {
   UsersIcon,
   StarIcon,
   VolumeIcon,
+  KeyIcon,
 } from '@/components/elements/icons';
 import { Settings, User } from 'lucide-react';
+
+// Map icon names to icon components for plugin nav links
+const ICON_MAP = {
+  key: KeyIcon,
+  server: ServerIcon,
+  briefcase: BriefcaseIcon,
+  chip: ChipIcon,
+  book: BookDocIcon,
+  users: UsersIcon,
+  volume: VolumeIcon,
+};
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
@@ -251,7 +263,11 @@ export function TopBar() {
     <>
       {link.icon && (
         <span className="text-base leading-none mr-1" aria-hidden="true">
-          {link.icon}
+          {ICON_MAP[link.icon] ? (
+            React.createElement(ICON_MAP[link.icon], { className: 'w-4 h-4' })
+          ) : (
+            link.icon
+          )}
         </span>
       )}
       <span className="inline-flex items-center gap-1">
@@ -316,7 +332,11 @@ export function TopBar() {
       <>
         {link.icon && (
           <span className="text-base leading-none mr-2" aria-hidden="true">
-            {link.icon}
+            {ICON_MAP[link.icon] ? (
+              React.createElement(ICON_MAP[link.icon], { className: 'w-5 h-5' })
+            ) : (
+              link.icon
+            )}
           </span>
         )}
         <span className="flex items-center gap-2">
@@ -387,36 +407,30 @@ export function TopBar() {
         </button>
 
         {isOpen && (
-          <div className="absolute top-full left-0 mt-1 w-64 bg-white rounded-md shadow-lg border border-gray-200 z-50">
+          <div className="absolute top-full left-0 mt-1 min-w-[8rem] bg-white rounded-md shadow-lg border border-gray-200 z-50">
             <div className="py-1">
               {links.map((link) => (
                 <Link
                   key={link.id}
                   href={resolvePluginHref(link.href)}
-                  className="block px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                   onClick={() => setOpenNavDropdown(null)}
                   prefetch={false}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-2">
-                      {link.icon && (
-                        <span className="text-base leading-none">
-                          {link.icon}
-                        </span>
-                      )}
-                      <span className="font-medium">{link.label}</span>
-                    </span>
-                    {link.badge && (
-                      <span className="text-[10px] uppercase tracking-wide bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
-                        {link.badge}
+                  <div className="flex items-center gap-2">
+                    {link.icon && (
+                      <span className="text-base leading-none">
+                        {ICON_MAP[link.icon] ? (
+                          React.createElement(ICON_MAP[link.icon], {
+                            className: 'w-4 h-4',
+                          })
+                        ) : (
+                          link.icon
+                        )}
                       </span>
                     )}
+                    <span>{link.label}</span>
                   </div>
-                  {link.description && (
-                    <p className="mt-1 text-xs text-gray-500">
-                      {link.description}
-                    </p>
-                  )}
                 </Link>
               ))}
             </div>
@@ -536,13 +550,6 @@ export function TopBar() {
                 <span>Users</span>
               </Link>
 
-              {/* Ungrouped plugin links */}
-              {ungrouped.map((link) => renderDesktopPluginNavLink(link))}
-
-              {/* Grouped dropdown menus */}
-              {Object.entries(groups).map(([groupName, links]) =>
-                renderDesktopDropdownMenu(groupName, links)
-              )}
             </div>
           )}
 
@@ -550,6 +557,18 @@ export function TopBar() {
           <div className="flex items-center space-x-1 ml-auto">
             {!isMobile && (
               <>
+                {/* Ungrouped plugin links - positioned on the right */}
+                {ungrouped.map((link) => renderDesktopPluginNavLink(link))}
+
+                {/* Grouped dropdown menus (e.g., Enterprise) - positioned on the right */}
+                {Object.entries(groups).map(([groupName, links]) =>
+                  renderDesktopDropdownMenu(groupName, links)
+                )}
+
+                {/* {Object.keys(groups).length > 0 && (
+                  <div className="border-l border-gray-200 h-6 mx-1"></div>
+                )} */}
+
                 <CustomTooltip
                   content="Documentation"
                   className="text-sm text-muted-foreground"
@@ -811,18 +830,14 @@ export function TopBar() {
                   Users
                 </Link>
 
+                <div className="border-t border-gray-200 my-4"></div>
+
                 {/* Ungrouped plugins */}
-                {ungrouped.length > 0 && (
-                  <>
-                    <div className="border-t border-gray-200 my-4"></div>
-                    {ungrouped.map((link) => renderMobilePluginNavLink(link))}
-                  </>
-                )}
+                {ungrouped.map((link) => renderMobilePluginNavLink(link))}
 
                 {/* Grouped plugins (displayed flat on mobile) */}
                 {Object.entries(groups).map(([groupName, links]) => (
                   <div key={groupName}>
-                    <div className="border-t border-gray-200 my-4"></div>
                     <div className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                       {groupName}
                     </div>
@@ -830,7 +845,9 @@ export function TopBar() {
                   </div>
                 ))}
 
-                <div className="border-t border-gray-200 my-4"></div>
+                {(ungrouped.length > 0 || Object.keys(groups).length > 0) && (
+                  <div className="border-t border-gray-200 my-4"></div>
+                )}
 
                 {/* External links in mobile */}
                 <a
