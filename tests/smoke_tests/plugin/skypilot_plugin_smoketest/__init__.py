@@ -18,4 +18,5 @@ class TestPlugin(plugins.BasePlugin):
         return router
 
     def install(self, extension_context: plugins.ExtensionContext):
-        extension_context.app.include_router(self.build_router())
+        if extension_context.app:
+            extension_context.app.include_router(self.build_router())
