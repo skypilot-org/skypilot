@@ -35,12 +35,16 @@ SKYPILOT_SA=${SKYPILOT_SA_NAME:-sky-sa}
 NAMESPACE=${SKYPILOT_NAMESPACE:-default}
 SUPER_USER=${SUPER_USER:-1}
 
-echo "Service account: ${SKYPILOT_SA}"
-echo "Namespace: ${NAMESPACE}"
+echo "=========================================="
+echo "SkyPilot Kubeconfig Generation"
+echo "=========================================="
+echo "Service Account: ${SKYPILOT_SA}"
+echo "Namespace:       ${NAMESPACE}"
 if [ "${SUPER_USER}" != "1" ]; then
-  echo "Disabled super user permissions. Using minimal permissions. You may need to do some manual setup with this."
+  echo "Permissions:     Minimal (manual setup may be required)"
   SUPER_USER=0
 fi
+echo ""
 
 # Set OS specific values.
 if [[ "$OSTYPE" == "linux-gnu" ]]; then
@@ -56,7 +60,7 @@ fi
 
 # If the user has set SKIP_SA_CREATION=1, skip creating the service account.
 if [ -z ${SKIP_SA_CREATION+x} ]; then
-  echo "Creating the Kubernetes Service Account with ${SUPER_USER:-super user}${SUPER_USER:+minimal} RBAC permissions."
+  echo "[1/3] Creating Kubernetes Service Account and RBAC permissions..."
   if [ "${SUPER_USER}" = "1" ]; then
     # Create service account with cluster-admin permissions
     kubectl apply -f - <<EOF
@@ -222,7 +226,8 @@ roleRef:
 EOF
   fi
 # Apply optional ingress-related roles, but don't make the script fail if it fails
-kubectl apply -f - 2>/dev/null <<EOF || echo "Failed to apply optional ingress-related roles. Nginx ingress is likely not installed. This is not critical and the script will continue."
+echo "      → Applying optional ingress permissions (skipped if ingress-nginx not installed)..."
+kubectl apply -f - 2>/dev/null <<EOF || true
 # Optional: Role for accessing ingress resources
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -256,7 +261,12 @@ roleRef:
   name: ${SKYPILOT_SA}-role-ingress-nginx  # Use the same name as the role at line 119
   apiGroup: rbac.authorization.k8s.io
 EOF
+else
+  echo "[1/3] Skipping service account creation (using existing account)..."
 fi
+
+echo ""
+echo "[2/3] Creating service account token..."
 
 # Checks if secret entry was defined for Service account. If defined it means that Kubernetes server has a
 # version bellow 1.24, otherwise one must manually create the secret and bind it to the Service account to have a non expiring token.
@@ -296,7 +306,9 @@ CURRENT_CONTEXT=$(kubectl config current-context)
 CURRENT_CLUSTER=$(kubectl config view -o jsonpath="{.contexts[?(@.name == \"${CURRENT_CONTEXT}\"})].context.cluster}")
 CURRENT_CLUSTER_ADDR=$(kubectl config view -o jsonpath="{.clusters[?(@.name == \"${CURRENT_CLUSTER}\"})].cluster.server}")
 
-echo "Writing kubeconfig."
+echo ""
+echo "[3/3] Generating kubeconfig file..."
+
 cat > kubeconfig <<EOF
 apiVersion: v1
 clusters:
@@ -319,8 +331,18 @@ users:
     token: ${SA_TOKEN}
 EOF
 
-echo "---
-Done!
-
-Kubeconfig using service account '${SKYPILOT_SA}' in namespace '${NAMESPACE}' written at $(pwd)/kubeconfig
-"
+echo ""
+echo "=========================================="
+echo "✓ SUCCESS!"
+echo "=========================================="
+echo ""
+echo "Kubeconfig file created successfully!"
+echo ""
+echo "  Service Account: ${SKYPILOT_SA}"
+echo "  Namespace:       ${NAMESPACE}"
+echo "  Location:        $(pwd)/kubeconfig"
+echo ""
+echo "Next steps:"
+echo "  Refer to this page for setting up the credential for remote API server:"
+echo "  https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html#optional-configure-cloud-accounts"
+echo ""

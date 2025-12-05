@@ -222,7 +222,7 @@ Following tabs describe how to configure credentials for different clouds on the
                 curl -O https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/sky/utils/kubernetes/generate_kubeconfig.sh && chmod +x generate_kubeconfig.sh
 
                 # Generate the kubeconfig
-                KUBECONFIG=$HOME/.kube/config # or the path to your kubeconfig file
+                export KUBECONFIG=$HOME/.kube/config # or the path to your kubeconfig file
                 ./generate_kubeconfig.sh
 
             Then create the Kubernetes secret with the generated kubeconfig file ``./kubeconfig``.
