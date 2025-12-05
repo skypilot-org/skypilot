@@ -55,6 +55,7 @@ class Slurm(clouds.Cloud):
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
+    _INDENT_PREFIX = '    '
 
     # Using the latest SkyPilot provisioner API to provision and check status.
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
@@ -419,7 +420,9 @@ class Slurm(clouds.Cloud):
             return (
                 False,
                 f'Slurm configuration file {slurm_utils.DEFAULT_SLURM_PATH} '
-                'does not exist.')
+                'does not exist.\n'
+                f'{cls._INDENT_PREFIX}For more info: '
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html#slurm-installation')
         except Exception as e:  # pylint: disable=broad-except
             return (False, 'Failed to load SSH configuration from '
                     f'{slurm_utils.DEFAULT_SLURM_PATH}: '
