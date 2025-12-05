@@ -251,6 +251,7 @@ def basic_pool_conf(
     resource_string = '    accelerators: ' + resource_string if resource_string else ''
     workdir_section = f'    workdir: {workdir}\n' if workdir else ''
     return textwrap.dedent(f"""
+    {workdir_section}
     pool:
         workers: {num_workers}
 
@@ -259,7 +260,6 @@ def basic_pool_conf(
         memory: 4GB+
         infra: {infra}
     {resource_string}
-    {workdir_section}
     setup: |
         {setup_cmd}
     """)
