@@ -398,6 +398,7 @@ spec:
             echo "Credentials file created successfully."
           else
             echo "AWS credentials not found in environment variables. Skipping credentials setup."
+            echo "Sleeping for 10 minutes before exiting for debugging purposes."
             sleep 600
           fi
         env:
@@ -534,6 +535,7 @@ spec:
             echo "api_key = \"$RUNPOD_API_KEY\"" >> /root/.runpod/config.toml
           else
             echo "RunPod credentials not found in environment variables. Skipping credentials setup."
+            echo "Sleeping for 10 minutes before exiting for debugging purposes."
             sleep 600
           fi
         env:
@@ -568,6 +570,7 @@ spec:
           EOF
           else
             echo "Digital Ocean credentials not found in environment variables. Skipping credentials setup."
+            echo "Sleeping for 10 minutes before exiting for debugging purposes."
             sleep 600
           fi
         env:
@@ -597,6 +600,7 @@ spec:
             echo "api_key = $LAMBDA_API_KEY" > /root/.lambda_cloud/lambda_keys
           else
             echo "Lambda credentials not found in environment variables. Skipping credentials setup."
+            echo "Sleeping for 10 minutes before exiting for debugging purposes."
             sleep 600
           fi
         env:
@@ -629,6 +633,7 @@ spec:
             echo "$VAST_API_KEY" > /root/.config/vastai/vast_api_key
           else
             echo "Vast credentials not found in environment variables. Skipping credentials setup."
+            echo "Sleeping for 10 minutes before exiting for debugging purposes."
             sleep 600
           fi
         env:
