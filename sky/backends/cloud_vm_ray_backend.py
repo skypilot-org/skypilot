@@ -5831,6 +5831,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return task.envs[constants.USER_ID_ENV_VAR]
         return None
 
+    def _get_task_codegen_class(
+            self, handle: CloudVmRayResourceHandle) -> task_codegen.TaskCodeGen:
+        """Returns the appropriate TaskCodeGen for the given handle."""
+        if isinstance(handle.launched_resources.cloud, clouds.Slurm):
+            assert (handle.cached_cluster_info
+                    is not None), ('cached_cluster_info must be set')
+            head_instance = handle.cached_cluster_info.get_head_instance()
+            assert (head_instance is not None), (
+                'Head instance not found in cached cluster info')
+            slurm_job_id = head_instance.tags.get('job_id')
+            assert (slurm_job_id
+                    is not None), ('job_id tag not found in head instance')
+            return task_codegen.SlurmCodeGen(slurm_job_id=slurm_job_id)
+        else:
+            return task_codegen.RayCodeGen()
+
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
                                remote_log_dir: str) -> None:
@@ -5843,19 +5859,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         task_env_vars = self._get_task_env_vars(task, job_id, handle)
 
-        codegen: task_codegen.TaskCodeGen
-        if isinstance(handle.launched_resources.cloud, clouds.Slurm):
-            assert (handle.cached_cluster_info
-                    is not None), ('cached_cluster_info must be set')
-            head_instance = handle.cached_cluster_info.get_head_instance()
-            assert (head_instance is not None), (
-                'Head instance not found in cached cluster info')
-            slurm_job_id = head_instance.tags.get('job_id')
-            assert (slurm_job_id
-                    is not None), ('job_id tag not found in head instance')
-            codegen = task_codegen.SlurmCodeGen(slurm_job_id=slurm_job_id)
-        else:
-            codegen = task_codegen.RayCodeGen()
+        codegen = self._get_task_codegen_class(handle)
 
         codegen.add_prologue(job_id)
         codegen.add_setup(
@@ -5901,19 +5905,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         task_env_vars = self._get_task_env_vars(task, job_id, handle)
 
-        codegen: task_codegen.TaskCodeGen
-        if isinstance(handle.launched_resources.cloud, clouds.Slurm):
-            assert (handle.cached_cluster_info
-                    is not None), ('cached_cluster_info must be set')
-            head_instance = handle.cached_cluster_info.get_head_instance()
-            assert (head_instance is not None), (
-                'Head instance not found in cached cluster info')
-            slurm_job_id = head_instance.tags.get('job_id')
-            assert (slurm_job_id
-                    is not None), ('job_id tag not found in head instance')
-            codegen = task_codegen.SlurmCodeGen(slurm_job_id=slurm_job_id)
-        else:
-            codegen = task_codegen.RayCodeGen()
+        codegen = self._get_task_codegen_class(handle)
 
         codegen.add_prologue(job_id)
         codegen.add_setup(
