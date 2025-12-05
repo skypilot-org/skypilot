@@ -157,7 +157,7 @@ kubernetes_dependencies = [
     # deprecated in 2.0.0 and removed in 2.6.0 `getheaders()` call (instead of
     # `headers` property). Tracked in
     # https://github.com/kubernetes-client/python/issues/2477
-    'urllib3>=2.1.0,<2.6.0',
+    'urllib3<2.6.0',
     'websockets',
     'python-dateutil',
 ]
