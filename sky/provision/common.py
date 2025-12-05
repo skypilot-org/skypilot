@@ -71,7 +71,9 @@ class ProvisionConfig:
         config_copy = config_utils.Config(config)
 
         for field_list in SENSITIVE_FIELDS:
-            config_copy.set_nested(field_list, '<redacted>')
+            val = config_copy.get_nested(field_list, default_value=None)
+            if val is not None:
+                config_copy.set_nested(field_list, '<redacted>')
         return dict(**config_copy)
 
 
