@@ -192,18 +192,6 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
     pathlib.Path(directory_utils.get_sky_dir()) / 'backends' /
     'monkey_patches' / 'monkey_patch_ray_up.py')
 
-# The maximum size of a command line arguments is 128 KB, i.e. the command
-# executed with /bin/sh should be less than 128KB.
-# https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
-#
-# If a user have very long run or setup commands, the generated command may
-# exceed the limit, as we directly include scripts in job submission commands.
-# If the command is too long, we instead write it to a file, rsync and execute
-# it.
-#
-# We use 100KB as a threshold to be safe for other arguments that
-# might be added during ssh.
-_MAX_INLINE_SCRIPT_LENGTH = 100 * 1024
 _EXCEPTION_MSG_AND_RETURNCODE_FOR_DUMP_INLINE_SCRIPT = [
     ('too long', 255),
     ('request-uri too large', 1),
@@ -216,18 +204,6 @@ _RESOURCES_UNAVAILABLE_LOG = (
 
 # Number of seconds to wait locking the cluster before communicating with user.
 _CLUSTER_LOCK_TIMEOUT = 5.0
-
-
-def _is_command_length_over_limit(command: str) -> bool:
-    """Check if the length of the command exceeds the limit.
-
-    We calculate the length of the command after quoting the command twice as
-    when it is executed by the CommandRunner, the command will be quoted twice
-    to ensure the correctness, which will add significant length to the command.
-    """
-
-    quoted_length = len(shlex.quote(shlex.quote(command)))
-    return quoted_length > _MAX_INLINE_SCRIPT_LENGTH
 
 
 def _is_message_too_long(returncode: int,
@@ -294,6 +270,7 @@ def _get_cluster_config_template(cloud):
         clouds.Lambda: 'lambda-ray.yml.j2',
         clouds.IBM: 'ibm-ray.yml.j2',
         clouds.SCP: 'scp-ray.yml.j2',
+        clouds.Slurm: 'slurm-ray.yml.j2',
         clouds.OCI: 'oci-ray.yml.j2',
         clouds.Paperspace: 'paperspace-ray.yml.j2',
         clouds.PrimeIntellect: 'primeintellect-ray.yml.j2',
@@ -2516,7 +2493,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     @property
     def is_grpc_enabled_with_flag(self) -> bool:
         """Returns whether this handle has gRPC enabled and gRPC flag is set."""
-        return env_options.Options.ENABLE_GRPC.get() and self.is_grpc_enabled
+        return (env_options.Options.ENABLE_GRPC.get() and
+                self.is_grpc_enabled and
+                not isinstance(self.launched_resources.cloud, clouds.Slurm))
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -3596,6 +3575,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
+
         start = time.time()
 
         if task.setup is None:
@@ -3647,7 +3627,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 _dump_final_script(setup_script,
                                    constants.PERSISTENT_SETUP_SCRIPT_PATH)
 
-            if detach_setup or _is_command_length_over_limit(encoded_script):
+            if (detach_setup or
+                    backend_utils.is_command_length_over_limit(encoded_script)):
                 _dump_final_script(setup_script)
                 create_script_code = 'true'
             else:
@@ -3804,7 +3785,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
 
-        # Should also be ealier than _is_command_length_over_limit
+        # Should also be ealier than is_command_length_over_limit
         # Same reason as in _setup
         if self._dump_final_script:
             _dump_code_to_file(job_submit_cmd,
@@ -3837,7 +3818,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         tasks=managed_job_tasks,
                         user_id=managed_job_user_id)
 
-                if _is_command_length_over_limit(codegen):
+                if backend_utils.is_command_length_over_limit(codegen):
                     _dump_code_to_file(codegen)
                     queue_job_request = jobsv1_pb2.QueueJobRequest(
                         job_id=job_id,
@@ -3859,7 +3840,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 use_legacy = True
 
         if use_legacy:
-            if _is_command_length_over_limit(job_submit_cmd):
+            if backend_utils.is_command_length_over_limit(job_submit_cmd):
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'
 
@@ -5850,6 +5831,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return task.envs[constants.USER_ID_ENV_VAR]
         return None
 
+    def _get_task_codegen_class(
+            self, handle: CloudVmRayResourceHandle) -> task_codegen.TaskCodeGen:
+        """Returns the appropriate TaskCodeGen for the given handle."""
+        if isinstance(handle.launched_resources.cloud, clouds.Slurm):
+            assert (handle.cached_cluster_info
+                    is not None), ('cached_cluster_info must be set')
+            head_instance = handle.cached_cluster_info.get_head_instance()
+            assert (head_instance is not None), (
+                'Head instance not found in cached cluster info')
+            slurm_job_id = head_instance.tags.get('job_id')
+            assert (slurm_job_id
+                    is not None), ('job_id tag not found in head instance')
+            return task_codegen.SlurmCodeGen(slurm_job_id=slurm_job_id)
+        else:
+            return task_codegen.RayCodeGen()
+
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
                                remote_log_dir: str) -> None:
@@ -5862,7 +5859,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         task_env_vars = self._get_task_env_vars(task, job_id, handle)
 
-        codegen = task_codegen.RayCodeGen()
+        codegen = self._get_task_codegen_class(handle)
+
         codegen.add_prologue(job_id)
         codegen.add_setup(
             1,
@@ -5907,7 +5905,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         task_env_vars = self._get_task_env_vars(task, job_id, handle)
 
-        codegen = task_codegen.RayCodeGen()
+        codegen = self._get_task_codegen_class(handle)
+
         codegen.add_prologue(job_id)
         codegen.add_setup(
             num_actual_nodes,

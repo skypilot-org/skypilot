@@ -2744,3 +2744,57 @@ def api_logout() -> None:
     _clear_api_server_config()
     logger.info(f'{colorama.Fore.GREEN}Logged out of SkyPilot API server.'
                 f'{colorama.Style.RESET_ALL}')
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(24)
+@annotations.client_api
+def realtime_slurm_gpu_availability(
+        name_filter: Optional[str] = None,
+        quantity_filter: Optional[int] = None) -> server_common.RequestId:
+    """Gets the real-time Slurm GPU availability.
+
+    Args:
+        name_filter: Optional name filter for GPUs.
+        quantity_filter: Optional quantity filter for GPUs.
+
+    Returns:
+        The request ID of the Slurm GPU availability request.
+    """
+    body = payloads.SlurmGpuAvailabilityRequestBody(
+        name_filter=name_filter,
+        quantity_filter=quantity_filter,
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/slurm_gpu_availability',
+        json=json.loads(body.model_dump_json()),
+    )
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(24)
+@annotations.client_api
+def slurm_node_info(
+        slurm_cluster_name: Optional[str] = None) -> server_common.RequestId:
+    """Gets the resource information for all nodes in the Slurm cluster.
+
+    Returns:
+        The request ID of the Slurm node info request.
+
+    Request Returns:
+        List[Dict[str, Any]]: A list of dictionaries, each containing info
+            for a single Slurm node (node_name, partition, node_state,
+            gpu_type, total_gpus, free_gpus, vcpu_count, memory_gb).
+    """
+    body = payloads.SlurmNodeInfoRequestBody(
+        slurm_cluster_name=slurm_cluster_name)
+    response = server_common.make_authenticated_request(
+        'GET',
+        '/slurm_node_info',
+        json=json.loads(body.model_dump_json()),
+    )
+    return server_common.get_request_id(response)

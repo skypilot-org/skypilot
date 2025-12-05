@@ -59,6 +59,9 @@ def test_minimal(generic_cloud: str):
     disk_size_param, validate_launch_output = smoke_tests_utils.get_disk_size_and_validate_launch_output(
         generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
+    check_raylet_cmd = '"prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"'
+    if generic_cloud == 'slurm':
+        check_raylet_cmd = 'true'
     test = smoke_tests_utils.Test(
         'minimal',
         [
@@ -77,7 +80,7 @@ def test_minimal(generic_cloud: str):
             '  && expanded_log_path=$(eval echo "$log_path") && echo "$expanded_log_path" '
             '  && test -f $expanded_log_path/run.log',
             # Ensure the raylet process has the correct file descriptor limit.
-            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
+            f'sky exec {name} {check_raylet_cmd}',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # Install jq for the next test.
             f'sky exec {name} \'sudo apt-get update && sudo apt-get install -y jq\'',
@@ -221,6 +224,7 @@ def test_minimal_with_git_workdir(generic_cloud: str):
 
 
 @pytest.mark.no_runpod
+@pytest.mark.no_slurm  # Slurm does not support containers yet
 def test_minimal_with_git_workdir_docker(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -297,6 +301,7 @@ def test_launch_fast(generic_cloud: str):
 @pytest.mark.no_lambda_cloud
 @pytest.mark.no_ibm
 @pytest.mark.no_kubernetes
+@pytest.mark.no_slurm
 @pytest.mark.no_hyperbolic
 @pytest.mark.no_shadeform
 @pytest.mark.no_seeweb
@@ -425,6 +430,7 @@ def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
+@pytest.mark.no_slurm  # Slurm does not support stopping instances
 @pytest.mark.no_vast  # This requires port opening
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
 @pytest.mark.no_shadeform  #Shadeform does not support stopping instances in SkyPilot implementation
@@ -587,6 +593,7 @@ def test_gcp_stale_job_manual_restart():
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet.
+@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet.
 def test_env_check(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
@@ -614,8 +621,8 @@ def test_env_check(generic_cloud: str):
 def test_cli_logs(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
-    if generic_cloud == 'kubernetes':
-        # Kubernetes does not support multi-node
+    if generic_cloud == 'slurm':
+        # Slurm does not support multi-node
         num_nodes = 1
     timestamp = time.time()
     test = smoke_tests_utils.Test('cli_logs', [
@@ -1122,12 +1129,19 @@ def test_kubernetes_get_nodes():
         assert node_addresses == preloaded_addresses
 
 
-@pytest.mark.kubernetes
-def test_kubernetes_show_gpus(generic_cloud: str):
+@pytest.mark.no_aws
+@pytest.mark.no_gcp
+@pytest.mark.no_nebius
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_runpod
+@pytest.mark.no_azure
+def test_kubernetes_slurm_show_gpus(generic_cloud: str):
+    assert generic_cloud in ('kubernetes', 'slurm')
+
     test = smoke_tests_utils.Test(
         'kubernetes_show_gpus',
         [(
-            's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra kubernetes) && '
+            f's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra {generic_cloud}) && '
             'echo "$s" && '
             # Verify either:
             # 1. We have at least one GPU entry with utilization info
@@ -1137,12 +1151,14 @@ def test_kubernetes_show_gpus(generic_cloud: str):
             # 2. The cluster has no GPUs, and the expected message is shown
             '(echo "$s" | grep -A 1 "REQUESTABLE_QTY_PER_NODE" | '
             'grep -E "^[A-Z0-9]+[[:space:]]+[0-9, ]+[[:space:]]+[0-9]+ of [0-9]+ free" || '
-            'echo "$s" | grep "No GPUs found in any Kubernetes clusters")')],
+            f'echo "$s" | grep "No GPUs found in any {generic_cloud} clusters")'
+        )],
     )
     smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_kubernetes
+@pytest.mark.no_slurm
 def test_show_gpus(generic_cloud: str):
     # Check that output contains GPU table headers and common GPU types
     check_cmd = ('echo "$s" && '
@@ -1576,6 +1592,7 @@ def test_sky_down_with_multiple_sgs():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_slurm  # Slurm does not support multi-node yet
 def test_launch_with_failing_setup(generic_cloud: str):
     """Test that failing setup outputs the right error message."""
     name = smoke_tests_utils.get_cluster_name()
@@ -1776,6 +1793,7 @@ def test_kubernetes_ssh_proxy_connection():
 # Only checks for processes in local machine, so skip remote server test.
 # TODO(kevin): Add metrics for number of open SSH tunnels and refactor this test to use it.
 @pytest.mark.no_remote_server
+@pytest.mark.no_slurm  # Slurm does not support gRPC skylet yet
 def test_no_ssh_tunnel_process_leak_after_teardown(generic_cloud: str):
     """Test that no SSH tunnel process leaks after teardown."""
     cluster_name = smoke_tests_utils.get_cluster_name()
