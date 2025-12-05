@@ -33,6 +33,7 @@ from sky.server import daemons
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
+from sky.server.requests.serializers import return_value_serializers
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
@@ -231,13 +232,16 @@ class Request:
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
         try:
+            # Use version-aware serializer to handle backward compatibility
+            # for old clients that don't recognize new fields.
+            serializer = return_value_serializers.get_serializer(self.name)
             return payloads.RequestPayload(
                 request_id=self.request_id,
                 name=self.name,
                 entrypoint=encoders.pickle_and_encode(self.entrypoint),
                 request_body=encoders.pickle_and_encode(self.request_body),
                 status=self.status.value,
-                return_value=orjson.dumps(self.return_value).decode('utf-8'),
+                return_value=serializer(self.return_value),
                 error=orjson.dumps(self.error).decode('utf-8'),
                 pid=self.pid,
                 created_at=self.created_at,

@@ -1982,3 +1982,476 @@ def test_filter_pods_sorts_by_name(unsorted_pod_names,
         # Verify the pods are returned in sorted order
         pod_names = list(result.keys())
         assert pod_names == expected_sorted_pod_names
+class TestCheckInstanceFits:
+    """Tests for check_instance_fits function."""
+
+    def _create_mock_node(self,
+                          name: str,
+                          cpu_capacity: str,
+                          memory_capacity: str,
+                          is_ready: bool = True,
+                          labels: Optional[dict] = None,
+                          gpu_allocatable: Optional[str] = None):
+        """Helper to create mock Kubernetes node."""
+        mock_node = mock.MagicMock()
+        mock_node.metadata.name = name
+        mock_node.metadata.labels = labels or {}
+        mock_node.status.capacity = {
+            'cpu': cpu_capacity,
+            'memory': memory_capacity
+        }
+        mock_node.status.allocatable = {
+            'cpu': cpu_capacity,
+            'memory': memory_capacity
+        }
+        if gpu_allocatable is not None:
+            mock_node.status.allocatable['nvidia.com/gpu'] = gpu_allocatable
+        mock_node.is_ready.return_value = is_ready
+        return mock_node
+
+    def test_cpu_instance_fits_on_cluster(self):
+        """Test CPU-only instance that fits on the cluster."""
+        mock_node = self._create_mock_node(name='cpu-node-1',
+                                           cpu_capacity='16',
+                                           memory_capacity='64Gi')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=[mock_node]):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '4CPU--16GB')
+            assert fits is True
+            assert reason is None
+
+    def test_cpu_instance_does_not_fit_insufficient_cpu(self):
+        """Test CPU-only instance that doesn't fit due to insufficient CPU."""
+        mock_node = self._create_mock_node(name='small-node',
+                                           cpu_capacity='2',
+                                           memory_capacity='64Gi')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=[mock_node]):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '4CPU--8GB')
+            assert fits is False
+            assert reason is not None
+            assert 'CPU' in reason
+
+    def test_cpu_instance_does_not_fit_insufficient_memory(self):
+        """Test CPU-only instance that doesn't fit due to insufficient memory."""
+        mock_node = self._create_mock_node(name='low-memory-node',
+                                           cpu_capacity='16',
+                                           memory_capacity='8Gi')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=[mock_node]):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '4CPU--16GB')
+            assert fits is False
+            assert reason is not None
+            assert 'memory' in reason.lower()
+
+    def test_cpu_instance_no_ready_nodes(self):
+        """Test CPU-only instance when no nodes are ready."""
+        mock_node = self._create_mock_node(name='not-ready-node',
+                                           cpu_capacity='16',
+                                           memory_capacity='64Gi',
+                                           is_ready=False)
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=[mock_node]):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '4CPU--16GB')
+            assert fits is False
+            assert reason is not None
+            assert 'No ready nodes' in reason
+
+    def test_gpu_instance_fits_on_cluster(self):
+        """Test GPU instance that fits on the cluster."""
+        mock_node = self._create_mock_node(
+            name='gpu-node-1',
+            cpu_capacity='32',
+            memory_capacity='128Gi',
+            labels={
+                'cloud.google.com/gke-accelerator': 'nvidia-tesla-v100',
+            },
+            gpu_allocatable='4')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                       return_value=[mock_node]), \
+             mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values',
+                       return_value=('cloud.google.com/gke-accelerator',
+                                   ['nvidia-tesla-v100'], None, None)), \
+             mock.patch('sky.provision.kubernetes.utils.get_node_accelerator_count',
+                       return_value=4):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '8CPU--32GB--V100:2')
+            assert fits is True
+            assert reason is None
+
+    def test_gpu_instance_gpu_type_not_available(self):
+        """Test GPU instance when GPU type is not available on cluster."""
+        mock_node = self._create_mock_node(name='cpu-node',
+                                           cpu_capacity='32',
+                                           memory_capacity='128Gi')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                       return_value=[mock_node]), \
+             mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values',
+                       side_effect=exceptions.ResourcesUnavailableError('A100 not found')):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '8CPU--32GB--A100:1')
+            assert fits is False
+            assert reason is not None
+            assert 'A100 not found' in reason
+
+    def test_gpu_instance_no_ready_gpu_nodes(self):
+        """Test GPU instance when no ready GPU nodes are available."""
+        mock_node = self._create_mock_node(
+            name='gpu-node-not-ready',
+            cpu_capacity='32',
+            memory_capacity='128Gi',
+            is_ready=False,
+            labels={
+                'cloud.google.com/gke-accelerator': 'nvidia-tesla-v100',
+            },
+            gpu_allocatable='4')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                       return_value=[mock_node]), \
+             mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values',
+                       return_value=('cloud.google.com/gke-accelerator',
+                                   ['nvidia-tesla-v100'], None, None)):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '8CPU--32GB--V100:2')
+            assert fits is False
+            assert reason is not None
+            assert 'No ready GPU nodes' in reason
+
+    def test_gpu_instance_insufficient_gpu_count(self):
+        """Test GPU instance when nodes don't have enough GPUs."""
+        mock_node = self._create_mock_node(
+            name='gpu-node-1',
+            cpu_capacity='32',
+            memory_capacity='128Gi',
+            labels={
+                'cloud.google.com/gke-accelerator': 'nvidia-tesla-v100',
+            },
+            gpu_allocatable='2')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                       return_value=[mock_node]), \
+             mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values',
+                       return_value=('cloud.google.com/gke-accelerator',
+                                   ['nvidia-tesla-v100'], None, None)), \
+             mock.patch('sky.provision.kubernetes.utils.get_node_accelerator_count',
+                       return_value=2):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '8CPU--32GB--V100:4')
+            assert fits is False
+            assert reason is not None
+            assert 'No GPU nodes found with' in reason
+
+    def test_gpu_instance_insufficient_cpu_on_gpu_node(self):
+        """Test GPU instance when GPU nodes don't have enough CPU."""
+        mock_node = self._create_mock_node(
+            name='gpu-node-low-cpu',
+            cpu_capacity='4',  # Only 4 CPUs
+            memory_capacity='128Gi',
+            labels={
+                'cloud.google.com/gke-accelerator': 'nvidia-tesla-v100',
+            },
+            gpu_allocatable='4')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                       return_value=[mock_node]), \
+             mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values',
+                       return_value=('cloud.google.com/gke-accelerator',
+                                   ['nvidia-tesla-v100'], None, None)), \
+             mock.patch('sky.provision.kubernetes.utils.get_node_accelerator_count',
+                       return_value=4):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '8CPU--32GB--V100:2')
+            assert fits is False
+            assert reason is not None
+            assert 'CPUs' in reason
+
+    def test_multiple_nodes_one_fits(self):
+        """Test that instance fits when at least one node has sufficient resources."""
+        small_node = self._create_mock_node(name='small-node',
+                                            cpu_capacity='4',
+                                            memory_capacity='16Gi')
+        large_node = self._create_mock_node(name='large-node',
+                                            cpu_capacity='32',
+                                            memory_capacity='128Gi')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=[small_node, large_node]):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '16CPU--64GB')
+            assert fits is True
+            assert reason is None
+
+    def test_empty_cluster(self):
+        """Test when cluster has no nodes."""
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=[]):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '4CPU--16GB')
+            assert fits is False
+            assert reason is not None
+            assert 'No ready nodes' in reason
+
+    def test_exact_resources_not_sufficient(self):
+        """Test that exact resource match is not considered sufficient.
+
+        The function requires strictly greater resources to account for
+        kube-system pods consuming resources.
+        """
+        # Node has exactly 4 CPUs and 16GB, requesting 4CPU--16GB should not fit
+        mock_node = self._create_mock_node(name='exact-match-node',
+                                           cpu_capacity='4',
+                                           memory_capacity='16Gi')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=[mock_node]):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '4CPU--16GB')
+            assert fits is False
+            assert reason is not None
+            assert 'Maximum resources found' in reason
+
+    def test_tpu_instance_fits(self):
+        """Test TPU instance that fits on the cluster."""
+        mock_node = self._create_mock_node(
+            name='tpu-node-1',
+            cpu_capacity='32',
+            memory_capacity='128Gi',
+            labels={
+                'cloud.google.com/gke-accelerator': 'tpu-v4-podslice',
+                'cloud.google.com/gke-tpu-accelerator': 'tpu-v4-podslice',
+                'cloud.google.com/gke-accelerator-count': '8',
+                'cloud.google.com/gke-tpu-topology': '2x4'
+            })
+        mock_node.status.allocatable['google.com/tpu'] = '8'
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                       return_value=[mock_node]), \
+             mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values',
+                       return_value=('cloud.google.com/gke-tpu-accelerator',
+                                   ['tpu-v4-podslice'], None, None)), \
+             mock.patch('sky.provision.kubernetes.utils.is_tpu_on_gke',
+                       return_value=True), \
+             mock.patch('sky.provision.kubernetes.utils.normalize_tpu_accelerator_name',
+                       return_value=('tpu-v4-podslice', 8)), \
+             mock.patch('sky.provision.kubernetes.utils.is_multi_host_tpu',
+                       return_value=False):
+            fits, reason = utils.check_instance_fits(
+                'test-context', '8CPU--32GB--tpu-v4-podslice:8')
+            assert fits is True
+            assert reason is None
+
+    def test_context_none(self):
+        """Test with None context."""
+        mock_node = self._create_mock_node(name='node-1',
+                                           cpu_capacity='16',
+                                           memory_capacity='64Gi')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=[mock_node]):
+            fits, reason = utils.check_instance_fits(None, '4CPU--16GB')
+            assert fits is True
+            assert reason is None
+
+    def test_millicore_cpu_capacity(self):
+        """Test node with millicore CPU capacity."""
+        mock_node = self._create_mock_node(
+            name='millicore-node',
+            cpu_capacity='4000m',  # 4 CPUs in millicore
+            memory_capacity='64Gi')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=[mock_node]):
+            # Requesting 2 CPUs should fit on a 4 CPU node
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '2CPU--16GB')
+            assert fits is True
+            assert reason is None
+
+    def test_fractional_cpu_instance(self):
+        """Test instance with fractional CPU request."""
+        mock_node = self._create_mock_node(name='node-1',
+                                           cpu_capacity='4',
+                                           memory_capacity='16Gi')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=[mock_node]):
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '0.5CPU--2GB')
+            assert fits is True
+            assert reason is None
+
+    def test_tpu_multi_host_skipped(self):
+        """Test that multi-host TPU nodes are skipped.
+
+        When a TPU node is a multi-host configuration, it should be skipped
+        during the check, and if no single-host TPU nodes match, the check fails.
+        """
+        # Multi-host TPU node that should be skipped
+        mock_multi_host_node = self._create_mock_node(
+            name='tpu-multi-host-node',
+            cpu_capacity='32',
+            memory_capacity='128Gi',
+            labels={
+                'cloud.google.com/gke-tpu-accelerator': 'tpu-v4-podslice',
+                'cloud.google.com/gke-accelerator-count': '8',
+                'cloud.google.com/gke-tpu-topology': '4x4',
+                'cloud.google.com/gke-tpu-node-pool-type': 'multi-host'
+            })
+        mock_multi_host_node.status.allocatable['google.com/tpu'] = '8'
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                       return_value=[mock_multi_host_node]), \
+             mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values',
+                       return_value=('cloud.google.com/gke-tpu-accelerator',
+                                   ['tpu-v4-podslice'], None, None)), \
+             mock.patch('sky.provision.kubernetes.utils.is_tpu_on_gke',
+                       return_value=True), \
+             mock.patch('sky.provision.kubernetes.utils.normalize_tpu_accelerator_name',
+                       return_value=('tpu-v4-podslice', 8)), \
+             mock.patch('sky.provision.kubernetes.utils.is_multi_host_tpu',
+                       return_value=True):
+            fits, reason = utils.check_instance_fits(
+                'test-context', '8CPU--32GB--tpu-v4-podslice:8')
+            # Should fail because multi-host TPU is skipped and no other TPU found
+            assert fits is False
+            assert reason is not None
+            assert 'Requested TPU type was not found' in reason
+
+    def test_tpu_chip_count_mismatch(self):
+        """Test TPU instance with mismatched chip count.
+
+        When TPU type matches but chip count doesn't match, the function
+        returns a list of available TPU configurations.
+        """
+        # TPU node with 4 chips, but we request 8
+        mock_tpu_node = self._create_mock_node(
+            name='tpu-node-4chip',
+            cpu_capacity='32',
+            memory_capacity='128Gi',
+            labels={
+                'cloud.google.com/gke-tpu-accelerator': 'tpu-v4-podslice',
+                'cloud.google.com/gke-accelerator-count': '4',
+                'cloud.google.com/gke-tpu-topology': '2x2'
+            })
+        mock_tpu_node.status.allocatable['google.com/tpu'] = '4'
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                       return_value=[mock_tpu_node]), \
+             mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values',
+                       return_value=('cloud.google.com/gke-tpu-accelerator',
+                                   ['tpu-v4-podslice'], None, None)), \
+             mock.patch('sky.provision.kubernetes.utils.is_tpu_on_gke',
+                       return_value=True), \
+             mock.patch('sky.provision.kubernetes.utils.normalize_tpu_accelerator_name',
+                       return_value=('tpu-v4-podslice', 8)), \
+             mock.patch('sky.provision.kubernetes.utils.is_multi_host_tpu',
+                       return_value=False):
+            fits, reason = utils.check_instance_fits(
+                'test-context', '8CPU--32GB--tpu-v4-podslice:8')
+            assert fits is False
+            assert reason is not None
+            # Should mention available TPU types
+            assert 'tpu-v4-podslice:4' in reason
+            assert 'Requested TPU type was not found' in reason
+
+    def test_gpu_label_values_none(self):
+        """Test when get_accelerator_label_key_values returns None for values.
+
+        When gpu_label_values is None, it should be converted to empty list,
+        resulting in no matching GPU nodes found.
+        """
+        mock_node = self._create_mock_node(
+            name='gpu-node',
+            cpu_capacity='32',
+            memory_capacity='128Gi',
+            labels={
+                'cloud.google.com/gke-accelerator': 'nvidia-tesla-v100',
+            },
+            gpu_allocatable='4')
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                       return_value=[mock_node]), \
+             mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values',
+                       return_value=('cloud.google.com/gke-accelerator',
+                                   None, None, None)):  # None for gpu_label_values
+            fits, reason = utils.check_instance_fits('test-context',
+                                                     '8CPU--32GB--V100:2')
+            assert fits is False
+            assert reason is not None
+            assert 'No ready GPU nodes found' in reason
+
+    def test_tpu_fits_returns_with_reason(self):
+        """Test TPU instance that fits.
+
+        This tests the path where check_tpu_fits returns True with reason=None.
+        """
+        mock_tpu_node = self._create_mock_node(
+            name='tpu-node-1',
+            cpu_capacity='32',
+            memory_capacity='128Gi',
+            labels={
+                'cloud.google.com/gke-tpu-accelerator': 'tpu-v4-podslice',
+                'cloud.google.com/gke-accelerator-count': '8',
+                'cloud.google.com/gke-tpu-topology': '2x4'
+            })
+        mock_tpu_node.status.allocatable['google.com/tpu'] = '8'
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                       return_value=[mock_tpu_node]), \
+             mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values',
+                       return_value=('cloud.google.com/gke-tpu-accelerator',
+                                   ['tpu-v4-podslice'], None, None)), \
+             mock.patch('sky.provision.kubernetes.utils.is_tpu_on_gke',
+                       return_value=True), \
+             mock.patch('sky.provision.kubernetes.utils.normalize_tpu_accelerator_name',
+                       return_value=('tpu-v4-podslice', 8)), \
+             mock.patch('sky.provision.kubernetes.utils.is_multi_host_tpu',
+                       return_value=False):
+            fits, reason = utils.check_instance_fits(
+                'test-context', '8CPU--32GB--tpu-v4-podslice:8')
+            assert fits is True
+            assert reason is None
+
+    def test_tpu_does_not_fit(self):
+        """Test TPU instance that doesn't fit.
+
+        When check_tpu_fits returns (False, reason_string), it should return False and the reason.
+        """
+        # TPU node with different chip count
+        mock_tpu_node = self._create_mock_node(
+            name='tpu-node-4chip',
+            cpu_capacity='32',
+            memory_capacity='128Gi',
+            labels={
+                'cloud.google.com/gke-tpu-accelerator': 'tpu-v4-podslice',
+                'cloud.google.com/gke-accelerator-count': '4',
+                'cloud.google.com/gke-tpu-topology': '2x2'
+            })
+        mock_tpu_node.status.allocatable['google.com/tpu'] = '4'
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                       return_value=[mock_tpu_node]), \
+             mock.patch('sky.provision.kubernetes.utils.get_accelerator_label_key_values',
+                       return_value=('cloud.google.com/gke-tpu-accelerator',
+                                   ['tpu-v4-podslice'], None, None)), \
+             mock.patch('sky.provision.kubernetes.utils.is_tpu_on_gke',
+                       return_value=True), \
+             mock.patch('sky.provision.kubernetes.utils.normalize_tpu_accelerator_name',
+                       return_value=('tpu-v4-podslice', 8)), \
+             mock.patch('sky.provision.kubernetes.utils.is_multi_host_tpu',
+                       return_value=False):
+            fits, reason = utils.check_instance_fits(
+                'test-context', '8CPU--32GB--tpu-v4-podslice:8')
+            assert fits is False
+            assert reason is not None
+            assert 'Requested TPU type was not found' in reason
