@@ -342,15 +342,28 @@ def get_current_command() -> str:
 
 
 def get_current_user() -> 'models.User':
-    """Returns the current user."""
+    """Returns the user in current server session."""
     if _current_user is not None:
         return _current_user
     return models.User.get_current_user()
 
 
 def get_current_user_name() -> str:
-    """Returns the current user name."""
+    """Returns the user name in current server session."""
     name = get_current_user().name
+    assert name is not None
+    return name
+
+
+def get_local_user_name() -> str:
+    """Returns the user name in local environment.
+
+    This is for backward compatibility where anonymous access is implicitly
+    allowed when no authentication method at server-side is configured and
+    the username from client environment variable will be used to identify the
+    user.
+    """
+    name = models.User.get_current_user().name
     assert name is not None
     return name
 
