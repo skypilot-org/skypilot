@@ -44,6 +44,7 @@ from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import metrics as metrics_lib
+from sky.server import plugins
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
@@ -159,6 +160,8 @@ queue_backend = server_config.QueueBackend.MULTIPROCESSING
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    # Load plugins for executor process.
+    plugins.load_plugins(plugins.ExtensionContext())
     # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
                      args=(f'worker:{proc_group}', threading.Event()),

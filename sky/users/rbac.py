@@ -1,7 +1,7 @@
 """RBAC (Role-Based Access Control) functionality for SkyPilot API Server."""
 
 import enum
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from sky import sky_logging
 from sky import skypilot_config
@@ -55,8 +55,13 @@ def get_default_role() -> str:
 
 
 def get_role_permissions(
+    plugin_rules: Optional[Dict[str, List[Dict[str, str]]]] = None
 ) -> Dict[str, Dict[str, Dict[str, List[Dict[str, str]]]]]:
-    """Get all role permissions from config.
+    """Get all role permissions from config and plugins.
+
+    Args:
+        plugin_rules: Optional dictionary of plugin RBAC rules to merge.
+                     Format: {'user': [{'path': '...', 'method': '...'}]}
 
     Returns:
         Dictionary containing all roles and their permissions configuration.
@@ -91,9 +96,32 @@ def get_role_permissions(
     if 'user' not in config_permissions:
         config_permissions['user'] = {
             'permissions': {
-                'blocklist': _DEFAULT_USER_BLOCKLIST
+                'blocklist': _DEFAULT_USER_BLOCKLIST.copy()
             }
         }
+
+    # Merge plugin rules into the appropriate roles
+    if plugin_rules:
+        for role, rules in plugin_rules.items():
+            if role not in supported_roles:
+                logger.warning(f'Plugin specified invalid role: {role}')
+                continue
+            if role not in config_permissions:
+                config_permissions[role] = {'permissions': {'blocklist': []}}
+            if 'permissions' not in config_permissions[role]:
+                config_permissions[role]['permissions'] = {'blocklist': []}
+            if 'blocklist' not in config_permissions[role]['permissions']:
+                config_permissions[role]['permissions']['blocklist'] = []
+
+            # Merge plugin rules, avoiding duplicates
+            existing_rules = config_permissions[role]['permissions'][
+                'blocklist']
+            for rule in rules:
+                if rule not in existing_rules:
+                    existing_rules.append(rule)
+                    logger.debug(f'Added plugin RBAC rule for {role}: '
+                                 f'{rule["method"]} {rule["path"]}')
+
     return config_permissions
 
 
