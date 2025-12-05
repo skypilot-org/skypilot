@@ -675,7 +675,7 @@ def _launch(
         clusters = get(status_request_id)
         cluster_user_hash = common_utils.get_user_hash()
         cluster_user_hash_str = ''
-        current_user = common_utils.get_current_user_name()
+        current_user = common_utils.get_local_user_name()
         cluster_user_name = current_user
         if not clusters:
             # Show the optimize log before the prompt if the cluster does not
