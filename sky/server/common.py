@@ -162,7 +162,11 @@ def _check_and_print_upgrade_hint(api_server_info: ApiServerInfo,
         return
 
     # Compare versions - only show hint if latest is actually newer
-    if version_lib.parse(latest_version) <= version_lib.parse(current_version):
+    try:
+        if version_lib.parse(latest_version) <= version_lib.parse(current_version):
+            return
+    except version_lib.InvalidVersion as e:
+        logger.debug(f'Failed to parse version string(s): {e}')
         return
 
     # Check if API server is local or remote
