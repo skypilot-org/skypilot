@@ -59,49 +59,9 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
     async def create_job_states():
         # TODO(kevin): Mock user_name and user_hash too.
 
-        # Job 1: PENDING state (just created)
-        job_id1 = state.set_job_info_without_job_id(name='a',
-                                                    workspace='ws1',
-                                                    entrypoint='ep1',
-                                                    pool='test-pool',
-                                                    pool_hash='hash123',
-                                                    user_hash='abcd1234')
-        state.set_pending(job_id1,
-                          task_id=0,
-                          task_name='task0',
-                          resources_str='{}',
-                          metadata='{}')
-
-        # Job 2: STARTING state (launched but not yet running)
-        job_id2 = state.set_job_info_without_job_id(name='b',
-                                                    workspace='ws1',
-                                                    entrypoint='ep2',
-                                                    pool=None,
-                                                    pool_hash=None,
-                                                    user_hash='abcd1234')
-        state.set_pending(job_id2,
-                          task_id=0,
-                          task_name='task0',
-                          resources_str='{}',
-                          metadata='{}')
-        await state.set_starting_async(job_id2, 0, 'run_123', time.time(), '{}',
-                                       {}, mock_callback)
-
-        # Job 3: RUNNING state (actively running)
-        job_id3 = state.set_job_info_without_job_id(name='a',
-                                                    workspace='ws2',
-                                                    entrypoint='ep3',
-                                                    pool=None,
-                                                    pool_hash=None,
-                                                    user_hash='abcd1234')
-        state.set_pending(job_id3,
-                          task_id=0,
-                          task_name='task0',
-                          resources_str='{}',
-                          metadata='{}')
-        await state.set_starting_async(job_id3, 0, 'run_456', time.time(), '{}',
-                                       {}, mock_callback)
-        await state.set_started_async(job_id3, 0, time.time(), mock_callback)
+        # Submit jobs in order 4, 3, 2, 1 so that get_waiting_job_async gets the
+        # right job. Previously they were submitted in the other order (which
+        # makes more sense), but I didn't want to change the names.
 
         # Job 4: SUCCEEDED state (completed successfully)
         job_id4 = state.set_job_info_without_job_id(name='d',
@@ -115,10 +75,66 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
                           task_name='task0',
                           resources_str='{}',
                           metadata='{}')
+        state.scheduler_set_waiting(job_id4, 'dag_content', 'user_yaml_content',
+                                    'env_file_content', None, 0)
+        launched_job = await state.get_waiting_job_async(1, time.time())
+        assert launched_job['job_id'] == job_id4
         await state.set_starting_async(job_id4, 0, 'run_789', time.time(), '{}',
                                        {}, mock_callback)
         await state.set_started_async(job_id4, 0, time.time(), mock_callback)
         await state.set_succeeded_async(job_id4, 0, time.time(), mock_callback)
+
+        # Job 3: RUNNING state (actively running)
+        job_id3 = state.set_job_info_without_job_id(name='a',
+                                                    workspace='ws2',
+                                                    entrypoint='ep3',
+                                                    pool=None,
+                                                    pool_hash=None,
+                                                    user_hash='abcd1234')
+        state.set_pending(job_id3,
+                          task_id=0,
+                          task_name='task0',
+                          resources_str='{}',
+                          metadata='{}')
+        state.scheduler_set_waiting(job_id3, 'dag_content', 'user_yaml_content',
+                                    'env_file_content', None, 0)
+        launched_job = await state.get_waiting_job_async(1, time.time())
+        assert launched_job['job_id'] == job_id3
+        await state.set_starting_async(job_id3, 0, 'run_456', time.time(), '{}',
+                                       {}, mock_callback)
+        await state.set_started_async(job_id3, 0, time.time(), mock_callback)
+
+        # Job 2: STARTING state (launched but not yet running)
+        job_id2 = state.set_job_info_without_job_id(name='b',
+                                                    workspace='ws1',
+                                                    entrypoint='ep2',
+                                                    pool=None,
+                                                    pool_hash=None,
+                                                    user_hash='abcd1234')
+        state.set_pending(job_id2,
+                          task_id=0,
+                          task_name='task0',
+                          resources_str='{}',
+                          metadata='{}')
+        state.scheduler_set_waiting(job_id2, 'dag_content', 'user_yaml_content',
+                                    'env_file_content', None, 0)
+        launched_job = await state.get_waiting_job_async(1, time.time())
+        assert launched_job['job_id'] == job_id2
+        await state.set_starting_async(job_id2, 0, 'run_123', time.time(), '{}',
+                                       {}, mock_callback)
+
+        # Job 1: PENDING state (just created)
+        job_id1 = state.set_job_info_without_job_id(name='a',
+                                                    workspace='ws1',
+                                                    entrypoint='ep1',
+                                                    pool='test-pool',
+                                                    pool_hash='hash123',
+                                                    user_hash='abcd1234')
+        state.set_pending(job_id1,
+                          task_id=0,
+                          task_name='task0',
+                          resources_str='{}',
+                          metadata='{}')
 
         return {
             'job_id1': job_id1,
@@ -534,7 +550,7 @@ class TestCancelJobs:
     def test_cancel_jobs_by_id_success(self):
         """Test successful job cancellation by ID using real seed data."""
         # Use actual job IDs from seed data - cancel PENDING and STARTING jobs (non-terminal)
-        job_ids_to_cancel = [self.job_ids['job_id1'], self.job_ids['job_id2']
+        job_ids_to_cancel = [self.job_ids['job_id2'], self.job_ids['job_id1']
                             ]  # PENDING and STARTING jobs
 
         request = managed_jobsv1_pb2.CancelJobsRequest(
@@ -586,7 +602,7 @@ class TestCancelJobs:
         # Should indicate multiple jobs found (actual message shows job IDs)
         assert "multiple running jobs found with name 'a'" in response.message.lower(
         )
-        assert f"job ids: [{self.job_ids['job_id3']}, {self.job_ids['job_id1']}]" in response.message.lower(
+        assert f"job ids: [{self.job_ids['job_id1']}, {self.job_ids['job_id3']}]" in response.message.lower(
         )
         context_mock.abort.assert_not_called()
 
@@ -675,7 +691,7 @@ class TestCancelJobs:
         # Jobs 1, 2 should be cancelled (in workspace 'ws1', non-terminal states)
         # Job 3 is in workspace 'ws2' so gets skipped
         # Job 4 is SUCCEEDED so should not be cancelled
-        expected_jobs = [self.job_ids['job_id1'], self.job_ids['job_id2']]
+        expected_jobs = [self.job_ids['job_id2'], self.job_ids['job_id1']]
         assert response.message.lower(
         ) == f"jobs with ids {expected_jobs[0]}, {expected_jobs[1]} are scheduled to be cancelled. job with id {self.job_ids['job_id3']} is skipped as they are not in the active workspace 'ws1'. check the workspace of the job with: sky jobs queue"
         context_mock.abort.assert_not_called()
