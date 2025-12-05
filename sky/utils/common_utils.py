@@ -363,7 +363,7 @@ def get_local_user_name() -> str:
     the username from client environment variable will be used to identify the
     user.
     """
-    name = models.User.get_current_user().name
+    name = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
     assert name is not None
     return name
 
