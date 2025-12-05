@@ -246,8 +246,10 @@ def basic_pool_conf(
     infra: str,
     resource_string: Optional[str] = None,
     setup_cmd: str = 'echo "setup message"',
+    workdir: Optional[str] = None,
 ):
     resource_string = '    accelerators: ' + resource_string if resource_string else ''
+    workdir_section = f'    workdir: {workdir}\n' if workdir else ''
     return textwrap.dedent(f"""
     pool:
         workers: {num_workers}
@@ -257,7 +259,7 @@ def basic_pool_conf(
         memory: 4GB+
         infra: {infra}
     {resource_string}
-
+    {workdir_section}
     setup: |
         {setup_cmd}
     """)
@@ -1449,5 +1451,50 @@ def test_pool_down_single_pool(generic_cloud: str):
                 ],
                 timeout=timeout,
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_scale_down_with_workdir(generic_cloud: str):
+    """Test that we can scale down a pool with workdir without errors. This 
+    makes sure that the workdir is not deleted when the pool is scaled down."""
+    import os
+
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+
+    # Create a temporary directory with a file in it to use as workdir
+    with tempfile.TemporaryDirectory(
+            prefix='sky-test-workdir-') as temp_workdir:
+        test_file_path = os.path.join(temp_workdir, 'test_file.txt')
+        with open(test_file_path, 'w') as f:
+            f.write('test content')
+
+        pool_config = basic_pool_conf(
+            num_workers=2,
+            infra=generic_cloud,
+            workdir=temp_workdir,
+            setup_cmd='echo "setup message"',
+        )
+
+        with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+            write_yaml(pool_yaml, pool_config)
+            test = smoke_tests_utils.Test(
+                'test_pool_scale_down_with_workdir',
+                [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
+                    wait_until_pool_ready(pool_name, timeout=timeout),
+                    wait_until_num_workers(
+                        pool_name, num_workers=2, timeout=timeout),
+                    _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, num_workers=1),
+                    wait_until_num_workers(
+                        pool_name, num_workers=1, timeout=timeout),
+                ],
+                timeout=timeout,
+                teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
             )
             smoke_tests_utils.run_one_test(test)
