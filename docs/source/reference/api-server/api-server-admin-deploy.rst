@@ -596,7 +596,7 @@ Following tabs describe how to configure credentials for different clouds on the
               --from-file=cw.config=$HOME/.coreweave/cw.config \
               --from-file=cw.credentials=$HOME/.coreweave/cw.credentials
 
-        When installing or upgrading the Helm chart, enable CoreWeave CAIOS credentials by setting :ref:`coreweaveCredentials.enabled <helm-values-coreweavecredentials-enabled>` and :ref:`coreweaveCredentials.coreweaveSecretName <helm-values-coreweavecredentials-coreweavesecretname>`:
+        When installing or upgrading the Helm chart, enable CoreWeave CAIOS credentials by setting ``coreweaveCredentials.enabled=true``:
 
         .. code-block:: bash
 
@@ -604,8 +604,20 @@ Following tabs describe how to configure credentials for different clouds on the
             helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
-              --set coreweaveCredentials.enabled=true \
-              --set coreweaveCredentials.coreweaveSecretName=coreweave-credentials
+              --set coreweaveCredentials.enabled=true
+
+        .. dropdown:: Use existing CoreWeave CAIOS credentials
+
+            You can also set the following values to use a secret that already contains your CoreWeave CAIOS credentials:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set coreweaveCredentials.enabled=true \
+                    --set coreweaveCredentials.coreweaveSecretName=your_secret_name
 
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
