@@ -12,7 +12,7 @@
 #   * Specify SKYPILOT_NAMESPACE env var to override the default namespace where the service account is created.
 #   * Specify SKYPILOT_SA_NAME env var to override the default service account name.
 #   * Specify SKIP_SA_CREATION=1 to skip creating the service account and use an existing one
-#   * Specify SUPER_USER=1 to create a service account with cluster-admin permissions
+#   * Specify SUPER_USER=0 to create a service account with minimal permissions
 #
 # Usage:
 #   # Create "sky-sa" service account with minimal permissions in "default" namespace and generate kubeconfig
