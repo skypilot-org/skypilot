@@ -57,6 +57,7 @@ from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics
 from sky.server import middleware_utils
+from sky.server import server_utils
 from sky.server import state
 from sky.server import stream_utils
 from sky.server import versions
@@ -471,7 +472,8 @@ async def schedule_on_boot_check_async():
         await executor.schedule_request_async(
             request_id='skypilot-server-on-boot-check',
             request_name=request_names.RequestName.CHECK,
-            request_body=payloads.CheckBody(),
+            request_body=server_utils.build_body_at_server(
+                request=None, body_type=payloads.CheckBody),
             func=sky_check.check,
             schedule_type=requests_lib.ScheduleType.SHORT,
             is_skypilot_system=True,
@@ -494,7 +496,8 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             await executor.schedule_request_async(
                 request_id=event.id,
                 request_name=event.name,
-                request_body=payloads.RequestBody(),
+                request_body=server_utils.build_body_at_server(
+                    request=None, body_type=payloads.RequestBody),
                 func=event.run_event,
                 schedule_type=requests_lib.ScheduleType.SHORT,
                 is_skypilot_system=True,
@@ -744,21 +747,14 @@ async def enabled_clouds(request: fastapi.Request,
                          workspace: Optional[str] = None,
                          expand: bool = False) -> None:
     """Gets enabled clouds on the server."""
-    # Old cli does not send request body for /enabled_clouds API,
-    # to keep backward compatbility, we construct the request body
-    # at server-side with the auth user overridden.
-    # TODO(aylei): enabled_clouds can be a sync handler without background
-    # execution.
-    request_body = payloads.EnabledCloudsBody(workspace=workspace,
-                                              expand=expand)
-    auth_user = request.state.auth_user
-    if auth_user:
-        request_body.env_vars[constants.USER_ID_ENV_VAR] = auth_user.id
-        request_body.env_vars[constants.USER_ENV_VAR] = auth_user.name
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS,
-        request_body=request_body,
+        request_body=server_utils.build_body_at_server(
+            request=request,
+            body_type=payloads.EnabledCloudsBody,
+            workspace=workspace,
+            expand=expand),
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -831,7 +827,8 @@ async def status_kubernetes(request: fastapi.Request) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STATUS_KUBERNETES,
-        request_body=payloads.RequestBody(),
+        request_body=server_utils.build_body_at_server(
+            request=request, body_type=payloads.RequestBody),
         func=core.status_kubernetes,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -1500,7 +1497,8 @@ async def storage_ls(request: fastapi.Request) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STORAGE_LS,
-        request_body=payloads.RequestBody(),
+        request_body=server_utils.build_body_at_server(
+            request=request, body_type=payloads.RequestBody),
         func=core.storage_ls,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -2047,7 +2045,8 @@ async def all_contexts(request: fastapi.Request) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ALL_CONTEXTS,
-        request_body=payloads.RequestBody(),
+        request_body=server_utils.build_body_at_server(
+            request=request, body_type=payloads.RequestBody),
         func=core.get_all_contexts,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
