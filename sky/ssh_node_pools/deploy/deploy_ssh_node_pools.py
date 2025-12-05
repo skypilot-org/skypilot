@@ -34,6 +34,10 @@ DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')
 SSH_CONFIG_PATH = os.path.expanduser('~/.ssh/config')
 NODE_POOLS_INFO_DIR = os.path.expanduser('~/.sky/ssh_node_pools_info')
 
+# We patch the systemd k3s restart delay. Refer:
+# https://github.com/skypilot-org/skypilot/issues/8145
+K3S_RESTART_DELAY = 15
+
 # Get the directory of this script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -206,7 +210,8 @@ def start_agent_node(node,
     logger.info(f'Deploying worker node ({node}).')
     cmd = f"""
             {askpass_block}
-            curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} INSTALL_K3S_EXEC='agent --node-label skypilot-ip={node}' \
+            curl -sfL https://get.k3s.io | sed 's/RestartSec=5/RestartSec={K3S_RESTART_DELAY}/' | \
+                K3S_NODE_NAME={node} INSTALL_K3S_EXEC='agent --node-label skypilot-ip={node}' \
                 K3S_URL=https://{master_addr}:6443 K3S_TOKEN={k3s_token} sudo -E -A sh -
         """
     result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
@@ -769,7 +774,7 @@ def deploy_cluster(cluster_name,
         f'Deploying SkyPilot runtime on head node ({head_node}).')
     cmd = f"""
         {askpass_block}
-        curl -sfL https://get.k3s.io | K3S_TOKEN={k3s_token} K3S_NODE_NAME={head_node} sudo -E -A sh - &&
+        curl -sfL https://get.k3s.io | sed 's/RestartSec=5/RestartSec={K3S_RESTART_DELAY}/' | K3S_TOKEN={k3s_token} K3S_NODE_NAME={head_node} sudo -E -A sh - &&
         mkdir -p ~/.kube &&
         sudo -A cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
         sudo -A chown $(id -u):$(id -g) ~/.kube/config &&
