@@ -245,6 +245,34 @@ def get_all_slurm_cluster_names() -> List[str]:
     return cluster_names
 
 
+def _check_cpu_mem_fits(
+        candidate_instance_type: SlurmInstanceType,
+        node_list: List[slurm.NodeInfo]) -> Tuple[bool, Optional[str]]:
+    """Checks if instance fits on candidate nodes based on CPU and memory.
+
+    We check capacity (not allocatable) because availability can change
+    during scheduling, and we want to let the Slurm scheduler handle that.
+    """
+    # We log max CPU and memory found on the GPU nodes for debugging.
+    max_cpu = 0
+    max_mem_gb = 0.0
+
+    for node_info in node_list:
+        node_cpus = node_info.cpus
+        node_mem_gb = node_info.memory_mb / 1024.0
+
+        if node_cpus > max_cpu:
+            max_cpu = node_cpus
+            max_mem_gb = node_mem_gb
+
+        if (node_cpus >= candidate_instance_type.cpus and
+                node_mem_gb >= candidate_instance_type.memory):
+            return True, None
+
+    return False, (f'Max found: {max_cpu} CPUs, '
+                   f'{common_utils.format_float(max_mem_gb)}G memory')
+
+
 def check_instance_fits(
         cluster: str,
         instance_type: str,
@@ -259,34 +287,6 @@ def check_instance_fits(
     Returns:
         Tuple of (fits, reason) where fits is True if available.
     """
-
-    def check_cpu_mem_fits(
-            candidate_instance_type: SlurmInstanceType,
-            node_list: List[slurm.NodeInfo]) -> Tuple[bool, Optional[str]]:
-        """Checks if instance fits on candidate nodes based on CPU and memory.
-
-        We check capacity (not allocatable) because availability can change
-        during scheduling, and we want to let the Slurm scheduler handle that.
-        """
-        # We log max CPU and memory found on the GPU nodes for debugging.
-        max_cpu = 0
-        max_mem_gb = 0.0
-
-        for node_info in node_list:
-            node_cpus = node_info.cpus
-            node_mem_gb = node_info.memory_mb / 1024.0
-
-            if node_cpus > max_cpu:
-                max_cpu = node_cpus
-                max_mem_gb = node_mem_gb
-
-            if (node_cpus >= candidate_instance_type.cpus and
-                    node_mem_gb >= candidate_instance_type.memory):
-                return True, None
-
-        return False, (f'Max found: {max_cpu} CPUs, '
-                       f'{common_utils.format_float(max_mem_gb)}G memory')
-
     # Get Slurm node list in the given cluster (region).
     ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
     ssh_config_dict = ssh_config.lookup(cluster)
@@ -316,13 +316,15 @@ def check_instance_fits(
         nodes = filtered
         partition_suffix = f' in partition {partition}'
 
-    s = SlurmInstanceType.from_instance_type(instance_type)
-    acc_count = s.accelerator_count if s.accelerator_count else 0
-    acc_type = s.accelerator_type if s.accelerator_type else None
+    slurm_instance_type = SlurmInstanceType.from_instance_type(instance_type)
+    acc_count = (slurm_instance_type.accelerator_count
+                 if slurm_instance_type.accelerator_count is not None else 0)
+    acc_type = slurm_instance_type.accelerator_type
     candidate_nodes = nodes
-    not_fit_reason_prefix = (f'No nodes found with enough '
-                             f'CPU (> {s.cpus} CPUs) and/or '
-                             f'memory (> {s.memory} G){partition_suffix}. ')
+    not_fit_reason_prefix = (
+        f'No nodes found with enough '
+        f'CPU (> {slurm_instance_type.cpus} CPUs) and/or '
+        f'memory (> {slurm_instance_type.memory} G){partition_suffix}. ')
     if acc_type is not None:
         assert acc_count is not None, (acc_type, acc_count)
 
@@ -358,12 +360,12 @@ def check_instance_fits(
         candidate_nodes = gpu_nodes
         not_fit_reason_prefix = (
             f'GPU nodes with {acc_type}{partition_suffix} do not have '
-            f'enough CPU (> {s.cpus} CPUs) and/or '
-            f'memory (> {s.memory} G). ')
+            f'enough CPU (> {slurm_instance_type.cpus} CPUs) and/or '
+            f'memory (> {slurm_instance_type.memory} G). ')
 
     # Check if CPU and memory requirements are met on at least one
     # candidate node.
-    fits, reason = check_cpu_mem_fits(s, candidate_nodes)
+    fits, reason = _check_cpu_mem_fits(slurm_instance_type, candidate_nodes)
     if not fits and reason is not None:
         reason = not_fit_reason_prefix + reason
     return fits, reason
