@@ -57,6 +57,11 @@ class TestInfoNodes:
             mock_run.return_value = (0, mock_output, '')
 
             result = client.info_nodes()
+            mock_run.assert_called_once_with(
+                f'sinfo -h --Node -o "%N{slurm.SEP}%t{slurm.SEP}%G{slurm.SEP}%c{slurm.SEP}%m{slurm.SEP}%P"',
+                require_outputs=True,
+                stream_logs=False,
+            )
 
             assert len(result) == 3
             assert result[0].node == 'node1'
