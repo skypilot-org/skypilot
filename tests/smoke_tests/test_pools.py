@@ -1,3 +1,4 @@
+import os
 import tempfile
 import textwrap
 from typing import Dict, List, Optional
@@ -1468,7 +1469,6 @@ def test_pool_down_single_pool(generic_cloud: str):
 def test_pool_scale_down_with_workdir(generic_cloud: str):
     """Test that we can scale down a pool with workdir without errors. This 
     makes sure that the workdir is not deleted when the pool is scaled down."""
-    import os
 
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
