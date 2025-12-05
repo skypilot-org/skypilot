@@ -33,11 +33,14 @@ set -eu -o pipefail
 # use default.
 SKYPILOT_SA=${SKYPILOT_SA_NAME:-sky-sa}
 NAMESPACE=${SKYPILOT_NAMESPACE:-default}
-SUPER_USER=${SUPER_USER:-0}
+SUPER_USER=${SUPER_USER:-1}
 
 echo "Service account: ${SKYPILOT_SA}"
 echo "Namespace: ${NAMESPACE}"
-echo "Super user permissions: ${SUPER_USER}"
+if [ "${SUPER_USER}" != "1" ]; then
+  echo "Disabled super user permissions. Using minimal permissions. You may need to do some manual setup with this."
+  SUPER_USER=0
+fi
 
 # Set OS specific values.
 if [[ "$OSTYPE" == "linux-gnu" ]]; then
@@ -53,7 +56,7 @@ fi
 
 # If the user has set SKIP_SA_CREATION=1, skip creating the service account.
 if [ -z ${SKIP_SA_CREATION+x} ]; then
-  echo "Creating the Kubernetes Service Account with ${SUPER_USER:+super user}${SUPER_USER:-minimal} RBAC permissions."
+  echo "Creating the Kubernetes Service Account with ${SUPER_USER:-super user}${SUPER_USER:+minimal} RBAC permissions."
   if [ "${SUPER_USER}" = "1" ]; then
     # Create service account with cluster-admin permissions
     kubectl apply -f - <<EOF
@@ -219,7 +222,7 @@ roleRef:
 EOF
   fi
 # Apply optional ingress-related roles, but don't make the script fail if it fails
-kubectl apply -f - <<EOF || echo "Failed to apply optional ingress-related roles. Nginx ingress is likely not installed. This is not critical and the script will continue."
+kubectl apply -f - 2>/dev/null <<EOF || echo "Failed to apply optional ingress-related roles. Nginx ingress is likely not installed. This is not critical and the script will continue."
 # Optional: Role for accessing ingress resources
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -320,20 +323,4 @@ echo "---
 Done!
 
 Kubeconfig using service account '${SKYPILOT_SA}' in namespace '${NAMESPACE}' written at $(pwd)/kubeconfig
-
-Copy the generated kubeconfig file to your ~/.kube/ directory to use it with
-kubectl and skypilot:
-
-# Backup your existing kubeconfig file
-mv ~/.kube/config ~/.kube/config.bak
-cp kubeconfig ~/.kube/config
-
-# Verify that you can access the cluster
-kubectl get pods
-
-Also add this to your ~/.sky/config.yaml to use the new service account:
-
-# ~/.sky/config.yaml
-kubernetes:
-  remote_identity: ${SKYPILOT_SA}
 "
