@@ -104,16 +104,25 @@ def wait_until_pool_ready(pool_name: str,
 def wait_until_worker_status(pool_name: str,
                              status: str,
                              timeout: int = 30,
-                             time_between_checks: int = 5):
+                             time_between_checks: int = 5,
+                             num_occurrences: int = 1):
     status_str = f'sky jobs pool status {pool_name} | grep -A999 "^Pool Workers" | grep "^{pool_name}"'
+    count_check = (
+        f'count=$(echo "$s" | grep -c "{status}" || echo "0"); '
+        f'if (( count != {num_occurrences} )); then '
+        f'  echo "Expected {num_occurrences} occurrences of status \'{status}\', but found $count"; '
+        '  continue; '
+        'fi; ')
+    waiting_msg_suffix = f' with {num_occurrences} occurrences'
     return (
         'start_time=$SECONDS; '
         'while true; do '
         f'if (( $SECONDS - $start_time > {timeout} )); then '
-        f'  echo "Timeout after {timeout} seconds waiting for worker status \'{status}\'"; exit 1; '
+        f'  echo "Timeout after {timeout} seconds waiting for worker status \'{status}\'{waiting_msg_suffix}"; exit 1; '
         'fi; '
         f's=$({status_str}); '
         'echo "$s"; '
+        f'{count_check}'
         f'if echo "$s" | grep "{status}"; then '
         '  break; '
         'fi; '
@@ -123,7 +132,7 @@ def wait_until_worker_status(pool_name: str,
         'if echo "$s" | grep "SHUTTING_DOWN"; then '
         '  exit 1; '
         'fi; '
-        f'echo "Waiting for worker status to be {status}..."; '
+        f'echo "Waiting for worker status to be {status}{waiting_msg_suffix}..."; '
         f'sleep {time_between_checks}; '
         'done; '
         'sleep 1')
@@ -249,7 +258,7 @@ def basic_pool_conf(
     workdir: Optional[str] = None,
 ):
     resource_string = '    accelerators: ' + resource_string if resource_string else ''
-    workdir_section = f'    workdir: {workdir}\n' if workdir else ''
+    workdir_section = f'workdir: {workdir}\n' if workdir else ''
     return textwrap.dedent(f"""
     {workdir_section}
     pool:
@@ -1489,10 +1498,14 @@ def test_pool_scale_down_with_workdir(generic_cloud: str):
                     wait_until_pool_ready(pool_name, timeout=timeout),
                     wait_until_num_workers(
                         pool_name, num_workers=2, timeout=timeout),
+                    wait_until_worker_status(
+                        pool_name, 'READY', timeout=timeout, num_occurrences=2),
                     _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, num_workers=1),
                     wait_until_num_workers(
                         pool_name, num_workers=1, timeout=timeout),
+                    wait_until_worker_status(
+                        pool_name, 'READY', timeout=timeout, num_occurrences=1),
                 ],
                 timeout=timeout,
                 teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
