@@ -490,7 +490,7 @@ runpodCredentials:
 # Populate Digital Ocean credentials from the secret with key `api_key`
 digitaloceanCredentials:
   enabled: false
-  # Name of the secret containing the CUDO credentials. Only used if enabled is true.
+  # Name of the secret containing the Digital Ocean credentials. Only used if enabled is true.
   digitaloceanSecretName: digitalocean-credentials  
 
 # Populate Lambda credentials from the secret with key `api_key`
