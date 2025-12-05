@@ -94,7 +94,6 @@ def get_or_fail(futures, pg) -> List[int]:
     sys.stdout.flush()
     return returncodes, pids
 
-run_fn = None
 futures = []
 
 class _ProcessingArgs:
@@ -218,7 +217,7 @@ def run_with_log(
     streaming_prefix: Optional[str] = None,
     log_cmd: bool = False,
     **kwargs,
-) -> Union[int, Tuple[int, str, str]]:
+) -> Union[int, Tuple[int, str, str], Tuple[int, int]]:
     """Runs a command and logs its output to a file.
 
     Args:
@@ -229,6 +228,8 @@ def run_with_log(
         process_stream: Whether to post-process the stdout/stderr of the
             command, such as replacing or skipping lines on the fly. If
             enabled, lines are printed only when '\r' or '\n' is found.
+        streaming_prefix: Optional prefix for each log line. Can contain {pid}
+            placeholder which will be replaced with the subprocess PID.
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
@@ -274,6 +275,13 @@ def run_with_log(
                 # For backward compatibility, do not specify use_kill_pg by
                 # default.
                 subprocess_utils.kill_process_daemon(proc.pid)
+
+            # Format streaming_prefix with subprocess PID if it contains {pid}
+            formatted_streaming_prefix = streaming_prefix
+            if streaming_prefix and '{pid}' in streaming_prefix:
+                formatted_streaming_prefix = streaming_prefix.format(
+                    pid=proc.pid)
+
             stdout = ''
             stderr = ''
             stdout_stream_handler = None
@@ -302,7 +310,7 @@ def run_with_log(
                     line_processor=line_processor,
                     # Replace CRLF when the output is logged to driver by ray.
                     replace_crlf=with_ray,
-                    streaming_prefix=streaming_prefix,
+                    streaming_prefix=formatted_streaming_prefix,
                 )
                 stdout_stream_handler = functools.partial(
                     _handle_io_stream,
@@ -392,7 +400,8 @@ def run_bash_command_with_log(bash_command: str,
                               log_path: str,
                               env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
-                              with_ray: bool = False):
+                              with_ray: bool = False,
+                              streaming_prefix: Optional[str] = None):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
         bash_command = make_task_bash_script(bash_command, env_vars=env_vars)
@@ -407,6 +416,7 @@ def run_bash_command_with_log(bash_command: str,
                             log_path,
                             stream_logs=stream_logs,
                             with_ray=with_ray,
+                            streaming_prefix=streaming_prefix,
                             shell=True)
 
 def run_bash_command_with_log_and_return_pid(
@@ -414,22 +424,25 @@ def run_bash_command_with_log_and_return_pid(
         log_path: str,
         env_vars: Optional[Dict[str, str]] = None,
         stream_logs: bool = False,
-        with_ray: bool = False):
-    return_code = run_bash_command_with_log(bash_command, log_path, env_vars,
-                                            stream_logs, with_ray)
+        with_ray: bool = False,
+        streaming_prefix: Optional[str] = None):
+    return_code = run_bash_command_with_log(bash_command,
+                                            log_path,
+                                            env_vars,
+                                            stream_logs,
+                                            with_ray,
+                                            streaming_prefix=streaming_prefix)
     return {'return_code': return_code, 'pid': os.getpid()}
 
 run_bash_command_with_log = run_bash_command_with_log
 run_bash_command_with_log_and_return_pid =                 ray.remote(run_bash_command_with_log_and_return_pid)
-if hasattr(autostop_lib, 'set_last_active_time_to_now'):
-    autostop_lib.set_last_active_time_to_now()
-
+autostop_lib.set_last_active_time_to_now()
 job_lib.set_status(3, job_lib.JobStatus.PENDING)
 pg = ray_util.placement_group([{"CPU": 2.0}, {"CPU": 2.0}], 'STRICT_SPREAD')
 plural = 's' if 2 > 1 else ''
 node_str = f'2 node{plural}'
 message = ('[2m├── [0m[2m'
-            'Waiting for task resources on '
+           'Waiting for task resources on '
            f'{node_str}.[0m')
 print(message, flush=True)
 # FIXME: This will print the error message from autoscaler if
@@ -437,7 +450,6 @@ print(message, flush=True)
 # error message.
 ray.get(pg.ready())
 print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
-
 job_lib.set_job_started(3)
 job_lib.scheduler.schedule_step()
 @ray.remote
@@ -465,8 +477,6 @@ sky_env_vars_dict['SKYPILOT_NUM_NODES'] = len(job_ip_rank_list)
 sky_env_vars_dict['SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000002-cluster-3'
 script = 'echo "Running on node $SKYPILOT_NODE_RANK"'
 rclone_flush_script = '\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                echo "skypilot: cached mount is still uploading to remote"\n                flushed=0\n                break\n            fi\n        done\n    done\n    echo "skypilot: cached mount uploaded complete"\nfi'
-if run_fn is not None:
-    script = run_fn(0, gang_scheduling_id_to_ip)
 
 if script is not None:
     script=f'unset RAY_RAYLET_PID; {script}'
@@ -507,8 +517,6 @@ sky_env_vars_dict['SKYPILOT_NUM_NODES'] = len(job_ip_rank_list)
 sky_env_vars_dict['SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000002-cluster-3'
 script = 'echo "Running on node $SKYPILOT_NODE_RANK"'
 rclone_flush_script = '\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                echo "skypilot: cached mount is still uploading to remote"\n                flushed=0\n                break\n            fi\n        done\n    done\n    echo "skypilot: cached mount uploaded complete"\nfi'
-if run_fn is not None:
-    script = run_fn(1, gang_scheduling_id_to_ip)
 
 if script is not None:
     script=f'unset RAY_RAYLET_PID; {script}'

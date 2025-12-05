@@ -82,7 +82,7 @@ def request_body_env_vars() -> dict:
         if common.is_api_server_local() and env_var in EXTERNAL_LOCAL_ENV_VARS:
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
-    env_vars[constants.USER_ENV_VAR] = common_utils.get_current_user_name()
+    env_vars[constants.USER_ENV_VAR] = common_utils.get_local_user_name()
     env_vars[
         usage_constants.USAGE_RUN_ID_ENV_VAR] = usage_lib.messages.usage.run_id
     if not common.is_api_server_local():
@@ -670,6 +670,11 @@ class KubernetesNodeInfoRequestBody(RequestBody):
     context: Optional[str] = None
 
 
+class SlurmNodeInfoRequestBody(RequestBody):
+    """The request body for the slurm node info endpoint."""
+    slurm_cluster_name: Optional[str] = None
+
+
 class ListAcceleratorsBody(RequestBody):
     """The request body for the list accelerators endpoint."""
     gpus_only: bool = True
@@ -854,3 +859,9 @@ class RequestPayload(BasePayload):
     status_msg: Optional[str] = None
     should_retry: bool = False
     finished_at: Optional[float] = None
+
+
+class SlurmGpuAvailabilityRequestBody(RequestBody):
+    """Request body for getting Slurm real-time GPU availability."""
+    name_filter: Optional[str] = None
+    quantity_filter: Optional[int] = None

@@ -2,9 +2,9 @@ jobs:
   controller:
     resources:
       cpus: 4+
-      memory: 4+
+      memory: 16+
 serve:
   controller:
     resources:
       cpus: 4+
-      memory: 4+
+      memory: 8+

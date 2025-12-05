@@ -182,6 +182,13 @@ class Cloud:
         """
         return cls._SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE
 
+    @classmethod
+    def uses_ray(cls) -> bool:
+        """Returns whether this cloud uses Ray as the distributed
+        execution framework.
+        """
+        return True
+
     #### Regions/Zones ####
 
     @classmethod

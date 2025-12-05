@@ -41,9 +41,10 @@ class TestLruCache:
             return x + 1
 
         # The function should be in the _FUNCTIONS_NEED_RELOAD_CACHE list
-        assert any(
-            f.__name__ == 'request_scoped_func' or hasattr(f, '__wrapped__')
-            for f in annotations._FUNCTIONS_NEED_RELOAD_CACHE)
+        assert any(f().__name__ == 'request_scoped_func' or
+                   hasattr(f(), '__wrapped__')
+                   for f in annotations._FUNCTIONS_NEED_RELOAD_CACHE
+                   if f() is not None)
 
     def test_cache_clear_method(self):
         """Test that cache_clear method works."""

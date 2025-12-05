@@ -498,6 +498,32 @@ def _start(
                 controller_autostop_config.enabled):
             idle_minutes_to_autostop = controller_autostop_config.idle_minutes
             down = controller_autostop_config.down
+    else:
+        # For non-controller clusters, restore autostop configuration from
+        # database if not explicitly provided.
+        if idle_minutes_to_autostop is None:
+            cluster_record = global_user_state.get_cluster_from_name(
+                cluster_name, include_user_info=False, summary_response=True)
+            if cluster_record is not None:
+                stored_autostop = cluster_record.get('autostop', -1)
+                stored_to_down = cluster_record.get('to_down', False)
+                # Restore autostop if it was previously set (autostop > 0)
+                if stored_autostop > 0:
+                    logger.warning(f'Restoring cluster {cluster_name!r} with '
+                                   f'autostop set to {stored_autostop} minutes'
+                                   f'. To turn off autostop, run: '
+                                   f'`sky autostop {cluster_name} --cancel`')
+                    idle_minutes_to_autostop = stored_autostop
+                    # Only restore 'down' if it was explicitly set and we're
+                    # restoring autostop
+                    if stored_to_down:
+                        down = stored_to_down
+                elif stored_autostop == 0:
+                    logger.warning(
+                        f'Autostop was previously set to 0 minutes '
+                        f'for cluster {cluster_name!r} so it will '
+                        'not be restored. To turn on autostop, run: '
+                        f'`sky autostop {cluster_name} -i <minutes>`')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
@@ -1206,7 +1232,14 @@ def realtime_kubernetes_gpu_availability(
     quantity_filter: Optional[int] = None,
     is_ssh: Optional[bool] = None
 ) -> List[Tuple[str, List[models.RealtimeGpuAvailability]]]:
+    """Gets the real-time Kubernetes GPU availability.
 
+    Returns:
+        A list of tuples, where each tuple contains:
+        - context (str): The Kubernetes context.
+        - availability_list (List[models.RealtimeGpuAvailability]): A list
+            of RealtimeGpuAvailability objects for that context.
+    """
     if context is None:
         # Include contexts from both Kubernetes and SSH clouds
         kubernetes_contexts = clouds.Kubernetes.existing_allowed_contexts()
@@ -1288,6 +1321,119 @@ def realtime_kubernetes_gpu_availability(
     return availability_lists
 
 
+def realtime_slurm_gpu_availability(
+        slurm_cluster_name: Optional[str] = None,
+        name_filter: Optional[str] = None,
+        quantity_filter: Optional[int] = None,
+        env_vars: Optional[Dict[str, str]] = None,
+        **kwargs) -> List[Tuple[str, List[models.RealtimeGpuAvailability]]]:
+    """Gets Slurm real-time GPU availability grouped by partition.
+
+    This function calls the Slurm backend to fetch GPU info.
+
+    Args:
+        name_filter: Optional name filter for GPUs.
+        quantity_filter: Optional quantity filter for GPUs.
+        env_vars: Environment variables (may be needed for backend).
+        kwargs: Additional keyword arguments.
+
+    Returns:
+        A list of tuples, where each tuple contains:
+        - partition_name (str): The name of the Slurm partition.
+        - availability_list (List[models.RealtimeGpuAvailability]): A list
+            of RealtimeGpuAvailability objects for that partition.
+        Example structure:
+        [
+            ('gpu_partition_1', [
+                RealtimeGpuAvailability(gpu='V100', counts=[4, 8],
+                                        capacity=16, available=10),
+                RealtimeGpuAvailability(gpu='A100', counts=[8],
+                                        capacity=8, available=0),
+            ]),
+            ('gpu_partition_2', [
+                RealtimeGpuAvailability(gpu='V100', counts=[4],
+                                        capacity=4, available=4),
+            ])
+        ]
+
+    Raises:
+        ValueError: If Slurm is not configured or no matching GPUs are found.
+        exceptions.NotSupportedError: If Slurm is not enabled or configured.
+    """
+    del env_vars, kwargs  # Currently unused
+
+    if slurm_cluster_name is None:
+        # Include contexts from both Kubernetes and SSH clouds
+        slurm_cluster_names = clouds.Slurm.existing_allowed_clusters()
+    else:
+        slurm_cluster_names = [slurm_cluster_name]
+
+    # Optional: Check if Slurm is enabled first
+    # enabled = global_user_state.get_enabled_clouds(
+    #     capability=sky_cloud.CloudCapability.COMPUTE)
+    # if not clouds.Slurm() in enabled:
+    #    raise exceptions.NotSupportedError(
+    #       "Slurm is not enabled. Run 'sky check' to enable it.")
+
+    def realtime_slurm_gpu_availability_single(
+            slurm_cluster_name: str) -> List[models.RealtimeGpuAvailability]:
+        try:
+            # This function now returns aggregated data per GPU type:
+            # Tuple[Dict[str, List[InstanceTypeInfo]], Dict[str, int],
+            # Dict[str, int]]
+            # (qtys_map, total_capacity, total_available)
+            accelerator_counts, total_capacity, total_available = (
+                catalog.list_accelerator_realtime(
+                    gpus_only=True,  # Ensure we only query for GPUs
+                    name_filter=name_filter,
+                    # Pass None for region_filter here; filtering happens
+                    # inside if needed, but we want all partitions returned
+                    # for grouping.
+                    region_filter=slurm_cluster_name,
+                    quantity_filter=quantity_filter,
+                    clouds='slurm',
+                    case_sensitive=False,
+                ))
+        except exceptions.NotSupportedError as e:
+            logger.error(f'Failed to query Slurm GPU availability: {e}')
+            raise
+        except ValueError as e:
+            # Re-raise ValueError if no GPUs are found matching the filters
+            logger.error(f'Error querying Slurm GPU availability: {e}')
+            raise
+        except Exception as e:
+            logger.error(
+                'Error querying Slurm GPU availability: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+            raise ValueError(
+                f'Error querying Slurm GPU availability: {e}') from e
+
+        # --- Format the output ---
+        realtime_gpu_availability_list: List[
+            models.RealtimeGpuAvailability] = []
+        for gpu_type, _ in sorted(accelerator_counts.items()):
+            realtime_gpu_availability_list.append(
+                models.RealtimeGpuAvailability(
+                    gpu_type,
+                    accelerator_counts.pop(gpu_type),
+                    total_capacity[gpu_type],
+                    total_available[gpu_type],
+                ))
+        return realtime_gpu_availability_list
+
+    parallel_queried = subprocess_utils.run_in_parallel(
+        realtime_slurm_gpu_availability_single, slurm_cluster_names)
+    availability_lists: List[Tuple[str,
+                                   List[models.RealtimeGpuAvailability]]] = []
+    for slurm_cluster_name, queried in zip(slurm_cluster_names,
+                                           parallel_queried):
+        if len(queried) == 0:
+            logger.debug(f'No gpus found in Slurm cluster {slurm_cluster_name}')
+            continue
+        availability_lists.append((slurm_cluster_name, queried))
+    return availability_lists
+
+
 # =================
 # = Local Cluster =
 # =================
@@ -1302,41 +1448,6 @@ def local_up(gpus: bool,
 def local_down(name: Optional[str] = None) -> None:
     """Tears down the Kubernetes cluster started by local_up."""
     kubernetes_deploy_utils.teardown_local_cluster(name)
-
-
-@usage_lib.entrypoint
-def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
-    """Deploys or tears down a Kubernetes cluster on SSH targets.
-
-    Args:
-        infra: Name of the cluster configuration in ssh_node_pools.yaml.
-            If None, the first cluster in the file is used.
-        cleanup: If True, clean up the cluster instead of deploying.
-    """
-    kubernetes_deploy_utils.deploy_ssh_cluster(
-        cleanup=cleanup,
-        infra=infra,
-    )
-
-
-@usage_lib.entrypoint
-def ssh_status(context_name: str) -> Tuple[bool, str]:
-    """Check the status of an SSH Node Pool context.
-
-    Args:
-        context_name: The SSH context name (e.g., 'ssh-my-cluster')
-
-    Returns:
-        Tuple[bool, str]: (is_ready, reason)
-            - is_ready: True if the SSH Node Pool is ready, False otherwise
-            - reason: Explanation of the status
-    """
-    try:
-        is_ready, reason = clouds.SSH.check_single_context(context_name)
-        return is_ready, reason
-    except Exception as e:  # pylint: disable=broad-except
-        return False, ('Failed to check SSH context: '
-                       f'{common_utils.format_exception(e)}')
 
 
 def get_all_contexts() -> List[str]:

@@ -65,7 +65,8 @@ AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 # TODO(tian): We might need to be careful that service logs can take a lot of
 # disk space. Maybe we could use a larger disk size, migrate to cloud storage or
 # do some log rotation.
-CONTROLLER_RESOURCES = {'cpus': '4+', 'disk_size': 200}
+# Set default minimal memory to 8GB to allow at least one service to run.
+CONTROLLER_RESOURCES = {'cpus': '4+', 'memory': '8+', 'disk_size': 200}
 # Autostop config for the jobs controller. These are the default values for
 # serve.controller.autostop in ~/.sky/config.yaml.
 CONTROLLER_AUTOSTOP = {

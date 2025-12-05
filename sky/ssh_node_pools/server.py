@@ -4,12 +4,11 @@ from typing import Any, Dict, List
 
 import fastapi
 
-from sky import core as sky_core
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
-from sky.ssh_node_pools import core as ssh_node_pools_core
+from sky.ssh_node_pools import core
 from sky.utils import common_utils
 
 router = fastapi.APIRouter()
@@ -19,7 +18,7 @@ router = fastapi.APIRouter()
 def get_ssh_node_pools() -> Dict[str, Any]:
     """Get all SSH Node Pool configurations."""
     try:
-        return ssh_node_pools_core.get_all_pools()
+        return core.get_all_pools()
     except Exception as e:
         raise fastapi.HTTPException(
             status_code=500,
@@ -31,7 +30,7 @@ def get_ssh_node_pools() -> Dict[str, Any]:
 def update_ssh_node_pools(pools_config: Dict[str, Any]) -> Dict[str, str]:
     """Update SSH Node Pool configurations."""
     try:
-        ssh_node_pools_core.update_pools(pools_config)
+        core.update_pools(pools_config)
         return {'status': 'success'}
     except Exception as e:
         raise fastapi.HTTPException(status_code=400,
@@ -43,7 +42,7 @@ def update_ssh_node_pools(pools_config: Dict[str, Any]) -> Dict[str, str]:
 def delete_ssh_node_pool(pool_name: str) -> Dict[str, str]:
     """Delete a SSH Node Pool configuration."""
     try:
-        if ssh_node_pools_core.delete_pool(pool_name):
+        if core.delete_pool(pool_name):
             return {'status': 'success'}
         else:
             raise fastapi.HTTPException(
@@ -70,8 +69,7 @@ async def upload_ssh_key(request: fastapi.Request) -> Dict[str, str]:
                                         detail='Missing key_name or key_file')
 
         key_content = await key_file.read()
-        key_path = ssh_node_pools_core.upload_ssh_key(key_name,
-                                                      key_content.decode())
+        key_path = core.upload_ssh_key(key_name, key_content.decode())
 
         return {'status': 'success', 'key_path': key_path}
     except fastapi.HTTPException:
@@ -87,7 +85,7 @@ async def upload_ssh_key(request: fastapi.Request) -> Dict[str, str]:
 def list_ssh_keys() -> List[str]:
     """List available SSH keys."""
     try:
-        return ssh_node_pools_core.list_ssh_keys()
+        return core.list_ssh_keys()
     except Exception as e:
         exception_msg = common_utils.format_exception(e)
         raise fastapi.HTTPException(
@@ -104,7 +102,7 @@ async def deploy_ssh_node_pool(request: fastapi.Request,
             request_id=request.state.request_id,
             request_name=request_names.RequestName.SSH_NODE_POOLS_UP,
             request_body=ssh_up_body,
-            func=sky_core.ssh_up,
+            func=core.ssh_up,
             schedule_type=requests_lib.ScheduleType.LONG,
         )
 
@@ -129,7 +127,7 @@ async def deploy_ssh_node_pool_general(
             request_id=request.state.request_id,
             request_name=request_names.RequestName.SSH_NODE_POOLS_UP,
             request_body=ssh_up_body,
-            func=sky_core.ssh_up,
+            func=core.ssh_up,
             schedule_type=requests_lib.ScheduleType.LONG,
         )
 
@@ -155,7 +153,7 @@ async def down_ssh_node_pool(request: fastapi.Request,
             request_id=request.state.request_id,
             request_name=request_names.RequestName.SSH_NODE_POOLS_DOWN,
             request_body=ssh_up_body,
-            func=sky_core.ssh_up,  # Reuse ssh_up function with cleanup=True
+            func=core.ssh_up,  # Reuse ssh_up function with cleanup=True
             schedule_type=requests_lib.ScheduleType.LONG,
         )
 
@@ -183,7 +181,7 @@ async def down_ssh_node_pool_general(
             request_id=request.state.request_id,
             request_name=request_names.RequestName.SSH_NODE_POOLS_DOWN,
             request_body=ssh_up_body,
-            func=sky_core.ssh_up,  # Reuse ssh_up function with cleanup=True
+            func=core.ssh_up,  # Reuse ssh_up function with cleanup=True
             schedule_type=requests_lib.ScheduleType.LONG,
         )
 
@@ -206,7 +204,7 @@ def get_ssh_node_pool_status(pool_name: str) -> Dict[str, str]:
     try:
         # Call ssh_status to check the context
         context_name = f'ssh-{pool_name}'
-        is_ready, reason = sky_core.ssh_status(context_name)
+        is_ready, reason = core.ssh_status(context_name)
 
         # Strip ANSI escape codes from the reason text
         def strip_ansi_codes(text):

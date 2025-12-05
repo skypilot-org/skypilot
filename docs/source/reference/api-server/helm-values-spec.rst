@@ -233,6 +233,10 @@ Below is the available helm value keys and the default value of each key:
     :ref:`tenantId <helm-values-nebiusCredentials-tenantId>`: null
     :ref:`nebiusSecretName <helm-values-nebiusCredentials-nebiusSecretName>`: nebius-credentials
 
+  :ref:`coreweaveCredentials <helm-values-coreweaveCredentials>`:
+    :ref:`enabled <helm-values-coreweaveCredentials-enabled>`: false
+    :ref:`coreweaveSecretName <helm-values-coreweaveCredentials-coreweaveSecretName>`: coreweave-credentials
+
   :ref:`extraInitContainers <helm-values-extraInitContainers>`: null
 
   :ref:`podSecurityContext <helm-values-podSecurityContext>`: {}
@@ -2105,6 +2109,44 @@ Default: ``nebius-credentials``
 
   nebiusCredentials:
     nebiusSecretName: nebius-credentials
+
+.. _helm-values-coreweaveCredentials:
+
+``coreweaveCredentials``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. _helm-values-coreweaveCredentials-enabled:
+
+``coreweaveCredentials.enabled``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable CoreWeave CAIOS credentials for the API server.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  coreweaveCredentials:
+    enabled: false
+
+.. _helm-values-coreweaveCredentials-coreweaveSecretName:
+
+``coreweaveCredentials.coreweaveSecretName``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Name of the secret containing the CoreWeave CAIOS credentials. Only used if enabled is true. The secret should contain the following keys:
+
+- ``cw.config``: CoreWeave CAIOS config file
+- ``cw.credentials``: CoreWeave CAIOS credentials file
+
+Refer to :ref:`CoreWeave CAIOS installation <coreweave-caios-installation>` for more details.
+
+Default: ``coreweave-credentials``
+
+.. code-block:: yaml
+
+  coreweaveCredentials:
+    coreweaveSecretName: coreweave-credentials
 
 .. _helm-values-extraInitContainers:
 

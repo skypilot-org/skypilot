@@ -69,6 +69,26 @@ class PermissionService:
             'Enforcer should be initialized after _lazy_initialize()')
         return self.enforcer
 
+    def _get_plugin_rbac_rules(self):
+        """Get RBAC rules from loaded plugins.
+
+        Returns:
+            Dictionary of plugin RBAC rules, or empty dict if plugins module
+            is not available or no rules are defined.
+        """
+        try:
+            # pylint: disable=import-outside-toplevel
+            from sky.server import plugins as server_plugins
+            return server_plugins.get_plugin_rbac_rules()
+        except ImportError:
+            # Plugin module not available (e.g., not running as server)
+            logger.debug(
+                'Plugin module not available, skipping plugin RBAC rules')
+            return {}
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to get plugin RBAC rules: {e}')
+            return {}
+
     def _maybe_initialize_basic_auth_user(self) -> None:
         """Initialize basic auth user if it is enabled."""
         basic_auth = os.environ.get(constants.SKYPILOT_INITIAL_BASIC_AUTH)
@@ -101,9 +121,12 @@ class PermissionService:
         enforcer = self._ensure_enforcer()
         existing_policies = enforcer.get_policy()
 
+        # Get plugin RBAC rules dynamically
+        plugin_rules = self._get_plugin_rbac_rules()
+
         # If we already have policies for the expected roles, skip
         # initialization
-        role_permissions = rbac.get_role_permissions()
+        role_permissions = rbac.get_role_permissions(plugin_rules=plugin_rules)
         expected_policies = []
         for role, permissions in role_permissions.items():
             if permissions['permissions'] and 'blocklist' in permissions[

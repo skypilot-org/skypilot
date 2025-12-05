@@ -582,6 +582,43 @@ Following tabs describe how to configure credentials for different clouds on the
               --set r2Credentials.enabled=true \
               --set r2Credentials.r2SecretName=r2-credentials
 
+    .. tab-item:: CoreWeave
+        :sync: coreweave-creds-tab
+
+        SkyPilot API server uses the same credentials as the :ref:`CoreWeave CAIOS installation <coreweave-caios-installation>` to authenticate with CoreWeave Object Storage.
+
+        Once you have the credentials configured locally, you can store them in a Kubernetes secret:
+
+        .. code-block:: bash
+
+            kubectl create secret generic coreweave-credentials \
+              --namespace $NAMESPACE \
+              --from-file=cw.config=$HOME/.coreweave/cw.config \
+              --from-file=cw.credentials=$HOME/.coreweave/cw.credentials
+
+        When installing or upgrading the Helm chart, enable CoreWeave CAIOS credentials by setting ``coreweaveCredentials.enabled=true``:
+
+        .. code-block:: bash
+
+            # --reuse-values keeps the Helm chart values set in the previous step
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set coreweaveCredentials.enabled=true
+
+        .. dropdown:: Use existing CoreWeave CAIOS credentials
+
+            You can also set the following values to use a secret that already contains your CoreWeave CAIOS credentials:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set coreweaveCredentials.enabled=true \
+                    --set coreweaveCredentials.coreweaveSecretName=your_secret_name
+
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
 

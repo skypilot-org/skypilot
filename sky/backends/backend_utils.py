@@ -147,6 +147,19 @@ CLUSTER_TUNNEL_LOCK_TIMEOUT_SECONDS = 10.0
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 
+# The maximum size of a command line arguments is 128 KB, i.e. the command
+# executed with /bin/sh should be less than 128KB.
+# https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
+#
+# If a user have very long run or setup commands, the generated command may
+# exceed the limit, as we directly include scripts in job submission commands.
+# If the command is too long, we instead write it to a file, rsync and execute
+# it.
+#
+# We use 100KB as a threshold to be safe for other arguments that
+# might be added during ssh.
+_MAX_INLINE_SCRIPT_LENGTH = 100 * 1024
+
 _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
                             'please retry after a while.')
 
@@ -223,6 +236,18 @@ _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH = [
 
 _ACK_MESSAGE = 'ack'
 _FORWARDING_FROM_MESSAGE = 'Forwarding from'
+
+
+def is_command_length_over_limit(command: str) -> bool:
+    """Check if the length of the command exceeds the limit.
+
+    We calculate the length of the command after quoting the command twice as
+    when it is executed by the CommandRunner, the command will be quoted twice
+    to ensure the correctness, which will add significant length to the command.
+    """
+
+    quoted_length = len(shlex.quote(shlex.quote(command)))
+    return quoted_length > _MAX_INLINE_SCRIPT_LENGTH
 
 
 def is_ip(s: str) -> bool:
@@ -860,12 +885,6 @@ def write_cluster_config(
     if to_provision.labels:
         labels.update(to_provision.labels)
 
-    # Dump the Ray ports to a file for Ray job submission
-    dump_port_command = (
-        f'{constants.SKY_PYTHON_CMD} -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
-        f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", encoding="utf-8"))\''
-    )
-
     # We disable conda auto-activation if the user has specified a docker image
     # to use, which is likely to already have a conda environment activated.
     conda_auto_activate = ('true' if to_provision.extract_docker_image() is None
@@ -952,6 +971,9 @@ def write_cluster_config(
                         '{conda_auto_activate}',
                         conda_auto_activate).replace('{is_custom_docker}',
                                                      is_custom_docker),
+                # Currently only used by Slurm. For other clouds, it is
+                # already part of ray_skypilot_installation_commands
+                'setup_sky_dirs_commands': constants.SETUP_SKY_DIRS_COMMANDS,
                 'ray_skypilot_installation_commands':
                     (constants.RAY_SKYPILOT_INSTALLATION_COMMANDS.replace(
                         '{sky_wheel_hash}',
@@ -969,7 +991,7 @@ def write_cluster_config(
                 'ray_port': constants.SKY_REMOTE_RAY_PORT,
                 'ray_dashboard_port': constants.SKY_REMOTE_RAY_DASHBOARD_PORT,
                 'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
-                'dump_port_command': dump_port_command,
+                'dump_port_command': instance_setup.DUMP_RAY_PORTS,
                 # Sky-internal constants.
                 'sky_ray_cmd': constants.SKY_RAY_CMD,
                 # pip install needs to have python env activated to make sure
@@ -1111,17 +1133,21 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
     """
     config = yaml_utils.read_yaml(tmp_yaml_path)
     # Check the availability of the cloud type.
-    if isinstance(cloud, (
+    if isinstance(
+            cloud,
+        (
             clouds.AWS,
             clouds.OCI,
             clouds.SCP,
+            # TODO(jwj): Handle Slurm-specific auth logic
+            clouds.Slurm,
             clouds.Vsphere,
             clouds.Cudo,
             clouds.Paperspace,
             clouds.Azure,
             clouds.DO,
             clouds.Nebius,
-    )):
+        )):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)
@@ -2367,7 +2393,12 @@ def _update_cluster_status(
     # remain healthy for a while before the cloud completely preempts the VMs.
     # We have mitigated this by again first querying the VM state from the cloud
     # provider.
-    if all_nodes_up and run_ray_status_to_check_ray_cluster_healthy():
+    cloud = handle.launched_resources.cloud
+
+    # For Slurm, skip Ray health check since it doesn't use Ray.
+    should_check_ray = cloud is not None and cloud.uses_ray()
+    if all_nodes_up and (not should_check_ray or
+                         run_ray_status_to_check_ray_cluster_healthy()):
         # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.

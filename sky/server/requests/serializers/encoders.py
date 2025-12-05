@@ -266,6 +266,23 @@ def encode_realtime_gpu_availability(
     return encoded
 
 
+@register_encoder('realtime_slurm_gpu_availability')
+def encode_realtime_slurm_gpu_availability(
+    return_value: List[Tuple[str,
+                             List[Any]]]) -> List[Tuple[str, List[List[Any]]]]:
+    # Convert RealtimeGpuAvailability namedtuples to lists
+    # for JSON serialization.
+    encoded = []
+    for context, gpu_list in return_value:
+        converted_gpu_list = []
+        for gpu in gpu_list:
+            assert isinstance(gpu, models.RealtimeGpuAvailability), (
+                f'Expected RealtimeGpuAvailability, got {type(gpu)}')
+            converted_gpu_list.append(list(gpu))
+        encoded.append((context, converted_gpu_list))
+    return encoded
+
+
 @register_encoder('list_accelerators')
 def encode_list_accelerators(
         return_value: Dict[str, List[Any]]) -> Dict[str, Any]:

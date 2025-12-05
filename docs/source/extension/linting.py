@@ -34,6 +34,7 @@ ALLOWED_TERMS = {
     'SDK',
     'TPU',
     'Ray',
+    'Slurm',
     'LoadBalancer',
     'Nginx',
     'Kubernetes',
