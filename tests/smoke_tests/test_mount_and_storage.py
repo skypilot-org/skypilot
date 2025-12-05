@@ -52,6 +52,7 @@ from sky.utils import controller_utils
 
 # ---------- file_mounts ----------
 @pytest.mark.no_vast  # VAST does not support num_nodes > 1 yet
+@pytest.mark.no_novita  # Novita does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 and storage mounting yet.
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet and storage mounting yet.
@@ -114,6 +115,7 @@ def test_oci_mounts():
 @pytest.mark.no_vast  # Requires GCP
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
 @pytest.mark.no_hyperbolic  # Requires GCP to be enabled
+@pytest.mark.no_novita  # Requires GCP to be enabled
 @pytest.mark.no_shadeform  # Requires GCP to be enabled
 @pytest.mark.no_seeweb  # Requires GCP to be enabled
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
@@ -706,6 +708,7 @@ def test_ibm_storage_mounts():
 
 
 @pytest.mark.no_vast  # VAST does not support multi-cloud features
+@pytest.mark.no_novita  # Novita does not support multi-cloud features
 @pytest.mark.no_shadeform  # Shadeform does not support multi-cloud features
 @pytest.mark.no_fluidstack  # FluidStack doesn't have stable package installation
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-cloud features
@@ -1522,6 +1525,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_novita
     @pytest.mark.no_shadeform  # Requires other clouds to be enabled
     @pytest.mark.no_kubernetes
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
@@ -1555,6 +1559,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_novita
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('store_type', [
@@ -1623,6 +1628,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_novita
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_kubernetes
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
@@ -1674,6 +1680,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_novita
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_kubernetes
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
@@ -1709,6 +1716,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
     @pytest.mark.no_postgres
+    @pytest.mark.no_novita
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_kubernetes
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
@@ -1748,6 +1756,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_novita
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.no_dependency  # Storage tests required full dependency installed
@@ -1775,6 +1784,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_novita
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.no_dependency  # Storage tests required full dependency installed
@@ -1800,6 +1810,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_novita
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_dependency  # Storage tests required full dependency installed
     @pytest.mark.parametrize(
@@ -1894,6 +1905,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_novita
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.no_dependency  # Storage tests required full dependency installed
@@ -1926,6 +1938,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_novita
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.no_dependency  # Storage tests required full dependency installed
@@ -1985,6 +1998,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_novita
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_postgres
     @pytest.mark.no_kubernetes
@@ -2003,6 +2017,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_novita
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.no_dependency  # Storage tests required full dependency installed
@@ -2045,6 +2060,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_novita
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.parametrize('invalid_name_list, store_type',
@@ -2077,6 +2093,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_novita
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.no_dependency  # Storage tests required full dependency installed
@@ -2130,6 +2147,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_hyperbolic
+    @pytest.mark.no_novita
     @pytest.mark.no_shadeform  # Requires AWS or S3
     @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
     @pytest.mark.no_dependency  # Storage tests required full dependency installed

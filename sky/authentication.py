@@ -36,6 +36,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import runpod
 from sky.adaptors import seeweb as seeweb_adaptor
+from sky.adaptors import novita as novita_adaptor
 from sky.adaptors import shadeform as shadeform_adaptor
 from sky.adaptors import vast
 from sky.provision.fluidstack import fluidstack_utils
@@ -375,6 +376,28 @@ def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config.setdefault('auth', {})
     config['auth']['ssh_user'] = 'ubuntu'
     config['auth']['ssh_public_key'] = public_key_path
+
+    return configure_ssh_info(config)
+
+
+def setup_novita_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Novita.
+    
+    Note: Novita only requires API key authentication. SSH keys are generated
+    locally for connecting to instances, but are not uploaded to Novita.
+    Instances are created with default SSH access configured by Novita.
+    """
+    # Generate SSH key pair for local use (connecting to instances)
+    # Novita doesn't require SSH keys to be uploaded to their platform
+    _, public_key_path = auth_utils.get_or_generate_keys()
+
+    # Configure SSH info in the config
+    # Novita instances use default SSH configuration provided by the platform
+    config.setdefault('auth', {})
+    config['auth']['ssh_public_key'] = public_key_path
+    # SSH user is typically 'root' or 'ubuntu' depending on the image
+    # This will be determined from the instance metadata
+    config['auth']['ssh_user'] = 'root'  # Default, may be overridden by instance info
 
     return configure_ssh_info(config)
 
