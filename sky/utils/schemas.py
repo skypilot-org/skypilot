@@ -460,8 +460,8 @@ def get_volume_schema():
                 'type': 'string',
                 'pattern': constants.MEMORY_SIZE_PATTERN,
             },
-            'resource_name': {
-                'type': 'string',
+            'use_existing': {
+                'type': 'boolean',
             },
             'config': {
                 'type': 'object',
@@ -573,6 +573,9 @@ def get_volume_mount_schema():
             },
             'volume_name': {
                 'type': 'string',
+            },
+            'is_ephemeral': {
+                'type': 'boolean',
             },
             'volume_config': {
                 'type': 'object',
@@ -791,23 +794,6 @@ def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
     return new_schema
 
 
-def _experimental_task_schema() -> dict:
-    # TODO: experimental.config_overrides has been deprecated in favor of the
-    # top-level `config` field. Remove in v0.11.0.
-    config_override_schema = _filter_schema(
-        get_config_schema(), constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)
-    return {
-        'experimental': {
-            'type': 'object',
-            'required': [],
-            'additionalProperties': False,
-            'properties': {
-                'config_overrides': config_override_schema,
-            }
-        }
-    }
-
-
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -918,7 +904,6 @@ def get_task_schema():
             '_metadata': {
                 'type': 'object',
             },
-            **_experimental_task_schema(),
         }
     }
 
@@ -1043,10 +1028,20 @@ class RemoteIdentityOptions(enum.Enum):
 
 def get_default_remote_identity(cloud: str) -> str:
     """Get the default remote identity for the specified cloud."""
-    if cloud == 'kubernetes':
+    if cloud in ('kubernetes', 'ssh'):
         return RemoteIdentityOptions.SERVICE_ACCOUNT.value
     return RemoteIdentityOptions.LOCAL_CREDENTIALS.value
 
+
+_CAPABILITIES_SCHEMA = {
+    'capabilities': {
+        'type': 'array',
+        'items': {
+            'type': 'string',
+            'case_insensitive_enum': ['compute', 'storage']
+        },
+    }
+}
 
 _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
@@ -1070,25 +1065,15 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     },
 }
 
-_CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
-    # TODO(kevin): Remove 'networking' in v0.13.0.
-    'networking': {
-        'type': 'string',
-        'case_insensitive_enum': [
-            type.value for type in kubernetes_enums.KubernetesNetworkingMode
-        ],
-    },
-    'ports': {
-        'type': 'string',
-        'case_insensitive_enum': [
-            type.value for type in kubernetes_enums.KubernetesPortMode
-        ],
-    },
+_CONTEXT_CONFIG_SCHEMA_MINIMAL = {
     'pod_config': {
         'type': 'object',
         'required': [],
         # Allow arbitrary keys since validating pod spec is hard
         'additionalProperties': True,
+    },
+    'provision_timeout': {
+        'type': 'integer',
     },
     'custom_metadata': {
         'type': 'object',
@@ -1104,9 +1089,23 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             }]
         },
     },
-    'provision_timeout': {
-        'type': 'integer',
+}
+
+_CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    # TODO(kevin): Remove 'networking' in v0.13.0.
+    'networking': {
+        'type': 'string',
+        'case_insensitive_enum': [
+            type.value for type in kubernetes_enums.KubernetesNetworkingMode
+        ],
     },
+    'ports': {
+        'type': 'string',
+        'case_insensitive_enum': [
+            type.value for type in kubernetes_enums.KubernetesPortMode
+        ],
+    },
+    **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
     'autoscaler': {
         'type': 'string',
         'case_insensitive_enum': [
@@ -1154,6 +1153,12 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
     },
     'remote_identity': {
         'type': 'string',
+    },
+    'post_provision_runcmd': {
+        'type': 'array',
+        'items': {
+            'type': 'string'
+        },
     }
 }
 
@@ -1257,6 +1262,7 @@ def get_config_schema():
                         }]
                     },
                 },
+                **_CAPABILITIES_SCHEMA,
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -1314,6 +1320,7 @@ def get_config_schema():
                         }
                     ],
                 },
+                **_CAPABILITIES_SCHEMA,
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -1376,12 +1383,22 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                'pod_config': {
+                'context_configs': {
                     'type': 'object',
                     'required': [],
-                    # Allow arbitrary keys since validating pod spec is hard
-                    'additionalProperties': True,
+                    'properties': {},
+                    # Properties are ssh cluster names, which are the
+                    # kubernetes context names without `ssh-` prefix.
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
+                        },
+                    },
                 },
+                **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
             }
         },
         'oci': {
@@ -1538,7 +1555,7 @@ def get_config_schema():
         }
     }
 
-    daemon_schema = {
+    daemon_schema: Dict[str, Any] = {
         'type': 'object',
         'required': [],
         'additionalProperties': False,
@@ -1644,7 +1661,8 @@ def get_config_schema():
                         },
                         'disabled': {
                             'type': 'boolean'
-                        }
+                        },
+                        **_CAPABILITIES_SCHEMA,
                     },
                     'additionalProperties': False,
                 },
@@ -1657,6 +1675,7 @@ def get_config_schema():
                         'disabled': {
                             'type': 'boolean'
                         },
+                        **_CAPABILITIES_SCHEMA,
                     },
                     'additionalProperties': False,
                 },

@@ -300,6 +300,7 @@ _current_user: Optional['models.User'] = None
 _current_request_id: Optional[str] = None
 
 
+# TODO(aylei,hailong): request context should be contextual
 def set_request_context(client_entrypoint: Optional[str],
                         client_command: Optional[str],
                         using_remote_api_server: bool,
@@ -1115,7 +1116,7 @@ def release_memory():
         gc.collect()
         if sys.platform.startswith('linux'):
             # Will fail on musl (alpine), but at least it works on our
-            # offical docker images.
+            # official docker images.
             libc = ctypes.CDLL('libc.so.6')
             return libc.malloc_trim(0)
         return 0

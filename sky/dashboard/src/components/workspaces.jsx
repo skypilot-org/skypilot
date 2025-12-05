@@ -48,7 +48,10 @@ import { REFRESH_INTERVALS } from '@/lib/config';
 import cachePreloader from '@/lib/cache-preloader';
 import { apiClient } from '@/data/connectors/client';
 import { sortData } from '@/data/utils';
-import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
+import {
+  CLOUD_CANONICALIZATIONS,
+  CLUSTER_NOT_UP_ERROR,
+} from '@/data/connectors/constants';
 import Link from 'next/link';
 
 // Workspace-aware API functions (cacheable)
@@ -93,11 +96,9 @@ export async function getWorkspaceClusters(workspaceName) {
     );
     return filteredClusters;
   } catch (error) {
-    console.error(
-      `Error fetching clusters for workspace ${workspaceName}:`,
-      error
-    );
-    return [];
+    const msg = `Error fetching clusters for workspace ${workspaceName}: ${error}`;
+    console.error(msg);
+    throw new Error(msg);
   }
 }
 
@@ -112,8 +113,49 @@ export async function getWorkspaceManagedJobs(workspaceName) {
       override_skypilot_config: { active_workspace: workspaceName },
     });
 
+    // Check if initial request succeeded
+    if (!response.ok) {
+      const msg = `Initial API request to get managed jobs failed with status ${response.status} for workspace ${workspaceName}`;
+      throw new Error(msg);
+    }
+
     const id = response.headers.get('X-Skypilot-Request-ID');
+    // Handle empty request ID
+    if (!id) {
+      const msg = `No request ID received from server for getting managed jobs for workspace ${workspaceName}`;
+      throw new Error(msg);
+    }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    let errorMessage = fetchedData.statusText;
+    if (fetchedData.status === 500) {
+      try {
+        const data = await fetchedData.json();
+        if (data.detail && data.detail.error) {
+          try {
+            const error = JSON.parse(data.detail.error);
+            // Handle specific error types
+            if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
+              return { jobs: [] };
+            } else {
+              errorMessage = error.message || String(data.detail.error);
+            }
+          } catch (jsonError) {
+            console.error(
+              'Error parsing JSON from data.detail.error:',
+              jsonError
+            );
+            errorMessage = String(data.detail.error);
+          }
+        }
+      } catch (parseError) {
+        console.error('Error parsing response JSON:', parseError);
+        errorMessage = String(parseError);
+      }
+    }
+    if (!fetchedData.ok) {
+      const msg = `API request to get managed jobs result failed with status ${fetchedData.status}, error: ${errorMessage} for workspace ${workspaceName}`;
+      throw new Error(msg);
+    }
     const data = await fetchedData.json();
     const jobsData = data.return_value
       ? JSON.parse(data.return_value)
@@ -134,11 +176,9 @@ export async function getWorkspaceManagedJobs(workspaceName) {
 
     return jobsData;
   } catch (error) {
-    console.error(
-      `Error fetching managed jobs for workspace ${workspaceName}:`,
-      error
-    );
-    return { jobs: [] };
+    const msg = `Error fetching managed jobs for workspace ${workspaceName}: ${error}`;
+    console.error(msg);
+    throw new Error(msg);
   }
 }
 
@@ -407,18 +447,28 @@ export function Workspaces() {
       // Fetch data for each workspace in parallel using workspace-aware API calls
       const workspaceDataPromises = configuredWorkspaceNames.map(
         async (wsName) => {
-          const [enabledClouds, clusters, managedJobs] = await Promise.all([
-            dashboardCache.get(getEnabledClouds, [wsName]),
-            dashboardCache.get(getWorkspaceClusters, [wsName]),
-            dashboardCache.get(getWorkspaceManagedJobs, [wsName]),
-          ]);
+          try {
+            const [enabledClouds, clusters, managedJobs] = await Promise.all([
+              dashboardCache.get(getEnabledClouds, [wsName]),
+              dashboardCache.get(getWorkspaceClusters, [wsName]),
+              dashboardCache.get(getWorkspaceManagedJobs, [wsName]),
+            ]);
 
-          return {
-            workspaceName: wsName,
-            enabledClouds,
-            clusters: clusters || [],
-            managedJobs: managedJobs || { jobs: [] },
-          };
+            return {
+              workspaceName: wsName,
+              enabledClouds,
+              clusters: clusters || [],
+              managedJobs: managedJobs || { jobs: [] },
+            };
+          } catch (error) {
+            console.error('Error fetching workspace data:', error);
+            return {
+              workspaceName: wsName,
+              enabledClouds: [],
+              clusters: [],
+              managedJobs: { jobs: [] },
+            };
+          }
         }
       );
 

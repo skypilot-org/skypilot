@@ -27,6 +27,9 @@ SkyPilot is a system to run, manage, and scale AI workloads on any AI infrastruc
 SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 **Infra teams** get a unified control plane to manage any AI compute — with advanced scheduling, scaling, and orchestration.
 
+..  Abstractions image source: https://drive.google.com/file/d/1egDS0xHXFUbUKS_63RyqYQLaZxmrSLZQ/view?usp=sharing
+..  To update: edit the .key, export to PDF, open in Photoshop, crop, save as PNG.
+
 .. image:: ../images/skypilot-abstractions-long-2.png
     :width: 90%
     :align: center
@@ -63,7 +66,7 @@ SkyPilot **makes Kubernetes easy for AI & Infra teams**:
 
 SkyPilot **unifies multiple clusters, clouds, and hardware**:
 
-- One interface to use reserved GPUs, Kubernetes clusters, or 16+ clouds
+- One interface to use reserved GPUs, Kubernetes clusters, Slurm clusters, or 20+ clouds
 - :ref:`Flexible provisioning <auto-failover>` of GPUs, TPUs, CPUs, with smart failover
 - :ref:`Team deployment <sky-api-server>` and resource sharing
 
@@ -205,7 +208,7 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Nebius, Lambda Cloud, RunPod, Fluidstack,
+Current supported infra: Kubernetes, Slurm, AWS, GCP, Azure, OCI, Nebius, Lambda Cloud, RunPod, Fluidstack,
 Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai, VMware vSphere, Seeweb, Prime Intellect.
 
 .. raw:: html
@@ -301,6 +304,7 @@ Read the research:
    Multi-Node Jobs <../running-jobs/distributed-jobs>
    Many Parallel Jobs <../running-jobs/many-jobs>
    Model Training Guide <../reference/training-guide>
+   Using a Pool of Workers <../examples/pools>
 
 .. toctree::
    :hidden:
@@ -316,6 +320,7 @@ Read the research:
    :caption: Infra Choices
 
    ../reference/kubernetes/index
+   ../reference/slurm/index
    Using Existing Machines <../reservations/existing-machines>
    ../reservations/reservations
    Using Cloud VMs <../compute/cloud-vm>

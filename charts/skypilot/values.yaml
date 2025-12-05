@@ -1,3 +1,16 @@
+# Global configuration for all components in the chart.
+global:
+  # Override the default imageRegistry for all images in the chart.
+  # @schema type: [string, null]
+  imageRegistry: null
+  # Specify imagePullSecrets for all components in the chart.
+  # @schema type: [array, null]; item: object
+  imagePullSecrets: null
+  # Specify extra environment variables to set on all components in the chart.
+  # @schema type: [array, null]; item: object
+  extraEnvs: null
+
+
 apiService:
   # Docker image to use for the API server. The default value will be updated by the release pipeline to be consistent with the SkyPilot release or nightly build.
   # Refer to https://docs.skypilot.co/en/latest/reference/api-server/helm-values-spec.html#helm-values-apiservice-image for more details.
@@ -161,6 +174,15 @@ apiService:
       # The size of the log file to retain
       size: 10M
 
+  # Image pull policy for the API server pod
+  # @schema type: [string, null]
+  imagePullPolicy: Always
+
+  # Add scheduling constraints to the API server pod
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
 # Authentication configuration for the API server
 # Refer to https://docs.skypilot.co/en/latest/reference/auth.html for more details.
 # @schema type: [object, null]
@@ -272,28 +294,6 @@ ingress:
   # @schema type: [object, null]
   annotations: null
 
-  # Whether enable an additional NodePort service for the ingress controller
-  # Default to null for backward compatibility:
-  # - For existing deployments, error out and ask users to set ingress.nodePortEnabled explicitly
-  # - For new deployments, disable the NodePort service, equivalent to ingress.nodePortEnabled=false
-  # So, for deployments that use default values, upgrade from 0.8.0 nightly will:
-  # - Ask users to set ingress.nodePortEnabled explicitly
-  # - Create a new LoadBalancer endpoint since ingress-nginx.controller.service.type is now default to LoadBalancer
-  # It is recommended to keep only one endpoint by explicitly setting ingress.nodePortEnabled=false and switch to ingress-nginx.controller.service.type
-  # if you are upgrading from 0.8.0 nightly.
-  # Deprecated: use ingress-nginx.controller.service.type=NodePort instead
-  # TODO(aylei): remove these fields in v0.10.0
-  # @schema hidden: true
-  nodePortEnabled: null
-  # Specific nodePort to use for the ingress controller
-  # If not set, Kubernetes will assign random ports in the NodePort range (default 30000-32767)
-  # Deprecated: use ingress-nginx.controller.service.nodePorts.http instead
-  # @schema type: [number, null]
-  httpNodePort: 30050 # Set to null to automatically assign a random port
-  # Deprecated: use ingress-nginx.controller.service.nodePorts.https instead
-  # @schema type: [number, null]
-  httpsNodePort: 30051 # Set to null to automatically assign a random port
-
   # TODO(aylei): deprecate skypilot managed proxy auth to reduce our maintenance burden, replace with examples instead.
   # OAuth2 Proxy configuration for authentication
   oauth2-proxy:
@@ -335,6 +335,10 @@ ingress:
     cookie-refresh: null  # refresh tokens after this duration (Access token lifespan minus 1 min)
     # @schema type: [string, number, null]
     cookie-expire: null  # cookie expiration time (should match refresh token lifespan)
+
+  # TLS settings to enable https ingress
+  tls:
+    enabled: false
 
 ingress-nginx:
   enabled: true
@@ -473,6 +477,9 @@ gcpCredentials:
   projectId: null
   # Name of the secret containing the gcp credentials. Only used if enabled is true.
   gcpSecretName: gcp-credentials
+  # Docker image to use for initializing the GCP credentials.
+  # @schema type: [string, null]
+  image: google/cloud-sdk:latest
 
 # Populate RunPod credentials from the secret with key `api_key`
 runpodCredentials:
@@ -528,6 +535,11 @@ runtimeClassName:
 # Refer to https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml for available values.
 # @schema skipProperties:true
 prometheus:
+  # By default, the API server will be annotated with well-known annotations (prometheus.io/*) to be discovered by prometheus.
+  # Set this to true will remove the well-known annotations and use a dedicated scrape config instead, which can be helpful when
+  # you do not want the API server to be discovered by other prometheus instances.
+  # @schema type: [boolean, null]
+  useDedicatedScrapeConfig: false
   enabled: false
   # Keep the installation minimal by default. If you want to monitor more resources other than the API server,
   # it is recommended to install and manage prometheus separately.
@@ -553,10 +565,47 @@ prometheus:
         regex: ;(.+)
         target_label: node
         replacement: $1
+    {{ if .Values.useDedicatedScrapeConfig }}
+    - job_name: 'skypilot-api-server-metrics'
+      honor_labels: true
+      kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+            - '{{ .Release.Namespace }}'
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_annotation_skypilot_co_scrape]
+          action: keep
+          regex: true
+        - source_labels: [__meta_kubernetes_pod_annotation_skypilot_co_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__meta_kubernetes_pod_annotation_skypilot_co_port, __meta_kubernetes_pod_ip]
+          action: replace
+          regex: (\d+);((([0-9]+?)(\.|$)){4})
+          replacement: $2:$1
+          target_label: __address__
+        - action: labelmap
+          regex: __meta_kubernetes_pod_label_(.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: pod
+        - source_labels: [__meta_kubernetes_pod_phase]
+          regex: Pending|Succeeded|Failed|Completed
+          action: drop
+        - source_labels: [__meta_kubernetes_pod_node_name]
+          action: replace
+          target_label: node
+    {{ end}}
   kube-state-metrics:
     enabled: true
+    # TODO (kyuds): remove skypilot-cluster label in v0.12.0; deprecated in favor of skypilot-cluster-name.
     metricLabelsAllowlist:
-      - pods=[skypilot-cluster]
+      - pods=[skypilot-cluster,skypilot-cluster-name]
   prometheus-node-exporter:
     enabled: false
   prometheus-pushgateway:
@@ -569,6 +618,11 @@ prometheus:
 # @schema skipProperties:true
 grafana:
   enabled: false
+  # Use Recreate strategy to avoid PVC mount conflicts during upgrades
+  # Since Grafana uses ReadWriteOnce PVC, RollingUpdate would fail when
+  # trying to mount the same PVC on two pods simultaneously
+  deploymentStrategy:
+    type: Recreate
   persistence:
     enabled: true
     size: 10Gi

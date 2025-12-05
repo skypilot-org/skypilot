@@ -60,6 +60,15 @@ spec:
   {{- if $useNewIngressClass }}
   ingressClassName: {{ .Values.ingress.ingressClassName }}
   {{- end }}
+  {{- $tls := .Values.ingress.tls | default dict }}
+  {{- if $tls.enabled | default false }}
+  tls:
+  - hosts:
+    - {{ .Values.ingress.host }}
+    # cert-manager will manage this secret if enabled by annotations
+    # otherwise, user needs to create this secret manually
+    secretName: {{ .Release.Name }}-tls-secrets
+  {{- end }}
   rules:
   - host: {{ .Values.ingress.host }}
     http:

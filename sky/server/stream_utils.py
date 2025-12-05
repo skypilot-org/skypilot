@@ -30,14 +30,6 @@ _READ_CHUNK_SIZE = 256 * 1024  # 256KB chunks for file reading
 # If a SHORT request has been stuck in pending for
 # _SHORT_REQUEST_SPINNER_TIMEOUT seconds, we show the waiting spinner
 _SHORT_REQUEST_SPINNER_TIMEOUT = 2
-# If there is an issue during provisioning that causes the cluster to be stuck
-# in INIT state, we use this timeout to break the loop and stop streaming
-# provision logs.
-_PROVISION_LOG_TIMEOUT = 3
-# Maximum time to wait for new log files to appear when streaming worker node
-# provision logs. Worker logs are created sequentially during the provisioning
-# process, so we need to wait for new files to appear.
-_MAX_WAIT_FOR_NEW_LOG_FILES = 3  # seconds
 
 LONG_REQUEST_POLL_INTERVAL = 1
 DEFAULT_POLL_INTERVAL = 0.1
@@ -152,52 +144,26 @@ async def log_streamer(
         if show_request_waiting_spinner:
             yield status_msg.stop()
 
+    # worker node provision logs
     if log_path is not None and log_path.is_dir():
-        # Track which log files we've already streamed
-        streamed_files = set()
-        no_new_files_count = 0
+        # Get all *.log files in the log_path dir
+        log_files = sorted(log_path.glob('*.log'))
 
-        while True:
-            # Get all *.log files in the log_path
-            log_files = sorted(log_path.glob('*.log'))
+        for log_file_path in log_files:
+            # Add header before each file (similar to tail -f behavior)
+            header = f'\n==> {log_file_path} <==\n\n'
+            yield header
 
-            # Filter out already streamed files
-            new_files = [f for f in log_files if f not in streamed_files]
+            async with aiofiles.open(log_file_path, 'rb') as f:
+                async for chunk in _tail_log_file(f, request_id, plain_logs,
+                                                  tail, follow, cluster_name,
+                                                  polling_interval):
+                    yield chunk
 
-            if len(new_files) == 0:
-                if not follow:
-                    break
-                # Wait a bit to see if new files appear
-                await asyncio.sleep(0.5)
-                no_new_files_count += 1
-                # Check if we've waited too long for new files
-                if no_new_files_count > _MAX_WAIT_FOR_NEW_LOG_FILES * 2:
-                    break
-                continue
-
-            # Reset the no-new-files counter when we find new files
-            no_new_files_count = 0
-
-            for log_file_path in new_files:
-                # Add header before each file (similar to tail -f behavior)
-                header = f'\n==> {log_file_path} <==\n\n'
-                yield header
-
-                async with aiofiles.open(log_file_path, 'rb') as f:
-                    async for chunk in _tail_log_file(f, request_id, plain_logs,
-                                                      tail, follow,
-                                                      cluster_name,
-                                                      polling_interval):
-                        yield chunk
-
-                # Mark this file as streamed
-                streamed_files.add(log_file_path)
-
-            # If not following, break after streaming all current files
-            if not follow:
-                break
+    # api server request logs (if request_id is provided) or
+    # head node provision logs (if cluster_name is provided)
     else:
-        assert log_path is not None, (request_id, log_path)
+        assert log_path is not None, (request_id, cluster_name)
         async with aiofiles.open(log_path, 'rb') as f:
             async for chunk in _tail_log_file(f, request_id, plain_logs, tail,
                                               follow, cluster_name,
@@ -312,8 +278,6 @@ async def _tail_log_file(
             # Provision logs pass in cluster_name, check cluster status
             # periodically to see if provisioning is done.
             if cluster_name is not None:
-                if current_time - last_flush_time > _PROVISION_LOG_TIMEOUT:
-                    break
                 if should_check_status:
                     last_status_check_time = current_time
                     cluster_status = await (
@@ -324,11 +288,25 @@ async def _tail_log_file(
                             'Stop tailing provision logs for cluster'
                             f' status for cluster {cluster_name} not found')
                         break
+                    # if the cluster is not in INIT state (UP or STOPPED),
+                    # stop tailing provision logs
                     if cluster_status != status_lib.ClusterStatus.INIT:
                         logger.debug(
                             f'Stop tailing provision logs for cluster'
                             f' {cluster_name} has status {cluster_status} '
                             '(not in INIT state)')
+                        break
+                    req_filter = requests_lib.RequestTaskFilter(
+                        status=[requests_lib.RequestStatus.RUNNING],
+                        cluster_names=[cluster_name],
+                        include_request_names=['sky.launch'],
+                        fields=['cluster_name'])
+                    req_tasks = await requests_lib.get_request_tasks_async(
+                        req_filter)
+                    # if the cluster is in INIT state and there is no ongoing
+                    # launch request, stop tailing provision logs
+                    if len(req_tasks) == 0:
+                        break
             if current_time - last_heartbeat_time >= _HEARTBEAT_INTERVAL:
                 # Currently just used to keep the connection busy, refer to
                 # https://github.com/skypilot-org/skypilot/issues/5750 for

@@ -7,6 +7,7 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
 import colorama
+from pydantic import SecretStr
 
 from sky import clouds
 from sky import dag as dag_lib
@@ -112,7 +113,7 @@ def _fill_in_env_vars(
 
 
 def _check_docker_login_config(task_envs: Dict[str, str],
-                               task_secrets: Dict[str, str]) -> bool:
+                               task_secrets: Dict[str, SecretStr]) -> bool:
     """Validates a valid docker login config in task_envs and task_secrets.
 
     Docker login variables must be specified together either in envs OR secrets,
@@ -173,12 +174,13 @@ def _with_docker_login_config(
     resources: Union[Set['resources_lib.Resources'],
                      List['resources_lib.Resources']],
     task_envs: Dict[str, str],
-    task_secrets: Dict[str, str],
+    task_secrets: Dict[str, SecretStr],
 ) -> Union[Set['resources_lib.Resources'], List['resources_lib.Resources']]:
     if not _check_docker_login_config(task_envs, task_secrets):
         return resources
     envs = task_envs.copy()
-    envs.update(task_secrets)
+    for key, value in task_secrets.items():
+        envs[key] = value.get_secret_value()
     docker_login_config = docker_utils.DockerLoginConfig.from_env_vars(envs)
 
     def _add_docker_login_config(resources: 'resources_lib.Resources'):
@@ -207,10 +209,11 @@ def _with_docker_username_for_runpod(
     resources: Union[Set['resources_lib.Resources'],
                      List['resources_lib.Resources']],
     task_envs: Dict[str, str],
-    task_secrets: Dict[str, str],
+    task_secrets: Dict[str, SecretStr],
 ) -> Union[Set['resources_lib.Resources'], List['resources_lib.Resources']]:
     envs = task_envs.copy()
-    envs.update(task_secrets)
+    for key, value in task_secrets.items():
+        envs[key] = value.get_secret_value()
     docker_username_for_runpod = envs.get(
         constants.RUNPOD_DOCKER_USERNAME_ENV_VAR)
 
@@ -221,6 +224,18 @@ def _with_docker_username_for_runpod(
     return (type(resources)(
         r.copy(_docker_username_for_runpod=docker_username_for_runpod)
         for r in resources))
+
+
+def get_plaintext_envs_and_secrets(
+    envs_and_secrets: Dict[str, Union[str, SecretStr]],) -> Dict[str, str]:
+    return {
+        k: v.get_secret_value() if isinstance(v, SecretStr) else v
+        for k, v in envs_and_secrets.items()
+    }
+
+
+def get_plaintext_secrets(secrets: Dict[str, SecretStr]) -> Dict[str, str]:
+    return {k: v.get_secret_value() for k, v in secrets.items()}
 
 
 class Task:
@@ -238,7 +253,7 @@ class Task:
         num_nodes: Optional[int] = None,
         file_mounts: Optional[Dict[str, str]] = None,
         storage_mounts: Optional[Dict[str, storage_lib.Storage]] = None,
-        volumes: Optional[Dict[str, str]] = None,
+        volumes: Optional[Dict[str, Union[str, Dict[str, Any]]]] = None,
         resources: Optional[Union['resources_lib.Resources',
                                   List['resources_lib.Resources'],
                                   Set['resources_lib.Resources']]] = None,
@@ -317,7 +332,10 @@ class Task:
             object}``, where mount_path is the path inside the remote VM(s)
             where the Storage object will be mounted on.
           volumes: A dict of volumes to be mounted for the task. The dict has
-            the form of ``{mount_path: volume_name}``.
+            the form of ``{mount_path: volume_name}`` for external persistent
+            volumes, or ``{mount_path: volume_config}`` for ephemeral volumes
+            where volume_config is a dict with 'size', and optional type,
+            labels, and 'config' fields, etc.
           resources: either a sky.Resources, a set of them, or a list of them.
             A set or a list of resources asks the optimizer to "pick the
             best of these resources" to run this task.
@@ -340,7 +358,9 @@ class Task:
         self.storage_plans: Dict[storage_lib.Storage,
                                  storage_lib.StoreType] = {}
         self._envs = envs or {}
-        self._secrets = secrets or {}
+        self._secrets = {}
+        if secrets is not None:
+            self._secrets = {k: SecretStr(v) for k, v in secrets.items()}
         self._volumes = volumes or {}
 
         # concatenate commands if given as list
@@ -704,33 +724,8 @@ class Task:
             task.set_outputs(outputs=outputs,
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
-        # Experimental configs.
-        experimental_configs = config.pop('experimental', None)
-
         # Handle the top-level config field
         config_override = config.pop('config', None)
-
-        # Handle backward compatibility with experimental.config_overrides
-        # TODO: Remove experimental.config_overrides in 0.11.0.
-        if experimental_configs is not None:
-            exp_config_override = experimental_configs.pop(
-                'config_overrides', None)
-            if exp_config_override is not None:
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}`experimental.config_overrides` '
-                    'field is deprecated in the task YAML. Use the `config` '
-                    f'field to set config overrides.{colorama.Style.RESET_ALL}')
-                if config_override is not None:
-                    logger.warning(
-                        f'{colorama.Fore.YELLOW}Both top-level `config` and '
-                        f'`experimental.config_overrides` are specified. '
-                        f'Using top-level `config`.{colorama.Style.RESET_ALL}')
-                else:
-                    config_override = exp_config_override
-            logger.debug('Overriding skypilot config with task-level config: '
-                         f'{config_override}')
-            assert not experimental_configs, ('Invalid task args: '
-                                              f'{experimental_configs.keys()}')
 
         # Store the final config override for use in resource setup
         cluster_config_override = config_override
@@ -797,16 +792,27 @@ class Task:
             #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
             # to raise errors on duplicate keys.
             user_specified_yaml = f.read()
-            config = yaml_utils.safe_load(user_specified_yaml)
+            return Task.from_yaml_str(user_specified_yaml)
+
+    @staticmethod
+    def from_yaml_str(yaml_str: str) -> 'Task':
+        """Initializes a task from a task YAML string.
+
+        Example:
+            .. code-block:: python
+
+                task = sky.Task.from_yaml_str('yaml_str')
+        """
+        config = yaml_utils.safe_load(yaml_str)
 
         if isinstance(config, str):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('YAML loaded as str, not as dict. '
-                                 f'Is it correct? Path: {yaml_path}')
+                                 f'Is it correct? content:\n{yaml_str}')
 
         if config is None:
             config = {}
-        config['_user_specified_yaml'] = user_specified_yaml
+        config['_user_specified_yaml'] = yaml_str
         return Task.from_yaml_config(config)
 
     def resolve_and_validate_volumes(self) -> None:
@@ -827,13 +833,26 @@ class Task:
         volume_mounts: List[volume_lib.VolumeMount] = []
         for dst_path, vol in self._volumes.items():
             self._validate_mount_path(dst_path, location='volumes')
-            # Shortcut for `dst_path: volume_name`
+            # Shortcut for `dst_path: volume_name` (external persistent volume)
             if isinstance(vol, str):
                 volume_mount = volume_lib.VolumeMount.resolve(dst_path, vol)
             elif isinstance(vol, dict):
-                assert 'name' in vol, 'Volume name must be set.'
-                volume_mount = volume_lib.VolumeMount.resolve(
-                    dst_path, vol['name'])
+                # Check if this is an ephemeral volume config or external volume
+                # with 'size' field
+                if 'size' in vol:
+                    # This is an ephemeral volume config
+                    volume_mount = (
+                        volume_lib.VolumeMount.resolve_ephemeral_config(
+                            dst_path, vol))
+                elif 'name' in vol:
+                    # External volume with 'name' field
+                    volume_mount = volume_lib.VolumeMount.resolve(
+                        dst_path, vol['name'])
+                else:
+                    raise ValueError(
+                        f'Invalid volume config: {dst_path}: {vol}. '
+                        'Either "size" (for ephemeral volume) or "name" '
+                        '(for external volume) must be set.')
             else:
                 raise ValueError(f'Invalid volume config: {dst_path}: {vol}')
             volume_mounts.append(volume_mount)
@@ -862,6 +881,9 @@ class Task:
             if access_mode in disabled_modes:
                 raise ValueError(f'Volume {vol.volume_name} with '
                                  f'{disabled_modes[access_mode]}')
+            # Skip ephemeral volumes for topology check
+            if vol.is_ephemeral:
+                continue
             # Check topology
             for key, (vol_name, previous_req) in topology.items():
                 req = getattr(vol.volume_config, key)
@@ -898,6 +920,8 @@ class Task:
                         vol_req)
                 else:
                     override_params[key] = vol_req
+        logger.debug(
+            f'Override resources with volume constraints: {override_params}')
         self.set_resources_override(override_params)
         self.volume_mounts = volume_mounts
 
@@ -928,22 +952,26 @@ class Task:
         return self._envs
 
     @property
-    def secrets(self) -> Dict[str, str]:
+    def secrets(self) -> Dict[str, SecretStr]:
         return self._secrets
 
     @property
-    def volumes(self) -> Dict[str, str]:
+    def volumes(self) -> Dict[str, Union[str, Dict[str, Any]]]:
         return self._volumes
 
-    def set_volumes(self, volumes: Dict[str, str]) -> None:
+    def set_volumes(self, volumes: Dict[str, Union[str, Dict[str,
+                                                             Any]]]) -> None:
         """Sets the volumes for this task.
 
         Args:
-          volumes: a dict of ``{mount_path: volume_name}``.
+          volumes: a dict of ``{mount_path: volume_name}`` for external
+            persistent volumes, or ``{mount_path: volume_config}`` for
+            ephemeral volumes.
         """
         self._volumes = volumes
 
-    def update_volumes(self, volumes: Dict[str, str]) -> None:
+    def update_volumes(self, volumes: Dict[str, Union[str, Dict[str,
+                                                                Any]]]) -> None:
         """Updates the volumes for this task."""
         self._volumes.update(volumes)
 
@@ -1031,7 +1059,8 @@ class Task:
                 raise ValueError(
                     'secrets must be List[Tuple[str, str]] or Dict[str, str]: '
                     f'{secrets}')
-        self._secrets.update(secrets)
+        for key, value in secrets.items():
+            self._secrets[key] = SecretStr(value)
         # Validate Docker login configuration if needed
         if _check_docker_login_config(self._envs, self._secrets):
             self.resources = _with_docker_login_config(self.resources,
@@ -1046,7 +1075,7 @@ class Task:
         return any(r.use_spot for r in self.resources)
 
     @property
-    def envs_and_secrets(self) -> Dict[str, str]:
+    def envs_and_secrets(self) -> Dict[str, Union[str, SecretStr]]:
         envs = self.envs.copy()
         envs.update(self.secrets)
         return envs
@@ -1092,7 +1121,7 @@ class Task:
     def set_resources(
         self, resources: Union['resources_lib.Resources',
                                List['resources_lib.Resources'],
-                               Set['resources_lib.Resources']]
+                               Set['resources_lib.Resources'], Dict[str, Any]]
     ) -> 'Task':
         """Sets the required resources to execute this task.
 
@@ -1106,7 +1135,9 @@ class Task:
         Returns:
           self: The current task, with resources set.
         """
-        if isinstance(resources, resources_lib.Resources):
+        if isinstance(resources, dict):
+            resources = resources_lib.Resources.from_yaml_config(resources)
+        elif isinstance(resources, resources_lib.Resources):
             resources = {resources}
         # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs,
@@ -1133,6 +1164,10 @@ class Task:
 
         self.set_resources(type(self.resources)(new_resources_list))
         return self
+
+    def get_resource_config(self) -> Dict[str, Any]:
+        return _resources_to_config(self.resources,
+                                    factor_out_common_fields=True)
 
     @property
     def service(self) -> Optional[service_spec.SkyServiceSpec]:
@@ -1626,9 +1661,11 @@ class Task:
             if clone_info.token is None and clone_info.ssh_key is None:
                 return self
             if clone_info.token is not None:
-                self.secrets[git.GIT_TOKEN_ENV_VAR] = clone_info.token
+                self.secrets[git.GIT_TOKEN_ENV_VAR] = SecretStr(
+                    clone_info.token)
             if clone_info.ssh_key is not None:
-                self.secrets[git.GIT_SSH_KEY_ENV_VAR] = clone_info.ssh_key
+                self.secrets[git.GIT_SSH_KEY_ENV_VAR] = SecretStr(
+                    clone_info.ssh_key)
         except exceptions.GitError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'{str(e)}') from None
@@ -1660,16 +1697,7 @@ class Task:
 
         add_if_not_none('name', self.name)
 
-        tmp_resource_config: Union[Dict[str, Union[str, int]],
-                                   Dict[str, List[Dict[str, Union[str, int]]]]]
-        if len(self.resources) > 1:
-            resource_list = []
-            for r in self.resources:
-                resource_list.append(r.to_yaml_config())
-            key = 'ordered' if isinstance(self.resources, list) else 'any_of'
-            tmp_resource_config = {key: resource_list}
-        else:
-            tmp_resource_config = list(self.resources)[0].to_yaml_config()
+        tmp_resource_config = _resources_to_config(self.resources)
 
         add_if_not_none('resources', tmp_resource_config)
 
@@ -1695,8 +1723,10 @@ class Task:
         add_if_not_none('envs', self.envs, no_empty=True)
 
         secrets = self.secrets
-        if secrets and redact_secrets:
-            secrets = {k: '<redacted>' for k in secrets}
+        if secrets and not redact_secrets:
+            secrets = {k: v.get_secret_value() for k, v in secrets.items()}
+        elif secrets and redact_secrets:
+            secrets = {k: '<redacted>' for k, v in secrets.items()}
         add_if_not_none('secrets', secrets, no_empty=True)
 
         add_if_not_none('file_mounts', {})
@@ -1747,7 +1777,12 @@ class Task:
         return required_features
 
     def __rshift__(self, b):
-        dag_lib.get_current_dag().add_edge(self, b)
+        dag = dag_lib.get_current_dag()
+        if dag is None:
+            raise RuntimeError(
+                'Cannot use >> operator outside of a DAG context. '
+                'Please use "with sky.Dag() as dag:" to create a DAG context.')
+        dag.add_edge(self, b)
 
     def __repr__(self):
         if isinstance(self.run, str):
@@ -1782,3 +1817,47 @@ class Task:
         else:
             s += '\n  resources: default instances'
         return s
+
+
+def _resources_to_config(
+        resources: Union[List['resources_lib.Resources'],
+                         Set['resources_lib.Resources']],
+        factor_out_common_fields: bool = False) -> Dict[str, Any]:
+    if len(resources) > 1:
+        resource_list: List[Dict[str, Union[str, int]]] = []
+        for r in resources:
+            resource_list.append(r.to_yaml_config())
+        group_key = 'ordered' if isinstance(resources, list) else 'any_of'
+        if factor_out_common_fields:
+            return _factor_out_common_resource_fields(resource_list, group_key)
+        return {group_key: resource_list}
+    else:
+        return list(resources)[0].to_yaml_config()
+
+
+def _factor_out_common_resource_fields(configs: List[Dict[str, Union[str,
+                                                                     int]]],
+                                       group_key: str) -> Dict[str, Any]:
+    """Factors out the fields that are common to all resources."""
+    return_config: Dict[str, Any] = configs[0].copy()
+    if len(configs) > 1:
+        for config in configs[1:]:
+            for key, value in config.items():
+                if key in return_config and return_config[key] != value:
+                    del return_config[key]
+    num_empty_configs = 0
+    for config in configs:
+        keys_to_delete = []
+        for key, value in config.items():
+            if key in return_config:
+                keys_to_delete.append(key)
+        for key in keys_to_delete:
+            del config[key]
+        if not config:
+            num_empty_configs += 1
+
+    if num_empty_configs == len(configs):
+        return return_config
+    if len(configs) > 0:
+        return_config[group_key] = configs
+    return return_config

@@ -30,6 +30,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import click
+from conftest import all_clouds_in_smoke_tests
 from conftest import cloud_to_pytest_keyword
 from conftest import default_clouds_to_run
 import requests
@@ -60,6 +61,8 @@ CLOUD_QUEUE_MAP = {
     'gcp': QUEUE_GENERIC_CLOUD,
     'azure': QUEUE_GENERIC_CLOUD,
     'nebius': QUEUE_GENERIC_CLOUD,
+    'lambda': QUEUE_GENERIC_CLOUD,
+    'runpod': QUEUE_GENERIC_CLOUD,
     'kubernetes': QUEUE_KIND
 }
 
@@ -113,8 +116,8 @@ def _parse_args(args: Optional[str] = None):
     parser = argparse.ArgumentParser(
         description="Process cloud arguments for tests")
 
-    # Flags for recognized clouds
-    for cloud in PYTEST_TO_CLOUD_KEYWORD.keys():
+    # Flags for recognized clouds - use cloud names (e.g., --lambda) to match pytest
+    for cloud in all_clouds_in_smoke_tests:
         parser.add_argument(f"--{cloud}", action="store_true")
 
     # Generic cloud argument, which takes a value (e.g., --generic-cloud aws)
@@ -138,8 +141,8 @@ def _parse_args(args: Optional[str] = None):
     # Collect chosen clouds from the flags
     # TODO(zpoint): get default clouds from the conftest.py
     default_clouds_to_run = []
-    for cloud in PYTEST_TO_CLOUD_KEYWORD.keys():
-        if getattr(parsed_args, cloud):
+    for cloud in all_clouds_in_smoke_tests:
+        if getattr(parsed_args, cloud, False):
             default_clouds_to_run.append(cloud)
     if default_clouds_to_run:
         default_clouds_to_run = list(
@@ -198,6 +201,7 @@ def _extract_marked_tests(
     rerun failures. Additionally, the parallelism would be controlled by pytest
     instead of the buildkite job queue.
     """
+    # Args are already in the format pytest expects (cloud names like --lambda)
     cmd = f'pytest {file_path} --collect-only {args}'
     output = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',

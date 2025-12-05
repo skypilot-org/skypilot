@@ -77,9 +77,13 @@ class APIHealthResponse(ResponseBaseModel):
     version: str = ''
     version_on_disk: str = ''
     commit: str = ''
+    # Whether basic auth on api server is enabled
     basic_auth_enabled: bool = False
     user: Optional[models.User] = None
+    # Whether service account token is enabled
     service_account_token_enabled: bool = False
+    # Whether basic auth on ingress is enabled
+    ingress_basic_auth_enabled: bool = False
 
 
 class StatusResponse(ResponseBaseModel):
@@ -187,6 +191,7 @@ class ManagedJobRecord(ResponseBaseModel):
     entrypoint: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     controller_pid: Optional[int] = None
+    controller_pid_started_at: Optional[float] = None
     dag_yaml_path: Optional[str] = None
     env_file_path: Optional[str] = None
     last_recovered_at: Optional[float] = None
@@ -219,3 +224,4 @@ class VolumeRecord(ResponseBaseModel):
     status: Optional[str] = None
     usedby_pods: List[str]
     usedby_clusters: List[str]
+    is_ephemeral: bool = False

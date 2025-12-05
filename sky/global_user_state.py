@@ -151,6 +151,7 @@ volume_table = sqlalchemy.Table(
                       server_default=None),
     sqlalchemy.Column('last_use', sqlalchemy.Text),
     sqlalchemy.Column('status', sqlalchemy.Text),
+    sqlalchemy.Column('is_ephemeral', sqlalchemy.Integer, server_default='0'),
 )
 
 # Table for Cluster History
@@ -2233,10 +2234,14 @@ def get_volume_names_start_with(starts_with: str) -> List[str]:
 
 @_init_db
 @metrics_lib.time_me
-def get_volumes() -> List[Dict[str, Any]]:
+def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(volume_table).all()
+        if is_ephemeral is None:
+            rows = session.query(volume_table).all()
+        else:
+            rows = session.query(volume_table).filter_by(
+                is_ephemeral=int(is_ephemeral)).all()
     records = []
     for row in rows:
         records.append({
@@ -2248,6 +2253,7 @@ def get_volumes() -> List[Dict[str, Any]]:
             'last_attached_at': row.last_attached_at,
             'last_use': row.last_use,
             'status': status_lib.VolumeStatus[row.status],
+            'is_ephemeral': bool(row.is_ephemeral),
         })
     return records
 
@@ -2274,14 +2280,23 @@ def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
 
 @_init_db
 @metrics_lib.time_me
-def add_volume(name: str, config: models.VolumeConfig,
-               status: status_lib.VolumeStatus) -> None:
+def add_volume(
+    name: str,
+    config: models.VolumeConfig,
+    status: status_lib.VolumeStatus,
+    is_ephemeral: bool = False,
+) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     volume_launched_at = int(time.time())
     handle = pickle.dumps(config)
     last_use = common_utils.get_current_command()
     user_hash = common_utils.get_current_user().id
     active_workspace = skypilot_config.get_active_workspace()
+    if is_ephemeral:
+        last_attached_at = int(time.time())
+        status = status_lib.VolumeStatus.IN_USE
+    else:
+        last_attached_at = None
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -2298,9 +2313,10 @@ def add_volume(name: str, config: models.VolumeConfig,
             handle=handle,
             user_hash=user_hash,
             workspace=active_workspace,
-            last_attached_at=None,
+            last_attached_at=last_attached_at,
             last_use=last_use,
             status=status.value,
+            is_ephemeral=int(is_ephemeral),
         )
         do_update_stmt = insert_stmnt.on_conflict_do_nothing()
         session.execute(do_update_stmt)

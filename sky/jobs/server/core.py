@@ -35,6 +35,7 @@ from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve.server import impl
+from sky.server.requests import request_names
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -237,7 +238,8 @@ def launch(
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
-    dag, mutated_user_config = admin_policy_utils.apply(dag)
+    dag, mutated_user_config = admin_policy_utils.apply(
+        dag, request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH)
     dag.resolve_and_validate_volumes()
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
@@ -394,6 +396,7 @@ def launch(
             for task_ in dag_copy.tasks:
                 if job_rank is not None:
                     task_.update_envs({'SKYPILOT_JOB_RANK': str(job_rank)})
+                if num_jobs is not None:
                     task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
             dag_utils.dump_chain_dag_to_yaml(dag_copy, f.name)
@@ -465,19 +468,24 @@ def launch(
                     # intermediate bucket and newly created bucket should be in
                     # workspace A.
                     if consolidation_mode_job_id is None:
-                        return execution.launch(task=controller_task,
-                                                cluster_name=controller_name,
-                                                stream_logs=stream_logs,
-                                                retry_until_up=True,
-                                                fast=True,
-                                                _disable_controller_check=True)
+                        return execution.launch(
+                            task=controller_task,
+                            cluster_name=controller_name,
+                            stream_logs=stream_logs,
+                            retry_until_up=True,
+                            fast=True,
+                            _request_name=request_names.AdminPolicyRequestName.
+                            JOBS_LAUNCH_CONTROLLER,
+                            _disable_controller_check=True)
                     # Manually launch the scheduler in consolidation mode.
                     local_handle = backend_utils.is_controller_accessible(
                         controller=controller, stopped_message='')
                     backend = backend_utils.get_backend_from_handle(
                         local_handle)
                     assert isinstance(backend, backends.CloudVmRayBackend)
-                    with sky_logging.silent():
+                    # Suppress file mount logs when submitting multiple jobs.
+                    should_silence = num_jobs is not None and num_jobs > 1
+                    with sky_logging.silent(should_silence):
                         backend.sync_file_mounts(
                             handle=local_handle,
                             all_file_mounts=controller_task.file_mounts,
@@ -493,10 +501,14 @@ def launch(
                         for k, v in controller_task.envs.items()
                     ]
                     run_script = '\n'.join(env_cmds + [run_script])
-                    # Dump script for high availability recovery.
-                    managed_job_state.set_ha_recovery_script(
-                        consolidation_mode_job_id, run_script)
-                    backend.run_on_head(local_handle, run_script)
+                    log_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
+                                           'managed_jobs')
+                    os.makedirs(log_dir, exist_ok=True)
+                    log_path = os.path.join(
+                        log_dir, f'submit-job-{consolidation_mode_job_id}.log')
+                    backend.run_on_head(local_handle,
+                                        run_script,
+                                        log_path=log_path)
                     ux_utils.starting_message(
                         f'Job submitted, ID: {consolidation_mode_job_id}')
                     return consolidation_mode_job_id, local_handle

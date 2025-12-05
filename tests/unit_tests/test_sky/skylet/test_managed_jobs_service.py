@@ -459,8 +459,8 @@ class TestGetJobTable:
         context_mock = mock.Mock()
 
         response = self.service.GetJobTable(request, context_mock)
-        assert isinstance(response, managed_jobsv1_pb2.GetJobTableResponse)
         context_mock.abort.assert_not_called()
+        assert isinstance(response, managed_jobsv1_pb2.GetJobTableResponse)
         assert len(response.jobs) == 4
 
         # Validate that requested fields have values

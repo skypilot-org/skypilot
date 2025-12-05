@@ -1,13 +1,13 @@
 {{- if and .Values.grafana.enabled .Values.grafana.sidecar.datasources.enabled }}
 apiVersion: v1
-kind: Secret
+kind: ConfigMap
 metadata:
   name: {{ .Release.Name }}-prometheus-datasource
   namespace: {{ .Release.Namespace }}
   labels:
     app: {{ .Release.Name }}-api
     grafana_datasource: "true"
-stringData:
+data:
   prometheus.yaml: |-
     apiVersion: 1
     datasources:
@@ -16,4 +16,5 @@ stringData:
         url: http://{{ .Release.Name }}-prometheus-server:80
         editable: false
         uid: prometheus
+        access: proxy
 {{- end }}

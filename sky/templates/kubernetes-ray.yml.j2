@@ -46,6 +46,10 @@ provider:
     # Used to set up the necessary permissions and sidecars.
     fuse_device_required: {{k8s_fuse_device_required}}
 
+    {% if ephemeral_volume_mounts %}
+    ephemeral_volume_specs: {{ephemeral_volume_mounts | tojson}}
+    {% endif %}
+
     # ServiceAccount created by the autoscaler for the head node pod that it
     # runs in. If this field isn't provided, the head pod config below must
     # contain a user-created service account with the proper permissions.
@@ -209,7 +213,9 @@ provider:
         metadata:
           labels:
             parent: skypilot
+            # TODO (kyuds): remove this label for v0.12.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
             skypilot-cluster: {{cluster_name_on_cloud}}
+            skypilot-cluster-name: {{cluster_name_on_cloud}}
             skypilot-user: {{ user }}
           name: {{cluster_name_on_cloud}}-head-ssh
         spec:
@@ -227,7 +233,9 @@ provider:
         metadata:
             labels:
               parent: skypilot
+              # TODO (kyuds): remove this label for v0.12.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
               skypilot-cluster: {{cluster_name_on_cloud}}
+              skypilot-cluster-name: {{cluster_name_on_cloud}}
               skypilot-user: {{ user }}
             # NOTE: If you're running multiple Ray clusters with services
             # on one Kubernetes cluster, they must have unique service
@@ -247,7 +255,9 @@ provider:
         metadata:
           labels:
             parent: skypilot
+            # TODO (kyuds): remove this label for v0.12.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
             skypilot-cluster: {{cluster_name_on_cloud}}
+            skypilot-cluster-name: {{cluster_name_on_cloud}}
             skypilot-user: {{ user }}
           name: {{cluster_name_on_cloud}}-worker{{ worker_id }}
         spec:
@@ -272,6 +282,7 @@ available_node_types:
         labels:
             parent: skypilot
             # component will be set for the head node pod to be the same as the head node service selector above if a
+            # TODO (kyuds): remove this label for v0.12.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
             skypilot-cluster: {{cluster_name_on_cloud}}
             skypilot-user: {{ user }}
             # Custom tags for the pods
@@ -635,6 +646,15 @@ available_node_types:
               # Set -x to print the commands and their arguments as they are executed.
               # Useful for debugging.
               set -x
+
+              # Execute user-provided post-provision runcmd
+              # before any of the SkyPilot setup commands.
+              {%- if runcmd %}
+              {%- for cmd in runcmd %}
+              {{cmd}}
+              {%- endfor %}
+              {%- endif %}
+
               # Helper function to conditionally use sudo
               # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
@@ -645,13 +665,6 @@ available_node_types:
               # STEP 1: Run apt update, install missing packages, and set up ssh.
               (
                 (
-                # For backwards compatibility, we put a marker file in the pod
-                # to indicate that the apt ssh setup step will write a completion
-                # marker file (/tmp/apt_ssh_setup_complete) to the pod.
-                # TODO: Remove this marker file and its usage in setup_commands
-                # after v0.11.0 release.
-                touch /tmp/apt_ssh_setup_started
-
                 # Helper: run apt-get update with retries
                 apt_update_with_retries() {
                   # do not fail the whole shell; we handle return codes
@@ -1335,12 +1348,10 @@ setup_commands:
     start_epoch=$(date +%s);
 
     # Wait for SSH setup to complete before proceeding
-    if [ -f /tmp/apt_ssh_setup_started ]; then
-      echo "=== Logs for asynchronous SSH setup ===";
-      ([ -f /tmp/apt_ssh_setup_complete ]|| [ -f /tmp/${STEPS[0]}.failed ]) && cat /tmp/${STEPS[0]}.log ||
-      { tail -f -n +1 /tmp/${STEPS[0]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; sleep 0.5; until [ -f /tmp/apt_ssh_setup_complete ] || [ -f /tmp/${STEPS[0]}.failed ]; do sleep 0.5; done; kill $TAIL_PID || true; };
-      [ -f /tmp/${STEPS[0]}.failed ] && { echo "Error: ${STEPS[0]} failed. Exiting."; exit 1; } || true;
-    fi
+    echo "=== Logs for asynchronous SSH setup ===";
+    ([ -f /tmp/apt_ssh_setup_complete ]|| [ -f /tmp/${STEPS[0]}.failed ]) && cat /tmp/${STEPS[0]}.log ||
+    { tail -f -n +1 /tmp/${STEPS[0]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; sleep 0.5; until [ -f /tmp/apt_ssh_setup_complete ] || [ -f /tmp/${STEPS[0]}.failed ]; do sleep 0.5; done; kill $TAIL_PID || true; };
+    [ -f /tmp/${STEPS[0]}.failed ] && { echo "Error: ${STEPS[0]} failed. Exiting."; exit 1; } || true;
 
     echo "=== Logs for asynchronous ray and skypilot installation ===";
     ([ -f /tmp/ray_skypilot_installation_complete ]|| [ -f /tmp/${STEPS[1]}.failed ]) && cat /tmp/${STEPS[1]}.log ||
@@ -1351,6 +1362,7 @@ setup_commands:
     echo "=== Ray and skypilot dependencies installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);
     {{ skypilot_wheel_installation_commands }}
+    {{ copy_skypilot_templates_commands }}
     end_epoch=$(date +%s);
     echo "=== Skypilot wheel installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);

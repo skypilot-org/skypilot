@@ -73,6 +73,8 @@ Below is the configuration syntax and some example values.  See details under ea
 
   :ref:`volumes <yaml-spec-new-volumes>`:
     /mnt/data: volume-name
+    /mnt/cache:
+      size: 100Gi
 
   :ref:`file_mounts <yaml-spec-file-mounts>`:
     # Sync a local directory to a remote directory
@@ -578,7 +580,8 @@ If ``'best'`` is specified, use the best network tier available on the specified
 
 - ``infra: gcp``: Enable GPUDirect-TCPX for high-performance node-to-node GPU communication
 - ``infra: nebius``: Enable Infiniband for high-performance GPU communication across Nebius VMs. Currently only supported for H100:8 and H200:8 nodes.
-- ``infra: k8s/my-nebius-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes
+- ``infra: k8s/my-coreweave-cluster``: Enable InfiniBand for high-performance GPU communication across pods on CoreWeave CKS clusters.
+- ``infra: k8s/my-nebius-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes.
 - ``infra: k8s/my-gke-cluster``: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance GPU communication across pods on Google Kubernetes Engine (GKE).
 
 .. code-block:: yaml
@@ -969,14 +972,18 @@ Example:
 ``volumes``
 ~~~~~~~~~~~
 
-SkyPilot supports managing volumes resource for tasks or jobs on Kubernetes clusters. Refer to :ref:`volumes on Kubernetes <volumes-on-kubernetes>` for more details.
+SkyPilot supports managing persistent and ephemeral volumes for tasks or jobs on Kubernetes clusters. Refer to :ref:`volumes on Kubernetes <volumes-on-kubernetes>` for more details.
 
 Example:
 
 .. code-block:: yaml
 
   volumes:
+    # Persistent volume
     /mnt/data: volume-name
+    # Ephemeral volume
+    /mnt/cache:
+      size: 100Gi
 
 
 .. _yaml-spec-file-mounts:

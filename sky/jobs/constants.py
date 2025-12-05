@@ -14,6 +14,12 @@ JOB_CONTROLLER_INDICATOR_FILE = '~/.sky/is_jobs_controller'
 
 CONSOLIDATED_SIGNAL_PATH = os.path.expanduser('~/.sky/signals/')
 SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
+
+# The consolidation mode lock ensures that if multiple API servers are running
+# at the same time (e.g. during a rolling update), recovery can only happen once
+# the previous API server has exited.
+CONSOLIDATION_MODE_LOCK_ID = '~/.sky/consolidation_mode_lock'
+
 # Resources as a dict for the jobs controller.
 # We use 50 GB disk size to reduce the cost.
 CONTROLLER_RESOURCES: Dict[str, Union[str, int]] = {

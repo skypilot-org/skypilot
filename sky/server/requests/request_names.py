@@ -78,3 +78,44 @@ class RequestName(str, enum.Enum):
     REQUEST_DAEMON_MANAGED_JOB_STATUS_REFRESH = 'managed-job-status-refresh'
     REQUEST_DAEMON_SKY_SERVE_STATUS_REFRESH = 'sky-serve-status-refresh'
     REQUEST_DAEMON_POOL_STATUS_REFRESH = 'pool-status-refresh'
+
+    def __repr__(self):
+        return self.value
+
+    def __str__(self):
+        return self.value
+
+
+class AdminPolicyRequestName(str, enum.Enum):
+    """Enum of all the request names that are
+    used for admin policy application."""
+    # General requests
+    # validate call is not stored in the request db,
+    # but is defined here for admin policy application
+    VALIDATE = 'validate'
+    OPTIMIZE = RequestName.OPTIMIZE.value
+    # Cluster requests
+    CLUSTER_LAUNCH = RequestName.CLUSTER_LAUNCH.value
+    CLUSTER_EXEC = RequestName.CLUSTER_EXEC.value
+    # Jobs requests
+    JOBS_LAUNCH = RequestName.JOBS_LAUNCH.value
+    # jobs launch controller request is not stored in the request db,
+    # but is defined here for admin policy application
+    JOBS_LAUNCH_CONTROLLER = 'jobs.launch_controller'
+    JOBS_POOL_APPLY = RequestName.JOBS_POOL_APPLY.value
+    JOBS_LAUNCH_CLUSTER = 'jobs.launch_cluster'
+    # Serve requests
+    SERVE_UP = RequestName.SERVE_UP.value
+    # serve launch controller request is not stored in the request db,
+    # but is defined here for admin policy application
+    SERVE_LAUNCH_CONTROLLER = 'serve.launch_controller'
+    SERVE_UPDATE = RequestName.SERVE_UPDATE.value
+    # serve launch replica request is not stored in the request db,
+    # but is defined here for admin policy application
+    SERVE_LAUNCH_REPLICA = 'serve.launch_replica'
+
+    def __repr__(self):
+        return self.value
+
+    def __str__(self):
+        return self.value

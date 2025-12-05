@@ -28,7 +28,7 @@ class LazyImport(types.ModuleType):
                  import_error_message: Optional[str] = None,
                  set_loggers: Optional[Callable] = None):
         self._module_name = module_name
-        self._module = None
+        self._module: Optional[types.ModuleType] = None
         self._import_error_message = import_error_message
         self._set_loggers = set_loggers
         self._lock = threading.RLock()

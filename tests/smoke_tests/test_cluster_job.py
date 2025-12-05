@@ -241,7 +241,7 @@ def test_scp_job_queue():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue_multinode instead
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus.
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_scp  # SCP does not have T4 gpus.
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
@@ -431,14 +431,13 @@ def test_docker_preinstalled_package(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_scp  # SCP does not have T4 gpus
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
 @pytest.mark.no_do  # DO does not have T4 gpus
 @pytest.mark.no_nebius  # Nebius does not have T4 gpus
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.no_seeweb  # Seeweb does not have T4 gpus
 @pytest.mark.resource_heavy
-@pytest.mark.no_remote_server
 def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     use_spot = True
@@ -448,27 +447,96 @@ def test_multi_echo(generic_cloud: str):
         # Assume tests using a remote api server endpoint do not support spot instances
         use_spot = not smoke_tests_utils.is_eks_cluster()
         accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+
+    # Determine timeout for 15 running jobs check: 2 min for remote server, single check for local
+    is_remote = smoke_tests_utils.is_remote_server_test()
+
+    # Wait loop to check for failures periodically
+    wait_for_no_failures = (
+        'start_time=$SECONDS; '
+        'while true; do '
+        's=$(sky queue {cluster_name}); '
+        'echo "$s"; '
+        'echo; '
+        'echo; '
+        'if echo "$s" | grep "FAILED"; then '
+        '  echo "Found FAILED jobs, exiting"; '
+        '  exit 1; '
+        'fi; '
+        'if (( $SECONDS - $start_time > 70 )); then '
+        '  echo "No failures detected after 70 seconds, proceeding"; '
+        '  break; '
+        'fi; '
+        'echo "Waiting and checking for failures..."; '
+        'sleep 10; '
+        'done').format(cluster_name=name)
+
+    # Check for at least 15 RUNNING jobs
+    # Remote server: while loop with 2 min timeout, wait if less than 15 running
+    # Local server: single check, exit if less than 15 running
+    if is_remote:
+        wait_for_15_running = (
+            'start_time=$SECONDS; '
+            'while true; do '
+            's=$(sky queue {cluster_name}); '
+            'echo "$s"; '
+            'echo; '
+            'echo; '
+            'running_count=$(echo "$s" | grep "RUNNING" | wc -l); '
+            'echo "Current RUNNING jobs: $running_count"; '
+            'if [ "$running_count" -eq 0 ]; then '
+            '  echo "No running jobs found, exiting"; '
+            '  exit 1; '
+            'fi; '
+            'if [ "$running_count" -ge 15 ]; then '
+            '  echo "Found at least 15 RUNNING jobs, proceeding"; '
+            '  break; '
+            'fi; '
+            'if (( $SECONDS - $start_time > 120 )); then '
+            '  echo "Timeout after 120 seconds waiting for 15 RUNNING jobs"; '
+            '  exit 1; '
+            'fi; '
+            'echo "Waiting for at least 15 RUNNING jobs (current: $running_count)..."; '
+            'sleep 10; '
+            'done').format(cluster_name=name)
+    else:
+        # Local server: single check only
+        wait_for_15_running = (
+            's=$(sky queue {cluster_name}); '
+            'echo "$s"; '
+            'echo; '
+            'echo; '
+            'running_count=$(echo "$s" | grep "RUNNING" | wc -l); '
+            'echo "Current RUNNING jobs: $running_count"; '
+            'if [ "$running_count" -lt 15 ]; then '
+            '  echo "Found less than 15 RUNNING jobs ($running_count), exiting"; '
+            '  exit 1; '
+            'fi; '
+            'echo "Found at least 15 RUNNING jobs, proceeding"; ').format(
+                cluster_name=name)
+
+    # Build commands list - skip API server restart for remote server tests
+    commands = []
+    if not is_remote:
+        # TODO(aylei): also test local API server after we have rate limit in local mode
+        # Use deploy mode to avoid ulimited concurrency requests exhausts the CPU
+        commands.append('sky api stop && sky api start --deploy')
+
+    commands.extend([
+        f'python examples/multi_echo.py {name} {generic_cloud} {int(use_spot)} {accelerator}',
+        wait_for_no_failures,
+        # Make sure that our job scheduler is fast enough to have at least
+        # 15 RUNNING jobs in parallel.
+        wait_for_15_running,
+        # Final check for failures
+        f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
+        # This is to make sure we can finish job 32 before the test timeout.
+        f'until sky logs {name} 32 --status; do echo "Waiting for job 32 to finish..."; sleep 10; done',
+    ])
+
     test = smoke_tests_utils.Test(
         'multi_echo',
-        [
-            # TODO(aylei): also test local API server after we have rate limit in local mode
-            # Use deploy mode to avoid ulimited concurrency requests exhausts the CPU
-            'sky api stop && sky api start --deploy',
-            f'python examples/multi_echo.py {name} {generic_cloud} {int(use_spot)} {accelerator}',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
-            'sleep 10',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
-            'sleep 30',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
-            'sleep 30',
-            # Make sure that our job scheduler is fast enough to have at least
-            # 15 RUNNING jobs in parallel.
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "RUNNING" | wc -l | awk \'{{if ($1 < 15) exit 1}}\'',
-            'sleep 30',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
-            # This is to make sure we can finish job 32 before the test timeout.
-            f'until sky logs {name} 32 --status; do echo "Waiting for job 32 to finish..."; sleep 1; done',
-        ] +
+        commands +
         # Ensure jobs succeeded.
         [
             smoke_tests_utils.
@@ -484,7 +552,8 @@ def test_multi_echo(generic_cloud: str):
             # unfulfilled' error.  If process not found, grep->ssh returns 1.
             f'ssh {name} \'ps aux | grep "[/]"monitor.py\''
         ],
-        (f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api stop && '
+        (f'sky down -y {name}' if is_remote else
+         f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api stop && '
          f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
          f'sky down -y {name}'),
         timeout=20 * 60,
@@ -498,7 +567,7 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.no_fluidstack  # Fluidstack does not have T4 gpus for now
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
-@pytest.mark.no_scp  # SCP does not have V100 (16GB) GPUs. Run test_scp_huggingface instead.
+@pytest.mark.no_scp  # SCP does not have T4 gpus. Run test_scp_huggingface instead.
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.no_seeweb  # Seeweb does not support T4 GPUs
 @pytest.mark.resource_heavy
@@ -657,7 +726,6 @@ def test_tpu_pod_slice_gke():
 # ---------- Simple apps. ----------
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
 def test_multi_hostname(generic_cloud: str):
@@ -681,7 +749,6 @@ def test_multi_hostname(generic_cloud: str):
 
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
 def test_multi_node_failure(generic_cloud: str):
@@ -1047,12 +1114,40 @@ def test_volumes_on_kubernetes():
     test = smoke_tests_utils.Test(
         'volumes_on_kubernetes',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'kubectl create -f - <<EOF\n'
+                f'apiVersion: v1\n'
+                f'kind: PersistentVolumeClaim\n'
+                f'metadata:\n'
+                f'  name: existing0\n'
+                f'spec:\n'
+                f'  accessModes:\n'
+                f'    - ReadWriteOnce\n'
+                f'  resources:\n'
+                f'    requests:\n'
+                f'      storage: 1Gi\n'
+                f'EOF',
+            ),
             f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB',
-            f'sky volumes ls | grep "pvc0"',
+            f'sky volumes apply -y -n existing0 --type k8s-pvc --size 2GB --use-existing',
+            f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "pvc0" && echo "$vols" | grep "existing0"',
             f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "{name}"',
+            f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing0 -y',
+            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi',
+            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then echo "existing0 not deleted" && exit 1; else echo "existing0 deleted"; fi',
+            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "{name}"); if [ -n "$vol" ]; then echo "ephemeral volume for cluster {name} not deleted" && exit 1; else echo "ephemeral volume for cluster {name} deleted"; fi',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                'pvcs=$(kubectl get pvc) && echo "$pvcs" && pvc=$(echo "$pvcs" | grep "pvc0"); if [ -n "$pvc" ]; then echo "pvc for volume pvc0 not deleted" && exit 1; else echo "pvc for volume pvc0 deleted"; fi && '
+                'pvc=$(echo "$pvcs" | grep "existing0"); if [ -n "$pvc" ]; then echo "pvc for volume existing0 not deleted" && exit 1; else echo "pvc for volume existing0 deleted"; fi && '
+                f'pvc=$(echo "$pvcs" | grep "{name}"); if [ -n "$pvc" ]; then echo "pvc for ephemeral volume of cluster {name} not deleted" && exit 1; else echo "pvc for ephemeral volume of cluster {name} deleted"; fi',
+            ),
         ],
-        f'sky down -y {name} && sky volumes delete pvc0 -y && (vol=$(sky volumes ls | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi)',
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} && vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then sky volumes delete existing0 -y; fi && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then sky volumes delete pvc0 -y; fi',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1197,7 +1292,6 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
 # ---------- Task: n=2 nodes with setups. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_do  # DO does not have V100 gpus
 @pytest.mark.no_nebius  # Nebius does not have V100 gpus
 @pytest.mark.no_hyperbolic  # Hyperbolic does not have V100 gpus
@@ -1287,7 +1381,6 @@ def test_azure_start_stop():
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
@@ -1320,9 +1413,11 @@ def test_autostop_wait_for_jobs(generic_cloud: str):
                 cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=autostop_timeout),
 
-            # Ensure the cluster is UP and the autostop setting is reset ('-').
-            f'sky start -y {name}',
-            f'sky status | grep {name} | grep -E "UP\s+-"',
+            # Ensure the cluster is UP.
+            # Change the autostop setting to be very high so we can test
+            # resetting it.
+            f'sky start -y {name} -i 500',
+            f'sky status | grep {name} | grep "UP"',
 
             # Ensure the job succeeded.
             f'sky exec {name} tests/test_yamls/minimal.yaml',
@@ -1340,8 +1435,10 @@ def test_autostop_wait_for_jobs(generic_cloud: str):
                 timeout=autostop_timeout),
 
             # Test restarting the idleness timer via exec:
-            f'sky start -y {name}',
-            f'sky status | grep {name} | grep -E "UP\s+-"',
+            # Change the autostop setting to be very high so we can test
+            # resetting it.
+            f'sky start -y {name} -i 500',
+            f'sky status | grep {name} | grep "UP"',
             f'sky autostop -y {name} -i 1 --wait-for jobs',  # Idleness starts counting.
             'sleep 45',  # Almost reached the threshold.
             f'sky exec {name} echo hi',  # Should restart the timer.
@@ -1360,7 +1457,6 @@ def test_autostop_wait_for_jobs(generic_cloud: str):
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
@@ -1407,7 +1503,7 @@ def test_autostop_wait_for_jobs_and_ssh(generic_cloud: str):
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_scp  # 180s does not enough
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
@@ -1494,7 +1590,7 @@ def test_cancel_azure():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_paperspace  # Paperspace has `gnome-shell` on nvidia-smi
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_scp  # SCP does not have T4 gpus
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
@@ -1760,6 +1856,59 @@ def test_kubernetes_pod_failure_detection():
         ],
         f'sky down -y {name}',
         timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_pod_pending_reason():
+    """Ensure pending pod reasons are surfaced in provision logs."""
+    name = smoke_tests_utils.get_cluster_name()
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_k8s_pending_volume.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    task_yaml_content = template.render()
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(task_yaml_content)
+        f.flush()
+
+        # This launch will be stuck in pending, so launch
+        # in background and kill after timeout.
+        launch_with_timeout_cmd = (
+            f'sky launch -y -c {name} --infra kubernetes {f.name} & '
+            f'LAUNCH_PID=$!; '
+            f'sleep 60; '
+            f'kill $LAUNCH_PID 2>/dev/null || true; '
+            f'wait $LAUNCH_PID 2>/dev/null || true')
+
+        test = smoke_tests_utils.Test(
+            'kubernetes_pod_pending_reason',
+            [
+                launch_with_timeout_cmd,
+                f's=$(sky logs --provision {name} --no-follow 2>&1); echo "$s"; echo; '
+                f'echo "$s" | grep "is pending: FailedMount: MountVolume.SetUp failed for volume"'
+            ],
+            f'sky down -y {name}',
+            timeout=10 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_pod_long_image_pull():
+    """Ensure kubelet image pulling events are surfaced in provision logs."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'kubernetes_pod_long_image_pull',
+        [
+            # Use a large image, for example CUDA runtime.
+            f'sky launch -y -c {name} --infra kubernetes --num-nodes 3 --image-id docker:nvidia/cuda:13.0.1-runtime-ubuntu24.04',
+            f's=$(sky logs --provision {name} --no-follow 2>&1); echo "$s"; echo; '
+            f'echo "$s" | grep "is pending: Pulling: Pulling image"'
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -2124,7 +2273,6 @@ def test_remote_server_api_login():
 
 # ---------- Testing Autostopping ----------
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
@@ -2165,7 +2313,6 @@ def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
 
 # ---------- Testing Autodowning ----------
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet

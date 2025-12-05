@@ -27,13 +27,17 @@ from sky.clouds.utils import aws_utils
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils.db import kv_cache
 
 if typing.TYPE_CHECKING:
+    from mypy_boto3_ec2 import type_defs as ec2_type_defs
+
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
     from sky.utils import status_lib
@@ -50,26 +54,6 @@ _DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu'
 _DEFAULT_GPU_ARM64_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-arm64'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
 _DEFAULT_NEURON_IMAGE_ID = 'skypilot:neuron-ubuntu-2204'
-
-# This local file (under ~/.aws/) will be uploaded to remote nodes (any
-# cloud), if all of the following conditions hold:
-#   - the current user identity is not using AWS SSO
-#   - this file exists
-# It has the following purposes:
-#   - make all nodes (any cloud) able to access private S3 buckets
-#   - make some remote nodes able to launch new nodes on AWS (i.e., makes
-#     AWS head node able to launch AWS workers, or any-cloud jobs controller
-#     able to launch spot clusters on AWS).
-#
-# If we detect the current user identity is AWS SSO, we will not upload this
-# file to any remote nodes (any cloud). Instead, a SkyPilot IAM role is
-# assigned to both AWS head and workers.
-# TODO(skypilot): This also means we leave open a bug for AWS SSO users that
-# use multiple clouds. The non-AWS nodes will have neither the credential
-# file nor the ability to understand AWS IAM.
-_CREDENTIAL_FILES = [
-    'credentials',
-]
 
 DEFAULT_AMI_GB = 45
 DEFAULT_SSH_USER = 'ubuntu'
@@ -120,8 +104,23 @@ _EFA_IMAGE_NAME = 'Deep Learning Base OSS Nvidia Driver GPU AMI' \
 # For functions that needs caching per AWS profile.
 _AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE = 5
 
+# Ref: https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-envvars.html
+_DEFAULT_AWS_CONFIG_PATH = '~/.aws/credentials'
+_AWS_CONFIG_FILE_ENV_VAR = 'AWS_CONFIG_FILE'
+
 T = TypeVar('T')
 P = ParamSpec('P')
+
+
+def _get_credentials_path() -> str:
+    cred_path = os.getenv(_AWS_CONFIG_FILE_ENV_VAR, None)
+    if cred_path is not None:
+        if not os.path.isfile(os.path.expanduser(cred_path)):
+            raise FileNotFoundError(f'{_AWS_CONFIG_FILE_ENV_VAR}={cred_path},'
+                                    ' but the file does not exist.')
+        return cred_path
+    # Fallback to the default config path.
+    return _DEFAULT_AWS_CONFIG_PATH
 
 
 def aws_profile_aware_lru_cache(*lru_cache_args,
@@ -299,7 +298,9 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported_features = {}
         if resources.use_spot:
@@ -341,10 +342,15 @@ class AWS(clouds.Cloud):
     #### Regions/Zones ####
 
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
         del accelerators  # unused
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'aws')
@@ -422,7 +428,8 @@ class AWS(clouds.Cloud):
             if acc_name == 'K80':
                 image_id = catalog.get_image_id_from_tag(
                     _DEFAULT_GPU_K80_IMAGE_ID, region_name, clouds='aws')
-            if acc_name in ['Trainium', 'Inferentia']:
+            if acc_name.startswith('Trainium') or acc_name.startswith(
+                    'Inferentia'):
                 image_id = catalog.get_image_id_from_tag(
                     _DEFAULT_NEURON_IMAGE_ID, region_name, clouds='aws')
         if image_id is not None:
@@ -468,32 +475,112 @@ class AWS(clouds.Cloud):
         return image_id_str
 
     @classmethod
+    def _describe_image_with_retry(
+        cls,
+        image_id: str,
+        region: str,
+        log_context: str,
+    ) -> Optional['ec2_type_defs.ImageTypeDef']:
+        image_not_found_message = (
+            f'Image {image_id!r} not found in AWS region {region} - '
+            f'can\'t get {log_context}.\n\n'
+            f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
+            'Example: ami-0729d913a335efca7')
+        max_retries = 3
+        debug_message = 'no describe_images response'
+        for iteration in range(1, max_retries + 1):
+            try:
+                client = aws.client('ec2', region_name=region)
+                response = client.describe_images(ImageIds=[image_id])
+                # These values are not optional, but we will use .get() to avoid
+                # crashing on a malformed response from AWS.
+                metadata = response.get('ResponseMetadata', {})
+                image_info = response.get('Images')
+                debug_message = (
+                    'describe_images response:\n'
+                    f'  status code: {metadata.get("HTTPStatusCode")}\n'
+                    f'  retry attempts: {metadata.get("RetryAttempts")}\n'
+                    f'  len(images): {len(image_info) if image_info else -1}\n'
+                    f'  next token: {response.get("NextToken")}')
+                logger.debug(debug_message)
+                if not image_info:
+                    # image_info is [] (can't find image) or None (invalid
+                    # response from AWS)
+                    with ux_utils.print_exception_no_traceback():
+                        if env_options.Options.SHOW_DEBUG_INFO.get():
+                            image_not_found_message += f'\n{debug_message}'
+                        raise ValueError(image_not_found_message)
+                image = image_info[0]
+                return image
+            except (aws.botocore_exceptions().NoCredentialsError,
+                    aws.botocore_exceptions().ProfileNotFound) as e:
+                # The caller will fall back to its own default value when we
+                # return None. Mention that explicitly in the shared log line.
+                logger.debug(
+                    f'Failed to get {log_context} for {image_id} in region '
+                    f'{region}: {e}. Using default value.')
+                return None
+            except aws.botocore_exceptions().ClientError as e:
+                # This shared log message replaces two attribute-specific
+                # messages (image size/root device) for simplicity.
+                logger.debug(f'Failed to get {log_context} for image '
+                             f'{image_id!r} in region {region}: {e}')
+                if iteration == max_retries:
+                    with ux_utils.print_exception_no_traceback():
+                        if env_options.Options.SHOW_DEBUG_INFO.get():
+                            image_not_found_message += f'\n{debug_message}'
+                            # Note: the ClientError's exception message should
+                            # include most useful info:
+                            # https://github.com/boto/botocore/blob/260a8b91cedae895165984d2102bcbc487de3027/botocore/exceptions.py#L518-L532
+                            additional_info = f'  ClientError: {e}'
+                            logger.debug(additional_info)
+                            image_not_found_message += '\n' + additional_info
+                        raise ValueError(image_not_found_message) from None
+            # linear backoff starting from 0.5 seconds
+            time.sleep(iteration * 0.5)
+        # Should never reach here, but keep type checker happy.
+        raise RuntimeError('Unreachable')
+
+    @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_AMI_GB
         assert region is not None, (image_id, region)
-        image_not_found_message = (
-            f'Image {image_id!r} not found in AWS region {region}.\n'
-            f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
-            'Example: ami-0729d913a335efca7')
-        try:
-            client = aws.client('ec2', region_name=region)
-            image_info = client.describe_images(ImageIds=[image_id]).get(
-                'Images', [])
-            if not image_info:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(image_not_found_message)
-            image_size = image_info[0]['BlockDeviceMappings'][0]['Ebs'][
-                'VolumeSize']
-        except (aws.botocore_exceptions().NoCredentialsError,
-                aws.botocore_exceptions().ProfileNotFound):
+        # first try the cache
+        workspace_profile = aws.get_workspace_profile()
+        kv_cache_key = f'aws:ami:size:{workspace_profile}:{region}:{image_id}'
+        image_size = kv_cache.get_cache_entry(kv_cache_key)
+        if image_size is not None:
+            logger.debug(
+                f'Image size {image_size} found in cache {kv_cache_key}')
+            return float(image_size)
+        # if not found in cache, query the cloud
+        image = cls._describe_image_with_retry(
+            image_id,
+            region,
+            log_context='image size',
+        )
+        if image is None:
             # Fallback to default image size if no credentials are available.
             # The credentials issue will be caught when actually provisioning
             # the instance and appropriate errors will be raised there.
             return DEFAULT_AMI_GB
-        except aws.botocore_exceptions().ClientError:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(image_not_found_message) from None
+        image_size = image['BlockDeviceMappings'][0]['Ebs']['VolumeSize']
+        # cache the result for a day.
+        # AMIs are immutable, so we can cache the result for a long time.
+        # While AMIs can be deleted, if the AMI is deleted before cache expiration,
+        # the actual VM launch still fails.
+        day_in_seconds = 60 * 60 * 24  # 1 day, 60s * 60m * 24h
+        try:
+            kv_cache.add_or_update_cache_entry(kv_cache_key, str(image_size),
+                                               time.time() + day_in_seconds)
+        except Exception as e:  # pylint: disable=broad-except
+            # Catch the error and continue.
+            # Failure to cache the result is not critical to the
+            # success of this function.
+            logger.debug(
+                f'Failed to cache image size for {image_id} in region {region}: {e}'
+            )
         return image_size
 
     @classmethod
@@ -504,36 +591,39 @@ class AWS(clouds.Cloud):
         if image_id.startswith('skypilot:'):
             return DEFAULT_ROOT_DEVICE_NAME
         assert region is not None, (image_id, region)
-        image_not_found_message = (
-            f'Image {image_id!r} not found in AWS region {region}.\n'
-            f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
-            'Example: ami-0729d913a335efca7')
-        try:
-            client = aws.client('ec2', region_name=region)
-            image_info = client.describe_images(ImageIds=[image_id]).get(
-                'Images', [])
-            if not image_info:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(image_not_found_message)
-            image = image_info[0]
-            if 'RootDeviceName' not in image:
-                logger.warning(f'Image {image_id!r} does not have a root '
-                               f'device name. '
-                               f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
-                return DEFAULT_ROOT_DEVICE_NAME
-            return image['RootDeviceName']
-        except (aws.botocore_exceptions().NoCredentialsError,
-                aws.botocore_exceptions().ProfileNotFound):
-            # Fallback to default root device name if no credentials are
-            # available.
-            # The credentials issue will be caught when actually provisioning
-            # the instance and appropriate errors will be raised there.
-            logger.warning(f'No credentials available for region {region}. '
-                           f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+        workspace_profile = aws.get_workspace_profile()
+        kv_cache_key = f'aws:ami:root_device_name:{workspace_profile}:{region}:{image_id}'
+        root_device_name = kv_cache.get_cache_entry(kv_cache_key)
+        if root_device_name is not None:
+            logger.debug(f'Image root device name {root_device_name} found in '
+                         f'cache {kv_cache_key}')
+            return root_device_name
+        # if not found in cache, query the cloud
+        image = cls._describe_image_with_retry(
+            image_id,
+            region,
+            log_context='image root device name',
+        )
+        if image is None:
             return DEFAULT_ROOT_DEVICE_NAME
-        except aws.botocore_exceptions().ClientError:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(image_not_found_message) from None
+        if 'RootDeviceName' not in image:
+            logger.debug(f'Image {image_id!r} does not have a root '
+                         f'device name. '
+                         f'Using {DEFAULT_ROOT_DEVICE_NAME}.')
+            return DEFAULT_ROOT_DEVICE_NAME
+        root_device_name = image['RootDeviceName']
+        day_in_seconds = 60 * 60 * 24  # 1 day, 60s * 60m * 24h
+        try:
+            kv_cache.add_or_update_cache_entry(kv_cache_key, root_device_name,
+                                               time.time() + day_in_seconds)
+        except Exception as e:  # pylint: disable=broad-except
+            # Catch the error and continue.
+            # Failure to cache the result is not critical to the
+            # success of this function.
+            logger.debug(
+                f'Failed to cache image root device name for {image_id} in region {region}: {e}'
+            )
+        return root_device_name
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -813,22 +903,67 @@ class AWS(clouds.Cloud):
     def _check_compute_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this AWS's compute service."""
-        return cls._check_credentials()
+        credentials_exist, identity_str, hints = cls._check_credentials_exist()
+        if not credentials_exist:
+            return False, hints
+
+        # Fetch the AWS catalogs
+        # pylint: disable=import-outside-toplevel
+        from sky.catalog import aws_catalog
+
+        # Trigger the fetch of the availability zones mapping.
+        try:
+            aws_catalog.get_default_instance_type()
+        except RuntimeError as e:
+            return False, (
+                'Failed to fetch the availability zones for the account '
+                f'{identity_str}. It is likely due to permission issues, please'
+                ' check the minimal permission required for AWS: '
+                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                f'\n{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+
+        return True, hints
 
     @classmethod
     def _check_storage_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to this AWS's storage service."""
-        # TODO(seungjin): Implement separate check for
-        # if the user has access to S3.
-        return cls._check_credentials()
+        credentials_exist, identity_str, hints = cls._check_credentials_exist()
+        if not credentials_exist:
+            return False, hints
+
+        try:
+            # Create an S3 client
+            s3_client = aws.client('s3')
+
+            # Try to list buckets
+            s3_client.list_buckets()
+        except aws.botocore_exceptions().ClientError as e:
+            return False, (
+                'Failed to list buckets for the account '
+                f'{identity_str}. It is likely due to permission issues, please'
+                ' check the storage permission required for AWS: '
+                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                f'\n{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+
+        return True, hints
 
     @classmethod
     # Cache since getting identity is slow.
     @aws_profile_aware_lru_cache(scope='request',
                                  maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)
-    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has access credentials to AWS."""
+    def _check_credentials_exist(
+            cls) -> Tuple[bool, Optional[str], Optional[str]]:
+        """Checks if the user has access credentials to AWS.
+
+        Returns:
+            bool: True if credentials exist and are valid.
+            str: Identity string of the user. None if credentials do not exist.
+                 (i.e. the first boolean is False)
+            str: Hints for the user to set up credentials.
+        """
 
         dependency_installation_hints = (
             'AWS dependencies are not installed. '
@@ -844,21 +979,22 @@ class AWS(clouds.Cloud):
                               stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
-            return False, dependency_installation_hints
+            return False, None, dependency_installation_hints
 
         # Checks if aws boto is installed properly
         if not common.can_import_modules(['boto3', 'botocore']):
-            return False, dependency_installation_hints
+            return False, None, dependency_installation_hints
 
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
         try:
             identity_str = cls.get_active_user_identity_str()
         except exceptions.CloudUserIdentityError as e:
-            return False, str(e)
+            return False, None, str(e)
 
+        credentials_path = _get_credentials_path()
         static_credential_exists = os.path.isfile(
-            os.path.expanduser('~/.aws/credentials'))
+            os.path.expanduser(credentials_path))
         hints = None
         identity_type = cls._current_identity_type()
         single_cloud_hint = (
@@ -909,25 +1045,10 @@ class AWS(clouds.Cloud):
             # other clouds to access private s3 buckets and resources like EC2.
             # `get_active_user_identity` does not guarantee this file exists.
             if not static_credential_exists:
-                return (False, '~/.aws/credentials does not exist. ' +
+                return (False, None, f'{credentials_path} does not exist. ' +
                         cls._STATIC_CREDENTIAL_HELP_STR)
 
-        # Fetch the AWS catalogs
-        # pylint: disable=import-outside-toplevel
-        from sky.catalog import aws_catalog
-
-        # Trigger the fetch of the availability zones mapping.
-        try:
-            aws_catalog.get_default_instance_type()
-        except RuntimeError as e:
-            return False, (
-                'Failed to fetch the availability zones for the account '
-                f'{identity_str}. It is likely due to permission issues, please'
-                ' check the minimal permission required for AWS: '
-                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
-                f'\n{cls._INDENT_PREFIX}Details: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
-        return True, hints
+        return True, identity_str, hints
 
     @classmethod
     def _current_identity_type(cls) -> Optional[AWSIdentityType]:
@@ -1044,7 +1165,8 @@ class AWS(clouds.Cloud):
                     f'Invalid AWS configuration.\n'
                     f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
-        except aws.botocore_exceptions().TokenRetrievalError:
+        except aws.botocore_exceptions().TokenRetrievalError as e:
+            logger.debug(f'Failed to get AWS caller identity: {e}.')
             # This is raised when the access token is expired, which mainly
             # happens when the user is using temporary credentials or SSO
             # login.
@@ -1164,11 +1286,31 @@ class AWS(clouds.Cloud):
         if self._current_identity_type(
         ) != AWSIdentityType.SHARED_CREDENTIALS_FILE:
             return {}
-        return {
-            f'~/.aws/{filename}': f'~/.aws/{filename}'
-            for filename in _CREDENTIAL_FILES
-            if os.path.exists(os.path.expanduser(f'~/.aws/{filename}'))
-        }
+
+        # This local credentials file (default to ~/.aws/credentials and can be
+        # overridden by AWS_CONFIG_FILE environment variable) will be uploaded
+        # to remote nodes (any cloud), if all of the following conditions hold:
+        #   - the current user identity is not using AWS SSO
+        #   - this file exists
+        # It has the following purposes:
+        #   - make all nodes (any cloud) able to access private S3 buckets
+        #   - make some remote nodes able to launch new nodes on AWS (i.e., makes
+        #     AWS head node able to launch AWS workers, or any-cloud jobs controller
+        #     able to launch spot clusters on AWS).
+        #
+        # If we detect the current user identity is AWS SSO, we will not upload this
+        # file to any remote nodes (any cloud). Instead, a SkyPilot IAM role is
+        # assigned to both AWS head and workers.
+        # TODO(skypilot): This also means we leave open a bug for AWS SSO users that
+        # use multiple clouds. The non-AWS nodes will have neither the credential
+        # file nor the ability to understand AWS IAM.
+        credentials_path = os.path.expanduser(_get_credentials_path())
+        if os.path.exists(credentials_path):
+            return {
+                # Upload to the default config location on remote cluster.
+                _DEFAULT_AWS_CONFIG_PATH: credentials_path
+            }
+        return {}
 
     @aws_profile_aware_lru_cache(scope='request',
                                  maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)

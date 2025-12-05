@@ -25,6 +25,7 @@ from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
+from sky.server.requests import request_names
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -84,7 +85,9 @@ def optimize(
     # but we do not apply the admin policy there. We should apply the admin
     # policy in the optimizer, but that will require some refactoring.
     with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, request_options=request_options) as dag:
+            dag,
+            request_name=request_names.AdminPolicyRequestName.OPTIMIZE,
+            request_options=request_options) as dag:
         dag.resolve_and_validate_volumes()
         return optimizer.Optimizer.optimize(dag=dag,
                                             minimize=minimize,
@@ -417,21 +420,17 @@ def cost_report(
         num_nodes = record.get('num_nodes', 1)
         try:
             resource_str_simple, resource_str_full = (
-                resources_utils.format_resource(
-                    resources, simplified_only=abbreviate_response))
+                resources_utils.format_resource(resources,
+                                                simplified_only=False))
             record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
-            if not abbreviate_response:
-                assert resource_str_full is not None
-                record[
-                    'resources_str_full'] = f'{num_nodes}x{resource_str_full}'
+            record['resources_str_full'] = f'{num_nodes}x{resource_str_full}'
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to get resources_str for cluster '
                          f'{record["name"]}: {str(e)}')
             for field in fields:
                 record[field] = None
             record['resources_str'] = '-'
-            if not abbreviate_response:
-                record['resources_str_full'] = '-'
+            record['resources_str_full'] = '-'
 
     for report in cluster_reports:
         _update_record_with_resources(report)
@@ -499,6 +498,32 @@ def _start(
                 controller_autostop_config.enabled):
             idle_minutes_to_autostop = controller_autostop_config.idle_minutes
             down = controller_autostop_config.down
+    else:
+        # For non-controller clusters, restore autostop configuration from
+        # database if not explicitly provided.
+        if idle_minutes_to_autostop is None:
+            cluster_record = global_user_state.get_cluster_from_name(
+                cluster_name, include_user_info=False, summary_response=True)
+            if cluster_record is not None:
+                stored_autostop = cluster_record.get('autostop', -1)
+                stored_to_down = cluster_record.get('to_down', False)
+                # Restore autostop if it was previously set (autostop > 0)
+                if stored_autostop > 0:
+                    logger.warning(f'Restoring cluster {cluster_name!r} with '
+                                   f'autostop set to {stored_autostop} minutes'
+                                   f'. To turn off autostop, run: '
+                                   f'`sky autostop {cluster_name} --cancel`')
+                    idle_minutes_to_autostop = stored_autostop
+                    # Only restore 'down' if it was explicitly set and we're
+                    # restoring autostop
+                    if stored_to_down:
+                        down = stored_to_down
+                elif stored_autostop == 0:
+                    logger.warning(
+                        f'Autostop was previously set to 0 minutes '
+                        f'for cluster {cluster_name!r} so it will '
+                        'not be restored. To turn on autostop, run: '
+                        f'`sky autostop {cluster_name} -i <minutes>`')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
@@ -1294,84 +1319,15 @@ def realtime_kubernetes_gpu_availability(
 # =================
 @usage_lib.entrypoint
 def local_up(gpus: bool,
-             ips: Optional[List[str]],
-             ssh_user: Optional[str],
-             ssh_key: Optional[str],
-             cleanup: bool,
-             context_name: Optional[str] = None,
-             password: Optional[str] = None,
              name: Optional[str] = None,
              port_start: Optional[int] = None) -> None:
-    """Creates a local or remote cluster."""
-
-    def _validate_args(ips, ssh_user, ssh_key, cleanup):
-        # If any of --ips, --ssh-user, or --ssh-key-path is specified,
-        # all must be specified
-        if bool(ips) or bool(ssh_user) or bool(ssh_key):
-            if not (ips and ssh_user and ssh_key):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'All ips, ssh_user, and ssh_key must be specified '
-                        'together.')
-
-        # --cleanup can only be used if --ips, --ssh-user and --ssh-key-path
-        # are all provided
-        if cleanup and not (ips and ssh_user and ssh_key):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'cleanup can only be used with ips, ssh_user and ssh_key.')
-
-    _validate_args(ips, ssh_user, ssh_key, cleanup)
-
-    # If remote deployment arguments are specified, run remote up script
-    if ips:
-        assert ssh_user is not None and ssh_key is not None
-        kubernetes_deploy_utils.deploy_remote_cluster(ips, ssh_user, ssh_key,
-                                                      cleanup, context_name,
-                                                      password)
-    else:
-        # Run local deployment (kind) if no remote args are specified
-        kubernetes_deploy_utils.deploy_local_cluster(name, port_start, gpus)
+    """Creates a local cluster."""
+    kubernetes_deploy_utils.deploy_local_cluster(name, port_start, gpus)
 
 
 def local_down(name: Optional[str] = None) -> None:
     """Tears down the Kubernetes cluster started by local_up."""
     kubernetes_deploy_utils.teardown_local_cluster(name)
-
-
-@usage_lib.entrypoint
-def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
-    """Deploys or tears down a Kubernetes cluster on SSH targets.
-
-    Args:
-        infra: Name of the cluster configuration in ssh_node_pools.yaml.
-            If None, the first cluster in the file is used.
-        cleanup: If True, clean up the cluster instead of deploying.
-    """
-    kubernetes_deploy_utils.deploy_ssh_cluster(
-        cleanup=cleanup,
-        infra=infra,
-    )
-
-
-@usage_lib.entrypoint
-def ssh_status(context_name: str) -> Tuple[bool, str]:
-    """Check the status of an SSH Node Pool context.
-
-    Args:
-        context_name: The SSH context name (e.g., 'ssh-my-cluster')
-
-    Returns:
-        Tuple[bool, str]: (is_ready, reason)
-            - is_ready: True if the SSH Node Pool is ready, False otherwise
-            - reason: Explanation of the status
-    """
-    try:
-        is_ready, reason = clouds.SSH.check_single_context(context_name)
-        return is_ready, reason
-    except Exception as e:  # pylint: disable=broad-except
-        return False, ('Failed to check SSH context: '
-                       f'{common_utils.format_exception(e)}')
 
 
 def get_all_contexts() -> List[str]:

@@ -68,19 +68,6 @@ version = 1
 _MAX_ATTEMPT_FOR_CREATION = 5
 
 
-class _ThreadLocalLRUCache(threading.local):
-
-    def __init__(self, maxsize=32):
-        super().__init__()
-        self.cache = annotations.lru_cache(scope='request', maxsize=maxsize)
-
-
-def _thread_local_lru_cache(maxsize=32):
-    # Create thread-local storage for the LRU cache
-    local_cache = _ThreadLocalLRUCache(maxsize)
-    return local_cache.cache
-
-
 def _assert_kwargs_builtin_type(kwargs):
     assert all(isinstance(v, (int, float, str)) for v in kwargs.values()), (
         f'kwargs should not contain none built-in types: {kwargs}')
@@ -125,9 +112,9 @@ def get_workspace_profile() -> Optional[str]:
     return skypilot_config.get_workspace_cloud('aws').get('profile', None)
 
 
-# The LRU cache needs to be thread-local to avoid multiple threads sharing the
+# The TTL cache needs to be thread-local to avoid multiple threads sharing the
 # same session object, which is not guaranteed to be thread-safe.
-@_thread_local_lru_cache()
+@annotations.thread_local_ttl_cache()
 def session(check_credentials: bool = True, profile: Optional[str] = None):
     """Create an AWS session.
 

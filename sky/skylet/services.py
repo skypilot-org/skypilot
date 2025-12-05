@@ -452,6 +452,10 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     converted_metadata = {
                         k: v for k, v in metadata.items() if v is not None
                     }
+                schedule_state = job.get('schedule_state')
+                if schedule_state is not None:
+                    schedule_state = managed_job_state.ManagedJobScheduleState(
+                        schedule_state).to_protobuf()
                 job_info = managed_jobsv1_pb2.ManagedJobInfo(
                     # The `spot.job_id`, which can be used to identify
                     # different tasks for the same job
@@ -464,8 +468,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     workspace=job.get('workspace'),
                     status=managed_job_state.ManagedJobStatus(
                         job.get('status')).to_protobuf(),
-                    schedule_state=managed_job_state.ManagedJobScheduleState(
-                        job.get('schedule_state')).to_protobuf(),
+                    schedule_state=schedule_state,
                     resources=job.get('resources'),
                     cluster_resources=job.get('cluster_resources'),
                     cluster_resources_full=job.get('cluster_resources_full'),
@@ -494,6 +497,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 total_no_filter=total_no_filter,
                 status_counts=status_counts)
         except Exception as e:  # pylint: disable=broad-except
+            logger.error(e, exc_info=True)
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def GetAllJobIdsByName(  # type: ignore[return]

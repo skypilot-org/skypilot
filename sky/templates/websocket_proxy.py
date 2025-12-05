@@ -22,6 +22,8 @@ import websockets
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect
 
+from sky import exceptions
+from sky.client import service_account_auth
 from sky.server import constants
 from sky.server.server import KubernetesSSHMessageType
 from sky.skylet import constants as skylet_constants
@@ -59,55 +61,67 @@ def _get_cookie_header(url: str) -> Dict[str, str]:
     return {'Cookie': cookie_header}
 
 
-async def main(url: str, timestamps_supported: bool) -> None:
-    cookie_header = _get_cookie_header(url)
-    async with connect(url,
-                       ping_interval=None,
-                       additional_headers=cookie_header) as websocket:
-        if os.isatty(sys.stdin.fileno()):
-            # pylint: disable=import-outside-toplevel
-            import termios
-            import tty
-            old_settings = termios.tcgetattr(sys.stdin.fileno())
-            tty.setraw(sys.stdin.fileno())
+async def main(url: str, timestamps_supported: bool, login_url: str) -> None:
+    headers = {}
+    headers.update(_get_cookie_header(url))
+    headers.update(service_account_auth.get_service_account_headers())
+    try:
+        async with connect(url, ping_interval=None,
+                           additional_headers=headers) as websocket:
+            await run_websocket_proxy(websocket, timestamps_supported)
+    except websockets.exceptions.InvalidStatus as e:
+        if e.response.status_code == 403:
+            print(str(exceptions.ApiServerAuthenticationError(login_url)),
+                  file=sys.stderr)
         else:
-            old_settings = None
+            print(f'Error ssh into cluster: {e}', file=sys.stderr)
+        sys.exit(1)
 
-        try:
-            loop = asyncio.get_running_loop()
-            # Use asyncio.Stream primitives to wrap stdin and stdout, this is to
-            # avoid creating a new thread for each read/write operation
-            # excessively.
-            stdin_reader = asyncio.StreamReader()
-            protocol = asyncio.StreamReaderProtocol(stdin_reader)
-            await loop.connect_read_pipe(lambda: protocol, sys.stdin)
-            transport, protocol = await loop.connect_write_pipe(
-                asyncio.streams.FlowControlMixin, sys.stdout)  # type: ignore
-            stdout_writer = asyncio.StreamWriter(transport, protocol, None,
-                                                 loop)
-            # Dictionary to store last ping time for latency measurement
-            last_ping_time_dict: Optional[Dict[int, float]] = None
-            if timestamps_supported:
-                last_ping_time_dict = {}
 
-            # Use an Event to signal when websocket is closed
-            websocket_closed_event = asyncio.Event()
-            websocket_lock = asyncio.Lock()
+async def run_websocket_proxy(websocket: ClientConnection,
+                              timestamps_supported: bool) -> None:
+    if os.isatty(sys.stdin.fileno()):
+        # pylint: disable=import-outside-toplevel
+        import termios
+        import tty
+        old_settings = termios.tcgetattr(sys.stdin.fileno())
+        tty.setraw(sys.stdin.fileno())
+    else:
+        old_settings = None
 
-            await asyncio.gather(
-                stdin_to_websocket(stdin_reader, websocket,
-                                   timestamps_supported, websocket_closed_event,
-                                   websocket_lock),
-                websocket_to_stdout(websocket, stdout_writer,
-                                    timestamps_supported, last_ping_time_dict,
-                                    websocket_closed_event, websocket_lock),
-                latency_monitor(websocket, last_ping_time_dict,
-                                websocket_closed_event, websocket_lock),
-                return_exceptions=True)
-        finally:
-            if old_settings:
-                termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN,
-                                  old_settings)
+    try:
+        loop = asyncio.get_running_loop()
+        # Use asyncio.Stream primitives to wrap stdin and stdout, this is to
+        # avoid creating a new thread for each read/write operation
+        # excessively.
+        stdin_reader = asyncio.StreamReader()
+        protocol = asyncio.StreamReaderProtocol(stdin_reader)
+        await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+        transport, protocol = await loop.connect_write_pipe(
+            asyncio.streams.FlowControlMixin, sys.stdout)  # type: ignore
+        stdout_writer = asyncio.StreamWriter(transport, protocol, None, loop)
+        # Dictionary to store last ping time for latency measurement
+        last_ping_time_dict: Optional[Dict[int, float]] = None
+        if timestamps_supported:
+            last_ping_time_dict = {}
+
+        # Use an Event to signal when websocket is closed
+        websocket_closed_event = asyncio.Event()
+        websocket_lock = asyncio.Lock()
+
+        await asyncio.gather(
+            stdin_to_websocket(stdin_reader, websocket, timestamps_supported,
+                               websocket_closed_event, websocket_lock),
+            websocket_to_stdout(websocket, stdout_writer, timestamps_supported,
+                                last_ping_time_dict, websocket_closed_event,
+                                websocket_lock),
+            latency_monitor(websocket, last_ping_time_dict,
+                            websocket_closed_event, websocket_lock),
+            return_exceptions=True)
+    finally:
+        if old_settings:
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN,
+                              old_settings)
 
 
 async def latency_monitor(websocket: ClientConnection,
@@ -232,20 +246,23 @@ async def websocket_to_stdout(websocket: ClientConnection,
 
 if __name__ == '__main__':
     server_url = sys.argv[1].strip('/')
-    if '://' not in server_url:
-        # Keep backward compatibility for legacy server URLs without protocol
-        # TODO(aylei): Remove this after 0.10.0
-        server_url = f'http://{server_url}'
 
-    health_url = f'{server_url}/api/health'
-    health_response = requests.get(health_url)
-    health_data = health_response.json()
-    timestamps_are_supported = int(health_data['api_version']) > 21
     disable_latency_measurement = os.environ.get(
         skylet_constants.SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR, '0') == '1'
-    timestamps_are_supported = (timestamps_are_supported and
-                                not disable_latency_measurement)
+    if disable_latency_measurement:
+        timestamps_are_supported = False
+    else:
+        # TODO(aylei): remove the separate /api/health call and use the header
+        # during websocket handshake to determine the server version.
+        health_url = f'{server_url}/api/health'
+        cookie_hdr = _get_cookie_header(health_url)
+        health_response = requests.get(health_url, headers=cookie_hdr)
+        health_data = health_response.json()
+        timestamps_are_supported = int(health_data.get('api_version', 0)) > 21
 
+    # Capture the original API server URL for login hint if authentication
+    # is required.
+    _login_url = server_url
     server_proto, server_fqdn = server_url.split('://')
     websocket_proto = 'ws'
     if server_proto == 'https':
@@ -258,4 +275,4 @@ if __name__ == '__main__':
     websocket_url = (f'{server_url}/kubernetes-pod-ssh-proxy'
                      f'?cluster_name={sys.argv[2]}'
                      f'{client_version_str}')
-    asyncio.run(main(websocket_url, timestamps_are_supported))
+    asyncio.run(main(websocket_url, timestamps_are_supported, _login_url))

@@ -32,6 +32,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 import traceback
 import typing
 from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
@@ -60,6 +61,8 @@ from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.client.cli import flags
 from sky.client.cli import table_utils
+from sky.client.cli import utils as cli_utils
+from sky.jobs.state import ManagedJobStatus
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
@@ -1116,7 +1119,7 @@ def launch(
     if task.service is not None:
         noun = 'pool' if task.service.pool else 'service'
         capnoun = noun.capitalize()
-        sysname = 'Jobs Worker Pool' if task.service.pool else 'SkyServe'
+        sysname = 'Pool' if task.service.pool else 'SkyServe'
         cmd = 'sky jobs pool apply' if task.service.pool else 'sky serve up'
         logger.info(
             f'{colorama.Fore.YELLOW}{capnoun} section will be ignored when '
@@ -1354,6 +1357,8 @@ def _handle_jobs_queue_request(
         str, Any]]]] = None,
     is_called_by_user: bool = False,
     only_in_progress: bool = False,
+    queue_result_version: cli_utils.QueueResultVersion = cli_utils.
+    QueueResultVersion.V1,
 ) -> Tuple[Optional[int], str]:
     """Get the in-progress managed jobs.
 
@@ -1368,6 +1373,7 @@ def _handle_jobs_queue_request(
         is_called_by_user: If this function is called by user directly, or an
             internal call.
         only_in_progress: If True, only return the number of in-progress jobs.
+        queue_result_version: The version of the queue result.
 
     Returns:
         A tuple of (num_in_progress_jobs, msg). If num_in_progress_jobs is None,
@@ -1403,7 +1409,7 @@ def _handle_jobs_queue_request(
             result = jobs_future.result()
             pool_status_result = pool_status_future.result()
 
-        if isinstance(result, tuple):
+        if queue_result_version.v2():
             managed_jobs_, total, status_counts, _ = result
             if only_in_progress:
                 num_in_progress_jobs = 0
@@ -1567,35 +1573,6 @@ def _handle_services_request(
     return num_services, msg
 
 
-def _status_kubernetes(show_all: bool):
-    """Show all SkyPilot resources in the current Kubernetes context.
-
-    Args:
-        show_all (bool): Show all job information (e.g., start time, failures).
-    """
-    all_clusters, unmanaged_clusters, all_jobs, context = (sdk.stream_and_get(
-        sdk.status_kubernetes()))
-    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-               f'Kubernetes cluster state (context: {context})'
-               f'{colorama.Style.RESET_ALL}')
-    status_utils.show_kubernetes_cluster_status_table(unmanaged_clusters,
-                                                      show_all)
-    if all_jobs:
-        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Managed jobs'
-                   f'{colorama.Style.RESET_ALL}')
-        msg = table_utils.format_job_table(all_jobs,
-                                           show_all=show_all,
-                                           show_user=False)
-        click.echo(msg)
-    if any(['sky-serve-controller' in c.cluster_name for c in all_clusters]):
-        # TODO: Parse serve controllers and show services separately.
-        #  Currently we show a hint that services are shown as clusters.
-        click.echo(f'\n{colorama.Style.DIM}Hint: SkyServe replica pods are '
-                   'shown in the "SkyPilot clusters" section.'
-                   f'{colorama.Style.RESET_ALL}')
-
-
 def _show_endpoint(query_clusters: Optional[List[str]],
                    cluster_records: List[responses.StatusResponse], ip: bool,
                    endpoints: bool, endpoint: Optional[int]) -> None:
@@ -1722,15 +1699,7 @@ def _show_enabled_infra(
               default=True,
               is_flag=True,
               required=False,
-              help='Also show cluster pools, if any.')
-@click.option(
-    '--kubernetes',
-    '--k8s',
-    default=False,
-    is_flag=True,
-    required=False,
-    help='[Experimental] Show all SkyPilot resources (including from other '
-    'users) in the current Kubernetes context.')
+              help='Also show pools, if any.')
 @click.argument('clusters',
                 required=False,
                 type=str,
@@ -1742,8 +1711,8 @@ def _show_enabled_infra(
 # pylint: disable=redefined-builtin
 def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
            endpoint: Optional[int], show_managed_jobs: bool,
-           show_services: bool, show_pools: bool, kubernetes: bool,
-           clusters: List[str], all_users: bool):
+           show_services: bool, show_pools: bool, clusters: List[str],
+           all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1806,9 +1775,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
-    if kubernetes:
-        _status_kubernetes(verbose)
-        return
     # Do not show job queue if user specifies clusters, and if user
     # specifies --ip or --endpoint(s).
     show_managed_jobs = show_managed_jobs and not any([clusters, ip, endpoints])
@@ -1861,7 +1827,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET
         if all_users:
             fields = fields + _USER_NAME_FIELD
-        return managed_jobs.queue(
+        return cli_utils.get_managed_job_queue(
             refresh=False,
             skip_finished=True,
             all_users=all_users,
@@ -1890,6 +1856,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
         return sdk.enabled_clouds(workspace=active_workspace, expand=True)
 
     managed_jobs_queue_request_id = None
+    queue_result_version = cli_utils.QueueResultVersion.V1
     service_status_request_id = None
     workspace_request_id = None
     pool_status_request_id = None
@@ -1908,7 +1875,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
         # Get the request IDs
         if show_managed_jobs:
-            managed_jobs_queue_request_id = managed_jobs_request_future.result()
+            (managed_jobs_queue_request_id,
+             queue_result_version) = managed_jobs_request_future.result()
         if show_services:
             service_status_request_id = services_request_future.result()
         if show_pools:
@@ -1975,7 +1943,9 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     show_user=all_users,
                     max_num_jobs_to_show=_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS,
                     is_called_by_user=False,
-                    only_in_progress=True)
+                    only_in_progress=True,
+                    queue_result_version=queue_result_version,
+                )
             except KeyboardInterrupt:
                 sdk.api_cancel(managed_jobs_queue_request_id, silent=True)
                 managed_jobs_query_interrupted = True
@@ -2069,6 +2039,35 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                      f'{colorama.Style.RESET_ALL}')
     if hints:
         click.echo('\n' + '\n'.join(hints))
+
+
+@cli.command(hidden=True)
+@flags.config_option(expose_value=False)
+@flags.verbose_option()
+def status_kubernetes(verbose: bool):
+    """[Experimental] Show all SkyPilot resources (including from other '
+    'users) in the current Kubernetes context."""
+    all_clusters, unmanaged_clusters, all_jobs, context = (sdk.stream_and_get(
+        sdk.status_kubernetes()))
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'Kubernetes cluster state (context: {context})'
+               f'{colorama.Style.RESET_ALL}')
+    status_utils.show_kubernetes_cluster_status_table(unmanaged_clusters,
+                                                      show_all=verbose)
+    if all_jobs:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Managed jobs'
+                   f'{colorama.Style.RESET_ALL}')
+        msg = table_utils.format_job_table(all_jobs,
+                                           show_all=verbose,
+                                           show_user=False)
+        click.echo(msg)
+    if any(['sky-serve-controller' in c.cluster_name for c in all_clusters]):
+        # TODO: Parse serve controllers and show services separately.
+        #  Currently we show a hint that services are shown as clusters.
+        click.echo(f'\n{colorama.Style.DIM}Hint: SkyServe replica pods are '
+                   'shown in the "SkyPilot clusters" section.'
+                   f'{colorama.Style.RESET_ALL}')
 
 
 @cli.command()
@@ -3007,21 +3006,23 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
     assert controller is not None, controller_name
 
     status_counts: Optional[Dict[str, int]] = None
+    managed_jobs_: List[responses.ManagedJobRecord] = []
     with rich_utils.client_status(
             '[bold cyan]Checking for in-progress managed jobs and pools[/]'):
         try:
             fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET + _USER_NAME_FIELD
-            request_id = managed_jobs.queue(
+            request_id, queue_result_version = cli_utils.get_managed_job_queue(
                 refresh=False,
                 skip_finished=True,
                 all_users=True,
                 fields=fields,
             )
             result = sdk.stream_and_get(request_id)
-            if isinstance(result, tuple):
+            if queue_result_version.v2():
                 managed_jobs_, _, status_counts, _ = result
             else:
-                managed_jobs_ = result
+                managed_jobs_ = typing.cast(List[responses.ManagedJobRecord],
+                                            result)
             request_id_pools = managed_jobs.pool_status(pool_names=None)
             pools_ = sdk.stream_and_get(request_id_pools)
         except exceptions.ClusterNotUpError as e:
@@ -3039,32 +3040,6 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
             # there is no in-prgress managed jobs.
             managed_jobs_ = []
             pools_ = []
-        except exceptions.InconsistentConsolidationModeError:
-            # If this error is raised, it means the user switched to the
-            # consolidation mode but the previous controller cluster is still
-            # running. We should allow the user to tear down the controller
-            # cluster in this case.
-            with skypilot_config.override_skypilot_config(
-                {'jobs': {
-                    'controller': {
-                        'consolidation_mode': False
-                    }
-                }}):
-                # Check again with the consolidation mode disabled. This is to
-                # make sure there is no in-progress managed jobs.
-                request_id = managed_jobs.queue(
-                    refresh=False,
-                    skip_finished=True,
-                    all_users=True,
-                    fields=fields,
-                )
-                result = sdk.stream_and_get(request_id)
-                if isinstance(result, tuple):
-                    managed_jobs_, _, status_counts, _ = result
-                else:
-                    managed_jobs_ = result
-                request_id_pools = managed_jobs.pool_status(pool_names=None)
-                pools_ = sdk.stream_and_get(request_id_pools)
 
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            'jobs controller. Please be aware of the following:'
@@ -3141,21 +3116,6 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
             # controller being STOPPED or being firstly launched, i.e., there is
             # no in-prgress services.
             services = []
-        except exceptions.InconsistentConsolidationModeError:
-            # If this error is raised, it means the user switched to the
-            # consolidation mode but the previous controller cluster is still
-            # running. We should allow the user to tear down the controller
-            # cluster in this case.
-            with skypilot_config.override_skypilot_config(
-                {'serve': {
-                    'controller': {
-                        'consolidation_mode': False
-                    }
-                }}):
-                # Check again with the consolidation mode disabled. This is to
-                # make sure there is no in-progress services.
-                request_id = serve_lib.status(service_names=None)
-                services = sdk.stream_and_get(request_id)
 
     if services:
         service_names = [service['name'] for service in services]
@@ -4297,6 +4257,12 @@ cli.add_command(volumes, name='volume')
               required=False,
               type=str,
               help='Volume size. Override the size defined in the YAML.')
+@click.option(
+    '--use-existing/--no-use-existing',
+    required=False,
+    default=None,
+    help='Whether to use an existing volume. Override the use_existing '
+    'defined in the YAML.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -4311,6 +4277,7 @@ def volumes_apply(
         infra: Optional[str],
         type: Optional[str],  # pylint: disable=redefined-builtin
         size: Optional[str],
+        use_existing: Optional[bool],
         yes: bool,
         async_call: bool):
     """Apply a volume.
@@ -4324,6 +4291,10 @@ def volumes_apply(
         \b
         # Apply a volume from a command.
         sky volumes apply --name pvc1 --infra k8s --type k8s-pvc --size 100Gi
+        \b
+        # Apply a volume with existing PVC `pvc2` from a command.
+        sky volumes apply --name pvc2 --infra k8s --type k8s-pvc --size 100Gi
+        --use-existing
     """
     # pylint: disable=import-outside-toplevel
     from sky.volumes import volume as volume_lib
@@ -4342,7 +4313,8 @@ def volumes_apply(
                     f'{entrypoint_str!r} needs to be a YAML file')
         if yaml_config is not None:
             volume_config_dict = yaml_config.copy()
-    override_config = _build_volume_override_config(name, infra, type, size)
+    override_config = _build_volume_override_config(name, infra, type, size,
+                                                    use_existing)
     volume_config_dict.update(override_config)
 
     # Create Volume instance
@@ -4373,11 +4345,15 @@ def volumes_apply(
                      f'{colorama.Style.RESET_ALL}')
 
 
-def _build_volume_override_config(name: Optional[str], infra: Optional[str],
-                                  volume_type: Optional[str],
-                                  size: Optional[str]) -> Dict[str, str]:
+def _build_volume_override_config(
+    name: Optional[str],
+    infra: Optional[str],
+    volume_type: Optional[str],
+    size: Optional[str],
+    use_existing: Optional[bool],
+) -> Dict[str, Any]:
     """Parse the volume override config."""
-    override_config = {}
+    override_config: Dict[str, Any] = {}
     if name is not None:
         override_config['name'] = name
     if infra is not None:
@@ -4386,6 +4362,8 @@ def _build_volume_override_config(name: Optional[str], infra: Optional[str],
         override_config['type'] = volume_type
     if size is not None:
         override_config['size'] = size
+    if use_existing is not None:
+        override_config['use_existing'] = use_existing
     return override_config
 
 
@@ -4641,10 +4619,11 @@ def jobs_launch(
                 break
         if print_setup_fm_warning:
             click.secho(
-                f'{colorama.Fore.YELLOW}setup/file_mounts/storage_mounts'
-                ' will be ignored when submit jobs to pool. To update a pool, '
-                f'please use `sky jobs pool apply {pool} new-pool.yaml`. '
+                f'{colorama.Fore.YELLOW}Setup, file mounts, and storage mounts'
+                ' will be ignored when submitting jobs to pool. To update a '
+                f'pool, please use `sky jobs pool apply {pool} new-pool.yaml`. '
                 f'{colorama.Style.RESET_ALL}')
+        print_setup_fm_warning = False
 
     # Optimize info is only show if _need_confirmation.
     if not yes:
@@ -4792,13 +4771,14 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
             fields = fields + _USER_NAME_FIELD
             if verbose:
                 fields = fields + _USER_HASH_FIELD
-        # Call both managed_jobs.queue and managed_jobs.pool_status in parallel
+        # Call both cli_utils.get_managed_job_queue and managed_jobs.pool_status
+        # in parallel
         def get_managed_jobs_queue():
-            return managed_jobs.queue(refresh=refresh,
-                                      skip_finished=skip_finished,
-                                      all_users=all_users,
-                                      limit=max_num_jobs_to_show,
-                                      fields=fields)
+            return cli_utils.get_managed_job_queue(refresh=refresh,
+                                                   skip_finished=skip_finished,
+                                                   all_users=all_users,
+                                                   limit=max_num_jobs_to_show,
+                                                   fields=fields)
 
         def get_pool_status():
             try:
@@ -4811,7 +4791,8 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
             managed_jobs_future = executor.submit(get_managed_jobs_queue)
             pool_status_future = executor.submit(get_pool_status)
 
-            managed_jobs_request_id = managed_jobs_future.result()
+            (managed_jobs_request_id,
+             queue_result_version) = managed_jobs_future.result()
             pool_status_request_id = pool_status_future.result()
 
         num_jobs, msg = _handle_jobs_queue_request(
@@ -4820,7 +4801,9 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
             show_all=verbose,
             show_user=all_users,
             max_num_jobs_to_show=max_num_jobs_to_show,
-            is_called_by_user=True)
+            is_called_by_user=True,
+            queue_result_version=queue_result_version,
+        )
     if not skip_finished:
         in_progress_only_hint = ''
     else:
@@ -5017,8 +5000,8 @@ def pool():
               type=click.Choice([m.value for m in serve_lib.UpdateMode],
                                 case_sensitive=False),
               required=False,
-              help=('Update mode. If "rolling", cluster pool will be updated '
-                    'with rolling update. If "blue_green", cluster pool will '
+              help=('Update mode. If "rolling", pool will be updated '
+                    'with rolling update. If "blue_green", pool will '
                     'be updated with blue-green update. This option is only '
                     'valid when the pool is already running.'))
 @click.option('--workers',
@@ -5058,7 +5041,7 @@ def jobs_pool_apply(
     yes: bool,
     async_call: bool,
 ):
-    """Either apply a config to a cluster pool for managed jobs submission
+    """Either apply a config to a pool for managed jobs submission
     or update the number of workers in the pool. One of POOL_YAML or --workers
     must be provided.
     Config:
@@ -5140,7 +5123,7 @@ def jobs_pool_apply(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def jobs_pool_status(verbose: bool, pool_names: List[str]):
-    """Show statuses of cluster pools.
+    """Show statuses of pools.
 
     Show detailed statuses of one or more pools. If POOL_NAME is not
     provided, show all pools' status.
@@ -5196,12 +5179,108 @@ def jobs_pool_down(
         raise click.UsageError('Can only specify one of POOL_NAMES or --all. '
                                f'Provided {argument_str!r}.')
 
-    if not yes:
-        quoted_pool_names = [f'{name!r}' for name in pool_names]
-        list_pool_str = ', '.join(quoted_pool_names)
-        pool_identity_str = f'pool(s) {list_pool_str}'
-        if all:
-            pool_identity_str = 'all pools'
+    def _get_nonterminal_jobs(pool_names: List[str],
+                              all: bool) -> List[responses.ManagedJobRecord]:
+        # Get nonterminal jobs for this pool using managed_jobs.queue
+        request_id, queue_result_version = cli_utils.get_managed_job_queue(
+            refresh=False,
+            skip_finished=True,
+            all_users=True,
+            limit=None,
+            fields=['job_id', 'status', 'pool'],
+        )
+        jobs_result = sdk.stream_and_get(request_id)
+
+        # Handle both tuple and list responses
+        jobs_list: List[responses.ManagedJobRecord]
+        if queue_result_version.v2():
+            jobs_list = jobs_result[0]
+        else:
+            jobs_list = typing.cast(List[responses.ManagedJobRecord],
+                                    jobs_result)
+
+        def _should_include_job(job: responses.ManagedJobRecord) -> bool:
+            # Job must not be terminal.
+            if job.get('status', ManagedJobStatus.SUCCEEDED).is_terminal():
+                return False
+            # If len is 0 then we are using -a option, so we include all jobs
+            # if they're associated with a pool.
+            if all:
+                return job.get('pool') is not None
+            # Otherwise we are using specific pool names, so we include the job
+            # if it's associated with one of the specified pools.
+            return job.get('pool') in pool_names
+
+        # Filter jobs by pool name and ensure nonterminal
+        pool_jobs = [job for job in jobs_list if _should_include_job(job)]
+        return pool_jobs
+
+    quoted_pool_names = [f'{name!r}' for name in pool_names]
+    list_pool_str = ', '.join(quoted_pool_names)
+    pool_identity_str = f'pool(s) {list_pool_str}'
+    if all:
+        pool_identity_str = 'all pools'
+
+    already_confirmed = False
+    try:
+        pool_jobs = _get_nonterminal_jobs(pool_names, all)
+        if pool_jobs:
+            num_jobs = len(pool_jobs)
+            job_ids = [job['job_id'] for job in pool_jobs]
+            job_ids_str = ','.join(str(job_id) for job_id in job_ids)
+            click.echo(
+                f'{colorama.Fore.YELLOW}Pool(s) has {num_jobs} '
+                f'nonterminal jobs: {job_ids_str} so it is not yet safe to down'
+                f'.{colorama.Style.RESET_ALL}')
+            if not yes:
+                should_cancel = click.confirm(
+                    'Would you like to cancel all jobs and down the pool(s)?',
+                    default=False,
+                    abort=False,
+                    show_default=True)
+                if not should_cancel:
+                    raise click.Abort()
+                already_confirmed = True
+
+            # Cancel all jobs in the pool
+            with rich_utils.client_status(
+                    ux_utils.spinner_message(
+                        f'Cancelling {num_jobs} jobs in {pool_identity_str}...')
+            ):
+                try:
+                    sdk.get(managed_jobs.cancel(job_ids=job_ids))
+                except Exception as e:
+                    logger.warning(f'Failed to cancel jobs: {e}.')
+                    raise e
+
+                max_wait_time = 300  # 5 minutes max wait
+                check_interval = 2  # Check every 2 seconds
+                start_time = time.time()
+                remaining_pool_jobs = _get_nonterminal_jobs(pool_names, all)
+                while (remaining_pool_jobs and
+                       time.time() - start_time < max_wait_time):
+                    # Check remaining jobs via API
+                    time.sleep(check_interval)
+                    remaining_pool_jobs = _get_nonterminal_jobs(pool_names, all)
+                    ux_utils.spinner_message(
+                        f'Waiting for {len(remaining_pool_jobs)} '
+                        'jobs to be cancelled...')
+
+                click.echo('\r' + ' ' * 80 + '\r', nl=False)
+                if time.time() - start_time >= max_wait_time:
+                    click.echo(
+                        f'{colorama.Fore.YELLOW}Warning: Timeout waiting '
+                        f'for jobs to finish. Proceeding with pool down '
+                        f'anyway.{colorama.Style.RESET_ALL}')
+                else:
+                    click.echo('All jobs cancelled.')
+    except Exception as e:  # pylint: disable=broad-except
+        # If API call fails, log warning but continue with pool down
+        logger.warning(
+            f'Failed to check for running jobs in pool(s): {pool_names!r}: {e}.'
+            ' Proceeding with pool down.')
+
+    if not yes and not already_confirmed:
         click.confirm(f'Terminating {pool_identity_str}. Proceed?',
                       default=True,
                       abort=True,
@@ -5433,28 +5512,30 @@ def serve():
 
 
 def _generate_task_with_service(
-        service_name: str,
-        service_yaml_args: Tuple[str, ...],
-        workdir: Optional[str],
-        cloud: Optional[str],
-        region: Optional[str],
-        zone: Optional[str],
-        num_nodes: Optional[int],
-        use_spot: Optional[bool],
-        image_id: Optional[str],
-        env_file: Optional[Dict[str, str]],
-        env: List[Tuple[str, str]],
-        secret: Optional[List[Tuple[str, str]]],
-        gpus: Optional[str],
-        instance_type: Optional[str],
-        ports: Optional[Tuple[str]],
-        cpus: Optional[str],
-        memory: Optional[str],
-        disk_size: Optional[int],
-        disk_tier: Optional[str],
-        network_tier: Optional[str],
-        not_supported_cmd: str,
-        pool: bool,  # pylint: disable=redefined-outer-name
+    service_name: str,
+    service_yaml_args: Tuple[str, ...],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    secret: Optional[List[Tuple[str, str]]],
+    gpus: Optional[str],
+    instance_type: Optional[str],
+    ports: Optional[Tuple[str]],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    network_tier: Optional[str],
+    not_supported_cmd: str,
+    pool: bool,  # pylint: disable=redefined-outer-name
+    git_url: Optional[str] = None,
+    git_ref: Optional[str] = None,
 ) -> task_lib.Task:
     """Generate a task with service section from a service YAML file."""
     is_yaml, _ = _check_yaml(''.join(service_yaml_args))
@@ -5484,6 +5565,8 @@ def _generate_task_with_service(
         disk_tier=disk_tier,
         network_tier=network_tier,
         ports=ports,
+        git_url=git_url,
+        git_ref=git_ref,
     )
     if isinstance(task, dag_lib.Dag):
         raise click.UsageError(
@@ -5499,7 +5582,7 @@ def _generate_task_with_service(
     if task.service.pool:
         if task.service.ports is not None or ports:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('Cannot specify ports in a cluster pool.')
+                raise ValueError('Cannot specify ports in a pool.')
         return task
 
     # NOTE(yi): we only allow one service port now.
@@ -5575,6 +5658,10 @@ def _generate_task_with_service(
               type=str,
               help='A service name. Unique for each service. If not provided, '
               'a unique name is autogenerated.')
+@click.option('--git-url', type=str, help='Git repository URL.')
+@click.option('--git-ref',
+              type=str,
+              help='Git reference (branch, tag, or commit hash) to use.')
 @_add_click_options(flags.TASK_OPTIONS + flags.EXTRA_RESOURCES_OPTIONS +
                     flags.COMMON_OPTIONS)
 @flags.yes_option()
@@ -5604,6 +5691,8 @@ def serve_up(
     network_tier: Optional[str],
     yes: bool,
     async_call: bool,
+    git_url: Optional[str] = None,
+    git_ref: Optional[str] = None,
 ):
     """Launch a SkyServe service.
 
@@ -5661,6 +5750,8 @@ def serve_up(
         ports=ports,
         not_supported_cmd='sky serve up',
         pool=False,
+        git_url=git_url,
+        git_ref=git_ref,
     )
     assert task.service is not None
     if task.service.pool:
@@ -6106,33 +6197,6 @@ def local():
               help='Launch cluster without GPU support even '
               'if GPUs are detected on the host.')
 @click.option(
-    '--ips',
-    type=str,
-    required=False,
-    help='Path to the file containing IP addresses of remote machines.')
-@click.option('--ssh-user',
-              type=str,
-              required=False,
-              help='SSH username for accessing remote machines.')
-@click.option('--ssh-key-path',
-              type=str,
-              required=False,
-              help='Path to the SSH private key.')
-@click.option('--cleanup',
-              is_flag=True,
-              help='Clean up the remote cluster instead of deploying it.')
-@click.option(
-    '--context-name',
-    type=str,
-    required=False,
-    help='Name to use for the kubeconfig context. Defaults to "default". '
-    'Used with the ip list.')
-@click.option('--password',
-              type=str,
-              required=False,
-              help='Password for the ssh-user to execute sudo commands. '
-              'Required only if passwordless sudo is not setup.')
-@click.option(
     '--name',
     type=str,
     required=False,
@@ -6148,56 +6212,10 @@ def local():
 @flags.config_option(expose_value=False)
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
-def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
-             cleanup: bool, context_name: Optional[str],
-             password: Optional[str], name: Optional[str],
-             port_start: Optional[int], async_call: bool):
-    """Creates a local or remote cluster."""
-
-    def _validate_args(ips, ssh_user, ssh_key_path, cleanup):
-        # If any of --ips, --ssh-user, or --ssh-key-path is specified,
-        # all must be specified
-        if bool(ips) or bool(ssh_user) or bool(ssh_key_path):
-            if not (ips and ssh_user and ssh_key_path):
-                raise click.BadParameter(
-                    'All --ips, --ssh-user, and --ssh-key-path '
-                    'must be specified together.')
-
-        # --cleanup can only be used if --ips, --ssh-user and --ssh-key-path
-        # are all provided
-        if cleanup and not (ips and ssh_user and ssh_key_path):
-            raise click.BadParameter('--cleanup can only be used with '
-                                     '--ips, --ssh-user and --ssh-key-path.')
-
-    _validate_args(ips, ssh_user, ssh_key_path, cleanup)
-
-    # If remote deployment arguments are specified, run remote up script
-    ip_list = None
-    ssh_key = None
-    if ips and ssh_user and ssh_key_path:
-        # Read and validate IP file
-        try:
-            with open(os.path.expanduser(ips), 'r', encoding='utf-8') as f:
-                ip_list = f.read().strip().splitlines()
-            if not ip_list:
-                raise click.BadParameter(f'IP file is empty: {ips}')
-        except (IOError, OSError) as e:
-            raise click.BadParameter(f'Failed to read IP file {ips}: {str(e)}')
-
-        # Read and validate SSH key file
-        try:
-            with open(os.path.expanduser(ssh_key_path), 'r',
-                      encoding='utf-8') as f:
-                ssh_key = f.read()
-            if not ssh_key:
-                raise click.BadParameter(
-                    f'SSH key file is empty: {ssh_key_path}')
-        except (IOError, OSError) as e:
-            raise click.BadParameter(
-                f'Failed to read SSH key file {ssh_key_path}: {str(e)}')
-
-    request_id = sdk.local_up(gpus, ip_list, ssh_user, ssh_key, cleanup,
-                              context_name, password, name, port_start)
+def local_up(gpus: bool, name: Optional[str], port_start: Optional[int],
+             async_call: bool):
+    """Creates a local cluster."""
+    request_id = sdk.local_up(gpus, name, port_start)
     _async_call_or_wait(request_id, async_call, request_name='local up')
 
 
@@ -6210,12 +6228,7 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_down(name: Optional[str], async_call: bool):
-    """Deletes a local cluster.
-
-    This will only delete a local cluster started without the ip list.
-    To clean up the local cluster started with a ip list, use `sky local up`
-    with the cleanup flag.
-    """
+    """Deletes a local cluster."""
     request_id = sdk.local_down(name)
     _async_call_or_wait(request_id, async_call, request_name='sky.local.down')
 

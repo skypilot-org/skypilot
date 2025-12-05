@@ -22,6 +22,7 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_managed_job.py --generic-cloud aws
 import io
+import os
 import pathlib
 import re
 import tempfile
@@ -850,7 +851,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
 @pytest.mark.no_dependency  # Storage tests required full dependency installed
 def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""
-    timeout = 215
+    timeout = 500
     low_resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
     name = smoke_tests_utils.get_cluster_name()
     yaml_str = pathlib.Path(
@@ -1251,13 +1252,15 @@ def test_managed_jobs_env_isolation(generic_cloud: str):
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=f'{name}',
                     job_status=[sky.ManagedJobStatus.RUNNING],
-                    timeout=80),
+                    timeout=600
+                    if smoke_tests_utils.is_remote_server_test() else 80),
                 f'sky jobs logs -n {name} --no-follow | grep "my name is {name}"',
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=f'{name}',
                     job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                    timeout=80),
+                    timeout=600
+                    if smoke_tests_utils.is_remote_server_test() else 80),
             ],
             f'sky jobs cancel -y -n {name}',
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
@@ -1598,6 +1601,7 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
 
 @pytest.mark.no_remote_server  # Need an isolated API server for this test case
 @pytest.mark.managed_jobs
+@pytest.mark.no_dependency  # restart api server requires full dependency installed
 def test_managed_jobs_logs_gc(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
 
@@ -1650,5 +1654,23 @@ def test_managed_jobs_logs_gc(generic_cloud: str):
         teardown=f'sky jobs cancel -y -n {name}; sky api stop',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+@pytest.mark.kubernetes
+def test_large_production_performance(request):
+    if not smoke_tests_utils.is_in_buildkite_env():
+        pytest.skip('Skipping test: requires db modification, run only in '
+                    'Buildkite.')
+
+    test = smoke_tests_utils.Test(
+        name='test-large-production-performance',
+        commands=[
+            f'bash tests/load_tests/db_scale_tests/test_large_production_performance.sh --postgres --restart-api-server',
+        ],
+        timeout=30 * 60,  # 30 minutes for data injection and testing
     )
     smoke_tests_utils.run_one_test(test)

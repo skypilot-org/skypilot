@@ -10,22 +10,22 @@ resources:
   accelerators: A100:1
 
 setup: |
-  conda activate py39
+  conda activate py311
   if [ $? -eq 0 ]; then
     echo "conda env exists"
   else
-    conda create -y -n py39 python=3.9
-    conda activate py39
+    conda create -y -n py311 python=3.11
+    conda activate py311
     git clone https://github.com/PromtEngineer/localGPT.git
     cd localGPT/
     git checkout 5ab5e1921adb45a2df8d61f189a3fb4e9b401e58
     pip install -r requirements.txt
-    # bitsandbytes>0.39.1 fails on GCP, see issue:
+    # bitsandbytes<0.42.0 fails on GCP, see issue:
     # https://github.com/TimDettmers/bitsandbytes/issues/620
-    pip install -U bitsandbytes==0.39.1
+    pip install -U bitsandbytes>=0.42.0
   fi
 
 run: |
-  conda activate py39
+  conda activate py311
   cd localGPT/
   python run_localGPT_API.py & python localGPTUI/localGPTUI.py --port 5111 --host 0.0.0.0

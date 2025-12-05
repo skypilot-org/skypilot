@@ -78,7 +78,9 @@ class Nebius(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
 
@@ -101,10 +103,15 @@ class Nebius(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
         assert zone is None, 'Nebius does not support zones.'
         del accelerators, zone  # unused
         regions = catalog.get_region_zones_for_instance_type(
@@ -448,9 +455,13 @@ class Nebius(clouds.Cloud):
         del workspace_config  # Unused
         sdk = nebius.sdk()
         profile_client = nebius.iam().ProfileServiceClient(sdk)
-        profile = nebius.sync_call(
-            profile_client.get(nebius.iam().GetProfileRequest(),
-                               timeout=nebius.READ_TIMEOUT))
+        try:
+            profile = nebius.sync_call(
+                profile_client.get(nebius.iam().GetProfileRequest(),
+                                   timeout=nebius.READ_TIMEOUT))
+        except Exception as e:
+            raise exceptions.CloudUserIdentityError(
+                f'Error getting Nebius profile: {e}')
         if profile.user_profile is not None:
             if profile.user_profile.attributes is None:
                 raise exceptions.CloudUserIdentityError(

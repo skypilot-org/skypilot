@@ -29,7 +29,6 @@ import { getPoolStatus } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
-import { getUsers } from '@/data/connectors/users';
 import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
@@ -57,6 +56,7 @@ import {
   Filters,
   updateURLParams as sharedUpdateURLParams,
   updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
+  buildFilterUrl,
 } from '@/components/shared/FilterSystem';
 
 // Define status groups for active and finished jobs
@@ -219,7 +219,6 @@ export function ManagedJobs() {
     jobsCacheManager.invalidateCache();
     dashboardCache.invalidate(getPoolStatus, [{}]);
     dashboardCache.invalidate(getWorkspaces);
-    dashboardCache.invalidate(getUsers);
 
     // Trigger a re-fetch in both tables via their refreshDataRef
     if (jobsRefreshRef.current) {
@@ -360,9 +359,9 @@ export function ManagedJobsTable({
     );
   }, [data]);
 
-  // Determine if we should show the Worker Pool column
+  // Determine if we should show the Pool column
   // Only show if there are any pools defined
-  const shouldShowWorkerPool = React.useMemo(() => {
+  const shouldShowPool = React.useMemo(() => {
     return poolsData && poolsData.length > 0;
   }, [poolsData]);
 
@@ -441,15 +440,13 @@ export function ManagedJobsTable({
         const isDataLoading = jobsCacheManager.isDataLoading(params);
 
         if (includeStatus) {
-          const [jr, cd] = await Promise.all([
-            jobsCacheManager.getPaginatedJobs(params),
-            dashboardCache.get(getClusters),
-          ]);
-          jobsResponse = jr;
-          clustersData = cd;
-        } else {
-          jobsResponse = await jobsCacheManager.getPaginatedJobs(params);
+          try {
+            clustersData = await dashboardCache.get(getClusters);
+          } catch (error) {
+            console.error('Error fetching clusters:', error);
+          }
         }
+        jobsResponse = await jobsCacheManager.getPaginatedJobs(params);
 
         // Always process the response, even if it's null
         const {
@@ -612,7 +609,7 @@ export function ManagedJobsTable({
 
   // Populate valueList for filter dropdown
   useEffect(() => {
-    if (!data || data.length === 0 || !setValueList) {
+    if (!setValueList) {
       return;
     }
 
@@ -628,13 +625,41 @@ export function ManagedJobsTable({
       if (job.pool) pools.add(job.pool);
     });
 
+    // Extract pool names from poolsData, but only include pools that:
+    // 1. Have running jobs (non-terminal status jobs), OR
+    // 2. Were created in the last day (based on uptime)
+    if (poolsData && Array.isArray(poolsData)) {
+      const oneDayInSeconds = 24 * 60 * 60; // 24 hours in seconds
+
+      poolsData.forEach((pool) => {
+        if (!pool.name) return;
+
+        // Check if pool has running jobs (non-terminal status)
+        const hasRunningJobs =
+          pool.jobCounts && Object.keys(pool.jobCounts).length > 0;
+
+        // Check if pool was created in the last day
+        // uptime is seconds since pool was created
+        // If uptime is null/undefined, we can't determine creation time
+        const createdInLastDay =
+          pool.uptime !== null &&
+          pool.uptime !== undefined &&
+          pool.uptime > 0 &&
+          pool.uptime < oneDayInSeconds;
+
+        if (hasRunningJobs || createdInLastDay) {
+          pools.add(pool.name);
+        }
+      });
+    }
+
     setValueList({
       name: Array.from(names).sort(),
       user: Array.from(users).sort(),
       workspace: Array.from(workspaces).sort(),
       pool: Array.from(pools).sort(),
     });
-  }, [data, setValueList]);
+  }, [data, poolsData, setValueList]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -980,12 +1005,12 @@ export function ManagedJobsTable({
                 >
                   Recoveries{getSortDirection('recoveries')}
                 </TableHead>
-                {shouldShowWorkerPool && (
+                {shouldShowPool && (
                   <TableHead
                     className="sortable whitespace-nowrap"
                     onClick={() => requestSort('pool')}
                   >
-                    Worker Pool{getSortDirection('pool')}
+                    Pool{getSortDirection('pool')}
                   </TableHead>
                 )}
 
@@ -1000,7 +1025,7 @@ export function ManagedJobsTable({
                     colSpan={
                       11 +
                       (shouldShowWorkspace ? 1 : 0) +
-                      (shouldShowWorkerPool ? 1 : 0)
+                      (shouldShowPool ? 1 : 0)
                     }
                     className="text-center py-6 text-gray-500"
                   >
@@ -1115,7 +1140,7 @@ export function ManagedJobsTable({
                           </NonCapitalizedTooltip>
                         </TableCell>
                         <TableCell>{item.recoveries}</TableCell>
-                        {shouldShowWorkerPool && (
+                        {shouldShowPool && (
                           <TableCell>
                             <div
                               className={
@@ -1161,7 +1186,7 @@ export function ManagedJobsTable({
                           colSpan={
                             11 +
                             (shouldShowWorkspace ? 1 : 0) +
-                            (shouldShowWorkerPool ? 1 : 0)
+                            (shouldShowPool ? 1 : 0)
                           }
                           innerRef={expandedRowRef}
                         />
@@ -1175,7 +1200,7 @@ export function ManagedJobsTable({
                     colSpan={
                       11 +
                       (shouldShowWorkspace ? 1 : 0) +
-                      (shouldShowWorkerPool ? 1 : 0)
+                      (shouldShowPool ? 1 : 0)
                     }
                     className="text-center py-6"
                   >
@@ -2015,7 +2040,15 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                     </Link>
                   </TableCell>
                   <TableCell>
-                    <JobStatusBadges jobCounts={pool.jobCounts} />
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <JobStatusBadges jobCounts={pool.jobCounts} />
+                      <Link
+                        href={buildFilterUrl('/jobs', 'pool', ':', pool.name)}
+                        className="text-blue-600 hover:text-blue-800 text-xs"
+                      >
+                        See all jobs
+                      </Link>
+                    </div>
                   </TableCell>
                   <TableCell>{getWorkersCount(pool)}</TableCell>
                   <TableCell>

@@ -92,8 +92,20 @@ jobs:
         run: |
           version="${{ inputs.version }}"
           # Convert PEP440 version to SemVer if needed for Helm versioning
-          # Handle cases like 1.0.0.dev20250218 -> 1.0.0-dev.20250218
+          # Handle cases like:
+          #   1.0.0.dev20250218 -> 1.0.0-dev.20250218
+          #   0.11.0rc0 -> 0.11.0-rc.0
+          #   0.11.0a1 -> 0.11.0-alpha.1
+          #   0.11.0b2 -> 0.11.0-beta.2
+          #   0.11.0.post1 -> 0.11.0+post.1
           semversion=$(echo "$version" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)/\1-dev.\2/')
+          semversion=$(echo "$semversion" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)rc([0-9]+)/\1-rc.\2/')
+          semversion=$(echo "$semversion" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)a([0-9]+)/\1-alpha.\2/')
+          semversion=$(echo "$semversion" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)b([0-9]+)/\1-beta.\2/')
+          # Post-releases use build metadata (+) since SemVer has no direct equivalent to PEP440's .post
+          # PEP440 .post means "after release", but SemVer build metadata has same precedence.
+          # TODO(romilb): If both 0.11.0 and 0.11.0+post.1 exist, Helm's "latest" behavior is undefined - some sources claim the newer one wins. Need to verify this.
+          semversion=$(echo "$semversion" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)\.post([0-9]+)/\1+post.\2/')
           
           # Update the version and name in the main skypilot chart
           sed -i "s/^version:.*$/version: ${semversion}/" src/charts/skypilot/Chart.yaml

@@ -32,7 +32,12 @@ class TestGetImageRootDeviceName:
             'Images': [{
                 'ImageId': 'ami-0123456789abcdef0',
                 'RootDeviceName': '/dev/xvda'
-            }]
+            }],
+            'ResponseMetadata': {
+                'HTTPStatusCode': 200,
+                'RetryAttempts': 0,
+                'NextToken': None,
+            },
         }
         result = aws_mod.AWS.get_image_root_device_name('ami-0123456789abcdef0',
                                                         'us-west-2')
@@ -41,7 +46,7 @@ class TestGetImageRootDeviceName:
 
     @mock.patch.object(aws_mod, 'logger')
     @mock.patch.object(aws_mod, 'aws')
-    def test_missing_root_device_name_warns_and_returns_default(
+    def test_missing_root_device_name_debugs_and_returns_default(
             self, mock_aws, mock_logger):
         client = mock.Mock()
         mock_aws.client.return_value = client
@@ -49,12 +54,17 @@ class TestGetImageRootDeviceName:
             'Images': [{
                 'ImageId': 'ami-0123456789abcdef1',
                 # No 'RootDeviceName'
-            }]
+            }],
+            'ResponseMetadata': {
+                'HTTPStatusCode': 200,
+                'RetryAttempts': 0,
+                'NextToken': None,
+            },
         }
         result = aws_mod.AWS.get_image_root_device_name('ami-0123456789abcdef1',
                                                         'us-west-2')
         assert result == aws_mod.DEFAULT_ROOT_DEVICE_NAME
-        assert mock_logger.warning.called
+        assert mock_logger.debug.called
 
     @mock.patch.object(aws_mod, 'logger')
     @mock.patch.object(aws_mod, 'aws')
@@ -85,10 +95,16 @@ class TestGetImageRootDeviceName:
         result = aws_mod.AWS.get_image_root_device_name('ami-0123456789abcdef2',
                                                         'eu-central-1')
         assert result == aws_mod.DEFAULT_ROOT_DEVICE_NAME
-        assert mock_logger.warning.called
+        assert mock_logger.debug.called
+        # Verify the debug log message contains expected content
+        debug_call_args = mock_logger.debug.call_args[0][0]
+        assert 'Failed to get image root device name' in debug_call_args
+        assert 'ami-0123456789abcdef2' in debug_call_args
+        assert 'eu-central-1' in debug_call_args
 
+    @mock.patch.object(aws_mod, 'logger')
     @mock.patch.object(aws_mod, 'aws')
-    def test_client_error_raises_value_error(self, mock_aws):
+    def test_client_error_raises_value_error(self, mock_aws, mock_logger):
 
         class DummyExceptions:
 
@@ -99,24 +115,41 @@ class TestGetImageRootDeviceName:
                 pass
 
             class ClientError(Exception):
-                pass
+
+                def __init__(self, message):
+                    self.message = message
+                    super().__init__(message)
 
         mock_aws.botocore_exceptions.return_value = DummyExceptions
 
         client = mock.Mock()
         mock_aws.client.return_value = client
-        client.describe_images.side_effect = DummyExceptions.ClientError()
+        client.describe_images.side_effect = DummyExceptions.ClientError(
+            'Image not found')
 
         with pytest.raises(ValueError) as ei:
             aws_mod.AWS.get_image_root_device_name('ami-0deadbeef',
                                                    'ap-south-1')
         assert 'not found' in str(ei.value)
+        # Verify the debug log was called
+        assert mock_logger.debug.called
+        debug_call_args = mock_logger.debug.call_args_list[0][0][0]
+        assert 'Failed to get image root device name' in debug_call_args
+        assert 'ami-0deadbeef' in debug_call_args
+        assert 'ap-south-1' in debug_call_args
 
     @mock.patch.object(aws_mod, 'aws')
     def test_image_not_found_raises_value_error(self, mock_aws):
         client = mock.Mock()
         mock_aws.client.return_value = client
-        client.describe_images.return_value = {'Images': []}
+        client.describe_images.return_value = {
+            'Images': [],
+            'ResponseMetadata': {
+                'HTTPStatusCode': 200,
+                'RetryAttempts': 0,
+                'NextToken': None,
+            },
+        }
 
         # Ensure botocore_exceptions returns real exception classes (not mocks)
         class DummyExceptions:
@@ -134,6 +167,172 @@ class TestGetImageRootDeviceName:
 
         with pytest.raises(ValueError) as ei:
             aws_mod.AWS.get_image_root_device_name('ami-00000000', 'us-east-2')
+        assert 'Image' in str(ei.value)
+
+
+class TestGetImageSize:
+
+    def test_skypilot_image_returns_default(self):
+        result = aws_mod.AWS.get_image_size('skypilot:ubuntu-22.04',
+                                            'us-east-1')
+        assert result == aws_mod.DEFAULT_AMI_GB
+
+    def test_missing_region_assertion(self):
+        with pytest.raises(AssertionError):
+            aws_mod.AWS.get_image_size('ami-0123456789abcdef0', None)
+
+    @mock.patch.object(aws_mod, 'aws')
+    def test_returns_image_size_when_found(self, mock_aws):
+        client = mock.Mock()
+        mock_aws.client.return_value = client
+        client.describe_images.return_value = {
+            'Images': [{
+                'ImageId': 'ami-0123456789abcdef0',
+                'BlockDeviceMappings': [{
+                    'Ebs': {
+                        'VolumeSize': 100
+                    }
+                }]
+            }],
+            'ResponseMetadata': {
+                'HTTPStatusCode': 200,
+                'RetryAttempts': 0,
+                'NextToken': None,
+            },
+        }
+        result = aws_mod.AWS.get_image_size('ami-0123456789abcdef0',
+                                            'us-west-2')
+        assert result == 100
+        mock_aws.client.assert_called_with('ec2', region_name='us-west-2')
+
+    @mock.patch.object(aws_mod, 'logger')
+    @mock.patch.object(aws_mod, 'aws')
+    def test_no_credentials_fallback_default(self, mock_aws, mock_logger):
+
+        class DummyExceptions:
+
+            class NoCredentialsError(Exception):
+                pass
+
+            class ProfileNotFound(Exception):
+                pass
+
+            class ClientError(Exception):
+                pass
+
+        mock_aws.botocore_exceptions.return_value = DummyExceptions
+
+        client = mock.Mock()
+        mock_aws.client.return_value = client
+        client.describe_images.side_effect = DummyExceptions.NoCredentialsError(
+            'No credentials')
+
+        result = aws_mod.AWS.get_image_size('ami-0123456789abcdef1',
+                                            'eu-central-1')
+        assert result == aws_mod.DEFAULT_AMI_GB
+        # Verify the debug log was called
+        assert mock_logger.debug.called
+        debug_call_args = mock_logger.debug.call_args[0][0]
+        assert 'Failed to get image size' in debug_call_args
+        assert 'ami-0123456789abcdef1' in debug_call_args
+        assert 'eu-central-1' in debug_call_args
+
+    @mock.patch.object(aws_mod, 'logger')
+    @mock.patch.object(aws_mod, 'aws')
+    def test_profile_not_found_fallback_default(self, mock_aws, mock_logger):
+
+        class DummyExceptions:
+
+            class NoCredentialsError(Exception):
+                pass
+
+            class ProfileNotFound(Exception):
+                pass
+
+            class ClientError(Exception):
+                pass
+
+        mock_aws.botocore_exceptions.return_value = DummyExceptions
+
+        client = mock.Mock()
+        mock_aws.client.return_value = client
+        client.describe_images.side_effect = DummyExceptions.ProfileNotFound(
+            'Profile not found')
+
+        result = aws_mod.AWS.get_image_size('ami-0123456789abcdef2',
+                                            'ap-south-1')
+        assert result == aws_mod.DEFAULT_AMI_GB
+        # Verify the debug log was called
+        assert mock_logger.debug.called
+        debug_call_args = mock_logger.debug.call_args[0][0]
+        assert 'Failed to get image size' in debug_call_args
+        assert 'ami-0123456789abcdef2' in debug_call_args
+        assert 'ap-south-1' in debug_call_args
+
+    @mock.patch.object(aws_mod, 'logger')
+    @mock.patch.object(aws_mod, 'aws')
+    def test_client_error_raises_value_error(self, mock_aws, mock_logger):
+
+        class DummyExceptions:
+
+            class NoCredentialsError(Exception):
+                pass
+
+            class ProfileNotFound(Exception):
+                pass
+
+            class ClientError(Exception):
+
+                def __init__(self, message):
+                    self.message = message
+                    super().__init__(message)
+
+        mock_aws.botocore_exceptions.return_value = DummyExceptions
+
+        client = mock.Mock()
+        mock_aws.client.return_value = client
+        client.describe_images.side_effect = DummyExceptions.ClientError(
+            'Image not found')
+
+        with pytest.raises(ValueError) as ei:
+            aws_mod.AWS.get_image_size('ami-0deadbeef', 'us-east-1')
+        assert 'not found' in str(ei.value)
+        # Verify the debug log was called
+        assert mock_logger.debug.called
+        debug_call_args = mock_logger.debug.call_args_list[0][0][0]
+        assert 'Failed to get image size' in debug_call_args
+        assert 'ami-0deadbeef' in debug_call_args
+        assert 'us-east-1' in debug_call_args
+
+    @mock.patch.object(aws_mod, 'aws')
+    def test_image_not_found_raises_value_error(self, mock_aws):
+        client = mock.Mock()
+        mock_aws.client.return_value = client
+        client.describe_images.return_value = {
+            'Images': [],
+            'ResponseMetadata': {
+                'HTTPStatusCode': 200,
+                'RetryAttempts': 0,
+                'NextToken': None,
+            },
+        }
+
+        # Ensure botocore_exceptions returns real exception classes (not mocks)
+        class DummyExceptions:
+
+            class NoCredentialsError(Exception):
+                pass
+
+            class ProfileNotFound(Exception):
+                pass
+
+            class ClientError(Exception):
+                pass
+
+        mock_aws.botocore_exceptions.return_value = DummyExceptions
+
+        with pytest.raises(ValueError) as ei:
+            aws_mod.AWS.get_image_size('ami-00000000', 'us-east-2')
         assert 'Image' in str(ei.value)
 
 
@@ -294,14 +493,27 @@ class TestEfaHelpers:
     def test_get_efa_image_id_missing_images_key_returns_none(self, mock_aws):
         client = mock.Mock()
         mock_aws.client.return_value = client
-        client.describe_images.return_value = {}
+        client.describe_images.return_value = {
+            'ResponseMetadata': {
+                'HTTPStatusCode': 200,
+                'RetryAttempts': 0,
+                'NextToken': None,
+            },
+        }
         assert aws_mod._get_efa_image_id('us-east-1') is None
 
     @mock.patch.object(aws_mod, 'aws')
     def test_get_efa_image_id_empty_images_returns_none(self, mock_aws):
         client = mock.Mock()
         mock_aws.client.return_value = client
-        client.describe_images.return_value = {'Images': []}
+        client.describe_images.return_value = {
+            'Images': [],
+            'ResponseMetadata': {
+                'HTTPStatusCode': 200,
+                'RetryAttempts': 0,
+                'NextToken': None,
+            },
+        }
         assert aws_mod._get_efa_image_id('us-east-2') is None
 
     @mock.patch.object(aws_mod, 'aws')
@@ -320,7 +532,12 @@ class TestEfaHelpers:
                     'State': 'deregistered',
                     'CreationDate': '2024-02-01T00:00:00.000Z',
                 },
-            ]
+            ],
+            'ResponseMetadata': {
+                'HTTPStatusCode': 200,
+                'RetryAttempts': 0,
+                'NextToken': None,
+            },
         }
         assert aws_mod._get_efa_image_id('us-west-1') is None
 
@@ -535,3 +752,24 @@ class TestAwsProfileAwareLruCache:
             else:
                 os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
             skypilot_config.reload_config()
+
+
+class TestAwsConfigFileEnvVar:
+    """Tests for AWS_CONFIG_FILE credential override."""
+
+    def test_get_credential_file_mounts_respects_env_override(
+            self, tmp_path, monkeypatch):
+        credential_file = tmp_path / 'aws_credentials'
+        credential_file.write_text('dummy')
+        monkeypatch.setenv('AWS_CONFIG_FILE', str(credential_file))
+
+        aws = aws_mod.AWS()
+        with mock.patch.object(
+                aws_mod.AWS,
+                '_current_identity_type',
+                return_value=aws_mod.AWSIdentityType.SHARED_CREDENTIALS_FILE):
+            mounts = aws.get_credential_file_mounts()
+
+        assert mounts == {
+            aws_mod._DEFAULT_AWS_CONFIG_PATH: str(credential_file)
+        }

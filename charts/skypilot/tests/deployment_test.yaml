@@ -52,6 +52,73 @@ tests:
             name: KUBECONFIG
             value: /root/.kube/config:/var/skypilot/kubeconfig/config
 
+  # Tests for global image configuration
+  - it: should apply global image pull secrets to the API deployment
+    set:
+      global.imagePullSecrets[0].name: global-pull-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.imagePullSecrets
+          content:
+            name: global-pull-secret
+
+  - it: should prefix API images with the global registry value
+    set:
+      global.imageRegistry: registry.example.com/custom
+      apiService.image: berkeleyskypilot/skypilot-nightly:latest
+      apiService.logs.retention.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.example.com/custom/berkeleyskypilot/skypilot-nightly:latest
+
+
+  - it: should replace original image registries when global registry override is set
+    set:
+      global.imageRegistry: registry.example.com/custom
+      apiService.image: gcr.io/skypilot-dev/sky:dev
+      apiService.logs.retention.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.example.com/custom/skypilot-dev/sky:dev
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: registry.example.com/custom/skypilot-dev/sky:dev
+
+  - it: should inject global extra envs into api containers and init containers
+    set:
+      global.extraEnvs:
+        - name: GLOBAL_ENV
+          value: global
+      awsCredentials.enabled: true
+      awsCredentials.useCredentialsFile: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GLOBAL_ENV
+            value: global
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: GLOBAL_ENV
+            value: global
+
+  - it: should prefix gcp credentials init container image with the global registry override
+    set:
+      global.imageRegistry: registry.example.com/custom
+      gcpCredentials.enabled: true
+      gcpCredentials.image: google/cloud-sdk:slim
+      gcpCredentials.projectId: test-project
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            name: setup-gcp-credentials
+            image: registry.example.com/custom/google/cloud-sdk:slim
+
   # Test cases for upgradeStrategy configuration
   - it: should use Recreate strategy by default
     asserts:
