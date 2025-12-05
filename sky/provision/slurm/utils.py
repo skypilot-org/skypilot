@@ -20,6 +20,13 @@ DEFAULT_CLUSTER_NAME = 'localcluster'
 DEFAULT_PARTITION = 'dev'
 
 
+def get_slurm_ssh_config() -> SSHConfig:
+    """Get the Slurm SSH config."""
+    slurm_config_path = os.path.expanduser(DEFAULT_SLURM_PATH)
+    slurm_config = SSHConfig.from_path(slurm_config_path)
+    return slurm_config
+
+
 class SlurmInstanceType:
     """Class to represent the "Instance Type" in a Slurm cluster.
 
@@ -194,7 +201,7 @@ def get_cluster_default_partition(cluster_name: str) -> str:
         The default partition name for the cluster.
     """
     try:
-        ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
+        ssh_config = get_slurm_ssh_config()
         ssh_config_dict = ssh_config.lookup(cluster_name)
     except Exception as e:
         raise ValueError(
@@ -227,7 +234,7 @@ def get_all_slurm_cluster_names() -> List[str]:
             an empty list otherwise.
     """
     try:
-        ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
+        ssh_config = get_slurm_ssh_config()
     except FileNotFoundError:
         return []
     except Exception as e:
@@ -249,7 +256,7 @@ def check_instance_fits(cluster: str,
                         instance_type: str) -> Tuple[bool, Optional[str]]:
     """Check if the given instance type fits in the given cluster."""
     # Get Slurm node list in the given cluster (region).
-    ssh_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
+    ssh_config = get_slurm_ssh_config()
     ssh_config_dict = ssh_config.lookup(cluster)
 
     client = slurm.SlurmClient(
@@ -326,7 +333,7 @@ def _get_slurm_node_info_list(
         slurm_cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
     """Gathers detailed information about each node in the Slurm cluster."""
     # 1. Get node state and GRES using sinfo
-    slurm_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
+    slurm_config = get_slurm_ssh_config()
     if slurm_cluster_name is None:
         slurm_cluster_names = get_all_slurm_cluster_names()
         if slurm_cluster_names:
