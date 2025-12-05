@@ -259,15 +259,19 @@ export function TopBar() {
     }`;
   };
 
+  const renderPluginIcon = (icon, className) => {
+    const IconComponent = ICON_MAP[icon];
+    if (IconComponent) {
+      return React.createElement(IconComponent, { className });
+    }
+    return icon;
+  };
+
   const renderNavLabel = (link) => (
     <>
       {link.icon && (
         <span className="text-base leading-none mr-1" aria-hidden="true">
-          {ICON_MAP[link.icon] ? (
-            React.createElement(ICON_MAP[link.icon], { className: 'w-4 h-4' })
-          ) : (
-            link.icon
-          )}
+          {renderPluginIcon(link.icon, 'w-4 h-4')}
         </span>
       )}
       <span className="inline-flex items-center gap-1">
@@ -332,11 +336,7 @@ export function TopBar() {
       <>
         {link.icon && (
           <span className="text-base leading-none mr-2" aria-hidden="true">
-            {ICON_MAP[link.icon] ? (
-              React.createElement(ICON_MAP[link.icon], { className: 'w-5 h-5' })
-            ) : (
-              link.icon
-            )}
+            {renderPluginIcon(link.icon, 'w-5 h-5')}
           </span>
         )}
         <span className="flex items-center gap-2">
@@ -420,13 +420,7 @@ export function TopBar() {
                   <div className="flex items-center gap-2">
                     {link.icon && (
                       <span className="text-base leading-none">
-                        {ICON_MAP[link.icon] ? (
-                          React.createElement(ICON_MAP[link.icon], {
-                            className: 'w-4 h-4',
-                          })
-                        ) : (
-                          link.icon
-                        )}
+                        {renderPluginIcon(link.icon, 'w-4 h-4')}
                       </span>
                     )}
                     <span>{link.label}</span>
@@ -549,7 +543,6 @@ export function TopBar() {
                 <UsersIcon className="w-4 h-4" />
                 <span>Users</span>
               </Link>
-
             </div>
           )}
 
@@ -564,10 +557,6 @@ export function TopBar() {
                 {Object.entries(groups).map(([groupName, links]) =>
                   renderDesktopDropdownMenu(groupName, links)
                 )}
-
-                {/* {Object.keys(groups).length > 0 && (
-                  <div className="border-l border-gray-200 h-6 mx-1"></div>
-                )} */}
 
                 <CustomTooltip
                   content="Documentation"
