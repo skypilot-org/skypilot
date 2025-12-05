@@ -60,4 +60,3 @@ class TestProvisionConfigRedaction:
         assert redacted['docker_config']['image'] == 'ubuntu:latest'
         # Should not create docker_login_config.password if it doesn't exist.
         assert 'docker_login_config' not in redacted['docker_config']
-
