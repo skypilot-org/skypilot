@@ -256,7 +256,16 @@ def check_instance_fits(cluster: str,
                         instance_type: str) -> Tuple[bool, Optional[str]]:
     """Check if the given instance type fits in the given cluster."""
     # Get Slurm node list in the given cluster (region).
-    ssh_config = get_slurm_ssh_config()
+    try:
+        ssh_config = get_slurm_ssh_config()
+    except FileNotFoundError:
+        return (False, f'Could not query Slurm cluster {cluster} '
+                f'because the Slurm configuration file '
+                f'{DEFAULT_SLURM_PATH} does not exist.')
+    except Exception as e:  # pylint: disable=broad-except
+        return (False, f'Could not query Slurm cluster {cluster} '
+                f'because Slurm SSH configuration at {DEFAULT_SLURM_PATH} '
+                f'could not be loaded: {common_utils.format_exception(e)}.')
     ssh_config_dict = ssh_config.lookup(cluster)
 
     client = slurm.SlurmClient(
@@ -331,8 +340,16 @@ def check_instance_fits(cluster: str,
 
 def _get_slurm_node_info_list(
         slurm_cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Gathers detailed information about each node in the Slurm cluster."""
+    """Gathers detailed information about each node in the Slurm cluster.
+
+    Raises:
+        FileNotFoundError: If the Slurm configuration file does not exist.
+        ValueError: If no Slurm cluster name is found in the Slurm
+                    configuration file.
+    """
     # 1. Get node state and GRES using sinfo
+
+    # can raise FileNotFoundError if config file does not exist.
     slurm_config = get_slurm_ssh_config()
     if slurm_cluster_name is None:
         slurm_cluster_names = get_all_slurm_cluster_names()

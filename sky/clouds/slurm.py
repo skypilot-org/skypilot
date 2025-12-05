@@ -416,9 +416,10 @@ class Slurm(clouds.Cloud):
         try:
             ssh_config = slurm_utils.get_slurm_ssh_config()
         except FileNotFoundError:
-            return (False,
-                    f'Slurm configuration file {slurm_utils.DEFAULT_SLURM_PATH}'
-                    ' does not exist.')
+            return (
+                False,
+                f'Slurm configuration file {slurm_utils.DEFAULT_SLURM_PATH} '
+                'does not exist.')
         except Exception as e:  # pylint: disable=broad-except
             return (False, 'Failed to load SSH configuration from '
                     f'{slurm_utils.DEFAULT_SLURM_PATH}: '
