@@ -314,9 +314,6 @@ class Novita(clouds.Cloud):
 
         if resources.instance_type is not None:
             # Instance type is already specified, validate it
-            # Ensure cloud is set if not already set
-            if resources.cloud is None:
-                resources = resources.copy(cloud=Novita())
             assert resources.is_launchable(), resources
             fuzzy_candidate_list = [resources.instance_type]
             return resources_utils.FeasibleResources([resources],

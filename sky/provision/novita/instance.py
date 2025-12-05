@@ -66,7 +66,7 @@ def _wait_for_instances_ready(cluster_name_on_cloud: str,
     while time.time() - start_time < timeout:
         instances = _get_cluster_instances(cluster_name_on_cloud)
         ready_count = 0
-        status_summary = {}
+        status_summary = {} # all statuses and their counts
 
         for instance in instances.values():
             status = instance.get('status', 'unknown')
@@ -231,19 +231,20 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         gpuInfo = ast.literal_eval(gpuInfo_str)
         print(f'gpuInfo: {gpuInfo}')
         
+        # the params are the same as the create_instance API: https://novita.ai/docs/api-reference/gpu-instance-create-instance#param-id
         # Extract productId from GpuInfo - this is the instance ID from Novita API
         productId = gpuInfo['Gpus'][0]['Id']
         gpuNum = 1
         imageUrl = 'nginx:latest'
         imageAuth = ''
         imageAuthId = ''
-        ports = ''
-        envs = []
-        tools = []
-        command = ''
+        ports = ''  # e.g.: 80/http, 3306/tcp. Supported port range: [1-65535], except for 2222, 2223, 2224 which are reserved for internal use
+        envs = []  # Instance environment variables. Up to 100 environment variables can be created. e.g.: {'ENV1': 'value1', 'ENV2': 'value2'}
+        tools = []  # some official images only include Jupyter. The total number of ports used by ports + tools must not exceed 15. e.g.: 【{'name': 'Jupyter', 'port': 8080, type: 'http'}]
+        command = ''  # Instance startup command. String, length limit: 0-2047 characters.
         clusterId = ''
-        networkStorages = []
-        networkId = ''
+        networkStorages = []  # Cloud storage mount configuration. Up to 30 cloud storages can be mounted. e.g.: [{'Id': '1234567890', 'mountPath': '/network'}]
+        networkId = ''  # VPC network ID. Leave empty if not using a VPC network.
         kind = 'gpu'
         min_rootfs = gpuInfo['Gpus'][0].get('MinRootFS') or gpuInfo['Gpus'][0].get('minRootFS', 10)
         rootfsSize = int(min_rootfs)
@@ -252,7 +253,6 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             'productId': productId,
             'region': region_code,  # Use region code without parentheses
             'name': instance_name,
-            'productId': productId,
             'gpuNum': gpuNum,
             'rootfsSize': rootfsSize,
             'imageUrl': imageUrl,
