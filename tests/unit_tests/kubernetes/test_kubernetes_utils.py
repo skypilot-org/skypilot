@@ -1982,6 +1982,8 @@ def test_filter_pods_sorts_by_name(unsorted_pod_names,
         # Verify the pods are returned in sorted order
         pod_names = list(result.keys())
         assert pod_names == expected_sorted_pod_names
+
+
 class TestCheckInstanceFits:
     """Tests for check_instance_fits function."""
 
