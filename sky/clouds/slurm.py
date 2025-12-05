@@ -422,7 +422,8 @@ class Slurm(clouds.Cloud):
                 f'Slurm configuration file {slurm_utils.DEFAULT_SLURM_PATH} '
                 'does not exist.\n'
                 f'{cls._INDENT_PREFIX}For more info: '
-                'https://docs.skypilot.co/en/latest/getting-started/installation.html#slurm-installation')
+                'https://docs.skypilot.co/en/latest/getting-started/'
+                'installation.html#slurm-installation')
         except Exception as e:  # pylint: disable=broad-except
             return (False, 'Failed to load SSH configuration from '
                     f'{slurm_utils.DEFAULT_SLURM_PATH}: '
