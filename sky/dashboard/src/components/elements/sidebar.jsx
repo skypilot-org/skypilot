@@ -700,6 +700,8 @@ export function TopBar() {
               </div>
             )}
           </div>
+
+          <div className="border-l border-gray-200 h-6 mx-1"></div>
         </div>
       </div>
 

@@ -631,3 +631,319 @@ class RayCodeGen(TaskCodeGen):
         """Generates code that waits for all tasks, then exits."""
         self._code.append('returncodes, _ = get_or_fail(futures, pg)')
         super().add_epilogue()
+
+
+class SlurmCodeGen(TaskCodeGen):
+    """Code generator for task execution on Slurm using native srun."""
+
+    def __init__(self, slurm_job_id: str):
+        """Initialize SlurmCodeGen
+
+        Args:
+            slurm_job_id: The Slurm job ID, i.e. SLURM_JOB_ID
+        """
+        super().__init__()
+        self._slurm_job_id = slurm_job_id
+
+    def add_prologue(self, job_id: int) -> None:
+        assert not self._has_prologue, 'add_prologue() called twice?'
+        self._has_prologue = True
+        self.job_id = job_id
+
+        self._add_common_imports()
+
+        self._code.append(
+            textwrap.dedent("""\
+            import colorama
+            import copy
+            import multiprocessing
+            import signal
+            import threading
+            from sky.backends import backend_utils
+            """))
+        self._add_skylet_imports()
+
+        self._add_constants()
+
+        self._add_logging_functions()
+
+        self._code.append(
+            textwrap.dedent(f"""\
+            def _slurm_cleanup_handler(signum, _frame):
+                slurm_job_id = {self._slurm_job_id!r}
+                assert slurm_job_id is not None, 'SLURM_JOB_ID is not set'
+                try:
+                    # Query steps for this job: squeue -s -j JOBID -h -o "%i %j"
+                    # Output format: "JOBID.STEPID STEPNAME"
+                    # TODO(kevin): This assumes that compute node is able
+                    # to run client commands against the controller.
+                    # Validate this assumption.
+                    result = subprocess.run(
+                        ['squeue', '-s', '-j', slurm_job_id, '-h', '-o', '%i %j'],
+                        capture_output=True, text=True, check=False)
+                    for line in result.stdout.strip().split('\\n'):
+                        if not line:
+                            continue
+                        parts = line.split()
+                        assert len(parts) >= 2, 'Expected at least 2 parts'
+                        step_id, step_name = parts[0], parts[1]
+                        if step_name == f'sky-{self.job_id}':
+                            subprocess.run(['scancel', step_id],
+                                            check=False, capture_output=True)
+                except Exception as e:
+                    print(f'Error in _slurm_cleanup_handler: {{e}}', flush=True)
+                    pass
+                # Re-raise to let default handler terminate.
+                signal.signal(signum, signal.SIG_DFL)
+                os.kill(os.getpid(), signum)
+
+            signal.signal(signal.SIGTERM, _slurm_cleanup_handler)
+            """))
+
+        self._code += [
+            'autostop_lib.set_last_active_time_to_now()',
+            f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
+            'has_setup_cmd = False',
+            'setup_cmd = None',
+            'setup_envs = None',
+            'setup_log_path = None',
+            'setup_num_nodes = None',
+        ]
+
+    def add_setup(
+        self,
+        num_nodes: int,
+        resources_dict: Dict[str, float],
+        stable_cluster_internal_ips: List[str],
+        env_vars: Dict[str, str],
+        setup_cmd: Optional[str] = None,
+        setup_log_path: Optional[str] = None,
+    ) -> None:
+        assert self._has_prologue, ('Call add_prologue() before add_setup().')
+        self._has_setup = True
+
+        self._add_waiting_for_resources_msg(num_nodes)
+
+        # Store setup information for use in add_tasks().
+        if setup_cmd is not None:
+            setup_envs = env_vars.copy()
+            setup_envs[constants.SKYPILOT_NUM_NODES] = str(num_nodes)
+            self._code += [
+                textwrap.dedent(f"""\
+                has_setup_cmd = True
+                setup_cmd = {setup_cmd!r}
+                setup_envs = {setup_envs!r}
+                setup_log_path = {setup_log_path!r}
+                setup_num_nodes = {num_nodes}
+                """),
+            ]
+
+        # Get the IP addresses of the nodes in the job.
+        # --overlap as this is a very cheap operation
+        # and we don't want it to be blocked.
+        self._code.append(
+            textwrap.dedent(f"""\
+            result = subprocess.run(
+                ['srun', '--overlap', '--jobid={self._slurm_job_id}', '--nodes={num_nodes}', '--ntasks={num_nodes}',
+                 '--ntasks-per-node=1', 'bash', '-c',
+                 'hostname -I | awk "{{print \\$1}}"'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            job_ips = result.stdout.strip().split('\\n')
+            cluster_ips_to_node_id = {{ip: i for i, ip in enumerate({stable_cluster_internal_ips!r})}}
+            job_ip_rank_list = sorted(job_ips, key=cluster_ips_to_node_id.get)
+            # Note: job_ip_rank_map is not needed for Slurm, as
+            # we will use $SLURM_PROCID to get the node rank.
+            job_ip_list_str = '\\n'.join(job_ip_rank_list)
+            """))
+
+    def add_task(
+        self,
+        num_nodes: int,
+        bash_script: Optional[str],
+        task_name: Optional[str],
+        resources_dict: Dict[str, float],
+        log_dir: str,
+        env_vars: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """Generates code for invoking a bash command
+        using srun within sbatch allocation.
+        """
+        assert self._has_setup, 'Call add_setup() before add_task().'
+        env_vars = env_vars or {}
+        task_name = task_name if task_name is not None else 'task'
+
+        acc_name, acc_count = self._get_accelerator_details(resources_dict)
+        num_gpus = 0
+        if (acc_name is not None and
+                not accelerator_registry.is_schedulable_non_gpu_accelerator(
+                    acc_name)):
+            num_gpus = int(math.ceil(acc_count))
+
+        # Slurm does not support fractional CPUs.
+        task_cpu_demand = int(math.ceil(resources_dict.pop('CPU')))
+
+        # Note: SKYPILOT_NUM_NODES and SKYPILOT_NODE_RANK are set in run_script
+        # from SLURM env vars (available in srun context), not here.
+        sky_env_vars_dict_str = [
+            textwrap.dedent(f"""\
+            sky_env_vars_dict = {{}}
+            sky_env_vars_dict['{constants.SKYPILOT_NODE_IPS}'] = job_ip_list_str
+            sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
+            """)
+        ]
+
+        if env_vars:
+            sky_env_vars_dict_str.extend(f'sky_env_vars_dict[{k!r}] = {v!r}'
+                                         for k, v in env_vars.items())
+        sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
+
+        rclone_flush_script = self._get_rclone_flush_script()
+        streaming_msg = self._get_job_started_msg()
+
+        self._code += [
+            sky_env_vars_dict_str,
+            textwrap.dedent(f"""\
+            script = {bash_script!r}
+            rclone_flush_script = {rclone_flush_script!r}
+
+            if script is not None:
+                script += rclone_flush_script
+                sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {num_gpus}
+                # TODO(kevin): Handle multi-node job log paths.
+                log_path = os.path.expanduser(os.path.join({log_dir!r}, "run.log"))
+
+                # Signal files that signal:
+                # 1. srun has acquired allocation within its existing sbatch allocation.
+                alloc_signal_file = f'/tmp/sky_alloc_{self._slurm_job_id}_{self.job_id}'
+                # 2. Driver script has finished `setup` and `run` is ready to proceed.
+                setup_done_signal_file = f'/tmp/sky_setup_done_{self._slurm_job_id}_{self.job_id}'
+
+                # Add prolog to signal allocation and wait for setup to finish.
+                # We also need to source ~/.bashrc again to make it as if the
+                # run section is run in a new shell, after setup is finished.
+                # Also setup SKYPILOT env vars from SLURM env vars.
+                run_script = (
+                    f"touch {{alloc_signal_file}} && "
+                    f"while [ ! -f {{setup_done_signal_file}} ]; do sleep 0.05; done && "
+                    f"rm -f {{setup_done_signal_file}} && "
+                    f"export {constants.SKYPILOT_NUM_NODES}=${{{{SLURM_NNODES:-$SLURM_JOB_NUM_NODES}}}} && "
+                    f"export {constants.SKYPILOT_NODE_RANK}=$SLURM_PROCID && "
+                    "source ~/.bashrc && "
+                    + script
+                )
+                # Start exclusive srun in a thread to reserve allocation (similar to ray.get(pg.ready()))
+                gpu_arg = f'--gpus-per-node={num_gpus}' if {num_gpus} > 0 else ''
+
+                def build_srun_cmd(script, extra_flags):
+                    script_path = None
+                    srun_flags = f'srun --quiet --unbuffered --jobid={self._slurm_job_id} --job-name=sky-{self.job_id} --ntasks-per-node=1 {{extra_flags}}'
+                    if backend_utils.is_command_length_over_limit(script):
+                        with tempfile.NamedTemporaryFile('w', prefix='sky_srun_', suffix='.sh', delete=False) as f:
+                            f.write(script)
+                            script_path = f.name
+                        srun_cmd = f'{{srun_flags}} bash {{script_path}}'
+                    else:
+                        srun_cmd = f'{{srun_flags}} bash -c {{shlex.quote(script)}}'
+                    return srun_cmd, script_path
+
+                def run_thread_func():
+                    # This blocks until Slurm allocates resources (--exclusive)
+                    # --mem=0 to match RayCodeGen's behavior where we don't explicitly request memory.
+                    run_flags = f'--nodes={num_nodes} --cpus-per-task={task_cpu_demand} --mem=0 {{gpu_arg}} --exclusive'
+                    srun_cmd, run_script_path = build_srun_cmd(run_script, run_flags)
+                    result = run_bash_command_with_log_and_return_pid(
+                        srun_cmd,
+                        log_path,
+                        env_vars=sky_env_vars_dict,
+                        stream_logs=True,
+                        with_ray=False,
+                        streaming_prefix=f'{{colorama.Fore.CYAN}}({task_name}, pid={{{{pid}}}}){{colorama.Style.RESET_ALL}} ',
+                    )
+                    if run_script_path is not None:
+                        os.remove(run_script_path)
+                    return result
+
+                run_thread_result = {{'result': None}}
+                def run_thread_wrapper():
+                    run_thread_result['result'] = run_thread_func()
+
+                run_thread = threading.Thread(target=run_thread_wrapper)
+                run_thread.start()
+
+                # Wait for allocation signal from inside srun
+                while not os.path.exists(alloc_signal_file):
+                    if not run_thread.is_alive():
+                        # srun failed before creating the signal file.
+                        run_thread.join()
+                        result = run_thread_result['result']
+                        returncode = int(result.get('return_code', 1))
+                        pid = result.get('pid', os.getpid())
+                        msg = f'ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with return code {{returncode}} (pid={{pid}}).'
+                        msg += f' See error logs above for more details.{colorama.Style.RESET_ALL}'
+                        print(msg, flush=True)
+                        returncodes = [returncode]
+                        job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
+                        sys.exit(1)
+                    time.sleep(0.1)
+
+                print({streaming_msg!r}, flush=True)
+
+                if has_setup_cmd:
+                    job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SETTING_UP)
+
+                    # The schedule_step should be called after the job status is set to
+                    # non-PENDING, otherwise, the scheduler will think the current job
+                    # is not submitted yet, and skip the scheduling step.
+                    job_lib.scheduler.schedule_step()
+
+                    # --overlap as we have already secured allocation with the srun for the run section,
+                    # and otherwise this srun would get blocked and deadlock.
+                    setup_flags = f'--overlap --nodes={{setup_num_nodes}}'
+                    setup_srun, setup_script_path = build_srun_cmd(setup_cmd, setup_flags)
+
+                    setup_result = run_bash_command_with_log_and_return_pid(
+                        setup_srun,
+                        os.path.expanduser(setup_log_path),
+                        env_vars=setup_envs,
+                        stream_logs=True,
+                        with_ray=False,
+                        streaming_prefix=f'{{colorama.Fore.CYAN}}(setup pid={{{{pid}}}}){{colorama.Style.RESET_ALL}} ',
+                    )
+
+                    if setup_script_path is not None:
+                        os.remove(setup_script_path)
+
+                    setup_returncode = int(setup_result.get('return_code', 1))
+                    if setup_returncode != 0:
+                        setup_pid = setup_result.get('pid', os.getpid())
+                        msg = f'ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with return code {{setup_returncode}} (pid={{setup_pid}}).'
+                        msg += f' See error logs above for more details.{colorama.Style.RESET_ALL}'
+                        print(msg, flush=True)
+                        job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
+                        sys.exit(1)
+
+                job_lib.set_job_started({self.job_id!r})
+                if not has_setup_cmd:
+                    # Need to call schedule_step() to make sure the scheduler
+                    # schedule the next pending job.
+                    job_lib.scheduler.schedule_step()
+
+                # Signal run thread to proceed.
+                pathlib.Path(setup_done_signal_file).touch()
+
+                # Wait for run thread to complete.
+                run_thread.join()
+                result = run_thread_result['result']
+
+                # Cleanup signal file
+                if os.path.exists(alloc_signal_file):
+                    os.remove(alloc_signal_file)
+
+                returncodes = [int(result.get('return_code', 1))]
+            else:
+                returncodes = [0]
+            """),
+        ]

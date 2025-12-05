@@ -586,6 +586,9 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
     if isinstance(cloud_type, sky_clouds.SSH):
         # Get the cluster names by reading from the node pools file
         contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
+    elif isinstance(cloud_type, sky_clouds.Slurm):
+        # Get the cluster names from SLURM config
+        contexts = sky_clouds.Slurm.existing_allowed_clusters()
     else:
         assert isinstance(cloud_type, sky_clouds.Kubernetes)
         contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
@@ -657,8 +660,12 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
                                               'to set up.'))
         contexts_formatted.append(
             f'\n    {symbol}{cleaned_context}{text_suffix}')
-    identity_str = ('SSH Node Pools' if isinstance(cloud_type, sky_clouds.SSH)
-                    else 'Allowed contexts')
+    if isinstance(cloud_type, sky_clouds.SSH):
+        identity_str = 'SSH Node Pools'
+    elif isinstance(cloud_type, sky_clouds.Slurm):
+        identity_str = 'Allowed clusters'
+    else:
+        identity_str = 'Allowed contexts'
     return f'\n    {identity_str}:{"".join(contexts_formatted)}'
 
 
@@ -677,7 +684,11 @@ def _format_enabled_cloud(cloud_name: str,
     cloud_and_capabilities = f'{cloud_name} [{", ".join(capabilities)}]'
     title = _green_color(cloud_and_capabilities)
 
-    if cloud_name in [repr(sky_clouds.Kubernetes()), repr(sky_clouds.SSH())]:
+    if cloud_name in [
+            repr(sky_clouds.Kubernetes()),
+            repr(sky_clouds.SSH()),
+            repr(sky_clouds.Slurm())
+    ]:
         return (f'{title}' + _format_context_details(
             cloud_name, show_details=False, ctx2text=ctx2text))
     return _green_color(cloud_and_capabilities)

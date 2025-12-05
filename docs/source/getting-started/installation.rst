@@ -373,10 +373,20 @@ GCP
           # This will generate ~/.config/gcloud/application_default_credentials.json.
           gcloud auth application-default login
 
-    .. tab-item:: Archive Download
+    .. tab-item:: Manual Install
         :sync: gcp-archive-download-tab
 
-        Follow the `Google Cloud SDK installation instructions <https://cloud.google.com/sdk/docs/install#installation_instructions>`_ for your OS.
+        For MacOS with Silicon Chips:
+
+        .. code-block:: shell
+
+          curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-darwin-arm.tar.gz gcloud.tar.gz
+          tar -xf gcloud.tar.gz
+          ./google-cloud-sdk/install.sh
+          # Update your path with the newly installed gcloud
+
+        If you are using other architecture or OS,
+        follow the `Google Cloud SDK installation instructions <https://cloud.google.com/sdk/docs/install#installation_instructions>`_ to download the appropriate package.
 
         Be sure to complete the optional step that adds ``gcloud`` to your ``PATH``.
         This step is required for SkyPilot to recognize that your ``gcloud`` installation is configured correctly.

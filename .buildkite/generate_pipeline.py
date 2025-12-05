@@ -63,6 +63,7 @@ CLOUD_QUEUE_MAP = {
     'nebius': QUEUE_GENERIC_CLOUD,
     'lambda': QUEUE_GENERIC_CLOUD,
     'runpod': QUEUE_GENERIC_CLOUD,
+    'slurm': QUEUE_GENERIC_CLOUD,
     'kubernetes': QUEUE_KIND
 }
 

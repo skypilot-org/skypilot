@@ -48,6 +48,7 @@ from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
 from sky.provision import metadata_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.slurm import utils as slurm_utils
 from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
 from sky.server import common
@@ -755,11 +756,21 @@ async def enabled_clouds(request: fastapi.Request,
                          workspace: Optional[str] = None,
                          expand: bool = False) -> None:
     """Gets enabled clouds on the server."""
+    # Old cli does not send request body for /enabled_clouds API,
+    # to keep backward compatbility, we construct the request body
+    # at server-side with the auth user overridden.
+    # TODO(aylei): enabled_clouds can be a sync handler without background
+    # execution.
+    request_body = payloads.EnabledCloudsBody(workspace=workspace,
+                                              expand=expand)
+    auth_user = request.state.auth_user
+    if auth_user:
+        request_body.env_vars[constants.USER_ID_ENV_VAR] = auth_user.id
+        request_body.env_vars[constants.USER_ENV_VAR] = auth_user.name
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS,
-        request_body=payloads.EnabledCloudsBody(workspace=workspace,
-                                                expand=expand),
+        request_body=request_body,
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -792,6 +803,35 @@ async def kubernetes_node_info(
         request_name=request_names.RequestName.KUBERNETES_NODE_INFO,
         request_body=kubernetes_node_info_body,
         func=kubernetes_utils.get_kubernetes_node_info,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
+@app.post('/slurm_gpu_availability')
+async def slurm_gpu_availability(
+    request: fastapi.Request,
+    slurm_gpu_availability_body: payloads.SlurmGpuAvailabilityRequestBody
+) -> None:
+    """Gets real-time Slurm GPU availability."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.REALTIME_SLURM_GPU_AVAILABILITY,
+        request_body=slurm_gpu_availability_body,
+        func=core.realtime_slurm_gpu_availability,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
+@app.get('/slurm_node_info')
+async def slurm_node_info(
+        request: fastapi.Request,
+        slurm_node_info_body: payloads.SlurmNodeInfoRequestBody) -> None:
+    """Gets detailed information for each node in the Slurm cluster."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.SLURM_NODE_INFO,
+        request_body=slurm_node_info_body,
+        func=slurm_utils.slurm_node_info,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
