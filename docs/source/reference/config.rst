@@ -1672,7 +1672,7 @@ Advanced Vast configuration (optional).
 ``vast.secure_only``
 ~~~~~~~~~~~~~~~~~~~~
 
-Force SkyPilot to only consider offers on Vast verified datacenters (optional).
+Configure SkyPilot to only consider offers on Vast verified datacenters (optional).
 Internally, this will query Vast with the ``datacenters=true`` parameters. Note
 some gpus may only be available on non-secure offers. This config can be
 overridden per task via :ref:`config flag <config-client-cli-flag>`.
