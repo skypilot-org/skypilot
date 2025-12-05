@@ -1133,6 +1133,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_fluidstack_authentication(config)
     elif isinstance(cloud, clouds.Hyperbolic):
         config = auth.setup_hyperbolic_authentication(config)
+    elif isinstance(cloud, clouds.Mithril):
+        config = auth.setup_mithril_authentication(config)
     elif isinstance(cloud, clouds.Shadeform):
         config = auth.setup_shadeform_authentication(config)
     elif isinstance(cloud, clouds.PrimeIntellect):

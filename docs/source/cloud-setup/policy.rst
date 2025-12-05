@@ -94,13 +94,13 @@ If you have a :ref:`centralized API server <sky-api-server>` deployed, you can e
 .. tab-set::
 
   .. tab-item:: Use a RESTful policy
-  
+
     Open :ref:`SkyPilot dashboard <sky-api-server-config>` https://api.server.com/dashboard/config,  and set the :ref:`admin_policy <config-yaml-admin-policy>` field to the URL of the RESTful policy. To host a RESTful policy, see :ref:`here <host-admin-policy-as-server>`.
 
     .. code-block:: yaml
 
         admin_policy: https://example.com/policy
-    
+
   .. tab-item:: Use a Python package
 
     First, install the Python package that implements the policy on the API server host:
@@ -197,7 +197,7 @@ Optionally, the server can also be implemented in other languages as long as it 
           },
           "at_client_side": false
         }
-    
+
     Response body is a marshalled :ref:`sky.MutatedUserRequest <mutated-user-request-class>` in JSON format:
 
     .. code-block:: json
@@ -320,7 +320,7 @@ Use ``UserRequest.task.get_resource_config()`` to get the resource configuration
 
 The resource configuration is a dictionary conforming to the :ref:`resource config schema <yaml-spec>`.
 
-Once the resource configuration is modified, you can use 
+Once the resource configuration is modified, you can use
 ``UserRequest.task.set_resources(resource_config)``
 to set the modified resource configuration back to the task.
 
@@ -424,8 +424,8 @@ Enforce autostop for all tasks
     :caption: `Config YAML for using EnforceAutostopPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/enforce_autostop.yaml>`_
 
 
-Set max autostop idle minutes for all tasks
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Setting maximum autostop idle minutes for all tasks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
     :language: python
@@ -516,8 +516,8 @@ Enforce a static GPU quota for each user on cluster launch requests
 
 .. note::
 
-    This policy calls sky.status() to get the total number 
-    of GPUs currently used by the user and therefore adds a 
+    This policy calls sky.status() to get the total number
+    of GPUs currently used by the user and therefore adds a
     few seconds of latency to every cluster launch request.
 
     This policy should be considered an educational example and not a
