@@ -203,10 +203,10 @@ class Slurm(clouds.Cloud):
             # Fetch partitions for this cluster and attach as zones
             try:
                 partitions = slurm_utils.get_partitions(cluster)
-                zones = [clouds.Zone(p) for p in partitions]
                 if zone is not None:
                     # Filter by zone (partition) if specified
-                    zones = [z for z in zones if z.name == zone]
+                    partitions = [p for p in partitions if p == zone]
+                zones = [clouds.Zone(p) for p in partitions]
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to get partitions for {cluster}: {e}')
                 zones = []
