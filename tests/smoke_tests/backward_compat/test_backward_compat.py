@@ -155,6 +155,9 @@ class TestBackwardCompatibility:
             # Fix https://github.com/skypilot-org/skypilot/issues/7287
             # for legacy skypilot versions.
             'uv pip install uvicorn==0.35.0 && '
+            # Fix https://github.com/skypilot-org/skypilot/issues/8216
+            # for legacy skypilot versions.
+            'uv pip install "urllib3<2.6.0" && '
             f'{pip_install_cmd}')
 
         # Install current version in current environment

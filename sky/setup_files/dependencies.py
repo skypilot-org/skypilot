@@ -155,8 +155,7 @@ kubernetes_dependencies = [
     'kubernetes>=20.0.0,!=32.0.0',
     # Urllib 2.6.0 breaks kubernetes client because kubernetes client uses
     # deprecated in 2.0.0 and removed in 2.6.0 `getheaders()` call (instead of
-    # `headers` property). Tracked in
-    # https://github.com/kubernetes-client/python/issues/2477
+    # `headers` property). See #8216.
     'urllib3<2.6.0',
     'websockets',
     'python-dateutil',
