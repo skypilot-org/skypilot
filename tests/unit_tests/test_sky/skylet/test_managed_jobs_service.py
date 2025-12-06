@@ -275,6 +275,14 @@ class TestGetJobTable:
         context_mock = mock.Mock()
 
         response = self.service.GetJobTable(request, context_mock)
+
+        # DEBUG: Check if abort was called and print the error
+        if context_mock.abort.called:
+            import sys
+            sys.stderr.write(f"\n\n!!! ABORT WAS CALLED !!!\nArgs: {context_mock.abort.call_args}\n\n")
+            sys.stderr.flush()
+            pytest.fail(f"context.abort was called: {context_mock.abort.call_args}")
+
         assert isinstance(response, managed_jobsv1_pb2.GetJobTableResponse)
         context_mock.abort.assert_not_called()
         assert len(response.jobs) == 4
