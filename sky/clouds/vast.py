@@ -6,6 +6,7 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky import skypilot_config
 from sky.adaptors import common
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -196,11 +197,20 @@ class Vast(clouds.Cloud):
         else:
             image_id = resources.image_id[resources.region]
 
+        secure_only = skypilot_config.get_effective_region_config(
+            cloud='vast',
+            region=region.name,
+            keys=('secure_only',),
+            default_value=False,
+            override_configs=resources.cluster_config_overrides,
+        )
+
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
             'image_id': image_id,
+            'secure_only': secure_only,
         }
 
     def _get_feasible_launchable_resources(
