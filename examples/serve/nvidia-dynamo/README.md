@@ -1,5 +1,12 @@
 # Run Nvidia Dynamo on any cloud or Kubernetes with SkyPilot
 
+<p align="center">
+  <picture>
+    <img src="https://i.imgur.com/Kr6sCeA.png" width=75%>
+  </picture>
+</p>
+
+
 This recipe shows how to deploy and serve models using [Nvidia Dynamo](https://github.com/ai-dynamo/dynamo) on any cloud provider or Kubernetes cluster with [SkyPilot](https://docs.skypilot.co/en/latest/docs/index.html). Run Dynamo seamlessly across AWS, GCP, Azure, Lambda Labs, Nebius and more - or bring your own Kubernetes infrastructure.
 
 Together, SkyPilot and Dynamo offer developers unparalleled flexibility: deploy any LLM, on any cloud, using any inference framework, all with minimal effort and operational overhead.
