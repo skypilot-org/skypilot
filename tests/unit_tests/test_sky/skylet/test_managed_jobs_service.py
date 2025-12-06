@@ -49,7 +49,28 @@ def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def _seed_test_jobs(_mock_managed_jobs_db_conn):
+def _mock_signal_files(tmp_path, monkeypatch):
+    from sky.jobs import constants as managed_job_constants
+
+    # Use a new directory in the temporary path for signal files
+    signals_dir = tmp_path / "signals"
+    signals_dir.mkdir(parents=True, exist_ok=True)
+    # Patch the prefix to point into the tmp signals_dir
+    monkeypatch.setattr(
+        managed_job_constants,
+        "SIGNAL_FILE_PREFIX",
+        str(signals_dir / "sky_jobs_controller_signal_{}"),
+    )
+    monkeypatch.setattr(
+        managed_job_constants,
+        "CONSOLIDATED_SIGNAL_PATH",
+        str(signals_dir),
+    )
+    yield
+
+
+@pytest.fixture
+def _seed_test_jobs(_mock_managed_jobs_db_conn, _mock_signal_files):
     """Seed the database with test jobs in various states for comprehensive testing."""
 
     # Mock callback function for async state transitions
