@@ -497,10 +497,6 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 total_no_filter=total_no_filter,
                 status_counts=status_counts)
         except Exception as e:  # pylint: disable=broad-except
-            import traceback
-            import sys
-            sys.stderr.write(f'\n\n!!! GetJobTable EXCEPTION !!!\nType: {type(e).__name__}\nMessage: {e}\nTraceback:\n{traceback.format_exc()}\n\n')
-            sys.stderr.flush()
             logger.error(e, exc_info=True)
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 

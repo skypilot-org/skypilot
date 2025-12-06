@@ -49,7 +49,32 @@ def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def _seed_test_jobs(_mock_managed_jobs_db_conn):
+def _mock_global_user_state_db(tmp_path, monkeypatch):
+    """Create a temporary SQLite DB for global_user_state to avoid conflicts.
+
+    GetJobTable calls managed_job_utils.get_managed_job_queue() which in turn
+    calls global_user_state.get_cluster_name_to_handle_map(). This triggers
+    global_user_state database initialization, which can conflict with the
+    managed jobs database fixture causing Alembic migration errors in CI.
+    """
+    from sky import global_user_state
+
+    db_path = tmp_path / 'state_testing.db'
+    engine = create_engine(f'sqlite:///{db_path}')
+    async_engine = create_async_engine(f'sqlite+aiosqlite:///{db_path}',
+                                       connect_args={'timeout': 30})
+
+    monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE', engine)
+    monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE_ASYNC',
+                        async_engine)
+
+    global_user_state.create_table(engine)
+
+    yield engine
+
+
+@pytest.fixture
+def _seed_test_jobs(_mock_managed_jobs_db_conn, _mock_global_user_state_db):
     """Seed the database with test jobs in various states for comprehensive testing."""
 
     # Mock callback function for async state transitions
@@ -275,14 +300,6 @@ class TestGetJobTable:
         context_mock = mock.Mock()
 
         response = self.service.GetJobTable(request, context_mock)
-
-        # DEBUG: Check if abort was called and print the error
-        if context_mock.abort.called:
-            import sys
-            sys.stderr.write(f"\n\n!!! ABORT WAS CALLED !!!\nArgs: {context_mock.abort.call_args}\n\n")
-            sys.stderr.flush()
-            pytest.fail(f"context.abort was called: {context_mock.abort.call_args}")
-
         assert isinstance(response, managed_jobsv1_pb2.GetJobTableResponse)
         context_mock.abort.assert_not_called()
         assert len(response.jobs) == 4
