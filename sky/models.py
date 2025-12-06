@@ -68,6 +68,8 @@ class KubernetesNodeInfo:
     free: Dict[str, int]
     # IP address of the node (external IP preferred, fallback to internal IP)
     ip_address: Optional[str] = None
+    # Whether the node is ready (all conditions are satisfied)
+    is_ready: bool = True
 
 
 @dataclasses.dataclass
