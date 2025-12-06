@@ -252,9 +252,48 @@ def get_all_slurm_cluster_names() -> List[str]:
     return cluster_names
 
 
-def check_instance_fits(cluster: str,
-                        instance_type: str) -> Tuple[bool, Optional[str]]:
-    """Check if the given instance type fits in the given cluster."""
+def _check_cpu_mem_fits(
+        candidate_instance_type: SlurmInstanceType,
+        node_list: List[slurm.NodeInfo]) -> Tuple[bool, Optional[str]]:
+    """Checks if instance fits on candidate nodes based on CPU and memory.
+
+    We check capacity (not allocatable) because availability can change
+    during scheduling, and we want to let the Slurm scheduler handle that.
+    """
+    # We log max CPU and memory found on the GPU nodes for debugging.
+    max_cpu = 0
+    max_mem_gb = 0.0
+
+    for node_info in node_list:
+        node_cpus = node_info.cpus
+        node_mem_gb = node_info.memory_gb
+
+        if node_cpus > max_cpu:
+            max_cpu = node_cpus
+            max_mem_gb = node_mem_gb
+
+        if (node_cpus >= candidate_instance_type.cpus and
+                node_mem_gb >= candidate_instance_type.memory):
+            return True, None
+
+    return False, (f'Max found: {max_cpu} CPUs, '
+                   f'{common_utils.format_float(max_mem_gb)}G memory')
+
+
+def check_instance_fits(
+        cluster: str,
+        instance_type: str,
+        partition: Optional[str] = None) -> Tuple[bool, Optional[str]]:
+    """Check if the given instance type fits in the given cluster/partition.
+
+    Args:
+        cluster: Name of the Slurm cluster.
+        instance_type: The instance type to check.
+        partition: Optional partition name. If None, checks all partitions.
+
+    Returns:
+        Tuple of (fits, reason) where fits is True if available.
+    """
     # Get Slurm node list in the given cluster (region).
     try:
         ssh_config = get_slurm_ssh_config()
@@ -277,10 +316,38 @@ def check_instance_fits(cluster: str,
     )
 
     nodes = client.info_nodes()
+    default_partition = get_cluster_default_partition(cluster)
 
-    s = SlurmInstanceType.from_instance_type(instance_type)
-    acc_count = s.accelerator_count if s.accelerator_count else 0
-    acc_type = s.accelerator_type if s.accelerator_type else None
+    def is_default_partition(node_partition: str) -> bool:
+        # info_nodes does not strip the '*' from the default partition name.
+        # But non-default partition names can also end with '*',
+        # so we need to check whether the partition name without the '*'
+        # is the same as the default partition name.
+        return (node_partition.endswith('*') and
+                node_partition[:-1] == default_partition)
+
+    partition_suffix = ''
+    if partition is not None:
+        filtered = []
+        for node_info in nodes:
+            node_partition = node_info.partition
+            if is_default_partition(node_partition):
+                # Strip '*' from default partition name.
+                node_partition = node_partition[:-1]
+            if node_partition == partition:
+                filtered.append(node_info)
+        nodes = filtered
+        partition_suffix = f' in partition {partition}'
+
+    slurm_instance_type = SlurmInstanceType.from_instance_type(instance_type)
+    acc_count = (slurm_instance_type.accelerator_count
+                 if slurm_instance_type.accelerator_count is not None else 0)
+    acc_type = slurm_instance_type.accelerator_type
+    candidate_nodes = nodes
+    not_fit_reason_prefix = (
+        f'No nodes found with enough '
+        f'CPU (> {slurm_instance_type.cpus} CPUs) and/or '
+        f'memory (> {slurm_instance_type.memory} G){partition_suffix}. ')
     if acc_type is not None:
         assert acc_count is not None, (acc_type, acc_count)
 
@@ -291,8 +358,8 @@ def check_instance_fits(cluster: str,
         # - gpu:a10g:8
         # - gpu:l4:1
         gres_pattern = re.compile(r'^gpu:([^:]+):(\d+)')
-        for node in nodes:
-            _, _, gres_str, _ = node.split()
+        for node_info in nodes:
+            gres_str = node_info.gres
             # Extract the GPU type and count from the GRES string
             match = gres_pattern.match(gres_str)
             if not match:
@@ -307,35 +374,24 @@ def check_instance_fits(cluster: str,
             # requested count
             if (node_acc_type == acc_type.lower() and
                     node_acc_count >= acc_count):
-                gpu_nodes.append(node)
+                gpu_nodes.append(node_info)
         if len(gpu_nodes) == 0:
             return (False,
                     f'No GPU nodes found with at least {acc_type}:{acc_count} '
                     f'on the cluster.')
 
         candidate_nodes = gpu_nodes
-        not_fit_reason_prefix = (f'GPU nodes with {acc_type} do not have '
-                                 f'enough CPU (> {s.cpus} CPUs) and/or '
-                                 f'memory (> {s.memory} G). ')
-    else:
-        candidate_nodes = nodes
-        not_fit_reason_prefix = (f'No nodes found with enough '
-                                 f'CPU (> {s.cpus} CPUs) and/or '
-                                 f'memory (> {s.memory} G). ')
+        not_fit_reason_prefix = (
+            f'GPU nodes with {acc_type}{partition_suffix} do not have '
+            f'enough CPU (> {slurm_instance_type.cpus} CPUs) and/or '
+            f'memory (> {slurm_instance_type.memory} G). ')
 
-    # TODO(jwj): Enable CPU and memory check.
-    # fits, reason = check_cpu_mem_fits(s, candidate_nodes)
-    # if not fits:
-    #     if reason is not None:
-    #         reason = not_fit_reason_prefix + reason
-    #     return fits, reason
-    # else:
-    #     return fits, reason
-
-    if len(candidate_nodes) != 0:
-        return True, None
-    else:
-        return False, not_fit_reason_prefix
+    # Check if CPU and memory requirements are met on at least one
+    # candidate node.
+    fits, reason = _check_cpu_mem_fits(slurm_instance_type, candidate_nodes)
+    if not fits and reason is not None:
+        reason = not_fit_reason_prefix + reason
+    return fits, reason
 
 
 def _get_slurm_node_info_list(
@@ -368,28 +424,27 @@ def _get_slurm_node_info_list(
         slurm_config_dict['identityfile'][0],
         ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
     )
-    sinfo_output = slurm_client.info_nodes()
+    node_infos = slurm_client.info_nodes()
 
-    if not sinfo_output:
+    if not node_infos:
         logger.warning(
             f'`sinfo -N` returned no output on cluster {slurm_cluster_name}. '
             f'No nodes found?')
         return []
 
-    # 2. Process each node
-    slurm_nodes_info = []
-    unique_nodes_processed = set()
+    # 2. Process each node, aggregating partitions per node
+    slurm_nodes_info: Dict[str, Dict[str, Any]] = {}
     gres_gpu_pattern = re.compile(r'((gpu)(?::([^:]+))?:(\d+))')
 
-    for line in sinfo_output:
-        parts = line.split()
-        if len(parts) < 4:
-            continue
-        node_name, state, gres_str, partition = parts[:4]
+    for node_info in node_infos:
+        node_name = node_info.node
+        state = node_info.state
+        gres_str = node_info.gres
+        partition = node_info.partition
 
-        if node_name in unique_nodes_processed:
+        if node_name in slurm_nodes_info:
+            slurm_nodes_info[node_name]['partitions'].append(partition)
             continue
-        unique_nodes_processed.add(node_name)
 
         # Extract GPU info from GRES
         gres_match = gres_gpu_pattern.search(gres_str)
@@ -448,19 +503,24 @@ def _get_slurm_node_info_list(
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(
                 f'Failed to get CPU/memory info for {node_name}: {e}')
-        slurm_nodes_info.append({
+
+        slurm_nodes_info[node_name] = {
             'node_name': node_name,
             'slurm_cluster_name': slurm_cluster_name,
-            'partition': partition,
+            'partitions': [partition],
             'node_state': state,
             'gpu_type': gpu_type_from_sinfo,
             'total_gpus': total_gpus,
             'free_gpus': free_gpus,
             'vcpu_count': vcpu_total,
             'memory_gb': round(mem_gb, 2),
-        })
+        }
 
-    return slurm_nodes_info
+    for node_info in slurm_nodes_info.values():
+        partitions = node_info.pop('partitions')
+        node_info['partition'] = ','.join(str(p) for p in partitions)
+
+    return list(slurm_nodes_info.values())
 
 
 def slurm_node_info(
@@ -479,11 +539,36 @@ def slurm_node_info(
     return node_list
 
 
-def get_all_partitions(cluster_name: str) -> List[str]:
-    """Gets all partitions in the Slurm cluster."""
-    node_list = slurm_node_info(cluster_name)
-    return list({node['partition'] for node in node_list})
-
-
 def is_inside_slurm_job() -> bool:
     return os.environ.get('SLURM_JOB_ID') is not None
+
+
+def get_partitions(cluster_name: str) -> List[str]:
+    """Get unique partition names available in a Slurm cluster.
+
+    Args:
+        cluster_name: Name of the Slurm cluster.
+
+    Returns:
+        Sorted list of unique partition names available in the cluster.
+    """
+    try:
+        slurm_config = SSHConfig.from_path(
+            os.path.expanduser(DEFAULT_SLURM_PATH))
+        slurm_config_dict = slurm_config.lookup(cluster_name)
+
+        client = slurm.SlurmClient(
+            slurm_config_dict['hostname'],
+            int(slurm_config_dict.get('port', 22)),
+            slurm_config_dict['user'],
+            slurm_config_dict['identityfile'][0],
+            ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
+        )
+
+        partitions = client.get_partitions()
+        return sorted(partitions)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(
+            f'Failed to get partitions for cluster {cluster_name}: {e}')
+        # Fall back to default partition if query fails
+        return [DEFAULT_PARTITION]

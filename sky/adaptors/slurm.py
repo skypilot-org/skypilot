@@ -3,13 +3,34 @@
 import logging
 import re
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
 logger = logging.getLogger(__name__)
+
+# ASCII Unit Separator (\x1f) to handle values with spaces
+# and other special characters.
+SEP = r'\x1f'
+
+# Regex pattern to extract partition names from scontrol output
+# Matches PartitionName=<name> and captures until the next field
+_PARTITION_NAME_REGEX = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
+
+
+# TODO(kevin): Add more API types for other client functions.
+class NodeInfo(NamedTuple):
+    """Information about a Slurm node from sinfo."""
+    node: str
+    state: str
+    gres: str
+    cpus: int
+    memory_gb: float
+    # The default partition contains a '*' at the end of the name.
+    # It is the caller's responsibility to strip the '*' if needed.
+    partition: str
 
 
 class SlurmClient:
@@ -124,22 +145,40 @@ class SlurmClient:
             rc, cmd, 'Failed to get Slurm cluster information.', stderr=stderr)
         return stdout
 
-    def info_nodes(self) -> List[str]:
+    def info_nodes(self) -> List[NodeInfo]:
         """Get Slurm node information.
 
         Returns node names, states, GRES (generic resources like GPUs),
-        and partition.
-
-        Returns:
-            A list of node info lines.
+        CPUs, memory (MB), and partitions.
         """
-        cmd = 'sinfo -h --Node -o "%N %t %G %P"'
+        cmd = (f'sinfo -h --Node -o '
+               f'"%N{SEP}%t{SEP}%G{SEP}%c{SEP}%m{SEP}%P"')
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
                                               stream_logs=False)
         subprocess_utils.handle_returncode(
             rc, cmd, 'Failed to get Slurm node information.', stderr=stderr)
-        return stdout.splitlines()
+
+        nodes = []
+        for line in stdout.splitlines():
+            parts = line.split(SEP)
+            if len(parts) != 6:
+                raise RuntimeError(
+                    f'Unexpected output format from sinfo: {line!r}')
+            try:
+                node_info = NodeInfo(node=parts[0],
+                                     state=parts[1],
+                                     gres=parts[2],
+                                     cpus=int(parts[3]),
+                                     memory_gb=int(parts[4]) / 1024.0,
+                                     partition=parts[5])
+                nodes.append(node_info)
+            except ValueError as e:
+                raise RuntimeError(
+                    f'Failed to parse node info from line: {line!r}. '
+                    f'Error: {e}') from e
+
+        return nodes
 
     def node_details(self, node_name: str) -> Dict[str, str]:
         """Get detailed Slurm node information.
@@ -173,23 +212,6 @@ class SlurmClient:
             stderr=node_details)
         node_info = _parse_scontrol_node_output(node_details)
         return node_info
-
-    def info_partitions(self) -> List[str]:
-        """Get Slurm node-to-partition information.
-
-        Returns:
-            A list of node and partition info lines.
-        """
-        cmd = 'sinfo -h --Nodes -o "%N %P"'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
-        subprocess_utils.handle_returncode(
-            rc,
-            cmd,
-            'Failed to get Slurm partition information.',
-            stderr=stderr)
-        return stdout.splitlines()
 
     def get_node_jobs(self, node_name: str) -> List[str]:
         """Get the list of jobs for a given node name.
@@ -333,6 +355,32 @@ class SlurmClient:
 
         return nodes, node_ips
 
+    def get_partitions(self) -> List[str]:
+        """Get unique partition names in the Slurm cluster.
+
+        Returns:
+            List of partition names. The default partition will not have a '*'
+            at the end of the name.
+        """
+        cmd = 'scontrol show partitions -o'
+        rc, stdout, stderr = self._runner.run(cmd,
+                                              require_outputs=True,
+                                              stream_logs=False)
+        subprocess_utils.handle_returncode(rc,
+                                           cmd,
+                                           'Failed to get Slurm partitions.',
+                                           stderr=stderr)
+
+        # Extract partition names from PartitionName= fields
+        partitions = []
+        for line in stdout.strip().splitlines():
+            match = _PARTITION_NAME_REGEX.search(line)
+            if match:
+                partition = match.group(1).strip()
+                if partition:
+                    partitions.append(partition)
+        return partitions
+
     def submit_job(
         self,
         partition: str,
@@ -386,11 +434,11 @@ class SlurmClient:
 
         for line in stdout.strip().splitlines():
             if 'Default=YES' in line:
-                # Extract partition name from PartitionName=<name>
-                parts = line.split()
-                for part in parts:
-                    if part.startswith('PartitionName='):
-                        return part.split('=', 1)[1]
+                match = _PARTITION_NAME_REGEX.search(line)
+                if match:
+                    partition = match.group(1).strip()
+                    if partition:
+                        return partition
 
         logger.debug('No default partition found')
         return None

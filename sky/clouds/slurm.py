@@ -97,10 +97,26 @@ class Slurm(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[Optional[List[clouds.Zone]]]:
-        # Always yield None for zones because Slurm does not support zones.
-        # This allows handling for any region without being restricted by
-        # zone logic.
-        yield None
+        """Iterate over partitions (zones) for provisioning with failover.
+
+        Yields one partition at a time for failover retry logic.
+        """
+        del num_nodes  # unused
+
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot,
+                                            region=region,
+                                            zone=None)
+
+        for r in regions:
+            if r.zones:
+                # Yield one partition at a time for failover
+                for zone in r.zones:
+                    yield [zone]
+            else:
+                # No partitions discovered, use default
+                yield None
 
     @classmethod
     @annotations.lru_cache(scope='global', maxsize=1)
@@ -177,16 +193,30 @@ class Slurm(clouds.Cloud):
         zone: Optional[str],
         resources: Optional['resources_lib.Resources'] = None
     ) -> List[clouds.Region]:
-        del accelerators, zone, use_spot, resources  # unused
+        del accelerators, use_spot, resources  # unused
         existing_clusters = cls.existing_allowed_clusters()
 
-        regions = []
+        regions: List[clouds.Region] = []
         for cluster in existing_clusters:
-            regions.append(clouds.Region(cluster))
+            # Filter by region if specified
+            if region is not None and cluster != region:
+                continue
 
-        if region is not None:
-            # Filter the regions by the given region (cluster) name.
-            regions = [r for r in regions if r.name == region]
+            # Fetch partitions for this cluster and attach as zones
+            try:
+                partitions = slurm_utils.get_partitions(cluster)
+                if zone is not None:
+                    # Filter by zone (partition) if specified
+                    partitions = [p for p in partitions if p == zone]
+                zones = [clouds.Zone(p) for p in partitions]
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to get partitions for {cluster}: {e}')
+                zones = []
+
+            r = clouds.Region(cluster)
+            if zones:
+                r.set_zones(zones)
+            regions.append(r)
 
         # Check if requested instance type will fit in the cluster.
         if instance_type is None:
@@ -195,19 +225,26 @@ class Slurm(clouds.Cloud):
         regions_to_return = []
         for r in regions:
             cluster = r.name
-            # try:
-            fits, reason = slurm_utils.check_instance_fits(
-                cluster, instance_type)
-            # except exceptions.KubeAPIUnreachableError as e:
-            #     cls._log_unreachable_context(cluster, str(e))
-            #     continue
-            if fits:
+
+            # Check each partition (zone) in the cluster
+            partitions_to_check = [z.name for z in r.zones] if r.zones else []
+            valid_zones = []
+
+            # TODO(kevin): Batch this check to reduce number of roundtrips.
+            for partition in partitions_to_check:
+                fits, reason = slurm_utils.check_instance_fits(
+                    cluster, instance_type, partition)
+                if fits:
+                    if partition:
+                        valid_zones.append(clouds.Zone(partition))
+                else:
+                    logger.debug(
+                        f'Instance type {instance_type} does not fit in '
+                        f'{cluster}/{partition}: {reason}')
+
+            if valid_zones:
+                r.set_zones(valid_zones)
                 regions_to_return.append(r)
-                continue
-            logger.debug(f'Instance type {instance_type} does '
-                         'not fit in the existing Slurm cluster '
-                         'with cluster: '
-                         f'{cluster}. Reason: {reason}')
 
         return regions_to_return
 
@@ -277,12 +314,18 @@ class Slurm(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
-        del cluster_name, zones, dryrun, volume_mounts  # Unused.
+        del cluster_name, dryrun, volume_mounts  # Unused.
         if region is not None:
             cluster = region.name
         else:
             cluster = 'localcluster'
         assert cluster is not None, 'No available Slurm cluster found.'
+
+        # Use zone as partition if specified, otherwise default
+        if zones and len(zones) > 0:
+            partition = zones[0].name
+        else:
+            partition = slurm_utils.get_cluster_default_partition(cluster)
 
         # cluster is our target slurmctld host.
         ssh_config = slurm_utils.get_slurm_ssh_config()
@@ -304,8 +347,6 @@ class Slurm(clouds.Cloud):
         acc_count = s.accelerator_count if s.accelerator_count else 0
         acc_type = s.accelerator_type if s.accelerator_type else None
 
-        default_partition = slurm_utils.get_cluster_default_partition(cluster)
-
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -314,7 +355,7 @@ class Slurm(clouds.Cloud):
             'accelerator_count': str(acc_count),
             'accelerator_type': acc_type,
             'slurm_cluster': cluster,
-            'slurm_partition': default_partition,
+            'slurm_partition': partition,
             # TODO(jwj): Pass SSH config in a smarter way
             'ssh_hostname': ssh_config_dict['hostname'],
             'ssh_port': str(ssh_config_dict.get('port', 22)),
@@ -477,16 +518,38 @@ class Slurm(clouds.Cloud):
         return catalog.instance_type_exists(instance_type, 'slurm')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
+        """Validate region (cluster) and zone (partition).
+
+        Args:
+            region: Slurm cluster name.
+            zone: Slurm partition name (optional).
+
+        Returns:
+            Tuple of (region, zone) if valid.
+
+        Raises:
+            ValueError: If cluster or partition not found.
+        """
         all_clusters = slurm_utils.get_all_slurm_cluster_names()
         if region and region not in all_clusters:
             raise ValueError(
                 f'Cluster {region} not found in Slurm config. Slurm only '
                 'supports cluster names as regions. Available '
                 f'clusters: {all_clusters}')
-        # TODO(kevin): Remove this once we support Slurm partitions.
+
+        # Validate partition (zone) if specified
         if zone is not None:
-            raise ValueError('Slurm support does not support setting zone. '
-                             'Cluster used is determined by the Slurm config.')
+            if region is None:
+                raise ValueError(
+                    'Cannot specify partition (zone) without specifying '
+                    'cluster (region) for Slurm.')
+
+            partitions = slurm_utils.get_partitions(region)
+            if zone not in partitions:
+                raise ValueError(
+                    f'Partition {zone!r} not found in cluster {region!r}. '
+                    f'Available partitions: {partitions}')
+
         return region, zone
 
     def accelerator_in_region_or_zone(self,
@@ -507,12 +570,20 @@ class Slurm(clouds.Cloud):
 
     @classmethod
     def expand_infras(cls) -> List[str]:
-        """Returns a list of enabled SLURM clusters.
+        """Returns a list of enabled Slurm cluster/partition combinations.
 
-        Each cluster is returned as 'Slurm/cluster-name' to be displayed
+        Each is returned as 'Slurm/cluster-name/partition' to be displayed
         as a separate option in the optimizer.
         """
-        return [
-            f'{cls.canonical_name()}/{c}'
-            for c in cls.existing_allowed_clusters(silent=True)
-        ]
+        infras = []
+        for cluster in cls.existing_allowed_clusters(silent=True):
+            try:
+                partitions = slurm_utils.get_partitions(cluster)
+                for partition in partitions:
+                    infras.append(
+                        f'{cls.canonical_name()}/{cluster}/{partition}')
+            except Exception as e:  # pylint: disable=broad-except
+                # Fall back to cluster-only if partition fetch fails
+                logger.debug(f'Failed to get partitions for {cluster}: {e}')
+                infras.append(f'{cls.canonical_name()}/{cluster}')
+        return infras
