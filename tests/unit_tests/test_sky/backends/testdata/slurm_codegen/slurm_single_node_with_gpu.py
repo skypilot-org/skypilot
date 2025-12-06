@@ -418,23 +418,7 @@ setup_envs = {'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'M
 setup_log_dir = '/sky/logs'
 setup_num_nodes = 1
 
-result = subprocess.run(
-    ['srun', '--overlap', '--jobid=12345', '--nodes=1', '--ntasks=1',
-     '--ntasks-per-node=1', 'bash', '-c',
-     'hostname -I | awk "{print \$1}"'],
-    capture_output=True,
-    text=True,
-    check=True
-)
-job_ips = result.stdout.strip().split('\n')
-cluster_ips_to_node_id = {ip: i for i, ip in enumerate(['10.0.0.1'])}
-job_ip_rank_list = sorted(job_ips, key=cluster_ips_to_node_id.get)
-# Note: job_ip_rank_map is not needed for Slurm, as
-# we will use $SLURM_PROCID to get the node rank.
-job_ip_list_str = '\n'.join(job_ip_rank_list)
-
 sky_env_vars_dict = {}
-sky_env_vars_dict['SKYPILOT_NODE_IPS'] = job_ip_list_str
 sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = 2
 
 sky_env_vars_dict['SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000001-cluster-2'
