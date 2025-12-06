@@ -1821,7 +1821,8 @@ def format_job_table(
             for replica in replica_info:
                 used_by = replica.get('used_by')
                 if used_by is not None:
-                    job_to_worker[used_by] = replica.get('replica_id')
+                    for job_id in used_by:
+                        job_to_worker[job_id] = replica.get('replica_id')
         return job_to_worker
 
     # Create mapping from job_id to worker replica_id
