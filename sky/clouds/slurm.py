@@ -1,10 +1,7 @@
 """Slurm."""
 
-import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
-
-from paramiko.config import SSHConfig
 
 from sky import catalog
 from sky import clouds
@@ -58,6 +55,7 @@ class Slurm(clouds.Cloud):
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
+    _INDENT_PREFIX = '    '
 
     # Using the latest SkyPilot provisioner API to provision and check status.
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
@@ -330,7 +328,7 @@ class Slurm(clouds.Cloud):
             partition = slurm_utils.get_cluster_default_partition(cluster)
 
         # cluster is our target slurmctld host.
-        ssh_config = SSHConfig.from_path(os.path.expanduser(CREDENTIAL_PATH))
+        ssh_config = slurm_utils.get_slurm_ssh_config()
         ssh_config_dict = ssh_config.lookup(cluster)
 
         resources = resources.assert_launchable()
@@ -457,7 +455,20 @@ class Slurm(clouds.Cloud):
     def _check_compute_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to the Slurm cluster."""
-        ssh_config = SSHConfig.from_path(os.path.expanduser(CREDENTIAL_PATH))
+        try:
+            ssh_config = slurm_utils.get_slurm_ssh_config()
+        except FileNotFoundError:
+            return (
+                False,
+                f'Slurm configuration file {slurm_utils.DEFAULT_SLURM_PATH} '
+                'does not exist.\n'
+                f'{cls._INDENT_PREFIX}For more info: '
+                'https://docs.skypilot.co/en/latest/getting-started/'
+                'installation.html#slurm-installation')
+        except Exception as e:  # pylint: disable=broad-except
+            return (False, 'Failed to load SSH configuration from '
+                    f'{slurm_utils.DEFAULT_SLURM_PATH}: '
+                    f'{common_utils.format_exception(e)}.')
         existing_allowed_clusters = cls.existing_allowed_clusters()
 
         if not existing_allowed_clusters:

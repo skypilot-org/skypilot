@@ -20,7 +20,7 @@ import struct
 import sys
 import threading
 import traceback
-from typing import Dict, List, Literal, Optional, Set, Tuple
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
 
@@ -57,6 +57,7 @@ from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics
 from sky.server import middleware_utils
+from sky.server import plugins
 from sky.server import server_utils
 from sky.server import state
 from sky.server import stream_utils
@@ -656,6 +657,17 @@ app.add_middleware(BearerTokenMiddleware)
 # middleware above.
 app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
+
+# Load plugins after all the middlewares are added, to keep the core
+# middleware stack intact if a plugin adds new middlewares.
+# Note: server.py will be imported twice in server process, once as
+# the top-level entrypoint module and once imported by uvicorn, we only
+# load the plugin when imported by uvicorn for server process.
+# TODO(aylei): move uvicorn app out of the top-level module to avoid
+# duplicate app initialization.
+if __name__ == 'sky.server.server':
+    plugins.load_plugins(plugins.ExtensionContext(app=app))
+
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
 app.include_router(users_rest.router, prefix='/users', tags=['users'])
@@ -1790,6 +1802,15 @@ async def api_status(
         return encoded_request_tasks
 
 
+@app.get('/api/plugins', response_class=fastapi_responses.ORJSONResponse)
+async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
+    """Return metadata about loaded backend plugins."""
+    plugin_info = [{
+        'js_extension_path': plugin.js_extension_path,
+    } for plugin in plugins.get_plugins()]
+    return {'plugins': plugin_info}
+
+
 @app.get(
     '/api/health',
     # response_model_exclude_unset omits unset fields
@@ -2096,6 +2117,14 @@ async def serve_dashboard(full_path: str):
     if os.path.isfile(file_path):
         return fastapi.responses.FileResponse(file_path)
 
+    # Serve plugin catch-all page for any /plugins/* paths so client-side
+    # routing can bootstrap correctly.
+    if full_path == 'plugins' or full_path.startswith('plugins/'):
+        plugin_catchall = os.path.join(server_constants.DASHBOARD_DIR,
+                                       'plugins', '[...slug].html')
+        if os.path.isfile(plugin_catchall):
+            return fastapi.responses.FileResponse(plugin_catchall)
+
     # Serve index.html for client-side routing
     # e.g. /clusters, /jobs
     index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
@@ -2259,6 +2288,8 @@ if __name__ == '__main__':
 
         for gt in global_tasks:
             gt.cancel()
+        for plugin in plugins.get_plugins():
+            plugin.shutdown()
         subprocess_utils.run_in_parallel(lambda worker: worker.cancel(),
                                          workers,
                                          num_threads=len(workers))
