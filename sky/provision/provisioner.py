@@ -157,9 +157,9 @@ def bulk_provision(
             logger.debug(f'SkyPilot version: {sky.__version__}; '
                          f'commit: {sky.__commit__}')
             logger.debug(_TITLE.format('Provisioning'))
-            logger.debug(
-                'Provision config:\n'
-                f'{json.dumps(dataclasses.asdict(bootstrap_config), indent=2)}')
+            redacted_config = bootstrap_config.get_redacted_config()
+            logger.debug('Provision config:\n'
+                         f'{json.dumps(redacted_config, indent=2)}')
             return _bulk_provision(cloud, region, cluster_name,
                                    bootstrap_config)
         except exceptions.NoClusterLaunchedError:
