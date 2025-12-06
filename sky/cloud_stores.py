@@ -22,6 +22,7 @@ from sky.adaptors import coreweave
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import seeweb
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.skylet import constants
@@ -680,6 +681,73 @@ class CoreWeaveCloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
 
+class SeewebCloudStorage(CloudStorage):
+    """Seeweb Cloud Storage."""
+
+    # List of commands to install AWS CLI
+    _GET_AWSCLI = [
+        'aws --version >/dev/null 2>&1 || '
+        f'{constants.SKY_UV_PIP_CMD} install awscli',
+    ]
+
+    def is_directory(self, url: str) -> bool:
+        """Checks if the seeweb object is a directory.
+
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
+
+        Args:
+            url: seeweb object URL.
+        """
+        sw = seeweb.resource('s3')
+        bucket_name, path = data_utils.split_seeweb_path(url)
+        bucket = sw.Bucket(bucket_name)
+
+        num_objects = 0
+        for obj in bucket.objects.filter(Prefix=path):
+            num_objects += 1
+            if obj.key == path:
+                return False
+            # If there are more than 1 object in filter, then it is a directory
+            if num_objects == 3:
+                return True
+
+        # A directory with few or no items
+        return True
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        """Downloads using AWS CLI."""
+        # AWS Sync by default uses 10 threads to upload files to the bucket.
+        # To increase parallelism, modify max_concurrent_requests in your
+        # aws config file (Default path: ~/.aws/config).
+        assert 'seeweb://' in source, 'seeweb:// is not in source'
+        source = source.replace('seeweb://', 's3://')
+        endpoint_url = seeweb.get_endpoint()
+        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               'sync --no-follow-symlinks '
+                               f'{source} {destination} '
+                               f'--profile={seeweb.SEEWEB_PROFILE_NAME} '
+                               f'--endpoint-url={endpoint_url}')
+
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        """Downloads a file using AWS CLI."""
+        assert 'seeweb://' in source, 'seeweb:// is not in source'
+        source = source.replace('seeweb://', 's3://')
+        endpoint_url = seeweb.get_endpoint()
+        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               f'cp {source} {destination} '
+                               f'--profile={seeweb.SEEWEB_PROFILE_NAME} '
+                               f'--endpoint-url={endpoint_url}')
+
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+
 def get_storage_from_path(url: str) -> CloudStorage:
     """Returns a CloudStorage by identifying the scheme:// in a URL."""
     result = urllib.parse.urlsplit(url)
@@ -698,6 +766,7 @@ _REGISTRY = {
     'oci': OciCloudStorage(),
     'nebius': NebiusCloudStorage(),
     'cw': CoreWeaveCloudStorage(),
+    'seeweb': SeewebCloudStorage(),
     # TODO: This is a hack, as Azure URL starts with https://, we should
     # refactor the registry to be able to take regex, so that Azure blob can
     # be identified with `https://(.*?)\.blob\.core\.windows\.net`
