@@ -266,6 +266,28 @@
                 }
             }
         },
+        "coreweaveCredentials": {
+            "type": "object",
+            "properties": {
+                "coreweaveSecretName": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "digitaloceanCredentials": {
+            "type": "object",
+            "properties": {
+                "digitaloceanSecretName": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
         "extraInitContainers": {
             "type": [
                 "array",

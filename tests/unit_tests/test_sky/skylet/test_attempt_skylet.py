@@ -148,6 +148,9 @@ class TestRestartSkylet:
         killed_pids = []
         monkeypatch.setattr('os.kill', lambda p, s: killed_pids.append((p, s)))
 
+        monkeypatch.setattr('sky.utils.common_utils.find_free_port',
+                            lambda port: constants.SKYLET_GRPC_PORT)
+
         subprocess_calls = []
 
         def mock_run(cmd, **kwargs):
@@ -182,6 +185,9 @@ class TestRestartSkylet:
 
         killed_pids = []
         monkeypatch.setattr('os.kill', lambda p, s: killed_pids.append((p, s)))
+
+        monkeypatch.setattr('sky.utils.common_utils.find_free_port',
+                            lambda port: constants.SKYLET_GRPC_PORT)
 
         subprocess_calls = []
 
