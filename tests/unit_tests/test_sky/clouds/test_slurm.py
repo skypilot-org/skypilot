@@ -16,28 +16,28 @@ class TestCheckInstanceFits:
                                     state='idle',
                                     gres='(null)',
                                     cpus=4,
-                                    memory_mb=16384,
+                                    memory_gb=16,
                                     partition='dev*')
 
     node_2cpu_8gb = slurm.NodeInfo(node='node1',
                                    state='idle',
                                    gres='(null)',
                                    cpus=2,
-                                   memory_mb=8192,
+                                   memory_gb=8,
                                    partition='dev*')
 
     node_gpu_a10g = slurm.NodeInfo(node='node1',
                                    state='idle',
                                    gres='gpu:a10g:8',
                                    cpus=192,
-                                   memory_mb=786432,
+                                   memory_gb=786,
                                    partition='gpus')
 
     node_2cpu_8gb_cpus = slurm.NodeInfo(node='node2',
                                         state='idle',
                                         gres='(null)',
                                         cpus=2,
-                                        memory_mb=8192,
+                                        memory_gb=8,
                                         partition='dev*')
 
     @pytest.mark.parametrize(
