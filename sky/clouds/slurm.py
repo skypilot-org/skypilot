@@ -36,8 +36,6 @@ class Slurm(clouds.Cloud):
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Slurm.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not '
-                                                       'supported in Slurm.',
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             'Customized multiple network interfaces are not supported in '
             'Slurm.',

@@ -480,7 +480,6 @@ def test_docker_preinstalled_package(generic_cloud: str):
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
 @pytest.mark.no_do  # DO does not have T4 gpus
 @pytest.mark.no_nebius  # Nebius does not have T4 gpus
-@pytest.mark.no_slurm  # Slurm does not support multi-node yet
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.no_seeweb  # Seeweb does not have T4 gpus
 @pytest.mark.resource_heavy
@@ -492,7 +491,10 @@ def test_multi_echo(generic_cloud: str):
         # EKS does not support spot instances
         # Assume tests using a remote api server endpoint do not support spot instances
         use_spot = not smoke_tests_utils.is_eks_cluster()
-    if generic_cloud in ('kubernetes', 'k8s'):
+    if generic_cloud == 'slurm':
+        # Slurm does not support spot instances
+        use_spot = False
+    if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
 
     # Determine timeout for 15 running jobs check: 2 min for remote server, single check for local
@@ -2376,10 +2378,6 @@ def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
 def test_autodown(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
-    if generic_cloud == 'slurm':
-        # Slurm does not support multi-node
-        num_nodes = 1
-
     # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
     # the VM is terminated.
     if generic_cloud == 'azure':
