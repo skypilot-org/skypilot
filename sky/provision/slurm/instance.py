@@ -131,9 +131,13 @@ def _create_virtual_instance(
                                       created_instance_ids=[])
 
     resources = config.node_config
+
+    # Note: By default Slurm terminates the entire job allocation if any node
+    # fails in its range of allocated nodes.
+    # In the future we can consider running sbatch with --no-kill to not
+    # automatically terminate a job if one of the nodes it has been
+    # allocated fails.
     num_nodes = config.count
-    # TODO(kevin): Support multi-node.
-    assert num_nodes == 1
 
     accelerator_type = resources.get('accelerator_type')
     accelerator_count_raw = resources.get('accelerator_count')
@@ -181,13 +185,15 @@ def _create_virtual_instance(
         }}
         trap cleanup TERM
 
-        # Create sky directory for the cluster.
-        # TODO(kevin): Since this is run inside the sbatch script, failures
-        # will not be surfaced in a synchronous way. We should add a check
-        # to verify the creation of the directory.
-        mkdir -p {sky_dir} {skypilot_runtime_dir}
-        # Suppress login messages.
-        touch {sky_dir}/.hushlogin
+        if [ "$SLURM_PROCID" -eq 0 ]; then
+            # Create sky directory for the cluster.
+            # TODO(kevin): Since this is run inside the sbatch script, failures
+            # will not be surfaced in a synchronous way. We should add a check
+            # to verify the creation of the directory.
+            mkdir -p {sky_dir} {skypilot_runtime_dir}
+            # Suppress login messages.
+            touch {sky_dir}/.hushlogin
+        fi
         sleep infinity
         """)
 
@@ -286,7 +292,12 @@ def query_instances(
         )
 
         for job_id in jobs:
-            statuses[job_id] = (sky_status, None)
+            nodes, _ = client.get_job_nodes(job_id, wait=False)
+            for node in nodes:
+                instance_id = slurm_utils.instance_id(job_id, node)
+                # TODO(kevin): If status is failed, we should probably query
+                # each node's status to get the reason.
+                statuses[instance_id] = (sky_status, None)
 
     return statuses
 
