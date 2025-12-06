@@ -742,27 +742,6 @@ class SlurmCodeGen(TaskCodeGen):
                 """),
             ]
 
-        # Get the IP addresses of the nodes in the job.
-        # --overlap as this is a very cheap operation
-        # and we don't want it to be blocked.
-        self._code.append(
-            textwrap.dedent(f"""\
-            result = subprocess.run(
-                ['srun', '--overlap', '--jobid={self._slurm_job_id}', '--nodes={num_nodes}', '--ntasks={num_nodes}',
-                 '--ntasks-per-node=1', 'bash', '-c',
-                 'hostname -I | awk "{{print \\$1}}"'],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            job_ips = result.stdout.strip().split('\\n')
-            cluster_ips_to_node_id = {{ip: i for i, ip in enumerate({stable_cluster_internal_ips!r})}}
-            job_ip_rank_list = sorted(job_ips, key=cluster_ips_to_node_id.get)
-            # Note: job_ip_rank_map is not needed for Slurm, as
-            # we will use $SLURM_PROCID to get the node rank.
-            job_ip_list_str = '\\n'.join(job_ip_rank_list)
-            """))
-
     def add_task(
         self,
         num_nodes: int,
@@ -789,12 +768,9 @@ class SlurmCodeGen(TaskCodeGen):
         # Slurm does not support fractional CPUs.
         task_cpu_demand = int(math.ceil(resources_dict.pop('CPU')))
 
-        # Note: SKYPILOT_NUM_NODES and SKYPILOT_NODE_RANK are set in run_script
-        # from SLURM env vars (available in srun context), not here.
         sky_env_vars_dict_str = [
             textwrap.dedent(f"""\
             sky_env_vars_dict = {{}}
-            sky_env_vars_dict['{constants.SKYPILOT_NODE_IPS}'] = job_ip_list_str
             sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
             """)
         ]

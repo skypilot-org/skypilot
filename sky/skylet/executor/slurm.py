@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import pathlib
+import socket
 import subprocess
 import sys
 import time
@@ -24,6 +25,33 @@ def _get_ip_address() -> str:
                                check=False)
     return ip_result.stdout.strip().split(
     )[0] if ip_result.returncode == 0 else 'unknown'
+
+
+def _get_job_node_ips() -> str:
+    """Get IPs of all nodes in the current Slurm job."""
+    nodelist = os.environ.get('SLURM_JOB_NODELIST', '')
+    assert nodelist, 'SLURM_JOB_NODELIST is not set'
+
+    # Expand compressed nodelist (e.g., "node[1-3,5]"
+    # -> "node1\nnode2\nnode3\nnode5")
+    result = subprocess.run(['scontrol', 'show', 'hostnames', nodelist],
+                            capture_output=True,
+                            text=True,
+                            check=False)
+    if result.returncode != 0:
+        raise RuntimeError(f'Failed to get hostnames for: {nodelist}')
+
+    hostnames = result.stdout.strip().split('\n')
+    ips = []
+    for hostname in hostnames:
+        try:
+            ip = socket.gethostbyname(hostname)
+            ips.append(ip)
+        except socket.gaierror as e:
+            raise RuntimeError('Failed to get IP for hostname: '
+                               f'{hostname}') from e
+
+    return '\n'.join(ips)
 
 
 def main():
@@ -80,6 +108,7 @@ def main():
     env_vars = json.loads(args.env_vars)
     env_vars['SKYPILOT_NODE_RANK'] = str(rank)
     env_vars['SKYPILOT_NUM_NODES'] = str(num_nodes)
+    env_vars['SKYPILOT_NODE_IPS'] = _get_job_node_ips()
 
     # Signal file coordination for setup/run synchronization
     # Rank 0 touches the allocation signal to indicate resources acquired
