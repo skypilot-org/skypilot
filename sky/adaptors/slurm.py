@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 # and other special characters.
 SEP = r'\x1f'
 
+# Regex pattern to extract partition names from scontrol output
+# Matches PartitionName=<name> and captures until the next field
+_PARTITION_NAME_REGEX = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
+
 
 # TODO(kevin): Add more API types for other client functions.
 class NodeInfo(NamedTuple):
@@ -23,7 +27,9 @@ class NodeInfo(NamedTuple):
     state: str
     gres: str
     cpus: int
-    memory_mb: int
+    memory_gb: float
+    # The default partition contains a '*' at the end of the name.
+    # It is the caller's responsibility to strip the '*' if needed.
     partition: str
 
 
@@ -164,7 +170,7 @@ class SlurmClient:
                                      state=parts[1],
                                      gres=parts[2],
                                      cpus=int(parts[3]),
-                                     memory_mb=int(parts[4]),
+                                     memory_gb=int(parts[4]) / 1024.0,
                                      partition=parts[5])
                 nodes.append(node_info)
             except ValueError as e:
@@ -206,23 +212,6 @@ class SlurmClient:
             stderr=node_details)
         node_info = _parse_scontrol_node_output(node_details)
         return node_info
-
-    def info_partitions(self) -> List[str]:
-        """Get Slurm node-to-partition information.
-
-        Returns:
-            A list of node and partition info lines.
-        """
-        cmd = 'sinfo -h --Nodes -o "%N %P"'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
-        subprocess_utils.handle_returncode(
-            rc,
-            cmd,
-            'Failed to get Slurm partition information.',
-            stderr=stderr)
-        return stdout.splitlines()
 
     def get_node_jobs(self, node_name: str) -> List[str]:
         """Get the list of jobs for a given node name.
@@ -370,7 +359,8 @@ class SlurmClient:
         """Get unique partition names in the Slurm cluster.
 
         Returns:
-            List of partition names.
+            List of partition names. The default partition will not have a '*'
+            at the end of the name.
         """
         cmd = 'scontrol show partitions -o'
         rc, stdout, stderr = self._runner.run(cmd,
@@ -383,10 +373,8 @@ class SlurmClient:
 
         # Extract partition names from PartitionName= fields
         partitions = []
-        # Match until the next field (any word followed by =)
-        partition_regex = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
         for line in stdout.strip().splitlines():
-            match = partition_regex.search(line)
+            match = _PARTITION_NAME_REGEX.search(line)
             if match:
                 partition = match.group(1).strip()
                 if partition:
@@ -446,11 +434,11 @@ class SlurmClient:
 
         for line in stdout.strip().splitlines():
             if 'Default=YES' in line:
-                # Extract partition name from PartitionName=<name>
-                parts = line.split()
-                for part in parts:
-                    if part.startswith('PartitionName='):
-                        return part.split('=', 1)[1]
+                match = _PARTITION_NAME_REGEX.search(line)
+                if match:
+                    partition = match.group(1).strip()
+                    if partition:
+                        return partition
 
         logger.debug('No default partition found')
         return None

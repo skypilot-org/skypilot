@@ -68,19 +68,19 @@ class TestInfoNodes:
             assert result[0].state == 'idle'
             assert result[0].gres == '(null)'
             assert result[0].cpus == 2
-            assert result[0].memory_mb == 16384
+            assert result[0].memory_gb == 16
             assert result[0].partition == 'dev'
 
             assert result[1].node == 'node2'
             assert result[1].state == 'mix'
             assert result[1].gres == 'gpu:a10g:8'
             assert result[1].cpus == 192
-            assert result[1].memory_mb == 786432
+            assert result[1].memory_gb == 768
             assert result[1].partition == 'gpu nodes (RESERVED)'
 
             assert result[2].node == 'node3'
             assert result[2].state == 'alloc'
             assert result[2].gres == '(null)'
             assert result[2].cpus == 4
-            assert result[2].memory_mb == 32768
+            assert result[2].memory_gb == 32
             assert result[2].partition == 'tpu nodes'

@@ -259,7 +259,7 @@ def _check_cpu_mem_fits(
 
     for node_info in node_list:
         node_cpus = node_info.cpus
-        node_mem_gb = node_info.memory_mb / 1024.0
+        node_mem_gb = node_info.memory_gb
 
         if node_cpus > max_cpu:
             max_cpu = node_cpus
@@ -302,14 +302,21 @@ def check_instance_fits(
     nodes = client.info_nodes()
     default_partition = get_cluster_default_partition(cluster)
 
+    def is_default_partition(node_partition: str) -> bool:
+        # info_nodes does not strip the '*' from the default partition name.
+        # But non-default partition names can also end with '*',
+        # so we need to check whether the partition name without the '*'
+        # is the same as the default partition name.
+        return (node_partition.endswith('*') and
+                node_partition[:-1] == default_partition)
+
     partition_suffix = ''
     if partition is not None:
         filtered = []
         for node_info in nodes:
             node_partition = node_info.partition
-            # Strip '*' from default partition name.
-            if (node_partition.endswith('*') and
-                    node_partition[:-1] == default_partition):
+            if is_default_partition(node_partition):
+                # Strip '*' from default partition name.
                 node_partition = node_partition[:-1]
             if node_partition == partition:
                 filtered.append(node_info)
@@ -521,18 +528,19 @@ def get_partitions(cluster_name: str) -> List[str]:
     Returns:
         Sorted list of unique partition names available in the cluster.
     """
-    slurm_config = SSHConfig.from_path(os.path.expanduser(DEFAULT_SLURM_PATH))
-    slurm_config_dict = slurm_config.lookup(cluster_name)
-
-    client = slurm.SlurmClient(
-        slurm_config_dict['hostname'],
-        int(slurm_config_dict.get('port', 22)),
-        slurm_config_dict['user'],
-        slurm_config_dict['identityfile'][0],
-        ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
-    )
-
     try:
+        slurm_config = SSHConfig.from_path(
+            os.path.expanduser(DEFAULT_SLURM_PATH))
+        slurm_config_dict = slurm_config.lookup(cluster_name)
+
+        client = slurm.SlurmClient(
+            slurm_config_dict['hostname'],
+            int(slurm_config_dict.get('port', 22)),
+            slurm_config_dict['user'],
+            slurm_config_dict['identityfile'][0],
+            ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
+        )
+
         partitions = client.get_partitions()
         return sorted(partitions)
     except Exception as e:  # pylint: disable=broad-except

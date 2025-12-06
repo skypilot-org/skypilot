@@ -204,6 +204,9 @@ class Slurm(clouds.Cloud):
             try:
                 partitions = slurm_utils.get_partitions(cluster)
                 zones = [clouds.Zone(p) for p in partitions]
+                if zone is not None:
+                    # Filter by zone (partition) if specified
+                    zones = [z for z in zones if z.name == zone]
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to get partitions for {cluster}: {e}')
                 zones = []
@@ -216,13 +219,6 @@ class Slurm(clouds.Cloud):
         if region is not None:
             # Filter the regions by the given region (cluster) name.
             regions = [r for r in regions if r.name == region]
-
-        # Filter by zone (partition) if specified
-        if zone is not None:
-            for r in regions:
-                if r.zones:
-                    r.set_zones([z for z in r.zones if z.name == zone])
-            regions = [r for r in regions if r.zones]
 
         # Check if requested instance type will fit in the cluster.
         if instance_type is None:
