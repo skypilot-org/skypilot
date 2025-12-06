@@ -75,3 +75,6 @@ protobuf==5.26.1
 # pydantic<2.12 avoids pulling pydantic-core 2.41.x. Revisit once upstream
 # resolves the import or we align versions accordingly.
 pydantic<2.12
+
+# For testing Verda
+verda>=1.17.4
