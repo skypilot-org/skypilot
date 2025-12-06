@@ -1,6 +1,4 @@
 """SDK functions for managed jobs."""
-import concurrent.futures
-import copy
 import ipaddress
 import os
 import pathlib
@@ -14,9 +12,11 @@ import colorama
 
 from sky import backends
 from sky import core
+from sky import dag as dag_lib
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
+from sky import optimizer
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
@@ -54,6 +54,7 @@ if typing.TYPE_CHECKING:
     from google.protobuf import json_format
 
     import sky
+    from sky import resources
     from sky.schemas.generated import managed_jobsv1_pb2
 else:
     json_format = adaptors_common.LazyImport('google.protobuf.json_format')
@@ -138,6 +139,61 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     return local_to_controller_file_mounts
 
 
+def _job_ids_to_str(job_ids: Optional[List[int]]) -> str:
+    if not job_ids:
+        return ''
+
+    if len(job_ids) == 1:
+        return str(job_ids[0])
+
+    job_ids = sorted(job_ids)
+    ranges = []
+    start = prev = job_ids[0]
+
+    for n in job_ids[1:]:
+        if n == prev + 1:
+            prev = n
+            continue
+        ranges.append(f'{start}-{prev}' if start != prev else str(start))
+        start = prev = n
+
+    # append last range
+    ranges.append(f'{start}-{prev}' if start != prev else str(start))
+    return ','.join(ranges)
+
+
+def _consolidated_launch(
+    controller: controller_utils.Controllers,
+    controller_task: 'sky.Task',
+    job_ids: List[int],
+) -> Tuple[List[int], backends.ResourceHandle]:
+    local_handle = backend_utils.is_controller_accessible(controller=controller,
+                                                          stopped_message='')
+    backend = backend_utils.get_backend_from_handle(local_handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+    with sky_logging.silent():
+        backend.sync_file_mounts(handle=local_handle,
+                                 all_file_mounts=controller_task.file_mounts,
+                                 storage_mounts=controller_task.storage_mounts)
+    run_script = controller_task.run
+    assert isinstance(run_script, str)
+    # Manually add the env variables to the run script.
+    # Originally this is done in ray jobs submission but now
+    # we have to do it manually because there is no ray
+    # runtime on the API server.
+    env_cmds = [f'export {k}={v!r}' for k, v in controller_task.envs.items()]
+    run_script = '\n'.join(env_cmds + [run_script])
+    # Dump script for high availability recovery.
+    assert job_ids is not None, 'job_ids not set'
+    log_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY, 'managed_jobs')
+    os.makedirs(log_dir, exist_ok=True)
+    job_ids_str = _job_ids_to_str(job_ids)
+    log_path = os.path.join(log_dir, f'submit-job-{job_ids_str}.log')
+    backend.run_on_head(local_handle, run_script, log_path=log_path)
+    ux_utils.starting_message(f'Job submitted, ID: {job_ids_str}')
+    return job_ids, local_handle
+
+
 def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
                               num_jobs: int) -> Optional[List[int]]:
     """Submit the managed job locally if in consolidation mode.
@@ -183,6 +239,190 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
                                           task.name, resources_str,
                                           task.metadata_json)
         job_ids.append(consolidation_mode_job_id)
+    return job_ids
+
+
+def _ensure_controller_up(
+    controller: controller_utils.Controllers,
+    task_resources: Optional[List['resources.Resources']] = None
+) -> 'cloud_vm_ray_backend.CloudVmRayResourceHandle':
+    """Ensure the jobs controller is up before proceeding.
+
+    If the controller is not accessible, provision it (bring up the cluster)
+    without launching a job. This avoids creating a cluster job ID that would
+    interfere with the ID space from the controller's perspective.
+
+    Args:
+        controller: The controller type to ensure is up.
+        task_resources: Optional list of task resources. If provided, the
+            controller will be launched on the same cloud as the tasks.
+    """
+    try:
+        handle = backend_utils.is_controller_accessible(controller=controller,
+                                                        stopped_message='')
+        return handle
+    except exceptions.ClusterNotUpError:
+        # Controller is not up, provision it (bring up the cluster)
+        controller_name = controller.value.cluster_name
+        logger.info(f'{colorama.Fore.YELLOW}'
+                    f'Jobs controller {controller_name} is not up. '
+                    f'Provisioning it...{colorama.Style.RESET_ALL}')
+
+        # Create a minimal task for provisioning the controller cluster
+        # We only use this for its resources, not to execute a job
+        # Use task_resources to determine which cloud to launch the controller.
+        controller_resources_set = controller_utils.get_controller_resources(
+            controller=controller,
+            task_resources=task_resources if task_resources else [])
+
+        # Use the jobs controller template to ensure cloud dependencies
+        # are installed.
+        dag_uuid = str(uuid.uuid4())
+        prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
+        remote_orig_user_yaml_path = (
+            f'{prefix}/ensure-controller-up-{dag_uuid}.original_user_yaml')
+        remote_user_yaml_path = f'{prefix}/ensure-controller-up-{dag_uuid}.yaml'
+        remote_user_config_path = (
+            f'{prefix}/ensure-controller-up-{dag_uuid}.config_yaml')
+        remote_env_file_path = f'{prefix}/ensure-controller-up-{dag_uuid}.env'
+
+        # Create minimal temporary files for template
+        with tempfile.NamedTemporaryFile(
+                prefix='ensure-controller-up-', mode='w',
+                delete=False) as f, tempfile.NamedTemporaryFile(
+                    prefix='ensure-controller-up-user-', mode='w',
+                    delete=False) as original_user_yaml_path:
+            # Write minimal dag content
+            minimal_dag = task_lib.Task(name='ensure_controller_up',
+                                        run='echo "Controller cluster is up"')
+            with dag_lib.Dag() as temp_dag:
+                temp_dag.add(minimal_dag)
+                dag_utils.dump_chain_dag_to_yaml(temp_dag, f.name)
+            original_user_yaml_path.write('')
+            original_user_yaml_path.flush()
+
+            vars_to_fill: Dict[str, Any] = {
+                'remote_original_user_yaml_path': remote_orig_user_yaml_path,
+                'original_user_dag_path': original_user_yaml_path.name,
+                'remote_user_yaml_path': remote_user_yaml_path,
+                'user_yaml_path': f.name,
+                'local_to_controller_file_mounts': {},
+                'jobs_controller': controller_name,
+                'dag_name': 'ensure_controller_up',
+                'remote_user_config_path': remote_user_config_path,
+                'remote_env_file_path': remote_env_file_path,
+                'modified_catalogs': {},
+                'priority': skylet_constants.DEFAULT_PRIORITY,
+                'is_consolidation_mode': False,
+                'pool': None,
+                'job_controller_indicator_file':
+                    managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,
+                **controller_utils.shared_controller_vars_to_fill(
+                    controller,
+                    remote_user_config_path=remote_user_config_path,
+                    local_user_config={},
+                ),
+            }
+
+            yaml_path = os.path.join(
+                managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
+                f'ensure-controller-up-{dag_uuid}.yaml')
+
+            # Fill the template to create the controller task YAML
+            common_utils.fill_template(
+                managed_job_constants.JOBS_CONTROLLER_TEMPLATE,
+                vars_to_fill,
+                output_path=yaml_path)
+
+            # Create task from the template-generated YAML
+            controller_task = task_lib.Task.from_yaml(yaml_path)
+            controller_task.set_resources(controller_resources_set)
+
+        # Optimize the task to make resources launchable.
+        with dag_lib.Dag() as dag:
+            dag.add(controller_task)
+        dag = optimizer.Optimizer.optimize(dag,
+                                           minimize=common.OptimizeTarget.COST,
+                                           quiet=True)
+        controller_task = dag.tasks[0]
+        assert controller_task.best_resources is not None, controller_task
+
+        with skypilot_config.local_active_workspace_ctx(
+                skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
+            with common.with_server_user():
+                # Only provision the cluster, don't execute a job
+                # This brings up the cluster without creating a cluster job ID.
+                backend = backends.CloudVmRayBackend()
+                # Use the optimized Resources object for provisioning
+                handle, _ = backend.provision(
+                    task=controller_task,
+                    to_provision=controller_task.best_resources,
+                    dryrun=False,
+                    stream_logs=False,
+                    cluster_name=controller_name,
+                    retry_until_up=True,
+                    skip_unnecessary_provisioning=True)
+                # Run setup commands to ensure cloud dependencies are installed
+                backend.setup(handle, controller_task, detach_setup=False)
+
+        # Verify the controller is now accessible
+        handle = backend_utils.is_controller_accessible(controller=controller,
+                                                        stopped_message='')
+        return handle
+
+
+def _submit_remotely(controller: controller_utils.Controllers,
+                     dag: 'sky.Dag',
+                     pool: Optional[str] = None,
+                     num_jobs: int = 1) -> List[int]:
+    # Ensure the controller is up before trying to create job IDs
+    # Use the same cloud as the tasks for the controller
+    task_resources = None
+    for task in dag.tasks:
+        if task.resources:
+            task_resources = list(task.resources)
+            break
+    local_handle = _ensure_controller_up(controller,
+                                         task_resources=task_resources)
+    backend = backend_utils.get_backend_from_handle(local_handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+
+    # Make sure the skylet is up to date before continuing.
+    backend.check_skylet_running(local_handle)
+
+    workspace = skypilot_config.get_active_workspace(force_user_workspace=True)
+    entrypoint = common_utils.get_current_command()
+    pool_hash = serve_state.get_service_hash(pool)
+    user_hash = common_utils.get_user_hash()
+
+    # Prepare task data
+    task_ids = []
+    task_names = []
+    metadata_jsons = []
+    for task_id, task in enumerate(dag.tasks):
+        task_ids.append(task_id)
+        assert task.name is not None, 'task name is not set'
+        task_names.append(task.name)
+        assert task.metadata_json is not None, 'task metadata is not set'
+        metadata_jsons.append(task.metadata_json)
+
+    # Use the same resources_str for all tasks
+    resources_str = backend_utils.get_task_resources_str(dag.tasks[0],
+                                                         is_managed_job=True)
+
+    assert dag.name is not None, 'dag name is not set'
+    job_ids = backend.set_job_info_without_job_id(handle=local_handle,
+                                                  name=dag.name,
+                                                  workspace=workspace,
+                                                  entrypoint=entrypoint,
+                                                  pool=pool,
+                                                  pool_hash=pool_hash,
+                                                  user_hash=user_hash,
+                                                  task_ids=task_ids,
+                                                  task_names=task_names,
+                                                  resources_str=resources_str,
+                                                  metadata_jsons=metadata_jsons,
+                                                  num_jobs=num_jobs)
     return job_ids
 
 
@@ -354,72 +594,69 @@ def launch(
         controller=controller,
         task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
+    if num_jobs and pool is None:
+        raise ValueError('Cannot specify num_jobs without pool.')
+
     num_jobs = num_jobs if num_jobs is not None else 1
     # We do this assignment after applying the admin policy, so that we don't
     # need to serialize the pool name in the dag. The dag object will be
     # preserved. See sky/admin_policy.py::MutatedUserRequest::decode.
     dag.pool = pool
-    consolidation_mode_job_ids = _maybe_submit_job_locally(
-        prefix, dag, num_jobs)
+    job_ids = _maybe_submit_job_locally(prefix, dag, num_jobs)
+    is_consolidation_mode = job_ids is not None
 
     # This is only needed for non-consolidation mode. For consolidation
     # mode, the controller uses the same catalog as API server.
-    modified_catalogs = {} if consolidation_mode_job_ids is not None else (
+    modified_catalogs = {} if is_consolidation_mode else (
         service_catalog_common.get_modified_catalog_file_mounts())
 
-    def _submit_one(
-        consolidation_mode_job_id: Optional[int] = None,
-        job_rank: Optional[int] = None,
-        num_jobs: Optional[int] = None,
-    ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
-        rank_suffix = '' if job_rank is None else f'-{job_rank}'
-        remote_original_user_yaml_path = (
-            f'{prefix}/{dag.name}-{dag_uuid}{rank_suffix}.original_user_yaml')
-        remote_user_yaml_path = (
-            f'{prefix}/{dag.name}-{dag_uuid}{rank_suffix}.yaml')
+    def _submit_many(
+        job_ids: Optional[List[int]] = None,
+        num_jobs: int = 1,
+        is_consolidation_mode: bool = False,
+    ) -> Tuple[Optional[List[int]], Optional[backends.ResourceHandle]]:
+        # Create a single set of YAML files (not per-rank)
+        remote_orig_user_yaml_path = (
+            f'{prefix}/{dag.name}-{dag_uuid}.original_user_yaml')
+        remote_user_yaml_path = (f'{prefix}/{dag.name}-{dag_uuid}.yaml')
         remote_user_config_path = (
-            f'{prefix}/{dag.name}-{dag_uuid}{rank_suffix}.config_yaml')
-        remote_env_file_path = (
-            f'{prefix}/{dag.name}-{dag_uuid}{rank_suffix}.env')
+            f'{prefix}/{dag.name}-{dag_uuid}.config_yaml')
+        remote_env_file_path = (f'{prefix}/{dag.name}-{dag_uuid}.env')
+
         with tempfile.NamedTemporaryFile(
-                prefix=f'managed-dag-{dag.name}{rank_suffix}-',
+                prefix=f'managed-dag-{dag.name}-',
                 mode='w',
         ) as f, tempfile.NamedTemporaryFile(
-                prefix=f'managed-user-dag-{dag.name}{rank_suffix}-',
+                prefix=f'managed-user-dag-{dag.name}-',
                 mode='w',
         ) as original_user_yaml_path:
             original_user_yaml_path.write(user_dag_str_user_specified)
             original_user_yaml_path.flush()
-            # Copy tasks to avoid race conditions when multiple threads modify
-            # the same dag object concurrently. Each thread needs its own copy.
-            dag_copy = copy.deepcopy(dag)
-            for task_ in dag_copy.tasks:
-                if job_rank is not None:
-                    task_.update_envs({'SKYPILOT_JOB_RANK': str(job_rank)})
-                if num_jobs is not None:
-                    task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
-            dag_utils.dump_chain_dag_to_yaml(dag_copy, f.name)
+            # Set the num_jobs env variable for each task.
+            for task_ in dag.tasks:
+                task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
-            vars_to_fill = {
-                'remote_original_user_yaml_path':
-                    (remote_original_user_yaml_path),
+            dag_utils.dump_chain_dag_to_yaml(dag, f.name)
+
+            vars_to_fill: Dict[str, Any] = {
+                'remote_original_user_yaml_path': remote_orig_user_yaml_path,
                 'original_user_dag_path': original_user_yaml_path.name,
                 'remote_user_yaml_path': remote_user_yaml_path,
                 'user_yaml_path': f.name,
                 'local_to_controller_file_mounts':
                     (local_to_controller_file_mounts),
                 'jobs_controller': controller_name,
-                # Note: actual cluster name will be <task.name>-<managed job ID>
                 'dag_name': dag.name,
                 'remote_user_config_path': remote_user_config_path,
                 'remote_env_file_path': remote_env_file_path,
                 'modified_catalogs': modified_catalogs,
                 'priority': priority,
-                'consolidation_mode_job_id': consolidation_mode_job_id,
+                'is_consolidation_mode': is_consolidation_mode,
                 'pool': pool,
                 'job_controller_indicator_file':
                     managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,
+                'num_jobs': num_jobs,
                 **controller_utils.shared_controller_vars_to_fill(
                     controller,
                     remote_user_config_path=remote_user_config_path,
@@ -432,28 +669,7 @@ def launch(
 
             yaml_path = os.path.join(
                 managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
-                f'{name}-{dag_uuid}-{consolidation_mode_job_id}-{job_rank}.yaml'
-            )
-            common_utils.fill_template(
-                managed_job_constants.JOBS_CONTROLLER_TEMPLATE,
-                vars_to_fill,
-                output_path=yaml_path)
-            controller_task = task_lib.Task.from_yaml(yaml_path)
-            controller_task.set_resources(controller_resources)
-
-            controller_task.managed_job_dag = dag_copy
-            # pylint: disable=protected-access
-            controller_task._metadata = metadata
-
-            job_identity = ''
-            if job_rank is not None:
-                job_identity = f' (rank: {job_rank})'
-            job_controller_postfix = (' from jobs controller' if
-                                      consolidation_mode_job_id is None else '')
-            logger.info(
-                f'{colorama.Fore.YELLOW}'
-                f'Launching managed job {dag.name!r}{job_identity}'
-                f'{job_controller_postfix}...{colorama.Style.RESET_ALL}')
+                f'{name}-{dag_uuid}.yaml')
 
             # Launch with the api server's user hash, so that sky status does
             # not show the owner of the controller as whatever user launched
@@ -462,13 +678,55 @@ def launch(
                 # Always launch the controller in the default workspace.
                 with skypilot_config.local_active_workspace_ctx(
                         skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
+                    if not is_consolidation_mode:
+                        job_ids = _submit_remotely(controller, dag, pool,
+                                                   num_jobs)
+                    assert job_ids is not None, 'job_ids is not set'
+
+                    job_controller_postfix = (' from jobs controller' if
+                                              not is_consolidation_mode else '')
+                    managed_jobs_str = 'managed job'
+
+                    job_ids_str = _job_ids_to_str(job_ids)
+                    vars_to_fill['job_ids'] = job_ids
+                    # Create job_id_to_rank dictionary by sorting job IDs and
+                    # assigning ranks.
+                    sorted_job_ids = sorted(job_ids)
+                    job_id_to_rank = {
+                        str(job_id): rank
+                        for rank, job_id in enumerate(sorted_job_ids)
+                    }
+                    vars_to_fill['job_id_to_rank'] = job_id_to_rank
+                    if num_jobs is not None and num_jobs > 1:
+                        managed_jobs_str = (
+                            f'{num_jobs} managed jobs {job_ids_str}')
+                    logger.info(
+                        f'{colorama.Fore.YELLOW}'
+                        f'Launching {managed_jobs_str} {dag.name!r}'
+                        f'{job_controller_postfix}...{colorama.Style.RESET_ALL}'
+                    )
+
+                    common_utils.fill_template(
+                        managed_job_constants.JOBS_CONTROLLER_TEMPLATE,
+                        vars_to_fill,
+                        output_path=yaml_path)
+                    logger.debug(f'Wrote controller yaml to path: {yaml_path}')
+                    controller_task = task_lib.Task.from_yaml(yaml_path)
+                    controller_task.set_resources(controller_resources)
+                    controller_task.managed_job_dag = dag
+                    # pylint: disable=protected-access
+                    controller_task._metadata = metadata
+
                     # TODO(zhwu): the buckets need to be correctly handled for
                     # a specific workspace. For example, if a job is launched in
                     # workspace A, but the controller is in workspace B, the
                     # intermediate bucket and newly created bucket should be in
                     # workspace A.
-                    if consolidation_mode_job_id is None:
-                        return execution.launch(
+                    if is_consolidation_mode:
+                        return _consolidated_launch(controller, controller_task,
+                                                    job_ids)
+                    else:
+                        result = execution.launch(
                             task=controller_task,
                             cluster_name=controller_name,
                             stream_logs=stream_logs,
@@ -477,92 +735,11 @@ def launch(
                             _request_name=request_names.AdminPolicyRequestName.
                             JOBS_LAUNCH_CONTROLLER,
                             _disable_controller_check=True)
-                    # Manually launch the scheduler in consolidation mode.
-                    local_handle = backend_utils.is_controller_accessible(
-                        controller=controller, stopped_message='')
-                    backend = backend_utils.get_backend_from_handle(
-                        local_handle)
-                    assert isinstance(backend, backends.CloudVmRayBackend)
-                    # Suppress file mount logs when submitting multiple jobs.
-                    should_silence = num_jobs is not None and num_jobs > 1
-                    with sky_logging.silent(should_silence):
-                        backend.sync_file_mounts(
-                            handle=local_handle,
-                            all_file_mounts=controller_task.file_mounts,
-                            storage_mounts=controller_task.storage_mounts)
-                    run_script = controller_task.run
-                    assert isinstance(run_script, str)
-                    # Manually add the env variables to the run script.
-                    # Originally this is done in ray jobs submission but now we
-                    # have to do it manually because there is no ray runtime on
-                    # the API server.
-                    env_cmds = [
-                        f'export {k}={v!r}'
-                        for k, v in controller_task.envs.items()
-                    ]
-                    run_script = '\n'.join(env_cmds + [run_script])
-                    log_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
-                                           'managed_jobs')
-                    os.makedirs(log_dir, exist_ok=True)
-                    log_path = os.path.join(
-                        log_dir, f'submit-job-{consolidation_mode_job_id}.log')
-                    backend.run_on_head(local_handle,
-                                        run_script,
-                                        log_path=log_path)
-                    ux_utils.starting_message(
-                        f'Job submitted, ID: {consolidation_mode_job_id}')
-                    return consolidation_mode_job_id, local_handle
+                        return job_ids, result[1]
 
-    if pool is None:
-        if consolidation_mode_job_ids is None:
-            return _submit_one()
-        assert len(consolidation_mode_job_ids) == 1
-        return _submit_one(consolidation_mode_job_ids[0])
-
-    ids: List[int] = []
-    all_handle: Optional[backends.ResourceHandle] = None
-
-    if num_jobs == 1:
-        job_id = (consolidation_mode_job_ids[0]
-                  if consolidation_mode_job_ids is not None else None)
-        jid, handle = _submit_one(job_id, 0, num_jobs=num_jobs)
-        assert jid is not None, (job_id, handle)
-        ids.append(jid)
-        all_handle = handle
-    else:
-        # Submit jobs in parallel using ThreadPoolExecutor
-        with concurrent.futures.ThreadPoolExecutor(
-                max_workers=min(num_jobs,
-                                os.cpu_count() or 1)) as executor:
-            # Submit jobs concurrently
-            future_to_rank = {}
-            for job_rank in range(num_jobs):
-                job_id = (consolidation_mode_job_ids[job_rank]
-                          if consolidation_mode_job_ids is not None else None)
-                future = executor.submit(_submit_one, job_id, job_rank,
-                                         num_jobs)
-                future_to_rank[future] = job_rank
-
-            # Collect results in order of job_rank to maintain consistent order.
-            results: List[Optional[Tuple[
-                int, Optional[backends.ResourceHandle]]]] = [None] * num_jobs
-            for future in concurrent.futures.as_completed(future_to_rank):
-                job_rank = future_to_rank[future]
-                try:
-                    jid, handle = future.result()
-                    assert jid is not None, (job_id, handle)
-                    results[job_rank] = (jid, handle)
-                    all_handle = handle  # Keep the last handle.
-                except Exception as e:
-                    logger.error(f'Error launching job {job_rank}: {e}')
-                    raise e
-
-            # Extract job IDs in order
-            for res in results:
-                if res is not None:
-                    ids.append(res[0])
-
-    return ids, all_handle
+    return _submit_many(job_ids=job_ids,
+                        num_jobs=num_jobs,
+                        is_consolidation_mode=is_consolidation_mode)
 
 
 def queue_from_kubernetes_pod(
