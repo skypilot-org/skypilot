@@ -1176,35 +1176,86 @@ def get_job_controller_process(job_id: int) -> Optional[ControllerPidRecord]:
 def is_legacy_controller_process(job_id: int) -> bool:
     """Check if the controller process is a legacy single-job controller process
 
+    This should return True for jobs before #7051.
     After #7051, the controller process pid is negative to indicate a new
     multi-job controller process.
     After #7847, the controller process pid is changed back to positive, but
     controller_pid_started_at will also be set.
+
+    This may not be reliable if the job is PENDING and WAITING/INACTIVE,
+    indicating that it hasn't been claimed by a controller yet, or if the job is
+    already DONE.
     """
-    # TODO(cooperc): Remove this function for 0.13.0
+    # TODO(cooperc): Remove this function for 0.14.0
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.execute(
             sqlalchemy.select(
+                job_info_table.c.schedule_state,
                 job_info_table.c.controller_pid,
                 job_info_table.c.controller_pid_started_at).where(
                     job_info_table.c.spot_job_id == job_id)).fetchone()
         if row is None:
             raise ValueError(f'Job {job_id} not found')
-        if row[0] is None:
-            # Job is from before #4485, so controller_pid is not set
+        schedule_state = row[0]
+        pid = row[1]
+        started_at = row[2]
+        if schedule_state is None:
+            # Job is from before #4485, so schedule_state is not set
             # This is a legacy single-job controller process (running in ray!)
             return True
-        started_at = row[1]
         if started_at is not None:
             # controller_pid_started_at is only set after #7847, so we know this
             # must be a non-legacy multi-job controller process.
             return False
-        pid = row[0]
+        if pid is None:
+            if schedule_state in (ManagedJobScheduleState.INACTIVE.value,
+                                  ManagedJobScheduleState.WAITING.value):
+                # We technically don't know if this job was launched before or
+                # after #7051, but given that the job has not started and the
+                # code here is added after #7051, we should assume it will be
+                # claimed by a new controller. This state is also expected
+                # during controller restart (after reset_jobs_for_recovery).
+                # Note:
+                # - INACTIVE should only be possible when the job is PENDING,
+                #   and this function doesn't guarantee correct results in that
+                #   case.
+                # - WAITING should only be possible when the job is PENDING, or
+                #   during controller restart (after reset_jobs_for_recovery).
+                return False
+            elif schedule_state == ManagedJobScheduleState.LAUNCHING.value:
+                # After #7051, the controller pid is set atomically with the
+                # transition to LAUNCHING, so this state is not possible. This
+                # must be running on a legacy controller process that hasn't yet
+                # written it's PID to the database.
+                return True
+            elif schedule_state in (
+                    ManagedJobScheduleState.ALIVE_WAITING.value,
+                    ManagedJobScheduleState.ALIVE_BACKOFF.value):
+                # These schedule_states are not used after #7051, but before
+                # 7051 they should only be used when the controller process is
+                # alive, and its pid should be set.
+                logger.warning(f'Job {job_id} is {schedule_state} but doesn\'t '
+                               'have a controller_pid')
+                return True
+            elif schedule_state == ManagedJobScheduleState.ALIVE.value:
+                # ALIVE schedule_state should only be possible when the job
+                # is claimed by a live controller, but then its pid should be
+                # set.
+                logger.warning(f'Job {job_id} is {schedule_state} but doesn\'t '
+                               'have a controller_pid')
+                return False
+            elif schedule_state == ManagedJobScheduleState.DONE.value:
+                # Before #7051, jobs could only be DONE if they claimed then
+                # finished/cancelled by a controller, or FAILED_CONTROLLER. So
+                # this is probably a new job.
+                return False
         if pid < 0:
             # Between #7051 and #7847, the controller pid was negative to
             # indicate a non-legacy multi-job controller process.
             return False
+        # If we get here, we have schedule_state set, pid >= 0, and no
+        # started_at. So this should be a legacy job from before #7051.
         return True
 
 
