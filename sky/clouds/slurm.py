@@ -200,6 +200,10 @@ class Slurm(clouds.Cloud):
 
         regions: List[clouds.Region] = []
         for cluster in existing_clusters:
+            # Filter by region if specified
+            if region is not None and cluster != region:
+                continue
+
             # Fetch partitions for this cluster and attach as zones
             try:
                 partitions = slurm_utils.get_partitions(cluster)
@@ -215,10 +219,6 @@ class Slurm(clouds.Cloud):
             if zones:
                 r.set_zones(zones)
             regions.append(r)
-
-        if region is not None:
-            # Filter the regions by the given region (cluster) name.
-            regions = [r for r in regions if r.name == region]
 
         # Check if requested instance type will fit in the cluster.
         if instance_type is None:
