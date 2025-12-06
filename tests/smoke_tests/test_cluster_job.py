@@ -480,7 +480,6 @@ def test_docker_preinstalled_package(generic_cloud: str):
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
 @pytest.mark.no_do  # DO does not have T4 gpus
 @pytest.mark.no_nebius  # Nebius does not have T4 gpus
-@pytest.mark.no_slurm  # Slurm does not support multi-node yet
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.no_seeweb  # Seeweb does not have T4 gpus
 @pytest.mark.resource_heavy
@@ -2376,10 +2375,6 @@ def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
 def test_autodown(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
-    if generic_cloud == 'slurm':
-        # Slurm does not support multi-node
-        num_nodes = 1
-
     # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
     # the VM is terminated.
     if generic_cloud == 'azure':
