@@ -869,49 +869,44 @@ class ControllerManager:
             # Clean up Storages with persistent=False.
             # TODO(zhwu): this assumes the specific backend.
             backend = cloud_vm_ray_backend.CloudVmRayBackend()
+            # Need to re-construct storage object in the controller process
+            # because when SkyPilot API server machine sends the yaml config to
+            # the controller machine, only storage metadata is sent, not the
+            # storage object itself.
+            try:
+                for storage in task.storage_mounts.values():
+                    storage.construct()
+            except (exceptions.StorageSpecError, exceptions.StorageError) as e:
+                logger.warning(
+                    f'Failed to construct storage object for teardown: {e}\n'
+                    'This may happen because storage construction already '
+                    'failed during launch, storage was deleted externally, '
+                    'credentials expired/changed, or network connectivity '
+                    'issues.')
+            try:
+                backend.teardown_ephemeral_storage(task)
+            except Exception as e:  # pylint: disable=broad-except
+                error = e
+                logger.warning(f'Failed to teardown ephemeral storage: {e}')
+                # we continue to try cleaning up whatever else we can.
 
-            # Skip storage and file mount teardown for pool-related jobs. All
-            # storage should persist until the pool is terminated.
-            if pool is None:
-                # Need to re-construct storage object in the controller process
-                # because when SkyPilot API server machine sends the yaml config
-                # to the controller machine, only storage metadata is sent, not
-                # the storage object itself.
+            # Clean up any files mounted from the local disk, such as two-hop
+            # file mounts.
+            for file_mount in (task.file_mounts or {}).values():
                 try:
-                    for storage in task.storage_mounts.values():
-                        storage.construct()
-                except (exceptions.StorageSpecError,
-                        exceptions.StorageError) as e:
-                    logger.warning(
-                        f'Failed to construct storage object for teardown: {e}'
-                        '\nThis may happen because storage construction already'
-                        ' failed during launch, storage was deleted externally,'
-                        ' credentials expired/changed, or network connectivity '
-                        'issues.')
-                try:
-                    backend.teardown_ephemeral_storage(task)
+                    # For consolidation mode, there is no two-hop file mounts
+                    # and the file path here represents the real user data.
+                    # We skip the cleanup for consolidation mode.
+                    if (not data_utils.is_cloud_store_url(file_mount) and
+                            not managed_job_utils.is_consolidation_mode()):
+                        path = os.path.expanduser(file_mount)
+                        if os.path.isdir(path):
+                            shutil.rmtree(path)
+                        else:
+                            os.remove(path)
                 except Exception as e:  # pylint: disable=broad-except
-                    error = e
-                    logger.warning(f'Failed to teardown ephemeral storage: {e}')
-                    # we continue to try cleaning up whatever else we can.
-
-                # Clean up any files mounted from the local disk, such as
-                # two-hopfile mounts.
-                for file_mount in (task.file_mounts or {}).values():
-                    try:
-                        # For consolidation mode, there is no two-hop file
-                        # mounts and the file path here represents the real user
-                        # data. We skip the cleanup for consolidation mode.
-                        if (not data_utils.is_cloud_store_url(file_mount) and
-                                not managed_job_utils.is_consolidation_mode()):
-                            path = os.path.expanduser(file_mount)
-                            if os.path.isdir(path):
-                                shutil.rmtree(path)
-                            else:
-                                os.remove(path)
-                    except Exception as e:  # pylint: disable=broad-except
-                        logger.warning(
-                            f'Failed to clean up file mount {file_mount}: {e}')
+                    logger.warning(
+                        f'Failed to clean up file mount {file_mount}: {e}')
 
             if error is not None:
                 raise error

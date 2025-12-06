@@ -1466,9 +1466,9 @@ def test_pool_down_single_pool(generic_cloud: str):
 
 
 @pytest.mark.no_remote_server  # see note 1 above
-def test_pool_scale_down_with_workdir(generic_cloud: str):
-    """Test that we can scale down a pool with workdir without errors. This 
-    makes sure that the workdir is not deleted when the pool is scaled down."""
+def test_pool_scale_with_workdir(generic_cloud: str):
+    """Test that we can scale a pool with workdir without errors. This makes
+    sure that the workdir is not deleted when the pool is scaled."""
 
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
@@ -1482,7 +1482,7 @@ def test_pool_scale_down_with_workdir(generic_cloud: str):
             f.write('test content')
 
         pool_config = basic_pool_conf(
-            num_workers=2,
+            num_workers=1,
             infra=generic_cloud,
             workdir=temp_workdir,
             setup_cmd='echo "setup message"',
@@ -1495,15 +1495,14 @@ def test_pool_scale_down_with_workdir(generic_cloud: str):
                 [
                     _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, pool_yaml=pool_yaml.name),
-                    wait_until_pool_ready(pool_name, timeout=timeout),
-                    wait_until_num_workers(
-                        pool_name, num_workers=2, timeout=timeout),
+                    wait_until_worker_status(
+                        pool_name, 'READY', timeout=timeout, num_occurrences=1),
+                    _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, num_workers=2),
                     wait_until_worker_status(
                         pool_name, 'READY', timeout=timeout, num_occurrences=2),
                     _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, num_workers=1),
-                    wait_until_num_workers(
-                        pool_name, num_workers=1, timeout=timeout),
                     wait_until_worker_status(
                         pool_name, 'READY', timeout=timeout, num_occurrences=1),
                 ],
