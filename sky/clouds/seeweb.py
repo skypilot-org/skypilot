@@ -365,6 +365,10 @@ class Seeweb(clouds.Cloud):
         if not resources.cloud:
             resources = resources.copy(cloud=self)
 
+        # Seeweb supports FUSE by default (like AWS, GCP, Azure)
+        # Set requires_fuse=True so clusters can use storage mounts
+        # resources.set_requires_fuse(True)
+
         # Return the resources as feasible
         return resources_utils.FeasibleResources([resources], [], None)
 

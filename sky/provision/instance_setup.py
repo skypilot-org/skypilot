@@ -30,7 +30,7 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
-_MAX_RETRY = 6
+_MAX_RETRY = 30
 
 # Increase the limit of the number of open files for the raylet process,
 # as the `ulimit` may not take effect at this point, because it requires
