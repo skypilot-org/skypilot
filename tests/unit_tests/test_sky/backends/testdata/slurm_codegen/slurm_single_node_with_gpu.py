@@ -369,7 +369,7 @@ def run_bash_command_with_log_and_return_pid(
                                             streaming_prefix=streaming_prefix)
     return {'return_code': return_code, 'pid': os.getpid()}
 
-def _slurm_cleanup_handler(signum, _frame):
+def _cancel_slurm_job_steps():
     slurm_job_id = '12345'
     assert slurm_job_id is not None, 'SLURM_JOB_ID is not set'
     try:
@@ -391,8 +391,11 @@ def _slurm_cleanup_handler(signum, _frame):
                 subprocess.run(['scancel', step_id],
                                 check=False, capture_output=True)
     except Exception as e:
-        print(f'Error in _slurm_cleanup_handler: {e}', flush=True)
+        print(f'Error in _cancel_slurm_job_steps: {e}', flush=True)
         pass
+
+def _slurm_cleanup_handler(signum, _frame):
+    _cancel_slurm_job_steps()
     # Re-raise to let default handler terminate.
     signal.signal(signum, signal.SIG_DFL)
     os.kill(os.getpid(), signum)
@@ -484,7 +487,7 @@ if script or has_setup_cmd:
         # shadows /usr/bin/env.
         job_suffix = '-setup' if is_setup else ''
         srun_cmd = (
-            f'srun --export=ALL --quiet --unbuffered --jobid=12345 '
+            f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid=12345 '
             f'--job-name=sky-2{job_suffix} --ntasks-per-node=1 {extra_flags} '
             f'{constants.SKY_PYTHON_CMD.replace("env -u", "/usr/bin/env -u")} -m sky.skylet.executor.slurm {runner_args}'
         )
@@ -575,6 +578,8 @@ if script or has_setup_cmd:
             msg += f' See error logs above for more details.[0m'
             print(msg, flush=True)
             job_lib.set_status(2, job_lib.JobStatus.FAILED_SETUP)
+            # Cancel the srun spawned by run_thread_func.
+            _cancel_slurm_job_steps()
             sys.exit(1)
 
     job_lib.set_job_started(2)
