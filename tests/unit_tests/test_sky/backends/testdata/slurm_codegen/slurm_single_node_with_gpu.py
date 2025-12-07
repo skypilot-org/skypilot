@@ -444,13 +444,18 @@ if script is not None:
     gpu_arg = f'--gpus-per-node=1' if 1 > 0 else ''
 
     def build_task_runner_cmd(user_script, extra_flags, log_dir, env_vars_dict,
+                              cluster_num_nodes, task_name=None,
                               is_setup=False, alloc_signal=None, setup_done_signal=None):
         env_vars_json = json.dumps(env_vars_dict)
 
         log_dir = shlex.quote(log_dir)
         env_vars = shlex.quote(env_vars_json)
+        cluster_ips = shlex.quote(",".join(['10.0.0.1']))
 
-        runner_args = f'--log-dir={log_dir} --env-vars={env_vars}'
+        runner_args = f'--log-dir={log_dir} --env-vars={env_vars} --cluster-num-nodes={cluster_num_nodes} --cluster-ips={cluster_ips}'
+
+        if task_name is not None:
+            runner_args += f' --task-name={shlex.quote(task_name)}'
 
         if is_setup:
             runner_args += ' --is-setup'
@@ -489,6 +494,8 @@ if script is not None:
         run_flags = f'--nodes=1 --cpus-per-task=4 --mem=0 {gpu_arg} --exclusive'
         srun_cmd, task_script_path = build_task_runner_cmd(
             script, run_flags, '/sky/logs/tasks', sky_env_vars_dict,
+            cluster_num_nodes=1,
+            task_name='train_task',
             alloc_signal=alloc_signal_file,
             setup_done_signal=setup_done_signal_file
         )
@@ -543,6 +550,7 @@ if script is not None:
         setup_flags = f'--overlap --nodes={setup_num_nodes}'
         setup_srun, setup_script_path = build_task_runner_cmd(
             setup_cmd, setup_flags, setup_log_dir, setup_envs,
+            cluster_num_nodes=1,
             is_setup=True
         )
 
