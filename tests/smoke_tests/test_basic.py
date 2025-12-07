@@ -593,7 +593,6 @@ def test_gcp_stale_job_manual_restart():
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet.
-@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet.
 def test_env_check(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 25 if generic_cloud == 'azure' else 15

@@ -248,7 +248,7 @@ def test_scp_job_queue():
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
-@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
+@pytest.mark.no_slurm  # Slurm does not support allocating fractional GPUs in a job. Run test_job_queue_multi_gpu instead
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
@@ -777,7 +777,6 @@ def test_tpu_pod_slice_gke():
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
-@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
 def test_multi_hostname(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
@@ -801,7 +800,6 @@ def test_multi_hostname(generic_cloud: str):
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
-@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
 def test_multi_node_failure(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -1649,7 +1647,6 @@ def test_cancel_azure():
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet
-@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):

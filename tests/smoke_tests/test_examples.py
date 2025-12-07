@@ -13,7 +13,6 @@ from sky.skylet import constants
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
-@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('train_file', [
     'examples/distributed-pytorch/train.yaml',
@@ -71,7 +70,6 @@ def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
-@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
 def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
@@ -128,7 +126,6 @@ def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
-@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
 def test_ray_basic(generic_cloud: str) -> None:
     name = smoke_tests_utils.get_cluster_name()
 
@@ -185,7 +182,6 @@ def test_ray_basic(generic_cloud: str) -> None:
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
-@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
 @pytest.mark.no_azure
 @pytest.mark.no_vast
 @pytest.mark.no_fluidstack
