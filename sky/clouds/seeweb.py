@@ -365,7 +365,6 @@ class Seeweb(clouds.Cloud):
         if not resources.cloud:
             resources = resources.copy(cloud=self)
 
-
         # Return the resources as feasible
         return resources_utils.FeasibleResources([resources], [], None)
 
