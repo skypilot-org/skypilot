@@ -66,6 +66,16 @@ def main():
     parser.add_argument('--log-dir',
                         required=True,
                         help='Directory for log files')
+    parser.add_argument('--cluster-num-nodes',
+                        type=int,
+                        required=True,
+                        help='Total number of nodes in the cluster')
+    parser.add_argument('--cluster-ips',
+                        required=True,
+                        help='Comma-separated list of cluster node IPs')
+    parser.add_argument('--task-name',
+                        default=None,
+                        help='Task name for single-node log prefix')
     parser.add_argument(
         '--is-setup',
         action='store_true',
@@ -81,12 +91,21 @@ def main():
         'Either '
         '--script or --script-path must be provided')
 
-    # Compute per-node values from Slurm environment variables
+    # Task rank, different from index of the node in the cluster.
     rank = int(os.environ['SLURM_PROCID'])
-    num_nodes = int(
-        os.environ.get('SLURM_NNODES', os.environ.get('SLURM_JOB_NUM_NODES',
-                                                      1)))
-    node_name = 'head' if rank == 0 else f'worker{rank}'
+    num_nodes = int(os.environ.get('SLURM_NNODES', 1))
+    is_single_node_cluster = (args.cluster_num_nodes == 1)
+
+    # Determine node index from IP (like Ray's cluster_ips_to_node_id)
+    cluster_ips = args.cluster_ips.split(',')
+    ip_addr = _get_ip_address()
+    try:
+        node_idx = cluster_ips.index(ip_addr)
+    except ValueError as e:
+        raise RuntimeError(f'IP address {ip_addr} not found in '
+                           f'cluster IPs: {cluster_ips}') from e
+    node_name = 'head' if node_idx == 0 else f'worker{node_idx}'
+
     if args.is_setup:
         # TODO(kevin): This is inconsistent with other clouds, where it is
         # simply called 'setup.log'. On Slurm that is obviously not possible,
@@ -94,6 +113,8 @@ def main():
         # 'setup.log' will be overwritten by other nodes.
         # Perhaps we should apply this naming convention to other clouds.
         log_filename = f'setup-{node_name}.log'
+    elif is_single_node_cluster:
+        log_filename = 'run.log'
     else:
         log_filename = f'{rank}-{node_name}.log'
     log_path = os.path.join(args.log_dir, log_filename)
@@ -123,28 +144,32 @@ def main():
     # Build log prefix
     # For setup on head: (setup pid={pid})
     # For setup on workers: (setup pid={pid}, ip=1.2.3.4)
-    # For run on head: (head, rank=0, pid={pid})
-    # For run on workers: (worker1, rank=1, pid={pid}, ip=1.2.3.4)
+    # For single-node cluster: (task_name, pid={pid})
+    # For multi-node on head: (head, rank=0, pid={pid})
+    # For multi-node on workers: (worker1, rank=1, pid={pid}, ip=1.2.3.4)
     # The {pid} placeholder will be replaced by run_with_log
     if args.is_setup:
-        # Setup prefix
-        if rank == 0:
+        # Setup prefix: head (node_idx=0) shows no IP, workers show IP
+        if node_idx == 0:
             prefix = (f'{colorama.Fore.CYAN}(setup pid={{pid}})'
                       f'{colorama.Style.RESET_ALL} ')
         else:
-            ip = _get_ip_address()
-            prefix = (f'{colorama.Fore.CYAN}(setup pid={{pid}}, ip={ip})'
+            prefix = (f'{colorama.Fore.CYAN}(setup pid={{pid}}, ip={ip_addr})'
                       f'{colorama.Style.RESET_ALL} ')
+    elif is_single_node_cluster:
+        # Single-node cluster: use task name
+        name_str = args.task_name if args.task_name else 'task'
+        prefix = (f'{colorama.Fore.CYAN}({name_str}, pid={{pid}})'
+                  f'{colorama.Style.RESET_ALL} ')
     else:
-        # Run prefix with node name and rank
-        if rank == 0:
+        # Multi-node cluster: head (node_idx=0) shows no IP, workers show IP
+        if node_idx == 0:
             prefix = (
                 f'{colorama.Fore.CYAN}({node_name}, rank={rank}, pid={{pid}})'
                 f'{colorama.Style.RESET_ALL} ')
         else:
-            ip = _get_ip_address()
             prefix = (f'{colorama.Fore.CYAN}'
-                      f'({node_name}, rank={rank}, pid={{pid}}, ip={ip})'
+                      f'({node_name}, rank={rank}, pid={{pid}}, ip={ip_addr})'
                       f'{colorama.Style.RESET_ALL} ')
 
     returncode = run_bash_command_with_log(script,
