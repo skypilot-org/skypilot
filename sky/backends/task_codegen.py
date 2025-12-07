@@ -789,9 +789,11 @@ class SlurmCodeGen(TaskCodeGen):
             sky_env_vars_dict_str,
             textwrap.dedent(f"""\
             script = {bash_script!r}
+            if script is None:
+                script = ''
             rclone_flush_script = {rclone_flush_script!r}
 
-            if script is not None:
+            if script or has_setup_cmd:
                 script += rclone_flush_script
                 sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {num_gpus}
 
