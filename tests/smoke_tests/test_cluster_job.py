@@ -1650,7 +1650,7 @@ def test_cancel_azure():
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
-    if generic_cloud == 'kubernetes':
+    if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus()
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
