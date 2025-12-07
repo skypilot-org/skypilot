@@ -21,7 +21,7 @@ from sky.skylet import constants
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
 def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
                                                                         str]):
-    if generic_cloud == 'kubernetes':
+    if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus()
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
@@ -73,7 +73,7 @@ def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
 def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
-    if generic_cloud == 'kubernetes':
+    if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus()
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
@@ -194,7 +194,7 @@ def test_ray_basic(generic_cloud: str) -> None:
 def test_nemorl(generic_cloud: str, accelerator: Dict[str, str]) -> None:
     cpu = '10+'
     memory = '60+'
-    if generic_cloud == 'kubernetes':
+    if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus()
     else:
         accelerator = accelerator.get(generic_cloud, 'L4')
