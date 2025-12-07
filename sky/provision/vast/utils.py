@@ -34,8 +34,8 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
 
 def launch(name: str, instance_type: str, region: str, disk_size: int,
-           image_name: str, ports: Optional[List[int]],
-           preemptible: bool) -> str:
+           image_name: str, ports: Optional[List[int]], preemptible: bool,
+           secure_only: bool) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the Vast GPU name, finds the specs for the
@@ -87,7 +87,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
 
-    query = ' '.join([
+    query = [
         'chunked=true',
         'georegion=true',
         f'geolocation="{region[-2:]}"',
@@ -95,13 +95,17 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
         f'num_gpus={num_gpus}',
         f'gpu_name="{gpu_name}"',
         f'cpu_ram>="{cpu_ram}"',
-    ])
+    ]
+    if secure_only:
+        query.append('datacenter=true')
+    query_str = ' '.join(query)
 
-    instance_list = vast.vast().search_offers(query=query)
+    instance_list = vast.vast().search_offers(query=query_str)
 
     if isinstance(instance_list, int) or len(instance_list) == 0:
         raise RuntimeError('Failed to create instances, could not find an '
-                           f'offer that satisfies the requirements "{query}".')
+                           'offer that satisfies the requirements '
+                           f'"{query_str}".')
 
     instance_touse = instance_list[0]
 

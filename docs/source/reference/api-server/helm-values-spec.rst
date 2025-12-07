@@ -237,6 +237,10 @@ Below is the available helm value keys and the default value of each key:
     :ref:`enabled <helm-values-coreweaveCredentials-enabled>`: false
     :ref:`coreweaveSecretName <helm-values-coreweaveCredentials-coreweaveSecretName>`: coreweave-credentials
 
+  :ref:`digitaloceanCredentials <helm-values-digitaloceanCredentials>`:
+    :ref:`enabled <helm-values-digitaloceanCredentials-enabled>`: false
+    :ref:`digitaloceanSecretName <helm-values-digitaloceanCredentials-digitaloceanSecretName>`: digitalocean-credentials
+
   :ref:`extraInitContainers <helm-values-extraInitContainers>`: null
 
   :ref:`podSecurityContext <helm-values-podSecurityContext>`: {}
@@ -2147,6 +2151,39 @@ Default: ``coreweave-credentials``
 
   coreweaveCredentials:
     coreweaveSecretName: coreweave-credentials
+
+.. _helm-values-digitaloceanCredentials:
+
+``digitaloceanCredentials``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. _helm-values-digitaloceanCredentials-enabled:
+
+``digitaloceanCredentials.enabled``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable DigitalOcean credentials for the API server.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  digitaloceanCredentials:
+    enabled: false
+
+.. _helm-values-digitaloceanCredentials-digitaloceanSecretName:
+
+``digitaloceanCredentials.digitaloceanSecretName``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Name of the secret containing the DigitalOcean credentials. Only used if enabled is true.
+
+Default: ``digitalocean-credentials``
+
+.. code-block:: yaml
+
+  digitaloceanCredentials:
+    digitaloceanSecretName: digitalocean-credentials
 
 .. _helm-values-extraInitContainers:
 

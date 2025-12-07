@@ -25,6 +25,7 @@ SKY_RUNTIME_DIR_ENV_VAR_KEY = 'SKY_RUNTIME_DIR'
 # them be in $HOME makes it more convenient.
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
+SKY_TEMPLATES_DIRECTORY = '~/sky_templates'
 SKY_IGNORE_FILE = '.skyignore'
 GIT_IGNORE_FILE = '.gitignore'
 
@@ -272,18 +273,23 @@ RAY_INSTALLATION_COMMANDS = (
 
 # Copy SkyPilot templates from the installed wheel to ~/sky_templates.
 # This must run after the skypilot wheel is installed.
+# Note: We remove ~/sky_templates first to avoid import conflicts where Python
+# would import from ~/sky_templates instead of site-packages (because
+# sky_templates itself is a package), leading to src == dst error when
+# launching on an existing cluster.
 COPY_SKYPILOT_TEMPLATES_COMMANDS = (
+    f'rm -rf {SKY_TEMPLATES_DIRECTORY}; '
     f'{ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
     f'{SKY_PYTHON_CMD} -c \''
     'import sky_templates, shutil, os; '
     'src = os.path.dirname(sky_templates.__file__); '
-    'dst = os.path.expanduser(\"~/sky_templates\"); '
+    f'dst = os.path.expanduser(\"{SKY_TEMPLATES_DIRECTORY}\"); '
     'print(f\"Copying templates from {src} to {dst}...\"); '
-    'shutil.copytree(src, dst, dirs_exist_ok=True); '
+    'shutil.copytree(src, dst); '
     'print(f\"Templates copied successfully\")\'; '
     # Make scripts executable.
-    'find ~/sky_templates -type f ! -name "*.py" ! -name "*.md" '
-    '-exec chmod +x {} \\; ')
+    f'find {SKY_TEMPLATES_DIRECTORY} -type f ! -name "*.py" ! -name "*.md" '
+    '-exec chmod +x {} + ; ')
 
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f'{SKY_UV_INSTALL_CMD};'
@@ -446,6 +452,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('gcp', 'enable_gvnic'),
     ('gcp', 'enable_gpu_direct'),
     ('gcp', 'placement_policy'),
+    ('vast', 'secure_only'),
     ('active_workspace',),
 ]
 # When overriding the SkyPilot configs on the API server with the client one,
