@@ -7,7 +7,7 @@ import yaml
 
 from sky import clouds
 from sky.ssh_node_pools import constants
-from sky.ssh_node_pools.deploy import deploy
+from sky.ssh_node_pools import deploy
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import yaml_utils
