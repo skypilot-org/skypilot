@@ -34,8 +34,9 @@ def deploy_ssh_cluster(cleanup: bool = False,
 
     with rich_utils.safe_status(ux_utils.spinner_message(msg_str)):
         try:
-            deploy.run(
-                infra=infra, cleanup=cleanup, kubeconfig_path=kubeconfig_path)
+            deploy.run(infra=infra,
+                       cleanup=cleanup,
+                       kubeconfig_path=kubeconfig_path)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(str(e))
             with ux_utils.print_exception_no_traceback():

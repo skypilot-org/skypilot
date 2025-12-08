@@ -3,14 +3,12 @@
 import base64
 import concurrent.futures as cf
 import os
-import random
 import re
 import shlex
 import shutil
 import subprocess
-import sys
 import tempfile
-from typing import List, Optional, Set
+from typing import List, Optional
 
 import colorama
 import yaml
@@ -18,6 +16,7 @@ import yaml
 from sky import sky_logging
 from sky.ssh_node_pools import constants
 from sky.ssh_node_pools import utils as ssh_utils
+from sky.ssh_node_pools.deploy import utils as deploy_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -29,82 +28,19 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 logger = sky_logging.init_logger(__name__)
 
 
-def run_command(cmd, shell=False, silent=False):
-    """Run a local command and return the output."""
-    process = subprocess.run(cmd,
-                             shell=shell,
-                             capture_output=True,
-                             text=True,
-                             check=False)
-    if process.returncode != 0:
-        if not silent:
-            logger.error(f'{colorama.Fore.RED}Error executing command: {cmd}\n'
-                         f'{RESET_ALL}STDOUT: {process.stdout}\n'
-                         f'STDERR: {process.stderr}')
-        return None
-    return process.stdout.strip()
+def progress_message(message):
+    """Show a progress message."""
+    logger.info(f'{colorama.Fore.YELLOW}➜ {message}{RESET_ALL}')
 
 
-def get_effective_host_ip(hostname: str) -> str:
-    """Get the effective IP for a hostname from SSH config."""
-    try:
-        result = subprocess.run(['ssh', '-G', hostname],
-                                capture_output=True,
-                                text=True,
-                                check=False)
-        if result.returncode == 0:
-            for line in result.stdout.splitlines():
-                if line.startswith('hostname '):
-                    return line.split(' ', 1)[1].strip()
-    except Exception:  # pylint: disable=broad-except
-        pass
-    return hostname  # Return the original hostname if lookup fails
+def success_message(message):
+    """Show a success message."""
+    logger.info(f'{colorama.Fore.GREEN}✔ {message}{RESET_ALL}')
 
 
-def run_remote(node,
-               cmd,
-               user='',
-               ssh_key='',
-               connect_timeout=30,
-               use_ssh_config=False,
-               print_output=False,
-               use_shell=False,
-               silent=False):
-    """Run a command on a remote machine via SSH."""
-    ssh_cmd: List[str]
-    if use_ssh_config:
-        # Use SSH config for connection parameters
-        ssh_cmd = ['ssh', node, cmd]
-    else:
-        # Use explicit parameters
-        ssh_cmd = [
-            'ssh', '-o', 'StrictHostKeyChecking=no', '-o', 'IdentitiesOnly=yes',
-            '-o', f'ConnectTimeout={connect_timeout}', '-o',
-            'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=3'
-        ]
-
-        if ssh_key:
-            if not os.path.isfile(ssh_key):
-                raise ValueError(f'SSH key not found: {ssh_key}')
-            ssh_cmd.extend(['-i', ssh_key])
-
-        ssh_cmd.append(f'{user}@{node}' if user else node)
-        ssh_cmd.append(cmd)
-
-    subprocess_cmd = ' '.join(ssh_cmd) if use_shell else ssh_cmd
-    process = subprocess.run(subprocess_cmd,
-                             capture_output=True,
-                             text=True,
-                             check=False,
-                             shell=use_shell)
-    if process.returncode != 0:
-        if not silent:
-            logger.error(f'{colorama.Fore.RED}Error executing command {cmd} on '
-                         f'{node}:{RESET_ALL} {process.stderr}')
-        return None
-    if print_output:
-        logger.info(process.stdout)
-    return process.stdout.strip()
+def force_update_status(message):
+    """Force update rich spinner status."""
+    rich_utils.force_update_status(ux_utils.spinner_message(message))
 
 
 def create_askpass_script(password):
@@ -126,21 +62,6 @@ export SUDO_ASKPASS=$ASKPASS_SCRIPT
 """
 
 
-def progress_message(message):
-    """Show a progress message."""
-    logger.info(f'{colorama.Fore.YELLOW}➜ {message}{RESET_ALL}')
-
-
-def success_message(message):
-    """Show a success message."""
-    logger.info(f'{colorama.Fore.GREEN}✔ {message}{RESET_ALL}')
-
-
-def force_update_status(message):
-    """Force update rich spinner status."""
-    rich_utils.force_update_status(ux_utils.spinner_message(message))
-
-
 def cleanup_node(node,
                  user,
                  ssh_key,
@@ -157,7 +78,7 @@ def cleanup_node(node,
         sudo -A /usr/local/bin/{script} || true &&
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     """
-    result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
+    result = deploy_utils.run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
     if result is None:
         logger.error(f'{colorama.Fore.RED}Failed to clean up {ntype} '
                      f'node ({node}).{RESET_ALL}')
@@ -180,7 +101,7 @@ def start_agent_node(node,
             curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} INSTALL_K3S_EXEC='agent --node-label skypilot-ip={node}' \
                 K3S_URL=https://{master_addr}:6443 K3S_TOKEN={k3s_token} sudo -E -A sh -
         """
-    result = run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
+    result = deploy_utils.run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
     if result is None:
         logger.error(f'{colorama.Fore.RED}✗ Failed to deploy K3s on worker '
                      f'node ({node}).{RESET_ALL}')
@@ -198,98 +119,13 @@ def start_agent_node(node,
 def check_gpu(node, user, ssh_key, use_ssh_config=False):
     """Check if a node has a GPU."""
     cmd = 'command -v nvidia-smi &> /dev/null && nvidia-smi --query-gpu=gpu_name --format=csv,noheader &> /dev/null'
-    result = run_remote(node,
+    result = deploy_utils.run_remote(node,
                         cmd,
                         user,
                         ssh_key,
                         use_ssh_config=use_ssh_config,
                         silent=True)
     return result is not None
-
-
-def ensure_directory_exists(path):
-    """Ensure the directory for the specified file path exists."""
-    directory = os.path.dirname(path)
-    if directory and not os.path.exists(directory):
-        os.makedirs(directory, exist_ok=True)
-
-
-def get_used_localhost_ports() -> Set[int]:
-    """Get SSH port forwardings already in use on localhost"""
-    used_ports = set()
-
-    # Get ports from netstat (works on macOS and Linux)
-    try:
-        if sys.platform == 'darwin':
-            # macOS
-            result = subprocess.run(['netstat', '-an', '-p', 'tcp'],
-                                    capture_output=True,
-                                    text=True,
-                                    check=False)
-        else:
-            # Linux and other Unix-like systems
-            result = subprocess.run(['netstat', '-tln'],
-                                    capture_output=True,
-                                    text=True,
-                                    check=False)
-
-        if result.returncode == 0:
-            # Look for lines with 'localhost:<port>' or '127.0.0.1:<port>'
-            for line in result.stdout.splitlines():
-                if '127.0.0.1:' in line or 'localhost:' in line:
-                    match = re.search(r':(64\d\d)\s', line)
-                    if match:
-                        port = int(match.group(1))
-                        if 6400 <= port <= 6500:  # Only consider our range
-                            used_ports.add(port)
-    except (subprocess.SubprocessError, FileNotFoundError):
-        # If netstat fails, try another approach
-        pass
-
-    # Also check ports from existing kubeconfig entries
-    try:
-        result = subprocess.run([
-            'kubectl', 'config', 'view', '-o',
-            'jsonpath=\'{.clusters[*].cluster.server}\''
-        ],
-                                capture_output=True,
-                                text=True,
-                                check=False)
-
-        if result.returncode == 0:
-            # Look for localhost URLs with ports
-            for url in result.stdout.split():
-                if 'localhost:' in url or '127.0.0.1:' in url:
-                    match = re.search(r':(\d+)', url)
-                    if match:
-                        port = int(match.group(1))
-                        if 6400 <= port <= 6500:  # Only consider our range
-                            used_ports.add(port)
-    except subprocess.SubprocessError:
-        pass
-
-    return used_ports
-
-
-def get_available_port(start: int = 6443, end: int = 6499) -> int:
-    """Get an available port in the given range that's not used by other tunnels"""
-    used_ports = get_used_localhost_ports()
-
-    # Try to use port 6443 first if available for the first cluster
-    if start == 6443 and start not in used_ports:
-        return start
-
-    # Otherwise find any available port in the range
-    available_ports = list(set(range(start, end + 1)) - used_ports)
-
-    if not available_ports:
-        # If all ports are used, pick a random one from our range
-        # (we'll terminate any existing connection in the setup)
-        return random.randint(start, end)
-
-    # Sort to get deterministic allocation
-    available_ports.sort()
-    return available_ports[0]
 
 
 def setup_kubectl_ssh_tunnel(head_node,
@@ -301,7 +137,7 @@ def setup_kubectl_ssh_tunnel(head_node,
     progress_message('Setting up SSH tunnel for Kubernetes API access...')
 
     # Get an available port for this cluster
-    port = get_available_port()
+    port = deploy_utils.get_available_port()
 
     # Paths to scripts
     tunnel_script = os.path.join(SCRIPT_DIR, 'tunnel', 'ssh-tunnel.sh')
@@ -316,7 +152,7 @@ def setup_kubectl_ssh_tunnel(head_node,
                                    f'{context_name}-key.pem')
 
     # Update kubeconfig to use localhost with the selected port
-    run_command([
+    deploy_utils.run_command([
         'kubectl', 'config', 'set-cluster', context_name,
         f'--server=https://127.0.0.1:{port}', '--insecure-skip-tls-verify=true'
     ])
@@ -338,7 +174,7 @@ def setup_kubectl_ssh_tunnel(head_node,
                     f'and will be used for authentication{RESET_ALL}')
 
     if use_ssh_config:
-        run_command(
+        deploy_utils.run_command(
             ['kubectl', 'config', 'set-credentials', context_name] + exec_args +
             [
                 '--exec-arg=--context', f'--exec-arg={context_name}',
@@ -347,7 +183,7 @@ def setup_kubectl_ssh_tunnel(head_node,
                 '--exec-arg=--host', f'--exec-arg={head_node}'
             ])
     else:
-        run_command(['kubectl', 'config', 'set-credentials', context_name] +
+        deploy_utils.run_command(['kubectl', 'config', 'set-credentials', context_name] +
                     exec_args + [
                         '--exec-arg=--context', f'--exec-arg={context_name}',
                         '--exec-arg=--port', f'--exec-arg={port}',
@@ -569,7 +405,7 @@ def deploy_single_cluster(cluster_name,
 
     # Pre-flight checks
     logger.info(f'Checking SSH connection to head node ({head_node})...')
-    result = run_remote(head_node,
+    result = deploy_utils.run_remote(head_node,
                         f'echo \'SSH connection successful ({head_node})\'',
                         ssh_user,
                         ssh_key,
@@ -648,7 +484,7 @@ def deploy_single_cluster(cluster_name,
                      worker_nodes_to_cleanup)
 
     with cf.ThreadPoolExecutor() as executor:
-        executor.map(lambda cmd: run_command(cmd, shell=True),
+        executor.map(lambda cmd: deploy_utils.run_command(cmd, shell=True),
                      remove_worker_cmds)
 
     if cleanup:
@@ -656,30 +492,30 @@ def deploy_single_cluster(cluster_name,
         if os.path.isfile(kubeconfig_path):
             logger.debug(
                 f'Removing context {context_name!r} from local kubeconfig...')
-            run_command(['kubectl', 'config', 'delete-context', context_name],
+            deploy_utils.run_command(['kubectl', 'config', 'delete-context', context_name],
                         shell=False,
                         silent=True)
-            run_command(['kubectl', 'config', 'delete-cluster', context_name],
+            deploy_utils.run_command(['kubectl', 'config', 'delete-cluster', context_name],
                         shell=False,
                         silent=True)
-            run_command(['kubectl', 'config', 'delete-user', context_name],
+            deploy_utils.run_command(['kubectl', 'config', 'delete-user', context_name],
                         shell=False,
                         silent=True)
 
             # Update the current context to the first available context
-            contexts = run_command([
+            contexts = deploy_utils.run_command([
                 'kubectl', 'config', 'view', '-o',
                 'jsonpath=\'{.contexts[0].name}\''
             ],
                                    shell=False,
                                    silent=True)
             if contexts:
-                run_command(['kubectl', 'config', 'use-context', contexts],
+                deploy_utils.run_command(['kubectl', 'config', 'use-context', contexts],
                             shell=False,
                             silent=True)
             else:
                 # If no context is available, simply unset the current context
-                run_command(['kubectl', 'config', 'unset', 'current-context'],
+                deploy_utils.run_command(['kubectl', 'config', 'unset', 'current-context'],
                             shell=False,
                             silent=True)
 
@@ -706,7 +542,7 @@ def deploy_single_cluster(cluster_name,
         '/etc/ssh/sshd_config && sudo systemctl restart sshd && '
         f'echo "Successfully enabled TCP Forwarding on head node ({head_node})."; '
         'fi')
-    result = run_remote(head_node,
+    result = deploy_utils.run_remote(head_node,
                         shlex.quote(cmd),
                         ssh_user,
                         ssh_key,
@@ -720,7 +556,7 @@ def deploy_single_cluster(cluster_name,
 
     # Get effective IP for master node if using SSH config - needed for workers to connect
     if head_use_ssh_config:
-        effective_master_ip = get_effective_host_ip(head_node)
+        effective_master_ip = deploy_utils.get_effective_host_ip(head_node)
         logger.info(f'{colorama.Fore.GREEN}Resolved head node {head_node} '
                     f'to {effective_master_ip} from SSH config{RESET_ALL}')
     else:
@@ -750,7 +586,7 @@ def deploy_single_cluster(cluster_name,
             exit 1
         fi
     """
-    result = run_remote(head_node,
+    result = deploy_utils.run_remote(head_node,
                         cmd,
                         ssh_user,
                         ssh_key,
@@ -773,7 +609,7 @@ def deploy_single_cluster(cluster_name,
         install_gpu = True
 
     # Fetch the head node's internal IP (this will be passed to worker nodes)
-    master_addr = run_remote(head_node,
+    master_addr = deploy_utils.run_remote(head_node,
                              'hostname -I | awk \'{print $1}\'',
                              ssh_user,
                              ssh_key,
@@ -852,10 +688,10 @@ def deploy_single_cluster(cluster_name,
                 'IdentitiesOnly=yes', '-i', ssh_key,
                 f'{ssh_user}@{head_node}:~/.kube/config', temp_kubeconfig
             ]
-        run_command(scp_cmd, shell=False)
+        deploy_utils.run_command(scp_cmd, shell=False)
 
         # Create the directory for the kubeconfig file if it doesn't exist
-        ensure_directory_exists(kubeconfig_path)
+        deploy_utils.ensure_directory_exists(kubeconfig_path)
 
         # Create empty kubeconfig if it doesn't exist
         if not os.path.isfile(kubeconfig_path):
@@ -1058,13 +894,13 @@ def deploy_single_cluster(cluster_name,
 
         # First check if context name exists and delete it if it does
         # TODO(romilb): Should we throw an error here instead?
-        run_command(['kubectl', 'config', 'delete-context', context_name],
+        deploy_utils.run_command(['kubectl', 'config', 'delete-context', context_name],
                     shell=False,
                     silent=True)
-        run_command(['kubectl', 'config', 'delete-cluster', context_name],
+        deploy_utils.run_command(['kubectl', 'config', 'delete-cluster', context_name],
                     shell=False,
                     silent=True)
-        run_command(['kubectl', 'config', 'delete-user', context_name],
+        deploy_utils.run_command(['kubectl', 'config', 'delete-user', context_name],
                     shell=False,
                     silent=True)
 
@@ -1073,7 +909,7 @@ def deploy_single_cluster(cluster_name,
         os.environ['KUBECONFIG'] = f'{kubeconfig_path}:{modified_config}'
         with open(merged_config, 'w', encoding='utf-8') as merged_file:
             kubectl_cmd = ['kubectl', 'config', 'view', '--flatten']
-            result = run_command(kubectl_cmd, shell=False)
+            result = deploy_utils.run_command(kubectl_cmd, shell=False)
             if result:
                 merged_file.write(result)
 
@@ -1081,7 +917,7 @@ def deploy_single_cluster(cluster_name,
         shutil.move(merged_config, kubeconfig_path)
 
         # Set the new context as the current context
-        run_command(['kubectl', 'config', 'use-context', context_name],
+        deploy_utils.run_command(['kubectl', 'config', 'use-context', context_name],
                     shell=False,
                     silent=True)
 
@@ -1120,7 +956,7 @@ def deploy_single_cluster(cluster_name,
             done
             echo 'GPU operator installed successfully.'
         """
-        result = run_remote(head_node,
+        result = deploy_utils.run_remote(head_node,
                             cmd,
                             ssh_user,
                             ssh_key,
@@ -1135,7 +971,7 @@ def deploy_single_cluster(cluster_name,
 
     # The env var KUBECONFIG ensures sky check uses the right kubeconfig
     os.environ['KUBECONFIG'] = kubeconfig_path
-    run_command(['sky', 'check', 'ssh'], shell=False)
+    deploy_utils.run_command(['sky', 'check', 'ssh'], shell=False)
 
     success_message('SkyPilot configured successfully.')
 
