@@ -4,7 +4,7 @@ from typing import Optional
 import colorama
 
 from sky import sky_logging
-from sky.ssh_node_pools.deploy import deploy_ssh_node_pools
+from sky.ssh_node_pools.deploy import deploy
 from sky.ssh_node_pools.deploy import utils as deploy_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
@@ -34,7 +34,7 @@ def deploy_ssh_cluster(cleanup: bool = False,
 
     with rich_utils.safe_status(ux_utils.spinner_message(msg_str)):
         try:
-            deploy_ssh_node_pools.deploy_clusters(
+            deploy.run(
                 infra=infra, cleanup=cleanup, kubeconfig_path=kubeconfig_path)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(str(e))
