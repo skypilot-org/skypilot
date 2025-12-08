@@ -1232,6 +1232,7 @@ Can be one of:
 
 - ``loadbalancer``: Use LoadBalancer service to expose ports.
 - ``nodeport``: Use NodePort service to expose ports.
+- ``podip``: Use Pod IPs to expose ports. Cannot be accessed from outside the cluster.
 
 Default: ``loadbalancer``.
 
