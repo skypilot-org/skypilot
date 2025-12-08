@@ -18,16 +18,6 @@ logger = sky_logging.init_logger(__name__)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def progress_message(message):
-    """Show a progress message."""
-    logger.info(f'{colorama.Fore.YELLOW}➜ {message}{colorama.Style.RESET_ALL}')
-
-
-def success_message(message):
-    """Show a success message."""
-    logger.info(f'{colorama.Fore.GREEN}✔ {message}{colorama.Style.RESET_ALL}')
-
-
 def _get_used_localhost_ports() -> Set[int]:
     """Get SSH port forwardings already in use on localhost"""
     used_ports = set()
@@ -112,7 +102,8 @@ def setup_kubectl_ssh_tunnel(head_node,
                              context_name,
                              use_ssh_config=False):
     """Set up kubeconfig exec credential plugin for SSH tunnel"""
-    progress_message('Setting up SSH tunnel for Kubernetes API access...')
+    logger.info(f'{colorama.Fore.YELLOW}➜ Setting up SSH tunnel for '
+                f'Kubernetes API access...{colorama.Style.RESET_ALL}')
 
     # Get an available port for this cluster
     port = get_available_port()
@@ -173,8 +164,9 @@ def setup_kubectl_ssh_tunnel(head_node,
                 f'--exec-arg={ssh_key}'
             ])
 
-    success_message('SSH tunnel configured through kubectl credential plugin '
-                    f'on port {port}')
+    logger.info(f'{colorama.Fore.GREEN}✔ SSH tunnel configured through '
+                'kubectl credential plugin on port '
+                f'{port}{colorama.Style.RESET_ALL}')
     logger.info('Your kubectl connection is now tunneled through SSH '
                 f'(port {port}).')
     logger.info('This tunnel will be automatically established when needed.')
@@ -185,7 +177,8 @@ def setup_kubectl_ssh_tunnel(head_node,
 
 def cleanup_kubectl_ssh_tunnel(cluster_name, context_name):
     """Clean up the SSH tunnel for a specific context"""
-    progress_message(f'Cleaning up SSH tunnel for `{cluster_name}`...')
+    logger.info(f'{colorama.Fore.YELLOW}➜ Cleaning up SSH tunnel for '
+                f'`{cluster_name}`...{colorama.Style.RESET_ALL}')
 
     # Path to cleanup script
     cleanup_script = os.path.join(SCRIPT_DIR, 'tunnel', 'cleanup-tunnel.sh')
@@ -199,8 +192,8 @@ def cleanup_kubectl_ssh_tunnel(cluster_name, context_name):
                        stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL,
                        check=False)
-
-        success_message(f'SSH tunnel for `{cluster_name}` cleaned up.')
+        logger.info(f'{colorama.Fore.GREEN}✔ SSH tunnel for `{cluster_name}` '
+                    f'cleaned up.{colorama.Style.RESET_ALL}')
     else:
         logger.error(f'{colorama.Fore.YELLOW}Cleanup script not found: '
                      f'{cleanup_script}{colorama.Style.RESET_ALL}')
