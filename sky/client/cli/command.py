@@ -3838,7 +3838,7 @@ def show_gpus(
             cloud_str: str = 'Kubernetes',
             context_title_str: str = 'CONTEXT') -> str:
         node_table = log_utils.create_table(
-            [context_title_str, 'NODE', 'GPU', 'UTILIZATION'])
+            [context_title_str, 'NODE', 'GPU', 'UTILIZATION', 'CPU', 'MEMORY'])
 
         no_permissions_str = '<no permissions>'
         hints = []
@@ -3855,10 +3855,26 @@ def show_gpus(
                 acc_type = node_info.accelerator_type
                 if acc_type is None:
                     acc_type = '-'
+
+                # Format CPU and memory
+                cpu_str = '-'
+                if node_info.cpu_count is not None:
+                    # Format as integer if value is integral,
+                    # otherwise show 1 decimal place
+                    if node_info.cpu_count == int(node_info.cpu_count):
+                        cpu_str = str(int(node_info.cpu_count))
+                    else:
+                        cpu_str = f'{node_info.cpu_count:.1f}'
+
+                memory_str = '-'
+                if node_info.memory_gb is not None:
+                    # Format memory in GB, show 1 decimal place
+                    memory_str = f'{node_info.memory_gb:.1f} GB'
+
                 node_table.add_row([
                     context_name, node_name, acc_type,
                     f'{available} of {node_info.total["accelerator_count"]} '
-                    'free'
+                    'free', cpu_str, memory_str
                 ])
 
         k8s_per_node_acc_message = (f'{cloud_str} per-node GPU availability')

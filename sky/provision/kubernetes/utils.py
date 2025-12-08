@@ -3078,13 +3078,31 @@ def get_kubernetes_node_info(
 
         accelerator_count = get_node_accelerator_count(context,
                                                        node.status.allocatable)
+
+        # Parse CPU and memory from node capacity
+        cpu_count = None
+        memory_gb = None
+        try:
+            if 'cpu' in node.status.capacity:
+                cpu_count = parse_cpu_or_gpu_resource(
+                    node.status.capacity['cpu'])
+            if 'memory' in node.status.capacity:
+                memory_gb = parse_memory_resource(
+                    node.status.capacity['memory'], unit='G')
+        except (KeyError, ValueError) as e:
+            # If parsing fails, log but continue
+            logger.debug(f'Failed to parse CPU/memory for node '
+                         f'{node.metadata.name}: {e}')
+
         if accelerator_count == 0:
             node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
                 name=node.metadata.name,
                 accelerator_type=accelerator_name,
                 total={'accelerator_count': 0},
                 free={'accelerators_available': 0},
-                ip_address=node_ip)
+                ip_address=node_ip,
+                cpu_count=cpu_count,
+                memory_gb=memory_gb)
             continue
 
         if not has_accelerator_nodes or error_on_get_allocated_gpu_qty_by_node:
@@ -3105,7 +3123,9 @@ def get_kubernetes_node_info(
             accelerator_type=accelerator_name,
             total={'accelerator_count': int(accelerator_count)},
             free={'accelerators_available': int(accelerators_available)},
-            ip_address=node_ip)
+            ip_address=node_ip,
+            cpu_count=cpu_count,
+            memory_gb=memory_gb)
     hint = ''
     if has_multi_host_tpu:
         hint = ('(Note: Multi-host TPUs are detected and excluded from the '

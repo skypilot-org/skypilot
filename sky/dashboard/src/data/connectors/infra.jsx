@@ -496,6 +496,10 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           const freeAccelerators =
             nodeData['free']?.['accelerators_available'] ?? 0;
 
+          // Extract CPU and memory information
+          const cpuCount = nodeData['cpu_count'] ?? null;
+          const memoryGb = nodeData['memory_gb'] ?? null;
+
           perNodeGPUs_dict[`${context}/${nodeName}`] = {
             node_name: nodeData['name'] || nodeName,
             gpu_name: acceleratorType,
@@ -503,6 +507,8 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             gpu_free: freeAccelerators,
             ip_address: nodeData['ip_address'] || null,
             context: context,
+            cpu_count: cpuCount,
+            memory_gb: memoryGb,
           };
 
           // If this node provides a GPU type not found via GPU availability,

@@ -171,6 +171,12 @@ export function InfrastructureSection({
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
                         #GPUs
                       </th>
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                        CPU
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                        Memory
+                      </th>
                     </tr>
                   </thead>
                   <tbody
@@ -219,6 +225,25 @@ export function InfrastructureSection({
                         }, {});
 
                         return Object.keys(typeCounts).join(', ');
+                      })();
+
+                      // Calculate aggregated CPU and memory for this context
+                      const aggregatedCpu = (() => {
+                        if (!hasNodeData || nodes.length === 0) return null;
+                        const totalCpu = nodes.reduce((sum, node) => {
+                          const cpu = node.cpu_count;
+                          return sum + (cpu !== null && cpu !== undefined ? cpu : 0);
+                        }, 0);
+                        return totalCpu > 0 ? totalCpu : null;
+                      })();
+
+                      const aggregatedMemory = (() => {
+                        if (!hasNodeData || nodes.length === 0) return null;
+                        const totalMemory = nodes.reduce((sum, node) => {
+                          const mem = node.memory_gb;
+                          return sum + (mem !== null && mem !== undefined ? mem : 0);
+                        }, 0);
+                        return totalMemory > 0 ? totalMemory : null;
                       })();
 
                       // Format display name for SSH contexts
@@ -327,6 +352,30 @@ export function InfrastructureSection({
                               </div>
                             ) : (
                               totalGpus
+                            )}
+                          </td>
+                          <td className="p-3">
+                            {!hasNodeData ? (
+                              <div className="flex items-center justify-center">
+                                <CircularProgress size={16} />
+                              </div>
+                            ) : aggregatedCpu !== null ? (
+                              aggregatedCpu === Math.floor(aggregatedCpu)
+                                ? Math.floor(aggregatedCpu)
+                                : aggregatedCpu.toFixed(1)
+                            ) : (
+                              '-'
+                            )}
+                          </td>
+                          <td className="p-3">
+                            {!hasNodeData ? (
+                              <div className="flex items-center justify-center">
+                                <CircularProgress size={16} />
+                              </div>
+                            ) : aggregatedMemory !== null ? (
+                              `${aggregatedMemory.toFixed(1)} GB`
+                            ) : (
+                              '-'
                             )}
                           </td>
                         </tr>
@@ -643,28 +692,53 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                       <th className="p-3 text-right font-medium text-gray-600">
                         Availability
                       </th>
+                      <th className="p-3 text-left font-medium text-gray-600">
+                        CPU
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600">
+                        Memory
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {nodesInContext.map((node, index) => (
-                      <tr
-                        key={`${node.node_name}-${index}`}
-                        className="hover:bg-gray-50"
-                      >
-                        <td className="p-3 whitespace-nowrap text-gray-700">
-                          {node.node_name}
-                        </td>
-                        <td className="p-3 whitespace-nowrap text-gray-700">
-                          {node.ip_address || '-'}
-                        </td>
-                        <td className="p-3 whitespace-nowrap text-gray-700">
-                          {node.gpu_name}
-                        </td>
-                        <td className="p-3 whitespace-nowrap text-right text-gray-700">
-                          {`${node.gpu_free} of ${node.gpu_total} free`}
-                        </td>
-                      </tr>
-                    ))}
+                    {nodesInContext.map((node, index) => {
+                      const cpuCount = node.cpu_count;
+                      const memoryGb = node.memory_gb;
+                      const cpuDisplay = cpuCount !== null && cpuCount !== undefined
+                        ? (cpuCount === Math.floor(cpuCount)
+                            ? Math.floor(cpuCount).toString()
+                            : cpuCount.toFixed(1))
+                        : '-';
+                      const memoryDisplay = memoryGb !== null && memoryGb !== undefined
+                        ? `${memoryGb.toFixed(1)} GB`
+                        : '-';
+
+                      return (
+                        <tr
+                          key={`${node.node_name}-${index}`}
+                          className="hover:bg-gray-50"
+                        >
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {node.node_name}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {node.ip_address || '-'}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {node.gpu_name}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-right text-gray-700">
+                            {`${node.gpu_free} of ${node.gpu_total} free`}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {cpuDisplay}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {memoryDisplay}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

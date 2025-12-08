@@ -68,6 +68,10 @@ class KubernetesNodeInfo:
     free: Dict[str, int]
     # IP address of the node (external IP preferred, fallback to internal IP)
     ip_address: Optional[str] = None
+    # CPU count (total CPUs available on the node)
+    cpu_count: Optional[float] = None
+    # Memory in GB (total memory available on the node)
+    memory_gb: Optional[float] = None
 
 
 @dataclasses.dataclass
