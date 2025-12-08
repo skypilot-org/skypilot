@@ -140,7 +140,9 @@ def ensure_directory_exists(path):
 
 def check_gpu(node, user, ssh_key, use_ssh_config=False):
     """Check if a node has a GPU."""
-    cmd = 'command -v nvidia-smi &> /dev/null && nvidia-smi --query-gpu=gpu_name --format=csv,noheader &> /dev/null'
+    cmd = ('command -v nvidia-smi &> /dev/null && '
+           'nvidia-smi --query-gpu=gpu_name --format=csv,noheader '
+           '&> /dev/null')
     result = run_remote(node,
                         cmd,
                         user,

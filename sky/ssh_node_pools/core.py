@@ -1,6 +1,6 @@
 """SSH Node Pool management core functionality."""
-from pathlib import Path
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml

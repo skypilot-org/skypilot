@@ -4,14 +4,13 @@ import random
 import re
 import subprocess
 import sys
-from typing import List, Optional, Set
+from typing import Set
 
 import colorama
 
 from sky import sky_logging
 from sky.ssh_node_pools import constants
 from sky.ssh_node_pools.deploy import utils as deploy_utils
-from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -87,7 +86,7 @@ def _get_used_localhost_ports() -> Set[int]:
 
 
 def get_available_port(start: int = 6443, end: int = 6499) -> int:
-    """Get an available port in the given range that's not used by other tunnels"""
+    """Get an available port in the given range not used by other tunnels"""
     used_ports = _get_used_localhost_ports()
 
     # Try to use port 6443 first if available for the first cluster
@@ -163,15 +162,16 @@ def setup_kubectl_ssh_tunnel(head_node,
                 '--exec-arg=--host', f'--exec-arg={head_node}'
             ])
     else:
-        deploy_utils.run_command(['kubectl', 'config', 'set-credentials', context_name] +
-                    exec_args + [
-                        '--exec-arg=--context', f'--exec-arg={context_name}',
-                        '--exec-arg=--port', f'--exec-arg={port}',
-                        '--exec-arg=--ttl', f'--exec-arg={ttl_seconds}',
-                        '--exec-arg=--host', f'--exec-arg={head_node}',
-                        '--exec-arg=--user', f'--exec-arg={ssh_user}',
-                        '--exec-arg=--ssh-key', f'--exec-arg={ssh_key}'
-                    ])
+        deploy_utils.run_command(
+            ['kubectl', 'config', 'set-credentials', context_name] + exec_args +
+            [
+                '--exec-arg=--context', f'--exec-arg={context_name}',
+                '--exec-arg=--port', f'--exec-arg={port}', '--exec-arg=--ttl',
+                f'--exec-arg={ttl_seconds}', '--exec-arg=--host',
+                f'--exec-arg={head_node}', '--exec-arg=--user',
+                f'--exec-arg={ssh_user}', '--exec-arg=--ssh-key',
+                f'--exec-arg={ssh_key}'
+            ])
 
     success_message('SSH tunnel configured through kubectl credential plugin '
                     f'on port {port}')

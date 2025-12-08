@@ -15,8 +15,8 @@ import yaml
 from sky import sky_logging
 from sky.ssh_node_pools import constants
 from sky.ssh_node_pools import utils as ssh_utils
-from sky.ssh_node_pools.deploy import utils as deploy_utils
 from sky.ssh_node_pools.deploy import tunnel_utils
+from sky.ssh_node_pools.deploy import utils as deploy_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -464,7 +464,7 @@ def deploy_single_cluster(cluster_name,
 
     # Check if head node has a GPU
     install_gpu = False
-    if check_gpu(head_node,
+    if deploy_utils.check_gpu(head_node,
                  ssh_user,
                  ssh_key,
                  use_ssh_config=head_use_ssh_config):
