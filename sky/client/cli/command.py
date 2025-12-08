@@ -728,8 +728,9 @@ def _check_yaml_only(
                     invalid_reason = ('is not a file. Please check if the path'
                                       ' is correct.')
                 else:
-                    invalid_reason = ('yaml.safe_load() failed. Please check if the'
-                                      ' path is correct.')
+                    invalid_reason = (
+                        'yaml.safe_load() failed. Please check if the'
+                        ' path is correct.')
         is_yaml = False
     return is_yaml, result, yaml_file_provided, invalid_reason
 

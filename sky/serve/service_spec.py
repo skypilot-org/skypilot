@@ -1,6 +1,5 @@
 """Service specification for SkyServe."""
 import json
-import os
 import textwrap
 from typing import Any, Dict, List, Optional, Union
 
