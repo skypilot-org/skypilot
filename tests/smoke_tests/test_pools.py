@@ -1628,7 +1628,7 @@ def test_pool_resource_multiple_jobs_single_worker(generic_cloud: str):
 
 
 @pytest.mark.no_remote_server  # see note 1 above
-def test_pool_resource_contention_single_worker(generic_cloud: str):
+def test_pool_resource_contention_two_workers(generic_cloud: str):
     """Test that only one job runs when resources don't allow both."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     name = smoke_tests_utils.get_cluster_name()

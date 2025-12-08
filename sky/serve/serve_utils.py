@@ -937,8 +937,6 @@ def get_next_cluster_name(
         logger.debug(f'Ready replicas: {ready_replicas!r}')
 
         idle_replicas: List['replica_managers.ReplicaInfo'] = []
-        free_resources_dict = serve_state.get_free_worker_resources(
-            service_name)
 
         # If task_resources is provided, use resource-aware scheduling
         # Normalize task_resources to a list
