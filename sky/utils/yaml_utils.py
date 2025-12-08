@@ -1,8 +1,12 @@
 """YAML utilities."""
 import io
+import os
 from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 
+import fsspec
+
 from sky.adaptors import common
+from sky.utils import ux_utils
 
 if TYPE_CHECKING:
     import yaml
@@ -36,12 +40,63 @@ def safe_load_all(stream) -> Any:
         return yaml.load_all(stream, Loader=yaml.SafeLoader)
 
 
+def is_url(path: str) -> bool:
+    """Check if a path is a remote URL or cloud storage path.
+
+    Supports: http://, https://, s3://, gs://, az://, etc.
+
+    Args:
+        path: Path to check.
+
+    Returns:
+        True if path is a remote resource, False if local file.
+    """
+    try:
+        # Use fsspec to determine if this is a remote path
+        # Local files will have protocol '' or 'file'
+        protocol = fsspec.utils.get_protocol(path)
+        return protocol not in ('', 'file')
+    except Exception:  # pylint: disable=broad-except
+        return False
+
+
+def read_file_or_url(path: str) -> str:
+    """Read content from a local file, URL, or cloud storage.
+
+    Uses fsspec to support multiple storage backends including local files,
+    HTTP/HTTPS, S3, GCS, Azure, and more.
+
+    Args:
+        path: Path to read. Examples:
+            - Local: /path/to/file.yaml or ~/file.yaml
+            - HTTP: https://example.com/file.yaml
+            - S3: s3://bucket/path/to/file.yaml
+            - GCS: gs://bucket/path/to/file.yaml
+            - Azure: az://container/path/to/file.yaml
+
+    Returns:
+        The content of the file as a string.
+
+    Raises:
+        ValueError: If the file cannot be read.
+    """
+    try:
+        with ux_utils.print_exception_no_traceback():
+            # Expand ~ for local files
+            if not is_url(path):
+                path = os.path.expanduser(path)
+
+            with fsspec.open(path, 'r') as f:
+                return f.read()
+    except Exception as e:
+        raise ValueError(f'Failed to read {path}: {e}') from e
+
+
 def read_yaml(path: Optional[str]) -> Dict[str, Any]:
     if path is None:
         raise ValueError('Attempted to read a None YAML.')
-    with open(path, 'r', encoding='utf-8') as f:
-        config = safe_load(f)
-    return config
+    yaml_str = read_file_or_url(path)
+    return read_yaml_str(yaml_str)
 
 
 def read_yaml_str(yaml_str: str) -> Dict[str, Any]:
@@ -64,8 +119,8 @@ def read_yaml_all_str(yaml_str: str) -> List[Dict[str, Any]]:
 
 
 def read_yaml_all(path: str) -> List[Dict[str, Any]]:
-    with open(path, 'r', encoding='utf-8') as f:
-        return read_yaml_all_str(f.read())
+    yaml_str = read_file_or_url(path)
+    return read_yaml_all_str(yaml_str)
 
 
 def dump_yaml(path: str,
