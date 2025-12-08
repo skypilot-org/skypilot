@@ -3084,8 +3084,8 @@ def get_kubernetes_node_info(
         memory_gb = None
         try:
             if 'cpu' in node.status.capacity:
-                cpu_count = parse_cpu_or_gpu_resource(
-                    node.status.capacity['cpu'])
+                cpu_count = float(
+                    parse_cpu_or_gpu_resource(node.status.capacity['cpu']))
             if 'memory' in node.status.capacity:
                 memory_gb = parse_memory_resource(
                     node.status.capacity['memory'], unit='G')
