@@ -7,7 +7,7 @@ import yaml
 
 from sky import clouds
 from sky.ssh_node_pools import constants
-from sky.ssh_node_pools import deploy
+from sky.ssh_node_pools.deploy import deploy
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import yaml_utils
@@ -149,10 +149,7 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
             If None, the first cluster in the file is used.
         cleanup: If True, clean up the cluster instead of deploying.
     """
-    deploy.deploy_ssh_cluster(
-        cleanup=cleanup,
-        infra=infra,
-    )
+    deploy.run(cleanup=cleanup, infra=infra)
 
 
 @usage_lib.entrypoint
