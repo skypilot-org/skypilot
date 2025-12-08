@@ -1,12 +1,12 @@
 """SSH Node Pool management core functionality."""
 import os
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
 from sky import clouds
 from sky.ssh_node_pools import deploy
+from sky.ssh_node_pools import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import yaml_utils
@@ -16,8 +16,8 @@ class SSHNodePoolManager:
     """Manager for SSH Node Pool configurations."""
 
     def __init__(self):
-        self.config_path = Path.home() / '.sky' / 'ssh_node_pools.yaml'
-        self.keys_dir = Path.home() / '.sky' / 'ssh_keys'
+        self.config_path = constants.DEFAULT_SSH_NODE_POOLS_PATH
+        self.keys_dir = constants.NODE_POOLS_KEY_DIR
         self.keys_dir.mkdir(parents=True, exist_ok=True)
 
     def get_all_pools(self) -> Dict[str, Any]:

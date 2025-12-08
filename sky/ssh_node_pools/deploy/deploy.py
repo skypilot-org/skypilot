@@ -564,6 +564,7 @@ def deploy_single_cluster(cluster_name,
     askpass_block = create_askpass_script(password)
 
     # Token for k3s
+    # TODO (kyuds): make this configurable?
     k3s_token = constants.K3S_TOKEN
 
     # Pre-flight checks
