@@ -6,7 +6,6 @@ import os
 import re
 import shlex
 import shutil
-import subprocess
 import tempfile
 from typing import List, Optional
 
@@ -17,6 +16,7 @@ from sky import sky_logging
 from sky.ssh_node_pools import constants
 from sky.ssh_node_pools import utils as ssh_utils
 from sky.ssh_node_pools.deploy import utils as deploy_utils
+from sky.ssh_node_pools.deploy import tunnel_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -41,189 +41,6 @@ def success_message(message):
 def force_update_status(message):
     """Force update rich spinner status."""
     rich_utils.force_update_status(ux_utils.spinner_message(message))
-
-
-def create_askpass_script(password):
-    """Create an askpass script block for sudo with password."""
-    if not password:
-        return ''
-
-    return f"""
-# Create temporary askpass script
-ASKPASS_SCRIPT=$(mktemp)
-trap 'rm -f $ASKPASS_SCRIPT' EXIT INT TERM ERR QUIT
-cat > $ASKPASS_SCRIPT << EOF
-#!/bin/bash
-echo {password}
-EOF
-chmod 700 $ASKPASS_SCRIPT
-# Use askpass
-export SUDO_ASKPASS=$ASKPASS_SCRIPT
-"""
-
-
-def cleanup_node(node,
-                 user,
-                 ssh_key,
-                 askpass_block,
-                 use_ssh_config=False,
-                 is_worker=True):
-    """Uninstall k3s and clean up the state on a node."""
-    ntype = 'worker' if is_worker else 'head'
-    force_update_status(f'Cleaning up {ntype} node ({node})...')
-    script = f'k3s{"-agent" if is_worker else ""}-uninstall.sh'
-    cmd = f"""
-        {askpass_block}
-        echo 'Uninstalling k3s...' &&
-        sudo -A /usr/local/bin/{script} || true &&
-        sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
-    """
-    result = deploy_utils.run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
-    if result is None:
-        logger.error(f'{colorama.Fore.RED}Failed to clean up {ntype} '
-                     f'node ({node}).{RESET_ALL}')
-    else:
-        success_message(f'Node {node} cleaned up successfully.')
-
-
-def start_agent_node(node,
-                     master_addr,
-                     k3s_token,
-                     user,
-                     ssh_key,
-                     askpass_block,
-                     use_ssh_config=False):
-    """Start a k3s agent node.
-    Returns: if the start is successful, and whether the node has a GPU."""
-    logger.info(f'Deploying worker node ({node}).')
-    cmd = f"""
-            {askpass_block}
-            curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} INSTALL_K3S_EXEC='agent --node-label skypilot-ip={node}' \
-                K3S_URL=https://{master_addr}:6443 K3S_TOKEN={k3s_token} sudo -E -A sh -
-        """
-    result = deploy_utils.run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
-    if result is None:
-        logger.error(f'{colorama.Fore.RED}✗ Failed to deploy K3s on worker '
-                     f'node ({node}).{RESET_ALL}')
-        return node, False, False
-    success_message(
-        f'SkyPilot runtime successfully deployed on worker node ({node}).')
-    # Check if worker node has a GPU
-    if check_gpu(node, user, ssh_key, use_ssh_config=use_ssh_config):
-        logger.info(f'{colorama.Fore.YELLOW}GPU detected on worker node '
-                    f'({node}).{RESET_ALL}')
-        return node, True, True
-    return node, True, False
-
-
-def check_gpu(node, user, ssh_key, use_ssh_config=False):
-    """Check if a node has a GPU."""
-    cmd = 'command -v nvidia-smi &> /dev/null && nvidia-smi --query-gpu=gpu_name --format=csv,noheader &> /dev/null'
-    result = deploy_utils.run_remote(node,
-                        cmd,
-                        user,
-                        ssh_key,
-                        use_ssh_config=use_ssh_config,
-                        silent=True)
-    return result is not None
-
-
-def setup_kubectl_ssh_tunnel(head_node,
-                             ssh_user,
-                             ssh_key,
-                             context_name,
-                             use_ssh_config=False):
-    """Set up kubeconfig exec credential plugin for SSH tunnel"""
-    progress_message('Setting up SSH tunnel for Kubernetes API access...')
-
-    # Get an available port for this cluster
-    port = deploy_utils.get_available_port()
-
-    # Paths to scripts
-    tunnel_script = os.path.join(SCRIPT_DIR, 'tunnel', 'ssh-tunnel.sh')
-
-    # Make sure scripts are executable
-    os.chmod(tunnel_script, 0o755)
-
-    # Certificate files
-    client_cert_file = os.path.join(constants.NODE_POOLS_INFO_DIR,
-                                    f'{context_name}-cert.pem')
-    client_key_file = os.path.join(constants.NODE_POOLS_INFO_DIR,
-                                   f'{context_name}-key.pem')
-
-    # Update kubeconfig to use localhost with the selected port
-    deploy_utils.run_command([
-        'kubectl', 'config', 'set-cluster', context_name,
-        f'--server=https://127.0.0.1:{port}', '--insecure-skip-tls-verify=true'
-    ])
-
-    # Build the exec args list based on auth method
-    exec_args = [
-        '--exec-command', tunnel_script, '--exec-api-version',
-        'client.authentication.k8s.io/v1beta1'
-    ]
-
-    # Set credential TTL to force frequent tunnel checks
-    ttl_seconds = 30
-
-    # Verify if we have extracted certificate data files
-    has_cert_files = os.path.isfile(client_cert_file) and os.path.isfile(
-        client_key_file)
-    if has_cert_files:
-        logger.info(f'{colorama.Fore.GREEN}Client certificate data extracted '
-                    f'and will be used for authentication{RESET_ALL}')
-
-    if use_ssh_config:
-        deploy_utils.run_command(
-            ['kubectl', 'config', 'set-credentials', context_name] + exec_args +
-            [
-                '--exec-arg=--context', f'--exec-arg={context_name}',
-                '--exec-arg=--port', f'--exec-arg={port}', '--exec-arg=--ttl',
-                f'--exec-arg={ttl_seconds}', '--exec-arg=--use-ssh-config',
-                '--exec-arg=--host', f'--exec-arg={head_node}'
-            ])
-    else:
-        deploy_utils.run_command(['kubectl', 'config', 'set-credentials', context_name] +
-                    exec_args + [
-                        '--exec-arg=--context', f'--exec-arg={context_name}',
-                        '--exec-arg=--port', f'--exec-arg={port}',
-                        '--exec-arg=--ttl', f'--exec-arg={ttl_seconds}',
-                        '--exec-arg=--host', f'--exec-arg={head_node}',
-                        '--exec-arg=--user', f'--exec-arg={ssh_user}',
-                        '--exec-arg=--ssh-key', f'--exec-arg={ssh_key}'
-                    ])
-
-    success_message('SSH tunnel configured through kubectl credential plugin '
-                    f'on port {port}')
-    logger.info('Your kubectl connection is now tunneled through SSH '
-                f'(port {port}).')
-    logger.info('This tunnel will be automatically established when needed.')
-    logger.info(f'Credential TTL set to {ttl_seconds}s to ensure tunnel '
-                'health is checked frequently.')
-    return port
-
-
-def cleanup_kubectl_ssh_tunnel(cluster_name, context_name):
-    """Clean up the SSH tunnel for a specific context"""
-    progress_message(f'Cleaning up SSH tunnel for `{cluster_name}`...')
-
-    # Path to cleanup script
-    cleanup_script = os.path.join(SCRIPT_DIR, 'tunnel', 'cleanup-tunnel.sh')
-
-    # Make sure script is executable
-    if os.path.exists(cleanup_script):
-        os.chmod(cleanup_script, 0o755)
-
-        # Run the cleanup script
-        subprocess.run([cleanup_script, context_name],
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL,
-                       check=False)
-
-        success_message(f'SSH tunnel for `{cluster_name}` cleaned up.')
-    else:
-        logger.error(f'{colorama.Fore.YELLOW}Cleanup script not found: '
-                     f'{cleanup_script}{RESET_ALL}')
 
 
 def run(cleanup: bool = False,
@@ -575,7 +392,7 @@ def deploy_single_cluster(cluster_name,
 
         # Clean up SSH tunnel after clean up kubeconfig, because the kubectl
         # will restart the ssh tunnel if it's not running.
-        cleanup_kubectl_ssh_tunnel(cluster_name, context_name)
+        tunnel_utils.cleanup_kubectl_ssh_tunnel(cluster_name, context_name)
 
         success_message(f'Node Pool `{cluster_name}` cleaned up successfully.')
         return []
@@ -969,7 +786,7 @@ def deploy_single_cluster(cluster_name,
                     silent=True)
 
     # Always set up SSH tunnel since we assume only port 22 is accessible
-    setup_kubectl_ssh_tunnel(head_node,
+    tunnel_utils.setup_kubectl_ssh_tunnel(head_node,
                              ssh_user,
                              ssh_key,
                              context_name,
@@ -1036,3 +853,76 @@ def deploy_single_cluster(cluster_name,
         success_message(f'Node Pool `{cluster_name}` deployed successfully.')
 
     return unsuccessful_workers
+
+
+def create_askpass_script(password):
+    """Create an askpass script block for sudo with password."""
+    if not password:
+        return ''
+
+    return f"""
+# Create temporary askpass script
+ASKPASS_SCRIPT=$(mktemp)
+trap 'rm -f $ASKPASS_SCRIPT' EXIT INT TERM ERR QUIT
+cat > $ASKPASS_SCRIPT << EOF
+#!/bin/bash
+echo {password}
+EOF
+chmod 700 $ASKPASS_SCRIPT
+# Use askpass
+export SUDO_ASKPASS=$ASKPASS_SCRIPT
+"""
+
+
+def cleanup_node(node,
+                 user,
+                 ssh_key,
+                 askpass_block,
+                 use_ssh_config=False,
+                 is_worker=True):
+    """Uninstall k3s and clean up the state on a node."""
+    ntype = 'worker' if is_worker else 'head'
+    force_update_status(f'Cleaning up {ntype} node ({node})...')
+    script = f'k3s{"-agent" if is_worker else ""}-uninstall.sh'
+    cmd = f"""
+        {askpass_block}
+        echo 'Uninstalling k3s...' &&
+        sudo -A /usr/local/bin/{script} || true &&
+        sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
+    """
+    result = deploy_utils.run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
+    if result is None:
+        logger.error(f'{colorama.Fore.RED}Failed to clean up {ntype} '
+                     f'node ({node}).{RESET_ALL}')
+    else:
+        success_message(f'Node {node} cleaned up successfully.')
+
+
+def start_agent_node(node,
+                     master_addr,
+                     k3s_token,
+                     user,
+                     ssh_key,
+                     askpass_block,
+                     use_ssh_config=False):
+    """Start a k3s agent node.
+    Returns: if the start is successful, and whether the node has a GPU."""
+    logger.info(f'Deploying worker node ({node}).')
+    cmd = f"""
+            {askpass_block}
+            curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} INSTALL_K3S_EXEC='agent --node-label skypilot-ip={node}' \
+                K3S_URL=https://{master_addr}:6443 K3S_TOKEN={k3s_token} sudo -E -A sh -
+        """
+    result = deploy_utils.run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
+    if result is None:
+        logger.error(f'{colorama.Fore.RED}✗ Failed to deploy K3s on worker '
+                     f'node ({node}).{RESET_ALL}')
+        return node, False, False
+    success_message(
+        f'SkyPilot runtime successfully deployed on worker node ({node}).')
+    # Check if worker node has a GPU
+    if deploy_utils.check_gpu(node, user, ssh_key, use_ssh_config=use_ssh_config):
+        logger.info(f'{colorama.Fore.YELLOW}GPU detected on worker node '
+                    f'({node}).{RESET_ALL}')
+        return node, True, True
+    return node, True, False

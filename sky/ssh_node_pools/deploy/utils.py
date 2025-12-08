@@ -1,10 +1,7 @@
 """Utilities for SSH Node Pools Deployment"""
 import os
-import random
-import re
 import subprocess
-import sys
-from typing import List, Optional, Set
+from typing import List, Optional
 
 import colorama
 
@@ -141,79 +138,13 @@ def ensure_directory_exists(path):
         os.makedirs(directory, exist_ok=True)
 
 
-def _get_used_localhost_ports() -> Set[int]:
-    """Get SSH port forwardings already in use on localhost"""
-    used_ports = set()
-
-    # Get ports from netstat (works on macOS and Linux)
-    try:
-        if sys.platform == 'darwin':
-            # macOS
-            result = subprocess.run(['netstat', '-an', '-p', 'tcp'],
-                                    capture_output=True,
-                                    text=True,
-                                    check=False)
-        else:
-            # Linux and other Unix-like systems
-            result = subprocess.run(['netstat', '-tln'],
-                                    capture_output=True,
-                                    text=True,
-                                    check=False)
-
-        if result.returncode == 0:
-            # Look for lines with 'localhost:<port>' or '127.0.0.1:<port>'
-            for line in result.stdout.splitlines():
-                if '127.0.0.1:' in line or 'localhost:' in line:
-                    match = re.search(r':(64\d\d)\s', line)
-                    if match:
-                        port = int(match.group(1))
-                        if 6400 <= port <= 6500:  # Only consider our range
-                            used_ports.add(port)
-    except (subprocess.SubprocessError, FileNotFoundError):
-        # If netstat fails, try another approach
-        pass
-
-    # Also check ports from existing kubeconfig entries
-    try:
-        result = subprocess.run([
-            'kubectl', 'config', 'view', '-o',
-            'jsonpath=\'{.clusters[*].cluster.server}\''
-        ],
-                                capture_output=True,
-                                text=True,
-                                check=False)
-
-        if result.returncode == 0:
-            # Look for localhost URLs with ports
-            for url in result.stdout.split():
-                if 'localhost:' in url or '127.0.0.1:' in url:
-                    match = re.search(r':(\d+)', url)
-                    if match:
-                        port = int(match.group(1))
-                        if 6400 <= port <= 6500:  # Only consider our range
-                            used_ports.add(port)
-    except subprocess.SubprocessError:
-        pass
-
-    return used_ports
-
-
-def get_available_port(start: int = 6443, end: int = 6499) -> int:
-    """Get an available port in the given range that's not used by other tunnels"""
-    used_ports = _get_used_localhost_ports()
-
-    # Try to use port 6443 first if available for the first cluster
-    if start == 6443 and start not in used_ports:
-        return start
-
-    # Otherwise find any available port in the range
-    available_ports = list(set(range(start, end + 1)) - used_ports)
-
-    if not available_ports:
-        # If all ports are used, pick a random one from our range
-        # (we'll terminate any existing connection in the setup)
-        return random.randint(start, end)
-
-    # Sort to get deterministic allocation
-    available_ports.sort()
-    return available_ports[0]
+def check_gpu(node, user, ssh_key, use_ssh_config=False):
+    """Check if a node has a GPU."""
+    cmd = 'command -v nvidia-smi &> /dev/null && nvidia-smi --query-gpu=gpu_name --format=csv,noheader &> /dev/null'
+    result = run_remote(node,
+                        cmd,
+                        user,
+                        ssh_key,
+                        use_ssh_config=use_ssh_config,
+                        silent=True)
+    return result is not None
