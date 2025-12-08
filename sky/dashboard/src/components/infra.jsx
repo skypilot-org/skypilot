@@ -23,6 +23,11 @@ import {
   openGrafana,
 } from '@/utils/grafana';
 import {
+  formatCpu,
+  formatMemory,
+  calculateAggregatedResource,
+} from '@/utils/resourceUtils';
+import {
   getWorkspaceInfrastructure,
   getCloudInfrastructure,
   getContextJobs,
@@ -228,23 +233,16 @@ export function InfrastructureSection({
                       })();
 
                       // Calculate aggregated CPU and memory for this context
-                      const aggregatedCpu = (() => {
-                        if (!hasNodeData || nodes.length === 0) return null;
-                        const totalCpu = nodes.reduce((sum, node) => {
-                          const cpu = node.cpu_count;
-                          return sum + (cpu !== null && cpu !== undefined ? cpu : 0);
-                        }, 0);
-                        return totalCpu > 0 ? totalCpu : null;
-                      })();
-
-                      const aggregatedMemory = (() => {
-                        if (!hasNodeData || nodes.length === 0) return null;
-                        const totalMemory = nodes.reduce((sum, node) => {
-                          const mem = node.memory_gb;
-                          return sum + (mem !== null && mem !== undefined ? mem : 0);
-                        }, 0);
-                        return totalMemory > 0 ? totalMemory : null;
-                      })();
+                      const aggregatedCpu = calculateAggregatedResource(
+                        nodes,
+                        'cpu_count',
+                        hasNodeData
+                      );
+                      const aggregatedMemory = calculateAggregatedResource(
+                        nodes,
+                        'memory_gb',
+                        hasNodeData
+                      );
 
                       // Format display name for SSH contexts
                       const displayName = isSSH
@@ -359,12 +357,8 @@ export function InfrastructureSection({
                               <div className="flex items-center justify-center">
                                 <CircularProgress size={16} />
                               </div>
-                            ) : aggregatedCpu !== null ? (
-                              aggregatedCpu === Math.floor(aggregatedCpu)
-                                ? Math.floor(aggregatedCpu)
-                                : aggregatedCpu.toFixed(1)
                             ) : (
-                              '-'
+                              formatCpu(aggregatedCpu)
                             )}
                           </td>
                           <td className="p-3">
@@ -372,10 +366,8 @@ export function InfrastructureSection({
                               <div className="flex items-center justify-center">
                                 <CircularProgress size={16} />
                               </div>
-                            ) : aggregatedMemory !== null ? (
-                              `${aggregatedMemory.toFixed(1)} GB`
                             ) : (
-                              '-'
+                              formatMemory(aggregatedMemory)
                             )}
                           </td>
                         </tr>
@@ -702,16 +694,8 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {nodesInContext.map((node, index) => {
-                      const cpuCount = node.cpu_count;
-                      const memoryGb = node.memory_gb;
-                      const cpuDisplay = cpuCount !== null && cpuCount !== undefined
-                        ? (cpuCount === Math.floor(cpuCount)
-                            ? Math.floor(cpuCount).toString()
-                            : cpuCount.toFixed(1))
-                        : '-';
-                      const memoryDisplay = memoryGb !== null && memoryGb !== undefined
-                        ? `${memoryGb.toFixed(1)} GB`
-                        : '-';
+                      const cpuDisplay = formatCpu(node.cpu_count);
+                      const memoryDisplay = formatMemory(node.memory_gb);
 
                       return (
                         <tr
