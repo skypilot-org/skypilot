@@ -236,16 +236,20 @@ def check_gpu(node, user, ssh_key, use_ssh_config=False):
         # Check that all GPUs have the same type.
         # Currently, SkyPilot does not support heterogeneous GPU node
         # (i.e. more than one GPU type on the same node).
-        node_gpu_type = None
-        for line in result.splitlines():
-            stripped_line = line.strip()
-            if node_gpu_type is None:
-                node_gpu_type = stripped_line
-            elif stripped_line != node_gpu_type:
-                raise RuntimeError(f'Node {node} has more than one GPU types '
-                                   f'({node_gpu_type} and {stripped_line}, potentially more). '
-                                   'SkyPilot does not support a node with multiple GPU types.')
-
+        gpu_names = {
+            line.strip() for line in result.splitlines() if line.strip()
+        }
+        if not gpu_names:
+            # This can happen if nvidia-smi returns only whitespace.
+            # Set result to None to ensure this function returns False.
+            result = None
+        elif len(gpu_names) > 1:
+            # Sort for a deterministic error message.
+            sorted_gpu_names = sorted(list(gpu_names))
+            raise RuntimeError(
+                f'Node {node} has more than one GPU types '
+                f'({", ".join(sorted_gpu_names)}). '
+                'SkyPilot does not support a node with multiple GPU types.')
     return result is not None
 
 
