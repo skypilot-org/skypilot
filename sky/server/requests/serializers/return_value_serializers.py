@@ -24,6 +24,9 @@ def register_serializer(*names: str):
         for name in names:
             if name != server_constants.DEFAULT_HANDLER_NAME:
                 name = server_constants.REQUEST_NAME_PREFIX + name
+            if name in handlers:
+                raise ValueError(f'Serializer {name} already registered: '
+                                 f'{handlers[name]}')
             handlers[name] = func
         return func
 

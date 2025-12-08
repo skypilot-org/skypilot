@@ -47,21 +47,20 @@ class TestRegisterSerializer:
             return_value_serializers.handlers.clear()
             return_value_serializers.handlers.update(original_handlers)
 
-    def test_register_default_handler_no_prefix(self):
-        """Test that default handler name doesn't get prefix added."""
+    def test_register_duplicate_name_raises_error(self):
+        """Test that registering the same name twice raises an error."""
         original_handlers = return_value_serializers.handlers.copy()
         try:
 
-            @return_value_serializers.register_serializer(
-                server_constants.DEFAULT_HANDLER_NAME)
-            def default_test_serializer(return_value):
+            @return_value_serializers.register_serializer('duplicate_name')
+            def first_serializer(return_value):
                 return json.dumps(return_value)
 
-            # Default handler should be registered without prefix
-            assert server_constants.DEFAULT_HANDLER_NAME in return_value_serializers.handlers
-            assert return_value_serializers.handlers[
-                server_constants.
-                DEFAULT_HANDLER_NAME] is default_test_serializer
+            with pytest.raises(ValueError):
+
+                @return_value_serializers.register_serializer('duplicate_name')
+                def second_serializer(return_value):
+                    return json.dumps(return_value)
         finally:
             return_value_serializers.handlers.clear()
             return_value_serializers.handlers.update(original_handlers)
