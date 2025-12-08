@@ -3,6 +3,7 @@ import subprocess
 import threading
 import time
 
+import psutil
 import pytest
 import requests
 from smoke_tests import metrics_utils
@@ -17,6 +18,12 @@ def test_api_server_memory(generic_cloud: str):
     if not smoke_tests_utils.is_docker_remote_api_server():
         pytest.skip('Skipping test in shared remote api server environment as '
                     'the resource might not be dedicated to this case')
+    if psutil.cpu_count() < 4:
+        pytest.fail('No enough CPU on host to run the benchmark, consider '
+                    'skipping the test for this environment')
+    if psutil.virtual_memory().total / (1024**3) < 16:
+        pytest.fail('No enough memory on host to run the benchmark, consider '
+                    'skipping the test for this environment')
     metrics_server_url = smoke_tests_utils.get_metrics_server_url()
     metrics_url = f'{metrics_server_url}/metrics'
     metrics_result = {}

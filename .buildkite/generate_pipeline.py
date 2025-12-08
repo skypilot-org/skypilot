@@ -43,7 +43,7 @@ QUEUE_GENERIC_CLOUD = 'generic_cloud'
 QUEUE_EKS = 'eks'
 QUEUE_GKE = 'gke'
 QUEUE_KIND = 'kind'
-QUEUE_BENCHMARK = 'generic_cloud_long_run'
+QUEUE_BENCHMARK = 'single_container'
 # We use a separate queue for generic cloud tests on remote servers because:
 # - generic_cloud queue has high concurrency on a single VM
 # - remote-server requires launching a docker container per test
