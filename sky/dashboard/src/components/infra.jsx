@@ -68,6 +68,62 @@ import {
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
 
+// Shared GPU utilization bar to avoid duplicating percentage math and markup
+const GpuUtilizationBar = ({
+  gpu,
+  heightClass = 'h-4',
+  wrapperClassName = '',
+}) => {
+  const total = gpu?.gpu_total || 0;
+  const notReady = gpu?.gpu_not_ready || 0;
+  const free = gpu?.gpu_free || 0;
+  const used = Math.max(0, total - free - notReady);
+  const toPercentage = total > 0 ? (value) => (value / total) * 100 : () => 0;
+  const notReadyPercentage = toPercentage(notReady);
+  const usedPercentage = toPercentage(used);
+  const freePercentage = toPercentage(free);
+
+  return (
+    <div
+      className={`bg-gray-100 rounded-md flex overflow-hidden shadow-sm ${heightClass} ${wrapperClassName}`.trim()}
+    >
+      {notReadyPercentage > 0 && (
+        <div
+          style={{
+            width: `${notReadyPercentage}%`,
+            fontSize: 'clamp(8px, 1.2vw, 12px)',
+          }}
+          className="bg-gray-400 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
+        >
+          {notReadyPercentage > 15 && `${notReady} not ready`}
+        </div>
+      )}
+      {usedPercentage > 0 && (
+        <div
+          style={{
+            width: `${usedPercentage}%`,
+            fontSize: 'clamp(8px, 1.2vw, 12px)',
+          }}
+          className="bg-yellow-500 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
+        >
+          {usedPercentage > 15 && `${used} used`}
+        </div>
+      )}
+      {freePercentage > 0 && (
+        <div
+          style={{
+            width: `${freePercentage}%`,
+            fontSize: 'clamp(8px, 1.2vw, 12px)',
+          }}
+          className="bg-green-700 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
+        >
+          {freePercentage > 15 && `${free} free`}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
 export function InfrastructureSection({
   title,
@@ -365,22 +421,6 @@ export function InfrastructureSection({
                       className={`bg-white divide-y divide-gray-200 ${gpus.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
                     >
                       {gpus.map((gpu) => {
-                        const unavailableGpus = gpu.gpu_unavailable || 0;
-                        const usedGpus =
-                          gpu.gpu_total - gpu.gpu_free - unavailableGpus;
-                        const freePercentage =
-                          gpu.gpu_total > 0
-                            ? (gpu.gpu_free / gpu.gpu_total) * 100
-                            : 0;
-                        const unavailablePercentage =
-                          gpu.gpu_total > 0
-                            ? (unavailableGpus / gpu.gpu_total) * 100
-                            : 0;
-                        const usedPercentage =
-                          gpu.gpu_total > 0
-                            ? (usedGpus / gpu.gpu_total) * 100
-                            : 0;
-
                         // Find the requestable quantities from contexts
                         const requestableQtys = groupedPerContextGPUs
                           ? Object.values(groupedPerContextGPUs)
@@ -410,44 +450,11 @@ export function InfrastructureSection({
                             </td>
                             <td className="p-3 w-2/3">
                               <div className="flex items-center gap-3">
-                                <div className="flex-1 bg-gray-100 rounded-md h-5 flex overflow-hidden shadow-sm min-w-[100px] w-full">
-                                  {unavailablePercentage > 0 && (
-                                    <div
-                                      style={{
-                                        width: `${unavailablePercentage}%`,
-                                        fontSize: 'clamp(8px, 1.2vw, 12px)',
-                                      }}
-                                      className="bg-gray-400 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
-                                    >
-                                      {unavailablePercentage > 15 &&
-                                        `${unavailableGpus} unavailable`}
-                                    </div>
-                                  )}
-                                  {usedPercentage > 0 && (
-                                    <div
-                                      style={{
-                                        width: `${usedPercentage}%`,
-                                        fontSize: 'clamp(8px, 1.2vw, 12px)',
-                                      }}
-                                      className="bg-yellow-500 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
-                                    >
-                                      {usedPercentage > 15 &&
-                                        `${usedGpus} used`}
-                                    </div>
-                                  )}
-                                  {freePercentage > 0 && (
-                                    <div
-                                      style={{
-                                        width: `${freePercentage}%`,
-                                        fontSize: 'clamp(8px, 1.2vw, 12px)',
-                                      }}
-                                      className="bg-green-700 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
-                                    >
-                                      {freePercentage > 15 &&
-                                        `${gpu.gpu_free} free`}
-                                    </div>
-                                  )}
-                                </div>
+                                <GpuUtilizationBar
+                                  gpu={gpu}
+                                  heightClass="h-5"
+                                  wrapperClassName="flex-1 min-w-[100px] w-full"
+                                />
                               </div>
                             </td>
                           </tr>
@@ -603,15 +610,6 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
             {gpusInContext.map((gpu) => {
-              const unavailableGpus = gpu.gpu_unavailable || 0;
-              const usedGpus = gpu.gpu_total - gpu.gpu_free - unavailableGpus;
-              const freePercentage =
-                gpu.gpu_total > 0 ? (gpu.gpu_free / gpu.gpu_total) * 100 : 0;
-              const usedPercentage =
-                gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
-              const unavailablePercentage =
-                gpu.gpu_total > 0 ? (unavailableGpus / gpu.gpu_total) * 100 : 0;
-
               return (
                 <div
                   key={gpu.gpu_name}
@@ -628,41 +626,12 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                       {gpu.gpu_free} free / {gpu.gpu_total} total
                     </span>
                   </div>
-                  <div className="w-full bg-gray-100 rounded-md h-4 flex overflow-hidden shadow-sm">
-                    {unavailablePercentage > 0 && (
-                      <div
-                        style={{
-                          width: `${unavailablePercentage}%`,
-                          fontSize: 'clamp(8px, 1.2vw, 12px)',
-                        }}
-                        className="bg-gray-400 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
-                      >
-                        {unavailablePercentage > 15 &&
-                          `${unavailableGpus} unavailable`}
-                      </div>
-                    )}
-                    {usedPercentage > 0 && (
-                      <div
-                        style={{
-                          width: `${usedPercentage}%`,
-                          fontSize: 'clamp(8px, 1.2vw, 12px)',
-                        }}
-                        className="bg-yellow-500 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
-                      >
-                        {usedPercentage > 15 && `${usedGpus} used`}
-                      </div>
-                    )}
-                    {freePercentage > 0 && (
-                      <div
-                        style={{
-                          width: `${freePercentage}%`,
-                          fontSize: 'clamp(8px, 1.2vw, 12px)',
-                        }}
-                        className="bg-green-700 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
-                      >
-                        {freePercentage > 15 && `${gpu.gpu_free} free`}
-                      </div>
-                    )}
+                  <div className="w-full">
+                    <GpuUtilizationBar
+                      gpu={gpu}
+                      heightClass="h-4"
+                      wrapperClassName="w-full"
+                    />
                   </div>
                 </div>
               );

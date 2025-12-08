@@ -451,14 +451,14 @@ async function getKubernetesGPUsFromContexts(contextNames) {
                 gpu_requestable_qty_per_node: 0,
                 gpu_total: 0,
                 gpu_free: 0,
-                gpu_unavailable: 0,
+                gpu_not_ready: 0,
                 context: context,
               };
             }
             gpuToData[gpuName].gpu_total += totalCount;
             gpuToData[gpuName].gpu_free += freeCount;
             if (isReady === false) {
-              gpuToData[gpuName].gpu_unavailable += totalCount;
+              gpuToData[gpuName].gpu_not_ready += totalCount;
             }
             gpuToData[gpuName].gpu_requestable_qty_per_node = totalCount;
           }
@@ -468,13 +468,13 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           if (gpuName in allGPUsSummary) {
             allGPUsSummary[gpuName].gpu_total += gpuToData[gpuName].gpu_total;
             allGPUsSummary[gpuName].gpu_free += gpuToData[gpuName].gpu_free;
-            allGPUsSummary[gpuName].gpu_unavailable +=
-              gpuToData[gpuName].gpu_unavailable;
+            allGPUsSummary[gpuName].gpu_not_ready +=
+              gpuToData[gpuName].gpu_not_ready;
           } else {
             allGPUsSummary[gpuName] = {
               gpu_total: gpuToData[gpuName].gpu_total,
               gpu_free: gpuToData[gpuName].gpu_free,
-              gpu_unavailable: gpuToData[gpuName].gpu_unavailable,
+              gpu_not_ready: gpuToData[gpuName].gpu_not_ready,
               gpu_name: gpuName,
             };
           }
@@ -530,7 +530,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
               allGPUsSummary[acceleratorType] = {
                 gpu_total: 0,
                 gpu_free: 0,
-                gpu_unavailable: 0,
+                gpu_not_ready: 0,
                 gpu_name: acceleratorType,
               };
             }
@@ -540,7 +540,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             if (!existingGpuEntry) {
               perContextGPUsData[context].push({
                 gpu_name: acceleratorType,
-                gpu_unavailable: 0,
+                gpu_not_ready: 0,
                 gpu_requestable_qty_per_node: '-',
                 gpu_total: 0,
                 gpu_free: 0,
