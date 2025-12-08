@@ -65,8 +65,8 @@ def run(cleanup: bool = False,
     with rich_utils.safe_status(ux_utils.spinner_message(msg_str)):
         try:
             deploy_multiple_clusters(infra=infra,
-                       cleanup=cleanup,
-                       kubeconfig_path=kubeconfig_path)
+                                     cleanup=cleanup,
+                                     kubeconfig_path=kubeconfig_path)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(str(e))
             with ux_utils.print_exception_no_traceback():
@@ -90,7 +90,8 @@ def run(cleanup: bool = False,
                     f'{colorama.Style.RESET_ALL}` to launch a cluster.')))
 
 
-def deploy_multiple_clusters(infra: Optional[str],
+def deploy_multiple_clusters(
+        infra: Optional[str],
         ssh_node_pools_file: str = constants.DEFAULT_SSH_NODE_POOLS_PATH,
         kubeconfig_path: str = constants.DEFAULT_KUBECONFIG_PATH,
         cleanup: bool = True):
@@ -121,8 +122,9 @@ def deploy_multiple_clusters(infra: Optional[str],
                                                       cluster_config)
 
             if not hosts_info:
-                logger.warning(f'{colorama.Fore.RED}Error: No valid hosts found '
-                               f'for cluster {cluster_name!r}. Skipping.{RESET_ALL}')
+                logger.warning(
+                    f'{colorama.Fore.RED}Error: No valid hosts found '
+                    f'for cluster {cluster_name!r}. Skipping.{RESET_ALL}')
                 continue
 
             context_name = f'ssh-{cluster_name}'
@@ -234,20 +236,20 @@ def deploy_multiple_clusters(infra: Optional[str],
 
 
 def deploy_single_cluster(cluster_name,
-                   head_node,
-                   worker_nodes,
-                   ssh_user,
-                   ssh_key,
-                   context_name,
-                   password,
-                   head_use_ssh_config,
-                   worker_use_ssh_config,
-                   kubeconfig_path,
-                   cleanup,
-                   worker_hosts=None,
-                   history_worker_nodes=None,
-                   history_workers_info=None,
-                   history_use_ssh_config=None) -> List[str]:
+                          head_node,
+                          worker_nodes,
+                          ssh_user,
+                          ssh_key,
+                          context_name,
+                          password,
+                          head_use_ssh_config,
+                          worker_use_ssh_config,
+                          kubeconfig_path,
+                          cleanup,
+                          worker_hosts=None,
+                          history_worker_nodes=None,
+                          history_workers_info=None,
+                          history_use_ssh_config=None) -> List[str]:
     """Deploy or clean up a single Kubernetes cluster.
 
     Returns: List of unsuccessful worker nodes.
@@ -256,7 +258,8 @@ def deploy_single_cluster(cluster_name,
                                      f'{context_name}-history.yaml')
     cert_file_path = os.path.join(constants.NODE_POOLS_INFO_DIR,
                                   f'{context_name}-cert.pem')
-    key_file_path = os.path.join(constants.NODE_POOLS_INFO_DIR, f'{context_name}-key.pem')
+    key_file_path = os.path.join(constants.NODE_POOLS_INFO_DIR,
+                                 f'{context_name}-key.pem')
     tunnel_log_file_path = os.path.join(constants.NODE_POOLS_INFO_DIR,
                                         f'{context_name}-tunnel.log')
 
@@ -269,11 +272,12 @@ def deploy_single_cluster(cluster_name,
 
     # Pre-flight checks
     logger.info(f'Checking SSH connection to head node ({head_node})...')
-    result = deploy_utils.run_remote(head_node,
-                        f'echo \'SSH connection successful ({head_node})\'',
-                        ssh_user,
-                        ssh_key,
-                        use_ssh_config=head_use_ssh_config)
+    result = deploy_utils.run_remote(
+        head_node,
+        f'echo \'SSH connection successful ({head_node})\'',
+        ssh_user,
+        ssh_key,
+        use_ssh_config=head_use_ssh_config)
     if result is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -336,11 +340,11 @@ def deploy_single_cluster(cluster_name,
 
         # Clean up head node
         cleanup_node(head_node,
-                            ssh_user,
-                            ssh_key,
-                            askpass_block,
-                            use_ssh_config=head_use_ssh_config,
-                            is_worker=False)
+                     ssh_user,
+                     ssh_key,
+                     askpass_block,
+                     use_ssh_config=head_use_ssh_config,
+                     is_worker=False)
     # Clean up worker nodes
     force_update_status(f'Cleaning up worker nodes [{cluster_name}]')
     with cf.ThreadPoolExecutor() as executor:
@@ -356,32 +360,37 @@ def deploy_single_cluster(cluster_name,
         if os.path.isfile(kubeconfig_path):
             logger.debug(
                 f'Removing context {context_name!r} from local kubeconfig...')
-            deploy_utils.run_command(['kubectl', 'config', 'delete-context', context_name],
-                        shell=False,
-                        silent=True)
-            deploy_utils.run_command(['kubectl', 'config', 'delete-cluster', context_name],
-                        shell=False,
-                        silent=True)
-            deploy_utils.run_command(['kubectl', 'config', 'delete-user', context_name],
-                        shell=False,
-                        silent=True)
+            deploy_utils.run_command(
+                ['kubectl', 'config', 'delete-context', context_name],
+                shell=False,
+                silent=True)
+            deploy_utils.run_command(
+                ['kubectl', 'config', 'delete-cluster', context_name],
+                shell=False,
+                silent=True)
+            deploy_utils.run_command(
+                ['kubectl', 'config', 'delete-user', context_name],
+                shell=False,
+                silent=True)
 
             # Update the current context to the first available context
             contexts = deploy_utils.run_command([
                 'kubectl', 'config', 'view', '-o',
                 'jsonpath=\'{.contexts[0].name}\''
             ],
-                                   shell=False,
-                                   silent=True)
+                                                shell=False,
+                                                silent=True)
             if contexts:
-                deploy_utils.run_command(['kubectl', 'config', 'use-context', contexts],
-                            shell=False,
-                            silent=True)
+                deploy_utils.run_command(
+                    ['kubectl', 'config', 'use-context', contexts],
+                    shell=False,
+                    silent=True)
             else:
                 # If no context is available, simply unset the current context
-                deploy_utils.run_command(['kubectl', 'config', 'unset', 'current-context'],
-                            shell=False,
-                            silent=True)
+                deploy_utils.run_command(
+                    ['kubectl', 'config', 'unset', 'current-context'],
+                    shell=False,
+                    silent=True)
 
             logger.debug(
                 f'Context {context_name!r} removed from local kubeconfig.')
@@ -407,11 +416,11 @@ def deploy_single_cluster(cluster_name,
         f'echo "Successfully enabled TCP Forwarding on head node ({head_node})."; '
         'fi')
     result = deploy_utils.run_remote(head_node,
-                        shlex.quote(cmd),
-                        ssh_user,
-                        ssh_key,
-                        use_ssh_config=head_use_ssh_config,
-                        use_shell=True)
+                                     shlex.quote(cmd),
+                                     ssh_user,
+                                     ssh_key,
+                                     use_ssh_config=head_use_ssh_config,
+                                     use_shell=True)
     if result is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -451,10 +460,10 @@ def deploy_single_cluster(cluster_name,
         fi
     """
     result = deploy_utils.run_remote(head_node,
-                        cmd,
-                        ssh_user,
-                        ssh_key,
-                        use_ssh_config=head_use_ssh_config)
+                                     cmd,
+                                     ssh_user,
+                                     ssh_key,
+                                     use_ssh_config=head_use_ssh_config)
     if result is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -465,19 +474,19 @@ def deploy_single_cluster(cluster_name,
     # Check if head node has a GPU
     install_gpu = False
     if deploy_utils.check_gpu(head_node,
-                 ssh_user,
-                 ssh_key,
-                 use_ssh_config=head_use_ssh_config):
+                              ssh_user,
+                              ssh_key,
+                              use_ssh_config=head_use_ssh_config):
         logger.info(f'{colorama.Fore.YELLOW}'
                     f'GPU detected on head node ({head_node}).{RESET_ALL}')
         install_gpu = True
 
     # Fetch the head node's internal IP (this will be passed to worker nodes)
     master_addr = deploy_utils.run_remote(head_node,
-                             'hostname -I | awk \'{print $1}\'',
-                             ssh_user,
-                             ssh_key,
-                             use_ssh_config=head_use_ssh_config)
+                                          'hostname -I | awk \'{print $1}\'',
+                                          ssh_user,
+                                          ssh_key,
+                                          use_ssh_config=head_use_ssh_config)
     if master_addr is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Failed to SSH to head node ({head_node}). '
@@ -663,8 +672,9 @@ def deploy_single_cluster(cluster_name,
                                     'Warning: Certificate may not be in proper PEM format'
                                 )
                         else:
-                            logger.error(f'{colorama.Fore.RED}Error: '
-                                         f'Certificate file is empty{RESET_ALL}')
+                            logger.error(
+                                f'{colorama.Fore.RED}Error: '
+                                f'Certificate file is empty{RESET_ALL}')
                     except Exception as e:  # pylint: disable=broad-except
                         logger.error(f'{colorama.Fore.RED}'
                                      f'Error processing certificate data: {e}'
@@ -758,15 +768,18 @@ def deploy_single_cluster(cluster_name,
 
         # First check if context name exists and delete it if it does
         # TODO(romilb): Should we throw an error here instead?
-        deploy_utils.run_command(['kubectl', 'config', 'delete-context', context_name],
-                    shell=False,
-                    silent=True)
-        deploy_utils.run_command(['kubectl', 'config', 'delete-cluster', context_name],
-                    shell=False,
-                    silent=True)
-        deploy_utils.run_command(['kubectl', 'config', 'delete-user', context_name],
-                    shell=False,
-                    silent=True)
+        deploy_utils.run_command(
+            ['kubectl', 'config', 'delete-context', context_name],
+            shell=False,
+            silent=True)
+        deploy_utils.run_command(
+            ['kubectl', 'config', 'delete-cluster', context_name],
+            shell=False,
+            silent=True)
+        deploy_utils.run_command(
+            ['kubectl', 'config', 'delete-user', context_name],
+            shell=False,
+            silent=True)
 
         # Merge the configurations using kubectl
         merged_config = os.path.join(temp_dir, 'merged_config')
@@ -781,16 +794,17 @@ def deploy_single_cluster(cluster_name,
         shutil.move(merged_config, kubeconfig_path)
 
         # Set the new context as the current context
-        deploy_utils.run_command(['kubectl', 'config', 'use-context', context_name],
-                    shell=False,
-                    silent=True)
+        deploy_utils.run_command(
+            ['kubectl', 'config', 'use-context', context_name],
+            shell=False,
+            silent=True)
 
     # Always set up SSH tunnel since we assume only port 22 is accessible
     tunnel_utils.setup_kubectl_ssh_tunnel(head_node,
-                             ssh_user,
-                             ssh_key,
-                             context_name,
-                             use_ssh_config=head_use_ssh_config)
+                                          ssh_user,
+                                          ssh_key,
+                                          context_name,
+                                          use_ssh_config=head_use_ssh_config)
 
     logger.debug(f'kubectl configured with new context \'{context_name}\'.')
     success_message(f'SkyPilot runtime is up [{cluster_name}].')
@@ -821,10 +835,10 @@ def deploy_single_cluster(cluster_name,
             echo 'GPU operator installed successfully.'
         """
         result = deploy_utils.run_remote(head_node,
-                            cmd,
-                            ssh_user,
-                            ssh_key,
-                            use_ssh_config=head_use_ssh_config)
+                                         cmd,
+                                         ssh_user,
+                                         ssh_key,
+                                         use_ssh_config=head_use_ssh_config)
         if result is None:
             logger.error(f'{colorama.Fore.RED}Failed to install GPU Operator.'
                          f'{RESET_ALL}')
@@ -844,11 +858,10 @@ def deploy_single_cluster(cluster_name,
             f'"{worker}"' for worker in unsuccessful_workers
         ]
 
-        logger.info(
-            f'{colorama.Fore.YELLOW}'
-            'Failed to deploy Kubernetes on the following nodes: '
-            f'{", ".join(quoted_unsuccessful_workers)}. Please check '
-            f'the logs for more details.{RESET_ALL}')
+        logger.info(f'{colorama.Fore.YELLOW}'
+                    'Failed to deploy Kubernetes on the following nodes: '
+                    f'{", ".join(quoted_unsuccessful_workers)}. Please check '
+                    f'the logs for more details.{RESET_ALL}')
     else:
         success_message(f'Node Pool `{cluster_name}` deployed successfully.')
 
@@ -890,7 +903,11 @@ def cleanup_node(node,
         sudo -A /usr/local/bin/{script} || true &&
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     """
-    result = deploy_utils.run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
+    result = deploy_utils.run_remote(node,
+                                     cmd,
+                                     user,
+                                     ssh_key,
+                                     use_ssh_config=use_ssh_config)
     if result is None:
         logger.error(f'{colorama.Fore.RED}Failed to clean up {ntype} '
                      f'node ({node}).{RESET_ALL}')
@@ -913,7 +930,11 @@ def start_agent_node(node,
             curl -sfL https://get.k3s.io | K3S_NODE_NAME={node} INSTALL_K3S_EXEC='agent --node-label skypilot-ip={node}' \
                 K3S_URL=https://{master_addr}:6443 K3S_TOKEN={k3s_token} sudo -E -A sh -
         """
-    result = deploy_utils.run_remote(node, cmd, user, ssh_key, use_ssh_config=use_ssh_config)
+    result = deploy_utils.run_remote(node,
+                                     cmd,
+                                     user,
+                                     ssh_key,
+                                     use_ssh_config=use_ssh_config)
     if result is None:
         logger.error(f'{colorama.Fore.RED}✗ Failed to deploy K3s on worker '
                      f'node ({node}).{RESET_ALL}')
@@ -921,7 +942,10 @@ def start_agent_node(node,
     success_message(
         f'SkyPilot runtime successfully deployed on worker node ({node}).')
     # Check if worker node has a GPU
-    if deploy_utils.check_gpu(node, user, ssh_key, use_ssh_config=use_ssh_config):
+    if deploy_utils.check_gpu(node,
+                              user,
+                              ssh_key,
+                              use_ssh_config=use_ssh_config):
         logger.info(f'{colorama.Fore.YELLOW}GPU detected on worker node '
                     f'({node}).{RESET_ALL}')
         return node, True, True
