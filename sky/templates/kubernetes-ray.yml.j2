@@ -523,6 +523,10 @@ available_node_types:
                 resourceFieldRef:
                   containerName: ray-node
                   resource: requests.memory
+            # Disable Ray memory monitor to prevent Ray's memory manager 
+            # from interfering with kubernetes resource manager.
+            - name: RAY_memory_monitor_refresh_ms
+              value: "0"
             {% for key, value in k8s_env_vars.items() if k8s_env_vars is not none %}
             - name: {{ key }}
               value: {{ value }}
