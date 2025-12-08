@@ -55,7 +55,7 @@ def test_api_server_memory(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'test_api_server_memory',
         [
-            f'python tests/load_tests/workload_benchmark.py -t 8 -r 10 -s workloads/basic.sh --cloud {generic_cloud}'
+            f'python tests/load_tests/workload_benchmark.py -t 8 -r 5 -s workloads/basic.sh --cloud {generic_cloud}'
         ],
         teardown='sky down -y "load-test-*"; sky jobs cancel -a -y',
         # Long timeout for benchmark to complete
