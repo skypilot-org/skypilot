@@ -3861,7 +3861,7 @@ def show_gpus(
                 if node_info.cpu_count is not None:
                     # Format as integer if value is integral,
                     # otherwise show 1 decimal place
-                    if node_info.cpu_count == int(node_info.cpu_count):
+                    if node_info.cpu_count.is_integer():
                         cpu_str = str(int(node_info.cpu_count))
                     else:
                         cpu_str = f'{node_info.cpu_count:.1f}'
