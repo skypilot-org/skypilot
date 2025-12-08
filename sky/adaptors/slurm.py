@@ -252,6 +252,28 @@ class SlurmClient:
         return state if state else None
 
     @timeline.event
+    def get_job_reason(self, job_id: str) -> Optional[str]:
+        """Get the reason a job is in its current state
+
+        Args:
+            job_id: The Slurm job ID.
+        """
+        # Without --states all, squeue omits terminated jobs.
+        cmd = f'squeue -h --jobs {job_id} --states all -o "%r"'
+        rc, stdout, stderr = self._runner.run(cmd,
+                                              require_outputs=True,
+                                              stream_logs=False)
+        if rc != 0:
+            logger.debug(f'Failed to get job info for job {job_id}: {stderr}')
+            return None
+
+        output = stdout.strip()
+        if not output:
+            return None
+
+        return output if output != 'None' else None
+
+    @timeline.event
     def wait_for_job_nodes(self, job_id: str, timeout: int = 300) -> None:
         """Wait for a Slurm job to have nodes allocated.
 

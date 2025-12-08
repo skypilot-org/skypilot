@@ -169,6 +169,8 @@ def _create_virtual_instance(
         #SBATCH --error={PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-%j.out
         #SBATCH --nodes={num_nodes}
         #SBATCH --wait-all-nodes=1
+        # Let the job be terminated rather than requeued implicitly.
+        #SBATCH --no-requeue
         #SBATCH --cpus-per-task={int(resources["cpus"])}
         #SBATCH --mem={int(resources["memory"])}G
         {gpu_directive}
@@ -182,13 +184,16 @@ def _create_virtual_instance(
                 kill $(cat "{skypilot_runtime_dir}/.sky/skylet_pid") 2>/dev/null || true
             fi
             echo "Cleaning up sky directories..."
-            rm -rf {skypilot_runtime_dir}
+            # Clean up sky runtime directory on each node.
+            srun --nodes={num_nodes} rm -rf {skypilot_runtime_dir}
             rm -rf {sky_home_dir}
         }}
         trap cleanup TERM
 
-        # Create sky directory for the cluster.
-        mkdir -p {sky_home_dir} {skypilot_runtime_dir}
+        # Create sky home directory for the cluster.
+        mkdir -p {sky_home_dir}
+        # Create sky runtime directory on each node.
+        srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}
         # Suppress login messages.
         touch {sky_home_dir}/.hushlogin
         # Signal that the sbatch script has completed setup.
@@ -289,33 +294,49 @@ def query_instances(
     # Map Slurm job states to SkyPilot ClusterStatus
     # Slurm states:
     # https://slurm.schedmd.com/squeue.html#SECTION_JOB-STATE-CODES
+    # TODO(kevin): Include more states here.
     status_map = {
         'pending': status_lib.ClusterStatus.INIT,
         'running': status_lib.ClusterStatus.UP,
         'completing': status_lib.ClusterStatus.UP,
         'completed': None,
         'cancelled': None,
-        'failed': status_lib.ClusterStatus.INIT,
+        'failed': None,
+        'node_fail': None,
     }
 
     statuses: Dict[str, Tuple[Optional[status_lib.ClusterStatus],
                               Optional[str]]] = {}
     for state, sky_status in status_map.items():
-        if non_terminated_only and sky_status is None:
-            continue
-
         jobs = client.query_jobs(
             cluster_name_on_cloud,
             [state],
         )
 
         for job_id in jobs:
-            nodes, _ = client.get_job_nodes(job_id, wait=False)
-            for node in nodes:
-                instance_id = slurm_utils.instance_id(job_id, node)
-                # TODO(kevin): If status is failed, we should probably query
-                # each node's status to get the reason.
-                statuses[instance_id] = (sky_status, None)
+            if state in ('pending', 'failed', 'node_fail', 'cancelled',
+                         'completed'):
+                reason = client.get_job_reason(job_id)
+                if non_terminated_only and sky_status is None:
+                    # TODO(kevin): For better UX, we should also find out
+                    # which node(s) exactly that failed if it's a node_fail
+                    # state.
+                    logger.debug(f'Job {job_id} is terminated, but '
+                                 'query_instances is called with '
+                                 f'non_terminated_only=True. State: {state}, '
+                                 f'Reason: {reason}')
+                    continue
+                statuses[job_id] = (sky_status, reason)
+            else:
+                nodes, _ = client.get_job_nodes(job_id, wait=False)
+                for node in nodes:
+                    instance_id = slurm_utils.instance_id(job_id, node)
+                    statuses[instance_id] = (sky_status, None)
+
+        # TODO(kevin): Query sacct too to get more historical job info.
+        # squeue only includes completed jobs that finished in the last
+        # MinJobAge seconds (default 300s). Or could be earlier if it
+        # reaches MaxJobCount first (default 10_000).
 
     return statuses
 
