@@ -348,4 +348,4 @@ Details: Prerequisites
 
 Other Notes
 ~~~~~~~~~~~~~
-* The SSH Node Pools runtime consumes some resources. Therefore, if you setup SSH Node Pools on a 4 cpu 16 gb memory server, for instance, SkyPilot will not be able to provision jobs that require 4 cpus and 16 gb of memory. The actual resources that SkyPilot picks up will be slightly less than the machine spec.
+* The SSH Node Pools runtime consumes some resources. Therefore, if you set up SSH Node Pools on a server with 4 CPUs and 16 GB of memory, SkyPilot cannot provision jobs that require the full 4 CPUs and 16 GB of memory. The actual resources SkyPilot reports as available will be slightly less than the machine's specifications.
