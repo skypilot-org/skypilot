@@ -21,9 +21,13 @@ def test_api_server_memory(generic_cloud: str):
     metrics_url = f'{metrics_server_url}/metrics'
     metrics_result = {}
     container_name = docker_utils.get_container_name()
-    subprocess.run(
-        ['docker', 'update', '--cpus', '4', '--memory', '16g', container_name],
-        check=True)
+    # This is to get consistent API server resources despite the infra setup
+    # Update memory and memoryswap together to avoid daemon error about swap
+    subprocess.run([
+        'docker', 'update', '--cpus', '4', '--memory', '16g', '--memory-swap',
+        '16g', container_name
+    ],
+                   check=True)
     subprocess.run(['docker', 'restart', container_name], check=True)
 
     health_url = f'{smoke_tests_utils.get_api_server_url()}/api/health'
