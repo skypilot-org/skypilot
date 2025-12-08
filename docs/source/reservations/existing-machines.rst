@@ -346,7 +346,7 @@ Details: Prerequisites
 * When working with GPU instances, GPU drivers must be installed on the host. Verify by running ``nvidia-smi``.
 
 
-Other Notes
+Other notes
 -----------
 
 * The SSH Node Pools runtime consumes some resources. Therefore, if you set up SSH Node Pools on a server with 4 CPUs and 16 GB of memory, for instance, SkyPilot cannot provision jobs that require the full 4 CPUs and 16 GB of memory. The actual resources SkyPilot reports as available will be slightly less than the machine's specifications.
