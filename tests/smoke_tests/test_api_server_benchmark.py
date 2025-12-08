@@ -58,10 +58,14 @@ def test_api_server_memory(generic_cloud: str):
             f'python tests/load_tests/workload_benchmark.py -t 8 -r 10 -s workloads/basic.sh --cloud {generic_cloud}'
         ],
         teardown='sky down -y "load-test-*"; sky jobs cancel -a -y',
+        # Long timeout for benchmark to complete
+        timeout=3600,
     )
-    smoke_tests_utils.run_one_test(test)
-    stop_event.set()
-    metrics_thread.join()
+    try:
+        smoke_tests_utils.run_one_test(test)
+    finally:
+        stop_event.set()
+        metrics_thread.join()
     assert metrics_result, 'No metrics collected'
     total_peak_bytes = sum(
         max(value
