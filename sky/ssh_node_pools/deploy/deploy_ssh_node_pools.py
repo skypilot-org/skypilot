@@ -225,13 +225,27 @@ def start_agent_node(node,
 
 def check_gpu(node, user, ssh_key, use_ssh_config=False):
     """Check if a node has a GPU."""
-    cmd = 'command -v nvidia-smi &> /dev/null && nvidia-smi --query-gpu=gpu_name --format=csv,noheader &> /dev/null'
+    cmd = 'command -v nvidia-smi &> /dev/null && nvidia-smi --query-gpu=gpu_name --format=csv,noheader'
     result = run_remote(node,
                         cmd,
                         user,
                         ssh_key,
                         use_ssh_config=use_ssh_config,
                         silent=True)
+    if result is not None:
+        # Check that all GPUs have the same type.
+        # Currently, SkyPilot does not support heterogeneous GPU node
+        # (i.e. more than one GPU type on the same node).
+        node_gpu_type = None
+        for line in result.splitlines():
+            stripped_line = line.strip()
+            if node_gpu_type is None:
+                node_gpu_type = stripped_line
+            elif stripped_line != node_gpu_type:
+                raise RuntimeError(f'Node {node} has more than one GPU types '
+                                   f'({node_gpu_type} and {stripped_line}, potentially more). '
+                                   'SkyPilot does not support a node with multiple GPU types.')
+
     return result is not None
 
 
