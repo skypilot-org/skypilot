@@ -68,8 +68,8 @@ def test_multi_tenant(generic_cloud: str):
                 f'sky status -u | grep {name}-2 | grep STOPPED',
             ]),
     ]
-    if generic_cloud == 'kubernetes':
-        # Skip the stop test for Kubernetes, as stopping is not supported.
+    if generic_cloud in ('kubernetes', 'slurm'):
+        # Skip the stop test for Kubernetes and Slurm, as stopping is not supported.
         stop_test_cmds = []
 
     test = smoke_tests_utils.Test(
@@ -500,6 +500,7 @@ def test_api_server_start_stop(generic_cloud: str):
             f'sky launch -n {name} --cloud {generic_cloud} tests/test_yamls/apiserver-start-stop.yaml -y {smoke_tests_utils.LOW_RESOURCE_ARG}'
         ],
         f'sky down -y {name} || true',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -726,6 +727,7 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
          f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
          f'sky down -y {name} || true; sky down -y {name}-another || true; '
          f'sky jobs cancel -n {name}-job -y || true;'),
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
 

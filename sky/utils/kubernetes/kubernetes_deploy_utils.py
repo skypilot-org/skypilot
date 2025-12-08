@@ -1,13 +1,11 @@
-"""Utility functions for deploying Kubernetes clusters."""
+"""Utility functions for deploying local Kubernetes kind clusters."""
 import os
 import random
 import shlex
 import subprocess
 import tempfile
 import textwrap
-from typing import List, Optional, Tuple
-
-import colorama
+from typing import Optional, Tuple
 
 from sky import check as sky_check
 from sky import sky_logging
@@ -20,7 +18,6 @@ from sky.utils import log_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from sky.utils.kubernetes import deploy_ssh_node_pools
 
 logger = sky_logging.init_logger(__name__)
 
@@ -30,95 +27,6 @@ DEFAULT_LOCAL_CLUSTER_NAME = 'skypilot'
 LOCAL_CLUSTER_PORT_RANGE = 100
 LOCAL_CLUSTER_INTERNAL_PORT_START = 30000
 LOCAL_CLUSTER_INTERNAL_PORT_END = 30099
-
-
-def check_ssh_cluster_dependencies(
-        raise_error: bool = True) -> Optional[List[str]]:
-    """Checks if the dependencies for ssh cluster are installed.
-
-    Args:
-        raise_error: set to true when the dependency needs to be present.
-            set to false for `sky check`, where reason strings are compiled
-            at the end.
-
-    Returns: the reasons list if there are missing dependencies.
-    """
-    # error message
-    jq_message = ('`jq` is required to setup ssh cluster.')
-
-    # save
-    reasons = []
-    required_binaries = []
-
-    # Ensure jq is installed
-    try:
-        subprocess.run(['jq', '--version'],
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL,
-                       check=True)
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        required_binaries.append('jq')
-        reasons.append(jq_message)
-
-    if required_binaries:
-        reasons.extend([
-            'On Debian/Ubuntu, install the missing dependenc(ies) with:',
-            f'  $ sudo apt install {" ".join(required_binaries)}',
-            'On MacOS, install with: ',
-            f'  $ brew install {" ".join(required_binaries)}',
-        ])
-        if raise_error:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('\n'.join(reasons))
-        return reasons
-    return None
-
-
-def deploy_ssh_cluster(cleanup: bool = False,
-                       infra: Optional[str] = None,
-                       kubeconfig_path: Optional[str] = None):
-    """Deploy a Kubernetes cluster on SSH targets.
-
-    This function reads ~/.sky/ssh_node_pools.yaml and uses it to deploy a
-    Kubernetes cluster on the specified machines.
-
-    Args:
-        cleanup: Whether to clean up the cluster instead of deploying.
-        infra: Name of the cluster in ssh_node_pools.yaml to use.
-            If None, the first cluster in the file will be used.
-        kubeconfig_path: Path to save the Kubernetes configuration file.
-            If None, the default ~/.kube/config will be used.
-    """
-    check_ssh_cluster_dependencies()
-
-    action = 'Cleanup' if cleanup else 'Deployment'
-    msg_str = f'Initializing SSH Node Pools {action}...'
-
-    with rich_utils.safe_status(ux_utils.spinner_message(msg_str)):
-        try:
-            deploy_ssh_node_pools.deploy_clusters(
-                infra=infra, cleanup=cleanup, kubeconfig_path=kubeconfig_path)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.error(str(e))
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    'Failed to deploy SkyPilot on some Node Pools.') from e
-
-    logger.info('')
-    if cleanup:
-        logger.info(
-            ux_utils.finishing_message(
-                '🎉 SSH Node Pools cleaned up successfully.'))
-    else:
-        logger.info(
-            ux_utils.finishing_message(
-                '🎉 SSH Node Pools set up successfully. ',
-                follow_up_message=(
-                    f'Run `{colorama.Style.BRIGHT}'
-                    f'sky check ssh'
-                    f'{colorama.Style.RESET_ALL}` to verify access, '
-                    f'`{colorama.Style.BRIGHT}sky launch --infra ssh'
-                    f'{colorama.Style.RESET_ALL}` to launch a cluster.')))
 
 
 def generate_kind_config(port_start: int,

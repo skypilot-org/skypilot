@@ -223,7 +223,10 @@ def get_gcs_mount_cmd(bucket_name: str,
     """Returns a command to mount a GCS bucket using gcsfuse."""
     bucket_sub_path_arg = f'--only-dir {_bucket_sub_path} '\
         if _bucket_sub_path else ''
-    mount_cmd = ('gcsfuse -o allow_other '
+    log_file = '$(mktemp -t gcsfuse.XXXX.log)'
+    mount_cmd = (f'gcsfuse --log-file {log_file} '
+                 '--debug_fuse_errors '
+                 '-o allow_other '
                  '--implicit-dirs '
                  f'--stat-cache-capacity {_STAT_CACHE_CAPACITY} '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
@@ -646,8 +649,19 @@ def get_mounting_script(
                 else
                     echo "No goofys log file found in /tmp"
                 fi
+            elif [ "$MOUNT_BINARY" = "gcsfuse" ]; then
+                echo "Looking for gcsfuse log files..."
+                # Find gcsfuse log files in /tmp (created by mktemp -t gcsfuse.XXXX.log)
+                GCSFUSE_LOGS=$(ls -t /tmp/gcsfuse.*.log 2>/dev/null | head -1)
+                if [ -n "$GCSFUSE_LOGS" ]; then
+                    echo "=== GCSFuse log file contents ==="
+                    cat "$GCSFUSE_LOGS"
+                    echo "=== End of gcsfuse log file ==="
+                else
+                    echo "No gcsfuse log file found in /tmp"
+                fi
             fi
-            # TODO(kevin): Print logs from rclone, etc too for observability.
+            # TODO(kevin): Print logs from rclone, blobfuse2, etc too for observability.
             exit $MOUNT_EXIT_CODE
         fi
         echo "Mounting done."
