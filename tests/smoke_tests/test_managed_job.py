@@ -147,7 +147,6 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
-@pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_do  # DO does not support spot instances
 @pytest.mark.no_vast  # The pipeline.yaml uses other clouds
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
@@ -158,11 +157,14 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
 def test_job_pipeline(generic_cloud: str):
     """Test a job pipeline."""
     name = smoke_tests_utils.get_cluster_name()
-
+    use_spot = True
+    if generic_cloud in ('kubernetes', 'slurm'):
+        # Kubernetes and Slurm do not support spot instances
+        use_spot = False
     # Use Jinja templating to generate the pipeline YAML with the specific cloud
     template_str = pathlib.Path('tests/test_yamls/pipeline.yaml.j2').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(cloud=generic_cloud)
+    content = template.render(cloud=generic_cloud, use_spot=use_spot)
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
@@ -487,7 +489,6 @@ def test_managed_jobs_pipeline_recovery_gcp():
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
-@pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_do  # DO does not have spot instances
 @pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
@@ -498,10 +499,14 @@ def test_managed_jobs_pipeline_recovery_gcp():
 def test_managed_jobs_recovery_default_resources(generic_cloud: str):
     """Test managed job recovery for default resources."""
     name = smoke_tests_utils.get_cluster_name()
+    use_spot_arg = "--use-spot"
+    if generic_cloud in ('kubernetes', 'slurm'):
+        # Kubernetes and Slurm do not support spot instances
+        use_spot_arg = ""
     test = smoke_tests_utils.Test(
         'managed-spot-recovery-default-resources',
         [
-            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} --use-spot "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
+            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} {use_spot_arg} "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -926,7 +931,7 @@ def test_managed_jobs_storage(generic_cloud: str):
             name,
             f'{non_persistent_bucket_removed_check_cmd} && exit 1 || true')
         timeout *= 2
-    elif generic_cloud == 'kubernetes':
+    elif generic_cloud in ('kubernetes', 'slurm'):
         # With Kubernetes, we don't know which object storage provider is used.
         # Check S3, GCS and Azure if bucket exists in any of them.
         s3_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(

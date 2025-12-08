@@ -52,6 +52,7 @@ def test_provision_logs_streaming(generic_cloud: str):
 
 
 @pytest.mark.no_vast
+@pytest.mark.no_slurm  # Slurm does not support multi-node yet
 def test_worker_provision_logs_streaming(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
 

@@ -5,13 +5,15 @@ import subprocess
 from typing import Any, Callable, Dict, List, Optional
 import uuid
 
+import colorama
 import yaml
 
+from sky import sky_logging
 from sky.utils import ux_utils
 
+logger = sky_logging.init_logger(__name__)
+
 DEFAULT_SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
-RED = '\033[0;31m'
-NC = '\033[0m'  # No color
 
 
 def check_host_in_ssh_config(hostname: str) -> bool:
@@ -186,8 +188,9 @@ def prepare_hosts_info(
         else:
             # It's a dict with potential overrides
             if 'ip' not in host:
-                print(f'{RED}Warning: Host missing \'ip\' field, '
-                      f'skipping: {host}{NC}')
+                logger.warning(f'{colorama.Fore.RED}Warning: Host missing'
+                               f'\'ip\' field, skipping: {host}'
+                               f'{colorama.Style.RESET_ALL}')
                 continue
 
             # Check if this is an SSH config hostname
