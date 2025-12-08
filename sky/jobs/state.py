@@ -97,7 +97,7 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('local_log_file', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
     sqlalchemy.Column('logs_cleaned_at', sqlalchemy.Float, server_default=None),
-    sqlalchemy.Column('full_resources', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('full_resources', sqlalchemy.JSON, server_default=None),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -1888,26 +1888,33 @@ def get_pool_worker_used_resources(
             sqlalchemy.and_(spot_table.c.spot_job_id.in_(job_ids)))
         rows = session.execute(query).fetchall()
 
-        # Parse resources strings into Resources objects and sum them using +
-        total_resources = None
+        resource_configs = []
         for row in rows:
             if row[0] is None:
                 # We don't have full_resources for this job. We should return
                 # none since we can't make any guarantees about what resources
                 # are being used.
                 return None
-            parsed = resources_lib.Resources.from_resources_string(row[0])
-            if parsed is None:
-                # We couldn't parse the resources string. We should return
-                # none since we can't make any guarantees about what resources
-                # are being used.
-                return None
-            if total_resources is None:
-                total_resources = parsed
-            else:
-                total_resources = total_resources + parsed
+            resource_configs.append(row[0])
 
-        return total_resources
+    # Parse resources dicts into Resources objects and sum them using +
+    total_resources = None
+    # full_resources is now stored as JSON dict from to_yaml_config()
+    for resource_config in resource_configs:
+        resources_set = resources_lib.Resources.from_yaml_config(
+            resource_config)
+        if len(resources_set) == 0:
+            # We couldn't parse the resources JSON. We should return
+            # none since we can't make any guarantees about what resources
+            # are being used.
+            return None
+        # Get the first Resources object from the set/list
+        parsed = next(iter(resources_set))
+        if total_resources is None:
+            total_resources = parsed
+        else:
+            total_resources = total_resources + parsed
+    return total_resources
 
 
 @_init_db_async
@@ -2024,7 +2031,8 @@ async def set_starting_async(job_id: int,
                              resources_str: str,
                              specs: Dict[str, Union[str, int]],
                              callback_func: AsyncCallbackType,
-                             full_resources_str: Optional[str] = None):
+                             full_resources_json: Optional[Dict[str,
+                                                                Any]] = None):
     """Set the task to starting state."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     logger.info('Launching the spot cluster...')
@@ -2036,8 +2044,8 @@ async def set_starting_async(job_id: int,
             spot_table.c.run_timestamp: run_timestamp,
             spot_table.c.specs: json.dumps(specs),
         }
-        if full_resources_str is not None:
-            values[spot_table.c.full_resources] = full_resources_str
+        if full_resources_json is not None:
+            values[spot_table.c.full_resources] = full_resources_json
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(

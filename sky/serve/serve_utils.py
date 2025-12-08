@@ -731,7 +731,7 @@ def _get_service_status(
             for replica_info in record['replica_info']:
                 job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
                     service_name, replica_info['name'])
-                replica_info['used_by'] = job_ids if job_ids else None
+                replica_info['used_by'] = job_ids
     return record
 
 
@@ -811,6 +811,89 @@ def get_ready_replicas(
     ]
 
 
+def _task_fits(task_resources: 'resources_lib.Resources',
+               free_resources: 'resources_lib.Resources') -> bool:
+    """Check if the task resources fit in the free resources."""
+    if not task_resources.less_demanding_than(free_resources,
+                                              check_cloud=False):
+        return False
+    if task_resources.cpus is not None:
+        if (free_resources.cpus is None or
+                task_resources.cpus > free_resources.cpus):
+            return False
+    if task_resources.memory is not None:
+        if (free_resources.memory is None or
+                task_resources.memory > free_resources.memory):
+            return False
+    return True
+
+
+def _is_empty_resource(resource: 'resources_lib.Resources') -> bool:
+    # Returns True if this resource object does not specify any resources.
+    return (resource.cpus is None and resource.memory is None and
+            resource.accelerators is None)
+
+
+def get_free_worker_resources(
+        pool: str) -> Optional[Dict[str, Optional[resources_lib.Resources]]]:
+    """Get free resources for each worker in a pool.
+
+    Args:
+        pool: Pool name (service name)
+
+    Returns:
+        Dictionary mapping cluster_name (worker) to free Resources object (or
+        None if worker is not available or has no free resources).
+    """
+
+    free_resources: Dict[str, Optional[resources_lib.Resources]] = {}
+    replicas = serve_state.get_replica_infos(pool)
+
+    for replica_info in replicas:
+        cluster_name = replica_info.cluster_name
+
+        # Get cluster handle
+        handle = replica_info.handle()
+        if handle is None or handle.launched_resources is None:
+            free_resources[cluster_name] = None
+            continue
+
+        total_resources = handle.launched_resources
+
+        # Get job IDs running on this worker
+        job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
+            pool, cluster_name)
+
+        # Get used resources
+        # TODO(lloyd): We should batch the database calls here so that we
+        # make a single call to get all the used resources for all the jobs.
+        used_resources = managed_job_state.get_pool_worker_used_resources(
+            set(job_ids))
+        if used_resources is None:
+            # We failed to get the used resources. We should return None since
+            # we can't make any guarantees about what resources are being used.
+            logger.warning(
+                f'Failed to get used resources for cluster {cluster_name!r}')
+            return None
+
+        if _is_empty_resource(used_resources):
+            # We encountered a job that has no resources specified. We
+            # will not consider it for resource-aware scheduling so it must
+            # be scheduled on its own. To do this we will set the free
+            # worker resources to nothing by returning an empty resource
+            # object.
+            logger.debug(f'Job {job_ids} has no resources specified. '
+                         'Skipping resource-aware scheduling for cluster '
+                         f'{cluster_name!r}')
+            free_resources[cluster_name] = resources_lib.Resources()
+        else:
+            # Calculate free resources using - operator
+            free = total_resources - used_resources
+            free_resources[cluster_name] = free
+
+    return free_resources
+
+
 def get_next_cluster_name(
     service_name: str,
     job_id: int,
@@ -841,44 +924,64 @@ def get_next_cluster_name(
     if not service_status['pool']:
         logger.error(f'Service {service_name!r} is not a pool.')
         return None
+
     with filelock.FileLock(get_service_filelock_path(service_name)):
+        free_resources = get_free_worker_resources(service_name)
         logger.debug(f'Get next cluster name for pool {service_name!r}')
         ready_replicas = get_ready_replicas(service_name)
 
         logger.debug(f'Ready replicas: {ready_replicas!r}')
 
         idle_replicas: List['replica_managers.ReplicaInfo'] = []
-        free_resources_dict = serve_state.get_free_worker_resources(
-            service_name)
 
         # If task_resources is provided, use resource-aware scheduling
-        if task_resources is not None and free_resources_dict is not None:
-            # Normalize task_resources to a list
-            if isinstance(task_resources, resources_lib.Resources):
-                task_resources_list = [task_resources]
-            elif isinstance(task_resources, (set, list)):
-                task_resources_list = list(task_resources)
-            else:
-                task_resources_list = []
+        # Normalize task_resources to a list
+        if isinstance(task_resources, resources_lib.Resources):
+            task_resources_list = [task_resources]
+        elif isinstance(task_resources, (set, list)):
+            task_resources_list = list(task_resources)
+        else:
+            task_resources_list = []
 
+        # We should do resource aware scheduling if:
+        # 1. There are task resources.
+        # 2. The first task resource has some resources listed.
+        # 3. There are free resources.
+        # 4. The first free resource has some resources listed.
+        resource_aware = len(task_resources_list) > 0
+        resource_aware = (resource_aware and
+                          not _is_empty_resource(task_resources_list[0]))
+        resource_aware = resource_aware and free_resources is not None
+        if free_resources is not None:
+            first_free_resource = list(free_resources.values())[0]
+            if first_free_resource is not None:
+                resource_aware = resource_aware and not _is_empty_resource(
+                    first_free_resource)
+            else:
+                resource_aware = False
+        else:
+            resource_aware = False
+
+        if resource_aware:
             for replica_info in ready_replicas:
                 cluster_name = replica_info.cluster_name
-                free_resources = free_resources_dict.get(cluster_name)
+                assert free_resources is not None
+                free_resources_on_worker = free_resources.get(cluster_name)
                 logger.debug(f'Free resources for cluster {cluster_name!r}: '
-                             f'{free_resources!r}')
+                             f'{free_resources_on_worker!r}')
 
                 # Skip if worker has no free resources available
-                if free_resources is None:
+                if free_resources_on_worker is None:
                     continue
 
                 # Check if all of the task resource options fit
                 fits = True
                 for task_res in task_resources_list:
                     logger.debug(f'Task resources: {task_res!r}')
-                    if not task_res.less_resources_than(free_resources):
+                    if not _task_fits(task_res, free_resources_on_worker):
                         logger.debug(f'Task resources {task_res!r} does not fit'
-                                     f' in free resources {free_resources!r}')
-                        fits = False
+                                     ' in free resources '
+                                     f'{free_resources_on_worker!r}')
                         break
                 if fits:
                     idle_replicas.append(replica_info)

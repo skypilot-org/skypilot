@@ -1563,8 +1563,8 @@ def test_pool_scale_with_workdir(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-pytest.mark.no_remote_server  # see note 1 above
-def test_pool_multiple_jobs_single_worker(generic_cloud: str):
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_resource_multiple_jobs_single_worker(generic_cloud: str):
     """Test that multiple jobs can run on a single worker when resources allow."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
@@ -1602,7 +1602,7 @@ def test_pool_multiple_jobs_single_worker(generic_cloud: str):
                 write_yaml(job_yaml_2, job_config_2)
 
                 test = smoke_tests_utils.Test(
-                    'test_pool_multiple_jobs_single_worker',
+                    'test_pool_resource_multiple_jobs_single_worker',
                     [
                         _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                             pool_name=pool_name, pool_yaml=pool_yaml.name),
@@ -1628,7 +1628,7 @@ def test_pool_multiple_jobs_single_worker(generic_cloud: str):
 
 
 @pytest.mark.no_remote_server  # see note 1 above
-def test_pool_resource_contention_single_worker(generic_cloud: str):
+def test_pool_resource_contention_two_workers(generic_cloud: str):
     """Test that only one job runs when resources don't allow both."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
@@ -1636,62 +1636,67 @@ def test_pool_resource_contention_single_worker(generic_cloud: str):
 
     # Pool with 2 CPUs and 4GB memory, single worker
     pool_config = basic_pool_conf(
-        num_workers=1,
+        num_workers=2,
         infra=generic_cloud,
         cpus='2',
         memory='4GB',
     )
 
-    # Two jobs, each taking 2 CPUs and 4GB memory (can't both fit)
-    job_name_1 = f'{name}-job-1'
-    job_name_2 = f'{name}-job-2'
-    job_config_1 = basic_job_conf(
-        job_name=job_name_1,
-        run_cmd='echo "Job 1 running" && sleep infinity',
-        cpus='2',
-        memory='4GB',
-    )
-    job_config_2 = basic_job_conf(
-        job_name=job_name_2,
-        run_cmd='echo "Job 2 running" && sleep infinity',
-        cpus='2',
-        memory='4GB',
-    )
+    def _get_job_config(job_name: str) -> str:
+        return basic_job_conf(
+            job_name=job_name,
+            run_cmd=f'echo "Job {job_name} running" && sleep infinity',
+            cpus='2',
+            memory='4GB',
+        )
+
+    num_jobs = 4
+
+    # Four jobs, each taking 2 CPUs and 4GB memory (only two can fit)
+    job_names = [f'{name}-job-{i}' for i in range(num_jobs)]
+    job_configs = [_get_job_config(job_name) for job_name in job_names]
 
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         with tempfile.NamedTemporaryFile(delete=True) as job_yaml_1:
             with tempfile.NamedTemporaryFile(delete=True) as job_yaml_2:
-                write_yaml(pool_yaml, pool_config)
-                write_yaml(job_yaml_1, job_config_1)
-                write_yaml(job_yaml_2, job_config_2)
+                with tempfile.NamedTemporaryFile(delete=True) as job_yaml_3:
+                    with tempfile.NamedTemporaryFile(delete=True) as job_yaml_4:
 
-                test = smoke_tests_utils.Test(
-                    'test_pool_resource_contention_single_worker',
-                    [
-                        _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
-                            pool_name=pool_name, pool_yaml=pool_yaml.name),
-                        wait_until_pool_ready(pool_name, timeout=timeout),
-                        # Launch first job
-                        _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
-                            pool_name=pool_name, job_yaml=job_yaml_1.name),
-                        # Launch second job
-                        _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
-                            pool_name=pool_name, job_yaml=job_yaml_2.name),
-                        # Verify only one job is RUNNING
-                        check_num_running_jobs(
-                            [job_name_1, job_name_2], 1, timeout=timeout),
-                        # Wait 30 seconds
-                        'sleep 30',
-                        # Verify only one job is RUNNING
-                        check_num_running_jobs(
-                            [job_name_1, job_name_2], 1, timeout=30),
-                    ],
-                    timeout=timeout,
-                    teardown=cancel_jobs_and_teardown_pool(pool_name,
-                                                           timeout=5),
-                )
+                        write_yaml(pool_yaml, pool_config)
+                        yamls = [job_yaml_1, job_yaml_2, job_yaml_3, job_yaml_4]
+                        for job_yaml, job_config in zip(yamls, job_configs):
+                            write_yaml(job_yaml, job_config)
 
-                smoke_tests_utils.run_one_test(test)
+                        test = smoke_tests_utils.Test(
+                            'test_pool_resource_contention_two_workers',
+                            [
+                                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                                    pool_name=pool_name,
+                                    pool_yaml=pool_yaml.name),
+                                wait_until_pool_ready(pool_name,
+                                                      timeout=timeout),
+                                # Launch all jobs
+                                *[
+                                    _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                                        pool_name=pool_name,
+                                        job_yaml=job_yaml.name)
+                                    for job_yaml in yamls
+                                ],
+                                # Verify only one job is RUNNING
+                                check_num_running_jobs(
+                                    job_names, 2, timeout=timeout),
+                                # Wait 30 seconds
+                                'sleep 30',
+                                # Verify only one job is RUNNING
+                                check_num_running_jobs(job_names, 2,
+                                                       timeout=30),
+                            ],
+                            timeout=timeout,
+                            teardown=cancel_jobs_and_teardown_pool(pool_name,
+                                                                   timeout=5),
+                        )
+
+                        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_remote_server  # see note 1 above
@@ -1750,6 +1755,83 @@ def test_pool_resource_reclamation(generic_cloud: str):
                         # Wait for second job to succeed (should run after first finishes)
                         wait_until_job_status(job_name_2, ['SUCCEEDED'],
                                               timeout=timeout),
+                    ],
+                    timeout=timeout,
+                    teardown=cancel_jobs_and_teardown_pool(pool_name,
+                                                           timeout=5),
+                )
+
+                smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_resource_fallback_to_unaware(generic_cloud: str):
+    """Test that resources are reclaimed when jobs finish, allowing queued jobs to run."""
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+
+    # Pool with 2 CPUs and 4GB memory, single worker
+    pool_config = basic_pool_conf(
+        num_workers=1,
+        infra=generic_cloud,
+        cpus='2',
+        memory='4GB',
+    )
+
+    # Two jobs, each taking 2 CPUs and 4GB memory (can't both fit initially)
+    resource_aware_job_name = f'{name}-job-1'
+    resource_unaware_job_name = f'{name}-job-2'
+
+    resource_aware_job_config = basic_job_conf(
+        job_name=resource_aware_job_name,
+        run_cmd='echo "hi"',
+        cpus='2',
+        memory='4GB',
+    )
+    resource_unaware_job_config = basic_job_conf(
+        job_name=resource_unaware_job_name,
+        run_cmd='sleep 300',
+    )
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(
+                delete=True) as resource_aware_job_yaml:
+            with tempfile.NamedTemporaryFile(
+                    delete=True) as resource_unaware_job_yaml:
+                write_yaml(pool_yaml, pool_config)
+                write_yaml(resource_aware_job_yaml, resource_aware_job_config)
+                write_yaml(resource_unaware_job_yaml,
+                           resource_unaware_job_config)
+
+                test = smoke_tests_utils.Test(
+                    'test_pool_resource_fallback_to_unaware',
+                    [
+                        _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name, pool_yaml=pool_yaml.name),
+                        wait_until_pool_ready(pool_name, timeout=timeout),
+                        # Launch resource unaware job
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name,
+                            job_yaml=resource_unaware_job_yaml.name),
+                        wait_until_job_status(resource_unaware_job_name,
+                                              ['RUNNING'],
+                                              timeout=timeout),
+                        # Launch second job
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name,
+                            job_yaml=resource_aware_job_yaml.name),
+
+                        # Make sure it's pending.
+                        wait_until_job_status(resource_aware_job_name,
+                                              ['PENDING'],
+                                              timeout=timeout),
+
+                        # Now we sleep to give time for potentital scheduling.
+                        'sleep 30',
+                        # The job should still be pending.
+                        wait_until_job_status(
+                            resource_aware_job_name, ['PENDING'], timeout=1),
                     ],
                     timeout=timeout,
                     teardown=cancel_jobs_and_teardown_pool(pool_name,

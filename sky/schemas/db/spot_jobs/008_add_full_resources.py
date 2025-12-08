@@ -25,7 +25,7 @@ def upgrade():
     with op.get_context().autocommit_block():
         db_utils.add_column_to_table_alembic('spot',
                                              'full_resources',
-                                             sa.Text(),
+                                             sa.JSON(),
                                              server_default=None)
 
 

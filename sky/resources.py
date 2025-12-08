@@ -1645,6 +1645,7 @@ class Resources:
         other: Union[List['Resources'], 'Resources'],
         requested_num_nodes: int = 1,
         check_ports: bool = False,
+        check_cloud: bool = True,
     ) -> bool:
         """Returns whether this resources is less demanding than the other.
 
@@ -1659,19 +1660,21 @@ class Resources:
             resources_list = [self.less_demanding_than(o) for o in other]
             return requested_num_nodes <= sum(resources_list)
 
-        assert other.cloud is not None, 'Other cloud must be specified'
+        if check_cloud:
+            assert other.cloud is not None, 'Other cloud must be specified'
 
-        if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
-            return False
-        # self.cloud <= other.cloud
+            if self.cloud is not None and not self.cloud.is_same_cloud(
+                    other.cloud):
+                return False
+            # self.cloud <= other.cloud
 
-        if self.region is not None and self.region != other.region:
-            return False
-        # self.region <= other.region
+            if self.region is not None and self.region != other.region:
+                return False
+            # self.region <= other.region
 
-        if self.zone is not None and self.zone != other.zone:
-            return False
-        # self.zone <= other.zone
+            if self.zone is not None and self.zone != other.zone:
+                return False
+            # self.zone <= other.zone
 
         if self.image_id is not None:
             if other.image_id is None:
@@ -1743,8 +1746,10 @@ class Resources:
             # On Kubernetes, we can't launch a task that requires FUSE on a pod
             # that wasn't initialized with FUSE support at the start.
             # Other clouds don't have this limitation.
-            if other.cloud.is_same_cloud(clouds.Kubernetes()):
-                return False
+            if check_cloud:
+                assert other.cloud is not None
+                if other.cloud.is_same_cloud(clouds.Kubernetes()):
+                    return False
 
         # self <= other
         return True
@@ -1791,60 +1796,6 @@ class Resources:
             self._ports is None,
             self._docker_login_config is None,
         ])
-
-    @classmethod
-    def from_resources_string(
-            cls, resources_str: Optional[str]) -> Optional['Resources']:
-        """Parse a resources string into a Resources object.
-
-        Args:
-            resources_str: String in format like "CPU:2, V100:1" or "CPU:2" or
-            None
-
-        Returns:
-            Resources object with parsed resources, or None if empty/None string
-        """
-        if not resources_str:
-            return None
-
-        # Parse format like "CPU:2, V100:1" or "CPU:2"
-        cpus = None
-        memory = None
-        accelerators = {}
-
-        parts = [part.strip() for part in resources_str.split(',')]
-        for part in parts:
-            if ':' not in part:
-                continue
-            key, value = part.split(':', 1)
-            key = key.strip()
-            value = value.strip()
-
-            try:
-                if key.upper() == 'CPU':
-                    cpus = value
-                elif key.lower() in ('memory', 'mem'):
-                    memory = value
-                else:
-                    # Treat as accelerator type
-                    try:
-                        acc_count = float(value)
-                        accelerators[key] = acc_count
-                    except ValueError:
-                        # If value is not a number, skip
-                        continue
-            except Exception as e:  # pylint: disable=broad-except
-                # Skip malformed entries
-                logger.error(f'Failed to parse resources string: {e}')
-                continue
-
-        # Only create Resources object if we have at least one resource
-        if cpus is None and memory is None and not accelerators:
-            return None
-
-        return cls(cpus=cpus,
-                   memory=memory,
-                   accelerators=accelerators if accelerators else None)
 
     def __add__(self, other: Optional['Resources']) -> Optional['Resources']:
         """Add two Resources objects together.
@@ -1940,44 +1891,6 @@ class Resources:
         return Resources(cpus=free_cpus,
                          memory=free_memory,
                          accelerators=free_accelerators)
-
-    def less_resources_than(self, other: 'Resources') -> bool:
-        """Returns whether this Resources is less demanding than the other.
-        Only checks CPU, memory and accelerators. Returns True if this Resources
-        object is less than or equal to the other."""
-
-        my_cpus = _parse_value(self.cpus) or 0
-        other_cpus = _parse_value(other.cpus) or 0
-        my_memory = _parse_value(self.memory) or 0
-        other_memory = _parse_value(other.memory) or 0
-        my_accelerators = (self.accelerators
-                           if self.accelerators is not None else {})
-        other_accelerators = (other.accelerators
-                              if other.accelerators is not None else {})
-
-        if my_cpus <= other_cpus:
-            return True
-        if my_memory <= other_memory:
-            return True
-        for acc in other_accelerators:
-            if (acc not in my_accelerators or
-                    my_accelerators[acc] <= other_accelerators[acc]):
-                return True
-
-        return False
-
-    def to_simple_string(self) -> str:
-        """Returns a simple string representation of the Resources that can be
-        parsed by Resources.from_resources_string."""
-        resource_list = []
-        if self.cpus is not None:
-            resource_list.append(f'CPU:{self.cpus}')
-        if self.memory is not None:
-            resource_list.append(f'Memory:{self.memory}')
-        if self.accelerators is not None:
-            for acc, count in self.accelerators.items():
-                resource_list.append(f'{acc}:{count}')
-        return ','.join(resource_list)
 
     def copy(self, **override) -> 'Resources':
         """Returns a copy of the given Resources."""
