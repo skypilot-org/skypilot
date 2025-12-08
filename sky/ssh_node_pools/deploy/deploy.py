@@ -73,6 +73,7 @@ def run(cleanup: bool = False,
                 raise RuntimeError(
                     'Failed to deploy SkyPilot on some Node Pools.') from e
 
+    # Add empty line for ux-purposes.
     logger.info('')
     if cleanup:
         logger.info(
