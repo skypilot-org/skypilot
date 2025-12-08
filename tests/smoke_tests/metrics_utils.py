@@ -16,7 +16,7 @@ class AggregatedMetric(TypedDict):
     unit: str
 
 
-@dataclasses.datalcass
+@dataclasses.dataclass
 class PerKeyDiff:
     key_label: str
     baseline: float
@@ -25,7 +25,7 @@ class PerKeyDiff:
     increase_pct: float
 
 
-@dataclasses.datalcass
+@dataclasses.dataclass
 class AggregateDiff:
     total_baseline: float
     total_actual: float
@@ -182,9 +182,9 @@ def compare_metrics(baseline: Dict[MetricKey, TimeSeries],
     ])
 
     if aggregate_checker:
-        aggregate_failures = aggregate_checker(total_baseline, total_actual,
-                                               total_increase,
-                                               total_increase_pct)
+        aggregate_failures = aggregate_checker(
+            AggregateDiff(total_baseline, total_actual, total_increase,
+                          total_increase_pct))
         failed_checks.extend(aggregate_failures)
 
     print(table.get_string(), file=sys.stderr, flush=True)
