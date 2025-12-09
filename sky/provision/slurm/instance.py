@@ -117,6 +117,14 @@ def _create_virtual_instance(
         cluster_name_on_cloud,
         ['pending', 'running'],
     )
+
+    # Get provision_timeout from config, defaulting to 10 seconds
+    provision_timeout = skypilot_config.get_effective_region_config(
+        cloud='slurm',
+        region=region,
+        keys=('provision_timeout',),
+        default_value=None)
+
     if existing_jobs:
         assert len(existing_jobs) == 1, (
             f'Multiple jobs found with name {cluster_name_on_cloud}: '
@@ -125,12 +133,6 @@ def _create_virtual_instance(
         job_id = existing_jobs[0]
         logger.debug(f'Job with name {cluster_name_on_cloud} already exists '
                      f'(JOBID: {job_id})')
-        # Get provision_timeout from config, defaulting to 10 seconds
-        provision_timeout = skypilot_config.get_effective_region_config(
-            cloud='slurm',
-            region=region,
-            keys=('provision_timeout',),
-            default_value=None)
 
         # Wait for nodes to be allocated (job might be in PENDING state)
         nodes, _ = client.get_job_nodes(job_id,
@@ -249,13 +251,6 @@ def _create_virtual_instance(
     logger.debug(f'Successfully submitted Slurm job {job_id} to partition '
                  f'{partition} for cluster {cluster_name_on_cloud} '
                  f'with {num_nodes} nodes')
-
-    # Get provision_timeout from config, defaulting to 10 seconds
-    provision_timeout = skypilot_config.get_effective_region_config(
-        cloud='slurm',
-        region=region,
-        keys=('provision_timeout',),
-        default_value=None)
 
     nodes, _ = client.get_job_nodes(job_id,
                                     wait=True,
