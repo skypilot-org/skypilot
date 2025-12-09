@@ -50,4 +50,3 @@ def test_task_fits():
     task_resources = Resources(cpus=1, memory=1, cloud=clouds.AWS())
     free_resources = Resources(cpus=None, memory=None, cloud=clouds.AWS())
     assert serve_utils._task_fits(task_resources, free_resources) is False
-
