@@ -426,7 +426,7 @@ class SlurmClient:
         Returns:
             List of SlurmPartition objects.
         """
-        cmd = 'scontrol show partition -o'
+        cmd = 'scontrol show partitions -o'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
                                               stream_logs=False)
