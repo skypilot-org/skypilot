@@ -712,11 +712,14 @@ def _get_request_no_lock(
         columns_str = ', '.join(fields)
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute((f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-                        'WHERE request_id LIKE ?'), (request_id + '%',))
-        row = cursor.fetchone()
-        if row is None:
-            return None
+        try:
+            cursor.execute((f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+                            'WHERE request_id LIKE ?'), (request_id + '%',))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+        finally:
+            cursor.close()
     if fields:
         row = _update_request_row_fields(row, fields)
     return Request.from_row(row)
@@ -1032,7 +1035,10 @@ def _add_or_update_request_no_lock(request: Request):
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(_add_or_update_request_sql, request.to_row())
+        try:
+            cursor.execute(_add_or_update_request_sql, request.to_row())
+        finally:
+            cursor.close()
 
 
 async def _add_or_update_request_no_lock_async(request: Request):
