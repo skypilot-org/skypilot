@@ -2816,6 +2816,13 @@ class SkyletClient:
     ) -> 'managed_jobsv1_pb2.CancelJobsResponse':
         return self._managed_jobs_stub.CancelJobs(request, timeout=timeout)
 
+    def update_replicas(
+        self,
+        request: 'servev1_pb2.UpdateReplicasRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'servev1_pb2.UpdateReplicasResponse':
+        return self._serve_stub.UpdateReplicas(request, timeout=timeout)
+
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):

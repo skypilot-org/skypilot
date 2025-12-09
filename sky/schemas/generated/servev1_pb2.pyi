@@ -113,3 +113,19 @@ class UpdateServiceRequest(_message.Message):
 class UpdateServiceResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
+
+class UpdateReplicasRequest(_message.Message):
+    __slots__ = ("service_name", "min_replicas", "pool")
+    SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
+    MIN_REPLICAS_FIELD_NUMBER: _ClassVar[int]
+    POOL_FIELD_NUMBER: _ClassVar[int]
+    service_name: str
+    min_replicas: int
+    pool: bool
+    def __init__(self, service_name: _Optional[str] = ..., min_replicas: _Optional[int] = ..., pool: bool = ...) -> None: ...
+
+class UpdateReplicasResponse(_message.Message):
+    __slots__ = ("message",)
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    message: str
+    def __init__(self, message: _Optional[str] = ...) -> None: ...

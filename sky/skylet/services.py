@@ -24,6 +24,7 @@ from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
+from sky.utils import message_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -156,6 +157,22 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
             serve_utils.update_service_encoded(service_name, version, mode,
                                                pool)
             return servev1_pb2.UpdateServiceResponse()
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def UpdateReplicas(  # type: ignore[return]
+            self, request: servev1_pb2.UpdateReplicasRequest,
+            context: grpc.ServicerContext
+    ) -> servev1_pb2.UpdateReplicasResponse:
+        """Update replicas directly without creating a new version"""
+        try:
+            service_name = request.service_name
+            min_replicas = request.min_replicas
+            pool = request.pool
+            encoded = serve_utils.update_replicas_encoded(
+                service_name, min_replicas, pool)
+            message = message_utils.decode_payload(encoded)
+            return servev1_pb2.UpdateReplicasResponse(message=message)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 

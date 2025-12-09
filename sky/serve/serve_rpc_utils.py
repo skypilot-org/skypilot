@@ -89,6 +89,25 @@ class TerminateServicesRequestConverter:
         return service_names, purge, pool
 
 
+class UpdateReplicasRequestConverter:
+    """Converter for UpdateReplicasRequest"""
+
+    @classmethod
+    def to_proto(cls, service_name: str, min_replicas: int,
+                 pool: bool) -> 'servev1_pb2.UpdateReplicasRequest':
+        request = servev1_pb2.UpdateReplicasRequest()
+        request.service_name = service_name
+        request.min_replicas = min_replicas
+        request.pool = pool
+        return request
+
+    @classmethod
+    def from_proto(
+            cls, proto: 'servev1_pb2.UpdateReplicasRequest'
+    ) -> Tuple[str, int, bool]:
+        return proto.service_name, proto.min_replicas, proto.pool
+
+
 # ========================= gRPC Runner for Sky Serve =========================
 
 
@@ -177,3 +196,15 @@ class RpcRunner:
                                                    pool=pool)
         backend_utils.invoke_skylet_with_retries(lambda: backends.SkyletClient(
             handle.get_grpc_channel()).update_service(request))
+
+    @classmethod
+    def update_replicas(cls, handle: backends.CloudVmRayResourceHandle,
+                        service_name: str, min_replicas: int,
+                        pool: bool) -> str:
+        assert handle.is_grpc_enabled_with_flag
+        request = UpdateReplicasRequestConverter.to_proto(
+            service_name, min_replicas, pool)
+        response = backend_utils.invoke_skylet_with_retries(
+            lambda: backends.SkyletClient(handle.get_grpc_channel()
+                                         ).update_replicas(request))
+        return response.message

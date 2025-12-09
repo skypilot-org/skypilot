@@ -472,6 +472,13 @@ def update(
     workers: Optional[int] = None,
 ) -> None:
     """Updates an existing service or pool."""
+
+    def _validate_task(task: 'task_lib.Task') -> 'task_lib.Task':
+        dag, _ = admin_policy_utils.apply(
+            task,
+            request_name=request_names.AdminPolicyRequestName.SERVE_UPDATE)
+        return dag.tasks[0]
+
     noun = 'pool' if pool else 'service'
     capnoun = noun.capitalize()
 
@@ -500,8 +507,8 @@ def update(
                                f'To spin up a {noun}, use {ux_utils.BOLD}'
                                f'{cmd}{ux_utils.RESET_BOLD}')
 
-    # If task is None and workers is specified, load existing configuration
-    # and update replica count.
+    # If task is None and workers is specified, try direct replica update first
+    # before falling back to version-based update.
     if task is None:
         if workers is None:
             with ux_utils.print_exception_no_traceback():
@@ -528,6 +535,76 @@ def update(
                                    f'existing {noun} {service_name!r}')
         task.set_service(task.service.copy(min_replicas=workers))
 
+        # See if the updated number of replicas is valid based on the admin
+        # policy before making the direct update.
+        task = _validate_task(task)
+        assert task.service is not None
+        if task.service.min_replicas != workers:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'{noun} {service_name!r} cannot be updated '
+                    f'to {workers} workers based on the admin policy.')
+
+        # Try direct replica update first (without creating a new version)
+        use_legacy = not handle.is_grpc_enabled_with_flag
+        direct_update_succeeded = False
+
+        if not use_legacy:
+            try:
+                serve_rpc_utils.RpcRunner.update_replicas(
+                    handle, service_name, workers, pool)
+                direct_update_succeeded = True
+                logger.info(
+                    f'{colorama.Fore.GREEN}Successfully updated {noun} '
+                    f'{service_name!r} to {workers} workers using direct update'
+                    f'.{colorama.Style.RESET_ALL}')
+            except Exception as e:  # pylint: disable=broad-except
+                # If direct update fails, fall back to version-based update
+                logger.debug(f'Direct replica update failed: {e}. '
+                             'Falling back to version-based update.')
+                use_legacy = True
+
+        if use_legacy:
+            try:
+                code = serve_utils.ServeCodeGen.update_replicas(
+                    service_name, workers, pool)
+                returncode, _, stderr = backend.run_on_head(
+                    handle,
+                    code,
+                    require_outputs=True,
+                    stream_logs=False,
+                    separate_stderr=True)
+                try:
+                    subprocess_utils.handle_returncode(returncode,
+                                                       code, 'Failed to update '
+                                                       f'{noun} replicas',
+                                                       stderr,
+                                                       stream_logs=True)
+                    direct_update_succeeded = True
+                    logger.info(
+                        f'{colorama.Fore.GREEN}Successfully updated {noun} '
+                        f'{service_name!r} to {workers} workers using direct '
+                        f'update.{colorama.Style.RESET_ALL}')
+                except exceptions.CommandError:
+                    # Fall back to version-based update
+                    logger.warning('Direct replica update not supported. '
+                                   'Falling back to version-based update.')
+            except Exception as e:  # pylint: disable=broad-except
+                # Fall back to version-based update
+                logger.warning(f'Direct replica update failed: {e}. '
+                               'Falling back to version-based update.')
+
+        # If direct update succeeded, return early, otherwise fall back to
+        # version-based update.
+        if direct_update_succeeded:
+            cmd = 'sky jobs pool status' if pool else 'sky serve status'
+            logger.info(
+                f'{colorama.Fore.GREEN}{capnoun} {service_name!r} replicas '
+                f'updated.{colorama.Style.RESET_ALL}\n'
+                f'Please use {ux_utils.BOLD}{cmd} {service_name} '
+                f'{ux_utils.RESET_BOLD}to check the latest status.')
+            return
+
     task.validate()
     serve_utils.validate_service_task(task, pool=pool)
 
@@ -537,9 +614,7 @@ def update(
     # and get the mutated config.
     # TODO(cblmemo,zhwu): If a user sets a new skypilot_config, the update
     # will not apply the config.
-    dag, _ = admin_policy_utils.apply(
-        task, request_name=request_names.AdminPolicyRequestName.SERVE_UPDATE)
-    task = dag.tasks[0]
+    task = _validate_task(task)
     if pool:
         _maybe_display_run_warning(task)
         # Use dummy run script for pool.
