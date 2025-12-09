@@ -190,6 +190,10 @@ def _create_virtual_instance(
             fi
             echo "Cleaning up sky directories..."
             # Clean up sky runtime directory on each node.
+            # NOTE: We can do this because --nodes for both this srun and the
+            # sbatch is the same number. Otherwise, there are no guarantees
+            # that this srun will run on the same subset of nodes as the srun
+            # that created the sky directories.
             srun --nodes={num_nodes} rm -rf {skypilot_runtime_dir}
             rm -rf {sky_home_dir}
         }}
@@ -306,6 +310,9 @@ def query_instances(
         'completing': status_lib.ClusterStatus.UP,
         'completed': None,
         'cancelled': None,
+        # NOTE: Jobs that get cancelled (from sky down) will go to failed state
+        # with the reason 'NonZeroExitCode' and remain in the squeue output for
+        # a while.
         'failed': None,
         'node_fail': None,
     }
