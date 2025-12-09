@@ -428,7 +428,11 @@ if script or True:
     # 1. alloc_signal_file: srun has acquired allocation
     # 2. setup_done_signal_file: Driver has finished setup, run can proceed
     #
-    # Stored in home directory (assumed to be NFS) so all nodes can access.
+    # Signal files are stored in home directory, which is
+    # assumed to be on a shared NFS mount accessible by all nodes.
+    # To support clusters with non-NFS home directories, we would
+    # need to let users specify an NFS-backed "working directory"
+    # or use a different coordination mechanism.
     alloc_signal_file = f'~/.sky_alloc_12345_2'
     alloc_signal_file = os.path.expanduser(alloc_signal_file)
     setup_done_signal_file = f'~/.sky_setup_done_12345_2'
@@ -478,7 +482,7 @@ if script or True:
         srun_cmd = (
             f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid=12345 '
             f'--job-name=sky-2{job_suffix} --ntasks-per-node=1 {extra_flags} '
-            f'{constants.SKY_PYTHON_CMD.replace("env -u", "/usr/bin/env -u")} -m sky.skylet.executor.slurm {runner_args}'
+            f'{constants.SKY_SLURM_PYTHON_CMD} -m sky.skylet.executor.slurm {runner_args}'
         )
         return srun_cmd, script_path
 
