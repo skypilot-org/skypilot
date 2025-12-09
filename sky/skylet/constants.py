@@ -68,11 +68,12 @@ SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
                f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
 
-# Use /usr/bin/env explicitly to work around a Slurm quirk where
-# srun's execvp() doesn't check execute permissions, failing when
-# $HOME/.local/bin/env (non-executable, from uv installation)
-# shadows /usr/bin/env.
-SKY_SLURM_UNSET_PYTHONPATH = '/usr/bin/env -u PYTHONPATH'
+# Use $(which env) to find env, falling back to /usr/bin/env if which is
+# unavailable. This works around a Slurm quirk where srun's execvp() doesn't
+# check execute permissions, failing when $HOME/.local/bin/env (non-executable,
+# from uv installation) shadows /usr/bin/env.
+SKY_SLURM_UNSET_PYTHONPATH = ('$(which env 2>/dev/null || echo /usr/bin/env) '
+                              '-u PYTHONPATH')
 SKY_SLURM_PYTHON_CMD = (f'{SKY_SLURM_UNSET_PYTHONPATH} '
                         f'$({SKY_GET_PYTHON_PATH_CMD})')
 
