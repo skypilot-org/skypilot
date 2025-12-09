@@ -390,52 +390,33 @@ def test_big_file_upload_memory_usage(generic_cloud: str):
                             actual: Dict[Tuple[str, ...], List[Tuple[float,
                                                                      float]]]):
 
-        def _rss_peak_aggregator(
-            baseline_values: List[Tuple[float, float]],
-            actual_values: List[Tuple[float, float]]
-        ) -> metrics_utils.AggregatedMetric:
-            """Aggregator for RSS (memory) metrics - computes peak values."""
-            baseline_peak_bytes = max([v for _, v in baseline_values
-                                      ]) if baseline_values else 0
-            actual_peak_bytes = max([v for _, v in actual_values
-                                    ]) if actual_values else 0
-
-            baseline_mb = baseline_peak_bytes / (1024 * 1024)
-            actual_mb = actual_peak_bytes / (1024 * 1024)
-
-            return metrics_utils.AggregatedMetric(baseline=baseline_mb,
-                                                  actual=actual_mb,
-                                                  unit='MB')
-
-        def _rss_per_key_threshold_checker(key_label: str, baseline: float,
-                                           actual: float, increase: float,
-                                           increase_pct: float) -> List[str]:
+        def _rss_per_key_threshold_checker(
+                diff: metrics_utils.PerKeyDiff) -> List[str]:
             """Per-key threshold checker for RSS metrics."""
             failures = []
-            if actual > 300:
+            if diff.actual > 300:
                 failures.append(f"exceeded 300 MB: {actual:.1f} MB")
-            if increase_pct > 50 and increase_pct != float('inf'):
+            if diff.increase_pct > 50 and diff.increase_pct != float('inf'):
                 failures.append(
-                    f"increased by {increase_pct:.1f}% (limit: 50%)")
+                    f"increased by {diff.increase_pct:.1f}% (limit: 50%)")
             return failures
 
         def _rss_aggregate_threshold_checker(
-                total_baseline: float, total_actual: float,
-                total_increase: float, total_increase_pct: float) -> List[str]:
+                diff: metrics_utils.AggregateDiff) -> List[str]:
             """Aggregate threshold checker for RSS metrics."""
             failures = []
-            if total_increase_pct > 30:
+            if diff.total_increase_pct > 30:
                 failures.append(
-                    f"Average memory increase too high: {total_increase_pct:.1f}% (limit: 30%)"
+                    f"Average memory increase too high: {diff.total_increase_pct:.1f}% (limit: 30%)"
                 )
             return failures
 
         metrics_utils.compare_metrics(
             baseline,
             actual,
-            aggregator_fn=_rss_peak_aggregator,
-            per_key_threshold_fn=_rss_per_key_threshold_checker,
-            aggregate_threshold_fn=_rss_aggregate_threshold_checker)
+            aggregator_fn=metrics_utils.rss_peak_aggregator,
+            per_key_checker=_rss_per_key_threshold_checker,
+            aggregate_checker=_rss_aggregate_threshold_checker)
 
     with smoke_tests_utils.override_sky_config():
         name = smoke_tests_utils.get_cluster_name()
