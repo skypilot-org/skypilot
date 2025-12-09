@@ -5,6 +5,10 @@ on:
     - cron: '0 0 * * *'  # 00:00 UTC (~5:00 PM PT during DST) — tests-only preflight
   workflow_dispatch:
     inputs:
+      commit_sha:
+        description: 'Specific commit SHA to build and publish (leave empty for latest)'
+        required: false
+        type: string
       skip_buildkite:
         description: 'Skip Buildkite tests (smoke, backward-compat, etc.)'
         required: false
@@ -17,20 +21,40 @@ on:
         type: boolean
 
 jobs:
+  determine-commit:
+    runs-on: ubuntu-latest
+    outputs:
+      commit_sha: ${{ steps.set_commit.outputs.commit_sha }}
+    steps:
+      - id: set_commit
+        name: Determine commit SHA to use
+        shell: bash
+        run: |
+          if [[ -n "${{ inputs.commit_sha }}" ]]; then
+            echo "commit_sha=${{ inputs.commit_sha }}" >> "$GITHUB_OUTPUT"
+            echo "Using specified commit: ${{ inputs.commit_sha }}"
+          else
+            echo "commit_sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            echo "Using current commit: ${{ github.sha }}"
+          fi
+
   check-date:
     runs-on: ubuntu-latest
+    needs: determine-commit
     outputs:
       should_run: ${{ steps.compute_should_run.outputs.should_run }}
     steps:
       - uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.determine-commit.outputs.commit_sha }}
       - name: print latest_commit
-        run: echo ${{ github.sha }}
+        run: echo ${{ needs.determine-commit.outputs.commit_sha }}
       - id: compute_should_run
         name: determine whether nightly should run
         shell: bash
         run: |
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            if git rev-list --after="24 hours" ${{ github.sha }} | grep -q .; then
+            if git rev-list --after="24 hours" ${{ needs.determine-commit.outputs.commit_sha }} | grep -q .; then
               echo "should_run=true" >> "$GITHUB_OUTPUT"
             else
               echo "should_run=false" >> "$GITHUB_OUTPUT"
@@ -42,7 +66,7 @@ jobs:
 
   gate-tests:
     runs-on: ubuntu-latest
-    needs: [check-date]
+    needs: [determine-commit, check-date]
     outputs:
       run_tests: ${{ steps.compute_gate.outputs.run_tests }}
       publish_without_tests: ${{ steps.compute_gate.outputs.publish_without_tests }}
@@ -76,13 +100,15 @@ jobs:
 
   nightly-build-pypi:
     runs-on: ubuntu-latest
-    needs: check-date
+    needs: [determine-commit, check-date]
     if: ${{ needs.check-date.outputs.should_run != 'false' }}
     outputs:
       version: ${{ steps.set-release-version.outputs.version }}
     steps:
       - name: Clone repository
         uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.determine-commit.outputs.commit_sha }}
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -112,7 +138,7 @@ jobs:
         id: set-release-version
         run: |
           RELEASE_VERSION=$(date +%Y%m%d)
-          sed -i "s/{{SKYPILOT_COMMIT_SHA}}/${{ github.sha }}/g" sky/__init__.py
+          sed -i "s/{{SKYPILOT_COMMIT_SHA}}/${{ needs.determine-commit.outputs.commit_sha }}/g" sky/__init__.py
           sed -i "s/__version__ = '.*'/__version__ = '1.0.0.dev${RELEASE_VERSION}'/g" sky/__init__.py
           sed -i "s/name='skypilot',/name='skypilot-nightly',/g" sky/setup_files/setup.py
           echo "version=1.0.0.dev${RELEASE_VERSION}" >> $GITHUB_OUTPUT
@@ -132,11 +158,11 @@ jobs:
           path: dist/
 
   smoke-tests-aws:
-    needs: [gate-tests, nightly-build-pypi]
+    needs: [determine-commit, gate-tests, nightly-build-pypi]
     if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
-      commit: ${{ github.sha }}
+      commit: ${{ needs.determine-commit.outputs.commit_sha }}
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi --aws"
       pipeline: "smoke-tests"
@@ -146,11 +172,11 @@ jobs:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   backward-compat-test-nightly:
-    needs: [gate-tests, nightly-build-pypi]
+    needs: [determine-commit, gate-tests, nightly-build-pypi]
     if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
-      commit: ${{ github.sha }}
+      commit: ${{ needs.determine-commit.outputs.commit_sha }}
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi backward compatibility test --base-branch pypi/skypilot-nightly"
       pipeline: "quicktest-core"
@@ -160,11 +186,11 @@ jobs:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   backward-compat-test-stable:
-    needs: [gate-tests, nightly-build-pypi]
+    needs: [determine-commit, gate-tests, nightly-build-pypi]
     if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
-      commit: ${{ github.sha }}
+      commit: ${{ needs.determine-commit.outputs.commit_sha }}
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi backward compatibility test --base-branch pypi/skypilot"
       pipeline: "quicktest-core"
@@ -174,11 +200,11 @@ jobs:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   smoke-tests-kubernetes-resource-heavy:
-    needs: [gate-tests, nightly-build-pypi]
+    needs: [determine-commit, gate-tests, nightly-build-pypi]
     if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
-      commit: ${{ github.sha }}
+      commit: ${{ needs.determine-commit.outputs.commit_sha }}
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi --kubernetes --resource-heavy"
       pipeline: "smoke-tests"
@@ -188,11 +214,11 @@ jobs:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   smoke-tests-kubernetes-no-resource-heavy:
-    needs: [gate-tests, nightly-build-pypi]
+    needs: [determine-commit, gate-tests, nightly-build-pypi]
     if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
-      commit: ${{ github.sha }}
+      commit: ${{ needs.determine-commit.outputs.commit_sha }}
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi --kubernetes --no-resource-heavy"
       pipeline: "smoke-tests"
@@ -202,11 +228,11 @@ jobs:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   smoke-tests-kubernetes-no-resource-heavy-limit-deps:
-    needs: [gate-tests, nightly-build-pypi]
+    needs: [determine-commit, gate-tests, nightly-build-pypi]
     if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
-      commit: ${{ github.sha }}
+      commit: ${{ needs.determine-commit.outputs.commit_sha }}
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi --kubernetes --no-resource-heavy --dependency"
       pipeline: "smoke-tests"
@@ -216,11 +242,11 @@ jobs:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   smoke-tests-remote-server-kubernetes:
-    needs: [gate-tests, nightly-build-pypi]
+    needs: [determine-commit, gate-tests, nightly-build-pypi]
     if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
-      commit: ${{ github.sha }}
+      commit: ${{ needs.determine-commit.outputs.commit_sha }}
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi --remote-server --kubernetes"
       pipeline: "smoke-tests"
@@ -231,11 +257,11 @@ jobs:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   smoke-tests-shared-gke-api-server:
-    needs: [gate-tests, nightly-build-pypi]
+    needs: [determine-commit, gate-tests, nightly-build-pypi]
     if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
-      commit: ${{ github.sha }}
+      commit: ${{ needs.determine-commit.outputs.commit_sha }}
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi shared-gke-api-server with postgres tests"
       pipeline: "nightly-build-shared-gke-api-server"
@@ -244,11 +270,11 @@ jobs:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   smoke-tests-lambda-job-queue:
-    needs: [gate-tests, nightly-build-pypi]
+    needs: [determine-commit, gate-tests, nightly-build-pypi]
     if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
-      commit: ${{ github.sha }}
+      commit: ${{ needs.determine-commit.outputs.commit_sha }}
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi test_lambda_job_queue --lambda"
       pipeline: "smoke-tests"
@@ -258,11 +284,11 @@ jobs:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   smoke-tests-runpod-minimal:
-    needs: [gate-tests, nightly-build-pypi]
+    needs: [determine-commit, gate-tests, nightly-build-pypi]
     if: ${{ needs.gate-tests.outputs.run_tests == 'true' }}
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
-      commit: ${{ github.sha }}
+      commit: ${{ needs.determine-commit.outputs.commit_sha }}
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi test_minimal --runpod"
       pipeline: "smoke-tests"
@@ -357,7 +383,7 @@ jobs:
 
   notify-slack-failure:
     runs-on: ubuntu-latest
-    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-shared-gke-api-server, smoke-tests-lambda-job-queue, smoke-tests-runpod-minimal, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-helm-release]
+    needs: [determine-commit, check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-shared-gke-api-server, smoke-tests-lambda-job-queue, smoke-tests-runpod-minimal, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-helm-release]
     # Only run this job if any of the previous jobs failed
     if: failure()
     steps:
@@ -365,7 +391,7 @@ jobs:
         id: message_content
         run: |
           TITLE_TEXT="Workflow ${{ github.workflow }} failed."
-          COMMIT_SHA="${{ github.sha }}"
+          COMMIT_SHA="${{ needs.determine-commit.outputs.commit_sha }}"
           COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA}"
           SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
           BUILDKITE_MSG=""
