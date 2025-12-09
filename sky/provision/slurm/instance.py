@@ -6,6 +6,7 @@ import time
 from typing import Any, cast, Dict, List, Optional, Tuple
 
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.provision import common
 from sky.provision import constants
@@ -124,9 +125,17 @@ def _create_virtual_instance(
         job_id = existing_jobs[0]
         logger.debug(f'Job with name {cluster_name_on_cloud} already exists '
                      f'(JOBID: {job_id})')
+        # Get provision_timeout from config, defaulting to 10 seconds
+        provision_timeout = skypilot_config.get_effective_region_config(
+            cloud='slurm',
+            region=region,
+            keys=('provision_timeout',),
+            default_value=None)
 
         # Wait for nodes to be allocated (job might be in PENDING state)
-        nodes, _ = client.get_job_nodes(job_id, wait=True)
+        nodes, _ = client.get_job_nodes(job_id,
+                                        wait=True,
+                                        timeout=provision_timeout)
         return common.ProvisionRecord(provider_name='slurm',
                                       region=region,
                                       zone=partition,
@@ -241,7 +250,16 @@ def _create_virtual_instance(
                  f'{partition} for cluster {cluster_name_on_cloud} '
                  f'with {num_nodes} nodes')
 
-    nodes, _ = client.get_job_nodes(job_id, wait=True)
+    # Get provision_timeout from config, defaulting to 10 seconds
+    provision_timeout = skypilot_config.get_effective_region_config(
+        cloud='slurm',
+        region=region,
+        keys=('provision_timeout',),
+        default_value=None)
+
+    nodes, _ = client.get_job_nodes(job_id,
+                                    wait=True,
+                                    timeout=provision_timeout)
     created_instance_ids = [
         slurm_utils.instance_id(job_id, node) for node in nodes
     ]
