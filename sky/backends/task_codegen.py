@@ -850,7 +850,7 @@ class SlurmCodeGen(TaskCodeGen):
                     srun_cmd = (
                         f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid={self._slurm_job_id} '
                         f'--job-name=sky-{self.job_id}{{job_suffix}} --ntasks-per-node=1 {{extra_flags}} '
-                        f'{{constants.SKY_PYTHON_CMD.replace("env -u", "/usr/bin/env -u")}} -m sky.skylet.executor.slurm {{runner_args}}'
+                        f'{{constants.SKY_SLURM_PYTHON_CMD}} -m sky.skylet.executor.slurm {{runner_args}}'
                     )
                     return srun_cmd, script_path
 
