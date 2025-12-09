@@ -33,6 +33,11 @@ _SKY_DIR_CREATION_TIMEOUT_SECONDS = 30
 
 def _sky_cluster_home_dir(cluster_name_on_cloud: str) -> str:
     """Returns the SkyPilot cluster's home directory path on the Slurm cluster.
+
+    This path is assumed to be on a shared NFS mount accessible by all nodes.
+    To support clusters with non-NFS home directories, we would need to let
+    users specify an NFS-backed "working directory" or use a different
+    coordination mechanism.
     """
     return f'{SHARED_ROOT_SKY_DIRECTORY}/{cluster_name_on_cloud}'
 

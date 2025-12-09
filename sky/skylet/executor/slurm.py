@@ -106,6 +106,8 @@ def main():
                            f'cluster IPs: {cluster_ips}') from e
     node_name = 'head' if node_idx == 0 else f'worker{node_idx}'
 
+    # Log files are written to a shared filesystem, so each node must use a
+    # unique filename to avoid collisions.
     if args.is_setup:
         # TODO(kevin): This is inconsistent with other clouds, where it is
         # simply called 'setup.log'. On Slurm that is obviously not possible,
