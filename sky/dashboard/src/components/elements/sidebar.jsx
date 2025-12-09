@@ -569,7 +569,7 @@ export function TopBar() {
                     className="inline-flex items-center align-middle border-b-2 border-transparent px-1 pt-1 space-x-1 text-gray-600 hover:text-blue-600 transition-colors duration-150 cursor-pointer"
                     title="Docs"
                   >
-                    <span className="mr-1 leading-none">Docs</span>
+                    <span className="leading-none">Docs</span>
                     <ExternalLinkIcon className="w-3.5 h-3.5" />
                   </a>
                 </CustomTooltip>
