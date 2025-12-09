@@ -578,13 +578,6 @@ class Slurm(clouds.Cloud):
         """
         infras = []
         for cluster in cls.existing_allowed_clusters(silent=True):
-            try:
-                partitions = slurm_utils.get_partitions(cluster)
-                for partition in partitions:
-                    infras.append(
-                        f'{cls.canonical_name()}/{cluster}/{partition}')
-            except Exception as e:  # pylint: disable=broad-except
-                # Fall back to cluster-only if partition fetch fails
-                logger.debug(f'Failed to get partitions for {cluster}: {e}')
-                infras.append(f'{cls.canonical_name()}/{cluster}')
+            infras.append(
+                f'{cls.canonical_name()}/{cluster}')
         return infras
