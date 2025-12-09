@@ -78,6 +78,9 @@ const GpuUtilizationBar = ({
   const notReady = gpu?.gpu_not_ready || 0;
   const free = gpu?.gpu_free || 0;
   const used = Math.max(0, total - free - notReady);
+  const notReadyLabel = `${notReady} not ready`;
+  const usedLabel = `${used} used`;
+  const freeLabel = `${free} free`;
   const toPercentage = total > 0 ? (value) => (value / total) * 100 : () => 0;
   const notReadyPercentage = toPercentage(notReady);
   const usedPercentage = toPercentage(used);
@@ -93,9 +96,10 @@ const GpuUtilizationBar = ({
             width: `${notReadyPercentage}%`,
             fontSize: 'clamp(8px, 1.2vw, 12px)',
           }}
+          title={notReadyLabel}
           className="bg-gray-400 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
         >
-          {notReadyPercentage > 15 && `${notReady} not ready`}
+          {notReadyPercentage > 15 && notReadyLabel}
         </div>
       )}
       {usedPercentage > 0 && (
@@ -104,9 +108,10 @@ const GpuUtilizationBar = ({
             width: `${usedPercentage}%`,
             fontSize: 'clamp(8px, 1.2vw, 12px)',
           }}
+          title={usedLabel}
           className="bg-yellow-500 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
         >
-          {usedPercentage > 15 && `${used} used`}
+          {usedPercentage > 15 && usedLabel}
         </div>
       )}
       {freePercentage > 0 && (
@@ -115,9 +120,10 @@ const GpuUtilizationBar = ({
             width: `${freePercentage}%`,
             fontSize: 'clamp(8px, 1.2vw, 12px)',
           }}
+          title={freeLabel}
           className="bg-green-700 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
         >
-          {freePercentage > 15 && `${free} free`}
+          {freePercentage > 15 && freeLabel}
         </div>
       )}
     </div>
