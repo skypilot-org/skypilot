@@ -404,23 +404,12 @@ signal.signal(signal.SIGTERM, _slurm_cleanup_handler)
 
 autostop_lib.set_last_active_time_to_now()
 job_lib.set_status(2, job_lib.JobStatus.PENDING)
-has_setup_cmd = False
-setup_cmd = None
-setup_envs = None
-setup_log_dir = None
-setup_num_nodes = None
 plural = 's' if 1 > 1 else ''
 node_str = f'1 node{plural}'
 message = ('[2m├── [0m[2m'
            'Waiting for task resources on '
            f'{node_str}.[0m')
 print(message, flush=True)
-has_setup_cmd = True
-setup_cmd = 'pip install torch'
-setup_envs = {'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'}
-setup_log_dir = '/sky/logs'
-setup_num_nodes = 1
-
 sky_env_vars_dict = {}
 sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = 2
 
@@ -431,7 +420,7 @@ if script is None:
     script = ''
 rclone_flush_script = '\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                echo "skypilot: cached mount is still uploading to remote"\n                flushed=0\n                break\n            fi\n        done\n    done\n    echo "skypilot: cached mount uploaded complete"\nfi'
 
-if script or has_setup_cmd:
+if script or True:
     script += rclone_flush_script
     sky_env_vars_dict['SKYPILOT_NUM_GPUS_PER_NODE'] = 1
 
@@ -542,7 +531,7 @@ if script or has_setup_cmd:
 
     print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
 
-    if has_setup_cmd:
+    if True:
         job_lib.set_status(2, job_lib.JobStatus.SETTING_UP)
 
         # The schedule_step should be called after the job status is set to
@@ -552,9 +541,9 @@ if script or has_setup_cmd:
 
         # --overlap as we have already secured allocation with the srun for the run section,
         # and otherwise this srun would get blocked and deadlock.
-        setup_flags = f'--overlap --nodes={setup_num_nodes}'
+        setup_flags = f'--overlap --nodes=1'
         setup_srun, setup_script_path = build_task_runner_cmd(
-            setup_cmd, setup_flags, setup_log_dir, setup_envs,
+            'pip install torch', setup_flags, '/sky/logs', {'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'},
             cluster_num_nodes=1,
             is_setup=True
         )
@@ -583,7 +572,7 @@ if script or has_setup_cmd:
             sys.exit(1)
 
     job_lib.set_job_started(2)
-    if not has_setup_cmd:
+    if not True:
         # Need to call schedule_step() to make sure the scheduler
         # schedule the next pending job.
         job_lib.scheduler.schedule_step()

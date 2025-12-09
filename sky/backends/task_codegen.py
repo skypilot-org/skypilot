@@ -710,12 +710,12 @@ class SlurmCodeGen(TaskCodeGen):
         self._code += [
             'autostop_lib.set_last_active_time_to_now()',
             f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
-            'has_setup_cmd = False',
-            'setup_cmd = None',
-            'setup_envs = None',
-            'setup_log_dir = None',
-            'setup_num_nodes = None',
         ]
+
+        self._setup_cmd: Optional[str] = None
+        self._setup_envs: Optional[Dict[str, str]] = None
+        self._setup_log_dir: Optional[str] = None
+        self._setup_num_nodes: Optional[int] = None
 
     def add_setup(
         self,
@@ -733,19 +733,14 @@ class SlurmCodeGen(TaskCodeGen):
 
         self._add_waiting_for_resources_msg(num_nodes)
 
-        # Store setup information for use in add_tasks().
+        # Store setup information for use in add_task().
         if setup_cmd is not None:
             setup_envs = env_vars.copy()
             setup_envs[constants.SKYPILOT_NUM_NODES] = str(num_nodes)
-            self._code += [
-                textwrap.dedent(f"""\
-                has_setup_cmd = True
-                setup_cmd = {setup_cmd!r}
-                setup_envs = {setup_envs!r}
-                setup_log_dir = {log_dir!r}
-                setup_num_nodes = {num_nodes}
-                """),
-            ]
+            self._setup_cmd = setup_cmd
+            self._setup_envs = setup_envs
+            self._setup_log_dir = log_dir
+            self._setup_num_nodes = num_nodes
 
     def add_task(
         self,
@@ -787,6 +782,7 @@ class SlurmCodeGen(TaskCodeGen):
 
         rclone_flush_script = self._get_rclone_flush_script()
         streaming_msg = self._get_job_started_msg()
+        has_setup_cmd = self._setup_cmd is not None
 
         self._code += [
             sky_env_vars_dict_str,
@@ -796,7 +792,7 @@ class SlurmCodeGen(TaskCodeGen):
                 script = ''
             rclone_flush_script = {rclone_flush_script!r}
 
-            if script or has_setup_cmd:
+            if script or {has_setup_cmd!r}:
                 script += rclone_flush_script
                 sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {num_gpus}
 
@@ -907,7 +903,7 @@ class SlurmCodeGen(TaskCodeGen):
 
                 print({streaming_msg!r}, flush=True)
 
-                if has_setup_cmd:
+                if {has_setup_cmd!r}:
                     job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SETTING_UP)
 
                     # The schedule_step should be called after the job status is set to
@@ -917,9 +913,9 @@ class SlurmCodeGen(TaskCodeGen):
 
                     # --overlap as we have already secured allocation with the srun for the run section,
                     # and otherwise this srun would get blocked and deadlock.
-                    setup_flags = f'--overlap --nodes={{setup_num_nodes}}'
+                    setup_flags = f'--overlap --nodes={self._setup_num_nodes}'
                     setup_srun, setup_script_path = build_task_runner_cmd(
-                        setup_cmd, setup_flags, setup_log_dir, setup_envs,
+                        {self._setup_cmd!r}, setup_flags, {self._setup_log_dir!r}, {self._setup_envs!r},
                         cluster_num_nodes={self._cluster_num_nodes},
                         is_setup=True
                     )
@@ -948,7 +944,7 @@ class SlurmCodeGen(TaskCodeGen):
                         sys.exit(1)
 
                 job_lib.set_job_started({self.job_id!r})
-                if not has_setup_cmd:
+                if not {has_setup_cmd!r}:
                     # Need to call schedule_step() to make sure the scheduler
                     # schedule the next pending job.
                     job_lib.scheduler.schedule_step()

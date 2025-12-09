@@ -127,9 +127,11 @@ def main():
 
     # Parse env vars and add SKYPILOT environment variables
     env_vars = json.loads(args.env_vars)
-    env_vars['SKYPILOT_NODE_RANK'] = str(rank)
-    env_vars['SKYPILOT_NUM_NODES'] = str(num_nodes)
-    env_vars['SKYPILOT_NODE_IPS'] = _get_job_node_ips()
+    if not args.is_setup:
+        # For setup, env vars are set in CloudVmRayBackend._setup.
+        env_vars['SKYPILOT_NODE_RANK'] = str(rank)
+        env_vars['SKYPILOT_NUM_NODES'] = str(num_nodes)
+        env_vars['SKYPILOT_NODE_IPS'] = _get_job_node_ips()
 
     # Signal file coordination for setup/run synchronization
     # Rank 0 touches the allocation signal to indicate resources acquired
