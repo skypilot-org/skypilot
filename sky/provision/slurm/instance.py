@@ -27,11 +27,17 @@ PROVISION_SCRIPTS_DIRECTORY = f'~/{PROVISION_SCRIPTS_DIRECTORY_NAME}'
 
 POLL_INTERVAL_SECONDS = 2
 # Default KillWait is 30 seconds, so we add some buffer time here.
-_TIMEOUT_SECONDS_FOR_JOB_TERMINATION = 60
+_JOB_TERMINATION_TIMEOUT_SECONDS = 60
+_SKY_DIR_CREATION_TIMEOUT_SECONDS = 30
 
 
 def _sky_cluster_home_dir(cluster_name_on_cloud: str) -> str:
     """Returns the SkyPilot cluster's home directory path on the Slurm cluster.
+
+    This path is assumed to be on a shared NFS mount accessible by all nodes.
+    To support clusters with non-NFS home directories, we would need to let
+    users specify an NFS-backed "working directory" or use a different
+    coordination mechanism.
     """
     return f'{SHARED_ROOT_SKY_DIRECTORY}/{cluster_name_on_cloud}'
 
@@ -88,7 +94,7 @@ def _create_virtual_instance(
     )
     start_time = time.time()
     while (completing_jobs and
-           time.time() - start_time < _TIMEOUT_SECONDS_FOR_JOB_TERMINATION):
+           time.time() - start_time < _JOB_TERMINATION_TIMEOUT_SECONDS):
         logger.debug(f'Found {len(completing_jobs)} completing jobs. '
                      f'Waiting for them to finish: {completing_jobs}')
         time.sleep(POLL_INTERVAL_SECONDS)
@@ -101,7 +107,7 @@ def _create_virtual_instance(
         # https://slurm.schedmd.com/troubleshoot.html#completing
         raise RuntimeError(f'Found {len(completing_jobs)} jobs still in '
                            'completing state after '
-                           f'{_TIMEOUT_SECONDS_FOR_JOB_TERMINATION}s. '
+                           f'{_JOB_TERMINATION_TIMEOUT_SECONDS}s. '
                            'This is typically due to non-killable processes '
                            'associated with the job.')
 
@@ -131,9 +137,13 @@ def _create_virtual_instance(
                                       created_instance_ids=[])
 
     resources = config.node_config
+
+    # Note: By default Slurm terminates the entire job allocation if any node
+    # fails in its range of allocated nodes.
+    # In the future we can consider running sbatch with --no-kill to not
+    # automatically terminate a job if one of the nodes it has been
+    # allocated fails.
     num_nodes = config.count
-    # TODO(kevin): Support multi-node.
-    assert num_nodes == 1
 
     accelerator_type = resources.get('accelerator_type')
     accelerator_count_raw = resources.get('accelerator_count')
@@ -144,7 +154,8 @@ def _create_virtual_instance(
         accelerator_count = 0
 
     skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
-    sky_dir = _sky_cluster_home_dir(cluster_name_on_cloud)
+    sky_home_dir = _sky_cluster_home_dir(cluster_name_on_cloud)
+    ready_signal = f'{sky_home_dir}/.sky_sbatch_ready'
 
     # Build the sbatch script
     gpu_directive = ''
@@ -163,6 +174,8 @@ def _create_virtual_instance(
         #SBATCH --error={PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-%j.out
         #SBATCH --nodes={num_nodes}
         #SBATCH --wait-all-nodes=1
+        # Let the job be terminated rather than requeued implicitly.
+        #SBATCH --no-requeue
         #SBATCH --cpus-per-task={int(resources["cpus"])}
         #SBATCH --mem={int(resources["memory"])}G
         {gpu_directive}
@@ -176,18 +189,24 @@ def _create_virtual_instance(
                 kill $(cat "{skypilot_runtime_dir}/.sky/skylet_pid") 2>/dev/null || true
             fi
             echo "Cleaning up sky directories..."
-            rm -rf {skypilot_runtime_dir}
-            rm -rf {sky_dir}
+            # Clean up sky runtime directory on each node.
+            # NOTE: We can do this because --nodes for both this srun and the
+            # sbatch is the same number. Otherwise, there are no guarantees
+            # that this srun will run on the same subset of nodes as the srun
+            # that created the sky directories.
+            srun --nodes={num_nodes} rm -rf {skypilot_runtime_dir}
+            rm -rf {sky_home_dir}
         }}
         trap cleanup TERM
 
-        # Create sky directory for the cluster.
-        # TODO(kevin): Since this is run inside the sbatch script, failures
-        # will not be surfaced in a synchronous way. We should add a check
-        # to verify the creation of the directory.
-        mkdir -p {sky_dir} {skypilot_runtime_dir}
+        # Create sky home directory for the cluster.
+        mkdir -p {sky_home_dir}
+        # Create sky runtime directory on each node.
+        srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}
         # Suppress login messages.
-        touch {sky_dir}/.hushlogin
+        touch {sky_home_dir}/.hushlogin
+        # Signal that the sbatch script has completed setup.
+        touch {ready_signal}
         sleep infinity
         """)
 
@@ -218,13 +237,32 @@ def _create_virtual_instance(
         login_node_runner.rsync(src_path, tgt_path, up=True, stream_logs=False)
 
     job_id = client.submit_job(partition, cluster_name_on_cloud, tgt_path)
-    logger.debug(f'Successfully submitted Slurm job {job_id} for cluster '
-                 f'{cluster_name_on_cloud} with {num_nodes} nodes')
+    logger.debug(f'Successfully submitted Slurm job {job_id} to partition '
+                 f'{partition} for cluster {cluster_name_on_cloud} '
+                 f'with {num_nodes} nodes')
 
     nodes, _ = client.get_job_nodes(job_id, wait=True)
     created_instance_ids = [
         slurm_utils.instance_id(job_id, node) for node in nodes
     ]
+
+    # Wait for the sbatch script to create the cluster's sky directories,
+    # to avoid a race condition where post-provision commands try to
+    # access the directories before they are created.
+    ready_check_cmd = (f'end=$((SECONDS+{_SKY_DIR_CREATION_TIMEOUT_SECONDS})); '
+                       f'while [ ! -f {ready_signal} ]; do '
+                       'if (( SECONDS >= end )); then '
+                       'exit 1; fi; '
+                       'sleep 0.5; '
+                       'done')
+    rc, stdout, stderr = login_node_runner.run(ready_check_cmd,
+                                               require_outputs=True,
+                                               stream_logs=False)
+    subprocess_utils.handle_returncode(
+        rc,
+        ready_check_cmd,
+        'Failed to verify sky directories creation.',
+        stderr=f'{stdout}\n{stderr}')
 
     return common.ProvisionRecord(provider_name='slurm',
                                   region=region,
@@ -265,28 +303,52 @@ def query_instances(
     # Map Slurm job states to SkyPilot ClusterStatus
     # Slurm states:
     # https://slurm.schedmd.com/squeue.html#SECTION_JOB-STATE-CODES
+    # TODO(kevin): Include more states here.
     status_map = {
         'pending': status_lib.ClusterStatus.INIT,
         'running': status_lib.ClusterStatus.UP,
         'completing': status_lib.ClusterStatus.UP,
         'completed': None,
         'cancelled': None,
-        'failed': status_lib.ClusterStatus.INIT,
+        # NOTE: Jobs that get cancelled (from sky down) will go to failed state
+        # with the reason 'NonZeroExitCode' and remain in the squeue output for
+        # a while.
+        'failed': None,
+        'node_fail': None,
     }
 
     statuses: Dict[str, Tuple[Optional[status_lib.ClusterStatus],
                               Optional[str]]] = {}
     for state, sky_status in status_map.items():
-        if non_terminated_only and sky_status is None:
-            continue
-
         jobs = client.query_jobs(
             cluster_name_on_cloud,
             [state],
         )
 
         for job_id in jobs:
-            statuses[job_id] = (sky_status, None)
+            if state in ('pending', 'failed', 'node_fail', 'cancelled',
+                         'completed'):
+                reason = client.get_job_reason(job_id)
+                if non_terminated_only and sky_status is None:
+                    # TODO(kevin): For better UX, we should also find out
+                    # which node(s) exactly that failed if it's a node_fail
+                    # state.
+                    logger.debug(f'Job {job_id} is terminated, but '
+                                 'query_instances is called with '
+                                 f'non_terminated_only=True. State: {state}, '
+                                 f'Reason: {reason}')
+                    continue
+                statuses[job_id] = (sky_status, reason)
+            else:
+                nodes, _ = client.get_job_nodes(job_id, wait=False)
+                for node in nodes:
+                    instance_id = slurm_utils.instance_id(job_id, node)
+                    statuses[instance_id] = (sky_status, None)
+
+        # TODO(kevin): Query sacct too to get more historical job info.
+        # squeue only includes completed jobs that finished in the last
+        # MinJobAge seconds (default 300s). Or could be earlier if it
+        # reaches MaxJobCount first (default 10_000).
 
     return statuses
 
