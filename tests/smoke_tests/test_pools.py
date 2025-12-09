@@ -251,6 +251,48 @@ def check_for_recovery_message_on_controller(job_name: str):
             f'echo "$s"; echo; echo; echo "$s" | grep "RECOVERING"')
 
 
+def check_worker_id_exists(pool_name: str,
+                           worker_id: int,
+                           timeout: int = 30,
+                           time_between_checks: int = 5):
+    """Check that a specific worker ID exists in the pool status.
+    
+    Args:
+        pool_name: The name of the pool.
+        worker_id: The worker ID (replica_id) to check for.
+        timeout: Maximum time to wait in seconds.
+        time_between_checks: Time to wait between checks in seconds.
+    """
+    return (
+        'start_time=$SECONDS; '
+        'while true; do '
+        f'if (( $SECONDS - $start_time > {timeout} )); then '
+        f'  echo "Timeout after {timeout} seconds waiting for worker {worker_id} to exist"; exit 1; '
+        'fi; '
+        f's=$(sky jobs pool status {pool_name} -v 2>&1); '
+        'echo "$s"; '
+        # Extract worker IDs using awk: look for "Pool Workers" section,
+        # then extract numeric IDs from subsequent lines
+        'worker_ids=($(echo "$s" | awk \'/Pool Workers/{{flag=1; next}} flag && NF>0 {{print $2}}\' | grep -E \'^[0-9]+$\')); '
+        'found=0; '
+        'for id in "${worker_ids[@]}"; do '
+        f'  if [[ "$id" == "{worker_id}" ]]; then '
+        f'    echo "Worker {worker_id} found in pool status"; '
+        '    found=1; '
+        '    break; '
+        '  fi; '
+        'done; '
+        'if [[ $found -eq 1 ]]; then '
+        '  break; '
+        'fi; '
+        'if echo "$s" | grep "FAILED"; then '
+        '  exit 1; '
+        'fi; '
+        f'echo "Waiting for worker {worker_id} to appear in pool status..."; '
+        f'sleep {time_between_checks}; '
+        'done')
+
+
 def basic_pool_conf(
     num_workers: int,
     infra: str,
@@ -1508,5 +1550,82 @@ def test_pool_scale_with_workdir(generic_cloud: str):
                 ],
                 timeout=timeout,
                 teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_scale_down_with_job_count_priority(generic_cloud: str):
+    """Test that when scaling down, replicas with fewer jobs are selected first.
+    
+    This test:
+    1. Creates a pool with 1 worker
+    2. Launches a job (no resources specified) that sleeps forever
+    3. Checks that the job is running
+    4. Ups the number of workers to 2
+    5. Launches a second job that sleeps forever
+    6. Waits for it to run
+    7. Cancels the first job
+    8. Scales the pool down to 1 worker
+    9. Waits for there to be 1 worker
+    10. Confirms that the worker that remains has id 2 (the one with the job)
+    """
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+
+    # Create job configs with long-running sleep commands
+    job_name_1 = f'{name}-job-1'
+    job_name_2 = f'{name}-job-2'
+
+    job_config = basic_job_conf(
+        job_name=job_name_1,  # Name will be overridden with -n flag
+        run_cmd='sleep infinity',
+    )
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+
+            test = smoke_tests_utils.Test(
+                'test_pool_scale_down_with_job_count_priority',
+                [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
+                    wait_until_pool_ready(pool_name, timeout=timeout),
+                    # Launch first job (no resources specified)
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                        pool_name=pool_name,
+                        job_yaml=job_yaml.name,
+                        job_name=job_name_1),
+                    wait_until_job_status(job_name_1, ['RUNNING'],
+                                          timeout=timeout),
+                    # Scale up to 2 workers
+                    _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, num_workers=2),
+                    wait_until_num_workers(pool_name, 2, timeout=timeout),
+                    # Launch second job
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                        pool_name=pool_name,
+                        job_yaml=job_yaml.name,
+                        job_name=job_name_2),
+                    wait_until_job_status(job_name_2, ['RUNNING'],
+                                          timeout=timeout),
+                    # Cancel the first job (so worker 1 has 0 jobs, worker 2 has 1 job)
+                    cancel_job(job_name_1),
+                    wait_until_job_status(
+                        job_name_1, ['CANCELLED'], bad_statuses=[], timeout=30),
+                    # Scale down to 1 worker
+                    _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, num_workers=1),
+                    wait_until_num_workers(pool_name, 1, timeout=timeout),
+                    # Verify that worker 2 remains (the one with the job)
+                    check_worker_id_exists(pool_name, 2, timeout=timeout),
+                ],
+                timeout=timeout,
+                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
             )
             smoke_tests_utils.run_one_test(test)

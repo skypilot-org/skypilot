@@ -9,6 +9,7 @@ import typing
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from sky import sky_logging
+from sky.jobs import state as managed_job_state
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -73,6 +74,7 @@ def _generate_scale_down_decisions(
 def _select_nonterminal_replicas_to_scale_down(
     num_replica_to_scale_down: int,
     replica_infos: Iterable['replica_managers.ReplicaInfo'],
+    service_name: str,
 ) -> List[int]:
     """Select nonterminal replicas to scale down.
 
@@ -82,7 +84,9 @@ def _select_nonterminal_replicas_to_scale_down(
             later stage may become ready soon.
         2. Based on the version in ascending order, so we scale down the older
             versions first.
-        3. Based on the replica_id in descending order, which is also the order
+        3. Based on the number of running jobs in ascending order, so we scale
+            down replicas with fewer jobs first.
+        4. Based on the replica_id in descending order, which is also the order
             of the replicas being launched. We scale down the replicas that are
             launched earlier first, as the replicas that are launched later may
             become ready soon.
@@ -90,6 +94,7 @@ def _select_nonterminal_replicas_to_scale_down(
     Args:
         num_replica_to_scale_down: The number of replicas to scale down.
         replica_infos: The list of replica informations to select from.
+        service_name: The name of the service (pool name).
 
     Returns:
         The list of replica ids to scale down.
@@ -99,12 +104,22 @@ def _select_nonterminal_replicas_to_scale_down(
     assert all(info.status in status_order for info in replicas), (
         'All replicas to scale down should be in provisioning or launched '
         'status.', replicas)
+
+    # Get the number of running jobs for each replica
+    replica_job_counts = {}
+    for info in replicas:
+        job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
+            service_name, info.cluster_name)
+        replica_job_counts[info.replica_id] = len(job_ids)
+
     replicas = sorted(
         replicas,
         key=lambda info: (
             status_order.index(info.status),
             # version in ascending order
             info.version,
+            # number of running jobs in ascending order
+            replica_job_counts[info.replica_id],
             # replica_id in descending order, i.e. launched order
             -info.replica_id))
     assert len(replicas) >= num_replica_to_scale_down, (
@@ -275,6 +290,7 @@ class Autoscaler:
                 max(0,
                     len(old_nonterminal_replicas) - num_old_replicas_to_keep),
                 old_nonterminal_replicas,
+                self._service_name,
             )
 
         if not active_versions:
@@ -556,7 +572,8 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
             # Use standard downscaling logic
             replicas_to_scale_down = (
                 _select_nonterminal_replicas_to_scale_down(
-                    num_replicas_to_scale_down, latest_nonterminal_replicas))
+                    num_replicas_to_scale_down, latest_nonterminal_replicas,
+                    self._service_name))
             logger.info(
                 'Number of replicas to scale down: '
                 f'{num_replicas_to_scale_down} {replicas_to_scale_down}')
@@ -1016,7 +1033,7 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
                 _select_nonterminal_replicas_to_scale_down(
                     num_spot_to_scale_down,
                     filter(lambda info: info.is_spot,
-                           latest_nonterminal_replicas)))
+                           latest_nonterminal_replicas), self._service_name))
             logger.info('Number of spot instances to scale down: '
                         f'{num_spot_to_scale_down} {replicas_to_scale_down}')
             all_replica_ids_to_scale_down.extend(replicas_to_scale_down)
@@ -1054,7 +1071,7 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
                 _select_nonterminal_replicas_to_scale_down(
                     num_ondemand_to_scale_down,
                     filter(lambda info: not info.is_spot,
-                           latest_nonterminal_replicas)))
+                           latest_nonterminal_replicas), self._service_name))
             logger.info(
                 'Number of on-demand instances to scale down: '
                 f'{num_ondemand_to_scale_down} {replicas_to_scale_down}')
