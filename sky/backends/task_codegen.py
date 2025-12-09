@@ -810,15 +810,15 @@ class SlurmCodeGen(TaskCodeGen):
                 gpu_arg = f'--gpus-per-node={num_gpus}' if {num_gpus} > 0 else ''
 
                 def build_task_runner_cmd(user_script, extra_flags, log_dir, env_vars_dict,
-                                          cluster_num_nodes, task_name=None,
-                                          is_setup=False, alloc_signal=None, setup_done_signal=None):
+                                          task_name=None, is_setup=False,
+                                          alloc_signal=None, setup_done_signal=None):
                     env_vars_json = json.dumps(env_vars_dict)
 
                     log_dir = shlex.quote(log_dir)
                     env_vars = shlex.quote(env_vars_json)
                     cluster_ips = shlex.quote(",".join({self._stable_cluster_ips!r}))
 
-                    runner_args = f'--log-dir={{log_dir}} --env-vars={{env_vars}} --cluster-num-nodes={{cluster_num_nodes}} --cluster-ips={{cluster_ips}}'
+                    runner_args = f'--log-dir={{log_dir}} --env-vars={{env_vars}} --cluster-num-nodes={self._cluster_num_nodes} --cluster-ips={{cluster_ips}}'
 
                     if task_name is not None:
                         runner_args += f' --task-name={{shlex.quote(task_name)}}'
@@ -860,7 +860,6 @@ class SlurmCodeGen(TaskCodeGen):
                     run_flags = f'--nodes={num_nodes} --cpus-per-task={task_cpu_demand} --mem=0 {{gpu_arg}} --exclusive'
                     srun_cmd, task_script_path = build_task_runner_cmd(
                         script, run_flags, {log_dir!r}, sky_env_vars_dict,
-                        cluster_num_nodes={self._cluster_num_nodes},
                         task_name={task_name!r},
                         alloc_signal=alloc_signal_file,
                         setup_done_signal=setup_done_signal_file
@@ -916,7 +915,6 @@ class SlurmCodeGen(TaskCodeGen):
                     setup_flags = f'--overlap --nodes={self._setup_num_nodes}'
                     setup_srun, setup_script_path = build_task_runner_cmd(
                         {self._setup_cmd!r}, setup_flags, {self._setup_log_dir!r}, {self._setup_envs!r},
-                        cluster_num_nodes={self._cluster_num_nodes},
                         is_setup=True
                     )
 
