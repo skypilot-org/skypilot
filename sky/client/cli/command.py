@@ -1869,8 +1869,10 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
             services_request_future = executor.submit(submit_services)
         if show_pools:
             pools_request_future = executor.submit(submit_pools)
+        time.sleep(0.5)
         if not (ip or show_endpoints):
             workspace_request_future = executor.submit(submit_workspace)
+        time.sleep(0.5)
         enabled_clouds_request_future = executor.submit(submit_enabled_clouds)
 
         # Get the request IDs

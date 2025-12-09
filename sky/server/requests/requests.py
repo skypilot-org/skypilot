@@ -671,11 +671,13 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
     """Get and update a SkyPilot API request."""
     # Acquire the lock to avoid race conditions between multiple request
     # operations, e.g. execute and cancel.
+    logger.info(f'UPDATE REQUEST START: {request_id}')
     with filelock.FileLock(request_lock_path(request_id)):
         request = _get_request_no_lock(request_id)
         yield request
         if request is not None:
             _add_or_update_request_no_lock(request)
+    logger.info(f'UPDATE REQUEST DONE: {request_id}')
 
 
 @init_db_async
@@ -711,12 +713,12 @@ def _get_request_no_lock(
     if fields:
         columns_str = ', '.join(fields)
     with _DB.conn:
-        cursor = _DB.conn.cursor()
-        cursor.execute((f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-                        'WHERE request_id LIKE ?'), (request_id + '%',))
-        row = cursor.fetchone()
-        if row is None:
-            return None
+        with _DB.conn.cursor() as cursor:
+            cursor.execute((f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+                            'WHERE request_id LIKE ?'), (request_id + '%',))
+            row = cursor.fetchone()
+            if row is None:
+                return None
     if fields:
         row = _update_request_row_fields(row, fields)
     return Request.from_row(row)
@@ -862,6 +864,7 @@ async def create_if_not_exists_async(request: Request) -> bool:
         True if a new request is created, False if the request already exists.
     """
     assert _DB is not None
+    logger.info(f'CREATE REQUEST START: {request.request_id}, ASYNC CONN: {id(_DB._async_conn)}, CONN: {id(_DB.conn)}, PID: {os.getpid()}')
     request_columns = ', '.join(REQUEST_COLUMNS)
     values_str = ', '.join(['?'] * len(REQUEST_COLUMNS))
     sql_statement = (
@@ -874,6 +877,7 @@ async def create_if_not_exists_async(request: Request) -> bool:
     # but a request cannot be cancelled before it is created.
     row = await _DB.execute_get_returning_value_async(sql_statement,
                                                       request_row)
+    logger.info(f'CREATE REQUEST DONE: {request.request_id}')
     return True if row else False
 
 
@@ -972,11 +976,11 @@ def get_request_tasks(req_filter: RequestTaskFilter) -> List[Request]:
     """
     assert _DB is not None
     with _DB.conn:
-        cursor = _DB.conn.cursor()
-        cursor.execute(*req_filter.build_query())
-        rows = cursor.fetchall()
-        if rows is None:
-            return []
+        with _DB.conn.cursor() as cursor:
+            cursor.execute(*req_filter.build_query())
+            rows = cursor.fetchall()
+            if rows is None:
+                return []
     if req_filter.fields:
         rows = [
             _update_request_row_fields(row, req_filter.fields) for row in rows
