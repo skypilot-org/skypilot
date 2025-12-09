@@ -477,9 +477,8 @@ def deploy_single_cluster(cluster_name,
     if deploy_utils.check_gpu(head_node,
                               ssh_user,
                               ssh_key,
-                              use_ssh_config=head_use_ssh_config):
-        logger.info(f'{colorama.Fore.YELLOW}'
-                    f'GPU detected on head node ({head_node}).{RESET_ALL}')
+                              use_ssh_config=head_use_ssh_config,
+                              is_head=True):
         install_gpu = True
 
     # Fetch the head node's internal IP (this will be passed to worker nodes)

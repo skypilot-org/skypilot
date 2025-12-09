@@ -867,7 +867,19 @@ class _NaturalOrderGroup(click.Group):
     """
 
     def list_commands(self, ctx):  # pylint: disable=unused-argument
-        return self.commands.keys()
+        # Preserve definition order but hide aliases (same command object) and
+        # commands explicitly marked as hidden.
+        seen_commands = set()
+        names = []
+        for name, command in self.commands.items():
+            if getattr(command, 'hidden', False):
+                continue
+            command_id = id(command)
+            if command_id in seen_commands:
+                continue
+            seen_commands.add(command_id)
+            names.append(name)
+        return names
 
     @usage_lib.entrypoint('sky.cli', fallback=True)
     def invoke(self, ctx):
