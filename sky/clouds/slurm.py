@@ -568,16 +568,11 @@ class Slurm(clouds.Cloud):
 
     @classmethod
     def expand_infras(cls) -> List[str]:
-        """Returns a list of enabled Slurm cluster/partition combinations.
+        """Returns a list of enabled Slurm clusters.
 
-        Each is returned as 'Slurm/cluster-name/partition' to be displayed
-        as a separate option in the optimizer.
-
-        The default partition appears first,
-        and the rest are sorted alphabetically.
+        Each is returned as 'Slurm/cluster-name'.
         """
         infras = []
         for cluster in cls.existing_allowed_clusters(silent=True):
-            infras.append(
-                f'{cls.canonical_name()}/{cluster}')
+            infras.append(f'{cls.canonical_name()}/{cluster}')
         return infras
