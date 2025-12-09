@@ -20,6 +20,12 @@ SEP = r'\x1f'
 _PARTITION_NAME_REGEX = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
 
 
+class SlurmPartition(NamedTuple):
+    """Information about the Slurm partitions."""
+    name: str
+    is_default: bool
+
+
 # TODO(kevin): Add more API types for other client functions.
 class NodeInfo(NamedTuple):
     """Information about a Slurm node from sinfo."""
@@ -377,32 +383,6 @@ class SlurmClient:
 
         return nodes, node_ips
 
-    def get_partitions(self) -> List[str]:
-        """Get unique partition names in the Slurm cluster.
-
-        Returns:
-            List of partition names. The default partition will not have a '*'
-            at the end of the name.
-        """
-        cmd = 'scontrol show partitions -o'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
-        subprocess_utils.handle_returncode(rc,
-                                           cmd,
-                                           'Failed to get Slurm partitions.',
-                                           stderr=stderr)
-
-        # Extract partition names from PartitionName= fields
-        partitions = []
-        for line in stdout.strip().splitlines():
-            match = _PARTITION_NAME_REGEX.search(line)
-            if match:
-                partition = match.group(1).strip()
-                if partition:
-                    partitions.append(partition)
-        return partitions
-
     def submit_job(
         self,
         partition: str,
@@ -440,27 +420,51 @@ class SlurmClient:
 
         return job_id
 
+    def get_partitions_info(self) -> List[SlurmPartition]:
+        """Get the partitions information for the Slurm cluster.
+
+        Returns:
+            List of SlurmPartition objects.
+        """
+        cmd = 'scontrol show partitions -o'
+        rc, stdout, stderr = self._runner.run(cmd,
+                                              require_outputs=True,
+                                              stream_logs=False)
+        subprocess_utils.handle_returncode(rc,
+                                           cmd,
+                                           'Failed to get Slurm partitions.',
+                                           stderr=stderr)
+
+        partitions = []
+        for line in stdout.strip().splitlines():
+            is_default = False
+            match = _PARTITION_NAME_REGEX.search(line)
+            if 'Default=YES' in line:
+                is_default = True
+            if match:
+                partition = match.group(1).strip()
+                if partition:
+                    partitions.append(
+                        SlurmPartition(name=partition, is_default=is_default))
+        return partitions
+
     def get_default_partition(self) -> Optional[str]:
-        """Get the default partition for the Slurm cluster.
+        """Get the default partition name for the Slurm cluster.
 
         Returns:
             The default partition name, or None if it cannot be determined.
         """
-        cmd = 'scontrol show partition -o'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
-        if rc != 0:
-            logger.debug(f'Failed to get default partition: {stderr}')
-            return None
-
-        for line in stdout.strip().splitlines():
-            if 'Default=YES' in line:
-                match = _PARTITION_NAME_REGEX.search(line)
-                if match:
-                    partition = match.group(1).strip()
-                    if partition:
-                        return partition
-
-        logger.debug('No default partition found')
+        partitions = self.get_partitions_info()
+        for partition in partitions:
+            if partition.is_default:
+                return partition.name
         return None
+
+    def get_partitions(self) -> List[str]:
+        """Get unique partition names in the Slurm cluster.
+
+        Returns:
+            List of partition names. The default partition will not have a '*'
+            at the end of the name.
+        """
+        return [partition.name for partition in self.get_partitions_info()]

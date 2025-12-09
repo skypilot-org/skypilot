@@ -1211,6 +1211,7 @@ def enabled_clouds(workspace: Optional[str] = None,
             return [cloud.canonical_name() for cloud in cached_clouds]
         enabled_ssh_infras = []
         enabled_k8s_infras = []
+        enabled_slurm_infras = []
         enabled_cloud_infras = []
         for cloud in cached_clouds:
             cloud_infra = cloud.expand_infras()
@@ -1218,10 +1219,16 @@ def enabled_clouds(workspace: Optional[str] = None,
                 enabled_ssh_infras.extend(cloud_infra)
             elif isinstance(cloud, clouds.Kubernetes):
                 enabled_k8s_infras.extend(cloud_infra)
+            elif isinstance(cloud, clouds.Slurm):
+                enabled_slurm_infras.extend(cloud_infra)
             else:
                 enabled_cloud_infras.extend(cloud_infra)
+        # We do not sort slurm infras alphabetically because the
+        # default partition should appear first.
+        # Ordering of slurm infras is enforced in Slurm implementation.
         all_infras = sorted(enabled_ssh_infras) + sorted(
-            enabled_k8s_infras) + sorted(enabled_cloud_infras)
+            enabled_k8s_infras) + enabled_slurm_infras + sorted(
+                enabled_cloud_infras)
         return all_infras
 
 

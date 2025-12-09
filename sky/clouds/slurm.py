@@ -572,6 +572,9 @@ class Slurm(clouds.Cloud):
 
         Each is returned as 'Slurm/cluster-name/partition' to be displayed
         as a separate option in the optimizer.
+
+        The default partition appears first,
+        and the rest are sorted alphabetically.
         """
         infras = []
         for cluster in cls.existing_allowed_clusters(silent=True):
