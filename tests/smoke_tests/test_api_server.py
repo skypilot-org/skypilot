@@ -35,6 +35,8 @@ def set_user(user_id: str, user_name: str, commands: List[str]) -> List[str]:
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
 @pytest.mark.no_shadeform  # Shadeform does not support multi-tenant jobs
 @pytest.mark.no_seeweb  # Seeweb does not support multi-tenant jobs
+# Note: we should skip or fix on shared remote cluster because two copies of
+# this test may down each other's clusters (sky down -a with hardcoded user id).
 def test_multi_tenant(generic_cloud: str):
     if smoke_tests_utils.services_account_token_configured_in_env_file():
         pytest.skip(
@@ -63,8 +65,14 @@ def test_multi_tenant(generic_cloud: str):
                 # Stopping cluster should not change the ownership of the cluster.
                 f's=$(sky status) && echo "$s" && echo "$s" | grep {name}-1 && exit 1 || true',
                 f'sky status {name}-1 | grep STOPPED',
-                # Both clusters should be stopped.
-                f'sky status -u | grep {name}-1 | grep STOPPED',
+                # Restarting other user's cluster should work.
+                f'sky start -y {name}-1',
+                # Cluster should still have the same disk.
+                f'sky exec {name}-1 \'ls file || exit 1\'',
+                # Restarting cluster should not change the ownership of the cluster.
+                f's=$(sky status) && echo "$s" && echo "$s" | grep {name}-1 && exit 1 || true',
+                # Cluster 1 should be UP now, but cluster 2 should be STOPPED.
+                f'sky status -u | grep {name}-1 | grep UP',
                 f'sky status -u | grep {name}-2 | grep STOPPED',
             ]),
     ]
@@ -78,14 +86,17 @@ def test_multi_tenant(generic_cloud: str):
             'echo "==== Test multi-tenant job on single cluster ===="',
             *set_user(user_1, user_1_name, [
                 f'sky launch -y -c {name}-1 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -n job-1 tests/test_yamls/minimal.yaml',
+                f'sky exec {name}-1 -n job-2 \'touch file\'',
                 f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-1 | grep SUCCEEDED | awk \'{{print $1}}\' | grep 1',
                 f's=$(sky queue -u {name}-1) && echo "$s" && echo "$s" | grep {user_1_name} | grep job-1 | grep SUCCEEDED',
             ]),
             *set_user(user_2, user_2_name, [
-                f'sky exec {name}-1 -n job-2 \'echo "hello" && exit 1\' || [ $? -eq 100 ]',
-                f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-2 | grep FAILED | awk \'{{print $1}}\' | grep 2',
+                f'sky exec {name}-1 -n job-3 \'echo "hello" && exit 1\' || [ $? -eq 100 ]',
+                f'sky launch -y -c {name}-1 -n job-4 \'ls file || exit 1\'',
+                f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-3 | grep FAILED | awk \'{{print $1}}\' | grep 3',
+                f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-4 | grep SUCCEEDED | awk \'{{print $1}}\' | grep 4',
                 f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-1 && exit 1 || true',
-                f's=$(sky queue {name}-1 -u) && echo "$s" && echo "$s" | grep {user_2_name} | grep job-2 | grep FAILED',
+                f's=$(sky queue {name}-1 -u) && echo "$s" && echo "$s" | grep {user_2_name} | grep job-3 | grep FAILED',
                 f's=$(sky queue {name}-1 -u) && echo "$s" && echo "$s" | grep {user_1_name} | grep job-1 | grep SUCCEEDED',
             ]),
             'echo "==== Test clusters from different users ===="',
