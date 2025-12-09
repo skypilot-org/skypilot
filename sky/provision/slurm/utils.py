@@ -550,7 +550,9 @@ def get_partitions(cluster_name: str) -> List[str]:
         cluster_name: Name of the Slurm cluster.
 
     Returns:
-        Sorted list of unique partition names available in the cluster.
+        List of unique partition names available in the cluster.
+        The default partition appears first,
+        and the rest are sorted alphabetically.
     """
     try:
         slurm_config = SSHConfig.from_path(
@@ -565,8 +567,16 @@ def get_partitions(cluster_name: str) -> List[str]:
             ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
         )
 
-        partitions = client.get_partitions()
-        return sorted(partitions)
+        partitions = client.get_partitions_info()
+        default_partition = [
+            partition.name for partition in partitions if partition.is_default
+        ]
+        other_partitions = [
+            partition.name
+            for partition in partitions
+            if not partition.is_default
+        ]
+        return default_partition + sorted(other_partitions)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(
             f'Failed to get partitions for cluster {cluster_name}: {e}')
