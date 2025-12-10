@@ -1151,6 +1151,7 @@ class ControllerManager:
 
                     # Restore config file if needed
                     file_content_utils.restore_job_config_file(job_id)
+                    skypilot_config.reload_config()
 
                     # Set SKYPILOT_JOB_RANK from job_id_to_rank mapping if
                     # available
@@ -1181,8 +1182,6 @@ class ControllerManager:
                         logger.debug(
                             'SKYPILOT_JOB_ID_TO_RANK not found in environment '
                             'variables')
-
-                    skypilot_config.reload_config()
                 else:  # pragma: no cover - defensive
                     logger.error('Context is None, cannot set environment '
                                  'variables')

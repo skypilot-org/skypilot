@@ -206,32 +206,6 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 # Note that the order of ">filename 2>&1" matters.
                 f' > {remote_log_path} 2>&1')
             job_lib.scheduler.queue(job_id, job_submit_cmd)
-
-            if request.HasField('managed_job'):
-                managed_job = request.managed_job
-                pool = managed_job.pool if managed_job.HasField(
-                    'pool') else None
-                pool_hash = None
-                if pool is not None:
-                    pool_hash = serve_state.get_service_hash(pool)
-                # Add the managed job to job queue database.
-                user_id = managed_job.user_id if managed_job.HasField(
-                    'user_id') else None
-                managed_job_state.set_job_info(job_id, managed_job.name,
-                                               managed_job.workspace,
-                                               managed_job.entrypoint, pool,
-                                               pool_hash, user_id)
-                # Set the managed job to PENDING state to make sure that
-                # this managed job appears in the `sky jobs queue`, even
-                # if it needs to wait to be submitted.
-                # We cannot set the managed job to PENDING state in the
-                # job template (jobs-controller.yaml.j2), as it may need
-                # to wait for the run commands to be scheduled on the job
-                # controller in high-load cases.
-                for task in managed_job.tasks:
-                    managed_job_state.set_pending(job_id, task.task_id,
-                                                  task.name, task.resources_str,
-                                                  task.metadata_json)
             return jobsv1_pb2.QueueJobResponse()
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))

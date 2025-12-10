@@ -274,7 +274,6 @@ def submit_jobs(job_ids: List[int], dag_yaml_path: str,
 
     The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
-    # Load DAG to get task information for setting job_info and pending state
     job_ids_without_controller_process = []
     for job_id in job_ids:
         controller_process = state.get_job_controller_process(job_id)
@@ -444,7 +443,5 @@ if __name__ == '__main__':
         f' Default: {constants.DEFAULT_PRIORITY}.')
     args = parser.parse_args()
 
-    all_job_ids = [args.job_id] if isinstance(args.job_id, int) else args.job_id
-
-    submit_jobs(all_job_ids, args.dag_yaml, args.user_yaml_path, args.env_file,
+    submit_jobs(args.job_id, args.dag_yaml, args.user_yaml_path, args.env_file,
                 args.priority)

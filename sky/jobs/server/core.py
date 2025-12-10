@@ -310,118 +310,113 @@ def _ensure_controller_up(
         task_resources: Optional list of task resources. If provided, the
             controller will be launched on the same cloud as the tasks.
     """
-    try:
-        handle = backend_utils.is_controller_accessible(controller=controller,
-                                                        stopped_message='')
-        return handle
-    except exceptions.ClusterNotUpError:
-        # Controller is not up, provision it (bring up the cluster)
-        controller_name = controller.value.cluster_name
-        logger.info(f'{colorama.Fore.YELLOW}'
-                    f'Jobs controller {controller_name} is not up. '
-                    f'Provisioning it...{colorama.Style.RESET_ALL}')
+    # Controller is not up, provision it (bring up the cluster)
+    controller_name = controller.value.cluster_name
+    logger.info(f'{colorama.Fore.YELLOW}'
+                f'Jobs controller {controller_name} is not up. '
+                f'Provisioning it...{colorama.Style.RESET_ALL}')
 
-        # Create a minimal task for provisioning the controller cluster
-        # We only use this for its resources, not to execute a job
-        # Use task_resources to determine which cloud to launch the controller.
-        controller_resources_set = controller_utils.get_controller_resources(
-            controller=controller,
-            task_resources=task_resources if task_resources else [])
+    # Create a minimal task for provisioning the controller cluster
+    # We only use this for its resources, not to execute a job
+    # Use task_resources to determine which cloud to launch the controller.
+    controller_resources_set = controller_utils.get_controller_resources(
+        controller=controller,
+        task_resources=task_resources if task_resources else [])
 
-        # Use the jobs controller template to ensure cloud dependencies
-        # are installed.
-        dag_uuid = str(uuid.uuid4())
-        prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
-        remote_orig_user_yaml_path = (
-            f'{prefix}/ensure-controller-up-{dag_uuid}.original_user_yaml')
-        remote_user_yaml_path = f'{prefix}/ensure-controller-up-{dag_uuid}.yaml'
-        remote_user_config_path = (
-            f'{prefix}/ensure-controller-up-{dag_uuid}.config_yaml')
-        remote_env_file_path = f'{prefix}/ensure-controller-up-{dag_uuid}.env'
+    # Use the jobs controller template to ensure cloud dependencies
+    # are installed.
+    dag_uuid = str(uuid.uuid4())
+    prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
+    remote_orig_user_yaml_path = (
+        f'{prefix}/ensure-controller-up-{dag_uuid}.original_user_yaml')
+    remote_user_yaml_path = f'{prefix}/ensure-controller-up-{dag_uuid}.yaml'
+    remote_user_config_path = (
+        f'{prefix}/ensure-controller-up-{dag_uuid}.config_yaml')
+    remote_env_file_path = f'{prefix}/ensure-controller-up-{dag_uuid}.env'
 
-        # Create minimal temporary files for template
-        with tempfile.NamedTemporaryFile(
-                prefix='ensure-controller-up-', mode='w',
-                delete=False) as f, tempfile.NamedTemporaryFile(
-                    prefix='ensure-controller-up-user-', mode='w',
-                    delete=False) as original_user_yaml_path:
-            # Write minimal dag content
-            minimal_dag = task_lib.Task(name='ensure_controller_up',
-                                        run='echo "Controller cluster is up"')
-            with dag_lib.Dag() as temp_dag:
-                temp_dag.add(minimal_dag)
-                dag_utils.dump_chain_dag_to_yaml(temp_dag, f.name)
-            original_user_yaml_path.write('')
-            original_user_yaml_path.flush()
+    # Create minimal temporary files for template
+    with tempfile.NamedTemporaryFile(
+            prefix='ensure-controller-up-', mode='w',
+            delete=False) as f, tempfile.NamedTemporaryFile(
+                prefix='ensure-controller-up-user-', mode='w',
+                delete=False) as original_user_yaml_path:
+        # Write minimal dag content
+        minimal_dag = task_lib.Task(name='ensure_controller_up',
+                                    run='echo "Controller cluster is up"')
+        with dag_lib.Dag() as temp_dag:
+            temp_dag.add(minimal_dag)
+            dag_utils.dump_chain_dag_to_yaml(temp_dag, f.name)
+        original_user_yaml_path.write('')
+        original_user_yaml_path.flush()
 
-            vars_to_fill: Dict[str, Any] = {
-                'remote_original_user_yaml_path': remote_orig_user_yaml_path,
-                'original_user_dag_path': original_user_yaml_path.name,
-                'remote_user_yaml_path': remote_user_yaml_path,
-                'user_yaml_path': f.name,
-                'local_to_controller_file_mounts': {},
-                'jobs_controller': controller_name,
-                'dag_name': 'ensure_controller_up',
-                'remote_user_config_path': remote_user_config_path,
-                'remote_env_file_path': remote_env_file_path,
-                'modified_catalogs': {},
-                'priority': skylet_constants.DEFAULT_PRIORITY,
-                'is_consolidation_mode': False,
-                'pool': None,
-                'job_controller_indicator_file':
-                    managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,
-                **controller_utils.shared_controller_vars_to_fill(
-                    controller,
-                    remote_user_config_path=remote_user_config_path,
-                    local_user_config={},
-                ),
-            }
+        vars_to_fill: Dict[str, Any] = {
+            'remote_original_user_yaml_path': remote_orig_user_yaml_path,
+            'original_user_dag_path': original_user_yaml_path.name,
+            'remote_user_yaml_path': remote_user_yaml_path,
+            'user_yaml_path': f.name,
+            'local_to_controller_file_mounts': {},
+            'jobs_controller': controller_name,
+            'dag_name': 'ensure_controller_up',
+            'remote_user_config_path': remote_user_config_path,
+            'remote_env_file_path': remote_env_file_path,
+            'modified_catalogs': {},
+            'priority': skylet_constants.DEFAULT_PRIORITY,
+            'is_consolidation_mode': False,
+            'pool': None,
+            'job_controller_indicator_file':
+                managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,
+            **controller_utils.shared_controller_vars_to_fill(
+                controller,
+                remote_user_config_path=remote_user_config_path,
+                local_user_config={},
+            ),
+        }
 
-            yaml_path = os.path.join(
-                managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
-                f'ensure-controller-up-{dag_uuid}.yaml')
+        yaml_path = os.path.join(
+            managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
+            f'ensure-controller-up-{dag_uuid}.yaml')
 
-            # Fill the template to create the controller task YAML
-            common_utils.fill_template(
-                managed_job_constants.JOBS_CONTROLLER_TEMPLATE,
-                vars_to_fill,
-                output_path=yaml_path)
+        # Fill the template to create the controller task YAML
+        common_utils.fill_template(
+            managed_job_constants.JOBS_CONTROLLER_TEMPLATE,
+            vars_to_fill,
+            output_path=yaml_path)
 
-            # Create task from the template-generated YAML
-            controller_task = task_lib.Task.from_yaml(yaml_path)
-            controller_task.set_resources(controller_resources_set)
+        # Create task from the template-generated YAML
+        controller_task = task_lib.Task.from_yaml(yaml_path)
+        controller_task.set_resources(controller_resources_set)
 
-        # Optimize the task to make resources launchable.
-        with dag_lib.Dag() as dag:
-            dag.add(controller_task)
-        dag = optimizer.Optimizer.optimize(dag,
-                                           minimize=common.OptimizeTarget.COST,
-                                           quiet=True)
-        controller_task = dag.tasks[0]
-        assert controller_task.best_resources is not None, controller_task
+    # Optimize the task to make resources launchable.
+    with dag_lib.Dag() as dag:
+        dag.add(controller_task)
+    dag = optimizer.Optimizer.optimize(dag,
+                                        minimize=common.OptimizeTarget.COST,
+                                        quiet=True)
+    controller_task = dag.tasks[0]
+    assert controller_task.best_resources is not None, controller_task
 
-        with skypilot_config.local_active_workspace_ctx(
-                skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
-            with common.with_server_user():
-                # Only provision the cluster, don't execute a job
-                # This brings up the cluster without creating a cluster job ID.
-                backend = backends.CloudVmRayBackend()
-                # Use the optimized Resources object for provisioning
-                handle, _ = backend.provision(
-                    task=controller_task,
-                    to_provision=controller_task.best_resources,
-                    dryrun=False,
-                    stream_logs=False,
-                    cluster_name=controller_name,
-                    retry_until_up=True,
-                    skip_unnecessary_provisioning=True)
-                # Run setup commands to ensure cloud dependencies are installed
-                backend.setup(handle, controller_task, detach_setup=False)
+    with skypilot_config.local_active_workspace_ctx(
+            skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
+        with common.with_server_user():
+            # Only provision the cluster, don't execute a job
+            # This brings up the cluster without creating a cluster job ID.
+            backend = backends.CloudVmRayBackend()
+            # Use the optimized Resources object for provisioning
+            handle, _ = backend.provision(
+                task=controller_task,
+                to_provision=controller_task.best_resources,
+                dryrun=False,
+                stream_logs=False,
+                cluster_name=controller_name,
+                retry_until_up=True,
+                skip_unnecessary_provisioning=True)
+            # Run setup commands to ensure cloud dependencies are installed
+            backend.setup(handle, controller_task, detach_setup=False)
 
-        # Verify the controller is now accessible
-        handle = backend_utils.is_controller_accessible(controller=controller,
-                                                        stopped_message='')
-        return handle
+    # Verify the controller is now accessible
+    handle = backend_utils.is_controller_accessible(controller=controller,
+                                                    stopped_message='')
+    return handle
 
 
 def _submit_remotely(controller: controller_utils.Controllers,

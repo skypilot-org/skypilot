@@ -1666,7 +1666,7 @@ def scheduler_set_waiting(job_ids: List[int], dag_yaml_content: str,
                     job_info_table.c.priority: priority,
                 })
         session.commit()
-        assert updated_count <= len(job_ids), (job_ids, updated_count)
+        assert updated_count == len(job_ids), (job_ids, updated_count)
 
 
 @_init_db
