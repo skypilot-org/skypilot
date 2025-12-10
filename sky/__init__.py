@@ -149,11 +149,11 @@ RunPod = clouds.RunPod
 Vast = clouds.Vast
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
-Nebius = clouds.Nebius
 Hyperbolic = clouds.Hyperbolic
+Nebius = clouds.Nebius
 Novita = clouds.Novita
-Shadeform = clouds.Shadeform
 Seeweb = clouds.Seeweb
+Shadeform = clouds.Shadeform
 
 __all__ = [
     '__version__',

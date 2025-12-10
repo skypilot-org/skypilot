@@ -151,8 +151,6 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         # The node_config contains instance specs including InstanceType
         # which follows the format: {cloud_provider}_{instance_type}
         # (e.g., "massedcompute_A6000_basex2")
-        print(f'run_instances config: {config}')
-        print(f'run_instances node_config: {config.node_config}')
         node_config = config.node_config
         assert 'InstanceType' in node_config, \
             'InstanceType must be present in node_config'
@@ -204,12 +202,10 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         
         # Try to match instance_type_full first, then try without cloud prefix
         df_filtered = df[df['InstanceType'] == instance_type_full]
-        print(f'instance_type_full: {instance_type_full}')
         if df_filtered.empty and '_' in instance_type_full:
             # If not found, try matching without the cloud provider prefix
             # instance_type_full format: "cloud_1x_RTX 4090 24GB" -> "1x_RTX 4090 24GB"
             instance_type_without_cloud = '_'.join(instance_type_full.split('_')[1:])
-            print(f'instance_type_without_cloud: {instance_type_without_cloud}')
             df_filtered = df[df['InstanceType'] == instance_type_without_cloud]
         
         # Also filter by region to get the correct row for this region
@@ -223,13 +219,9 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 f'{df[df["InstanceType"] == instance_type_full]["Region"].unique().tolist() if not df[df["InstanceType"] == instance_type_full].empty else "N/A"}')
         
         df = df_filtered
-        print(f'df: {df}')
         rowData = df.iloc[0]
-        print(f'rowData: {rowData}')
         gpuInfo_str = rowData['GpuInfo']
-        print(f'gpuInfo_str: {gpuInfo_str}')
         gpuInfo = ast.literal_eval(gpuInfo_str)
-        print(f'gpuInfo: {gpuInfo}')
         
         # the params are the same as the create_instance API: https://novita.ai/docs/api-reference/gpu-instance-create-instance#param-id
         # Extract productId from GpuInfo - this is the instance ID from Novita API
@@ -272,8 +264,6 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         # Empty strings and empty lists should be omitted
         # imageUrl = 'nginx:latest'  # Default image, may not be needed
         # kind = 'gpu'  # May be inferred from productId
-        print(f'create_config: {create_config}')
-
         try:
             logger.info(f'Creating {node_type} instance: {instance_name}')
             response = novita_utils.create_instance(create_config)

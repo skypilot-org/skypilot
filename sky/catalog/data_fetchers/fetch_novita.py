@@ -9,7 +9,6 @@ If neither --api-key nor --api-key-path are provided, this script will parse
 """
 import argparse
 import csv
-import json
 import os
 from typing import Dict
 
@@ -63,10 +62,7 @@ def create_catalog(api_key: str, output_path: str) -> None:
     data = response.json()
     dataArr = data.get('data', [])
 
-    # print(f'dataArr: {dataArr}')
-
-    instance_types = list(filter(lambda x: x.get('availableDeploy', False), dataArr))
-
+    instance_types = list(filter(lambda x: x.get('availableDeploy', False) and x.get('canBuy', True) and not x.get('activityProduct', False), dataArr))
 
     with open(output_path, mode='w', encoding='utf-8') as f:
         writer = csv.writer(f, delimiter=',', quotechar='"')
@@ -74,9 +70,6 @@ def create_catalog(api_key: str, output_path: str) -> None:
             'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
             'MemoryGiB', 'Price', 'Region', 'GpuInfo', 'SpotPrice'
         ])
-
-        print(f'instance_types: {instance_types}')
-
         for instance in instance_types:
             name = instance['name']
             id = instance['id']
@@ -107,8 +100,6 @@ def create_catalog(api_key: str, output_path: str) -> None:
                         gpu_info,
                         ''
                     ])
-                    print(f'wrote row: {f"{gpu_count}x_{name}"}, {name}, {gpu_count}, {vcpus}, {memory_gb}, {price}, {region}, {gpu_info}')
-
 
 def get_api_key(cmdline_args: argparse.Namespace) -> str:
     """Get Novita API key from cmdline or default path."""
@@ -136,7 +127,5 @@ if __name__ == '__main__':
     parser.add_argument('--api-key-path',
                         help='path of file containing Novita API key.')
     args = parser.parse_args()
-    print(f'Fetching Novita catalog from {ENDPOINT}')
     os.makedirs('novita', exist_ok=True)
     create_catalog(get_api_key(args), 'novita/vms.csv')
-    print('Novita catalog saved to novita/vms.csv')

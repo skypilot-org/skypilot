@@ -511,10 +511,10 @@ HOSTED_CATALOG_DIR_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilo
 HOSTED_CATALOG_DIR_URL_S3_MIRROR = 'https://skypilot-catalog.s3.us-east-1.amazonaws.com/catalogs'  # pylint: disable=line-too-long
 CATALOG_SCHEMA_VERSION = 'v8'
 CATALOG_DIR = '~/.sky/catalogs'
-ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
-              'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
-              'paperspace', 'primeintellect', 'do', 'nebius', 'ssh',
-              'hyperbolic', 'seeweb', 'novita', 'shadeform')
+ALL_CLOUDS = ('aws', 'azure', 'cudo', 'do', 'fluidstack', 'gcp', 'hyperbolic', 
+              'ibm', 'kubernetes', 'lambda', 'nebius', 'novita', 'oci', 
+              'paperspace', 'primeintellect', 'runpod', 'scp', 'seeweb', 
+              'shadeform', 'ssh', 'vast', 'vsphere')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.
