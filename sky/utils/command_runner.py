@@ -1351,6 +1351,9 @@ class SlurmCommandRunner(SSHCommandRunner):
         self._ssh_proxy_command = login_node_proxy_command
         # Update self.ip to target the compute node.
         self.ip = slurm_node
+        # Assume the compute node's SSH port is 22.
+        # TODO(kevin): Make this configurable if needed.
+        self.port = 22
 
     def rsync(
         self,
