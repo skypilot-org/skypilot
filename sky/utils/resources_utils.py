@@ -180,6 +180,19 @@ def simplify_ports(ports: List[str]) -> List[str]:
     return port_set_to_ranges(port_ranges_to_set(ports))
 
 
+def _format_resource_value(value: float) -> str:
+    """Format resource values with up to 1 decimal place.
+
+    Values are rounded to the first decimal; whole numbers are displayed
+    without a decimal point to keep the previous formatting consistent.
+    """
+
+    rounded_value = round(float(value), 1)
+    if rounded_value.is_integer():
+        return str(int(rounded_value))
+    return f'{rounded_value:.1f}'
+
+
 def format_resource(resource: 'resources_lib.Resources',
                     simplified_only: bool = False) -> Tuple[str, Optional[str]]:
     resource = resource.assert_launchable()
@@ -198,8 +211,9 @@ def format_resource(resource: 'resources_lib.Resources',
 
     if (resource.accelerators is None or is_k8s):
         if vcpu is not None:
-            elements_simple.append(f'cpus={int(vcpu)}')
-            elements_full.append(f'cpus={int(vcpu)}')
+            cpus = _format_resource_value(vcpu)
+            elements_simple.append(f'cpus={cpus}')
+            elements_full.append(f'cpus={cpus}')
         if mem is not None:
             elements_simple.append(f'mem={int(mem)}')
             elements_full.append(f'mem={int(mem)}')
