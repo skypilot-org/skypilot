@@ -1303,8 +1303,8 @@ def test_container_logs_two_jobs_kubernetes():
             [
                 smoke_tests_utils.launch_cluster_for_cloud_cmd(
                     'kubernetes', name),
-                f'sky launch -y -c {name} {task_yaml}',
-                f'sky launch -y -c {name} {task_yaml}',
+                f'sky launch -y -c {name} --infra kubernetes {task_yaml}',
+                f'sky launch -y -c {name} --infra kubernetes {task_yaml}',
                 _check_container_logs(name, pod_logs, 9, 2),
             ],
             f'sky down -y {name} && '
