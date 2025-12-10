@@ -19,6 +19,9 @@ SEP = r'\x1f'
 # Matches PartitionName=<name> and captures until the next field
 _PARTITION_NAME_REGEX = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
 
+# Default timeout for waiting for job nodes to be allocated, in seconds.
+_SLURM_DEFAULT_PROVISION_TIMEOUT = 10
+
 
 class SlurmPartition(NamedTuple):
     """Information about the Slurm partitions."""
@@ -280,12 +283,12 @@ class SlurmClient:
         return output if output != 'None' else None
 
     @timeline.event
-    def wait_for_job_nodes(self, job_id: str, timeout: int = 300) -> None:
+    def wait_for_job_nodes(self, job_id: str, timeout: int) -> None:
         """Wait for a Slurm job to have nodes allocated.
 
         Args:
             job_id: The Slurm job ID.
-            timeout: Maximum time to wait in seconds (default: 300).
+            timeout: Maximum time to wait in seconds.
         """
         start_time = time.time()
         last_state = None
@@ -328,9 +331,11 @@ class SlurmClient:
                            f'{timeout} seconds. Last state: {last_state}')
 
     @timeline.event
-    def get_job_nodes(self,
-                      job_id: str,
-                      wait: bool = True) -> Tuple[List[str], List[str]]:
+    def get_job_nodes(
+            self,
+            job_id: str,
+            wait: bool = True,
+            timeout: Optional[int] = None) -> Tuple[List[str], List[str]]:
         """Get the list of nodes and their IPs for a given job ID.
 
         The ordering is guaranteed to be stable for the lifetime of the job.
@@ -338,6 +343,7 @@ class SlurmClient:
         Args:
             job_id: The Slurm job ID.
             wait: If True, wait for nodes to be allocated before returning.
+            timeout: Maximum time to wait in seconds. Only used when wait=True.
 
         Returns:
             A tuple of (nodes, node_ips) where nodes is a list of node names
@@ -345,7 +351,9 @@ class SlurmClient:
         """
         # Wait for nodes to be allocated if requested
         if wait:
-            self.wait_for_job_nodes(job_id)
+            if timeout is None:
+                timeout = _SLURM_DEFAULT_PROVISION_TIMEOUT
+            self.wait_for_job_nodes(job_id, timeout=timeout)
 
         cmd = (
             f'squeue -h --jobs {job_id} -o "%N" | tr \',\' \'\\n\' | '
