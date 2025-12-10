@@ -532,6 +532,17 @@ Following tabs describe how to configure credentials for different clouds on the
               --reuse-values \
               --set-file apiService.sshNodePools=/your/path/to/ssh_node_pools.yaml
 
+        .. note::
+
+           Updating the value of ``apiService.sshNodePools`` will not restart the API server but it will take tens of seconds to take effect on the API server.
+           You can verify the config updates on the API server by running the following command:
+
+           .. code-block:: bash
+
+            # API_SERVER_POD_NAME is the name of the API server pod
+            # The NAMESPACE should be consistent with the API server deployment
+            kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.sky/ssh_node_pools.yaml
+
         If your ``ssh_node_pools.yaml`` requires SSH keys, create a secret that contains the keys and set the :ref:`apiService.sshKeySecret <helm-values-apiService-sshKeySecret>` to the secret name:
 
         .. code-block:: bash
@@ -642,7 +653,7 @@ Following tabs describe how to configure credentials for different clouds on the
             You can also set the following values to use a secret that already contains your DigitalOcean API key:
 
             .. code-block:: bash
-                
+
                 # TODO: replace with your secret name
                 # if secret name is not provided, secret name defaults to `digitalocean-credentials`
                 helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
