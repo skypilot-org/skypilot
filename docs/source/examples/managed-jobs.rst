@@ -729,6 +729,18 @@ If you have deployed a :ref:`remote API server <sky-api-server>`, you can avoid 
 .. warning::
   Because the jobs controller must stay alive to manage running jobs, it's required to use an external API server to enable consolidation mode.
 
+.. image:: ../images/jobs-consolidation-mode.svg
+  :width: 800
+  :alt: Architecture diagram of SkyPilot remote API server with and without consolidation mode
+  :align: center
+
+Consolidating the API server and the jobs controller has a few advantages:
+
+- No extra VM/pod is needed for the jobs controller, saving cost.
+- Submitting jobs is **more than 10x faster** for the first job and more than 2x faster for subsequent jobs.
+- Since the API server directly launches the underlying managed job clusters, no special credential handling is required.
+- It's easier to directly connect to jobs to debug.
+
 To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml-jobs-controller-consolidation-mode>` in the API server config.
 
 .. code-block:: yaml
@@ -748,5 +760,7 @@ To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml
    RELEASE_NAME=skypilot
    # Restart the API server to pick up the config change
    kubectl -n $NAMESPACE rollout restart deployment $RELEASE_NAME-api-server
+
+See :ref:`more about the Kubernetes upgrade strategy of the API server <sky-api-server-graceful-upgrade>`.
 
 The jobs controller will use a bit of overhead - it reserves an extra 2GB of memory for itself, which may reduce the amount of requests your API server can handle. To counteract, you can increase the amount of CPU and memory allocated to the API server: See :ref:`sky-api-server-resources-tuning`.
