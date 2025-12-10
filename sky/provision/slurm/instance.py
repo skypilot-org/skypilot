@@ -118,7 +118,8 @@ def _create_virtual_instance(
         ['pending', 'running'],
     )
 
-    # Get provision_timeout from config, defaulting to 10 seconds
+    # Get provision_timeout from config. If not specified, use None,
+    # which will use the default timeout specified in the Slurm adaptor.
     provision_timeout = skypilot_config.get_effective_region_config(
         cloud='slurm',
         region=region,
