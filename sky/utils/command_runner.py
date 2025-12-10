@@ -1415,11 +1415,11 @@ class SlurmCommandRunner(SSHCommandRunner):
         cmd = (
             f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
             f'"{self.skypilot_runtime_dir}" && '
-            # Set the uv cache directory to /tmp/uv_cache to speed up
-            # package installation. Otherwise it defaults to ~/.cache/uv.
-            # This also means we can share the uv cache between multiple
-            # SkyPilot clusters.
-            f'export UV_CACHE_DIR=/tmp/uv_cache && '
+            # Set the uv cache directory to /tmp/uv_cache_$(id -u) to speed up
+            # package installation while avoiding permission conflicts when
+            # multiple users share the same host. Otherwise it defaults to
+            # ~/.cache/uv.
+            f'export UV_CACHE_DIR=/tmp/uv_cache_$(id -u) && '
             f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
         ssh_options = ('-o StrictHostKeyChecking=no '
                        '-o UserKnownHostsFile=/dev/null '
