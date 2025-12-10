@@ -1312,7 +1312,8 @@ class SlurmCommandRunner(SSHCommandRunner):
             runner.rsync(source, target, up=True)
 
         Args:
-            node: (ip, port) The IP address and port of the remote machine.
+            node: (ip, port) The IP address and port of the remote machine
+              (login node).
             ssh_user: SSH username.
             ssh_private_key: Path to SSH private key.
             sky_dir: The private directory for the SkyPilot cluster on the
@@ -1320,7 +1321,8 @@ class SlurmCommandRunner(SSHCommandRunner):
             skypilot_runtime_dir: The directory for the SkyPilot runtime
               on the Slurm cluster.
             job_id: The Slurm job ID for this instance.
-            slurm_node: The Slurm node hostname for this instance.
+            slurm_node: The Slurm node hostname for this instance
+              (compute node).
             **kwargs: Additional arguments forwarded to SSHCommandRunner
               (e.g., ssh_proxy_command).
         """
@@ -1329,6 +1331,29 @@ class SlurmCommandRunner(SSHCommandRunner):
         self.skypilot_runtime_dir = skypilot_runtime_dir
         self.job_id = job_id
         self.slurm_node = slurm_node
+
+        # Build a chained ProxyCommand that goes through the login node to reach
+        # the compute node where the job is running.
+
+        # First, build SSH options to reach the login node, using the user's
+        # existing proxy command if provided.
+        proxy_ssh_options = ' '.join(
+            ssh_options_list(self.ssh_private_key,
+                             None,
+                             ssh_proxy_command=self._ssh_proxy_command,
+                             port=self.port,
+                             disable_control_master=True))
+        login_node_proxy_command = (f'ssh {proxy_ssh_options} '
+                                    f'-W %h:%p {self.ssh_user}@{self.ip}')
+
+        # Update the proxy command to be the login node proxy, which will
+        # be used by super().run() to reach the compute node.
+        self._ssh_proxy_command = login_node_proxy_command
+        # Update self.ip to target the compute node.
+        self.ip = slurm_node
+        # Assume the compute node's SSH port is 22.
+        # TODO(kevin): Make this configurable if needed.
+        self.port = 22
 
     def rsync(
         self,
@@ -1351,24 +1376,15 @@ class SlurmCommandRunner(SSHCommandRunner):
         # if the target dir is in a shared filesystem, since it will
         # be accessible by the compute node.
 
-        # Build ProxyCommand to proxy through the Slurm login node to
-        # the compute node where the job is running.
-        proxy_ssh_options = ' '.join(
-            ssh_options_list(self.ssh_private_key,
-                             None,
-                             ssh_proxy_command=self._ssh_proxy_command,
-                             port=self.port,
-                             disable_control_master=True))
-        login_node_proxy_command = (f'ssh {proxy_ssh_options} '
-                                    f'-W %h:%p {self.ssh_user}@{self.ip}')
-
-        # Build the complete SSH option to pass in to rsync -e 'ssh ...',
-        # utilizing the login node proxy command we have above.
+        # Build SSH options for rsync using the ProxyCommand set up in __init__
+        # to reach the compute node through the login node.
         ssh_options = ' '.join(
             ssh_options_list(
-                None,  # Assume no key needed to ssh from login to compute node
+                # Assume nothing and rely on default SSH behavior when -i is
+                # not specified.
                 None,
-                ssh_proxy_command=login_node_proxy_command,
+                None,
+                ssh_proxy_command=self._ssh_proxy_command,
                 disable_control_master=True))
         rsh_option = f'ssh {ssh_options}'
 
@@ -1421,9 +1437,5 @@ class SlurmCommandRunner(SSHCommandRunner):
             # ~/.cache/uv.
             f'export UV_CACHE_DIR=/tmp/uv_cache_$(id -u) && '
             f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
-        ssh_options = ('-o StrictHostKeyChecking=no '
-                       '-o UserKnownHostsFile=/dev/null '
-                       '-o LogLevel=ERROR')
-        cmd = f'ssh {ssh_options} {self.slurm_node} {shlex.quote(cmd)}'
 
         return super().run(cmd, **kwargs)
