@@ -513,6 +513,7 @@ def _execute_dag(
                 backend.set_autostop(handle, idle_minutes_to_autostop, wait_for,
                                      down)
 
+        job_id = None
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
@@ -559,6 +560,7 @@ def launch(
     _request_name: request_names.AdminPolicyRequestName = request_names.
     AdminPolicyRequestName.CLUSTER_LAUNCH,
     job_logger: logging.Logger = logger,
+    _stages: Optional[List[Stage]] = None,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launches a cluster or task.
@@ -652,7 +654,7 @@ def launch(
             cluster_name, operation_str='sky.launch')
 
     handle = None
-    stages = None
+    stages = _stages
     skip_unnecessary_provisioning = False
     # Check if cluster exists and we are doing fast provisioning
     if fast and cluster_name is not None:
@@ -686,19 +688,22 @@ def launch(
                 ))
         if cluster_status == status_lib.ClusterStatus.UP:
             handle = maybe_handle
-            stages = [
-                # Provisioning will be short-circuited if the existing
-                # cluster config hash matches the calculated one.
-                Stage.PROVISION,
-                Stage.SYNC_WORKDIR,
-                Stage.SYNC_FILE_MOUNTS,
-                # Setup will be skipped if provisioning was skipped.
-                Stage.SETUP,
-                Stage.PRE_EXEC,
-                Stage.EXEC,
-                Stage.DOWN,
-            ]
+            if stages is None:
+                stages = [
+                    # Provisioning will be short-circuited if the existing
+                    # cluster config hash matches the calculated one.
+                    Stage.PROVISION,
+                    Stage.SYNC_WORKDIR,
+                    Stage.SYNC_FILE_MOUNTS,
+                    # Setup will be skipped if provisioning was skipped.
+                    Stage.SETUP,
+                    Stage.PRE_EXEC,
+                    Stage.EXEC,
+                    Stage.DOWN,
+                ]
             skip_unnecessary_provisioning = True
+    
+    logger.error(f'Stages: {stages}')
 
     # Attach to setup if the cluster is a controller, so that user can
     # see the setup logs when inspecting the launch process to know

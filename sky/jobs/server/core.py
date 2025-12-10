@@ -398,20 +398,24 @@ def _ensure_controller_up(
     with skypilot_config.local_active_workspace_ctx(
             skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
         with common.with_server_user():
-            # Only provision the cluster, don't execute a job
-            # This brings up the cluster without creating a cluster job ID.
-            backend = backends.CloudVmRayBackend()
-            # Use the optimized Resources object for provisioning
-            handle, _ = backend.provision(
-                task=controller_task,
-                to_provision=controller_task.best_resources,
-                dryrun=False,
-                stream_logs=False,
-                cluster_name=controller_name,
-                retry_until_up=True,
-                skip_unnecessary_provisioning=True)
-            # Run setup commands to ensure cloud dependencies are installed
-            backend.setup(handle, controller_task, detach_setup=False)
+            # Only provision the controller, don't execute a job.
+
+            # Run all stages except for execution and launch.
+            stages = [execution.Stage.PROVISION,
+                      execution.Stage.OPTIMIZE,
+                      execution.Stage.SYNC_WORKDIR,
+                      execution.Stage.SYNC_FILE_MOUNTS,
+                      execution.Stage.SETUP]
+            _, _ = execution.launch(
+                    task=controller_task,
+                    cluster_name=controller_name,
+                    retry_until_up=True,
+                    stream_logs=False,
+                    _request_name=request_names.AdminPolicyRequestName.
+                    JOBS_LAUNCH_CONTROLLER,
+                    _disable_controller_check=True,
+                    _stages=stages)
+
 
     # Verify the controller is now accessible
     handle = backend_utils.is_controller_accessible(controller=controller,
