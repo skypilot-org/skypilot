@@ -303,7 +303,7 @@ def _get_cloud_dependencies_installation_commands(
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
     commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" && '
                     f'{constants.SKY_UV_INSTALL_CMD} || '
-                    f'(echo "\\nERROR: Failed to install uv" && exit 1)')
+                    f'echo "\\nERROR: Failed to install uv"')
 
     enabled_compute_clouds = set(
         sky_check.get_cached_enabled_clouds_or_refresh(
@@ -334,7 +334,7 @@ def _get_cloud_dependencies_installation_commands(
                 f'echo -en "\\r{step_prefix}azure-cli{empty_str}" && '
                 f'{constants.SKY_UV_PIP_CMD} install --prerelease=allow '
                 f'"{dependencies.AZURE_CLI}" || '
-                f'(echo "\\nERROR: Failed to install azure-cli" && exit 1)')
+                f'echo "\\nERROR: Failed to install azure-cli"')
         elif isinstance(cloud, clouds.GCP):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(f'echo -en "\\r{step_prefix}GCP SDK{empty_str}" &&'
@@ -395,7 +395,7 @@ def _get_cloud_dependencies_installation_commands(
                 f'echo -en "\\r{step_prefix}cudoctl{empty_str}" && '
                 'wget https://download.cudocompute.com/cli/cudoctl-amd64.deb -O ~/cudoctl.deb && '  # pylint: disable=line-too-long
                 'sudo dpkg -i ~/cudoctl.deb || '
-                '(echo "\\nERROR: Failed to install cudoctl" && exit 1)')
+                'echo "\\nERROR: Failed to install cudoctl"')
         elif isinstance(cloud, clouds.IBM):
             if controller != Controllers.JOBS_CONTROLLER:
                 # We only need IBM deps on the jobs controller.
@@ -418,7 +418,7 @@ def _get_cloud_dependencies_installation_commands(
     commands.append(
         f'echo -en "\\r{step_prefix}cloud python packages{empty_str}" && '
         f'{constants.SKY_UV_PIP_CMD} install {packages_string} || '
-        f'(echo "\\nERROR: Failed to install cloud dependencies" && exit 1)')
+        f'echo "\\nERROR: Failed to install cloud dependencies"')
 
     total_commands = len(commands)
     finish_prefix = prefix_str.replace('[<step>/<total>] ', '  ')
