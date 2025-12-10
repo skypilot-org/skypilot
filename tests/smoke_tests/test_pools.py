@@ -1700,6 +1700,80 @@ def test_pool_resource_contention_two_workers(generic_cloud: str):
 
 
 @pytest.mark.no_remote_server  # see note 1 above
+def test_pool_resource_contention_two_workers_some_available(
+        generic_cloud: str):
+    """Test that only one job runs when one resource allows both jobs to run but
+    the other doesn't."""
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+
+    # Pool with 2 CPUs and 8GB memory, single worker
+    pool_config = basic_pool_conf(
+        num_workers=2,
+        infra=generic_cloud,
+        cpus='2',
+        memory='8GB',
+    )
+
+    def _get_job_config(job_name: str) -> str:
+        return basic_job_conf(
+            job_name=job_name,
+            run_cmd=f'echo "Job {job_name} running" && sleep infinity',
+            cpus='2',
+            memory='4GB',
+        )
+
+    num_jobs = 4
+
+    # Four jobs, each taking 2 CPUs and 4GB memory (only two can fit)
+    job_names = [f'{name}-job-{i}' for i in range(num_jobs)]
+    job_configs = [_get_job_config(job_name) for job_name in job_names]
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml_1:
+            with tempfile.NamedTemporaryFile(delete=True) as job_yaml_2:
+                with tempfile.NamedTemporaryFile(delete=True) as job_yaml_3:
+                    with tempfile.NamedTemporaryFile(delete=True) as job_yaml_4:
+
+                        write_yaml(pool_yaml, pool_config)
+                        yamls = [job_yaml_1, job_yaml_2, job_yaml_3, job_yaml_4]
+                        for job_yaml, job_config in zip(yamls, job_configs):
+                            write_yaml(job_yaml, job_config)
+
+                        test = smoke_tests_utils.Test(
+                            'test_pool_resource_contention_two_workers',
+                            [
+                                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                                    pool_name=pool_name,
+                                    pool_yaml=pool_yaml.name),
+                                wait_until_pool_ready(pool_name,
+                                                      timeout=timeout),
+                                # Launch all jobs
+                                *[
+                                    _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                                        pool_name=pool_name,
+                                        job_yaml=job_yaml.name)
+                                    for job_yaml in yamls
+                                ],
+                                # Verify only one job is RUNNING
+                                check_num_running_jobs(
+                                    job_names, 2, timeout=timeout),
+                                # Wait 30 seconds
+                                'sleep 30',
+                                # Verify only one job is RUNNING
+                                check_num_running_jobs(job_names, 2,
+                                                       timeout=30),
+                            ],
+                            timeout=timeout,
+                            teardown=cancel_jobs_and_teardown_pool(pool_name,
+                                                                   timeout=5),
+                        )
+
+                        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_resource_reclamation(generic_cloud: str):
     """Test that resources are reclaimed when jobs finish, allowing queued jobs to run."""
     timeout = smoke_tests_utils.get_timeout(generic_cloud)

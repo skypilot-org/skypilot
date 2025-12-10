@@ -963,6 +963,7 @@ def get_next_cluster_name(
             resource_aware = False
 
         if resource_aware:
+            logger.debug('Doing resource aware scheduling')
             for replica_info in ready_replicas:
                 cluster_name = replica_info.cluster_name
                 assert free_resources is not None
@@ -972,6 +973,8 @@ def get_next_cluster_name(
 
                 # Skip if worker has no free resources available
                 if free_resources_on_worker is None:
+                    logger.debug(f'Worker {cluster_name!r} has no free '
+                                 'resources')
                     continue
 
                 # Check if all of the task resource options fit
@@ -982,10 +985,12 @@ def get_next_cluster_name(
                         logger.debug(f'Task resources {task_res!r} does not fit'
                                      ' in free resources '
                                      f'{free_resources_on_worker!r}')
+                        fits = False
                         break
                 if fits:
                     idle_replicas.append(replica_info)
         else:
+            logger.debug('Falling back to resource unaware scheduling')
             # Fall back to resource unaware scheduling if no task resources
             # are provided.
             for replica_info in ready_replicas:
