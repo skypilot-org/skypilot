@@ -166,6 +166,7 @@ class JobController:
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
         pool: Optional[str] = None,
+        rank: Optional[int] = None,
     ) -> None:
         """Initialize a ``JobsController``.
 
@@ -180,6 +181,8 @@ class JobController:
             pool: Optional pool name. When provided, the job is
                 submitted to the pool rather than launching a dedicated
                 cluster.
+            rank: Optional rank of the job that can be used to partition
+                workloads.
         """
 
         self.starting = starting
@@ -195,6 +198,8 @@ class JobController:
 
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
         self._pool = pool
+        self._rank = rank
+        logger.info(f'Rank for job {self._job_id}: {self._rank}')
 
         # pylint: disable=line-too-long
         # Add a unique identifier to the task environment variables, so that
@@ -228,8 +233,8 @@ class JobController:
                 job_id_env_vars)
             # Add SKYPILOT_JOB_RANK if it's set in the context or os.environ
             # (os.environ may be hijacked to use ContextualEnviron which includes context overrides)
-            if 'SKYPILOT_JOB_RANK' in os.environ:
-                task_envs['SKYPILOT_JOB_RANK'] = os.environ['SKYPILOT_JOB_RANK']
+            if self._rank is not None:
+                task_envs['SKYPILOT_JOB_RANK'] = str(self._rank)
             task.update_envs(task_envs)
 
     def _download_log_and_stream(
@@ -1136,6 +1141,8 @@ class ControllerManager:
         logger.info(f'From controller {self._controller_uuid}')
         logger.info(f'  pid={self._pid}')
 
+        job_rank = None
+
         env_content = file_content_utils.get_job_env_content(job_id)
         if env_content:
             try:
@@ -1163,17 +1170,6 @@ class ControllerManager:
                             logger.debug(
                                 f'Loaded job_id_to_rank map: {job_id_to_rank}')
                             job_rank = job_id_to_rank.get(str(job_id))
-                            if job_rank is not None:
-                                ctx.override_envs(
-                                    {'SKYPILOT_JOB_RANK': str(job_rank)})
-                                logger.info(
-                                    'Set SKYPILOT_JOB_RANK=%s for job %s',
-                                    job_rank, job_id)
-                            else:
-                                logger.warning(
-                                    'Job ID %s not found in job_id_to_rank '
-                                    'mapping. Available keys: %s', job_id,
-                                    list(job_id_to_rank.keys()))
                         except json.JSONDecodeError as e:
                             logger.warning(
                                 'Failed to parse SKYPILOT_JOB_ID_TO_RANK for '
@@ -1194,7 +1190,8 @@ class ControllerManager:
         try:
             controller = JobController(job_id, self.starting,
                                        self._job_tasks_lock,
-                                       self._starting_signal, pool)
+                                       self._starting_signal, pool,
+                                       job_rank)
 
             async with self._job_tasks_lock:
                 if job_id in self.job_tasks:
