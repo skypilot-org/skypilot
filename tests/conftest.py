@@ -74,9 +74,9 @@ def _clear_request_level_cache():
 # To only run tests for managed jobs (without generic tests), use
 # --managed-jobs.
 all_clouds_in_smoke_tests = [
-    'aws', 'azure', 'cloudflare', 'coreweave', 'cudo', 'do', 'fluidstack', 
-    'gcp', 'hyperbolic', 'ibm', 'kubernetes', 'lambda', 'nebius', 'novita', 
-    'oci', 'paperspace','primeintellect', 'runpod', 'scp', 'seeweb',
+    'aws', 'azure', 'cloudflare', 'coreweave', 'cudo', 'do', 'fluidstack',
+    'gcp', 'hyperbolic', 'ibm', 'kubernetes', 'lambda', 'nebius', 'novita',
+    'oci', 'paperspace', 'primeintellect', 'runpod', 'scp', 'seeweb',
     'shadeform', 'slurm', 'vast', 'vsphere'
 ]
 default_clouds_to_run = ['aws', 'azure']

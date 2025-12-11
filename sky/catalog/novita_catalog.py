@@ -67,8 +67,7 @@ def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Validate region and zone for Novita."""
-    return common.validate_region_zone_impl('novita', _get_df(), region,
-                                            zone)
+    return common.validate_region_zone_impl('novita', _get_df(), region, zone)
 
 
 def get_hourly_cost(instance_type: str,

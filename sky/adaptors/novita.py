@@ -59,5 +59,7 @@ def add_ssh_key_to_novita(public_key: str) -> Optional[str]:
     """
     # Novita doesn't require SSH keys to be uploaded
     # Instances are created with default SSH access configured by Novita
-    logger.debug('Novita does not require SSH key upload - using default instance SSH access')
+    logger.debug(
+        'Novita does not require SSH key upload - using default instance SSH access'
+    )
     return None

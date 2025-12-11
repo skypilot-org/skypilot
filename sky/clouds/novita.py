@@ -243,11 +243,13 @@ class Novita(clouds.Cloud):
             # Ensure cloud is set before calling _get_feasible_launchable_resources
             if resources.cloud is None:
                 resources = resources.copy(cloud=Novita())
-            feasible_resources = self._get_feasible_launchable_resources(resources)
+            feasible_resources = self._get_feasible_launchable_resources(
+                resources)
             if not feasible_resources.resources_list:
                 raise ValueError(
                     f'No feasible resources found. '
-                    f'Hint: {feasible_resources.hint or "Check your resource requirements."}')
+                    f'Hint: {feasible_resources.hint or "Check your resource requirements."}'
+                )
             instance_type = feasible_resources.resources_list[0].instance_type
 
         resources_vars = {}
@@ -274,7 +276,7 @@ class Novita(clouds.Cloud):
             image_url = novita_config.get('imageUrl')
         if image_url:
             resources_vars['image_url'] = image_url
-        
+
         # Get imageAuth from cluster_config_overrides if specified
         image_auth = None
         if resources.cluster_config_overrides:
@@ -353,9 +355,7 @@ class Novita(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Get credential files that need to be mounted."""
-        return {
-            f'~/.novita/{f}': f'~/.novita/{f}' for f in _CREDENTIAL_FILES
-        }
+        return {f'~/.novita/{f}': f'~/.novita/{f}' for f in _CREDENTIAL_FILES}
 
     @classmethod
     def get_current_user_identity_str(cls) -> Optional[str]:

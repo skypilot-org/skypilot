@@ -20,9 +20,8 @@ def get_api_key() -> str:
     """Get Novita API key from file."""
     api_key_path = os.path.expanduser(NOVITA_API_KEY_PATH)
     if not os.path.exists(api_key_path):
-        raise FileNotFoundError(
-            f'Novita API key not found at {api_key_path}. '
-            'Please save your API key to this file.')
+        raise FileNotFoundError(f'Novita API key not found at {api_key_path}. '
+                                'Please save your API key to this file.')
 
     with open(api_key_path, 'r', encoding='utf-8') as f:
         api_key = f.read().strip()
@@ -80,4 +79,6 @@ def delete_instance(instance_id: str) -> Dict[str, Any]:
 
     Note: Novita delete API returns empty response with 200 status.
     """
-    return make_request('POST', '/instance/delete', json={'instanceId': instance_id})
+    return make_request('POST',
+                        '/instance/delete',
+                        json={'instanceId': instance_id})
