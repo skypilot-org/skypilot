@@ -1190,8 +1190,7 @@ class ControllerManager:
         try:
             controller = JobController(job_id, self.starting,
                                        self._job_tasks_lock,
-                                       self._starting_signal, pool,
-                                       job_rank)
+                                       self._starting_signal, pool, job_rank)
 
             async with self._job_tasks_lock:
                 if job_id in self.job_tasks:

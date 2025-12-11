@@ -12,11 +12,9 @@ import colorama
 
 from sky import backends
 from sky import core
-from sky import dag as dag_lib
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
-from sky import optimizer
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
@@ -331,14 +329,11 @@ def _ensure_controller_up(
         'dag_name': 'ensure_controller_up',
         'job_controller_indicator_file':
             managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,
-        **controller_utils.controller_only_vars_to_fill(
-            controller,
-        ),
+        **controller_utils.controller_only_vars_to_fill(controller,),
     }
 
-    yaml_path = os.path.join(
-        managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
-        f'ensure-controller-up-{dag_uuid}.yaml')
+    yaml_path = os.path.join(managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
+                             f'ensure-controller-up-{dag_uuid}.yaml')
 
     # Fill the template to create the controller task YAML for provisioning.
     common_utils.fill_template(
@@ -356,21 +351,20 @@ def _ensure_controller_up(
             # Only provision the controller, don't execute a job.
 
             # Run all stages except for execution and launch.
-            stages = [execution.Stage.PROVISION,
-                      execution.Stage.OPTIMIZE,
-                      execution.Stage.SYNC_WORKDIR,
-                      execution.Stage.SYNC_FILE_MOUNTS,
-                      execution.Stage.SETUP]
+            stages = [
+                execution.Stage.PROVISION, execution.Stage.OPTIMIZE,
+                execution.Stage.SYNC_WORKDIR, execution.Stage.SYNC_FILE_MOUNTS,
+                execution.Stage.SETUP
+            ]
             _, _ = execution.launch(
-                    task=controller_task,
-                    cluster_name=controller_name,
-                    retry_until_up=True,
-                    stream_logs=False,
-                    _request_name=request_names.AdminPolicyRequestName.
-                    JOBS_LAUNCH_CONTROLLER,
-                    _disable_controller_check=True,
-                    _stages=stages)
-
+                task=controller_task,
+                cluster_name=controller_name,
+                retry_until_up=True,
+                stream_logs=False,
+                _request_name=request_names.AdminPolicyRequestName.
+                JOBS_LAUNCH_CONTROLLER,
+                _disable_controller_check=True,
+                _stages=stages)
 
     # Verify the controller is now accessible
     handle = backend_utils.is_controller_accessible(controller=controller,
@@ -628,8 +622,7 @@ def launch(
     remote_orig_user_yaml_path = (
         f'{prefix}/{dag.name}-{dag_uuid}.original_user_yaml')
     remote_user_yaml_path = (f'{prefix}/{dag.name}-{dag_uuid}.yaml')
-    remote_user_config_path = (
-        f'{prefix}/{dag.name}-{dag_uuid}.config_yaml')
+    remote_user_config_path = (f'{prefix}/{dag.name}-{dag_uuid}.config_yaml')
     remote_env_file_path = (f'{prefix}/{dag.name}-{dag_uuid}.env')
 
     with tempfile.NamedTemporaryFile(
@@ -687,8 +680,8 @@ def launch(
             # Always launch the controller in the default workspace.
             with skypilot_config.local_active_workspace_ctx(
                     skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
-                job_controller_postfix = (' from jobs controller' if
-                                            not is_consolidation_mode else '')
+                job_controller_postfix = (' from jobs controller'
+                                          if not is_consolidation_mode else '')
                 managed_jobs_str = 'managed job'
 
                 job_ids_str = _job_ids_to_str(job_ids)
@@ -707,8 +700,7 @@ def launch(
                 logger.info(
                     f'{colorama.Fore.YELLOW}'
                     f'Launching {managed_jobs_str} {dag.name!r}'
-                    f'{job_controller_postfix}...{colorama.Style.RESET_ALL}'
-                )
+                    f'{job_controller_postfix}...{colorama.Style.RESET_ALL}')
 
                 common_utils.fill_template(
                     managed_job_constants.JOBS_CONTROLLER_TEMPLATE,

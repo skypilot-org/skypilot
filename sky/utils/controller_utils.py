@@ -586,8 +586,7 @@ def shared_controller_vars_to_fill(
     return vars_to_fill
 
 
-def controller_only_vars_to_fill(
-        controller: Controllers) -> Dict[str, str]:
+def controller_only_vars_to_fill(controller: Controllers) -> Dict[str, str]:
     vars_to_fill: Dict[str, Any] = {
         'sky_activate_python_env': constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
         'cloud_dependencies_installation_commands':
