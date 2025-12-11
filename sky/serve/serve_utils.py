@@ -989,7 +989,14 @@ def get_next_cluster_name(
                         break
                 if fits:
                     idle_replicas.append(replica_info)
-        else:
+        # Also fall back to resource unaware scheduling if no idle replicas are
+        # found. This might be because our launched resources were improperly
+        # set. If that's the case then jobs will fail to schedule in a resource
+        # aware way because one of the resources will be `None` so we can just
+        # fallback to 1 job per replica. If we are truly resource bottlenecked
+        # then we will see that there are jobs running on the replica and will
+        # not schedule another.
+        elif len(idle_replicas) == 0:
             logger.debug('Falling back to resource unaware scheduling')
             # Fall back to resource unaware scheduling if no task resources
             # are provided.
