@@ -27,7 +27,39 @@ available_node_types:
       InstanceType: {{instance_type}}
       PublicKey: |-
         skypilot:ssh_public_key_content
-
+{%- if image_url %}
+      ImageUrl: {{image_url}}
+{%- endif %}
+{%- if image_auth %}
+      ImageAuth: {{image_auth}}
+{%- endif %}
+{%- if image_auth_id %}
+      ImageAuthId: {{image_auth_id}}
+{%- endif %}
+{%- if ports %}
+      Ports: {{ports}}
+{%- endif %}
+{%- if envs %}
+      Envs: {{envs}}
+{%- endif %}
+{%- if tools %}
+      Tools: {{tools}}
+{%- endif %}
+{%- if command %}
+      Command: {{command}}
+{%- endif %}
+{%- if cluster_id %}
+      ClusterId: {{cluster_id}}
+{%- endif %}
+{%- if network_storages %}
+      NetworkStorages: {{network_storages}}
+{%- endif %}
+{%- if network_id %}
+      NetworkId: {{network_id}}
+{%- endif %}
+{%- if rootfs_size %}
+      RootfsSize: {{rootfs_size}}
+{%- endif %}
 head_node_type: ray_head_default
 
 # Format: `REMOTE_PATH : LOCAL_PATH`

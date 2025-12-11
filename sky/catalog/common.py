@@ -177,13 +177,11 @@ def read_catalog(filename: str,
     assert (pull_frequency_hours is None or
             pull_frequency_hours >= 0), pull_frequency_hours
     catalog_path = get_catalog_path(filename)
-    print(f'catalog_path: {catalog_path}')
     cloud = os.path.dirname(filename)
     if cloud != 'common':
         cloud = str(registry.CLOUD_REGISTRY.from_str(cloud))
 
     meta_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, '.meta', filename)
-    print(f'meta_path: {meta_path}')
     os.makedirs(os.path.dirname(meta_path), exist_ok=True)
 
     def _need_update() -> bool:

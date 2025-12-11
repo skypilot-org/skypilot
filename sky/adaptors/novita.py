@@ -1,14 +1,9 @@
 """Novita cloud adaptor."""
 
 import functools
-import socket
 from typing import Any, Dict, List, Optional
 
-import requests
-
 from sky import sky_logging
-from sky.provision.novita import novita_utils
-from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 

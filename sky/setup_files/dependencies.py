@@ -233,7 +233,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi==0.4.0'],
-    'novita': [],  # No dependencies needed for novita
+    'novita': [],  # No dependencies needed for novita,
     'shadeform': [],  # No dependencies needed for shadeform
 }
 
