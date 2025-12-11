@@ -272,7 +272,13 @@ if __name__ == '__main__':
     client_version_str = (f'&client_version={constants.API_VERSION}'
                           if timestamps_are_supported else '')
 
-    websocket_url = (f'{server_url}/kubernetes-pod-ssh-proxy'
+    # For backwards compatibility, fallback to kubernetes-pod-ssh-proxy if
+    # no endpoint is provided.
+    endpoint = sys.argv[3] if len(sys.argv) > 3 else 'kubernetes-pod-ssh-proxy'
+    # Worker index for Slurm.
+    worker_idx = sys.argv[4] if len(sys.argv) > 4 else '0'
+    websocket_url = (f'{server_url}/{endpoint}'
                      f'?cluster_name={sys.argv[2]}'
+                     f'&worker={worker_idx}'
                      f'{client_version_str}')
     asyncio.run(main(websocket_url, timestamps_are_supported, _login_url))

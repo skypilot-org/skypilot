@@ -227,10 +227,13 @@ class SSHConfigHelper(object):
                 ip = 'localhost'
                 port = constants.DEFAULT_DOCKER_PORT
             node_name = cluster_name if i == 0 else cluster_name + f'-worker{i}'
+            node_proxy_command = proxy_command_for_nodes
+            if node_proxy_command is not None:
+                node_proxy_command = node_proxy_command.replace('%w', str(i))
             # TODO(romilb): Update port number when k8s supports multinode
             codegen += cls._get_generated_config(
                 sky_autogen_comment, node_name, ip, username,
-                key_path_for_config, proxy_command_for_nodes, port,
+                key_path_for_config, node_proxy_command, port,
                 docker_proxy_command) + '\n'
 
         cluster_config_path = os.path.expanduser(
