@@ -1910,7 +1910,6 @@ def get_pool_worker_used_resources(
             return None
         # Get the first Resources object from the set/list
         parsed = next(iter(resources_set))
-        logger.debug(f'Parsed resources for job: {parsed!r}')
         if total_resources is None:
             total_resources = parsed
         else:
