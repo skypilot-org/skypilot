@@ -268,7 +268,7 @@ cluster_failures_table = sqlalchemy.Table(
     'cluster_failures',
     Base.metadata,
     sqlalchemy.Column('cluster_hash', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('failure_mode', sqlalchemy.Text),
+    sqlalchemy.Column('failure_mode', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('failure_reason', sqlalchemy.Text),
     sqlalchemy.Column('deleted_at', sqlalchemy.Integer, server_default=None),
 )
