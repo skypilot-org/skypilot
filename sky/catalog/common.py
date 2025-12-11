@@ -410,7 +410,7 @@ def get_vcpus_mem_from_instance_type_impl(
     if df.empty:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'No instance type {instance_type} found.')
-    
+
     # For some clouds like Novita, the same instance type may have different
     # vCPUs or MemoryGiB values (due to different configurations). In such cases,
     # we use the most common value, or the first value if all are unique.
@@ -427,7 +427,7 @@ def get_vcpus_mem_from_instance_type_impl(
             f'{sorted(vcpus_set)}. Using {vcpus}.')
     else:
         vcpus = df['vCPUs'].iloc[0]
-    
+
     mem_set = set(df['MemoryGiB'].dropna())
     if len(mem_set) > 1:
         # Use the most common value, or first if all are unique

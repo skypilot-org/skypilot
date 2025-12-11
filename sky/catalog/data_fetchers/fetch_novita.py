@@ -52,7 +52,6 @@ def create_catalog(api_key: str, output_path: str) -> None:
 
     params = {'available': 'true'}
 
-
     response = requests.get(ENDPOINT,
                             headers=headers,
                             params=params,
@@ -62,7 +61,10 @@ def create_catalog(api_key: str, output_path: str) -> None:
     data = response.json()
     dataArr = data.get('data', [])
 
-    instance_types = list(filter(lambda x: x.get('availableDeploy', False) and x.get('canBuy', True) and not x.get('activityProduct', False), dataArr))
+    instance_types = list(
+        filter(
+            lambda x: x.get('availableDeploy', False) and x.get('canBuy', True)
+            and not x.get('activityProduct', False), dataArr))
 
     with open(output_path, mode='w', encoding='utf-8') as f:
         writer = csv.writer(f, delimiter=',', quotechar='"')
@@ -83,7 +85,6 @@ def create_catalog(api_key: str, output_path: str) -> None:
             # Convert dict to string for CSV storage (ast.literal_eval can parse repr format)
             gpu_info = repr(gpu_info_dict)
 
-
             # Write entry for each available region
             for regionItem in instance.get('regions', []):
                 if gpu_count > 0:
@@ -101,6 +102,7 @@ def create_catalog(api_key: str, output_path: str) -> None:
                         ''
                     ])
 
+
 def get_api_key(cmdline_args: argparse.Namespace) -> str:
     """Get Novita API key from cmdline or default path."""
     api_key = cmdline_args.api_key
@@ -111,8 +113,7 @@ def get_api_key(cmdline_args: argparse.Namespace) -> str:
                 api_key = f.read().strip()
         else:
             # Read from ~/.novita/api_key
-            with open(DEFAULT_NOVITA_API_KEY_PATH,
-                      mode='r',
+            with open(DEFAULT_NOVITA_API_KEY_PATH, mode='r',
                       encoding='utf-8') as f:
                 api_key = f.read().strip()
     assert api_key is not None, (

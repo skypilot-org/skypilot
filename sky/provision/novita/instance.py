@@ -66,7 +66,7 @@ def _wait_for_instances_ready(cluster_name_on_cloud: str,
     while time.time() - start_time < timeout:
         instances = _get_cluster_instances(cluster_name_on_cloud)
         ready_count = 0
-        status_summary = {} # all statuses and their counts
+        status_summary: Dict[str, int] = {}  # all statuses and their counts
 
         for instance in instances.values():
             status = instance.get('status', 'unknown')
@@ -80,10 +80,9 @@ def _wait_for_instances_ready(cluster_name_on_cloud: str,
         # Log progress every 30 seconds or when status changes
         if (elapsed - last_log_time >= log_interval or
                 ready_count >= expected_count):
-            logger.info(
-                f'Waiting for instances to be ready: '
-                f'({ready_count}/{expected_count}) after {elapsed}s. '
-                f'Status: {status_summary}')
+            logger.info(f'Waiting for instances to be ready: '
+                        f'({ready_count}/{expected_count}) after {elapsed}s. '
+                        f'Status: {status_summary}')
             last_log_time = elapsed
 
         if ready_count >= expected_count:
@@ -194,53 +193,71 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         # Extract just the region code (part before parentheses) for API
         # The Novita API expects just the region code, not the full name
         region_code = region.split(' (')[0] if ' (' in region else region
-        
+
         # Get catalog data and filter by instance type
         # Note: instance_type_full may include cloud provider prefix (e.g., "massedcompute_1x_RTX 4090 24GB")
         # but CSV InstanceType is just "1x_RTX 4090 24GB", so we need to match correctly
         df = novita_catalog._get_df()
-        
+
         # Try to match instance_type_full first, then try without cloud prefix
         df_filtered = df[df['InstanceType'] == instance_type_full]
         if df_filtered.empty and '_' in instance_type_full:
             # If not found, try matching without the cloud provider prefix
             # instance_type_full format: "cloud_1x_RTX 4090 24GB" -> "1x_RTX 4090 24GB"
-            instance_type_without_cloud = '_'.join(instance_type_full.split('_')[1:])
+            instance_type_without_cloud = '_'.join(
+                instance_type_full.split('_')[1:])
             df_filtered = df[df['InstanceType'] == instance_type_without_cloud]
-        
+
         # Also filter by region to get the correct row for this region
         if not df_filtered.empty:
             df_filtered = df_filtered[df_filtered['Region'] == region]
-        
+
         if df_filtered.empty:
             raise ValueError(
                 f'Instance type {instance_type_full} not found in region {region}. '
                 f'Available regions for this instance type: '
-                f'{df[df["InstanceType"] == instance_type_full]["Region"].unique().tolist() if not df[df["InstanceType"] == instance_type_full].empty else "N/A"}')
-        
+                f'{df[df["InstanceType"] == instance_type_full]["Region"].unique().tolist() if not df[df["InstanceType"] == instance_type_full].empty else "N/A"}'
+            )
+
         df = df_filtered
         rowData = df.iloc[0]
         gpuInfo_str = rowData['GpuInfo']
         gpuInfo = ast.literal_eval(gpuInfo_str)
-        
+
         # the params are the same as the create_instance API: https://novita.ai/docs/api-reference/gpu-instance-create-instance#param-id
         # Extract productId from GpuInfo - this is the instance ID from Novita API
         productId = gpuInfo['Gpus'][0]['Id']
         gpuNum = 1
         # Get imageUrl from node_config, default to 'nginx:latest' if not specified
-        imageUrl = node_config.get('ImageUrl') or node_config.get('imageUrl') or 'nginx:latest'
-        imageAuth = node_config.get('ImageAuth') or node_config.get('imageAuth') or ''
-        imageAuthId = node_config.get('ImageAuthId') or node_config.get('imageAuthId') or ''
-        ports = node_config.get('Ports') or node_config.get('ports') or ''  # e.g.: 80/http,3306/tcp. Supported port range: [1-65535], except for 2222, 2223, 2224 which are reserved for internal use
-        envs = node_config.get('Envs') or node_config.get('envs') or []  # Instance environment variables. Up to 100 environment variables can be created. e.g.: {'ENV1': 'value1', 'ENV2': 'value2'}
-        tools = node_config.get('Tools') or node_config.get('tools') or []  # some official images only include Jupyter. The total number of ports used by ports + tools must not exceed 15. e.g.: 【{'name': 'Jupyter', 'port': 8080, type: 'http'}]
-        command = node_config.get('Command') or node_config.get('command') or ''  # Instance startup command. String, length limit: 0-2047 characters.
+        imageUrl = node_config.get('ImageUrl') or node_config.get(
+            'imageUrl') or 'nginx:latest'
+        imageAuth = node_config.get('ImageAuth') or node_config.get(
+            'imageAuth') or ''
+        imageAuthId = node_config.get('ImageAuthId') or node_config.get(
+            'imageAuthId') or ''
+        ports = node_config.get('Ports') or node_config.get(
+            'ports'
+        ) or ''  # e.g.: 80/http,3306/tcp. Supported port range: [1-65535], except for 2222, 2223, 2224 which are reserved for internal use
+        envs = node_config.get('Envs') or node_config.get('envs') or [
+        ]  # Instance environment variables. Up to 100 environment variables can be created. e.g.: {'ENV1': 'value1', 'ENV2': 'value2'}
+        tools = node_config.get('Tools') or node_config.get('tools') or [
+        ]  # some official images only include Jupyter. The total number of ports used by ports + tools must not exceed 15. e.g.: 【{'name': 'Jupyter', 'port': 8080, type: 'http'}]
+        command = node_config.get('Command') or node_config.get(
+            'command'
+        ) or ''  # Instance startup command. String, length limit: 0-2047 characters.
         # clusterId = ""
-        networkStorages = node_config.get('NetworkStorages') or node_config.get('networkStorages') or []  # Cloud storage mount configuration. Up to 30 cloud storages can be mounted. e.g.: [{'Id': '1234567890', 'mountPath': '/network'}]
-        networkId = node_config.get('NetworkId') or node_config.get('networkId') or ''  # VPC network ID. Leave empty if not using a VPC network.
+        networkStorages = node_config.get('NetworkStorages') or node_config.get(
+            'networkStorages'
+        ) or [
+        ]  # Cloud storage mount configuration. Up to 30 cloud storages can be mounted. e.g.: [{'Id': '1234567890', 'mountPath': '/network'}]
+        networkId = node_config.get('NetworkId') or node_config.get(
+            'networkId'
+        ) or ''  # VPC network ID. Leave empty if not using a VPC network.
         kind = 'gpu'
-        min_rootfs = gpuInfo['Gpus'][0].get('MinRootFS') or gpuInfo['Gpus'][0].get('minRootFS', 10)
-        rootfsSize = node_config.get('RootfsSize') or node_config.get('rootfsSize') or int(min_rootfs)
+        min_rootfs = gpuInfo['Gpus'][0].get(
+            'MinRootFS') or gpuInfo['Gpus'][0].get('minRootFS', 10)
+        rootfsSize = node_config.get('RootfsSize') or node_config.get(
+            'rootfsSize') or int(min_rootfs)
 
         create_config = {
             'productId': productId,
@@ -262,7 +279,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         }
 
         logger.info(f'create_config: {create_config}')
-        
+
         # Only add optional fields if they have meaningful values
         # Empty strings and empty lists should be omitted
         # imageUrl = 'nginx:latest'  # Default image, may not be needed
@@ -318,8 +335,7 @@ def stop_instances(cluster_name_on_cloud: str,
                    worker_only: bool = False) -> None:
     """Stop instances (not supported by Novita)."""
     del cluster_name_on_cloud, provider_config, worker_only  # unused
-    raise NotImplementedError(
-        'Stopping instances is not supported by Novita')
+    raise NotImplementedError('Stopping instances is not supported by Novita')
 
 
 def terminate_instances(cluster_name_on_cloud: str,
@@ -383,8 +399,7 @@ def get_cluster_info(
 
     ssh_user = 'novita'  # default
     if head_instance_id is not None:
-        ssh_user = instances.get(head_instance_id,
-                                 {}).get('ssh_user', 'novita')
+        ssh_user = instances.get(head_instance_id, {}).get('ssh_user', 'novita')
 
     return common.ClusterInfo(instances=cluster_instances,
                               head_instance_id=head_instance_id,
@@ -410,7 +425,7 @@ def query_instances(
     for instance_id, instance in instances.items():
         novita_status = instance.get('status', 'unknown')
         sky_status = NOVITA_STATUS_MAP.get(novita_status,
-                                              status_lib.ClusterStatus.INIT)
+                                           status_lib.ClusterStatus.INIT)
 
         if (non_terminated_only and
                 sky_status == status_lib.ClusterStatus.STOPPED):

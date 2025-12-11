@@ -396,7 +396,8 @@ def setup_novita_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['auth']['ssh_public_key'] = public_key_path
     # SSH user is typically 'root' or 'ubuntu' depending on the image
     # This will be determined from the instance metadata
-    config['auth']['ssh_user'] = 'novita'  # Default, may be overridden by instance info
+    config['auth'][
+        'ssh_user'] = 'novita'  # Default, may be overridden by instance info
 
     return configure_ssh_info(config)
 
