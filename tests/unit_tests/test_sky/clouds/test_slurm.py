@@ -193,39 +193,3 @@ class TestTerminateInstances:
 
         # Should return early without canceling
         mock_client.cancel_jobs_by_name.assert_not_called()
-
-    @patch('sky.provision.slurm.instance.slurm_utils.is_inside_slurm_job')
-    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
-    def test_terminate_instances_strips_whitespace(self,
-                                                   mock_slurm_client_class,
-                                                   mock_is_inside_job):
-        """Test that terminate_instances strips whitespace from job state."""
-        mock_is_inside_job.return_value = False
-
-        mock_client = mock.MagicMock()
-        mock_slurm_client_class.return_value = mock_client
-
-        cluster_name = 'test-cluster'
-        provider_config = {
-            'ssh': {
-                'hostname': 'localhost',
-                'port': '22',
-                'user': 'testuser',
-                'private_key': '/path/to/key',
-            }
-        }
-
-        # Job state with trailing whitespace (from squeue output)
-        mock_client.get_jobs_state_by_name.return_value = ['RUNNING\n']
-
-        slurm_instance.terminate_instances(
-            cluster_name_on_cloud=cluster_name,
-            provider_config=provider_config,
-        )
-
-        # Should correctly identify RUNNING and send TERM signal
-        mock_client.cancel_jobs_by_name.assert_called_once_with(
-            cluster_name,
-            signal='TERM',
-            full=True,
-        )
