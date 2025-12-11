@@ -504,17 +504,17 @@ def terminate_instances(
         ssh_private_key,
         ssh_proxy_command=ssh_proxy_command,
     )
-    job_ids = client.query_jobs(job_name=cluster_name_on_cloud)
-    if not job_ids:
+    jobs_state = client.get_jobs_state_by_name(cluster_name_on_cloud)
+    if not jobs_state:
         logger.debug(f'Job for cluster {cluster_name_on_cloud} not found, '
                      'it may have been terminated.')
         return
-    assert len(job_ids) == 1, (
-        f'Multiple jobs found for cluster {cluster_name_on_cloud}: {job_ids}')
+    assert len(jobs_state) == 1, (
+        f'Multiple jobs found for cluster {cluster_name_on_cloud}: {jobs_state}'
+    )
 
-    job_id = job_ids[0]
-    job_state = client.get_job_state(job_id)
-    if job_state is not None and job_state == 'PENDING':
+    job_state = jobs_state[0]
+    if job_state == 'PENDING':
         # For pending jobs, cancel without signal, otherwise it may hang.
         client.cancel_jobs_by_name(cluster_name_on_cloud, signal=None)
     else:

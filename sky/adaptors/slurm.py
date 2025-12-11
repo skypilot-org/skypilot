@@ -252,13 +252,30 @@ class SlurmClient:
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
                                               stream_logs=False)
-        if rc != 0:
-            # Job may not exist
-            logger.debug(f'Failed to get job state for job {job_id}: {stderr}')
-            return None
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd,
+            f'Failed to get job state for job {job_id}.',
+            stderr=stdout + '\n' + stderr)
 
         state = stdout.strip()
         return state if state else None
+
+    def get_jobs_state_by_name(self, job_name: str) -> List[str]:
+        """Get the states of all Slurm jobs by name.
+        """
+        cmd = f'squeue -h --name {job_name} -o "%T"'
+        rc, stdout, stderr = self._runner.run(cmd,
+                                              require_outputs=True,
+                                              stream_logs=False)
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd,
+            f'Failed to get job state for job {job_name}.',
+            stderr=stdout + '\n' + stderr)
+
+        states = stdout.splitlines()
+        return states
 
     @timeline.event
     def get_job_reason(self, job_id: str) -> Optional[str]:
