@@ -1,3 +1,4 @@
+import os
 import tempfile
 import textwrap
 from typing import Dict, List, Optional
@@ -104,16 +105,25 @@ def wait_until_pool_ready(pool_name: str,
 def wait_until_worker_status(pool_name: str,
                              status: str,
                              timeout: int = 30,
-                             time_between_checks: int = 5):
+                             time_between_checks: int = 5,
+                             num_occurrences: int = 1):
     status_str = f'sky jobs pool status {pool_name} | grep -A999 "^Pool Workers" | grep "^{pool_name}"'
+    count_check = (
+        f'count=$(echo "$s" | grep -c "{status}" || echo "0"); '
+        f'if (( count != {num_occurrences} )); then '
+        f'  echo "Expected {num_occurrences} occurrences of status \'{status}\', but found $count"; '
+        '  continue; '
+        'fi; ')
+    waiting_msg_suffix = f' with {num_occurrences} occurrences'
     return (
         'start_time=$SECONDS; '
         'while true; do '
         f'if (( $SECONDS - $start_time > {timeout} )); then '
-        f'  echo "Timeout after {timeout} seconds waiting for worker status \'{status}\'"; exit 1; '
+        f'  echo "Timeout after {timeout} seconds waiting for worker status \'{status}\'{waiting_msg_suffix}"; exit 1; '
         'fi; '
         f's=$({status_str}); '
         'echo "$s"; '
+        f'{count_check}'
         f'if echo "$s" | grep "{status}"; then '
         '  break; '
         'fi; '
@@ -123,7 +133,7 @@ def wait_until_worker_status(pool_name: str,
         'if echo "$s" | grep "SHUTTING_DOWN"; then '
         '  exit 1; '
         'fi; '
-        f'echo "Waiting for worker status to be {status}..."; '
+        f'echo "Waiting for worker status to be {status}{waiting_msg_suffix}..."; '
         f'sleep {time_between_checks}; '
         'done; '
         'sleep 1')
@@ -246,9 +256,12 @@ def basic_pool_conf(
     infra: str,
     resource_string: Optional[str] = None,
     setup_cmd: str = 'echo "setup message"',
+    workdir: Optional[str] = None,
 ):
     resource_string = '    accelerators: ' + resource_string if resource_string else ''
+    workdir_section = f'workdir: {workdir}\n' if workdir else ''
     return textwrap.dedent(f"""
+    {workdir_section}
     pool:
         workers: {num_workers}
 
@@ -257,7 +270,6 @@ def basic_pool_conf(
         memory: 4GB+
         infra: {infra}
     {resource_string}
-
     setup: |
         {setup_cmd}
     """)
@@ -315,7 +327,7 @@ def get_worker_cluster_name(pool_name: str, worker_id: int):
 @pytest.mark.no_remote_server  # see note 1 above
 def test_vllm_pool(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud == 'kubernetes':
-        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+        accelerator = smoke_tests_utils.get_available_gpus()
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -1277,22 +1289,45 @@ def test_pools_double_launch(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-def check_pool_not_in_status(pool_name: str):
-    """Check that a pool does not appear in `sky jobs pool status`."""
-    return (f's=$(sky jobs pool status); '
-            f'echo "$s"; '
-            f'if echo "$s" | grep "{pool_name}"; then '
-            f'  echo "ERROR: Pool {pool_name} still exists in pool status"; '
-            f'  exit 1; '
-            f'fi; '
-            f'echo "Pool {pool_name} correctly removed from pool status"')
+def check_pool_not_in_status(pool_name: str,
+                             timeout: int = 30,
+                             time_between_checks: int = 5):
+    """Check that a pool does not appear in `sky jobs pool status`.
+
+    Args:
+        pool_name: The name of the pool to check for.
+        timeout: Maximum time in seconds to wait for the pool to be removed.
+        time_between_checks: Time in seconds to wait between checks.
+    """
+    return (
+        'start_time=$SECONDS; '
+        'while true; do '
+        f'if (( $SECONDS - $start_time > {timeout} )); then '
+        f'  echo "Timeout after {timeout} seconds waiting for pool {pool_name} to be removed"; '
+        f'  s=$(sky jobs pool status); '
+        f'  echo "$s"; '
+        f'  if echo "$s" | grep "{pool_name}"; then '
+        f'    echo "ERROR: Pool {pool_name} still exists in pool status"; '
+        f'    exit 1; '
+        f'  fi; '
+        f'  exit 0; '
+        'fi; '
+        f's=$(sky jobs pool status); '
+        'echo "$s"; '
+        f'if ! echo "$s" | grep "{pool_name}"; then '
+        f'  echo "Pool {pool_name} correctly removed from pool status"; '
+        '  break; '
+        'fi; '
+        f'echo "Waiting for pool {pool_name} to be removed..."; '
+        f'sleep {time_between_checks}; '
+        'done')
 
 
 @pytest.mark.resource_heavy
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_down_all_with_running_jobs(generic_cloud: str):
     """Test that `sky jobs pool down -a -y` cancels running jobs and removes pools.
-    
+
     This test:
     1. Launches two pools with the same config but different names
     2. Launches 1 job (sleeping for a long time) to each pool (2 jobs total)
@@ -1378,7 +1413,7 @@ def test_pool_down_all_with_running_jobs(generic_cloud: str):
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_down_single_pool(generic_cloud: str):
     """Test that `sky jobs pool down <pool_name> -y` downs a single pool.
-    
+
     This test:
     1. Launches one pool
     2. Launches 1 job (sleeping for a long time) to the pool
@@ -1422,9 +1457,56 @@ def test_pool_down_single_pool(generic_cloud: str):
                     'sleep 10',
                     wait_until_job_status(
                         job_name, ['CANCELLED'], bad_statuses=[], timeout=30),
-                    check_pool_not_in_status(pool_name),
+                    check_pool_not_in_status(pool_name, timeout=30),
                 ],
                 timeout=timeout,
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_scale_with_workdir(generic_cloud: str):
+    """Test that we can scale a pool with workdir without errors. This makes
+    sure that the workdir is not deleted when the pool is scaled."""
+
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+
+    # Create a temporary directory with a file in it to use as workdir
+    with tempfile.TemporaryDirectory(
+            prefix='sky-test-workdir-') as temp_workdir:
+        test_file_path = os.path.join(temp_workdir, 'test_file.txt')
+        with open(test_file_path, 'w') as f:
+            f.write('test content')
+
+        pool_config = basic_pool_conf(
+            num_workers=1,
+            infra=generic_cloud,
+            workdir=temp_workdir,
+            setup_cmd='echo "setup message"',
+        )
+
+        with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+            write_yaml(pool_yaml, pool_config)
+            test = smoke_tests_utils.Test(
+                'test_pool_scale_down_with_workdir',
+                [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
+                    wait_until_worker_status(
+                        pool_name, 'READY', timeout=timeout, num_occurrences=1),
+                    _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, num_workers=2),
+                    wait_until_worker_status(
+                        pool_name, 'READY', timeout=timeout, num_occurrences=2),
+                    _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, num_workers=1),
+                    wait_until_worker_status(
+                        pool_name, 'READY', timeout=timeout, num_occurrences=1),
+                ],
+                timeout=timeout,
+                teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
             )
             smoke_tests_utils.run_one_test(test)

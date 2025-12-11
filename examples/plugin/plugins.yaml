@@ -1,0 +1,8 @@
+plugins:
+- class: example_plugin.ExamplePlugin
+- class: example_plugin.ExampleParameterizedPlugin
+  parameters:
+    message: "Message from parameters"
+- class: example_plugin.ExampleMiddlewarePlugin
+- class: example_plugin.ExampleBackgroundTaskPlugin
+- class: example_plugin.ExamplePatchPlugin

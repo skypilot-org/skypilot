@@ -35,11 +35,12 @@ done
 
 if [ "$AUTO_BUILD" = true ]; then
     # Use sphinx-autobuild for automatic rebuilding
-    # Ignore gallery directory to prevent unnecessary rebuilds
+    # Ignore gallery directory and llms.txt to prevent unnecessary rebuilds
     export SPHINX_BUILD_LOCAL=true
     export SPHINX_PORT=${PORT:-8000}
     sphinx-autobuild source build/html \
         --ignore "*.md" \
+        --ignore "**/llms.txt" \
         --port ${PORT:-8000}
 else
     rm -rf build docs
