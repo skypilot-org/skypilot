@@ -518,7 +518,7 @@ def terminate_instances(
         # For pending jobs, cancel without signal, otherwise it may hang.
         client.cancel_jobs_by_name(cluster_name_on_cloud, signal=None)
     else:
-        # For running jobs, send TERM signal
+        # For other job states (e.g., RUNNING), send a TERM signal.
         client.cancel_jobs_by_name(cluster_name_on_cloud,
                                    signal='TERM',
                                    full=True)
