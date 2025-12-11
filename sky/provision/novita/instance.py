@@ -6,10 +6,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from sky import sky_logging
+from sky.catalog import novita_catalog
 from sky.provision import common
 from sky.provision.novita import novita_utils
 from sky.utils import status_lib
-from sky.catalog import novita_catalog
 
 POLL_INTERVAL = 10
 INSTANCE_READY_TIMEOUT = 3600
