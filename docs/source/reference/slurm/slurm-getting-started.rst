@@ -63,7 +63,7 @@ Create the configuration file:
        IdentityFile ~/.ssh/id_rsa
        # Optional: Port 22
        # Optional: ProxyCommand ssh -W %h:%p jumphost
-    
+
    # Optional: Add more clusters if you have multiple Slurm clusters
    Host mycluster2
        HostName login.mycluster2.myorg.com
@@ -180,7 +180,7 @@ Most Slurm clusters have a shared filesystem (typically NFS) that is mounted on 
 SkyPilot leverages this existing setup - your home directory and files are automatically accessible
 from your SkyPilot clusters and jobs.
 
-This means your code, data, and outputs are available on all nodes without any additional configuration. 
+This means your code, data, and outputs are available on all nodes without any additional configuration.
 
 If you have local files you want to use on the remote cluster, you can sync them from your local machine to the remote cluster using :ref:`file mounts and workdir <sync-code-artifacts>`.
 
@@ -204,7 +204,6 @@ Current limitations
 
 Slurm support in SkyPilot is under active development. The following features are not yet supported:
 
-* **Multinode jobs**: multinode jobs will be supported soon on Slurm.
 * **Autostop**: Slurm clusters cannot be automatically terminated after idle time.
 * **Custom images**: Docker or custom container images are not supported.
 * **SkyServe**: Serving deployments on Slurm is not yet supported.
@@ -215,16 +214,16 @@ FAQs
 * **How does SkyPilot interact with Slurm?**
 
   Each SkyPilot "cluster" corresponds to a Slurm job. When you run ``sky launch``, SkyPilot creates an sbatch script that requests the specified resources
-  and runs a long-lived process with the SkyPilot runtime. 
-  
+  and runs a long-lived process with the SkyPilot runtime.
+
   SkyPilot uses slurm CLI commands on the login node to interact with the cluster. It submits jobs using ``sbatch``, views the status of jobs using ``squeue``, and terminates jobs using ``scancel``.
-  
+
 
 * **Which user are jobs submitted as?**
 
   Jobs are submitted using your own Slurm username (the ``User`` specified in your ``~/.slurm/config``).
   This means your jobs appear under your username in ``squeue``, count against your quotas, and respect
-  your existing permissions. 
+  your existing permissions.
 
 * **Can I use multiple Slurm clusters?**
 
@@ -233,12 +232,13 @@ FAQs
 
 * **What partition does SkyPilot use?**
 
-  We use the default partition for the Slurm cluster. Choosing a specific partition will be supported soon.
+  By default, SkyPilot uses the default partition configured in your Slurm cluster. To specify a partition, use the ``--infra`` flag with the format ``slurm/<cluster>/<partition>``:
+
+  .. code-block:: bash
+
+     $ sky launch --infra slurm/training/gpus task.yaml
 
 * **Can SkyPilot provision a Slurm cluster for me?**
 
   No. SkyPilot runs tasks on existing Slurm clusters. It does not provision new Slurm clusters
   or add nodes to existing clusters.
-
-  
-
