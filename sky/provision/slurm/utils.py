@@ -183,14 +183,7 @@ def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
     """Get the default partition for a Slurm cluster.
 
     Queries the Slurm cluster for the partition marked with an asterisk (*)
-    in sinfo output. If no default partition is marked, returns the first
-    partition alphabetically.
-
-    Args:
-        cluster_name: Name of the Slurm cluster.
-
-    Returns:
-        The default partition name for the cluster.
+    in sinfo output. If no default partition is marked, returns None.
     """
     try:
         ssh_config = get_slurm_ssh_config()
