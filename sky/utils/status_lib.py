@@ -27,7 +27,10 @@ class ClusterStatus(enum.Enum):
 
     STOPPED = 'STOPPED'
     """The cluster is stopped."""
-
+    
+    # This state is used for display only.
+    # This state is not to be used in state machine logic
+    # without necessary considerations for doing so.
     PENDING = 'PENDING'
     """The cluster is pending scheduling."""
 
