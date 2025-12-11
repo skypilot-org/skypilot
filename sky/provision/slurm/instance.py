@@ -513,12 +513,28 @@ def terminate_instances(
         f'Multiple jobs found for cluster {cluster_name_on_cloud}: {jobs_state}'
     )
 
-    job_state = jobs_state[0]
-    if job_state == 'PENDING':
-        # For pending jobs, cancel without signal, otherwise it may hang.
+    job_state = jobs_state[0].strip()
+    # Terminal states where scancel is not needed or will fail.
+    terminal_states = {
+        'COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL', 'PREEMPTED',
+        'SPECIAL_EXIT'
+    }
+    if job_state in terminal_states:
+        logger.debug(
+            f'Job for cluster {cluster_name_on_cloud} is already in a terminal '
+            f'state {job_state}. No action needed.')
+        return
+
+    if job_state in ('PENDING', 'CONFIGURING'):
+        # For pending/configuring jobs, cancel without signal to avoid hangs.
         client.cancel_jobs_by_name(cluster_name_on_cloud, signal=None)
+    elif job_state == 'COMPLETING':
+        # Job is already being terminated. No action needed.
+        logger.debug(
+            f'Job for cluster {cluster_name_on_cloud} is already completing. '
+            'No action needed.')
     else:
-        # For other job states (e.g., RUNNING), send a TERM signal.
+        # For other states (e.g., RUNNING, SUSPENDED), send a TERM signal.
         client.cancel_jobs_by_name(cluster_name_on_cloud,
                                    signal='TERM',
                                    full=True)

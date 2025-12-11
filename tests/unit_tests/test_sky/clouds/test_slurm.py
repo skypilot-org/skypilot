@@ -6,6 +6,7 @@ import unittest.mock as mock
 import pytest
 
 from sky.adaptors import slurm
+from sky.provision.slurm import instance as slurm_instance
 from sky.provision.slurm import utils as slurm_utils
 
 
@@ -90,3 +91,141 @@ class TestCheckInstanceFits:
             assert reason_contains in reason
         else:
             assert reason is None
+
+
+class TestTerminateInstances:
+    """Test slurm_instance.terminate_instances()."""
+
+    @pytest.mark.parametrize(
+        'job_state,should_cancel,should_signal',
+        [
+            # Terminal states - no action needed
+            ('COMPLETED', False, False),
+            ('CANCELLED', False, False),
+            ('FAILED', False, False),
+            ('TIMEOUT', False, False),
+            ('NODE_FAIL', False, False),
+            ('PREEMPTED', False, False),
+            ('SPECIAL_EXIT', False, False),
+            # COMPLETING - already terminating
+            ('COMPLETING', False, False),
+            # PENDING and CONFIGURING - cancel without signal
+            ('PENDING', True, False),
+            ('CONFIGURING', True, False),
+            # Other states - cancel with TERM signal
+            ('RUNNING', True, True),
+            ('SUSPENDED', True, True),
+            ('STAGING_OUT', True, True),
+        ])
+    @patch('sky.provision.slurm.instance.slurm_utils.is_inside_slurm_job')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    def test_terminate_instances_handles_job_states(self,
+                                                    mock_slurm_client_class,
+                                                    mock_is_inside_job,
+                                                    job_state, should_cancel,
+                                                    should_signal):
+        """Test terminate_instances handles different job states correctly."""
+        mock_is_inside_job.return_value = False
+
+        mock_client = mock.MagicMock()
+        mock_slurm_client_class.return_value = mock_client
+
+        cluster_name = 'test-cluster'
+        provider_config = {
+            'ssh': {
+                'hostname': 'localhost',
+                'port': '22',
+                'user': 'testuser',
+                'private_key': '/path/to/key',
+            }
+        }
+
+        # Mock the job state query
+        mock_client.get_jobs_state_by_name.return_value = [job_state]
+
+        slurm_instance.terminate_instances(
+            cluster_name_on_cloud=cluster_name,
+            provider_config=provider_config,
+        )
+
+        if should_cancel:
+            if should_signal:
+                mock_client.cancel_jobs_by_name.assert_called_once_with(
+                    cluster_name,
+                    signal='TERM',
+                    full=True,
+                )
+            else:
+                mock_client.cancel_jobs_by_name.assert_called_once_with(
+                    cluster_name,
+                    signal=None,
+                )
+        else:
+            mock_client.cancel_jobs_by_name.assert_not_called()
+
+    @patch('sky.provision.slurm.instance.slurm_utils.is_inside_slurm_job')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    def test_terminate_instances_no_jobs_found(self, mock_slurm_client_class,
+                                               mock_is_inside_job):
+        """Test terminate_instances when no jobs are found."""
+        mock_is_inside_job.return_value = False
+
+        mock_client = mock.MagicMock()
+        mock_slurm_client_class.return_value = mock_client
+
+        cluster_name = 'test-cluster'
+        provider_config = {
+            'ssh': {
+                'hostname': 'localhost',
+                'port': '22',
+                'user': 'testuser',
+                'private_key': '/path/to/key',
+            }
+        }
+
+        # No jobs found
+        mock_client.get_jobs_state_by_name.return_value = []
+
+        slurm_instance.terminate_instances(
+            cluster_name_on_cloud=cluster_name,
+            provider_config=provider_config,
+        )
+
+        # Should return early without canceling
+        mock_client.cancel_jobs_by_name.assert_not_called()
+
+    @patch('sky.provision.slurm.instance.slurm_utils.is_inside_slurm_job')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    def test_terminate_instances_strips_whitespace(self,
+                                                   mock_slurm_client_class,
+                                                   mock_is_inside_job):
+        """Test that terminate_instances strips whitespace from job state."""
+        mock_is_inside_job.return_value = False
+
+        mock_client = mock.MagicMock()
+        mock_slurm_client_class.return_value = mock_client
+
+        cluster_name = 'test-cluster'
+        provider_config = {
+            'ssh': {
+                'hostname': 'localhost',
+                'port': '22',
+                'user': 'testuser',
+                'private_key': '/path/to/key',
+            }
+        }
+
+        # Job state with trailing whitespace (from squeue output)
+        mock_client.get_jobs_state_by_name.return_value = ['RUNNING\n']
+
+        slurm_instance.terminate_instances(
+            cluster_name_on_cloud=cluster_name,
+            provider_config=provider_config,
+        )
+
+        # Should correctly identify RUNNING and send TERM signal
+        mock_client.cancel_jobs_by_name.assert_called_once_with(
+            cluster_name,
+            signal='TERM',
+            full=True,
+        )
