@@ -3898,8 +3898,9 @@ def show_gpus(
             contexts_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
             cloud_str: str = 'Kubernetes',
             context_title_str: str = 'CONTEXT') -> str:
-        node_table = log_utils.create_table(
-            [context_title_str, 'NODE', 'GPU', 'UTILIZATION', 'CPU', 'MEMORY'])
+        node_table = log_utils.create_table([
+            context_title_str, 'NODE', 'CPU', 'MEMORY', 'GPU', 'GPU UTILIZATION'
+        ])
 
         no_permissions_str = '<no permissions>'
         hints = []
@@ -3942,8 +3943,8 @@ def show_gpus(
                     utilization_str += ' (Node NotReady)'
 
                 node_table.add_row([
-                    context_name, node_name, acc_type, utilization_str, cpu_str,
-                    memory_str
+                    context_name, node_name, cpu_str, memory_str, acc_type,
+                    utilization_str
                 ])
 
         k8s_per_node_acc_message = (f'{cloud_str} per-node GPU availability')
