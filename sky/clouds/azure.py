@@ -98,7 +98,7 @@ class Azure(clouds.Cloud):
                 f'High availability controllers are not supported on {cls._REPR}.'
             ),
             clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
-                (f'Custom network tier is not supported yet on {cls._REPR}.'),
+                (f'Custom network tier is not supported on {cls._REPR}.'),
             clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK: (
                 f'Customized multiple network interfaces are not supported on {cls._REPR}.'
             ),
