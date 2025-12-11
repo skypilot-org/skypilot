@@ -702,8 +702,6 @@ def launch(
                     Stage.DOWN,
                 ]
             skip_unnecessary_provisioning = True
-    
-    logger.error(f'Stages: {stages}')
 
     # Attach to setup if the cluster is a controller, so that user can
     # see the setup logs when inspecting the launch process to know

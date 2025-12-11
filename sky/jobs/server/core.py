@@ -327,52 +327,28 @@ def _ensure_controller_up(
     # are installed.
     dag_uuid = str(uuid.uuid4())
 
-    # Create minimal temporary files for template
-    with tempfile.NamedTemporaryFile(
-            prefix='ensure-controller-up-', mode='w',
-            delete=False) as f, tempfile.NamedTemporaryFile(
-                prefix='ensure-controller-up-user-', mode='w',
-                delete=False) as original_user_yaml_path:
-        # Write minimal dag content
-        minimal_dag = task_lib.Task(name='ensure_controller_up',
-                                    run='echo "Controller cluster is up"')
-        with dag_lib.Dag() as temp_dag:
-            temp_dag.add(minimal_dag)
-            dag_utils.dump_chain_dag_to_yaml(temp_dag, f.name)
-        original_user_yaml_path.write('')
-        original_user_yaml_path.flush()
+    vars_to_fill: Dict[str, Any] = {
+        'dag_name': 'ensure_controller_up',
+        'job_controller_indicator_file':
+            managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,
+        **controller_utils.controller_only_vars_to_fill(
+            controller,
+        ),
+    }
 
-        vars_to_fill: Dict[str, Any] = {
-            'dag_name': 'ensure_controller_up',
-            'job_controller_indicator_file':
-                managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,
-            **controller_utils.controller_only_vars_to_fill(
-                controller,
-            ),
-        }
+    yaml_path = os.path.join(
+        managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
+        f'ensure-controller-up-{dag_uuid}.yaml')
 
-        yaml_path = os.path.join(
-            managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
-            f'ensure-controller-up-{dag_uuid}.yaml')
+    # Fill the template to create the controller task YAML for provisioning.
+    common_utils.fill_template(
+        managed_job_constants.JOBS_CONTROLLER_PROVISION_TEMPLATE,
+        vars_to_fill,
+        output_path=yaml_path)
 
-        # Fill the template to create the controller task YAML
-        common_utils.fill_template(
-            managed_job_constants.JOBS_CONTROLLER_PROVISION_TEMPLATE,
-            vars_to_fill,
-            output_path=yaml_path)
-
-        # Create task from the template-generated YAML
-        controller_task = task_lib.Task.from_yaml(yaml_path)
-        controller_task.set_resources(controller_resources_set)
-
-    # Optimize the task to make resources launchable.
-    with dag_lib.Dag() as dag:
-        dag.add(controller_task)
-    dag = optimizer.Optimizer.optimize(dag,
-                                        minimize=common.OptimizeTarget.COST,
-                                        quiet=True)
-    controller_task = dag.tasks[0]
-    assert controller_task.best_resources is not None, controller_task
+    # Create task from the template-generated YAML.
+    controller_task = task_lib.Task.from_yaml(yaml_path)
+    controller_task.set_resources(controller_resources_set)
 
     with skypilot_config.local_active_workspace_ctx(
             skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
