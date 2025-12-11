@@ -120,11 +120,11 @@ Once you have configured your Slurm cluster:
 
    SkyPilot will submit a job to your Slurm cluster using ``sbatch``.
 
-3. To run on a specific Slurm cluster, use the ``--infra`` flag:
+3. To run on a specific Slurm cluster or partition, use the ``--infra`` flag:
 
    .. code-block:: bash
 
-      $ sky launch --infra slurm/mycluster1 task.yaml
+      $ sky launch --infra slurm/mycluster/mypartition task.yaml
 
 
 Viewing cluster status
@@ -232,11 +232,11 @@ FAQs
 
 * **What partition does SkyPilot use?**
 
-  By default, SkyPilot uses the default partition configured in your Slurm cluster. To specify a partition, use the ``--infra`` flag with the format ``slurm/<cluster>/<partition>``:
+  By default, SkyPilot uses the default partition configured in your Slurm cluster. To specify a partition, use the ``--infra`` flag:
 
   .. code-block:: bash
 
-     $ sky launch --infra slurm/training/gpus task.yaml
+     $ sky launch --infra slurm/mycluster/mypartition task.yaml
 
 * **Can SkyPilot provision a Slurm cluster for me?**
 
