@@ -586,6 +586,38 @@ def shared_controller_vars_to_fill(
     return vars_to_fill
 
 
+def controller_only_vars_to_fill(
+        controller: Controllers) -> Dict[str, str]:
+    vars_to_fill: Dict[str, Any] = {
+        'sky_activate_python_env': constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
+        'cloud_dependencies_installation_commands':
+            _get_cloud_dependencies_installation_commands(controller),
+    }
+    env_vars: Dict[str, str] = {
+        env.env_key: str(int(env.get())) for env in env_options.Options
+    }
+    env_vars.update({
+        # Should not use $USER here, as that env var can be empty when
+        # running in a container.
+        constants.USER_ENV_VAR: common_utils.get_current_user_name(),
+        constants.USER_ID_ENV_VAR: common_utils.get_user_hash(),
+        # Skip cloud identity check to avoid the overhead.
+        env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.env_key: '1',
+        # Disable minimize logging to get more details on the controller.
+        env_options.Options.MINIMIZE_LOGGING.env_key: '0',
+        constants.IS_SKYPILOT_SERVE_CONTROLLER:
+            ('true'
+             if controller == Controllers.SKY_SERVE_CONTROLLER else 'false'),
+    })
+    override_concurrent_launches = os.environ.get(
+        constants.SERVE_OVERRIDE_CONCURRENT_LAUNCHES, None)
+    if override_concurrent_launches is not None:
+        env_vars[constants.SERVE_OVERRIDE_CONCURRENT_LAUNCHES] = str(
+            int(override_concurrent_launches))
+    vars_to_fill['controller_envs'] = env_vars
+    return vars_to_fill
+
+
 def get_controller_resources(
     controller: Controllers,
     task_resources: Iterable['resources.Resources'],

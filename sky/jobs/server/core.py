@@ -326,13 +326,6 @@ def _ensure_controller_up(
     # Use the jobs controller template to ensure cloud dependencies
     # are installed.
     dag_uuid = str(uuid.uuid4())
-    prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
-    remote_orig_user_yaml_path = (
-        f'{prefix}/ensure-controller-up-{dag_uuid}.original_user_yaml')
-    remote_user_yaml_path = f'{prefix}/ensure-controller-up-{dag_uuid}.yaml'
-    remote_user_config_path = (
-        f'{prefix}/ensure-controller-up-{dag_uuid}.config_yaml')
-    remote_env_file_path = f'{prefix}/ensure-controller-up-{dag_uuid}.env'
 
     # Create minimal temporary files for template
     with tempfile.NamedTemporaryFile(
@@ -350,25 +343,11 @@ def _ensure_controller_up(
         original_user_yaml_path.flush()
 
         vars_to_fill: Dict[str, Any] = {
-            'remote_original_user_yaml_path': remote_orig_user_yaml_path,
-            'original_user_dag_path': original_user_yaml_path.name,
-            'remote_user_yaml_path': remote_user_yaml_path,
-            'user_yaml_path': f.name,
-            'local_to_controller_file_mounts': {},
-            'jobs_controller': controller_name,
             'dag_name': 'ensure_controller_up',
-            'remote_user_config_path': remote_user_config_path,
-            'remote_env_file_path': remote_env_file_path,
-            'modified_catalogs': {},
-            'priority': skylet_constants.DEFAULT_PRIORITY,
-            'is_consolidation_mode': False,
-            'pool': None,
             'job_controller_indicator_file':
                 managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE,
-            **controller_utils.shared_controller_vars_to_fill(
+            **controller_utils.controller_only_vars_to_fill(
                 controller,
-                remote_user_config_path=remote_user_config_path,
-                local_user_config={},
             ),
         }
 
@@ -378,7 +357,7 @@ def _ensure_controller_up(
 
         # Fill the template to create the controller task YAML
         common_utils.fill_template(
-            managed_job_constants.JOBS_CONTROLLER_TEMPLATE,
+            managed_job_constants.JOBS_CONTROLLER_PROVISION_TEMPLATE,
             vars_to_fill,
             output_path=yaml_path)
 
