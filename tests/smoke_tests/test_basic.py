@@ -1147,7 +1147,7 @@ def test_kubernetes_slurm_show_gpus(generic_cloud: str):
             # 2. The cluster has no GPUs, and the expected message is shown
             '(echo "$s" | grep -A 1 "REQUESTABLE_QTY_PER_NODE" | '
             'grep -E "^[A-Z0-9]+[[:space:]]+[0-9, ]+[[:space:]]+[0-9]+ of [0-9]+ free" || '
-            f'echo "$s" | grep "No GPUs found in any {generic_cloud} clusters")'
+            f'echo "$s" | grep "No GPUs found in any {generic_cloud.capitalize()} clusters")'
         )],
     )
     smoke_tests_utils.run_one_test(test)

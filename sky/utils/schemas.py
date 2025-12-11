@@ -1417,6 +1417,9 @@ def get_config_schema():
                         'pattern': '^all$'
                     }]
                 },
+                'provision_timeout': {
+                    'type': 'integer',
+                },
             }
         },
         'oci': {

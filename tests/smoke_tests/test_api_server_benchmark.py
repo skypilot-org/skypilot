@@ -59,12 +59,16 @@ def test_api_server_memory(generic_cloud: str):
     stop_event = threading.Event()
     metrics_thread = threading.Thread(target=_collect_metrics)
     metrics_thread.start()
+    parallelism = 8
+    if generic_cloud == 'kubernetes':
+        # Kubernetes has limited resources, lower the concurrency
+        parallelism = 4
     test = smoke_tests_utils.Test(
         'test_api_server_memory',
         [
-            f'python tests/load_tests/workload_benchmark.py -t 8 -r 5 --detail -s workloads/basic.sh --cloud {generic_cloud}'
+            f'python tests/load_tests/workload_benchmark.py -t {parallelism} -r 5 --detail -s workloads/basic.sh --cloud {generic_cloud}'
         ],
-        teardown='sky down -y "load-test-*"; sky jobs cancel -a -y',
+        teardown='sky down -y "load-test-*"; sky jobs cancel -a -y || true',
         # Long timeout for benchmark to complete
         timeout=3600,
     )

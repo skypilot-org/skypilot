@@ -201,7 +201,7 @@ def test_nemorl(generic_cloud: str, accelerator: Dict[str, str]) -> None:
 
     infra = generic_cloud
     if generic_cloud == 'aws':
-        infra = 'aws/ap-northeast-1'
+        infra = 'aws'
 
     name = smoke_tests_utils.get_cluster_name()
     original_yaml_path = 'llm/nemorl/nemorl.sky.yaml'
