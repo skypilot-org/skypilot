@@ -773,26 +773,40 @@ class Task:
 
     @staticmethod
     def from_yaml(yaml_path: str) -> 'Task':
-        """Initializes a task from a task YAML.
+        """Initializes a task from a task YAML file, URL, or cloud storage.
+
+        Supports loading from:
+          - Local files: /path/to/task.yaml, ~/task.yaml
+          - HTTP/HTTPS URLs: https://example.com/task.yaml
+          - Cloud storage: s3://bucket/task.yaml, gs://bucket/task.yaml,
+            az://container/task.yaml
 
         Example:
             .. code-block:: python
 
+                # From local file
                 task = sky.Task.from_yaml('/path/to/task.yaml')
 
+                # From HTTP URL
+                task = sky.Task.from_yaml('https://example.com/task.yaml')
+
+                # From cloud storage
+                task = sky.Task.from_yaml('s3://my-bucket/configs/task.yaml')
+                task = sky.Task.from_yaml('gs://my-bucket/configs/task.yaml')
+
         Args:
-          yaml_path: file path to a valid task yaml file.
+          yaml_path: Path to a valid task YAML file. Can be a local file path,
+            HTTP/HTTPS URL, or cloud storage URL (s3://, gs://, az://).
 
         Raises:
           ValueError: if the path gets loaded into a str instead of a dict; or
             if there are any other parsing errors.
         """
-        with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
-            # TODO(zongheng): use
-            #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
-            # to raise errors on duplicate keys.
-            user_specified_yaml = f.read()
-            return Task.from_yaml_str(user_specified_yaml)
+        # TODO(zongheng): use
+        #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
+        # to raise errors on duplicate keys.
+        user_specified_yaml = yaml_utils.read_file_or_url(yaml_path)
+        return Task.from_yaml_str(user_specified_yaml)
 
     @staticmethod
     def from_yaml_str(yaml_str: str) -> 'Task':
