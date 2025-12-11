@@ -227,23 +227,24 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         # Extract productId from GpuInfo - this is the instance ID from Novita API
         productId = gpuInfo['Gpus'][0]['Id']
         gpuNum = 1
-        imageUrl = 'nginx:latest'
-        imageAuth = ''
-        imageAuthId = ''
-        ports = ''  # e.g.: 80/http, 3306/tcp. Supported port range: [1-65535], except for 2222, 2223, 2224 which are reserved for internal use
-        envs = []  # Instance environment variables. Up to 100 environment variables can be created. e.g.: {'ENV1': 'value1', 'ENV2': 'value2'}
-        tools = []  # some official images only include Jupyter. The total number of ports used by ports + tools must not exceed 15. e.g.: 【{'name': 'Jupyter', 'port': 8080, type: 'http'}]
-        command = ''  # Instance startup command. String, length limit: 0-2047 characters.
-        clusterId = ''
-        networkStorages = []  # Cloud storage mount configuration. Up to 30 cloud storages can be mounted. e.g.: [{'Id': '1234567890', 'mountPath': '/network'}]
-        networkId = ''  # VPC network ID. Leave empty if not using a VPC network.
+        # Get imageUrl from node_config, default to 'nginx:latest' if not specified
+        imageUrl = node_config.get('ImageUrl') or node_config.get('imageUrl') or 'nginx:latest'
+        imageAuth = node_config.get('ImageAuth') or node_config.get('imageAuth') or ''
+        imageAuthId = node_config.get('ImageAuthId') or node_config.get('imageAuthId') or ''
+        ports = node_config.get('Ports') or node_config.get('ports') or ''  # e.g.: 80/http,3306/tcp. Supported port range: [1-65535], except for 2222, 2223, 2224 which are reserved for internal use
+        envs = node_config.get('Envs') or node_config.get('envs') or []  # Instance environment variables. Up to 100 environment variables can be created. e.g.: {'ENV1': 'value1', 'ENV2': 'value2'}
+        tools = node_config.get('Tools') or node_config.get('tools') or []  # some official images only include Jupyter. The total number of ports used by ports + tools must not exceed 15. e.g.: 【{'name': 'Jupyter', 'port': 8080, type: 'http'}]
+        command = node_config.get('Command') or node_config.get('command') or ''  # Instance startup command. String, length limit: 0-2047 characters.
+        # clusterId = ""
+        networkStorages = node_config.get('NetworkStorages') or node_config.get('networkStorages') or []  # Cloud storage mount configuration. Up to 30 cloud storages can be mounted. e.g.: [{'Id': '1234567890', 'mountPath': '/network'}]
+        networkId = node_config.get('NetworkId') or node_config.get('networkId') or ''  # VPC network ID. Leave empty if not using a VPC network.
         kind = 'gpu'
         min_rootfs = gpuInfo['Gpus'][0].get('MinRootFS') or gpuInfo['Gpus'][0].get('minRootFS', 10)
-        rootfsSize = int(min_rootfs)
+        rootfsSize = node_config.get('RootfsSize') or node_config.get('rootfsSize') or int(min_rootfs)
 
         create_config = {
             'productId': productId,
-            'region': region_code,  # Use region code without parentheses
+            # 'region': region_code,  # Use region code without parentheses
             'name': instance_name,
             'gpuNum': gpuNum,
             'rootfsSize': rootfsSize,
@@ -254,11 +255,13 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             'envs': envs,
             'tools': tools,
             'command': command,
-            'clusterId': clusterId,
+            # 'clusterId': clusterId,
             'networkStorages': networkStorages,
             'networkId': networkId,
             'kind': kind,
         }
+
+        logger.info(f'create_config: {create_config}')
         
         # Only add optional fields if they have meaningful values
         # Empty strings and empty lists should be omitted
