@@ -2199,8 +2199,6 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
         async def close_stdin() -> None:
             stdin.close()
 
-        # Timestamps are always supported for Slurm
-        # (introduced after that feature).
         ssh_failed = await _run_websocket_proxy(
             websocket,
             read_from_backend=lambda: stdout.read(4096),
