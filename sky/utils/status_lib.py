@@ -27,12 +27,12 @@ class ClusterStatus(enum.Enum):
 
     STOPPED = 'STOPPED'
     """The cluster is stopped."""
-    
-    # This state is used for display only.
-    # This state is not to be used in state machine logic
-    # without necessary considerations for doing so.
     PENDING = 'PENDING'
-    """The cluster is pending scheduling."""
+    """The cluster is pending scheduling.
+
+    NOTE: This state is for display only and should not be used in state
+    machine logic without necessary considerations.
+    """
 
     def colored_str(self):
         color = _STATUS_TO_COLOR[self]
