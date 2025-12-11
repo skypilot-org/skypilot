@@ -36,8 +36,6 @@ class Slurm(clouds.Cloud):
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Slurm.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not '
-                                                       'supported in Slurm.',
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             'Customized multiple network interfaces are not supported in '
             'Slurm.',
@@ -570,20 +568,11 @@ class Slurm(clouds.Cloud):
 
     @classmethod
     def expand_infras(cls) -> List[str]:
-        """Returns a list of enabled Slurm cluster/partition combinations.
+        """Returns a list of enabled Slurm clusters.
 
-        Each is returned as 'Slurm/cluster-name/partition' to be displayed
-        as a separate option in the optimizer.
+        Each is returned as 'Slurm/cluster-name'.
         """
         infras = []
         for cluster in cls.existing_allowed_clusters(silent=True):
-            try:
-                partitions = slurm_utils.get_partitions(cluster)
-                for partition in partitions:
-                    infras.append(
-                        f'{cls.canonical_name()}/{cluster}/{partition}')
-            except Exception as e:  # pylint: disable=broad-except
-                # Fall back to cluster-only if partition fetch fails
-                logger.debug(f'Failed to get partitions for {cluster}: {e}')
-                infras.append(f'{cls.canonical_name()}/{cluster}')
+            infras.append(f'{cls.canonical_name()}/{cluster}')
         return infras

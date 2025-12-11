@@ -867,7 +867,19 @@ class _NaturalOrderGroup(click.Group):
     """
 
     def list_commands(self, ctx):  # pylint: disable=unused-argument
-        return self.commands.keys()
+        # Preserve definition order but hide aliases (same command object) and
+        # commands explicitly marked as hidden.
+        seen_commands = set()
+        names = []
+        for name, command in self.commands.items():
+            if getattr(command, 'hidden', False):
+                continue
+            command_id = id(command)
+            if command_id in seen_commands:
+                continue
+            seen_commands.add(command_id)
+            names.append(name)
+        return names
 
     @usage_lib.entrypoint('sky.cli', fallback=True)
     def invoke(self, ctx):
@@ -3699,8 +3711,9 @@ def show_gpus(
             raise ValueError(full_err_msg)
         no_permissions_str = '<no permissions>'
         realtime_gpu_infos = []
+        # Stores per-GPU totals as [ready_capacity, available, not_ready].
         total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
-            lambda: [0, 0])
+            lambda: [0, 0, 0])
         all_nodes_info = []
 
         # display an aggregated table for all contexts
@@ -3711,6 +3724,33 @@ def show_gpus(
 
         num_filtered_contexts = 0
 
+        def _count_not_ready_gpus(
+            nodes_info: Optional['models.KubernetesNodesInfo']
+        ) -> Dict[str, int]:
+            """Return counts of GPUs on not ready nodes keyed by GPU type."""
+            not_ready_counts: Dict[str, int] = collections.defaultdict(int)
+            if nodes_info is None:
+                return not_ready_counts
+
+            node_info_dict = getattr(nodes_info, 'node_info_dict', {}) or {}
+            for node_info in node_info_dict.values():
+                accelerator_type = getattr(node_info, 'accelerator_type', None)
+                if not accelerator_type:
+                    continue
+
+                total_info = getattr(node_info, 'total', {})
+                accelerator_count = 0
+                if isinstance(total_info, dict):
+                    accelerator_count = int(
+                        total_info.get('accelerator_count', 0))
+                if accelerator_count <= 0:
+                    continue
+
+                node_is_ready = getattr(node_info, 'is_ready', True)
+                if not node_is_ready:
+                    not_ready_counts[accelerator_type] += accelerator_count
+            return not_ready_counts
+
         if realtime_gpu_availability_lists:
             for (ctx, availability_list) in realtime_gpu_availability_lists:
                 if not _filter_ctx(ctx):
@@ -3720,6 +3760,12 @@ def show_gpus(
                 else:
                     display_ctx = ctx
                 num_filtered_contexts += 1
+                # Collect node info for this context before building tables so
+                # we can exclude GPUs on not ready nodes from the totals.
+                nodes_info = sdk.stream_and_get(
+                    sdk.kubernetes_node_info(context=ctx))
+                context_not_ready_counts = _count_not_ready_gpus(nodes_info)
+
                 realtime_gpu_table = log_utils.create_table(
                     ['GPU', qty_header, 'UTILIZATION'])
                 for realtime_gpu_availability in sorted(availability_list):
@@ -3728,29 +3774,44 @@ def show_gpus(
                     available_qty = (gpu_availability.available
                                      if gpu_availability.available != -1 else
                                      no_permissions_str)
+                    # Exclude GPUs on not ready nodes from capacity counts.
+                    not_ready_count = min(
+                        context_not_ready_counts.get(gpu_availability.gpu, 0),
+                        gpu_availability.capacity)
+                    # Ensure capacity is never below the reported available
+                    # quantity (if available is unknown, treat as 0 for totals).
+                    available_for_totals = max(
+                        gpu_availability.available
+                        if gpu_availability.available != -1 else 0, 0)
+                    effective_capacity = max(
+                        gpu_availability.capacity - not_ready_count,
+                        available_for_totals)
+                    utilization = (
+                        f'{available_qty} of {effective_capacity} free')
+                    if not_ready_count > 0:
+                        utilization += f' ({not_ready_count} not ready)'
                     realtime_gpu_table.add_row([
                         gpu_availability.gpu,
                         _list_to_str(gpu_availability.counts),
-                        f'{available_qty} of {gpu_availability.capacity} free',
+                        utilization,
                     ])
                     gpu = gpu_availability.gpu
-                    capacity = gpu_availability.capacity
                     # we want total, so skip permission denied.
-                    available = max(gpu_availability.available, 0)
-                    if capacity > 0:
-                        total_gpu_info[gpu][0] += capacity
-                        total_gpu_info[gpu][1] += available
+                    if effective_capacity > 0 or not_ready_count > 0:
+                        total_gpu_info[gpu][0] += effective_capacity
+                        total_gpu_info[gpu][1] += available_for_totals
+                        total_gpu_info[gpu][2] += not_ready_count
                 realtime_gpu_infos.append((display_ctx, realtime_gpu_table))
-                # Collect node info for this context
-                nodes_info = sdk.stream_and_get(
-                    sdk.kubernetes_node_info(context=ctx))
                 all_nodes_info.append((display_ctx, nodes_info))
         if num_filtered_contexts > 1:
             total_realtime_gpu_table = log_utils.create_table(
                 ['GPU', 'UTILIZATION'])
             for gpu, stats in total_gpu_info.items():
-                total_realtime_gpu_table.add_row(
-                    [gpu, f'{stats[1]} of {stats[0]} free'])
+                not_ready = stats[2]
+                utilization = f'{stats[1]} of {stats[0]} free'
+                if not_ready > 0:
+                    utilization += f' ({not_ready} not ready)'
+                total_realtime_gpu_table.add_row([gpu, utilization])
         else:
             total_realtime_gpu_table = None
 
@@ -3871,10 +3932,18 @@ def show_gpus(
                     # Format memory in GB, show 1 decimal place
                     memory_str = f'{node_info.memory_gb:.1f} GB'
 
+                utilization_str = (
+                    f'{available} of '
+                    f'{node_info.total["accelerator_count"]} free')
+                # Check if node is ready (defaults to True for backward
+                # compatibility with older server versions)
+                node_is_ready = getattr(node_info, 'is_ready', True)
+                if not node_is_ready:
+                    utilization_str += ' (Node NotReady)'
+
                 node_table.add_row([
-                    context_name, node_name, acc_type,
-                    f'{available} of {node_info.total["accelerator_count"]} '
-                    'free', cpu_str, memory_str
+                    context_name, node_name, acc_type, utilization_str, cpu_str,
+                    memory_str
                 ])
 
         k8s_per_node_acc_message = (f'{cloud_str} per-node GPU availability')

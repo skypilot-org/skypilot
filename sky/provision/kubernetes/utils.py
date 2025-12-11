@@ -1206,14 +1206,23 @@ class V1NodeAddress:
 
 
 @dataclasses.dataclass
+class V1NodeCondition:
+    """Represents a Kubernetes node condition."""
+    type: str
+    status: str
+
+
+@dataclasses.dataclass
 class V1NodeStatus:
     allocatable: Dict[str, str]
     capacity: Dict[str, str]
     addresses: List[V1NodeAddress]
+    conditions: List[V1NodeCondition]
 
 
 @dataclasses.dataclass
 class V1Node:
+    """Represents a Kubernetes node."""
     metadata: V1ObjectMeta
     status: V1NodeStatus
 
@@ -1231,7 +1240,23 @@ class V1Node:
                            V1NodeAddress(type=addr['type'],
                                          address=addr['address'])
                            for addr in data['status'].get('addresses', [])
+                       ],
+                       conditions=[
+                           V1NodeCondition(type=cond['type'],
+                                           status=cond['status'])
+                           for cond in data['status'].get('conditions', [])
                        ]))
+
+    def is_ready(self) -> bool:
+        """Check if the node is ready based on its conditions.
+
+        A node is considered ready if it has a 'Ready' condition with
+        status 'True'.
+        """
+        for condition in self.status.conditions:
+            if condition.type == 'Ready':
+                return condition.status == 'True'
+        return False
 
 
 @annotations.lru_cache(scope='request', maxsize=10)
@@ -1451,11 +1476,12 @@ def check_instance_fits(context: Optional[str],
             return False, str(e)
         # Get the set of nodes that have the GPU type
         gpu_nodes = [
-            node for node in nodes if gpu_label_key in node.metadata.labels and
+            node for node in nodes
+            if node.is_ready() and gpu_label_key in node.metadata.labels and
             node.metadata.labels[gpu_label_key] in gpu_label_values
         ]
         if not gpu_nodes:
-            return False, f'No GPU nodes found with {acc_type} on the cluster'
+            return False, f'No ready GPU nodes found with {acc_type} on the cluster'
         if is_tpu_on_gke(acc_type):
             # If requested accelerator is a TPU type, check if the cluster
             # has sufficient TPU resource to meet the requirement.
@@ -1479,7 +1505,9 @@ def check_instance_fits(context: Optional[str],
             f'enough CPU (> {k8s_instance_type.cpus} CPUs) and/or '
             f'memory (> {k8s_instance_type.memory} G). ')
     else:
-        candidate_nodes = nodes
+        candidate_nodes = [node for node in nodes if node.is_ready()]
+        if not candidate_nodes:
+            return False, 'No ready nodes found in the cluster.'
         not_fit_reason_prefix = (f'No nodes found with enough '
                                  f'CPU (> {k8s_instance_type.cpus} CPUs) '
                                  'and/or memory '
@@ -3093,6 +3121,8 @@ def get_kubernetes_node_info(
             # If parsing fails, log but continue
             logger.debug(f'Failed to parse CPU/memory for node '
                          f'{node.metadata.name}: {e}')
+        # Check if node is ready
+        node_is_ready = node.is_ready()
 
         if accelerator_count == 0:
             node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
@@ -3102,10 +3132,14 @@ def get_kubernetes_node_info(
                 free={'accelerators_available': 0},
                 ip_address=node_ip,
                 cpu_count=cpu_count,
-                memory_gb=memory_gb)
+                memory_gb=memory_gb,
+                is_ready=node_is_ready)
             continue
 
-        if not has_accelerator_nodes or error_on_get_allocated_gpu_qty_by_node:
+        if not node_is_ready:
+            # If node is not ready, report 0 available GPUs
+            accelerators_available = 0
+        elif not has_accelerator_nodes or error_on_get_allocated_gpu_qty_by_node:
             accelerators_available = -1
         else:
             allocated_qty = allocated_qty_by_node[node.metadata.name]
@@ -3125,7 +3159,8 @@ def get_kubernetes_node_info(
             free={'accelerators_available': int(accelerators_available)},
             ip_address=node_ip,
             cpu_count=cpu_count,
-            memory_gb=memory_gb)
+            memory_gb=memory_gb,
+            is_ready=node_is_ready)
     hint = ''
     if has_multi_host_tpu:
         hint = ('(Note: Multi-host TPUs are detected and excluded from the '

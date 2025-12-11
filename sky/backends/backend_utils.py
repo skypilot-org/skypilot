@@ -1086,7 +1086,11 @@ def write_cluster_config(
         with open(tmp_yaml_path, 'w', encoding='utf-8') as f:
             f.write(restored_yaml_content)
 
-    config_dict['cluster_name_on_cloud'] = cluster_name_on_cloud
+    # Read the cluster_name_on_cloud from the restored yaml. This is a hack to
+    # make sure that launching on the same cluster across multiple users works
+    # correctly. See #8232.
+    yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
+    config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
 
     # Make sure to do this before we optimize file mounts. Optimization is
     # non-deterministic, but everything else before this point should be

@@ -441,6 +441,8 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           const gpuName = nodeData['accelerator_type'] || '-';
           const totalCount = nodeData['total']?.['accelerator_count'] || 0;
           const freeCount = nodeData['free']?.['accelerators_available'] || 0;
+          // Check if node is ready (defaults to true for backward compatibility)
+          const isReady = nodeData['is_ready'] !== false;
 
           if (totalCount > 0) {
             if (!gpuToData[gpuName]) {
@@ -449,11 +451,15 @@ async function getKubernetesGPUsFromContexts(contextNames) {
                 gpu_requestable_qty_per_node: 0,
                 gpu_total: 0,
                 gpu_free: 0,
+                gpu_not_ready: 0,
                 context: context,
               };
             }
             gpuToData[gpuName].gpu_total += totalCount;
             gpuToData[gpuName].gpu_free += freeCount;
+            if (isReady === false) {
+              gpuToData[gpuName].gpu_not_ready += totalCount;
+            }
             gpuToData[gpuName].gpu_requestable_qty_per_node = totalCount;
           }
         }
@@ -462,10 +468,13 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           if (gpuName in allGPUsSummary) {
             allGPUsSummary[gpuName].gpu_total += gpuToData[gpuName].gpu_total;
             allGPUsSummary[gpuName].gpu_free += gpuToData[gpuName].gpu_free;
+            allGPUsSummary[gpuName].gpu_not_ready +=
+              gpuToData[gpuName].gpu_not_ready;
           } else {
             allGPUsSummary[gpuName] = {
               gpu_total: gpuToData[gpuName].gpu_total,
               gpu_free: gpuToData[gpuName].gpu_free,
+              gpu_not_ready: gpuToData[gpuName].gpu_not_ready,
               gpu_name: gpuName,
             };
           }
@@ -495,6 +504,8 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             nodeData['total']?.['accelerator_count'] ?? 0;
           const freeAccelerators =
             nodeData['free']?.['accelerators_available'] ?? 0;
+          // Check if node is ready (defaults to true for backward compatibility)
+          const nodeIsReady = nodeData['is_ready'] !== false;
 
           // Extract CPU and memory information
           const cpuCount = nodeData['cpu_count'] ?? null;
@@ -509,6 +520,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             context: context,
             cpu_count: cpuCount,
             memory_gb: memoryGb,
+            is_ready: nodeIsReady,
           };
 
           // If this node provides a GPU type not found via GPU availability,
@@ -524,6 +536,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
               allGPUsSummary[acceleratorType] = {
                 gpu_total: 0,
                 gpu_free: 0,
+                gpu_not_ready: 0,
                 gpu_name: acceleratorType,
               };
             }
@@ -533,6 +546,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             if (!existingGpuEntry) {
               perContextGPUsData[context].push({
                 gpu_name: acceleratorType,
+                gpu_not_ready: 0,
                 gpu_requestable_qty_per_node: '-',
                 gpu_total: 0,
                 gpu_free: 0,

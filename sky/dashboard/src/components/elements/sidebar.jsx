@@ -386,7 +386,7 @@ export function TopBar() {
       <div className="relative" key={groupName} ref={navDropdownRef}>
         <button
           onClick={() => setOpenNavDropdown(isOpen ? null : groupName)}
-          className={`inline-flex items-center border-b-2 px-1 pt-1 space-x-1 ${
+          className={`inline-flex items-center align-middle border-b-2 px-1 pt-1 space-x-1 ${
             isOpen
               ? 'text-blue-600 border-blue-600'
               : 'border-transparent text-gray-700 hover:text-blue-600'
@@ -566,10 +566,10 @@ export function TopBar() {
                     href="https://skypilot.readthedocs.io/en/latest/"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center px-2 py-1 text-gray-600 hover:text-blue-600 transition-colors duration-150 cursor-pointer"
+                    className="inline-flex items-center align-middle border-b-2 border-transparent px-1 pt-1 space-x-1 text-gray-600 hover:text-blue-600 transition-colors duration-150 cursor-pointer"
                     title="Docs"
                   >
-                    <span className="mr-1">Docs</span>
+                    <span className="leading-none">Docs</span>
                     <ExternalLinkIcon className="w-3.5 h-3.5" />
                   </a>
                 </CustomTooltip>
@@ -582,7 +582,7 @@ export function TopBar() {
                     href="https://github.com/skypilot-org/skypilot"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+                    className="inline-flex items-center justify-center align-middle p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
                     title="GitHub"
                   >
                     <GitHubIcon className="w-5 h-5" />
@@ -597,7 +597,7 @@ export function TopBar() {
                     href="https://slack.skypilot.co/"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+                    className="inline-flex items-center justify-center align-middle p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
                     title="Slack"
                   >
                     <SlackIcon className="w-5 h-5" />
@@ -612,7 +612,7 @@ export function TopBar() {
                     href="https://github.com/skypilot-org/skypilot/issues/new"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+                    className="inline-flex items-center justify-center align-middle p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
                     title="Leave Feedback"
                   >
                     <CommentFeedbackIcon className="w-5 h-5" />
