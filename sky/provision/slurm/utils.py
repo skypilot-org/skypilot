@@ -14,10 +14,7 @@ from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# TODO(jwj): Choose commonly used default values.
 DEFAULT_SLURM_PATH = '~/.slurm/config'
-DEFAULT_CLUSTER_NAME = 'localcluster'
-DEFAULT_PARTITION = 'dev'
 
 
 def get_slurm_ssh_config() -> SSHConfig:
@@ -170,29 +167,24 @@ def instance_id(job_id: str, node: str) -> str:
     return f'job{job_id}-{node}'
 
 
-def get_cluster_name_from_config(provider_config: Dict[str, Any]) -> str:
-    """Return the cluster name from the provider config.
-
-    The concept of cluster can be mapped to a cloud region.
-    """
-    return provider_config.get('cluster', DEFAULT_CLUSTER_NAME)
-
-
 def get_partition_from_config(provider_config: Dict[str, Any]) -> str:
     """Return the partition from the provider config.
 
     The concept of partition can be mapped to a cloud zone.
     """
-    return provider_config.get('partition', DEFAULT_PARTITION)
+    partition = provider_config.get('partition')
+    if partition is None:
+        raise ValueError('Partition not specified in provider config.')
+    return partition
 
 
 @annotations.lru_cache(scope='request')
-def get_cluster_default_partition(cluster_name: str) -> str:
+def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
     """Get the default partition for a Slurm cluster.
 
     Queries the Slurm cluster for the partition marked with an asterisk (*)
-    in sinfo output. Falls back to DEFAULT_PARTITION if the query fails or
-    no default partition is found.
+    in sinfo output. If no default partition is marked, returns the first
+    partition alphabetically.
 
     Args:
         cluster_name: Name of the Slurm cluster.
@@ -216,14 +208,7 @@ def get_cluster_default_partition(cluster_name: str) -> str:
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
     )
 
-    default_partition = client.get_default_partition()
-    if default_partition is None:
-        # TODO(kevin): Have a way to specify default partition in
-        # ~/.sky/config.yaml if needed, in case a Slurm cluster
-        # really does not have a default partition.
-        raise ValueError('No default partition found for cluster '
-                         f'{cluster_name}.')
-    return default_partition
+    return client.get_default_partition()
 
 
 def get_all_slurm_cluster_names() -> List[str]:
@@ -319,6 +304,9 @@ def check_instance_fits(
     default_partition = get_cluster_default_partition(cluster)
 
     def is_default_partition(node_partition: str) -> bool:
+        if default_partition is None:
+            return False
+
         # info_nodes does not strip the '*' from the default partition name.
         # But non-default partition names can also end with '*',
         # so we need to check whether the partition name without the '*'
@@ -543,6 +531,7 @@ def is_inside_slurm_job() -> bool:
     return os.environ.get('SLURM_JOB_ID') is not None
 
 
+@annotations.lru_cache(scope='request')
 def get_partitions(cluster_name: str) -> List[str]:
     """Get unique partition names available in a Slurm cluster.
 
@@ -577,7 +566,6 @@ def get_partitions(cluster_name: str) -> List[str]:
                 other_partitions.append(partition.name)
         return default_partitions + sorted(other_partitions)
     except Exception as e:  # pylint: disable=broad-except
-        logger.warning(
-            f'Failed to get partitions for cluster {cluster_name}: {e}')
-        # Fall back to default partition if query fails
-        return [DEFAULT_PARTITION]
+        raise ValueError(
+            f'Failed to get partitions for cluster '
+            f'{cluster_name}: {common_utils.format_exception(e)}') from e

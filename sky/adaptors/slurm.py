@@ -134,7 +134,7 @@ class SlurmClient:
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            f'Failed to cancel job {job_name}.',
-                                           stderr=stderr)
+                                           stderr=stdout + '\n' + stderr)
         logger.debug(f'Successfully cancelled job {job_name}: {stdout}')
 
     def info(self) -> str:
