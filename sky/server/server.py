@@ -2206,7 +2206,7 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             read_from_backend=lambda: stdout.read(4096),
             write_to_backend=write_and_drain,
             close_backend=close_stdin,
-            timestamps_supported=True,
+            timestamps_supported=timestamps_supported,
             backend_name='srun',
         )
 
