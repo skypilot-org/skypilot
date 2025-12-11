@@ -22,7 +22,7 @@ import threading
 import traceback
 import typing
 from typing import (Any, Awaitable, Callable, Dict, List, Literal, Optional,
-                    Set, Tuple)
+                    Set, Tuple, Type)
 import uuid
 import zipfile
 
@@ -1894,8 +1894,30 @@ class SSHMessageType(IntEnum):
     LATENCY_MEASUREMENT = 2
 
 
-# Kept for backwards compatibility.
-# KubernetesSSHMessageType = SSHMessageType
+async def _get_cluster_and_validate(
+    cluster_name: str,
+    cloud_type: Type[clouds.Cloud],
+) -> 'backends.CloudVmRayResourceHandle':
+    """Fetch cluster status and validate it's UP and correct cloud type."""
+    # Run core.status in another thread to avoid blocking the event loop.
+    with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
+        cluster_records = await context_utils.to_thread_with_executor(
+            thread_pool_executor, core.status, cluster_name, all_users=True)
+    cluster_record = cluster_records[0]
+    if cluster_record['status'] != status_lib.ClusterStatus.UP:
+        raise fastapi.HTTPException(
+            status_code=400, detail=f'Cluster {cluster_name} is not running')
+
+    handle: Optional['backends.CloudVmRayResourceHandle'] = cluster_record[
+        'handle']
+    assert handle is not None, 'Cluster handle is None'
+    if not isinstance(handle.launched_resources.cloud, cloud_type):
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail=f'Cluster {cluster_name} is not a {str(cloud_type())} '
+            'cluster. Use ssh to connect to the cluster instead.')
+
+    return handle
 
 
 async def _run_websocket_proxy(
@@ -2012,22 +2034,7 @@ async def kubernetes_pod_ssh_proxy(
     logger.info(f'Websocket timestamps supported: {timestamps_supported}, \
         client_version = {client_version}')
 
-    # Run core.status in another thread to avoid blocking the event loop.
-    with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
-        cluster_records = await context_utils.to_thread_with_executor(
-            thread_pool_executor, core.status, cluster_name, all_users=True)
-    cluster_record = cluster_records[0]
-    if cluster_record['status'] != status_lib.ClusterStatus.UP:
-        raise fastapi.HTTPException(
-            status_code=400, detail=f'Cluster {cluster_name} is not running')
-
-    handle = cluster_record['handle']
-    assert handle is not None, 'Cluster handle is None'
-    if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-        raise fastapi.HTTPException(
-            status_code=400,
-            detail=f'Cluster {cluster_name} is not a Kubernetes cluster'
-            'Use ssh to connect to the cluster instead.')
+    handle = await _get_cluster_and_validate(cluster_name, clouds.Kubernetes)
 
     kubectl_cmd = handle.get_command_runners()[0].port_forward_command(
         port_forward=[(None, 22)])
@@ -2106,32 +2113,15 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
                               worker: int = 0,
                               client_version: Optional[int] = None) -> None:
     """Proxies SSH to the Slurm job via sshd inside srun."""
-    # Unlike the Kubernetes pod SSH proxy, Slurm support is introduced after
-    # websocket timestamps are introduced, so there is no need to check the
-    # client version to be > 21.
-    del client_version
-
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: '
                 f'{cluster_name}')
 
-    # Run core.status in another thread to avoid blocking the event loop.
-    with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
-        cluster_records = await context_utils.to_thread_with_executor(
-            thread_pool_executor, core.status, cluster_name, all_users=True)
-    cluster_record = cluster_records[0]
-    if cluster_record['status'] != status_lib.ClusterStatus.UP:
-        raise fastapi.HTTPException(
-            status_code=400, detail=f'Cluster {cluster_name} is not running')
+    timestamps_supported = client_version is not None and client_version > 21
+    logger.info(f'Websocket timestamps supported: {timestamps_supported}, \
+        client_version = {client_version}')
 
-    handle: Optional['backends.CloudVmRayResourceHandle'] = cluster_record[
-        'handle']
-    assert handle is not None, 'Cluster handle is None'
-    if not isinstance(handle.launched_resources.cloud, clouds.Slurm):
-        raise fastapi.HTTPException(
-            status_code=400,
-            detail=f'Cluster {cluster_name} is not a Kubernetes cluster'
-            'Use ssh to connect to the cluster instead.')
+    handle = await _get_cluster_and_validate(cluster_name, clouds.Slurm)
 
     assert handle.cached_cluster_info is not None, 'Cached cluster info is None'
     provider_config = handle.cached_cluster_info.provider_config
@@ -2170,7 +2160,8 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             f'Cluster has {len(node_hostnames)} nodes.')
     target_node = node_hostnames[worker]
 
-    # Run sshd inside the Slurm job "container" via srun.
+    # Run sshd inside the Slurm job "container" via srun, such that it inherits
+    # the resource constraints of the Slurm job.
     ssh_cmd.extend(slurm_utils.srun_sshd_command(job_id, target_node, ssh_user))
 
     proc = await asyncio.create_subprocess_exec(
