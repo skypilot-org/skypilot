@@ -47,6 +47,15 @@ from common_test_fixtures import skyignore_dir
 
 from sky.server import common as server_common
 
+
+@pytest.fixture(autouse=True)
+def _clear_request_level_cache():
+    """Keep request-scoped caches from leaking between tests."""
+    annotations.clear_request_level_cache()
+    yield
+    annotations.clear_request_level_cache()
+
+
 # Usage: use
 #   @pytest.mark.slow
 # to mark a test as slow and to skip by default.
@@ -68,7 +77,7 @@ all_clouds_in_smoke_tests = [
     'aws', 'azure', 'cloudflare', 'coreweave', 'cudo', 'do', 'fluidstack',
     'gcp', 'hyperbolic', 'ibm', 'kubernetes', 'lambda', 'nebius', 'novita',
     'oci', 'paperspace', 'primeintellect', 'runpod', 'scp', 'seeweb',
-    'shadeform', 'vast', 'vsphere'
+    'shadeform', 'slurm', 'vast', 'vsphere'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -100,6 +109,7 @@ cloud_to_pytest_keyword = {
     'seeweb': 'seeweb',
     'shadeform': 'shadeform',
     'coreweave': 'coreweave',
+    'slurm': 'slurm',
 }
 
 

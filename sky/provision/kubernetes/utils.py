@@ -14,7 +14,8 @@ import shutil
 import subprocess
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
+                    Union)
 
 import ijson
 
@@ -1205,14 +1206,23 @@ class V1NodeAddress:
 
 
 @dataclasses.dataclass
+class V1NodeCondition:
+    """Represents a Kubernetes node condition."""
+    type: str
+    status: str
+
+
+@dataclasses.dataclass
 class V1NodeStatus:
     allocatable: Dict[str, str]
     capacity: Dict[str, str]
     addresses: List[V1NodeAddress]
+    conditions: List[V1NodeCondition]
 
 
 @dataclasses.dataclass
 class V1Node:
+    """Represents a Kubernetes node."""
     metadata: V1ObjectMeta
     status: V1NodeStatus
 
@@ -1230,7 +1240,23 @@ class V1Node:
                            V1NodeAddress(type=addr['type'],
                                          address=addr['address'])
                            for addr in data['status'].get('addresses', [])
+                       ],
+                       conditions=[
+                           V1NodeCondition(type=cond['type'],
+                                           status=cond['status'])
+                           for cond in data['status'].get('conditions', [])
                        ]))
+
+    def is_ready(self) -> bool:
+        """Check if the node is ready based on its conditions.
+
+        A node is considered ready if it has a 'Ready' condition with
+        status 'True'.
+        """
+        for condition in self.status.conditions:
+            if condition.type == 'Ready':
+                return condition.status == 'True'
+        return False
 
 
 @annotations.lru_cache(scope='request', maxsize=10)
@@ -1450,11 +1476,12 @@ def check_instance_fits(context: Optional[str],
             return False, str(e)
         # Get the set of nodes that have the GPU type
         gpu_nodes = [
-            node for node in nodes if gpu_label_key in node.metadata.labels and
+            node for node in nodes
+            if node.is_ready() and gpu_label_key in node.metadata.labels and
             node.metadata.labels[gpu_label_key] in gpu_label_values
         ]
         if not gpu_nodes:
-            return False, f'No GPU nodes found with {acc_type} on the cluster'
+            return False, f'No ready GPU nodes found with {acc_type} on the cluster'
         if is_tpu_on_gke(acc_type):
             # If requested accelerator is a TPU type, check if the cluster
             # has sufficient TPU resource to meet the requirement.
@@ -1478,7 +1505,9 @@ def check_instance_fits(context: Optional[str],
             f'enough CPU (> {k8s_instance_type.cpus} CPUs) and/or '
             f'memory (> {k8s_instance_type.memory} G). ')
     else:
-        candidate_nodes = nodes
+        candidate_nodes = [node for node in nodes if node.is_ready()]
+        if not candidate_nodes:
+            return False, 'No ready nodes found in the cluster.'
         not_fit_reason_prefix = (f'No nodes found with enough '
                                  f'CPU (> {k8s_instance_type.cpus} CPUs) '
                                  'and/or memory '
@@ -3077,16 +3106,23 @@ def get_kubernetes_node_info(
 
         accelerator_count = get_node_accelerator_count(context,
                                                        node.status.allocatable)
+        # Check if node is ready
+        node_is_ready = node.is_ready()
+
         if accelerator_count == 0:
             node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
                 name=node.metadata.name,
                 accelerator_type=accelerator_name,
                 total={'accelerator_count': 0},
                 free={'accelerators_available': 0},
-                ip_address=node_ip)
+                ip_address=node_ip,
+                is_ready=node_is_ready)
             continue
 
-        if not has_accelerator_nodes or error_on_get_allocated_gpu_qty_by_node:
+        if not node_is_ready:
+            # If node is not ready, report 0 available GPUs
+            accelerators_available = 0
+        elif not has_accelerator_nodes or error_on_get_allocated_gpu_qty_by_node:
             accelerators_available = -1
         else:
             allocated_qty = allocated_qty_by_node[node.metadata.name]
@@ -3104,7 +3140,8 @@ def get_kubernetes_node_info(
             accelerator_type=accelerator_name,
             total={'accelerator_count': int(accelerator_count)},
             free={'accelerators_available': int(accelerators_available)},
-            ip_address=node_ip)
+            ip_address=node_ip,
+            is_ready=node_is_ready)
     hint = ''
     if has_multi_host_tpu:
         hint = ('(Note: Multi-host TPUs are detected and excluded from the '
@@ -3136,7 +3173,11 @@ def filter_pods(namespace: str,
                 context: Optional[str],
                 tag_filters: Dict[str, str],
                 status_filters: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Filters pods by tags and status."""
+    """Filters pods by tags and status.
+
+    Returned dict is sorted by name, with workers sorted by their numeric suffix.
+    This ensures consistent ordering for SSH configuration and other operations.
+    """
     non_included_pod_statuses = POD_STATUSES.copy()
 
     field_selector = ''
@@ -3154,7 +3195,32 @@ def filter_pods(namespace: str,
     pods = [
         pod for pod in pod_list.items if pod.metadata.deletion_timestamp is None
     ]
-    return {pod.metadata.name: pod for pod in pods}
+
+    # Sort pods by name, with workers sorted by their numeric suffix.
+    # This ensures consistent ordering (e.g., cluster-head, cluster-worker1,
+    # cluster-worker2, cluster-worker3, ...) even when Kubernetes API
+    # returns them in arbitrary order. This works even if there were
+    # somehow pod names other than head/worker ones, and those end up at
+    # the end of the list.
+    def get_pod_sort_key(
+        pod: V1Pod
+    ) -> Union[Tuple[Literal[0], str], Tuple[Literal[1], int], Tuple[Literal[2],
+                                                                     str]]:
+        name = pod.metadata.name
+        name_suffix = name.split('-')[-1]
+        if name_suffix == 'head':
+            return (0, name)
+        elif name_suffix.startswith('worker'):
+            try:
+                return (1, int(name_suffix.split('worker')[-1]))
+            except (ValueError, IndexError):
+                return (2, name)
+        else:
+            return (2, name)
+
+    sorted_pods = sorted(pods, key=get_pod_sort_key)
+
+    return {pod.metadata.name: pod for pod in sorted_pods}
 
 
 def _remove_pod_annotation(pod: Any,

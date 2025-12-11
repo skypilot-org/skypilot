@@ -23,6 +23,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import common_utils
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
@@ -141,7 +142,7 @@ def init_db(func):
 
         with _db_init_lock:
             if _DB is None:
-                db_path = os.path.expanduser('~/.sky/jobs.db')
+                db_path = runtime_utils.get_runtime_dir_path('.sky/jobs.db')
                 os.makedirs(pathlib.Path(db_path).parents[0], exist_ok=True)
                 _DB = db_utils.SQLiteConn(db_path, create_table)
         return func(*args, **kwargs)
@@ -631,7 +632,8 @@ def get_ray_port():
     If the port file does not exist, the cluster was launched before #1790,
     return the default port.
     """
-    port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
+    port_path = runtime_utils.get_runtime_dir_path(
+        constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 6379
     port = json.load(open(port_path, 'r', encoding='utf-8'))['ray_port']
@@ -644,7 +646,8 @@ def get_job_submission_port():
     If the port file does not exist, the cluster was launched before #1790,
     return the default port.
     """
-    port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
+    port_path = runtime_utils.get_runtime_dir_path(
+        constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 8265
     port = json.load(open(port_path, 'r',
@@ -762,7 +765,7 @@ def update_job_status(job_ids: List[int],
     statuses = []
     for job_id in job_ids:
         # Per-job status lock is required because between the job status
-        # query and the job status update, the job status in the databse
+        # query and the job status update, the job status in the database
         # can be modified by the generated ray program.
         with filelock.FileLock(_get_lock_path(job_id)):
             status = None
@@ -1270,4 +1273,5 @@ class JobLibCodeGen:
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         code = ';'.join(code)
-        return f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(code)}'
+        return (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
+                f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(code)}')

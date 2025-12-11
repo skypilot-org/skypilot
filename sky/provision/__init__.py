@@ -30,6 +30,7 @@ from sky.provision import scp
 from sky.provision import seeweb
 from sky.provision import novita
 from sky.provision import shadeform
+from sky.provision import slurm
 from sky.provision import ssh
 from sky.provision import vast
 from sky.provision import vsphere

@@ -84,6 +84,7 @@ install_requires = [
     'bcrypt==4.0.1',
     'pyjwt',
     'gitpython',
+    'paramiko',
     'types-paramiko',
     'alembic',
     'aiohttp',
@@ -203,12 +204,21 @@ cloud_dependencies: Dict[str, List[str]] = {
     'ssh': kubernetes_dependencies,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1
-    # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python 3.11+
-    # stdlib provides tomllib; on lower versions we depend on tomli explicitly.
-    # Instead of installing tomli conditionally, we install it explicitly.
-    # This is because the conditional installation of tomli does not work
-    # with controller package installation code.
-    'runpod': ['runpod>=1.6.1', 'tomli'],
+    'runpod': [
+        # For the container registry auth api. Reference:
+        # https://github.com/runpod/runpod-python/releases/tag/1.6.1
+        'runpod>=1.6.1',
+        # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python
+        # 3.11+ stdlib provides tomllib; on lower versions we depend on tomli
+        # explicitly. Instead of installing tomli conditionally, we install it
+        # explicitly. This is because the conditional installation of tomli does
+        # not work with controller package installation code.
+        'tomli',
+        # runpod installs aiodns (via aiohttp[speedups]), which is incompatible
+        # with pycares 5.0.0 due to deprecations.
+        # See https://github.com/aio-libs/aiodns/issues/214
+        'pycares<5',
+    ],
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
@@ -235,6 +245,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'seeweb': ['ecsapi==0.4.0'],
     'novita': [],  # No dependencies needed for novita,
     'shadeform': [],  # No dependencies needed for shadeform
+    'slurm': [],  # No dependencies needed for slurm
 }
 
 # Calculate which clouds should be included in the [all] installation.

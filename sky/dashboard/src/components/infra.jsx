@@ -68,6 +68,68 @@ import {
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
 
+// Shared GPU utilization bar to avoid duplicating percentage math and markup
+const GpuUtilizationBar = ({
+  gpu,
+  heightClass = 'h-4',
+  wrapperClassName = '',
+}) => {
+  const total = gpu?.gpu_total || 0;
+  const notReady = gpu?.gpu_not_ready || 0;
+  const free = gpu?.gpu_free || 0;
+  const used = Math.max(0, total - free - notReady);
+  const notReadyLabel = `${notReady} not ready`;
+  const usedLabel = `${used} used`;
+  const freeLabel = `${free} free`;
+  const toPercentage = total > 0 ? (value) => (value / total) * 100 : () => 0;
+  const notReadyPercentage = toPercentage(notReady);
+  const usedPercentage = toPercentage(used);
+  const freePercentage = toPercentage(free);
+
+  return (
+    <div
+      className={`bg-gray-100 rounded-md flex overflow-hidden shadow-sm ${heightClass} ${wrapperClassName}`.trim()}
+    >
+      {notReadyPercentage > 0 && (
+        <div
+          style={{
+            width: `${notReadyPercentage}%`,
+            fontSize: 'clamp(8px, 1.2vw, 12px)',
+          }}
+          title={notReadyLabel}
+          className="bg-gray-400 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
+        >
+          {notReadyPercentage > 15 && notReadyLabel}
+        </div>
+      )}
+      {usedPercentage > 0 && (
+        <div
+          style={{
+            width: `${usedPercentage}%`,
+            fontSize: 'clamp(8px, 1.2vw, 12px)',
+          }}
+          title={usedLabel}
+          className="bg-yellow-500 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
+        >
+          {usedPercentage > 15 && usedLabel}
+        </div>
+      )}
+      {freePercentage > 0 && (
+        <div
+          style={{
+            width: `${freePercentage}%`,
+            fontSize: 'clamp(8px, 1.2vw, 12px)',
+          }}
+          title={freeLabel}
+          className="bg-green-700 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
+        >
+          {freePercentage > 15 && freeLabel}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
 export function InfrastructureSection({
   title,
@@ -82,6 +144,7 @@ export function InfrastructureSection({
   jobsData = {},
   isJobsDataLoading = true,
   isSSH = false, // To differentiate between SSH and Kubernetes
+  isSlurm = false, // To differentiate Slurm clusters
   actionButton = null, // Optional action button for the header
   contextWorkspaceMap = {}, // Mapping of contexts to workspaces
   contextErrors = {}, // Mapping of contexts to error messages
@@ -134,10 +197,14 @@ export function InfrastructureSection({
                 {safeContexts.length === 1
                   ? isSSH
                     ? 'pool'
-                    : 'context'
+                    : isSlurm
+                      ? 'cluster'
+                      : 'context'
                   : isSSH
                     ? 'pools'
-                    : 'contexts'}
+                    : isSlurm
+                      ? 'clusters'
+                      : 'contexts'}
               </span>
             </div>
             {actionButton}
@@ -149,7 +216,7 @@ export function InfrastructureSection({
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/4">
-                        {isSSH ? 'Node Pool' : 'Context'}
+                        Name
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
                         Clusters
@@ -360,27 +427,20 @@ export function InfrastructureSection({
                       className={`bg-white divide-y divide-gray-200 ${gpus.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
                     >
                       {gpus.map((gpu) => {
-                        const usedGpus = gpu.gpu_total - gpu.gpu_free;
-                        const freePercentage =
-                          gpu.gpu_total > 0
-                            ? (gpu.gpu_free / gpu.gpu_total) * 100
-                            : 0;
-                        const usedPercentage =
-                          gpu.gpu_total > 0
-                            ? (usedGpus / gpu.gpu_total) * 100
-                            : 0;
-
                         // Find the requestable quantities from contexts
                         const requestableQtys = groupedPerContextGPUs
                           ? Object.values(groupedPerContextGPUs)
                               .flat()
-                              .filter(
-                                (g) =>
-                                  g.gpu_name === gpu.gpu_name &&
-                                  (isSSH
-                                    ? g.context.startsWith('ssh-')
-                                    : !g.context.startsWith('ssh-'))
-                              )
+                              .filter((g) => {
+                                if (g.gpu_name !== gpu.gpu_name) return false;
+                                if (isSlurm) return true; // For Slurm, include all
+                                // For Kubernetes/SSH, filter by context type
+                                const contextKey = g.context || g.cluster;
+                                if (!contextKey) return false;
+                                return isSSH
+                                  ? contextKey.startsWith('ssh-')
+                                  : !contextKey.startsWith('ssh-');
+                              })
                               .map((g) => g.gpu_requestable_qty_per_node)
                               .filter((qty, i, arr) => arr.indexOf(qty) === i) // Unique values
                               .join(', ')
@@ -396,26 +456,11 @@ export function InfrastructureSection({
                             </td>
                             <td className="p-3 w-2/3">
                               <div className="flex items-center gap-3">
-                                <div className="flex-1 bg-gray-100 rounded-md h-5 flex overflow-hidden shadow-sm min-w-[100px] w-full">
-                                  {usedPercentage > 0 && (
-                                    <div
-                                      style={{ width: `${usedPercentage}%` }}
-                                      className="bg-yellow-500 h-full flex items-center justify-center text-white text-xs font-medium"
-                                    >
-                                      {usedPercentage > 15 &&
-                                        `${usedGpus} used`}
-                                    </div>
-                                  )}
-                                  {freePercentage > 0 && (
-                                    <div
-                                      style={{ width: `${freePercentage}%` }}
-                                      className="bg-green-700 h-full flex items-center justify-center text-white text-xs font-medium"
-                                    >
-                                      {freePercentage > 15 &&
-                                        `${gpu.gpu_free} free`}
-                                    </div>
-                                  )}
-                                </div>
+                                <GpuUtilizationBar
+                                  gpu={gpu}
+                                  heightClass="h-5"
+                                  wrapperClassName="flex-1 min-w-[100px] w-full"
+                                />
                               </div>
                             </td>
                           </tr>
@@ -571,12 +616,6 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
             {gpusInContext.map((gpu) => {
-              const usedGpus = gpu.gpu_total - gpu.gpu_free;
-              const freePercentage =
-                gpu.gpu_total > 0 ? (gpu.gpu_free / gpu.gpu_total) * 100 : 0;
-              const usedPercentage =
-                gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
-
               return (
                 <div
                   key={gpu.gpu_name}
@@ -593,23 +632,12 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                       {gpu.gpu_free} free / {gpu.gpu_total} total
                     </span>
                   </div>
-                  <div className="w-full bg-gray-100 rounded-md h-4 flex overflow-hidden shadow-sm">
-                    {usedPercentage > 0 && (
-                      <div
-                        style={{ width: `${usedPercentage}%` }}
-                        className="bg-yellow-500 h-full flex items-center justify-center text-white text-xs"
-                      >
-                        {usedPercentage > 15 && `${usedGpus} used`}
-                      </div>
-                    )}
-                    {freePercentage > 0 && (
-                      <div
-                        style={{ width: `${freePercentage}%` }}
-                        className="bg-green-700 h-full flex items-center justify-center text-white text-xs"
-                      >
-                        {freePercentage > 15 && `${gpu.gpu_free} free`}
-                      </div>
-                    )}
+                  <div className="w-full">
+                    <GpuUtilizationBar
+                      gpu={gpu}
+                      heightClass="h-4"
+                      wrapperClassName="w-full"
+                    />
                   </div>
                 </div>
               );
@@ -653,7 +681,9 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                           {node.gpu_name}
                         </td>
                         <td className="p-3 whitespace-nowrap text-right text-gray-700">
-                          {`${node.gpu_free} of ${node.gpu_total} free`}
+                          {node.is_ready === false
+                            ? `0 of ${node.gpu_total} free (Node NotReady)`
+                            : `${node.gpu_free} of ${node.gpu_total} free`}
                         </td>
                       </tr>
                     ))}
@@ -1615,6 +1645,9 @@ export function GPUs() {
   const [allGPUs, setAllGPUs] = useState([]);
   const [perContextGPUs, setPerContextGPUs] = useState([]);
   const [perNodeGPUs, setPerNodeGPUs] = useState([]);
+  const [allSlurmGPUs, setAllSlurmGPUs] = useState([]);
+  const [perClusterSlurmGPUs, setPerClusterSlurmGPUs] = useState([]);
+  const [perNodeSlurmGPUs, setPerNodeSlurmGPUs] = useState([]);
   const [cloudInfraData, setCloudInfraData] = useState([]);
   const [totalClouds, setTotalClouds] = useState(0);
   const [enabledClouds, setEnabledClouds] = useState(0);
@@ -1719,6 +1752,9 @@ export function GPUs() {
           allGPUs: fetchedAllGPUs,
           perContextGPUs: fetchedPerContextGPUs,
           perNodeGPUs: fetchedPerNodeGPUs,
+          allSlurmGPUs: fetchedAllSlurmGPUs,
+          perClusterSlurmGPUs: fetchedPerClusterSlurmGPUs,
+          perNodeSlurmGPUs: fetchedPerNodeSlurmGPUs,
           contextStats: fetchedContextStats,
           contextWorkspaceMap: fetchedContextWorkspaceMap,
           contextErrors: fetchedContextErrors,
@@ -1729,6 +1765,9 @@ export function GPUs() {
         setAllGPUs(fetchedAllGPUs || []);
         setPerContextGPUs(fetchedPerContextGPUs || []);
         setPerNodeGPUs(fetchedPerNodeGPUs || []);
+        setAllSlurmGPUs(fetchedAllSlurmGPUs || []);
+        setPerClusterSlurmGPUs(fetchedPerClusterSlurmGPUs || []);
+        setPerNodeSlurmGPUs(fetchedPerNodeSlurmGPUs || []);
         setContextStats(fetchedContextStats || {});
         setContextWorkspaceMap(fetchedContextWorkspaceMap || {});
         setContextErrors(fetchedContextErrors || {});
@@ -1747,6 +1786,9 @@ export function GPUs() {
         setAllGPUs([]);
         setPerContextGPUs([]);
         setPerNodeGPUs([]);
+        setAllSlurmGPUs([]);
+        setPerClusterSlurmGPUs([]);
+        setPerNodeSlurmGPUs([]);
         setContextStats({});
         setContextWorkspaceMap({});
         setContextErrors({});
@@ -1761,6 +1803,9 @@ export function GPUs() {
       setAllGPUs([]);
       setPerContextGPUs([]);
       setPerNodeGPUs([]);
+      setAllSlurmGPUs([]);
+      setPerClusterSlurmGPUs([]);
+      setPerNodeSlurmGPUs([]);
       setContextStats({});
       setContextWorkspaceMap({});
       setContextErrors({});
@@ -2112,6 +2157,43 @@ export function GPUs() {
     return allGPUs.filter((gpu) => kubeGpuNames.has(gpu.gpu_name));
   }, [allGPUs, perContextGPUs]);
 
+  // Extract Slurm cluster names from perClusterSlurmGPUs
+  const slurmClusters = React.useMemo(() => {
+    if (!perClusterSlurmGPUs || !Array.isArray(perClusterSlurmGPUs)) {
+      return [];
+    }
+    const clusters = [
+      ...new Set(perClusterSlurmGPUs.map((gpu) => gpu.cluster)),
+    ];
+    return clusters.sort();
+  }, [perClusterSlurmGPUs]);
+
+  // Group perClusterSlurmGPUs by cluster
+  const groupedPerClusterSlurmGPUs = React.useMemo(() => {
+    if (!perClusterSlurmGPUs) return {};
+    return perClusterSlurmGPUs.reduce((acc, gpu) => {
+      const { cluster } = gpu;
+      if (!acc[cluster]) {
+        acc[cluster] = [];
+      }
+      acc[cluster].push(gpu);
+      return acc;
+    }, {});
+  }, [perClusterSlurmGPUs]);
+
+  // Group perNodeSlurmGPUs by cluster
+  const groupedPerNodeSlurmGPUs = React.useMemo(() => {
+    if (!perNodeSlurmGPUs) return {};
+    return perNodeSlurmGPUs.reduce((acc, node) => {
+      const { cluster } = node;
+      if (!acc[cluster]) {
+        acc[cluster] = [];
+      }
+      acc[cluster].push(node);
+      return acc;
+    }, {});
+  }, [perNodeSlurmGPUs]);
+
   // Group perNodeGPUs by context
   const groupedPerNodeGPUs = React.useMemo(() => {
     if (!perNodeGPUs) return {};
@@ -2354,6 +2436,27 @@ export function GPUs() {
     );
   };
 
+  const renderSlurmInfrastructure = () => {
+    return (
+      <InfrastructureSection
+        title="Slurm"
+        isLoading={kubeLoading}
+        isDataLoaded={kubeDataLoaded}
+        contexts={slurmClusters}
+        gpus={allSlurmGPUs}
+        groupedPerContextGPUs={groupedPerClusterSlurmGPUs}
+        groupedPerNodeGPUs={groupedPerNodeSlurmGPUs}
+        handleContextClick={handleContextClick}
+        contextStats={{}}
+        jobsData={{}}
+        isJobsDataLoading={false}
+        isSSH={false}
+        isSlurm={true}
+        contextWorkspaceMap={{}}
+      />
+    );
+  };
+
   const renderKubernetesTab = () => {
     // If a context is selected, show its details instead of the summary
     if (selectedContext) {
@@ -2383,7 +2486,16 @@ export function GPUs() {
       });
     };
 
-    // Always add all three sections (they handle their own loading/empty states)
+    // Always add all sections (they handle their own loading/empty states)
+
+    // Add Slurm section (always show) - Priority 1 to show at top
+    const slurmHasActivity = slurmClusters.length > 0;
+    sections.push({
+      name: 'Slurm',
+      render: renderSlurmInfrastructure,
+      hasActivity: slurmHasActivity,
+      priority: 1, // Slurm gets priority 1 within same activity level
+    });
 
     // Add Kubernetes section (always show)
     // Kubernetes section is active if there are any contexts available (similar to Cloud logic)
@@ -2392,7 +2504,7 @@ export function GPUs() {
       name: 'Kubernetes',
       render: renderKubernetesInfrastructure,
       hasActivity: kubeHasActivity,
-      priority: 1, // Kubernetes gets priority 1 within same activity level
+      priority: 2, // Kubernetes gets priority 2 within same activity level
     });
 
     // Add Cloud section (always show)
@@ -2402,7 +2514,7 @@ export function GPUs() {
       name: 'Cloud',
       render: renderCloudInfrastructure,
       hasActivity: cloudHasActivity,
-      priority: 2, // Cloud gets priority 2 within same activity level
+      priority: 3, // Cloud gets priority 3 within same activity level
     });
 
     // Add SSH section (always show)
@@ -2412,7 +2524,7 @@ export function GPUs() {
       name: 'SSH Node Pool',
       render: renderSSHNodePoolInfrastructure,
       hasActivity: sshHasActivity,
-      priority: 3, // SSH gets priority 3 within same activity level
+      priority: 4, // SSH gets priority 4 within same activity level
     });
 
     // Dynamic sorting: enabled/active sections move to front automatically
