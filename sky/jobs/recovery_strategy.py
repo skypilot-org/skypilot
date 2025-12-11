@@ -448,7 +448,7 @@ class StrategyExecutor:
                             # scheduling.
                             task_resources = None
                             if self.dag.tasks:
-                                task = self.dag.tasks[0]
+                                task = self.dag.tasks[self.task_id]
                                 task_resources = task.resources
 
                             self.cluster_name = await (context_utils.to_thread(
