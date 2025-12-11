@@ -31,6 +31,8 @@ class RequestName(str, enum.Enum):
     CLUSTER_JOB_LOGS = 'logs'
     CLUSTER_JOB_DOWNLOAD_LOGS = 'download_logs'
     CLUSTER_COST_REPORT = 'cost_report'
+    CLUSTER_EVENTS = 'cluster_events'
+    GET_CLUSTER_FAILURES = 'get_cluster_failures'
     # Storage requests
     STORAGE_LS = 'storage_ls'
     STORAGE_DELETE = 'storage_delete'
@@ -52,6 +54,7 @@ class RequestName(str, enum.Enum):
     JOBS_POOL_STATUS = 'jobs.pool_status'
     JOBS_POOL_LOGS = 'jobs.pool_logs'
     JOBS_POOL_SYNC_DOWN_LOGS = 'jobs.pool_sync_down_logs'
+    JOBS_STATUS_TRANSITIONS = 'jobs.status_transitions'
     # Serve requests
     SERVE_UP = 'serve.up'
     SERVE_UPDATE = 'serve.update'

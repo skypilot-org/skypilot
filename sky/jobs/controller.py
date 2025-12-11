@@ -592,6 +592,7 @@ class JobController:
                 cluster_name,
                 force_refresh_statuses=set(status_lib.ClusterStatus))
 
+            recovery_reason = None
             if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster is (partially) preempted or failed. It can be
                 # down, INIT or STOPPED, based on the interruption behavior of
@@ -602,10 +603,28 @@ class JobController:
                 logger.info(
                     f'Cluster is preempted or failed{cluster_status_str}. '
                     'Recovering...')
+                cluster_failures = await context_utils.to_thread(
+                    backend_utils.get_cluster_failures,
+                    cluster_name=cluster_name)
+                logger.info(f'Cluster failures: {cluster_failures}')
+                if cluster_failures:
+                    failure_reasons = [
+                        failure['failure_reason']
+                        for failure in cluster_failures
+                    ]
+                    recovery_reason = '; '.join(failure_reasons)
             else:
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.
                     continue
+                # TODO(rohan): clean up this logic
+                elif job_status == job_lib.JobStatus.CANCELLED:
+                    # We should only enter this state if GPU Healer marks the
+                    # job as cancelled.
+                    logger.info(f'SkyPilot GPU Healer: Job {self._job_id} '
+                                f'task {task_id} was cancelled by GPU Healer '
+                                'due to an XID Error. Recovering...')
+                    recovery_reason = 'SkyPilot GPU Healer: XID Error detected.'
                 elif (job_status
                       in job_lib.JobStatus.user_code_failure_states() or
                       job_status == job_lib.JobStatus.FAILED_DRIVER):
@@ -754,7 +773,8 @@ class JobController:
                 job_id=self._job_id,
                 task_id=task_id,
                 force_transit_to_recovering=force_transit_to_recovering,
-                callback_func=callback_func)
+                callback_func=callback_func,
+                reason=recovery_reason)
 
             recovered_time = await self._strategy_executor.recover()
 

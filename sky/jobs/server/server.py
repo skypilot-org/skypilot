@@ -242,3 +242,18 @@ async def pool_download_logs(
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
+
+
+@router.post('/status_transitions')
+async def status_transitions(
+        request: fastapi.Request,
+        body: payloads.GetJobStatusTransitionsBody) -> None:
+    """Gets status transitions for a managed job."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.JOBS_STATUS_TRANSITIONS,
+        request_body=body,
+        func=core.get_job_status_transitions,
+        schedule_type=api_requests.ScheduleType.SHORT,
+        request_cluster_name=common.JOB_CONTROLLER_NAME,
+    )

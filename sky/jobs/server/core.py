@@ -1223,3 +1223,24 @@ def pool_sync_down_logs(
                                replica_ids=worker_ids,
                                tail=tail,
                                pool=True)
+
+
+@usage_lib.entrypoint
+def get_job_status_transitions(
+    job_id: int,
+    task_id: Optional[int] = None,
+    limit: Optional[int] = 10,
+) -> List[Dict[str, Any]]:
+    """Get status transitions for a managed job.
+
+    Args:
+        job_id: The job ID to get transitions for.
+        task_id: Optional task ID to filter by.
+        limit: Optional limit on number of transitions to return (default 10).
+
+    Returns:
+        List of status transition records.
+    """
+    return managed_job_state.get_job_status_transitions(job_id=job_id,
+                                                        task_id=task_id,
+                                                        limit=limit)

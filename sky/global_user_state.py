@@ -264,6 +264,15 @@ system_config_table = sqlalchemy.Table(
     sqlalchemy.Column('updated_at', sqlalchemy.Integer),
 )
 
+cluster_failures_table = sqlalchemy.Table(
+    'cluster_failures',
+    Base.metadata,
+    sqlalchemy.Column('cluster_hash', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('failure_mode', sqlalchemy.Text),
+    sqlalchemy.Column('failure_reason', sqlalchemy.Text),
+    sqlalchemy.Column('deleted_at', sqlalchemy.Integer, server_default=None),
+)
+
 
 def _glob_to_similar(glob_pattern):
     """Converts a glob pattern to a PostgreSQL LIKE pattern."""
@@ -1020,8 +1029,11 @@ async def cluster_event_retention_daemon():
         await asyncio.sleep(sleep_amount)
 
 
-def get_cluster_events(cluster_name: Optional[str], cluster_hash: Optional[str],
-                       event_type: ClusterEventType) -> List[str]:
+def get_cluster_events(cluster_name: Optional[str],
+                       cluster_hash: Optional[str],
+                       event_type: ClusterEventType,
+                       include_timestamps: bool = False,
+                       limit: Optional[int] = None) -> List[Any]:
     """Returns the cluster events for the cluster.
 
     Args:
@@ -1030,6 +1042,16 @@ def get_cluster_events(cluster_name: Optional[str], cluster_hash: Optional[str],
         cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
             is specified.
         event_type: Type of the event.
+        include_timestamps: If True, returns list of dicts with 'reason' and
+            'transitioned_at' fields. If False, returns list of reason strings.
+        limit: If specified, returns at most this many events (most recent).
+            If None, returns all events.
+
+    Returns:
+        If include_timestamps is False: List of reason strings.
+        If include_timestamps is True: List of dicts with 'reason' and
+            'transitioned_at' (unix timestamp) fields.
+        Events are ordered from oldest to newest.
     """
     assert _SQLALCHEMY_ENGINE is not None
 
@@ -1043,9 +1065,26 @@ def get_cluster_events(cluster_name: Optional[str], cluster_hash: Optional[str],
             raise ValueError(f'Hash for cluster {cluster_name} not found.')
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(cluster_event_table).filter_by(
-            cluster_hash=cluster_hash, type=event_type.value).order_by(
-                cluster_event_table.c.transitioned_at.asc()).all()
+        if limit is not None:
+            # To get the most recent N events in ASC order, we use a subquery:
+            # 1. Get most recent N events (ORDER BY DESC LIMIT N)
+            # 2. Re-order them by ASC
+            subquery = session.query(cluster_event_table).filter_by(
+                cluster_hash=cluster_hash, type=event_type.value).order_by(
+                    cluster_event_table.c.transitioned_at.desc()).limit(
+                        limit).subquery()
+            rows = session.query(subquery).order_by(
+                subquery.c.transitioned_at.asc()).all()
+        else:
+            rows = session.query(cluster_event_table).filter_by(
+                cluster_hash=cluster_hash, type=event_type.value).order_by(
+                    cluster_event_table.c.transitioned_at.asc()).all()
+
+    if include_timestamps:
+        return [{
+            'reason': row.reason,
+            'transitioned_at': row.transitioned_at
+        } for row in rows]
     return [row.reason for row in rows]
 
 
@@ -2741,3 +2780,137 @@ def get_max_db_connections() -> Optional[int]:
         if max_connections is None:
             return None
         return int(max_connections)
+
+
+@_init_db
+@metrics_lib.time_me
+def add_or_update_cluster_failure(cluster_hash: str,
+                                  failure_mode: str,
+                                  failure_reason: str,
+                                  deleted_at: Optional[int] = None) -> None:
+    """Add or update a cluster failure record.
+
+    Args:
+        cluster_hash: Hash of the cluster.
+        failure_mode: Type/mode of the failure.
+        failure_reason: Reason for the failure.
+        deleted_at: Timestamp when the failure was resolved/deleted.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+
+        insert_stmnt = insert_func(cluster_failures_table).values(
+            cluster_hash=cluster_hash,
+            failure_mode=failure_mode,
+            failure_reason=failure_reason,
+            deleted_at=deleted_at)
+
+        # Use ON CONFLICT DO UPDATE to handle upsert
+        upsert_stmnt = insert_stmnt.on_conflict_do_update(
+            index_elements=[cluster_failures_table.c.cluster_hash],
+            set_={
+                cluster_failures_table.c.failure_mode: failure_mode,
+                cluster_failures_table.c.failure_reason: failure_reason,
+                cluster_failures_table.c.deleted_at: deleted_at
+            })
+
+        session.execute(upsert_stmnt)
+        session.commit()
+
+
+@_init_db
+@metrics_lib.time_me
+def get_cluster_failures(
+        cluster_hash: Optional[str] = None,
+        cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Get active cluster failures for a given cluster or all clusters.
+
+    Args:
+        cluster_hash: Hash of the cluster to query failures for. Cannot be
+            specified if cluster_name is specified. If both are None, returns
+            failures for all clusters.
+        cluster_name: Name of the cluster to query failures for. Cannot be
+            specified if cluster_hash is specified. If both are None, returns
+            failures for all clusters.
+
+    Returns:
+        List of dictionaries containing failure records that match the
+        cluster(s) and don't have deleted_at set (i.e., active failures).
+        Each dict contains: cluster_hash, failure_mode, deleted_at.
+    """
+    if cluster_hash is not None and cluster_name is not None:
+        raise ValueError('Cannot specify both cluster_hash and cluster_name')
+    # Handle cluster_name to cluster_hash conversion
+    if cluster_name is not None:
+        cluster_hash = _get_hash_for_existing_cluster(cluster_name)
+        if cluster_hash is None:
+            # Cluster doesn't exist, return empty list
+            return []
+
+    assert _SQLALCHEMY_ENGINE is not None
+
+    # Build filter conditions
+    filters = [cluster_failures_table.c.deleted_at.is_(None)]
+    if cluster_hash is not None:
+        filters.append(cluster_failures_table.c.cluster_hash == cluster_hash)
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(cluster_failures_table).filter(
+            sqlalchemy.and_(*filters)).all()
+
+    return [{
+        'cluster_hash': row.cluster_hash,
+        'failure_mode': row.failure_mode,
+        'failure_reason': row.failure_reason,
+        'deleted_at': row.deleted_at
+    } for row in rows]
+
+
+@_init_db
+@metrics_lib.time_me
+def clear_cluster_failures(failures: List[Dict[str, Any]]) -> None:
+    """Clear (mark as deleted) a list of cluster failures.
+
+    Args:
+        failures: List of failure dictionaries as returned by
+        get_cluster_failures(). Each dict should contain:
+        cluster_hash, failure_mode, failure_reason, deleted_at.
+    """
+    if not failures:
+        return
+
+    assert _SQLALCHEMY_ENGINE is not None
+    current_time = int(time.time())
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Build a list of conditions to match the failures we want to update
+        conditions = []
+        for failure in failures:
+            condition = sqlalchemy.and_(
+                cluster_failures_table.c.cluster_hash ==
+                failure['cluster_hash'], cluster_failures_table.c.failure_mode
+                == failure['failure_mode'])
+            conditions.append(condition)
+
+        if conditions:
+            # Use OR to combine all conditions and update in a single query
+            combined_condition = sqlalchemy.or_(*conditions)
+
+            update_stmt = sqlalchemy.update(cluster_failures_table).where(
+                sqlalchemy.and_(
+                    combined_condition,
+                    cluster_failures_table.c.deleted_at.is_(
+                        None)  # Only update active failures
+                )).values(deleted_at=current_time)
+
+            session.execute(update_stmt)
+            session.commit()

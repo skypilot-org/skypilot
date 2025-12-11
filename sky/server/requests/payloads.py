@@ -865,3 +865,26 @@ class SlurmGpuAvailabilityRequestBody(RequestBody):
     """Request body for getting Slurm real-time GPU availability."""
     name_filter: Optional[str] = None
     quantity_filter: Optional[int] = None
+
+
+class ClusterEventsBody(RequestBody):
+    """The request body for the cluster events endpoint."""
+    cluster_name: Optional[str] = None
+    cluster_hash: Optional[str] = None
+    event_type: str  # 'STATUS_CHANGE' or 'DEBUG'
+    include_timestamps: bool = False
+    limit: Optional[
+        int] = None  # If specified, returns at most this many events
+
+
+class GetClusterFailuresBody(RequestBody):
+    """The request body for the get cluster failures endpoint."""
+    cluster_name: Optional[str] = None
+    cluster_hash: Optional[str] = None
+
+
+class GetJobStatusTransitionsBody(RequestBody):
+    """The request body for the get job status transitions endpoint."""
+    job_id: int
+    task_id: Optional[int] = None
+    limit: Optional[int] = 10  # Default to 10 most recent transitions
