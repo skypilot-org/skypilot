@@ -59,7 +59,6 @@ run: |
 
   # Submit the job(s) to the scheduler.
   # Note: The job is already in the `spot` table, marked as PENDING.
-  {%- if job_ids is defined and job_ids is not none %}
   job_ids_array=({% for job_id in job_ids %}{{job_id}} {% endfor %})
   # Create a space-separated string of job IDs
   job_ids_str=$(IFS=' '; echo "${job_ids_array[*]}")
@@ -72,17 +71,6 @@ run: |
     {%- endif %}
     --priority {{priority}} \
     --job-id $job_ids_str
-  {%- else %}
-  python \
-    -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
-    --user-yaml-path {{remote_original_user_yaml_path}} \
-    --job-id $SKYPILOT_INTERNAL_JOB_ID \
-    --env-file {{remote_env_file_path}} \
-    {%- if pool is not none %}
-    --pool {{pool}} \
-    {%- endif %}
-    --priority {{priority}}
-  {%- endif %}
 
 
 envs:
