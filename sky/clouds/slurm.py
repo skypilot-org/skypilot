@@ -362,6 +362,8 @@ class Slurm(clouds.Cloud):
             # TODO(jwj): Solve naming collision with 'ssh_private_key'.
             # Please refer to slurm-ray.yml.j2 'ssh' and 'auth' sections.
             'slurm_private_key': ssh_config_dict['identityfile'][0],
+            'slurm_sshd_host_key_filename':
+                (slurm_utils.SLURM_SSHD_HOST_KEY_FILENAME),
         }
 
         return deploy_vars
