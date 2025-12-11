@@ -736,10 +736,10 @@ If you have deployed a :ref:`remote API server <sky-api-server>`, you can avoid 
 
 Consolidating the API server and the jobs controller has a few advantages:
 
+- 6x faster job submission.
+- Consistent cloud/Kubernetes credentials across the API server and jobs controller.
+- Persistent managed job state using the same database as the API server, e.g., PostgreSQL.
 - No extra VM/pod is needed for the jobs controller, saving cost.
-- Submitting jobs is **more than 10x faster** for the first job and more than 2x faster for subsequent jobs.
-- Since the API server directly launches the underlying managed job clusters, no special credential handling is required.
-- It's easier to directly connect to jobs to debug.
 
 To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml-jobs-controller-consolidation-mode>` in the API server config.
 
