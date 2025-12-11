@@ -2816,11 +2816,13 @@ def add_or_update_cluster_failure(cluster_hash: str,
 
         # Use ON CONFLICT DO UPDATE to handle upsert
         upsert_stmnt = insert_stmnt.on_conflict_do_update(
-            index_elements=[cluster_failures_table.c.cluster_hash],
+            index_elements=[
+                cluster_failures_table.c.cluster_hash,
+                cluster_failures_table.c.failure_mode
+            ],
             set_={
-                cluster_failures_table.c.failure_mode: failure_mode,
                 cluster_failures_table.c.failure_reason: failure_reason,
-                cluster_failures_table.c.deleted_at: deleted_at
+                cluster_failures_table.c.deleted_at: deleted_at,
             })
 
         session.execute(upsert_stmnt)

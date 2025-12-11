@@ -617,14 +617,6 @@ class JobController:
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.
                     continue
-                # TODO(rohan): clean up this logic
-                elif job_status == job_lib.JobStatus.CANCELLED:
-                    # We should only enter this state if GPU Healer marks the
-                    # job as cancelled.
-                    logger.info(f'SkyPilot GPU Healer: Job {self._job_id} '
-                                f'task {task_id} was cancelled by GPU Healer '
-                                'due to an XID Error. Recovering...')
-                    recovery_reason = 'SkyPilot GPU Healer: XID Error detected.'
                 elif (job_status
                       in job_lib.JobStatus.user_code_failure_states() or
                       job_status == job_lib.JobStatus.FAILED_DRIVER):
