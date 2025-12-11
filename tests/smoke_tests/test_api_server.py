@@ -35,6 +35,8 @@ def set_user(user_id: str, user_name: str, commands: List[str]) -> List[str]:
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
 @pytest.mark.no_shadeform  # Shadeform does not support multi-tenant jobs
 @pytest.mark.no_seeweb  # Seeweb does not support multi-tenant jobs
+# Note: we should skip or fix on shared remote cluster because two copies of
+# this test may down each other's clusters (sky down -a with hardcoded user id).
 def test_multi_tenant(generic_cloud: str):
     if smoke_tests_utils.services_account_token_configured_in_env_file():
         pytest.skip(
@@ -63,13 +65,19 @@ def test_multi_tenant(generic_cloud: str):
                 # Stopping cluster should not change the ownership of the cluster.
                 f's=$(sky status) && echo "$s" && echo "$s" | grep {name}-1 && exit 1 || true',
                 f'sky status {name}-1 | grep STOPPED',
-                # Both clusters should be stopped.
-                f'sky status -u | grep {name}-1 | grep STOPPED',
+                # Restarting other user's cluster should work.
+                f'sky start -y {name}-1',
+                # Cluster should still have the same disk.
+                f'sky exec {name}-1 \'ls file || exit 1\'',
+                # Restarting cluster should not change the ownership of the cluster.
+                f's=$(sky status) && echo "$s" && echo "$s" | grep {name}-1 && exit 1 || true',
+                # Cluster 1 should be UP now, but cluster 2 should be STOPPED.
+                f'sky status -u | grep {name}-1 | grep UP',
                 f'sky status -u | grep {name}-2 | grep STOPPED',
             ]),
     ]
-    if generic_cloud == 'kubernetes':
-        # Skip the stop test for Kubernetes, as stopping is not supported.
+    if generic_cloud in ('kubernetes', 'slurm'):
+        # Skip the stop test for Kubernetes and Slurm, as stopping is not supported.
         stop_test_cmds = []
 
     test = smoke_tests_utils.Test(
@@ -78,14 +86,17 @@ def test_multi_tenant(generic_cloud: str):
             'echo "==== Test multi-tenant job on single cluster ===="',
             *set_user(user_1, user_1_name, [
                 f'sky launch -y -c {name}-1 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -n job-1 tests/test_yamls/minimal.yaml',
+                f'sky exec {name}-1 -n job-2 \'touch file\'',
                 f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-1 | grep SUCCEEDED | awk \'{{print $1}}\' | grep 1',
                 f's=$(sky queue -u {name}-1) && echo "$s" && echo "$s" | grep {user_1_name} | grep job-1 | grep SUCCEEDED',
             ]),
             *set_user(user_2, user_2_name, [
-                f'sky exec {name}-1 -n job-2 \'echo "hello" && exit 1\' || [ $? -eq 100 ]',
-                f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-2 | grep FAILED | awk \'{{print $1}}\' | grep 2',
+                f'sky exec {name}-1 -n job-3 \'echo "hello" && exit 1\' || [ $? -eq 100 ]',
+                f'sky launch -y -c {name}-1 -n job-4 \'ls file || exit 1\'',
+                f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-3 | grep FAILED | awk \'{{print $1}}\' | grep 3',
+                f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-4 | grep SUCCEEDED | awk \'{{print $1}}\' | grep 4',
                 f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-1 && exit 1 || true',
-                f's=$(sky queue {name}-1 -u) && echo "$s" && echo "$s" | grep {user_2_name} | grep job-2 | grep FAILED',
+                f's=$(sky queue {name}-1 -u) && echo "$s" && echo "$s" | grep {user_2_name} | grep job-3 | grep FAILED',
                 f's=$(sky queue {name}-1 -u) && echo "$s" && echo "$s" | grep {user_1_name} | grep job-1 | grep SUCCEEDED',
             ]),
             'echo "==== Test clusters from different users ===="',
@@ -379,52 +390,33 @@ def test_big_file_upload_memory_usage(generic_cloud: str):
                             actual: Dict[Tuple[str, ...], List[Tuple[float,
                                                                      float]]]):
 
-        def _rss_peak_aggregator(
-            baseline_values: List[Tuple[float, float]],
-            actual_values: List[Tuple[float, float]]
-        ) -> metrics_utils.AggregatedMetric:
-            """Aggregator for RSS (memory) metrics - computes peak values."""
-            baseline_peak_bytes = max([v for _, v in baseline_values
-                                      ]) if baseline_values else 0
-            actual_peak_bytes = max([v for _, v in actual_values
-                                    ]) if actual_values else 0
-
-            baseline_mb = baseline_peak_bytes / (1024 * 1024)
-            actual_mb = actual_peak_bytes / (1024 * 1024)
-
-            return metrics_utils.AggregatedMetric(baseline=baseline_mb,
-                                                  actual=actual_mb,
-                                                  unit='MB')
-
-        def _rss_per_key_threshold_checker(key_label: str, baseline: float,
-                                           actual: float, increase: float,
-                                           increase_pct: float) -> List[str]:
+        def _rss_per_key_threshold_checker(
+                diff: metrics_utils.PerKeyDiff) -> List[str]:
             """Per-key threshold checker for RSS metrics."""
             failures = []
-            if actual > 300:
+            if diff.actual > 300:
                 failures.append(f"exceeded 300 MB: {actual:.1f} MB")
-            if increase_pct > 50 and increase_pct != float('inf'):
+            if diff.increase_pct > 50 and diff.increase_pct != float('inf'):
                 failures.append(
-                    f"increased by {increase_pct:.1f}% (limit: 50%)")
+                    f"increased by {diff.increase_pct:.1f}% (limit: 50%)")
             return failures
 
         def _rss_aggregate_threshold_checker(
-                total_baseline: float, total_actual: float,
-                total_increase: float, total_increase_pct: float) -> List[str]:
+                diff: metrics_utils.AggregateDiff) -> List[str]:
             """Aggregate threshold checker for RSS metrics."""
             failures = []
-            if total_increase_pct > 30:
+            if diff.total_increase_pct > 30:
                 failures.append(
-                    f"Average memory increase too high: {total_increase_pct:.1f}% (limit: 30%)"
+                    f"Average memory increase too high: {diff.total_increase_pct:.1f}% (limit: 30%)"
                 )
             return failures
 
         metrics_utils.compare_metrics(
             baseline,
             actual,
-            aggregator_fn=_rss_peak_aggregator,
-            per_key_threshold_fn=_rss_per_key_threshold_checker,
-            aggregate_threshold_fn=_rss_aggregate_threshold_checker)
+            aggregator_fn=metrics_utils.rss_peak_aggregator,
+            per_key_checker=_rss_per_key_threshold_checker,
+            aggregate_checker=_rss_aggregate_threshold_checker)
 
     with smoke_tests_utils.override_sky_config():
         name = smoke_tests_utils.get_cluster_name()
@@ -500,6 +492,7 @@ def test_api_server_start_stop(generic_cloud: str):
             f'sky launch -n {name} --cloud {generic_cloud} tests/test_yamls/apiserver-start-stop.yaml -y {smoke_tests_utils.LOW_RESOURCE_ARG}'
         ],
         f'sky down -y {name} || true',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -726,6 +719,7 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
          f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
          f'sky down -y {name} || true; sky down -y {name}-another || true; '
          f'sky jobs cancel -n {name}-job -y || true;'),
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
 

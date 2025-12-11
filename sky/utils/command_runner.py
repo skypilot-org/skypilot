@@ -63,6 +63,22 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     return path
 
 
+def _is_skypilot_managed_key(key_path: str) -> bool:
+    """Check if SSH key follows SkyPilot's managed key format.
+
+    SkyPilot-managed keys follow the pattern: ~/.sky/clients/<hash>/ssh/sky-key
+    External keys (like ~/.ssh/id_rsa) do not follow this pattern.
+
+    Args:
+        key_path: Path to the SSH private key.
+
+    Returns:
+        True if the key follows SkyPilot's managed format, False otherwise.
+    """
+    parts = os.path.normpath(key_path).split(os.path.sep)
+    return len(parts) >= 2 and parts[-1] == 'sky-key' and parts[-2] == 'ssh'
+
+
 # Disable sudo for root user. This is useful when the command is running in a
 # docker container, i.e. image_id is a docker image.
 ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD = (
@@ -603,7 +619,7 @@ class SSHCommandRunner(CommandRunner):
         self,
         node: Tuple[str, int],
         ssh_user: str,
-        ssh_private_key: str,
+        ssh_private_key: Optional[str],
         ssh_control_name: Optional[str] = '__default__',
         ssh_proxy_command: Optional[str] = None,
         docker_user: Optional[str] = None,
@@ -613,7 +629,7 @@ class SSHCommandRunner(CommandRunner):
         """Initialize SSHCommandRunner.
 
         Example Usage:
-            runner = SSHCommandRunner(ip, ssh_user, ssh_private_key)
+            runner = SSHCommandRunner((ip, port), ssh_user, ssh_private_key)
             runner.run('ls -l', mode=SshMode.NON_INTERACTIVE)
             runner.rsync(source, target, up=True)
 
@@ -650,8 +666,17 @@ class SSHCommandRunner(CommandRunner):
         self.disable_control_master = (
             disable_control_master or
             control_master_utils.should_disable_control_master())
-        # ensure the ssh key files are created from the database
-        auth_utils.create_ssh_key_files_from_db(ssh_private_key)
+        # Ensure SSH key is available. For SkyPilot-managed keys, create from
+        # database. For external keys (e.g., Slurm clusters), verify existence.
+        if ssh_private_key is not None and _is_skypilot_managed_key(
+                ssh_private_key):
+            auth_utils.create_ssh_key_files_from_db(ssh_private_key)
+        elif ssh_private_key is not None:
+            # Externally managed key - just verify it exists
+            expanded_key_path = os.path.expanduser(ssh_private_key)
+            if not os.path.exists(expanded_key_path):
+                raise FileNotFoundError(
+                    f'SSH private key not found: {expanded_key_path}')
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')
@@ -867,6 +892,7 @@ class SSHCommandRunner(CommandRunner):
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        get_remote_home_dir: Callable[[], str] = lambda: '~',
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -879,6 +905,8 @@ class SSHCommandRunner(CommandRunner):
             stream_logs: Stream logs to the stdout/stderr.
             max_retry: The maximum number of retries for the rsync command.
               This value should be non-negative.
+            get_remote_home_dir: A callable that returns the remote home
+              directory. Defaults to '~'.
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -903,7 +931,8 @@ class SSHCommandRunner(CommandRunner):
                     rsh_option=rsh_option,
                     log_path=log_path,
                     stream_logs=stream_logs,
-                    max_retry=max_retry)
+                    max_retry=max_retry,
+                    get_remote_home_dir=get_remote_home_dir)
 
 
 class KubernetesCommandRunner(CommandRunner):
@@ -1247,3 +1276,166 @@ class LocalProcessCommandRunner(CommandRunner):
                     log_path=log_path,
                     stream_logs=stream_logs,
                     max_retry=max_retry)
+
+
+class SlurmCommandRunner(SSHCommandRunner):
+    """Runner for Slurm commands.
+
+    SlurmCommandRunner sends commands over an SSH connection through the Slurm
+    controller, to the virtual instances.
+    """
+
+    def __init__(
+        self,
+        node: Tuple[str, int],
+        ssh_user: str,
+        ssh_private_key: Optional[str],
+        *,
+        sky_dir: str,
+        skypilot_runtime_dir: str,
+        job_id: str,
+        slurm_node: str,
+        **kwargs,
+    ):
+        """Initialize SlurmCommandRunner.
+
+        Example Usage:
+            runner = SlurmCommandRunner(
+                (ip, port),
+                ssh_user,
+                ssh_private_key,
+                sky_dir=sky_dir,
+                skypilot_runtime_dir=skypilot_runtime_dir,
+                job_id=job_id,
+                slurm_node=slurm_node)
+            runner.run('ls -l', mode=SshMode.NON_INTERACTIVE)
+            runner.rsync(source, target, up=True)
+
+        Args:
+            node: (ip, port) The IP address and port of the remote machine
+              (login node).
+            ssh_user: SSH username.
+            ssh_private_key: Path to SSH private key.
+            sky_dir: The private directory for the SkyPilot cluster on the
+              Slurm cluster.
+            skypilot_runtime_dir: The directory for the SkyPilot runtime
+              on the Slurm cluster.
+            job_id: The Slurm job ID for this instance.
+            slurm_node: The Slurm node hostname for this instance
+              (compute node).
+            **kwargs: Additional arguments forwarded to SSHCommandRunner
+              (e.g., ssh_proxy_command).
+        """
+        super().__init__(node, ssh_user, ssh_private_key, **kwargs)
+        self.sky_dir = sky_dir
+        self.skypilot_runtime_dir = skypilot_runtime_dir
+        self.job_id = job_id
+        self.slurm_node = slurm_node
+
+        # Build a chained ProxyCommand that goes through the login node to reach
+        # the compute node where the job is running.
+
+        # First, build SSH options to reach the login node, using the user's
+        # existing proxy command if provided.
+        proxy_ssh_options = ' '.join(
+            ssh_options_list(self.ssh_private_key,
+                             None,
+                             ssh_proxy_command=self._ssh_proxy_command,
+                             port=self.port,
+                             disable_control_master=True))
+        login_node_proxy_command = (f'ssh {proxy_ssh_options} '
+                                    f'-W %h:%p {self.ssh_user}@{self.ip}')
+
+        # Update the proxy command to be the login node proxy, which will
+        # be used by super().run() to reach the compute node.
+        self._ssh_proxy_command = login_node_proxy_command
+        # Update self.ip to target the compute node.
+        self.ip = slurm_node
+        # Assume the compute node's SSH port is 22.
+        # TODO(kevin): Make this configurable if needed.
+        self.port = 22
+
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        log_path: str = os.devnull,
+        stream_logs: bool = True,
+        max_retry: int = 1,
+    ) -> None:
+        """Rsyncs files directly to the Slurm compute node,
+        by proxying through the Slurm login node.
+
+        For Slurm, files need to be accessible by compute nodes where jobs
+        execute via srun. This means either it has to be on the compute node's
+        local filesystem, or on a shared filesystem.
+        """
+        # TODO(kevin): We can probably optimize this to skip the proxying
+        # if the target dir is in a shared filesystem, since it will
+        # be accessible by the compute node.
+
+        # Build SSH options for rsync using the ProxyCommand set up in __init__
+        # to reach the compute node through the login node.
+        ssh_options = ' '.join(
+            ssh_options_list(
+                # Assume nothing and rely on default SSH behavior when -i is
+                # not specified.
+                None,
+                None,
+                ssh_proxy_command=self._ssh_proxy_command,
+                disable_control_master=True))
+        rsh_option = f'ssh {ssh_options}'
+
+        self._rsync(
+            source,
+            target,
+            # Compute node
+            node_destination=f'{self.ssh_user}@{self.slurm_node}',
+            up=up,
+            rsh_option=rsh_option,
+            log_path=log_path,
+            stream_logs=stream_logs,
+            max_retry=max_retry,
+            get_remote_home_dir=lambda: self.sky_dir)
+
+    @timeline.event
+    @context_utils.cancellation_guard
+    def run(self, cmd: Union[str, List[str]],
+            **kwargs) -> Union[int, Tuple[int, str, str]]:
+        """Run Slurm-supported user commands over an SSH connection.
+
+        Args:
+            cmd: The Slurm-supported user command to run.
+
+        Returns:
+            returncode
+            or
+            A tuple of (returncode, stdout, stderr).
+        """
+        # Override $HOME so that each SkyPilot cluster's state is isolated
+        # from one another. We rely on the assumption that ~ is exclusively
+        # used by a cluster, and in Slurm that is not the case, as $HOME
+        # could be part of a shared filesystem.
+        # And similarly for SKY_RUNTIME_DIR. See constants.\
+        # SKY_RUNTIME_DIR_ENV_VAR_KEY for more details.
+        #
+        # SSH directly to the compute node instead of using srun.
+        # This avoids Slurm's proctrack/cgroup which kills all processes
+        # when the job step ends (including child processes launched as
+        # a separate process group), breaking background process spawning
+        # (e.g., JobScheduler._run_job which uses launch_new_process_tree).
+        # Note: proctrack/cgroup is enabled by default on Nebius'
+        # Managed Soperator.
+        cmd = (
+            f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
+            f'"{self.skypilot_runtime_dir}" && '
+            # Set the uv cache directory to /tmp/uv_cache_$(id -u) to speed up
+            # package installation while avoiding permission conflicts when
+            # multiple users share the same host. Otherwise it defaults to
+            # ~/.cache/uv.
+            f'export UV_CACHE_DIR=/tmp/uv_cache_$(id -u) && '
+            f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
+
+        return super().run(cmd, **kwargs)

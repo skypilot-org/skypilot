@@ -487,6 +487,12 @@ runpodCredentials:
   # Name of the secret containing the RunPod credentials. Only used if enabled is true.
   runpodSecretName: runpod-credentials
 
+# Populate Digital Ocean credentials from the secret with key `api_key`
+digitaloceanCredentials:
+  enabled: false
+  # Name of the secret containing the Digital Ocean credentials. Only used if enabled is true.
+  digitaloceanSecretName: digitalocean-credentials  
+
 # Populate Lambda credentials from the secret with key `api_key`
 lambdaCredentials:
   enabled: false
@@ -511,6 +517,11 @@ r2Credentials:
   enabled: false
   # Name of the secret containing the r2 credentials. Only used if enabled is true.
   r2SecretName: r2-credentials
+
+coreweaveCredentials:
+  enabled: false
+  # Name of the secret containing the coreweave credentials. Only used if enabled is true.
+  coreweaveSecretName: coreweave-credentials
 
 # Extra init containers to run before the api container
 # @schema type: [array, null]; item: object

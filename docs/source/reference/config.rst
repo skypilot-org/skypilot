@@ -193,6 +193,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
 
+  :ref:`vast <config-yaml-vast>`:
+    :ref:`secure_only <config-yaml-vast-secure-only>`: true
+
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
 
@@ -1675,6 +1678,24 @@ Example:
   nebius:
     domain: api.nebius.cloud:443
 
+.. _config-yaml-vast:
+
+``vast``
+~~~~~~~~
+
+Advanced Vast configuration (optional).
+
+.. _config-yaml-vast-secure-only:
+
+``vast.secure_only``
+~~~~~~~~~~~~~~~~~~~~
+
+Configure SkyPilot to only consider offers on Vast verified datacenters (optional).
+Internally, this will query Vast with the ``datacenters=true`` parameters. Note
+some GPUs may only be available on non-secure offers. This config can be
+overridden per task via :ref:`config flag <config-client-cli-flag>`.
+
+Default: ``false``
 
 .. _config-yaml-rbac:
 
