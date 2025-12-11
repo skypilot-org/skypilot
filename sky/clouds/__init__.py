@@ -24,13 +24,13 @@ from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
 from sky.clouds.lambda_cloud import Lambda
 from sky.clouds.nebius import Nebius
+from sky.clouds.novita import Novita
 from sky.clouds.oci import OCI
 from sky.clouds.paperspace import Paperspace
 from sky.clouds.primeintellect import PrimeIntellect
 from sky.clouds.runpod import RunPod
 from sky.clouds.scp import SCP
 from sky.clouds.seeweb import Seeweb
-from sky.clouds.novita import Novita
 from sky.clouds.shadeform import Shadeform
 from sky.clouds.slurm import Slurm
 from sky.clouds.ssh import SSH
