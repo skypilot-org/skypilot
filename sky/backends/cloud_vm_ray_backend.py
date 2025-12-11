@@ -3228,6 +3228,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle.launched_resources = handle.launched_resources.copy(
                     region=provision_record.region, zone=provision_record.zone)
 
+                # Update launched_resources with instance_type and memory from
+                # the provisioned instance if not already set.
+                self._update_launched_resources_from_instance(
+                    handle, to_provision_config.resources)
+
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
                     prev_cluster_status, config_hash)
@@ -3314,6 +3319,77 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         provision_lib.open_ports(repr(cloud), handle.cluster_name_on_cloud,
                                  handle.launched_resources.ports,
                                  provider_config)
+
+    def _update_launched_resources_from_instance(
+            self, handle: CloudVmRayResourceHandle,
+            to_provision: Optional[resources_lib.Resources]) -> None:
+        """Update launched_resources based on the instance type if those
+        resource are not already set.
+
+        This ensures that launched_resources accurately reflects the actual
+        provisioned instance, which is important for resource aware scheduling
+        on pool workers.
+        """
+
+        def _update_launched_resources(handle: CloudVmRayResourceHandle,
+                                       instance_type: str) -> None:
+            cpus = None
+            mem = None
+            accelerators = None
+            if launched_resources.cloud is None:
+                logger.debug('Launched resources cloud is not set.')
+                return
+            try:
+                cpus, mem = (launched_resources.cloud.
+                             get_vcpus_mem_from_instance_type(instance_type))
+                logger.debug(f'Got vCPUs and memory from instance type: {cpus},'
+                             f' {mem}')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug('Failed to get vCPUs and memory from instance '
+                             f'type: {e}')
+            try:
+                accelerators = (
+                    launched_resources.cloud.
+                    get_accelerators_from_instance_type(instance_type))
+                logger.debug('Got accelerators from instance type: '
+                             f'{accelerators}')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug('Failed to get accelerators from instance type: '
+                             f'{e}')
+                return
+            update_kwargs: Dict[str, Any] = {}
+            if mem is not None and launched_resources.memory is None:
+                update_kwargs['memory'] = str(mem)
+            if (accelerators is not None and
+                    launched_resources.accelerators is None):
+                update_kwargs['accelerators'] = accelerators
+            if cpus is not None and launched_resources.cpus is None:
+                update_kwargs['cpus'] = str(cpus)
+            logger.debug(f'Updating launched resources with: {update_kwargs}')
+            handle.launched_resources = launched_resources.copy(**update_kwargs)
+
+        launched_resources = handle.launched_resources
+
+        # If instance_type is already set, we can derive memory from it
+        if launched_resources.instance_type is not None:
+            _update_launched_resources(handle, launched_resources.instance_type)
+            return
+        else:
+            logger.debug('Launched instance type is not set.')
+
+        # Try to get instance_type from to_provision
+        instance_type = None
+        if to_provision is not None and to_provision.instance_type is not None:
+            instance_type = to_provision.instance_type
+        else:
+            logger.debug('To provision instance type is not set.')
+
+        if instance_type is not None:
+            _update_launched_resources(handle, instance_type)
+        else:
+            logger.debug('Failed to get instance type from provisioned'
+                         'instance.')
+            return
 
     def _update_after_cluster_provisioned(
             self, handle: CloudVmRayResourceHandle,

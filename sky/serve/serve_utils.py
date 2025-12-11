@@ -859,6 +859,8 @@ def get_free_worker_resources(
             continue
 
         total_resources = handle.launched_resources
+        logger.debug(f'Total resources for cluster {cluster_name!r}: '
+                     f'{total_resources!r}')
 
         # Get job IDs running on this worker
         job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
@@ -869,6 +871,8 @@ def get_free_worker_resources(
         # make a single call to get all the used resources for all the jobs.
         used_resources = managed_job_state.get_pool_worker_used_resources(
             set(job_ids))
+        logger.debug(f'Used resources for cluster {cluster_name!r}: '
+                     f'{used_resources!r}')
         if used_resources is None:
             # We failed to get the used resources. We should return None since
             # we can't make any guarantees about what resources are being used.
