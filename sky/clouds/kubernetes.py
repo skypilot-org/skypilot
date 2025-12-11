@@ -4,7 +4,7 @@ import os
 import re
 import subprocess
 import tempfile
-from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
 
@@ -449,9 +449,12 @@ class Kubernetes(clouds.Cloud):
 
     @staticmethod
     def _calculate_provision_timeout(
+        cloud: str,
+        context: str,
         num_nodes: int,
         volume_mounts: Optional[List['volume_lib.VolumeMount']],
         enable_flex_start: bool,
+        cluster_config_overrides: Optional[Dict[str, Any]] = None,
     ) -> int:
         """Calculate provision timeout based on number of nodes.
 
@@ -466,6 +469,20 @@ class Kubernetes(clouds.Cloud):
         Returns:
             Timeout in seconds
         """
+        # Use _REPR, instead of directly using 'kubernetes' as the config key,
+        # because it could be SSH node pool as well.
+        timeout = skypilot_config.get_effective_region_config(
+            cloud=cloud,
+            region=context,
+            keys=('provision_timeout',),
+            default_value=None,
+            override_configs=cluster_config_overrides)
+
+        # If timeout is set explicitly by user,
+        # return the user specified timeout.
+        if timeout is not None:
+            return timeout
+
         base_timeout = 10  # Base timeout for single node
         per_node_timeout = 0.2  # Additional seconds per node
         max_timeout = 60  # Cap at 1 minute
@@ -696,6 +713,9 @@ class Kubernetes(clouds.Cloud):
                     f'DWS is only supported in GKE, but the autoscaler type '
                     f'for context {context} is {autoscaler_type}')
 
+        # Use _REPR, instead of directly using 'kubernetes' as the config key,
+        # because it could be SSH node pool as well.
+        cloud_config_str = self._REPR.lower()
         # Timeout for resource provisioning. This timeout determines how long to
         # wait for pod to be in pending status before giving up.
         # Larger timeout may be required for autoscaling clusters, since
@@ -705,20 +725,10 @@ class Kubernetes(clouds.Cloud):
         # scheduling 100s of pods.
         # We use a linear scaling formula to determine the timeout based on the
         # number of nodes.
-
         timeout = self._calculate_provision_timeout(
-            num_nodes, volume_mounts, enable_flex_start or
-            enable_flex_start_queued_provisioning)
-
-        # Use _REPR, instead of directly using 'kubernetes' as the config key,
-        # because it could be SSH node pool as well.
-        cloud_config_str = self._REPR.lower()
-        timeout = skypilot_config.get_effective_region_config(
-            cloud=cloud_config_str,
-            region=context,
-            keys=('provision_timeout',),
-            default_value=timeout,
-            override_configs=resources.cluster_config_overrides)
+            cloud_config_str, context, num_nodes, volume_mounts,
+            enable_flex_start or enable_flex_start_queued_provisioning,
+            resources.cluster_config_overrides)
 
         deploy_vars = {
             'instance_type': resources.instance_type,
