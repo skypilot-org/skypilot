@@ -28,6 +28,9 @@ class ClusterStatus(enum.Enum):
     STOPPED = 'STOPPED'
     """The cluster is stopped."""
 
+    PENDING = 'PENDING'
+    """The cluster is pending scheduling."""
+
     def colored_str(self):
         color = _STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
@@ -37,6 +40,7 @@ _STATUS_TO_COLOR = {
     ClusterStatus.INIT: colorama.Fore.BLUE,
     ClusterStatus.UP: colorama.Fore.GREEN,
     ClusterStatus.STOPPED: colorama.Fore.YELLOW,
+    ClusterStatus.PENDING: colorama.Fore.CYAN,
 }
 
 
