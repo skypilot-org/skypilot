@@ -25,7 +25,7 @@ from websockets.asyncio.client import connect
 from sky import exceptions
 from sky.client import service_account_auth
 from sky.server import constants
-from sky.server.server import KubernetesSSHMessageType
+from sky.server.server import SSHMessageType
 from sky.skylet import constants as skylet_constants
 
 BUFFER_SIZE = 2**16  # 64KB
@@ -142,8 +142,9 @@ async def latency_monitor(websocket: ClientConnection,
             ping_time = time.time()
             next_id += 1
             last_ping_time_dict[next_id] = ping_time
-            message_header_bytes = struct.pack(
-                '!BI', KubernetesSSHMessageType.PINGPONG.value, next_id)
+            message_header_bytes = struct.pack('!BI',
+                                               SSHMessageType.PINGPONG.value,
+                                               next_id)
             try:
                 async with websocket_lock:
                     await websocket.send(message_header_bytes)
@@ -176,7 +177,7 @@ async def stdin_to_websocket(reader: asyncio.StreamReader,
             if timestamps_supported:
                 # Send message with type 0 to indicate data.
                 message_type_bytes = struct.pack(
-                    '!B', KubernetesSSHMessageType.REGULAR_DATA.value)
+                    '!B', SSHMessageType.REGULAR_DATA.value)
                 data = message_type_bytes + data
             async with websocket_lock:
                 await websocket.send(data)
@@ -201,10 +202,10 @@ async def websocket_to_stdout(websocket: ClientConnection,
             if (timestamps_supported and len(message) > 0 and
                     last_ping_time_dict is not None):
                 message_type = struct.unpack('!B', message[:1])[0]
-                if message_type == KubernetesSSHMessageType.REGULAR_DATA.value:
+                if message_type == SSHMessageType.REGULAR_DATA.value:
                     # Regular data - strip type byte and write to stdout
                     message = message[1:]
-                elif message_type == KubernetesSSHMessageType.PINGPONG.value:
+                elif message_type == SSHMessageType.PINGPONG.value:
                     # PONG response - calculate latency and send measurement
                     if not len(message) == struct.calcsize('!BI'):
                         raise ValueError(
@@ -222,8 +223,7 @@ async def websocket_to_stdout(websocket: ClientConnection,
 
                     # Send latency measurement (type 2)
                     message_type_bytes = struct.pack(
-                        '!B',
-                        KubernetesSSHMessageType.LATENCY_MEASUREMENT.value)
+                        '!B', SSHMessageType.LATENCY_MEASUREMENT.value)
                     latency_bytes = struct.pack('!Q', latency_ms)
                     message = message_type_bytes + latency_bytes
                     # Send to server.

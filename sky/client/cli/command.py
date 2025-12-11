@@ -227,12 +227,11 @@ def _get_cluster_records_and_set_ssh_config(
                 f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
             # %w is a placeholder for the node index, substituted per-node
             # in cluster_utils.SSHConfigHelper.add_cluster().
-            proxy_command = (
-                f'{escaped_executable_path} '
-                f'{escaped_websocket_proxy_path} '
-                f'{server_common.get_server_url()} '
-                f'{handle.cluster_name} '
-                f'slurm-job-ssh-proxy %w')
+            proxy_command = (f'{escaped_executable_path} '
+                             f'{escaped_websocket_proxy_path} '
+                             f'{server_common.get_server_url()} '
+                             f'{handle.cluster_name} '
+                             f'slurm-job-ssh-proxy %w')
             credentials['ssh_proxy_command'] = proxy_command
 
         cluster_utils.SSHConfigHelper.add_cluster(

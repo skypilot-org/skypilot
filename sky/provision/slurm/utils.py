@@ -19,6 +19,9 @@ DEFAULT_SLURM_PATH = '~/.slurm/config'
 DEFAULT_CLUSTER_NAME = 'localcluster'
 DEFAULT_PARTITION = 'dev'
 
+# SSH host key filename for sshd.
+SLURM_SSHD_HOST_KEY_FILENAME = 'skypilot_host_key'
+
 
 def get_slurm_ssh_config() -> SSHConfig:
     """Get the Slurm SSH config."""
@@ -581,3 +584,49 @@ def get_partitions(cluster_name: str) -> List[str]:
             f'Failed to get partitions for cluster {cluster_name}: {e}')
         # Fall back to default partition if query fails
         return [DEFAULT_PARTITION]
+
+
+def srun_sshd_command(
+    job_id: str,
+    target_node: str,
+    unix_user: str,
+) -> List[str]:
+    """Build srun command for launching sshd -i inside a Slurm job.
+
+    This is used by the API server to proxy SSH connections to Slurm jobs
+    via sshd running in inetd mode within srun.
+
+    Args:
+        job_id: The Slurm job ID
+        target_node: The target compute node hostname
+        unix_user: The Unix user for the job
+
+    Returns:
+        List of command arguments to be extended to ssh base command
+    """
+    # We use ~username to ensure we use the real home of the user ssh'ing in,
+    # because we override the home directory in SlurmCommandRunner.run.
+    user_home_ssh_dir = f'~{unix_user}/.ssh'
+    return [
+        'srun',
+        '--quiet',
+        '--unbuffered',
+        '--overlap',
+        '--jobid',
+        job_id,
+        '-w',
+        target_node,
+        '/usr/sbin/sshd',
+        '-i',  # Uses stdin/stdout
+        '-e',  # Writes errors to stderr
+        '-h',
+        f'{user_home_ssh_dir}/{SLURM_SSHD_HOST_KEY_FILENAME}',
+        '-o',
+        f'AuthorizedKeysFile={user_home_ssh_dir}/authorized_keys',
+        '-o',
+        'PasswordAuthentication=no',
+        '-o',
+        'PubkeyAuthentication=yes',
+        '-o',
+        'StrictModes=no',
+    ]
