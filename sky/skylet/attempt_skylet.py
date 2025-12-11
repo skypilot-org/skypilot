@@ -9,6 +9,7 @@ import psutil
 
 from sky.skylet import constants
 from sky.skylet import runtime_utils
+from sky.utils import common_utils
 
 VERSION_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_VERSION_FILE)
 SKYLET_LOG_FILE = runtime_utils.get_runtime_dir_path(constants.SKYLET_LOG_FILE)
@@ -97,8 +98,13 @@ def restart_skylet():
     for pid in _find_running_skylet_pids():
         try:
             os.kill(pid, signal.SIGKILL)
-        except (OSError, ProcessLookupError):
-            # Process died between detection and kill
+            # Wait until process fully terminates so its socket gets released.
+            # Without this, find_free_port may race with the kernel closing the
+            # socket and fail to bind to the port that's supposed to be free.
+            psutil.Process(pid).wait(timeout=5)
+        except (OSError, ProcessLookupError, psutil.NoSuchProcess,
+                psutil.TimeoutExpired):
+            # Process died between detection and kill, or timeout waiting
             pass
     # Clean up the PID file
     try:
@@ -106,7 +112,11 @@ def restart_skylet():
     except OSError:
         pass  # Best effort cleanup
 
-    port = constants.SKYLET_GRPC_PORT
+    # TODO(kevin): Handle race conditions here. Race conditions can only
+    # happen on Slurm, where there could be multiple clusters running in
+    # one network namespace. For other clouds, the behaviour will be that
+    # it always gets port 46590 (default port).
+    port = common_utils.find_free_port(constants.SKYLET_GRPC_PORT)
     subprocess.run(
         # We have made sure that `attempt_skylet.py` is executed with the
         # skypilot runtime env activated, so that skylet can access the cloud

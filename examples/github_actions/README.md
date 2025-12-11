@@ -8,6 +8,19 @@ This example provides a GitHub CI pipeline that automatically starts a SkyPilot 
 
 > **_NOTE:_**  This example is adapted from Metta AI's GitHub actions pipeline: https://github.com/Metta-AI/metta/tree/main
 
+## Why use SkyPilot with GitHub Actions?
+
+Pairing SkyPilot with GitHub Actions can automate routine experiments to run without manual input, improving iteration speed. Using SkyPilot with GitHub Actions can:
+
+**Customize Workflow Triggers**: GitHub Actions provides a breadth of triggers to automate workflows, including:
+- Code pushes to a branch
+- Changes to specific files
+- On a schedule
+
+**Orchestrate and Monitor Jobs across Clouds**: SkyPilot allows the CI task to run across region, clouds and kubernetes clusters, and provides a single pane of glass to monitor the CI jobs.
+
+**Enable Custom Notifications**: Send a notification whenever a CI job runs, with a link to monitor the job status and logs.
+
 
 ## Prerequisites
 
@@ -27,6 +40,7 @@ To create a service account key:
 
 - **Navigate to the Users page**: On the main page of the SkyPilot dashboard, click "Users".
 - **Access Service Account Settings**: Click "Service Accounts" located at the top of the page.
+> **Note:** If "Service Accounts" section does not exist on the dashboard, the API server is not using SSO. This section can be skipped.
 - **Create New Service Account**: Click "+ Create Service Account" button located at the top of the page and follow the instructions to create a service account token.
 
 ### GitHub: Define repository secrets
@@ -86,7 +100,12 @@ The workflow checks out the GitHub repo to a specified commit, generates a uniqu
 
 The ``Launch SkyPilot Job`` action in turn uses a custom action located at ``.github/actions/setup-environment/action.yaml`` to install necessary dependencies (including ``skypilot``), and launches a SkyPilot job.
 
-Once the job is successfully launched, ``sky-job.yaml`` then parses out the job ID of the submitted job. A slack message is then sent to the configured slack channel. An example message is provided below:
+Once the job is successfully launched, ``sky-job.yaml`` then parses out the job ID of the submitted job.
+
+The submitted job can be queried either by using `sky jobs queue` or by visiting the Jobs page of the SkyPilot API dashboard.
+![dashboard page](https://i.imgur.com/JjDk30Z.png "Dashboard page")
+
+A slack message is then sent to the configured slack channel. An example message is provided below:
 ![slack message](https://i.imgur.com/p50yoD5.png "Slack message")
 
 ## Frequently Asked Questions
@@ -101,3 +120,7 @@ on:
 -   branches: [main]
 +   branches: [master]
 ```
+
+### How do I limit / isolate the resources available to the workflow?
+
+You can specify a specific cloud, region or kubernetes cluster for the workflow to use in the task YAML. Alternatively, you can define a separate [workspace](https://docs.skypilot.co/en/latest/admin/workspaces.html) the workflow can use, isolating the infrastructure the workflow has access to.
