@@ -4,7 +4,7 @@ import { apiClient } from '@/data/connectors/client';
 
 export function VersionDisplay() {
   const [version, setVersion] = useState(null);
-  const [commit, setCommit] = useState(null);
+  const [latestVersion, setLatestVersion] = useState(null);
 
   const getVersion = async () => {
     const data = await apiClient.get('/api/health');
@@ -18,8 +18,8 @@ export function VersionDisplay() {
     if (healthData.version) {
       setVersion(healthData.version);
     }
-    if (healthData.commit) {
-      setCommit(healthData.commit);
+    if (healthData.latest_version) {
+      setLatestVersion(healthData.latest_version);
     }
   };
 
@@ -27,20 +27,28 @@ export function VersionDisplay() {
     getVersion();
   }, []);
 
-  if (!version) return null;
+  // Only show light bulb icon if there's an upgrade available
+  if (!latestVersion) return null;
 
-  // Create tooltip text
-  const tooltipText = commit
-    ? `Commit: ${commit}`
-    : 'Commit information not available';
+  // Create tooltip content with proper line breaks
+  const tooltipContent = (
+    <div>
+      <div className="font-semibold">Update Available</div>
+      <br />
+      <div>Current version: {version}</div>
+      <div>New version available: {latestVersion}</div>
+    </div>
+  );
 
   return (
     <NonCapitalizedTooltip
-      content={tooltipText}
+      content={tooltipContent}
       className="text-sm text-muted-foreground"
     >
-      <div className="text-sm text-gray-500 cursor-help border-b border-dotted border-gray-400 inline-block">
-        Version: {version}
+      <div className="inline-flex items-center cursor-help">
+        <span className="text-yellow-600 text-lg" title="Update Available">
+          💡
+        </span>
       </div>
     </NonCapitalizedTooltip>
   );

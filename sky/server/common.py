@@ -20,8 +20,10 @@ from typing import (Any, Callable, cast, Dict, Generic, Literal, Optional,
 import uuid
 
 import cachetools
+import click
 import colorama
 import filelock
+from packaging import version as version_lib
 from passlib import context as passlib_context
 from typing_extensions import ParamSpec
 
@@ -102,6 +104,7 @@ ApiVersion = Optional[str]
 logger = sky_logging.init_logger(__name__)
 
 hinted_for_server_install_version_mismatch = False
+_upgrade_hint_shown = False
 
 crypt_ctx = passlib_context.CryptContext([
     'bcrypt', 'sha256_crypt', 'sha512_crypt', 'des_crypt', 'apr_md5_crypt',
@@ -126,6 +129,86 @@ class ApiServerInfo:
     user: Optional[Dict[str, Any]] = None
     basic_auth_enabled: bool = False
     error: Optional[str] = None
+    latest_version: Optional[str] = None
+
+
+def _check_and_print_upgrade_hint(api_server_info: ApiServerInfo,
+                                  endpoint: str) -> None:
+    """Check for newer SkyPilot version and print upgrade hint if available.
+
+    This function checks the API server info for latest_version and prints
+    an upgrade hint if a newer version is available. It only shows the hint
+    once per CLI session.
+
+    Args:
+        api_server_info: The API server info containing version information.
+        endpoint: The endpoint URL of the API server.
+    """
+    global _upgrade_hint_shown
+
+    # Skip if we've already shown the hint
+    if _upgrade_hint_shown:
+        return
+
+    # Skip if no latest version info
+    if not api_server_info.latest_version:
+        return
+
+    latest_version = api_server_info.latest_version
+    current_version = api_server_info.version or 'unknown'
+
+    # Skip if current version is unknown (can't compare)
+    if current_version == 'unknown':
+        return
+
+    # Compare versions - only show hint if latest is actually newer
+    try:
+        if version_lib.parse(latest_version) <= version_lib.parse(
+                current_version):
+            return
+    except version_lib.InvalidVersion as e:
+        logger.debug(f'Failed to parse version string(s): {e}')
+        return
+
+    # Check if API server is local or remote
+    is_local = is_api_server_local(endpoint)
+
+    _upgrade_hint_shown = True
+
+    # Build the hint message
+    hint_lines = [
+        f'{colorama.Fore.YELLOW}'
+        f'💡 A new version of SkyPilot is available: {latest_version} '
+        f'(you have {current_version})'
+        f'{colorama.Style.RESET_ALL}',
+    ]
+
+    # Add server-specific instructions
+    if is_local:
+        # Deduce if it's a nightly version and generate upgrade command
+        is_nightly = version_lib.parse(latest_version).is_devrelease
+
+        if is_nightly:
+            upgrade_command = 'pip install --upgrade --pre skypilot-nightly'
+        else:
+            upgrade_command = 'pip install --upgrade skypilot'
+
+        hint_lines.extend([
+            f'{ux_utils.INDENT_SYMBOL}Upgrade with: '
+            f'{colorama.Fore.CYAN}{upgrade_command}'
+            f'{colorama.Style.RESET_ALL}',
+            f'{ux_utils.INDENT_SYMBOL}After upgrading, restart the API server: '
+            f'{colorama.Fore.CYAN}sky api stop && sky api start'
+            f'{colorama.Style.RESET_ALL}',
+        ])
+    else:
+        hint_lines.append(
+            f'{ux_utils.INDENT_SYMBOL}Note: This is a remote API server. '
+            f'Please upgrade SkyPilot on the server side via your deployment '
+            f'method, then restart the API server.'
+            f'{colorama.Style.RESET_ALL}')
+
+    click.echo('\n' + '\n'.join(hint_lines) + '\n', err=True)
 
 
 def get_api_cookie_jar_path() -> pathlib.Path:
@@ -422,13 +505,15 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             commit = result.get('commit')
             user = result.get('user')
             basic_auth_enabled = result.get('basic_auth_enabled')
+            latest_version = result.get('latest_version')
             server_info = ApiServerInfo(status=ApiServerStatus(server_status),
                                         api_version=api_version,
                                         version=version,
                                         version_on_disk=version_on_disk,
                                         commit=commit,
                                         user=user,
-                                        basic_auth_enabled=basic_auth_enabled)
+                                        basic_auth_enabled=basic_auth_enabled,
+                                        latest_version=latest_version)
             if api_version is None or version is None or commit is None:
                 logger.warning(f'API server response missing '
                                f'version info. {server_url} may '
@@ -734,6 +819,9 @@ def check_server_healthy(
             logger.warning(_LOCAL_API_SERVER_RESTART_HINT)
 
         hinted_for_server_install_version_mismatch = True
+
+    # Check and print upgrade hint if available
+    _check_and_print_upgrade_hint(api_server_info, endpoint)
 
     return api_server_status, api_server_info
 
