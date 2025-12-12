@@ -65,6 +65,7 @@ class SkyPilotContext(object):
         self._log_file_handle = None
         self.env_overrides = {}
         self.config_context = None
+        self.slurm_client_ssh_credentials = None
 
     def cancel(self):
         """Cancel the context."""
@@ -127,12 +128,15 @@ class SkyPilotContext(object):
         The new context will get its own handle/fd for the log file.
         The new context will get an independent copy of the env var overrides.
         The new context will get an independent copy of the config context.
+        The new context will get an independent copy of slurm SSH credentials.
         Cancellation of the current context will not be propagated to the copy.
         """
         new_context = SkyPilotContext()
         new_context.redirect_log(self._log_file)
         new_context.env_overrides = self.env_overrides.copy()
         new_context.config_context = copy.deepcopy(self.config_context)
+        new_context.slurm_client_ssh_credentials = copy.deepcopy(
+            self.slurm_client_ssh_credentials)
         return new_context
 
 

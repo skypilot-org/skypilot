@@ -23,6 +23,7 @@ Compatibility note:
 Also refer to sky.server.constants.MIN_COMPATIBLE_API_VERSION and the
 sky.server.versions module for more details.
 """
+import base64
 import os
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -32,6 +33,7 @@ from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.provision.slurm import utils as slurm_utils
 from sky.server import common
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -127,6 +129,75 @@ def get_override_skypilot_config_path_from_client() -> Optional[str]:
     return skypilot_config.loaded_config_path_serialized()
 
 
+class SlurmSSHCredential(pydantic.BaseModel):
+    """SSH credentials for a Slurm cluster."""
+    ssh_user: str
+    ssh_private_key_base64: str
+
+
+def get_slurm_ssh_credentials_from_client(
+) -> Optional[Dict[str, SlurmSSHCredential]]:
+    """Returns Slurm SSH credentials from client's ~/.slurm/config.
+
+    Parses the client's ~/.slurm/config file, reads the private keys for each
+    Host entry, and returns them as base64-encoded credentials. This allows
+    the API server to SSH into Slurm clusters on behalf of the client.
+
+    Returns:
+        A dict mapping cluster name (Host) to SlurmSSHCredential, or None if
+        no ~/.slurm/config exists.
+    """
+    if annotations.is_on_api_server:
+        return None
+
+    slurm_config_path = os.path.expanduser(slurm_utils.DEFAULT_SLURM_PATH)
+    if not os.path.exists(slurm_config_path):
+        return None
+
+    try:
+        ssh_config = slurm_utils.get_slurm_ssh_config()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to load Slurm SSH config: {e}')
+        return None
+
+    credentials: Dict[str, SlurmSSHCredential] = {}
+    for cluster_name in ssh_config.get_hostnames():
+        if cluster_name == '*':
+            continue
+
+        try:
+            config_dict = ssh_config.lookup(cluster_name)
+            ssh_user = config_dict.get('user')
+            identity_files: List[str] = config_dict.get(
+                'identityfile', [])  # type: ignore[assignment]
+
+            if not ssh_user or not identity_files:
+                logger.debug(f'Skipping Slurm cluster {cluster_name}: '
+                             f'missing user or identityfile')
+                continue
+
+            key_path = os.path.expanduser(identity_files[0])
+            if not os.path.exists(key_path):
+                logger.debug(f'Skipping Slurm cluster {cluster_name}: '
+                             f'key file {key_path} does not exist')
+                continue
+
+            with open(key_path, 'rb') as f:
+                key_content = f.read()
+            key_base64 = base64.b64encode(key_content).decode('utf-8')
+
+            credentials[cluster_name] = SlurmSSHCredential(
+                ssh_user=ssh_user,
+                ssh_private_key_base64=key_base64,
+            )
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to read SSH credentials for Slurm cluster '
+                           f'{cluster_name}: {e}')
+            continue
+
+    return credentials if credentials else None
+
+
 class BasePayload(pydantic.BaseModel):
     """The base payload for the SkyPilot API."""
     # Ignore extra fields in the request body, which is useful for backward
@@ -146,6 +217,9 @@ class RequestBody(BasePayload):
     using_remote_api_server: bool = False
     override_skypilot_config: Optional[Dict[str, Any]] = {}
     override_skypilot_config_path: Optional[str] = None
+    # Slurm SSH credentials from client's ~/.slurm/config
+    # Maps cluster name (Host) -> SSH credentials needed for that cluster
+    slurm_ssh_credentials: Optional[Dict[str, SlurmSSHCredential]] = None
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -163,6 +237,8 @@ class RequestBody(BasePayload):
         data['override_skypilot_config_path'] = data.get(
             'override_skypilot_config_path',
             get_override_skypilot_config_path_from_client())
+        data['slurm_ssh_credentials'] = data.get(
+            'slurm_ssh_credentials', get_slurm_ssh_credentials_from_client())
         super().__init__(**data)
 
     def to_kwargs(self) -> Dict[str, Any]:
@@ -178,6 +254,7 @@ class RequestBody(BasePayload):
         kwargs.pop('using_remote_api_server')
         kwargs.pop('override_skypilot_config')
         kwargs.pop('override_skypilot_config_path')
+        kwargs.pop('slurm_ssh_credentials')
         return kwargs
 
     @property
