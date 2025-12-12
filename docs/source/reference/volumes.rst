@@ -231,7 +231,6 @@ This section demonstrates how to configure and use distributed filesystems as Sk
                   name: juicefs-pvc
                   type: k8s-pvc
                   infra: k8s
-                  size: 100Gi
                   use_existing: true
                   config:
                     access_mode: ReadWriteMany
