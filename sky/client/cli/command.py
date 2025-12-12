@@ -3918,20 +3918,49 @@ def show_gpus(
                 if acc_type is None:
                     acc_type = '-'
 
-                # Format CPU and memory
+                # Format CPU and memory: "X of Y free" or just "Y" if
+                # free is unknown
                 cpu_str = '-'
                 if node_info.cpu_count is not None:
-                    # Format as integer if value is integral,
-                    # otherwise show 1 decimal place
+                    # Format total CPU
                     if node_info.cpu_count.is_integer():
-                        cpu_str = str(int(node_info.cpu_count))
+                        cpu_total_str = str(int(node_info.cpu_count))
                     else:
-                        cpu_str = f'{node_info.cpu_count:.1f}'
+                        cpu_total_str = f'{node_info.cpu_count:.1f}'
+
+                    # Check if we have free CPU info (use hasattr to
+                    # check if field exists, then access directly)
+                    cpu_free = None
+                    if hasattr(node_info, 'cpu_free'):
+                        cpu_free = node_info.cpu_free
+                    if cpu_free is not None:
+                        # Format free CPU
+                        if isinstance(cpu_free,
+                                      float) and cpu_free.is_integer():
+                            cpu_free_str = str(int(cpu_free))
+                        else:
+                            cpu_free_str = f'{cpu_free:.1f}'
+                        cpu_str = f'{cpu_free_str} of {cpu_total_str} free'
+                    else:
+                        cpu_str = cpu_total_str
 
                 memory_str = '-'
                 if node_info.memory_gb is not None:
-                    # Format memory in GB, show 1 decimal place
-                    memory_str = f'{node_info.memory_gb:.1f} GB'
+                    # Format total memory
+                    memory_total_str = f'{node_info.memory_gb:.1f} GB'
+
+                    # Check if we have free memory info (use hasattr
+                    # to check if field exists, then access directly)
+                    memory_free_gb = None
+                    if hasattr(node_info, 'memory_free_gb'):
+                        memory_free_gb = node_info.memory_free_gb
+                    if memory_free_gb is not None:
+                        # Format free memory
+                        memory_free_str = f'{memory_free_gb:.1f} GB'
+                        memory_str = (
+                            f'{memory_free_str} of {memory_total_str} free')
+                    else:
+                        memory_str = memory_total_str
 
                 utilization_str = (
                     f'{available} of '

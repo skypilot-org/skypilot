@@ -510,6 +510,8 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           // Extract CPU and memory information
           const cpuCount = nodeData['cpu_count'] ?? null;
           const memoryGb = nodeData['memory_gb'] ?? null;
+          const cpuFree = nodeData['cpu_free'] ?? null;
+          const memoryFreeGb = nodeData['memory_free_gb'] ?? null;
 
           perNodeGPUs_dict[`${context}/${nodeName}`] = {
             node_name: nodeData['name'] || nodeName,
@@ -520,6 +522,8 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             context: context,
             cpu_count: cpuCount,
             memory_gb: memoryGb,
+            cpu_free: cpuFree,
+            memory_free_gb: memoryFreeGb,
             is_ready: nodeIsReady,
           };
 

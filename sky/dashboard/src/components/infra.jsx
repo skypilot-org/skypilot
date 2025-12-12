@@ -714,8 +714,30 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {nodesInContext.map((node, index) => {
-                      const cpuDisplay = formatCpu(node.cpu_count);
-                      const memoryDisplay = formatMemory(node.memory_gb);
+                      // Format CPU display: "X of Y free" or just "Y" if free is unknown
+                      let cpuDisplay = '-';
+                      if (node.cpu_count !== null && node.cpu_count !== undefined) {
+                        const cpuTotal = formatCpu(node.cpu_count);
+                        if (node.cpu_free !== null && node.cpu_free !== undefined) {
+                          const cpuFree = formatCpu(node.cpu_free);
+                          cpuDisplay = `${cpuFree} of ${cpuTotal} free`;
+                        } else {
+                          cpuDisplay = cpuTotal;
+                        }
+                      }
+
+                      // Format memory display: "X GB of Y GB free" or just "Y GB" if free is unknown
+                      let memoryDisplay = '-';
+                      if (node.memory_gb !== null && node.memory_gb !== undefined) {
+                        const memoryTotal = formatMemory(node.memory_gb);
+                        if (node.memory_free_gb !== null && node.memory_free_gb !== undefined) {
+                          const memoryFree = formatMemory(node.memory_free_gb);
+                          memoryDisplay = `${memoryFree} of ${memoryTotal} free`;
+                        } else {
+                          memoryDisplay = memoryTotal;
+                        }
+                      }
+
                       const utilizationStr =
                         node.is_ready === false
                           ? `0 of ${node.gpu_total} free (Node NotReady)`

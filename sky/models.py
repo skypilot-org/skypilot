@@ -72,6 +72,11 @@ class KubernetesNodeInfo:
     cpu_count: Optional[float] = None
     # Memory in GB (total memory available on the node)
     memory_gb: Optional[float] = None
+    # Free CPU count (free CPUs available on the node after pod allocations)
+    cpu_free: Optional[float] = None
+    # Free memory in GB (free memory available on the node after pod
+    # allocations)
+    memory_free_gb: Optional[float] = None
     # Whether the node is ready (all conditions are satisfied)
     is_ready: bool = True
 
