@@ -10,7 +10,7 @@ import logging
 import os
 import traceback
 import typing
-from typing import Optional, Set
+from typing import List, Optional, Set
 
 from sky import backends
 from sky import dag as dag_lib
@@ -799,7 +799,7 @@ def _get_logger_file(file_logger: logging.Logger) -> Optional[str]:
 def _add_k8s_annotations(task: 'task_lib.Task', job_id: int) -> None:
     # Add Kubernetes pod config annotation before launch
     original_resources = task.resources
-    new_resources_list = []
+    new_resources_list: List['resources.Resources'] = []
     for resource in original_resources:
         # Get existing config overrides or create new dict
         config_overrides = resource.cluster_config_overrides
@@ -815,4 +815,4 @@ def _add_k8s_annotations(task: 'task_lib.Task', job_id: int) -> None:
         new_resources_list.append(new_resource)
 
     # Set the new resources back to the task
-    task.set_resources(type(original_resources)(new_resources_list))
+    task.set_resources(new_resources_list)
