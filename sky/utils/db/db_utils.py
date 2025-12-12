@@ -292,7 +292,7 @@ class _AsyncConnectionWrapper:
     def __init__(self, db_path: str):
         self._db_path = db_path
         self._connection: Optional[aiosqlite.Connection] = None
-        self._lock: Optional[asyncio.Lock] = None
+        self._lock: asyncio.Lock = asyncio.Lock()
 
     @classmethod
     async def create(cls, db_path: str) -> '_AsyncConnectionWrapper':
