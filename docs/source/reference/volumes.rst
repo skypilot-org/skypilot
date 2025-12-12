@@ -171,18 +171,42 @@ This section demonstrates how to configure and use distributed filesystems as Sk
 
         1. **Install the JuiceFS CSI driver** on your Kubernetes cluster. Follow the official `installation guide <https://juicefs.com/docs/csi/getting_started>`_ for detailed instructions.
 
-        2. **Verify the driver installation** - Confirm that the ``juicefs-sc`` storage class has been created successfully:
+        2. **Verify the driver installation** - Confirm that the JuiceFS CSI Driver pods are running:
 
         .. code-block:: console
 
-          $ kubectl get storageclass
-          NAME           PROVISIONER         RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
-          juicefs-sc     csi.juicefs.com     Retain          Immediate           false                  10m
+          $ kubectl -n kube-system get pod -l app.kubernetes.io/name=juicefs-csi-driver
+          NAME                       READY   STATUS    RESTARTS   AGE
+          juicefs-csi-controller-0   2/2     Running   0          10m
+          juicefs-csi-node-8rd96     3/3     Running   0          10m
 
-        .. note::
-           If the ``juicefs-sc`` storage class is not available, refer to the `JuiceFS storage class creation guide <https://juicefs.com/docs/csi/guide/pv/#create-storage-class>`_ to set it up.
+        3. **Set up JuiceFS storage** - You can use either static provisioning (with a pre-created PV) or dynamic provisioning (with a StorageClass):
 
-        3. **Create a SkyPilot volume for JuiceFS** with a volume YAML:
+        .. tab-set::
+
+            .. tab-item:: Dynamic Provisioning (StorageClass)
+                :sync: dynamic-tab
+
+                Create a StorageClass for dynamic provisioning. Refer to the `JuiceFS StorageClass guide <https://juicefs.com/docs/csi/guide/pv/#create-storage-class>`_ for details.
+
+                .. code-block:: console
+
+                  $ kubectl get storageclass juicefs-sc
+                  NAME         PROVISIONER       RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
+                  juicefs-sc   csi.juicefs.com   Retain          Immediate           false                  10m
+
+            .. tab-item:: Static Provisioning (PV)
+                :sync: static-tab
+
+                Create a PersistentVolume manually. Refer to the `JuiceFS static provisioning guide <https://juicefs.com/docs/csi/guide/pv/#static-provisioning>`_ for details.
+
+                .. code-block:: console
+
+                  $ kubectl get pv juicefs-pv
+                  NAME         CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                 STORAGECLASS   AGE
+                  juicefs-pv   100Gi      RWX            Retain           Bound    default/juicefs-pvc                  10m
+
+        4. **Create a SkyPilot volume for JuiceFS** with a volume YAML:
 
         .. code-block:: yaml
 
@@ -199,7 +223,7 @@ This section demonstrates how to configure and use distributed filesystems as Sk
 
           $ sky volumes apply juicefs-volume.yaml
 
-        4. **Mount the volume to SkyPilot task** in your SkyPilot YAML:
+        5. **Mount the volume to SkyPilot task** in your SkyPilot YAML:
 
         .. code-block:: yaml
 
