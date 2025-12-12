@@ -447,9 +447,9 @@ class Kubernetes(clouds.Cloud):
         # we don't have a notion of disk size in Kubernetes.
         return 0
 
-    @staticmethod
+    @classmethod
     def _calculate_provision_timeout(
-        cloud: str,
+        cls,
         context: str,
         num_nodes: int,
         volume_mounts: Optional[List['volume_lib.VolumeMount']],
@@ -469,10 +469,10 @@ class Kubernetes(clouds.Cloud):
         Returns:
             Timeout in seconds
         """
-        # Use _REPR, instead of directly using 'kubernetes' as the config key,
-        # because it could be SSH node pool as well.
         timeout = skypilot_config.get_effective_region_config(
-            cloud=cloud,
+            # Use _REPR, instead of directly using 'kubernetes' as the
+            # config key, because it could be SSH node pool as well.
+            cloud=cls._REPR.lower(),
             region=context,
             keys=('provision_timeout',),
             default_value=None,
@@ -713,9 +713,6 @@ class Kubernetes(clouds.Cloud):
                     f'DWS is only supported in GKE, but the autoscaler type '
                     f'for context {context} is {autoscaler_type}')
 
-        # Use _REPR, instead of directly using 'kubernetes' as the config key,
-        # because it could be SSH node pool as well.
-        cloud_config_str = self._REPR.lower()
         # Timeout for resource provisioning. This timeout determines how long to
         # wait for pod to be in pending status before giving up.
         # Larger timeout may be required for autoscaling clusters, since
@@ -726,8 +723,8 @@ class Kubernetes(clouds.Cloud):
         # We use a linear scaling formula to determine the timeout based on the
         # number of nodes.
         timeout = self._calculate_provision_timeout(
-            cloud_config_str, context, num_nodes, volume_mounts,
-            enable_flex_start or enable_flex_start_queued_provisioning,
+            context, num_nodes, volume_mounts, enable_flex_start or
+            enable_flex_start_queued_provisioning,
             resources.cluster_config_overrides)
 
         deploy_vars = {
