@@ -7,6 +7,8 @@ import time
 import pytest
 
 from sky import backends
+from sky.clouds import kubernetes
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.resources import Resources
 from sky.utils import status_lib
 from sky.utils.cli_utils import status_utils
@@ -355,6 +357,35 @@ def test_get_resources_kubernetes():
     resources_str = status_utils._get_resources(mock_record_k8s_gpu,
                                                 truncate=False)
     assert resources_str == '2x(gpus=A100:2, cpus=8, mem=32, disk=50)'
+
+
+def test_get_resources_fractional_cpus():
+    """Fractional CPU requests should be displayed with 1 decimal place."""
+
+    k8s_instance_type = kubernetes_utils.KubernetesInstanceType.from_resources(
+        cpus=0.5, memory=4)
+    mock_resources_fractional_cpu = Resources(
+        cloud=kubernetes.Kubernetes(),
+        instance_type=k8s_instance_type.name,
+        cpus=0.5,
+        memory=4,
+    )
+    mock_handle_fractional_cpu = backends.CloudVmRayResourceHandle(
+        cluster_name='test-k8s-fractional-cpu',
+        cluster_name_on_cloud='test-k8s-fractional-cpu-cloud',
+        cluster_yaml=None,
+        launched_nodes=1,
+        launched_resources=mock_resources_fractional_cpu)
+    mock_record_fractional_cpu = {
+        'handle': mock_handle_fractional_cpu,
+    }
+
+    resources_str = status_utils._get_resources(mock_record_fractional_cpu)
+    assert resources_str == '1x(cpus=0.5, mem=4, ...)'
+
+    resources_str_full = status_utils._get_resources(
+        mock_record_fractional_cpu, truncate=False)
+    assert resources_str_full == '1x(cpus=0.5, mem=4, disk=256)'
 
     # Test K8s with TPU resources
     mock_resources_k8s_tpu = Resources(infra='k8s/gke-tpu-cluster',
