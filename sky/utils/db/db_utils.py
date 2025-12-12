@@ -298,6 +298,11 @@ def drop_column_from_table_alembic(
             raise
 
 
+def fault_point():
+    """For test fault injection."""
+    pass
+
+
 class SQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database."""
 
@@ -376,6 +381,9 @@ class SQLiteConn(threading.local):
             # pylint: disable=protected-access
             with safe_cursor_on_connection(conn._conn) as cursor:
                 cursor.execute(sql, parameters)
+                # Note(dev): sqlite3.Connection cannot be patched, keep
+                # fault_point here to test the integrity of exec_fetch_all()
+                fault_point()
                 return cursor.fetchall()
 
         # pylint: disable=protected-access

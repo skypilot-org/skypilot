@@ -69,12 +69,12 @@ async def test_execute_fetchall_async_error_does_not_stall_read_txn(
 
     await conn.execute_and_commit_async('INSERT INTO items (value) VALUES (?)',
                                         ('initial',))
-
-    # Trigger an error before fetchall() is executed.
     with pytest.raises(sqlite3.OperationalError):
-        async with conn.execute_fetchall_async(
-                'SELECT missing_column FROM items') as _:
-            pass
+        with mock.patch.object(db_utils,
+                               'fault_point',
+                               side_effect=sqlite3.OperationalError('BOOM')):
+            async with conn.execute_fetchall_async('SELECT * FROM items') as _:
+                pass
 
     # Another connection writes to the database while the failed read is cleaned
     # up to ensure there is no lingering read transaction.
