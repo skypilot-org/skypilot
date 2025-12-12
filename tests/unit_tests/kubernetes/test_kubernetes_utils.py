@@ -162,7 +162,8 @@ def test_get_kubernetes_node_info():
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
                    return_value=[mock_cpu_node_1, mock_cpu_node_2]), \
          mock.patch('sky.provision.kubernetes.utils.'
-                   'get_allocated_resources_by_node') as mock_get_allocated_resources:
+                   'get_allocated_resources_by_node',
+                   return_value=({}, {})) as mock_get_allocated_resources:
         node_info = utils.get_kubernetes_node_info()
 
         mock_get_allocated_resources.assert_called_once()
