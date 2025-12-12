@@ -753,7 +753,7 @@ class SSHCommandRunner(CommandRunner):
     def ssh_base_command(self, *, ssh_mode: SshMode,
                          port_forward: Optional[List[Tuple[int, int]]],
                          connect_timeout: Optional[int]) -> List[str]:
-        ssh = ['ssh', '-vvv']
+        ssh = ['ssh']
         if ssh_mode == SshMode.NON_INTERACTIVE:
             # Disable pseudo-terminal allocation. Otherwise, the output of
             # ssh will be corrupted by the user's input.
