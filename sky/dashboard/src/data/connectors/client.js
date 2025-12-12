@@ -60,9 +60,10 @@ export const apiClient = {
   },
 
   // Helper method for POST requests
-  post: async (path, body) => {
+  post: async (path, body, options = {}) => {
     const headers = {
       'Content-Type': 'application/json',
+      ...(options.headers || {}),
     };
 
     const baseUrl = window.location.origin;
@@ -72,12 +73,13 @@ export const apiClient = {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
+      signal: options.signal,
     });
   },
 
   // Helper method for streaming responses
-  stream: async (path, body, onData) => {
-    const response = await apiClient.post(path, body);
+  stream: async (path, body, onData, options = {}) => {
+    const response = await apiClient.post(path, body, options);
     if (!response.ok) {
       const msg = `API request ${path} failed with status ${response.status}`;
       console.error(msg);

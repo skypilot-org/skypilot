@@ -332,6 +332,16 @@ export function stripAnsiCodes(str) {
   return str.replace(/\x1b\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGKH]/g, '');
 }
 
+// Common filter for control / rich payload log lines
+export function shouldDropLogLine(line) {
+  if (!line) return true;
+  if (line.includes('<sky-payload')) return true;
+  if (/rich_(init|update|start|exit)/i.test(line)) return true;
+  if (/<rich_.*?>.*<\/rich_.*?>/i.test(line)) return true;
+  if (/^├──/.test(line) || /^└──/.test(line)) return true;
+  return false;
+}
+
 function extractNodeTypes(logs) {
   const nodePattern = /\((head|worker\d+),/g; // Matches 'head' or 'worker' followed by any number
   const nodeTypes = new Set();
@@ -355,23 +365,33 @@ function extractNodeTypes(logs) {
 
 export function LogFilter({ logs, controller = false }) {
   const [selectedNode, setSelectedNode] = useState('all');
-  const [filteredLogs, setFilteredLogs] = useState(logs);
+  const normalizeLogs = (input) => {
+    if (!input) return [];
+    if (Array.isArray(input)) return input;
+    if (typeof input === 'string') {
+      return input.split('\n').filter((line) => line !== '');
+    }
+    return [];
+  };
+
+  const normalizedLogs = normalizeLogs(logs);
+  const [filteredLogs, setFilteredLogs] = useState(normalizedLogs);
   const [nodeTypes, setNodeTypes] = useState([]);
 
   useEffect(() => {
-    setNodeTypes(extractNodeTypes(logs));
-  }, [logs]);
+    setNodeTypes(extractNodeTypes(normalizedLogs.join('\n')));
+  }, [normalizedLogs]);
 
   useEffect(() => {
     if (selectedNode === 'all') {
-      setFilteredLogs(logs);
+      setFilteredLogs(normalizedLogs);
     } else {
-      const filtered = logs
-        .split('\n')
-        .filter((line) => line.includes(`(${selectedNode},`));
-      setFilteredLogs(filtered.join('\n'));
+      const filtered = normalizedLogs.filter((line) =>
+        line.includes(`(${selectedNode},`)
+      );
+      setFilteredLogs(filtered);
     }
-  }, [selectedNode, logs]);
+  }, [selectedNode, normalizedLogs]);
 
   return (
     <div>
@@ -400,9 +420,11 @@ export function LogFilter({ logs, controller = false }) {
         </div>
       )}
       <div
-        className="logs-container"
-        dangerouslySetInnerHTML={{ __html: formatLogs(filteredLogs) }}
-      />
+        className="logs-container whitespace-pre-wrap break-all font-mono text-sm text-gray-900"
+        aria-label="job-logs"
+      >
+        {filteredLogs.join('\n')}
+      </div>
     </div>
   );
 }

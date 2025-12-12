@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Layout } from '@/components/elements/layout';
 import { Card } from '@/components/ui/card';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -7,6 +6,7 @@ import { useClusterDetails } from '@/data/connectors/clusters';
 import {
   CustomTooltip as Tooltip,
   formatFullTimestamp,
+  LogFilter,
 } from '@/components/utils';
 import { RotateCwIcon, Download } from 'lucide-react';
 import { CircularProgress } from '@mui/material';
@@ -15,11 +15,13 @@ import {
   downloadJobLogs,
 } from '@/data/connectors/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
-import { LogFilter, formatLogs, stripAnsiCodes } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { CheckIcon, CopyIcon } from 'lucide-react';
+import PropTypes from 'prop-types';
+import { useLogStreamer } from '@/hooks/useLogStreamer';
+import { useCallback } from 'react';
 
 // Custom header component with buttons inline
 function JobHeader({
@@ -83,10 +85,8 @@ export function JobDetailPage() {
     useClusterDetails({ cluster });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
-  const [logs, setLogs] = useState('');
-  const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [logsRefreshToken, setLogsRefreshToken] = useState(0);
 
   const PENDING_STATUSES = useMemo(() => ['INIT', 'PENDING', 'SETTING_UP'], []);
 
@@ -97,117 +97,41 @@ export function JobDetailPage() {
   }, [clusterJobData, job, PENDING_STATUSES]);
 
   // Update isInitialLoad when data is first loaded
-  React.useEffect(() => {
+  useEffect(() => {
     if (!loading && isInitialLoad) {
       setIsInitialLoad(false);
     }
   }, [loading, isInitialLoad]);
 
-  const handleRefreshLogs = () => {
-    setIsRefreshingLogs((prev) => !prev);
-    setLogs('');
-  };
-
-  useEffect(() => {
-    let active = true;
-
-    if (!cluster || !job || isPending) {
-      setIsLoadingLogs(false);
-      return () => {
-        active = false;
-      };
-    }
-
-    setIsLoadingLogs(true);
-
-    streamClusterJobLogs({
+  const logStreamArgs = useMemo(
+    () => ({
       clusterName: cluster,
       jobId: job,
-      onNewLog: (chunk) => {
-        if (active) {
-          setLogs((prevLogs) => {
-            // Split the chunk into lines
-            const newLines = chunk.split('\n').filter((line) => line.trim());
-
-            let updatedLogs = prevLogs;
-
-            for (const line of newLines) {
-              // Clean the line (remove ANSI codes)
-              const cleanLine = stripAnsiCodes(line);
-
-              // Check if this is a progress bar line
-              const isProgressBar = /\d+%\s*\|/.test(cleanLine);
-
-              if (isProgressBar) {
-                // Extract process identifier from the new line
-                const processMatch = cleanLine.match(/^\(([^)]+)\)/);
-
-                if (processMatch && updatedLogs) {
-                  // Look for the last progress bar from the same process in existing logs
-                  const existingLines = updatedLogs.split('\n');
-                  let replaced = false;
-
-                  // Search from the end for efficiency
-                  for (let i = existingLines.length - 1; i >= 0; i--) {
-                    const existingLine = existingLines[i];
-                    if (/\d+%\s*\|/.test(existingLine)) {
-                      const existingProcessMatch =
-                        existingLine.match(/^\(([^)]+)\)/);
-                      if (
-                        existingProcessMatch &&
-                        existingProcessMatch[1] === processMatch[1]
-                      ) {
-                        // Found a progress bar from the same process, replace it
-                        existingLines[i] = cleanLine;
-                        updatedLogs = existingLines.join('\n');
-                        replaced = true;
-                        break;
-                      }
-                    }
-                  }
-
-                  if (!replaced) {
-                    // No existing progress bar from this process, append
-                    updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
-                  }
-                } else {
-                  // First line or no process match, just append
-                  updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
-                }
-              } else {
-                // Regular log line, just append
-                updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
-              }
-            }
-
-            return updatedLogs;
-          });
-        }
-      },
       workspace: clusterData?.workspace,
-    })
-      .then(() => {
-        if (active) {
-          setIsLoadingLogs(false);
-        }
-      })
-      .catch((error) => {
-        if (active) {
-          console.error('Error streaming logs:', error);
-          setIsLoadingLogs(false);
-        }
-      });
+    }),
+    [cluster, job, clusterData?.workspace]
+  );
 
-    return () => {
-      active = false;
-    };
-  }, [cluster, job, isRefreshingLogs, isPending, clusterData]);
+  const handleStreamError = useCallback((error) => {
+    console.error('Error streaming cluster logs:', error);
+  }, []);
+
+  const { lines: displayLines, isLoading: isLoadingLogs } = useLogStreamer({
+    streamFn: streamClusterJobLogs,
+    streamArgs: logStreamArgs,
+    enabled: Boolean(cluster && job) && !isPending,
+    refreshTrigger: logsRefreshToken,
+    onError: handleStreamError,
+  });
+
+  const handleRefreshLogs = () => {
+    setLogsRefreshToken((token) => token + 1);
+  };
 
   // Handle manual refresh
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
-    setIsRefreshingLogs((prev) => !prev);
-    setLogs('');
+    setLogsRefreshToken((token) => token + 1);
     try {
       if (refreshData) {
         await refreshData();
@@ -440,7 +364,7 @@ export function JobDetailPage() {
                     </div>
                   ) : (
                     <div className="max-h-96 overflow-y-auto">
-                      <LogFilter logs={logs} />
+                      <LogFilter logs={displayLines} />
                     </div>
                   )}
                 </div>
@@ -452,5 +376,16 @@ export function JobDetailPage() {
     </>
   );
 }
+
+JobHeader.propTypes = {
+  cluster: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  job: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  jobData: PropTypes.shape({
+    job: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  }),
+  onRefresh: PropTypes.func,
+  isRefreshing: PropTypes.bool,
+  loading: PropTypes.bool,
+};
 
 export default JobDetailPage;
