@@ -584,7 +584,13 @@ class Resources:
         type at launch time. Thus, Resources in the backend's ResourceHandle
         will always have the memory field set to None.)
         """
-        return self._memory
+        if self._memory is not None:
+            return self._memory
+        if self.cloud is not None and self._instance_type is not None:
+            _, memory = self.cloud.get_vcpus_mem_from_instance_type(
+                self._instance_type)
+            return str(memory)
+        return None
 
     @property
     @annotations.lru_cache(scope='global', maxsize=1)
