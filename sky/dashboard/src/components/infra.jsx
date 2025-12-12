@@ -236,7 +236,7 @@ export function InfrastructureSection({
                         GPU Types
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
-                        #GPUs
+                        GPUs
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
                         CPU
@@ -693,22 +693,22 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                   <thead className="bg-gray-100">
                     <tr>
                       <th className="p-3 text-left font-medium text-gray-600">
+                        {displayTitle}
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600">
                         Node
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        IP Address
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        GPU
-                      </th>
-                      <th className="p-3 text-right font-medium text-gray-600">
-                        Availability
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600">
                         CPU
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600">
                         Memory
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600">
+                        GPU
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600">
+                        GPU Utilization
                       </th>
                     </tr>
                   </thead>
@@ -727,22 +727,22 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                           className="hover:bg-gray-50"
                         >
                           <td className="p-3 whitespace-nowrap text-gray-700">
+                            {contextName}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-gray-700">
                             {node.node_name}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {node.ip_address || '-'}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {node.gpu_name}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-right text-gray-700">
-                            {utilizationStr}
                           </td>
                           <td className="p-3 whitespace-nowrap text-gray-700">
                             {cpuDisplay}
                           </td>
                           <td className="p-3 whitespace-nowrap text-gray-700">
                             {memoryDisplay}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {node.gpu_name}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {utilizationStr}
                           </td>
                         </tr>
                       );
@@ -1599,7 +1599,7 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
             <th className="p-3 text-left font-medium text-gray-600">
               GPU Types
             </th>
-            <th className="p-3 text-left font-medium text-gray-600">#GPUs</th>
+            <th className="p-3 text-left font-medium text-gray-600">GPUs</th>
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
