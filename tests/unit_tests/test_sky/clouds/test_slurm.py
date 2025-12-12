@@ -1,5 +1,9 @@
 """Tests for Slurm cloud implementation."""
 
+import base64
+import os
+import tempfile
+from unittest.mock import MagicMock
 from unittest.mock import patch
 import unittest.mock as mock
 
@@ -8,6 +12,8 @@ import pytest
 from sky.adaptors import slurm
 from sky.provision.slurm import instance as slurm_instance
 from sky.provision.slurm import utils as slurm_utils
+from sky.server.requests import payloads
+from sky.utils import context
 
 
 class TestCheckInstanceFits:
@@ -193,3 +199,176 @@ class TestTerminateInstances:
 
         # Should return early without canceling
         mock_client.cancel_jobs_by_name.assert_not_called()
+
+
+class TestGetSlurmSshConfigDict:
+    """Test slurm_utils.get_slurm_ssh_config_dict()."""
+
+    @patch('sky.provision.slurm.utils.get_slurm_ssh_config')
+    def test_server_side_config_only(self, mock_get_ssh_config):
+        """Test reading SSH config on server without credential overlay."""
+        mock_ssh_config = MagicMock()
+        mock_ssh_config.lookup.return_value = {
+            'hostname': '10.0.0.1',
+            'port': '22',
+            'user': 'slurm-user',
+            'identityfile': ['/home/user/.ssh/id_rsa'],
+            'proxycommand': 'ssh -W %h:%p bastion',
+        }
+        mock_get_ssh_config.return_value = mock_ssh_config
+
+        result = slurm_utils.get_slurm_ssh_config_dict('my-cluster')
+
+        assert result['hostname'] == '10.0.0.1'
+        assert result['user'] == 'slurm-user'
+        assert result['identityfile'] == ['/home/user/.ssh/id_rsa']
+        assert result['proxycommand'] == 'ssh -W %h:%p bastion'
+        mock_ssh_config.lookup.assert_called_once_with('my-cluster')
+
+    @pytest.mark.parametrize('use_context', [False, True])
+    @patch('sky.provision.slurm.utils.get_slurm_ssh_config')
+    def test_client_credential_overlay(self, mock_get_ssh_config, use_context):
+        """Test client credential overlay."""
+        mock_ssh_config = MagicMock()
+        mock_ssh_config.lookup.return_value = {
+            'hostname': '10.0.0.1',
+            'port': '22',
+            'user': 'root',
+            'identityfile': ['/root/.ssh/id_rsa'],
+        }
+        mock_get_ssh_config.return_value = mock_ssh_config
+
+        test_key_content = b'-----BEGIN RSA PRIVATE KEY-----\ntest-key-data\n-----END RSA PRIVATE KEY-----\n'
+        credentials = {
+            'my-cluster': payloads.SlurmSSHCredential(
+                ssh_user='bob',
+                ssh_private_key_base64=base64.b64encode(
+                    test_key_content).decode('utf-8'),
+            )
+        }
+
+        def run_test():
+            slurm_utils.set_client_ssh_credentials(credentials)
+            try:
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    with patch.object(slurm_utils, 'SLURM_SSH_KEY_CACHE_DIR',
+                                      tmpdir):
+                        result = slurm_utils.get_slurm_ssh_config_dict(
+                            'my-cluster')
+
+                        assert result['user'] == 'bob'
+                        assert result['hostname'] == '10.0.0.1'
+                        assert len(result['identityfile']) == 1
+
+                        key_path = result['identityfile'][0]
+                        assert os.path.exists(key_path)
+                        assert os.path.dirname(key_path) == tmpdir
+
+                        with open(key_path, 'rb') as f:
+                            assert f.read() == test_key_content
+                        # Extract just the permission bits
+                        assert oct(os.stat(key_path).st_mode)[-3:] == '600'
+            finally:
+                slurm_utils.set_client_ssh_credentials(None)
+
+        if use_context:
+            # Test coroutine case with context
+            with context.initialize():
+                run_test()
+        else:
+            # Test multiprocess worker case
+            run_test()
+
+    @patch('sky.provision.slurm.utils.get_slurm_ssh_config')
+    def test_key_caching(self, mock_get_ssh_config):
+        """Test key caching: reuses same key, creates new cache for different key."""
+        mock_ssh_config = MagicMock()
+        mock_ssh_config.lookup.return_value = {
+            'hostname': '10.0.0.1',
+            'port': '22',
+            'user': 'root',
+            'identityfile': ['/root/.ssh/id_rsa'],
+        }
+        mock_get_ssh_config.return_value = mock_ssh_config
+
+        key1_content = b'-----BEGIN RSA PRIVATE KEY-----\nkey1\n-----END RSA PRIVATE KEY-----\n'
+        key2_content = b'-----BEGIN RSA PRIVATE KEY-----\nkey2\n-----END RSA PRIVATE KEY-----\n'
+
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                with patch.object(slurm_utils, 'SLURM_SSH_KEY_CACHE_DIR',
+                                  tmpdir):
+                    # Step 1: Use key1 - creates cache
+                    slurm_utils.set_client_ssh_credentials({
+                        'my-cluster': payloads.SlurmSSHCredential(
+                            ssh_user='user1',
+                            ssh_private_key_base64=base64.b64encode(
+                                key1_content).decode('utf-8'),
+                        )
+                    })
+                    result1 = slurm_utils.get_slurm_ssh_config_dict(
+                        'my-cluster')
+                    key_path1 = result1['identityfile'][0]
+                    mtime1 = os.path.getmtime(key_path1)
+
+                    # Step 2: Use key1 again - reuses cache
+                    result2 = slurm_utils.get_slurm_ssh_config_dict(
+                        'my-cluster')
+                    key_path2 = result2['identityfile'][0]
+                    mtime2 = os.path.getmtime(key_path2)
+
+                    assert key_path1 == key_path2
+                    assert mtime1 == mtime2  # File not rewritten
+
+                    # Step 3: Use key2 - creates new cache
+                    slurm_utils.set_client_ssh_credentials({
+                        'my-cluster': payloads.SlurmSSHCredential(
+                            ssh_user='user2',
+                            ssh_private_key_base64=base64.b64encode(
+                                key2_content).decode('utf-8'),
+                        )
+                    })
+                    result3 = slurm_utils.get_slurm_ssh_config_dict(
+                        'my-cluster')
+                    key_path3 = result3['identityfile'][0]
+
+                    # Different keys create different cache files
+                    assert key_path3 != key_path1
+
+                    # Both cache files exist
+                    assert os.path.exists(key_path1)
+                    assert os.path.exists(key_path3)
+
+                    # Verify contents
+                    with open(key_path1, 'rb') as f:
+                        assert f.read() == key1_content
+                    with open(key_path3, 'rb') as f:
+                        assert f.read() == key2_content
+        finally:
+            slurm_utils.set_client_ssh_credentials(None)
+
+    @patch('sky.provision.slurm.utils.get_slurm_ssh_config')
+    def test_missing_cluster_in_credentials(self, mock_get_ssh_config):
+        """Test that config is not modified when cluster not in credentials."""
+        mock_ssh_config = MagicMock()
+        mock_ssh_config.lookup.return_value = {
+            'hostname': '10.0.0.1',
+            'port': '22',
+            'user': 'root',
+            'identityfile': ['/root/.ssh/id_rsa'],
+        }
+        mock_get_ssh_config.return_value = mock_ssh_config
+
+        slurm_utils.set_client_ssh_credentials({
+            'other-cluster': payloads.SlurmSSHCredential(
+                ssh_user='alice',
+                ssh_private_key_base64='dGVzdC1rZXk=',
+            )
+        })
+
+        try:
+            result = slurm_utils.get_slurm_ssh_config_dict('my-cluster')
+            assert result['user'] == 'root'
+            assert result['identityfile'] == ['/root/.ssh/id_rsa']
+        finally:
+            slurm_utils.set_client_ssh_credentials(None)

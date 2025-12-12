@@ -1,7 +1,11 @@
 """Slurm utilities for SkyPilot."""
+import base64
+import copy
+import hashlib
 import math
 import os
 import re
+import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from paramiko.config import SSHConfig
@@ -11,10 +15,18 @@ from sky import sky_logging
 from sky.adaptors import slurm
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import context
 
 logger = sky_logging.init_logger(__name__)
 
 DEFAULT_SLURM_PATH = '~/.slurm/config'
+
+# Cache directory for decoded SSH keys from client credentials.
+# Keys are cached by content hash to avoid regenerating temp files per request.
+SLURM_SSH_KEY_CACHE_DIR = '~/.sky/generated/slurm_ssh_keys'
+
+# The global loaded client SSH credentials.
+_global_client_ssh_credentials: Optional[Dict[str, Any]] = None
 
 
 def get_slurm_ssh_config() -> SSHConfig:
@@ -22,6 +34,88 @@ def get_slurm_ssh_config() -> SSHConfig:
     slurm_config_path = os.path.expanduser(DEFAULT_SLURM_PATH)
     slurm_config = SSHConfig.from_path(slurm_config_path)
     return slurm_config
+
+
+def _get_client_ssh_credentials() -> Optional[Dict[str, Any]]:
+    """Get Slurm SSH credentials for current execution context.
+
+    Returns credentials from SkyPilotContext if running in coroutines,
+    otherwise falls back to global variable for multiprocess workers.
+
+    Returns:
+        A dict mapping cluster name to SlurmSSHCredential, or None if
+        not set or no context exists.
+    """
+    ctx = context.get()
+    if not ctx:
+        # Running in multiprocess worker - use global variable
+        return _global_client_ssh_credentials
+    # Running in coroutine - use context
+    if ctx.slurm_client_ssh_credentials is None:
+        # Credentials not initialized in context, inherit from global
+        ctx.slurm_client_ssh_credentials = copy.deepcopy(
+            _global_client_ssh_credentials)
+    return ctx.slurm_client_ssh_credentials
+
+
+def set_client_ssh_credentials(credentials: Optional[Dict[str, Any]]) -> None:
+    """Set Slurm SSH credentials for current execution context.
+
+    This works for both multiprocess workers (sets global variable) and
+    coroutines (sets in SkyPilotContext).
+    """
+    global _global_client_ssh_credentials
+    ctx = context.get()
+    if not ctx:
+        # Running in multiprocess worker - set global variable
+        _global_client_ssh_credentials = credentials
+    else:
+        # Running in coroutine - set in context
+        ctx.slurm_client_ssh_credentials = credentials
+
+
+def get_slurm_ssh_config_dict(cluster_name: str) -> Dict[str, Any]:
+    """Get SSH config dict for a Slurm cluster with credential overlay.
+
+    Loads the SSH configuration from ~/.slurm/config for the given cluster.
+    If client_ssh_credentials is set, the user and private key from those
+    credentials will override the local config values.
+    """
+    ssh_config = get_slurm_ssh_config()
+    ssh_config_dict = ssh_config.lookup(cluster_name)
+
+    # Check for credentials in the current execution context
+    # This works for both multiprocess workers and coroutines
+    slurm_ssh_credentials = _get_client_ssh_credentials()
+    if slurm_ssh_credentials and cluster_name in slurm_ssh_credentials:
+        cred = slurm_ssh_credentials[cluster_name]
+        ssh_config_dict['user'] = cred.ssh_user
+
+        # Hash the base64 key content to get a stable cache key.
+        # Avoids creating a new temp file for every request.
+        key_hash = hashlib.sha256(
+            cred.ssh_private_key_base64.encode()).hexdigest()
+
+        cache_dir = os.path.expanduser(SLURM_SSH_KEY_CACHE_DIR)
+        os.makedirs(cache_dir, mode=0o700, exist_ok=True)
+        key_path = os.path.join(cache_dir, key_hash)
+
+        if not os.path.isfile(key_path):
+            key_bytes = base64.b64decode(cred.ssh_private_key_base64)
+            # Write to temp file first, then atomic rename to avoid race
+            # conditions when multiple concurrent requests write the same key.
+            with tempfile.NamedTemporaryFile(mode='wb',
+                                             dir=cache_dir,
+                                             delete=False) as tmp_file:
+                tmp_file.write(key_bytes)
+                tmp_path = tmp_file.name
+            # SSH requires private keys to have restricted permissions
+            os.chmod(tmp_path, 0o600)
+            os.rename(tmp_path, key_path)
+
+        ssh_config_dict['identityfile'] = [key_path]  # type: ignore[assignment]
+
+    return ssh_config_dict
 
 
 class SlurmInstanceType:
@@ -186,8 +280,7 @@ def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
     in sinfo output. If no default partition is marked, returns None.
     """
     try:
-        ssh_config = get_slurm_ssh_config()
-        ssh_config_dict = ssh_config.lookup(cluster_name)
+        ssh_config_dict = get_slurm_ssh_config_dict(cluster_name)
     except Exception as e:
         raise ValueError(
             f'Failed to load SSH configuration from {DEFAULT_SLURM_PATH}: '
@@ -275,7 +368,7 @@ def check_instance_fits(
     """
     # Get Slurm node list in the given cluster (region).
     try:
-        ssh_config = get_slurm_ssh_config()
+        ssh_config_dict = get_slurm_ssh_config_dict(cluster)
     except FileNotFoundError:
         return (False, f'Could not query Slurm cluster {cluster} '
                 f'because the Slurm configuration file '
@@ -284,7 +377,6 @@ def check_instance_fits(
         return (False, f'Could not query Slurm cluster {cluster} '
                 f'because Slurm SSH configuration at {DEFAULT_SLURM_PATH} '
                 f'could not be loaded: {common_utils.format_exception(e)}.')
-    ssh_config_dict = ssh_config.lookup(cluster)
 
     client = slurm.SlurmClient(
         ssh_config_dict['hostname'],
@@ -388,8 +480,6 @@ def _get_slurm_node_info_list(
     """
     # 1. Get node state and GRES using sinfo
 
-    # can raise FileNotFoundError if config file does not exist.
-    slurm_config = get_slurm_ssh_config()
     if slurm_cluster_name is None:
         slurm_cluster_names = get_all_slurm_cluster_names()
         if slurm_cluster_names:
@@ -398,7 +488,8 @@ def _get_slurm_node_info_list(
         raise ValueError(
             f'No Slurm cluster name found in the {DEFAULT_SLURM_PATH} '
             f'configuration.')
-    slurm_config_dict = slurm_config.lookup(slurm_cluster_name)
+    # can raise FileNotFoundError if config file does not exist.
+    slurm_config_dict = get_slurm_ssh_config_dict(slurm_cluster_name)
     logger.debug(f'Slurm config dict: {slurm_config_dict}')
     slurm_client = slurm.SlurmClient(
         slurm_config_dict['hostname'],
