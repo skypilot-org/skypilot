@@ -52,6 +52,7 @@ class SlurmClient:
         ssh_user: str,
         ssh_key: Optional[str],
         ssh_proxy_command: Optional[str] = None,
+        ssh_proxy_jump: Optional[str] = None,
     ):
         """Initialize SlurmClient.
 
@@ -61,12 +62,14 @@ class SlurmClient:
             ssh_user: SSH username.
             ssh_key: Path to SSH private key, or None for keyless SSH.
             ssh_proxy_command: Optional SSH proxy command.
+            ssh_proxy_jump: Optional SSH proxy jump destination.
         """
         self.ssh_host = ssh_host
         self.ssh_port = ssh_port
         self.ssh_user = ssh_user
         self.ssh_key = ssh_key
         self.ssh_proxy_command = ssh_proxy_command
+        self.ssh_proxy_jump = ssh_proxy_jump
 
         # Internal runner for executing Slurm CLI commands
         # on the controller node.
@@ -75,6 +78,7 @@ class SlurmClient:
             ssh_user,
             ssh_key,
             ssh_proxy_command=ssh_proxy_command,
+            ssh_proxy_jump=ssh_proxy_jump,
         )
 
     def query_jobs(

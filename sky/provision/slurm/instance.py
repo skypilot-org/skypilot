@@ -72,6 +72,7 @@ def _create_virtual_instance(
     ssh_user = ssh_config_dict['user']
     ssh_key = ssh_config_dict['private_key']
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
+    ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
     partition = slurm_utils.get_partition_from_config(provider_config)
 
     client = slurm.SlurmClient(
@@ -80,6 +81,7 @@ def _create_virtual_instance(
         ssh_user,
         ssh_key,
         ssh_proxy_command=ssh_proxy_command,
+        ssh_proxy_jump=ssh_proxy_jump,
     )
 
     # COMPLETING state occurs when a job is being terminated - during this
@@ -229,6 +231,7 @@ def _create_virtual_instance(
         ssh_user,
         ssh_key,
         ssh_proxy_command=ssh_proxy_command,
+        ssh_proxy_jump=ssh_proxy_jump,
     )
 
     cmd = f'mkdir -p {PROVISION_SCRIPTS_DIRECTORY}'
@@ -305,6 +308,7 @@ def query_instances(
     ssh_user = ssh_config_dict['user']
     ssh_key = ssh_config_dict['private_key']
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
+    ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
     client = slurm.SlurmClient(
         ssh_host,
@@ -312,6 +316,7 @@ def query_instances(
         ssh_user,
         ssh_key,
         ssh_proxy_command=ssh_proxy_command,
+        ssh_proxy_jump=ssh_proxy_jump,
     )
 
     # Map Slurm job states to SkyPilot ClusterStatus
@@ -401,6 +406,7 @@ def get_cluster_info(
     ssh_user = ssh_config_dict['user']
     ssh_key = ssh_config_dict['private_key']
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
+    ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
     client = slurm.SlurmClient(
         ssh_host,
@@ -408,6 +414,7 @@ def get_cluster_info(
         ssh_user,
         ssh_key,
         ssh_proxy_command=ssh_proxy_command,
+        ssh_proxy_jump=ssh_proxy_jump,
     )
 
     # Find running job for this cluster
@@ -496,6 +503,7 @@ def terminate_instances(
         logger.debug('Running inside a Slurm job, using machine\'s ssh config')
         ssh_private_key = None
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
+    ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
     client = slurm.SlurmClient(
         ssh_host,
@@ -503,6 +511,7 @@ def terminate_instances(
         ssh_user,
         ssh_private_key,
         ssh_proxy_command=ssh_proxy_command,
+        ssh_proxy_jump=ssh_proxy_jump,
     )
     jobs_state = client.get_jobs_state_by_name(cluster_name_on_cloud)
     if not jobs_state:
@@ -586,6 +595,10 @@ def get_command_runners(
     # it is the login node's. The internal IP is the private IP of the node.
     ssh_user = cast(str, credentials.pop('ssh_user'))
     ssh_private_key = cast(str, credentials.pop('ssh_private_key'))
+    # ssh_proxy_jump is Slurm-specific, it does not exist in the auth section
+    # of the cluster yaml.
+    ssh_proxy_jump = cluster_info.provider_config.get('ssh', {}).get(
+        'proxyjump', None)
     runners = [
         command_runner.SlurmCommandRunner(
             (instance_info.external_ip or '', instance_info.ssh_port),
@@ -595,6 +608,7 @@ def get_command_runners(
             skypilot_runtime_dir=_skypilot_runtime_dir(cluster_name_on_cloud),
             job_id=instance_info.tags['job_id'],
             slurm_node=instance_info.tags['node'],
+            ssh_proxy_jump=ssh_proxy_jump,
             **credentials) for instance_info in instances
     ]
 
