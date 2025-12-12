@@ -19,12 +19,10 @@ from sky.skylet.log_lib import run_bash_command_with_log
 
 def _get_ip_address() -> str:
     """Get the IP address of the current node."""
-    ip_result = subprocess.run(['hostname', '-I'],
-                               capture_output=True,
-                               text=True,
-                               check=False)
-    return ip_result.stdout.strip().split(
-    )[0] if ip_result.returncode == 0 else 'unknown'
+    # Use socket.gethostbyname to be consistent with _get_job_node_ips(),
+    # which resolves hostnames the same way. Using `hostname -I` can return
+    # Docker bridge IPs (172.17.x.x) first, causing IP mismatch errors.
+    return socket.gethostbyname(socket.gethostname())
 
 
 def _get_job_node_ips() -> str:

@@ -323,7 +323,13 @@ class Slurm(clouds.Cloud):
         if zones and len(zones) > 0:
             partition = zones[0].name
         else:
-            partition = slurm_utils.get_cluster_default_partition(cluster)
+            partitions = slurm_utils.get_partitions(cluster)
+            if not partitions:
+                raise ValueError(f'No partitions found for cluster {cluster}.')
+            # get_partitions returns the default partition first, then sorted
+            # alphabetically, so this also handles the case where the cluster
+            # does not have a default partition.
+            partition = partitions[0]
 
         # cluster is our target slurmctld host.
         ssh_config = slurm_utils.get_slurm_ssh_config()
