@@ -814,8 +814,7 @@ def get_ready_replicas(
 def _task_fits(task_resources: 'resources_lib.Resources',
                free_resources: 'resources_lib.Resources') -> bool:
     """Check if the task resources fit in the free resources."""
-    if not task_resources.less_demanding_than(free_resources,
-                                              check_cloud=False):
+    if not task_resources.less_demanding_than(free_resources):
         return False
     if task_resources.cpus is not None:
         if (free_resources.cpus is None or
@@ -1709,16 +1708,19 @@ def _format_replica_table(replica_records: List[Dict[str, Any]], show_all: bool,
         elif isinstance(used_by, str):
             used_by_str = used_by
         else:
-            if len(used_by) > 2:
-                used_by_str = (
-                    f'{used_by[0]}, {used_by[1]}, +{len(used_by) - 2}'
-                    ' more')
-            elif len(used_by) == 2:
-                used_by_str = f'{used_by[0]}, {used_by[1]}'
-            elif len(used_by) == 1:
-                used_by_str = str(used_by[0])
+            if isinstance(used_by, str):
+                used_by_str = used_by
             else:
-                used_by_str = '-'
+                if len(used_by) > 2:
+                    used_by_str = (
+                        f'{used_by[0]}, {used_by[1]}, +{len(used_by) - 2}'
+                        ' more')
+                elif len(used_by) == 2:
+                    used_by_str = f'{used_by[0]}, {used_by[1]}'
+                elif len(used_by) == 1:
+                    used_by_str = str(used_by[0])
+                else:
+                    used_by_str = '-'
 
         replica_handle: Optional['backends.CloudVmRayResourceHandle'] = record[
             'handle']
