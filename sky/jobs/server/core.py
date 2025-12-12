@@ -1226,21 +1226,21 @@ def pool_sync_down_logs(
 
 
 @usage_lib.entrypoint
-def get_job_status_transitions(
+def get_job_task_events(
     job_id: int,
     task_id: Optional[int] = None,
     limit: Optional[int] = 10,
 ) -> List[Dict[str, Any]]:
-    """Get status transitions for a managed job.
+    """Get task events for a managed job.
 
     Args:
-        job_id: The job ID to get transitions for.
+        job_id: The job ID to get task events for.
         task_id: Optional task ID to filter by.
-        limit: Optional limit on number of transitions to return (default 10).
+        limit: Optional limit on number of task events to return (default 10).
 
     Returns:
-        List of status transition records.
+        List of task event records.
     """
-    return managed_job_state.get_job_status_transitions(job_id=job_id,
-                                                        task_id=task_id,
-                                                        limit=limit)
+    return managed_job_state.get_job_task_events(job_id=job_id,
+                                                 task_id=task_id,
+                                                 limit=limit)

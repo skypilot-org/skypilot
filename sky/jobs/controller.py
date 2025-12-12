@@ -18,6 +18,7 @@ import dotenv
 import sky
 from sky import core
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -593,6 +594,7 @@ class JobController:
                 force_refresh_statuses=set(status_lib.ClusterStatus))
 
             recovery_reason = None
+            recovery_code = None
             if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster is (partially) preempted or failed. It can be
                 # down, INIT or STOPPED, based on the interruption behavior of
@@ -604,14 +606,17 @@ class JobController:
                     f'Cluster is preempted or failed{cluster_status_str}. '
                     'Recovering...')
                 cluster_failures = await context_utils.to_thread(
-                    backend_utils.get_cluster_failures,
+                    global_user_state.get_cluster_failures,
                     cluster_name=cluster_name)
                 logger.info(f'Cluster failures: {cluster_failures}')
                 if cluster_failures:
-                    failure_reasons = [
-                        failure['failure_reason']
-                        for failure in cluster_failures
-                    ]
+                    failure_modes = []
+                    failure_reasons = []
+                    for failure in cluster_failures:
+                        failure_modes.append(failure['failure_mode'])
+                        failure_reasons.append(failure['failure_reason'])
+
+                    recovery_code = '; '.join(failure_modes)
                     recovery_reason = '; '.join(failure_reasons)
             else:
                 if job_status is not None and not job_status.is_terminal():
@@ -766,7 +771,9 @@ class JobController:
                 task_id=task_id,
                 force_transit_to_recovering=force_transit_to_recovering,
                 callback_func=callback_func,
-                reason=recovery_reason)
+                code=recovery_code,
+                reason=recovery_reason,
+            )
 
             recovered_time = await self._strategy_executor.recover()
 

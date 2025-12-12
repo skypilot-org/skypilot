@@ -2205,11 +2205,6 @@ def check_can_clone_disk_and_override_task(
     return task, handle
 
 
-def get_cluster_failures(cluster_name: str) -> List[Dict[str, Any]]:
-    """Get the cluster failures for a given cluster."""
-    return global_user_state.get_cluster_failures(cluster_name=cluster_name)
-
-
 def _update_cluster_status(
         cluster_name: str,
         record: Dict[str, Any],
@@ -2269,7 +2264,6 @@ def _update_cluster_status(
 
     cluster_failures = global_user_state.get_cluster_failures(
         record['cluster_hash'])
-    no_cluster_failures = len(cluster_failures) == 0
 
     def get_node_counts_from_ray_status(
             runner: command_runner.CommandRunner) -> Tuple[int, int, str, str]:
@@ -2412,7 +2406,7 @@ def _update_cluster_status(
     should_check_ray = cloud is not None and cloud.uses_ray()
     if (all_nodes_up and (not should_check_ray or
                           run_ray_status_to_check_ray_cluster_healthy()) and
-            no_cluster_failures):
+            not cluster_failures):
         # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.
@@ -2523,7 +2517,7 @@ def _update_cluster_status(
                                  for status in node_statuses)
     is_abnormal = (some_nodes_terminated or some_nodes_not_stopped)
 
-    if is_abnormal and no_cluster_failures:
+    if is_abnormal and not cluster_failures:
         status_reason = ', '.join(
             [status[1] for status in node_statuses if status[1] is not None])
 
@@ -2651,12 +2645,12 @@ def _update_cluster_status(
             cluster_name,
             include_user_info=include_user_info,
             summary_response=summary_response)
-    # Now is_abnormal is False: either node_statuses is empty or all nodes are
-    # STOPPED.
+    # Now is_abnormal is False: either node_statuses is empty, all nodes are
+    # STOPPED, or there are cluster failures.
 
     # If there are cluster failures and we do not need to terminate the cluster
     # then we can return the cluster record as is.
-    if not no_cluster_failures and not to_terminate:
+    if cluster_failures and not to_terminate:
         return global_user_state.get_cluster_from_name(
             cluster_name,
             include_user_info=include_user_info,

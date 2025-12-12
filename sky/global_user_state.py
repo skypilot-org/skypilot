@@ -267,10 +267,17 @@ system_config_table = sqlalchemy.Table(
 cluster_failures_table = sqlalchemy.Table(
     'cluster_failures',
     Base.metadata,
-    sqlalchemy.Column('cluster_hash', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('failure_mode', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('id',
+                      sqlalchemy.Integer,
+                      primary_key=True,
+                      autoincrement=True),
+    sqlalchemy.Column('cluster_hash', sqlalchemy.Text, index=True),
+    sqlalchemy.Column('failure_mode', sqlalchemy.Text, index=True),
     sqlalchemy.Column('failure_reason', sqlalchemy.Text),
-    sqlalchemy.Column('deleted_at', sqlalchemy.Integer, server_default=None),
+    sqlalchemy.Column('cleared_at',
+                      sqlalchemy.Integer,
+                      server_default=None,
+                      index=True),
 )
 
 
@@ -2784,17 +2791,17 @@ def get_max_db_connections() -> Optional[int]:
 
 @_init_db
 @metrics_lib.time_me
-def add_or_update_cluster_failure(cluster_hash: str,
-                                  failure_mode: str,
-                                  failure_reason: str,
-                                  deleted_at: Optional[int] = None) -> None:
-    """Add or update a cluster failure record.
+def add_cluster_failure(cluster_hash: str,
+                        failure_mode: str,
+                        failure_reason: str,
+                        cleared_at: Optional[int] = None) -> None:
+    """Add a new cluster failure record.
 
     Args:
         cluster_hash: Hash of the cluster.
         failure_mode: Type/mode of the failure.
         failure_reason: Reason for the failure.
-        deleted_at: Timestamp when the failure was resolved/deleted.
+        cleared_at: Timestamp when the failure was resolved/cleared.
     """
     assert _SQLALCHEMY_ENGINE is not None
 
@@ -2808,24 +2815,13 @@ def add_or_update_cluster_failure(cluster_hash: str,
         else:
             raise ValueError('Unsupported database dialect')
 
-        insert_stmnt = insert_func(cluster_failures_table).values(
+        # Insert a new failure record using dialect-specific insert
+        insert_stmt = insert_func(cluster_failures_table).values(
             cluster_hash=cluster_hash,
             failure_mode=failure_mode,
             failure_reason=failure_reason,
-            deleted_at=deleted_at)
-
-        # Use ON CONFLICT DO UPDATE to handle upsert
-        upsert_stmnt = insert_stmnt.on_conflict_do_update(
-            index_elements=[
-                cluster_failures_table.c.cluster_hash,
-                cluster_failures_table.c.failure_mode
-            ],
-            set_={
-                cluster_failures_table.c.failure_reason: failure_reason,
-                cluster_failures_table.c.deleted_at: deleted_at,
-            })
-
-        session.execute(upsert_stmnt)
+            cleared_at=cleared_at)
+        session.execute(insert_stmt)
         session.commit()
 
 
@@ -2861,7 +2857,7 @@ def get_cluster_failures(
     assert _SQLALCHEMY_ENGINE is not None
 
     # Build filter conditions
-    filters = [cluster_failures_table.c.deleted_at.is_(None)]
+    filters = [cluster_failures_table.c.cleared_at.is_(None)]
     if cluster_hash is not None:
         filters.append(cluster_failures_table.c.cluster_hash == cluster_hash)
 
@@ -2873,19 +2869,19 @@ def get_cluster_failures(
         'cluster_hash': row.cluster_hash,
         'failure_mode': row.failure_mode,
         'failure_reason': row.failure_reason,
-        'deleted_at': row.deleted_at
+        'cleared_at': row.cleared_at
     } for row in rows]
 
 
 @_init_db
 @metrics_lib.time_me
 def clear_cluster_failures(failures: List[Dict[str, Any]]) -> None:
-    """Clear (mark as deleted) a list of cluster failures.
+    """Clear (mark as cleared) a list of cluster failures.
 
     Args:
         failures: List of failure dictionaries as returned by
         get_cluster_failures(). Each dict should contain:
-        cluster_hash, failure_mode, failure_reason, deleted_at.
+        cluster_hash, failure_mode, failure_reason, cleared_at.
     """
     if not failures:
         return
@@ -2910,9 +2906,9 @@ def clear_cluster_failures(failures: List[Dict[str, Any]]) -> None:
             update_stmt = sqlalchemy.update(cluster_failures_table).where(
                 sqlalchemy.and_(
                     combined_condition,
-                    cluster_failures_table.c.deleted_at.is_(
+                    cluster_failures_table.c.cleared_at.is_(
                         None)  # Only update active failures
-                )).values(deleted_at=current_time)
+                )).values(cleared_at=current_time)
 
             session.execute(update_stmt)
             session.commit()
