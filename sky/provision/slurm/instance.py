@@ -595,7 +595,7 @@ def get_command_runners(
     # it is the login node's. The internal IP is the private IP of the node.
     ssh_user = cast(str, credentials.pop('ssh_user'))
     ssh_private_key = cast(str, credentials.pop('ssh_private_key'))
-    # ssh_proxy_jump is Slurm-specific, it does not existi in the auth section
+    # ssh_proxy_jump is Slurm-specific, it does not exist in the auth section
     # of the cluster yaml.
     ssh_proxy_jump = cluster_info.provider_config.get('ssh', {}).get(
         'proxyjump', None)
