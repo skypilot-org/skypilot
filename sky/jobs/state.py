@@ -847,9 +847,9 @@ async def set_restarting_async(job_id: int, task_id: int, recovering: bool):
     after using set_backoff_pending to transition back to PENDING during
     launch retry backoff.
     """
-    target_status = ManagedJobStatus.STARTING.value
+    target_status = ManagedJobStatus.STARTING
     if recovering:
-        target_status = ManagedJobStatus.RECOVERING.value
+        target_status = ManagedJobStatus.RECOVERING
 
     await add_job_task_event_async(job_id, task_id, target_status,
                                    'Job is restarting')
@@ -861,7 +861,7 @@ async def set_restarting_async(job_id: int, task_id: int, recovering: bool):
                     spot_table.c.spot_job_id == job_id,
                     spot_table.c.task_id == task_id,
                     spot_table.c.end_at.is_(None),
-                )).values({spot_table.c.status: target_status}))
+                )).values({spot_table.c.status: target_status.value}))
         count = result.rowcount
         await session.commit()
         logger.debug(f'back to {target_status}')
