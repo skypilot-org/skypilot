@@ -814,7 +814,8 @@ def get_ready_replicas(
 def _task_fits(task_resources: 'resources_lib.Resources',
                free_resources: 'resources_lib.Resources') -> bool:
     """Check if the task resources fit in the free resources."""
-    if not task_resources.less_demanding_than(free_resources):
+    if not task_resources.less_demanding_than(free_resources,
+                                              check_cloud=False):
         return False
     if task_resources.cpus is not None:
         if (free_resources.cpus is None or

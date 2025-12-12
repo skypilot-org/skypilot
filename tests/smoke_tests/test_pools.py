@@ -1563,6 +1563,9 @@ def test_pool_scale_with_workdir(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
+# 2. The resource tests don't currently work on anything but kubernetes because
+# the launched resources for other clouds don't have memory specified.
+@pytest.mark.kubernetes  # see note 2 above
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_resource_multiple_jobs_single_worker(generic_cloud: str):
     """Test that multiple jobs can run on a single worker when resources allow."""
@@ -1627,6 +1630,7 @@ def test_pool_resource_multiple_jobs_single_worker(generic_cloud: str):
                 smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes  # see note 2 above
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_resource_contention_two_workers(generic_cloud: str):
     """Test that only one job runs when resources don't allow both."""
@@ -1699,6 +1703,7 @@ def test_pool_resource_contention_two_workers(generic_cloud: str):
                         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes  # see note 2 above
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_resource_contention_two_workers_some_available(
         generic_cloud: str):
@@ -1773,6 +1778,7 @@ def test_pool_resource_contention_two_workers_some_available(
                         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes  # see note 2 above
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_resource_reclamation(generic_cloud: str):
     """Test that resources are reclaimed when jobs finish, allowing queued jobs to run."""
@@ -1838,6 +1844,7 @@ def test_pool_resource_reclamation(generic_cloud: str):
                 smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes  # see note 2 above
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_resource_fallback_to_unaware(generic_cloud: str):
     """Test that resources are reclaimed when jobs finish, allowing queued jobs to run."""
