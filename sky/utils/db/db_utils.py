@@ -6,6 +6,7 @@ import os
 import pathlib
 import sqlite3
 import threading
+import time
 import typing
 from typing import Any, Callable, Dict, Iterable, Literal, Optional, Union
 
@@ -285,6 +286,7 @@ def drop_column_from_table_alembic(
         else:
             raise
 
+CURSORS = []
 
 class SQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database."""
@@ -297,6 +299,7 @@ class SQLiteConn(threading.local):
         create_table(self.cursor, self.conn)
         self._async_conn: Optional[aiosqlite.Connection] = None
         self._async_conn_lock: Optional[asyncio.Lock] = None
+        self.times = 0
 
     async def _get_async_conn(self) -> aiosqlite.Connection:
         """Get the shared aiosqlite connection for current thread.
@@ -357,8 +360,18 @@ class SQLiteConn(threading.local):
                                      parameters: Optional[Iterable[Any]] = None
                                     ) -> Iterable[sqlite3.Row]:
         conn = await self._get_async_conn()
-        return await conn.execute_fetchall(sql, parameters)
-
+        def exec_fetch_all_mock(sql: str, parameters: Any) -> Iterable[sqlite3.Row]:
+            cursor = conn._conn.execute(sql, parameters)
+            # Avoid GC!!
+            CURSORS.append(cursor)
+            self.times += 1
+            if self.times % 2 == 0:
+                logger.info('Fail execute fecth all')
+                raise RuntimeError('BOOM')
+            res = cursor.fetchall()
+            return res
+        return await conn._execute(exec_fetch_all_mock, sql, parameters)
+    
     async def execute_get_returning_value_async(
             self,
             sql: str,
