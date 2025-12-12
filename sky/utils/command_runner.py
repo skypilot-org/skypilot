@@ -178,6 +178,9 @@ def ssh_options_list(
 
     if ssh_proxy_jump is not None:
         logger.debug(f'--- ProxyJump: {ssh_proxy_jump} ---')
+        if ssh_proxy_command is not None:
+            logger.warning('Both ProxyCommand and ProxyJump are specified. '
+                           'ProxyCommand will take precedence.')
         arg_dict.update({
             'ProxyJump': shlex.quote(ssh_proxy_jump),
         })
@@ -750,7 +753,7 @@ class SSHCommandRunner(CommandRunner):
     def ssh_base_command(self, *, ssh_mode: SshMode,
                          port_forward: Optional[List[Tuple[int, int]]],
                          connect_timeout: Optional[int]) -> List[str]:
-        ssh = ['ssh']
+        ssh = ['ssh', '-vvv']
         if ssh_mode == SshMode.NON_INTERACTIVE:
             # Disable pseudo-terminal allocation. Otherwise, the output of
             # ssh will be corrupted by the user's input.
@@ -872,6 +875,8 @@ class SSHCommandRunner(CommandRunner):
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
         os.makedirs(log_dir, exist_ok=True)
+
+        logger.info(f'--- command: {command} ---')
 
         executable = None
         if not process_stream:
