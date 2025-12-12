@@ -184,6 +184,7 @@ def format_resource(resource: 'resources_lib.Resources',
                     simplified_only: bool = False) -> Tuple[str, Optional[str]]:
     resource = resource.assert_launchable()
     is_k8s = str(resource.cloud).lower() == 'kubernetes'
+    vcpu, mem = None, None
     if resource.accelerators is None or is_k8s or not simplified_only:
         vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
             resource.instance_type)
