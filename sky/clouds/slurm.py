@@ -365,6 +365,7 @@ class Slurm(clouds.Cloud):
             'ssh_port': str(ssh_config_dict.get('port', 22)),
             'ssh_user': ssh_config_dict['user'],
             'slurm_proxy_command': ssh_config_dict.get('proxycommand', None),
+            'slurm_proxy_jump': ssh_config_dict.get('proxyjump', None),
             # TODO(jwj): Solve naming collision with 'ssh_private_key'.
             # Please refer to slurm-ray.yml.j2 'ssh' and 'auth' sections.
             'slurm_private_key': ssh_config_dict['identityfile'][0],
@@ -492,7 +493,8 @@ class Slurm(clouds.Cloud):
                     int(ssh_config_dict.get('port', 22)),
                     ssh_config_dict['user'],
                     ssh_config_dict['identityfile'][0],
-                    ssh_proxy_command=ssh_config_dict.get('proxycommand', None))
+                    ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+                    ssh_proxy_jump=ssh_config_dict.get('proxyjump', None))
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
                 ctx2text[cluster] = 'enabled'

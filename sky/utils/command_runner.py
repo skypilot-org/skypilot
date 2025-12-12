@@ -90,6 +90,7 @@ def ssh_options_list(
     ssh_control_name: Optional[str],
     *,
     ssh_proxy_command: Optional[str] = None,
+    ssh_proxy_jump: Optional[str] = None,
     docker_ssh_proxy_command: Optional[str] = None,
     connect_timeout: Optional[int] = None,
     port: int = 22,
@@ -133,11 +134,11 @@ def ssh_options_list(
     # SSH Control will have a severe delay when using docker_ssh_proxy_command.
     # TODO(tian): Investigate why.
     #
-    # We disable ControlMaster when ssh_proxy_command is used, because the
-    # master connection will be idle although the connection might be shared
-    # by other ssh commands that is not idle. In that case, user's custom proxy
-    # command may drop the connection due to idle timeout, since it will only
-    # see the idle master connection. It is an issue even with the
+    # We disable ControlMaster when ssh_proxy_command or ssh_proxy_jump is used,
+    # because the master connection will be idle although the connection might
+    # be shared by other ssh commands that is not idle. In that case, user's
+    # custom proxy command may drop the connection due to idle timeout, since it
+    # will only see the idle master connection. It is an issue even with the
     # ServerAliveInterval set, since the keepalive message may not be recognized
     # by the custom proxy command, such as AWS SSM Session Manager.
     #
@@ -147,7 +148,8 @@ def ssh_options_list(
     # is running and the ControlMaster keeps the session, which results in
     # 'ControlPersist' number of seconds delay per ssh commands ran.
     if (ssh_control_name is not None and docker_ssh_proxy_command is None and
-            ssh_proxy_command is None and not disable_control_master):
+            ssh_proxy_command is None and ssh_proxy_jump is None and
+            not disable_control_master):
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
@@ -172,6 +174,12 @@ def ssh_options_list(
             # Due to how log_lib.run_with_log() works (using shell=True) we
             # must quote this value.
             'ProxyCommand': shlex.quote(ssh_proxy_command),
+        })
+
+    if ssh_proxy_jump is not None:
+        logger.debug(f'--- ProxyJump: {ssh_proxy_jump} ---')
+        arg_dict.update({
+            'ProxyJump': ssh_proxy_jump,
         })
 
     return ssh_key_option + [
@@ -622,6 +630,7 @@ class SSHCommandRunner(CommandRunner):
         ssh_private_key: Optional[str],
         ssh_control_name: Optional[str] = '__default__',
         ssh_proxy_command: Optional[str] = None,
+        ssh_proxy_jump: Optional[str] = None,
         docker_user: Optional[str] = None,
         disable_control_master: Optional[bool] = False,
         port_forward_execute_remote_command: Optional[bool] = False,
@@ -644,6 +653,8 @@ class SSHCommandRunner(CommandRunner):
             ssh_proxy_command: Optional, the value to pass to '-o
                 ProxyCommand'. Useful for communicating with clusters without
                 public IPs using a "jump server".
+            ssh_proxy_jump: Optional, the value to pass to '-o ProxyJump' flag.
+                Similar to ssh_proxy_command, but more modern.
             port: The port to use for ssh.
             docker_user: The docker user to use for ssh. If specified, the
                 command will be run inside a docker container which have a ssh
@@ -663,6 +674,7 @@ class SSHCommandRunner(CommandRunner):
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
+        self._ssh_proxy_jump = ssh_proxy_jump
         self.disable_control_master = (
             disable_control_master or
             control_master_utils.should_disable_control_master())
@@ -763,6 +775,7 @@ class SSHCommandRunner(CommandRunner):
             self.ssh_private_key,
             self.ssh_control_name,
             ssh_proxy_command=self._ssh_proxy_command,
+            ssh_proxy_jump=self._ssh_proxy_jump,
             docker_ssh_proxy_command=docker_ssh_proxy_command,
             port=self.port,
             connect_timeout=connect_timeout,
@@ -920,6 +933,7 @@ class SSHCommandRunner(CommandRunner):
                 self.ssh_private_key,
                 self.ssh_control_name,
                 ssh_proxy_command=self._ssh_proxy_command,
+                ssh_proxy_jump=self._ssh_proxy_jump,
                 docker_ssh_proxy_command=docker_ssh_proxy_command,
                 port=self.port,
                 disable_control_master=self.disable_control_master))
@@ -1336,11 +1350,12 @@ class SlurmCommandRunner(SSHCommandRunner):
         # the compute node where the job is running.
 
         # First, build SSH options to reach the login node, using the user's
-        # existing proxy command if provided.
+        # existing proxy command or proxy jump if provided.
         proxy_ssh_options = ' '.join(
             ssh_options_list(self.ssh_private_key,
                              None,
                              ssh_proxy_command=self._ssh_proxy_command,
+                             ssh_proxy_jump=self._ssh_proxy_jump,
                              port=self.port,
                              disable_control_master=True))
         login_node_proxy_command = (f'ssh {proxy_ssh_options} '
