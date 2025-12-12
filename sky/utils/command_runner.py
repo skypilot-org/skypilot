@@ -179,7 +179,7 @@ def ssh_options_list(
     if ssh_proxy_jump is not None:
         logger.debug(f'--- ProxyJump: {ssh_proxy_jump} ---')
         arg_dict.update({
-            'ProxyJump': ssh_proxy_jump,
+            'ProxyJump': shlex.quote(ssh_proxy_jump),
         })
 
     return ssh_key_option + [
