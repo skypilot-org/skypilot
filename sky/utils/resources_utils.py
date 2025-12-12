@@ -198,7 +198,7 @@ def format_resource(resource: 'resources_lib.Resources',
         elements_full.append(f'gpus={acc}:{count}')
 
     cpu_to_add = None
-    if resource.cpus is not None:
+    if resource.cpus is not None and resource.cpus.strip():
         cpus_str = resource.cpus.rstrip('+')
         try:
             cpus_float = float(cpus_str)
