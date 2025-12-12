@@ -1004,7 +1004,7 @@ def get_next_cluster_name(
         # fallback to 1 job per replica. If we are truly resource bottlenecked
         # then we will see that there are jobs running on the replica and will
         # not schedule another.
-        elif len(idle_replicas) == 0:
+        if len(idle_replicas) == 0:
             logger.debug('Falling back to resource unaware scheduling')
             # Fall back to resource unaware scheduling if no task resources
             # are provided.
