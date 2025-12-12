@@ -6,6 +6,7 @@ resources:
     job_recovery: EAGER_NEXT_REGION
 """
 import asyncio
+import copy
 import logging
 import os
 import traceback
@@ -402,6 +403,8 @@ class StrategyExecutor:
                                                      f'{env_var}: {value}')
                                         os.environ[env_var] = value
 
+                            _add_k8s_annotations(self.dag.tasks[0], self.job_id)
+
                             request_id = None
                             try:
                                 request_id = await context_utils.to_thread(
@@ -792,3 +795,36 @@ def _get_logger_file(file_logger: logging.Logger) -> Optional[str]:
         if isinstance(handler, logging.FileHandler):
             return handler.baseFilename
     return None
+
+
+def _add_k8s_annotations(task: 'task_lib.Task', job_id: int) -> None:
+    # Add Kubernetes pod config annotation before launch
+    original_resources = task.resources
+    new_resources_list = []
+    for resource in original_resources:
+        # Get existing config overrides or create new dict
+        config_overrides = resource.cluster_config_overrides
+
+        # Initialize nested structure if needed
+        if 'kubernetes' not in config_overrides:
+            config_overrides['kubernetes'] = {}
+        if 'pod_config' not in config_overrides['kubernetes']:
+            config_overrides['kubernetes']['pod_config'] = {}
+        if 'metadata' not in config_overrides['kubernetes']['pod_config']:
+            config_overrides['kubernetes']['pod_config']['metadata'] = {}
+        if 'annotations' not in config_overrides['kubernetes']['pod_config'][
+                'metadata']:
+            config_overrides['kubernetes']['pod_config']['metadata'][
+                'annotations'] = {}
+
+        # Add the managed job ID annotation
+        config_overrides['kubernetes']['pod_config']['metadata']['annotations'][
+            'skypilot-managed-job-id'] = str(job_id)
+        config_overrides['kubernetes']['pod_config']['metadata']['annotations'][
+            'skypilot-managed-job-name'] = str(task.name)
+        # Create new resource with updated config
+        new_resource = resource.copy(_cluster_config_overrides=config_overrides)
+        new_resources_list.append(new_resource)
+
+    # Set the new resources back to the task
+    task.set_resources(type(original_resources)(new_resources_list))
