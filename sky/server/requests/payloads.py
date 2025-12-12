@@ -883,8 +883,8 @@ class GetClusterFailuresBody(RequestBody):
     cluster_hash: Optional[str] = None
 
 
-class GetJobStatusTransitionsBody(RequestBody):
-    """The request body for the get job status transitions endpoint."""
+class GetJobTaskEventsBody(RequestBody):
+    """The request body for the get job task events endpoint."""
     job_id: int
     task_id: Optional[int] = None
-    limit: Optional[int] = 10  # Default to 10 most recent transitions
+    limit: Optional[int] = 10  # Default to 10 most recent task events

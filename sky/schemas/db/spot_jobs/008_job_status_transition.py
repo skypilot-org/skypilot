@@ -1,8 +1,8 @@
-"""Add job_status_transition table for tracking managed job status changes.
+"""Add job_task_events table for tracking managed job task events.
 
 Revision ID: 008
 Revises: 007
-Create Date: 2025-12-06
+Create Date: 2025-12-11
 
 """
 # pylint: disable=invalid-name
@@ -21,12 +21,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    """Create job_status_transition table for tracking status changes."""
+    """Create job_task_events table for tracking task events."""
     with op.get_context().autocommit_block():
         db_utils.add_table_to_db_sqlalchemy(Base.metadata, op.get_bind(),
-                                            'job_status_transition')
+                                            'job_task_events')
 
 
 def downgrade():
-    """Drop job_status_transition table."""
+    """Drop job_task_events table."""
     pass
