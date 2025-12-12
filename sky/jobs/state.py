@@ -11,7 +11,8 @@ import sqlite3
 import threading
 import time
 import typing
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
+from typing import (Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple,
+                    Union)
 import urllib.parse
 
 import colorama
@@ -24,6 +25,7 @@ from sqlalchemy.ext import asyncio as sql_async
 from sqlalchemy.ext import declarative
 
 from sky import exceptions
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -95,6 +97,7 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('local_log_file', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
     sqlalchemy.Column('logs_cleaned_at', sqlalchemy.Float, server_default=None),
+    sqlalchemy.Column('full_resources', sqlalchemy.JSON, server_default=None),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -1857,6 +1860,63 @@ def get_nonterminal_job_ids_by_pool(pool: str,
         return job_ids
 
 
+@_init_db
+def get_pool_worker_used_resources(
+        job_ids: Set[int]) -> Optional['resources_lib.Resources']:
+    """Get the total used resources by running jobs.
+
+    Args:
+        job_ids: Set of spot_job_id values to check
+
+    Returns:
+        Resources object with summed resources from all running jobs, or None
+        if we couldn't parse the resources string for any job.
+    """
+    if not job_ids:
+        return None
+
+    assert _SQLALCHEMY_ENGINE is not None
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Query spot_table for full_resources. Use full_resources if available,
+        # otherwise fall back to resources for backward compatibility.
+        # Don't check for running status because we want to include jobs that
+        # may have just been scheduled. The job_ids come from
+        # get_nonterminal_job_ids_by_pool anyway so we don't need to worry
+        # about removing old jobs.
+        query = sqlalchemy.select(spot_table.c.full_resources).where(
+            sqlalchemy.and_(spot_table.c.spot_job_id.in_(job_ids)))
+        rows = session.execute(query).fetchall()
+
+        resource_configs = []
+        for row in rows:
+            if row[0] is None:
+                # We don't have full_resources for this job. We should return
+                # none since we can't make any guarantees about what resources
+                # are being used.
+                return None
+            resource_configs.append(row[0])
+
+    # Parse resources dicts into Resources objects and sum them using +
+    total_resources = None
+    # full_resources is now stored as JSON dict from to_yaml_config()
+    for resource_config in resource_configs:
+        resources_set = resources_lib.Resources.from_yaml_config(
+            resource_config)
+        if len(resources_set) == 0:
+            # We couldn't parse the resources JSON. We should return
+            # none since we can't make any guarantees about what resources
+            # are being used.
+            return None
+        # Get the first Resources object from the set/list
+        parsed = next(iter(resources_set))
+        if total_resources is None:
+            total_resources = parsed
+        else:
+            total_resources = total_resources + parsed
+    return total_resources
+
+
 @_init_db_async
 async def get_waiting_job_async(
         pid: int, pid_started_at: float) -> Optional[Dict[str, Any]]:
@@ -1964,14 +2024,28 @@ async def get_latest_task_id_status_async(
 
 
 @_init_db_async
-async def set_starting_async(job_id: int, task_id: int, run_timestamp: str,
-                             submit_time: float, resources_str: str,
+async def set_starting_async(job_id: int,
+                             task_id: int,
+                             run_timestamp: str,
+                             submit_time: float,
+                             resources_str: str,
                              specs: Dict[str, Union[str, int]],
-                             callback_func: AsyncCallbackType):
+                             callback_func: AsyncCallbackType,
+                             full_resources_json: Optional[Dict[str,
+                                                                Any]] = None):
     """Set the task to starting state."""
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     logger.info('Launching the spot cluster...')
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        values = {
+            spot_table.c.resources: resources_str,
+            spot_table.c.submitted_at: submit_time,
+            spot_table.c.status: ManagedJobStatus.STARTING.value,
+            spot_table.c.run_timestamp: run_timestamp,
+            spot_table.c.specs: json.dumps(specs),
+        }
+        if full_resources_json is not None:
+            values[spot_table.c.full_resources] = full_resources_json
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
@@ -1979,13 +2053,7 @@ async def set_starting_async(job_id: int, task_id: int, run_timestamp: str,
                     spot_table.c.task_id == task_id,
                     spot_table.c.status == ManagedJobStatus.PENDING.value,
                     spot_table.c.end_at.is_(None),
-                )).values({
-                    spot_table.c.resources: resources_str,
-                    spot_table.c.submitted_at: submit_time,
-                    spot_table.c.status: ManagedJobStatus.STARTING.value,
-                    spot_table.c.run_timestamp: run_timestamp,
-                    spot_table.c.specs: json.dumps(specs),
-                }))
+                )).values(values))
         count = result.rowcount
         await session.commit()
         if count != 1:

@@ -11,6 +11,7 @@ import pytest
 from sky.clouds import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import resources_utils
 
 
 class TestKubernetesExistingAllowedContexts(unittest.TestCase):
@@ -379,7 +380,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         setattr(self.resources, 'assert_launchable', lambda: self.resources)
 
         # Import NetworkTier for setting network_tier
-        from sky.utils import resources_utils
         self.resources.network_tier = resources_utils.NetworkTier.BEST
 
         self.cluster_name = "test-cluster"
@@ -439,7 +439,9 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         # Call make_deploy_resources_variables
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
             resources=self.resources,
-            cluster_name=self.cluster_name,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
             region=self.region,
             zones=None,
             num_nodes=1,
@@ -506,7 +508,9 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         # Call make_deploy_resources_variables
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
             resources=self.resources,
-            cluster_name=self.cluster_name,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
             region=self.region,
             zones=None,
             num_nodes=1,
@@ -539,7 +543,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         """Test that IPC_LOCK capability is disabled when network tier is not BEST."""
 
         # Modify resources to not use BEST network tier
-        from sky.utils import resources_utils
         self.resources.network_tier = resources_utils.NetworkTier.STANDARD
 
         # Setup mocks - when network tier is not BEST, _detect_network_type returns NONE
@@ -575,7 +578,9 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         # Call make_deploy_resources_variables
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
             resources=self.resources,
-            cluster_name=self.cluster_name,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
             region=self.region,
             zones=None,
             num_nodes=1,
@@ -620,7 +625,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         setattr(gpu_resources, 'assert_launchable', lambda: gpu_resources)
 
         # Set network tier to BEST
-        from sky.utils import resources_utils
         gpu_resources.network_tier = resources_utils.NetworkTier.BEST
 
         # Setup mocks - cluster supports high performance networking (Nebius)
@@ -663,7 +667,9 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         # Call make_deploy_resources_variables
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
             resources=gpu_resources,
-            cluster_name="test-nebius-gpu-cluster",
+            cluster_name=resources_utils.ClusterName(
+                display_name="test-nebius-gpu-cluster",
+                name_on_cloud="test-nebius-gpu-cluster"),
             region=mock.MagicMock(name="nebius-context"),
             zones=None,
             num_nodes=1,
@@ -711,7 +717,6 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         setattr(self.resources, 'assert_launchable', lambda: self.resources)
 
         # Import NetworkTier for setting network_tier
-        from sky.utils import resources_utils
         self.resources.network_tier = resources_utils.NetworkTier.BEST
 
         self.cluster_name = "test-k8s-cluster"
@@ -791,7 +796,9 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         # Call make_deploy_resources_variables
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
             resources=self.resources,
-            cluster_name=self.cluster_name,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
             region=self.region,
             zones=None,
             num_nodes=1,
@@ -880,7 +887,6 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         prod_resources.image_id = None
         setattr(prod_resources, 'assert_launchable', lambda: prod_resources)
 
-        from sky.utils import resources_utils
         prod_resources.network_tier = resources_utils.NetworkTier.BEST
 
         prod_region = mock.MagicMock()
@@ -889,7 +895,9 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         # Call make_deploy_resources_variables
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
             resources=prod_resources,
-            cluster_name="test-prod-cluster",
+            cluster_name=resources_utils.ClusterName(
+                display_name="test-prod-cluster",
+                name_on_cloud="test-prod-cluster"),
             region=prod_region,
             zones=None,
             num_nodes=1,
@@ -1569,7 +1577,6 @@ class TestKubernetesUnsupportedFeaturesForResources(unittest.TestCase):
 
         resources = mock.MagicMock()
         resources.region = 'test-context'
-        from sky.utils import resources_utils
         resources.network_tier = resources_utils.NetworkTier.BEST
 
         from sky import clouds
@@ -1600,7 +1607,6 @@ class TestKubernetesUnsupportedFeaturesForResources(unittest.TestCase):
 
         resources = mock.MagicMock()
         resources.region = 'test-context'
-        from sky.utils import resources_utils
         resources.network_tier = resources_utils.NetworkTier.BEST
 
         from sky import clouds

@@ -6,6 +6,7 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
+from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import resources_utils
 
@@ -36,6 +37,13 @@ class StopFailoverError(Exception):
     """
 
 
+# These fields are sensitive and should be redacted from the config for logging
+# purposes.
+SENSITIVE_FIELDS = [
+    ('docker_config', 'docker_login_config', 'password'),
+]
+
+
 @dataclasses.dataclass
 class ProvisionConfig:
     """Configuration for provisioning."""
@@ -55,6 +63,18 @@ class ProvisionConfig:
     resume_stopped_nodes: bool
     # Optional ports to open on launch of the cluster.
     ports_to_open_on_launch: Optional[List[int]]
+
+    def get_redacted_config(self) -> Dict[str, Any]:
+        """Get the redacted config."""
+        config = dataclasses.asdict(self)
+
+        config_copy = config_utils.Config(config)
+
+        for field_list in SENSITIVE_FIELDS:
+            val = config_copy.get_nested(field_list, default_value=None)
+            if val is not None:
+                config_copy.set_nested(field_list, '<redacted>')
+        return dict(**config_copy)
 
 
 # -------------------- output data model -------------------- #

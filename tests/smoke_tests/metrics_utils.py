@@ -1,3 +1,4 @@
+import dataclasses
 import sys
 import threading
 import time
@@ -15,13 +16,33 @@ class AggregatedMetric(TypedDict):
     unit: str
 
 
-def collect_metrics(
-    url: str,
-    metric_name: str,
-    duration_seconds: Optional[int] = None,
-    stop_event: Optional[threading.Event] = None,
-    interval_seconds: int = 5
-) -> Dict[Tuple[str, ...], List[Tuple[float, float]]]:
+@dataclasses.dataclass
+class PerKeyDiff:
+    key_label: str
+    baseline: float
+    actual: float
+    increase: float
+    increase_pct: float
+
+
+@dataclasses.dataclass
+class AggregateDiff:
+    total_baseline: float
+    total_actual: float
+    total_increase: float
+    total_increase_pct: float
+
+
+MetricKey = Tuple[str, ...]
+TimeSeries = List[Tuple[float, float]]
+Failures = List[str]
+
+
+def collect_metrics(url: str,
+                    metric_name: str,
+                    duration_seconds: Optional[int] = None,
+                    stop_event: Optional[threading.Event] = None,
+                    interval_seconds: int = 5) -> Dict[MetricKey, TimeSeries]:
     assert (duration_seconds is not None) ^ (
         stop_event is not None
     ), "Exactly one of duration_seconds or stop_event must be provided"
@@ -52,9 +73,8 @@ def collect_metrics(
     return metrics
 
 
-def parse_metrics(
-        metric_name: str,
-        metrics_text: str) -> Dict[Tuple[str, ...], List[Tuple[float, float]]]:
+def parse_metrics(metric_name: str,
+                  metrics_text: str) -> Dict[MetricKey, TimeSeries]:
     metrics_dict = {}
     timestamp = time.time()
 
@@ -75,16 +95,14 @@ def parse_metrics(
     return metrics_dict
 
 
-def compare_metrics(
-    baseline: Dict[Tuple[str, ...], List[Tuple[float, float]]],
-    actual: Dict[Tuple[str, ...], List[Tuple[float, float]]],
-    aggregator_fn: Callable[
-        [List[Tuple[float, float]], List[Tuple[float,
-                                               float]]], AggregatedMetric],
-    per_key_threshold_fn: Optional[Callable[[str, float, float, float, float],
-                                            List[str]]] = None,
-    aggregate_threshold_fn: Optional[Callable[[float, float, float, float],
-                                              List[str]]] = None):
+def compare_metrics(baseline: Dict[MetricKey, TimeSeries],
+                    actual: Dict[MetricKey, TimeSeries],
+                    aggregator_fn: Callable[[TimeSeries, TimeSeries],
+                                            AggregatedMetric],
+                    per_key_checker: Optional[Callable[[PerKeyDiff],
+                                                       Failures]] = None,
+                    aggregate_checker: Optional[Callable[[AggregateDiff],
+                                                         Failures]] = None):
     """
     General function to compare baseline and actual metrics.
 
@@ -94,9 +112,9 @@ def compare_metrics(
         aggregator_fn: Function(baseline_values, actual_values) -> AggregatedMetric
             Aggregates time-series values into a single scalar per metric.
             Examples: peak RSS, p95 latency, mean CPU usage
-        per_key_threshold_fn: Optional function(key_label, baseline, actual, increase, increase_pct)
+        per_key_checker: Optional function(PerKeyDiff)
                              -> list of failure messages
-        aggregate_threshold_fn: Optional function(total_baseline, total_actual, total_increase, total_increase_pct)
+        aggregate_checker: Optional function(AggregateDiff)
                                -> list of failure messages
     """
     comparison = {}
@@ -139,10 +157,10 @@ def compare_metrics(
             key_label, baseline_fmt, actual_fmt, increase_fmt, increase_pct_fmt
         ])
 
-        if per_key_threshold_fn:
-            key_failures = per_key_threshold_fn(key_label, baseline_val,
-                                                actual_val, increase,
-                                                increase_pct)
+        if per_key_checker:
+            key_failures = per_key_checker(
+                PerKeyDiff(key_label, baseline_val, actual_val, increase,
+                           increase_pct))
             for failure in key_failures:
                 failed_checks.append(f"{key_label}: {failure}")
 
@@ -163,14 +181,28 @@ def compare_metrics(
         total_increase_pct_fmt
     ])
 
-    if aggregate_threshold_fn:
-        aggregate_failures = aggregate_threshold_fn(total_baseline,
-                                                    total_actual,
-                                                    total_increase,
-                                                    total_increase_pct)
+    if aggregate_checker:
+        aggregate_failures = aggregate_checker(
+            AggregateDiff(total_baseline, total_actual, total_increase,
+                          total_increase_pct))
         failed_checks.extend(aggregate_failures)
 
     print(table.get_string(), file=sys.stderr, flush=True)
 
     if failed_checks:
         raise Exception(f"Performance regression detected: {failed_checks}")
+
+
+def rss_peak_aggregator(
+        baseline_values: List[Tuple[float, float]],
+        actual_values: List[Tuple[float, float]]) -> AggregatedMetric:
+    """Aggregator for RSS (memory) metrics - computes peak values."""
+    baseline_peak_bytes = max([v for _, v in baseline_values
+                              ]) if baseline_values else 0
+    actual_peak_bytes = max([v for _, v in actual_values
+                            ]) if actual_values else 0
+
+    baseline_mb = baseline_peak_bytes / (1024 * 1024)
+    actual_mb = actual_peak_bytes / (1024 * 1024)
+
+    return AggregatedMetric(baseline=baseline_mb, actual=actual_mb, unit='MB')

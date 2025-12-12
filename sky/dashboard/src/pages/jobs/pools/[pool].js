@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Link from 'next/link';
-import { CircularProgress } from '@mui/material';
+import { CircularProgress, Popover } from '@mui/material';
 import {
   RefreshCw,
   ChevronDown,
@@ -38,6 +38,74 @@ import {
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { buildFilterUrl } from '@/components/shared/FilterSystem';
+
+function UsedByJobsCell({ usedBy }) {
+  const MAX_DISPLAY = 2;
+  const [anchorEl, setAnchorEl] = useState(null);
+
+  // Handle array format
+  const jobIds = Array.isArray(usedBy) ? usedBy.filter((id) => id != null) : [];
+
+  if (jobIds.length === 0) return '-';
+
+  const displayed = jobIds.slice(0, MAX_DISPLAY);
+  const hidden = jobIds.slice(MAX_DISPLAY);
+
+  const handleClick = (event) => {
+    setAnchorEl(event.currentTarget);
+  };
+  const handleClose = () => {
+    setAnchorEl(null);
+  };
+
+  return (
+    <>
+      {displayed.map((jobId, idx) => (
+        <span key={jobId}>
+          <Link
+            href={`/jobs/${jobId}`}
+            className="text-blue-600 hover:text-blue-800 hover:underline"
+          >
+            {jobId}
+          </Link>
+          {idx < displayed.length - 1 ? ', ' : ''}
+        </span>
+      ))}
+      {hidden.length > 0 && (
+        <>
+          ,{' '}
+          <span
+            className="text-blue-600 cursor-pointer underline"
+            onClick={handleClick}
+            style={{ userSelect: 'none' }}
+          >
+            +{hidden.length} more
+          </span>
+          <Popover
+            open={Boolean(anchorEl)}
+            anchorEl={anchorEl}
+            onClose={handleClose}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+          >
+            <div style={{ padding: 12, maxWidth: 300 }}>
+              {hidden.map((jobId) => (
+                <div key={jobId} style={{ marginBottom: 4 }}>
+                  <Link
+                    href={`/jobs/${jobId}`}
+                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                  >
+                    {jobId}
+                  </Link>
+                </div>
+              ))}
+            </div>
+          </Popover>
+        </>
+      )}
+    </>
+  );
+}
 
 export default function PoolDetailPage() {
   const router = useRouter();
@@ -696,16 +764,7 @@ export default function PoolDetailPage() {
                         </TableCell>
                         <TableCell>{worker.version || '-'}</TableCell>
                         <TableCell>
-                          {worker.used_by ? (
-                            <Link
-                              href={`/jobs/${worker.used_by}`}
-                              className="text-blue-600 hover:text-blue-800 hover:underline"
-                            >
-                              Job ID: {worker.used_by}
-                            </Link>
-                          ) : (
-                            '-'
-                          )}
+                          <UsedByJobsCell usedBy={worker.used_by} />
                         </TableCell>
                       </TableRow>
                     ))

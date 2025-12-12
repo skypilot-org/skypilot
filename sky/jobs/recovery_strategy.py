@@ -444,9 +444,16 @@ class StrategyExecutor:
                                 raise
                             logger.info('Managed job cluster launched.')
                         else:
+                            # Get task resources from DAG for resource-aware
+                            # scheduling.
+                            task_resources = None
+                            if self.dag.tasks:
+                                task = self.dag.tasks[self.task_id]
+                                task_resources = task.resources
+
                             self.cluster_name = await (context_utils.to_thread(
                                 serve_utils.get_next_cluster_name, self.pool,
-                                self.job_id))
+                                self.job_id, task_resources))
                             if self.cluster_name is None:
                                 raise exceptions.NoClusterLaunchedError(
                                     'No cluster name found in the pool.')

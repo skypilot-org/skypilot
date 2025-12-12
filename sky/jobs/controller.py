@@ -334,6 +334,16 @@ class JobController:
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
 
+            # Get full_resources_json using to_yaml_config from task resources
+            full_resources_json = None
+            if task.resources:
+                # Get the first Resources object from the set/list.
+                # TODO(lloyd): This does not work with tasks that have an any_of
+                # config. When we're adding support for heterogeneity we should
+                # change this to use `_resources_to_config`.
+                task_resource = next(iter(task.resources))
+                full_resources_json = task_resource.to_yaml_config()
+
             await managed_job_state.set_starting_async(
                 self._job_id,
                 task_id,
@@ -344,7 +354,8 @@ class JobController:
                     'max_restarts_on_errors':
                         self._strategy_executor.max_restarts_on_errors
                 },
-                callback_func=callback_func)
+                callback_func=callback_func,
+                full_resources_json=full_resources_json)
             logger.info(f'Submitted managed job {self._job_id} '
                         f'(task: {task_id}, name: {task.name!r}); '
                         f'{constants.TASK_ID_ENV_VAR}: {task_id_env_var}')

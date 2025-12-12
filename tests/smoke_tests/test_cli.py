@@ -32,7 +32,7 @@ def test_endpoint_output_basic(generic_cloud: str):
     """Test that sky api info endpoint output is correct."""
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test('endpoint_output_basic', [
-        f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+        f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
         f's=$(SKYPILOT_DEBUG=0 sky api info | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "Endpoint set to default local API server."',
     ],
                                   timeout=smoke_tests_utils.get_timeout(
@@ -47,7 +47,7 @@ def test_endpoint_output_basic_no_pg_conn_closed_errors(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'endpoint_output_basic_no_pg_conn_closed_errors', [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT_NO_PG_CONN_CLOSED_ERROR}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT_NO_PG_CONN_CLOSED_ERROR}',
         ],
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
         teardown=f'sky down -y {name}')
@@ -71,7 +71,7 @@ def test_endpoint_output_config(generic_cloud: str):
 
         name = smoke_tests_utils.get_cluster_name()
         test = smoke_tests_utils.Test('endpoint_output_config', [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f's=$(SKYPILOT_DEBUG=0 sky api info | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "Endpoint set via {f.name}"',
         ],
                                       timeout=smoke_tests_utils.get_timeout(
@@ -91,7 +91,7 @@ def test_endpoint_output_env(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     expected_string = f"Endpoint set via the environment variable {constants.SKY_API_SERVER_URL_ENV_VAR}"
     test = smoke_tests_utils.Test('endpoint_output_env', [
-        f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+        f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
         f's=$(SKYPILOT_DEBUG=0 sky api info | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "Expecting to see: {expected_string}\n" && echo "$s" | grep "{expected_string}"',
     ],
                                   timeout=smoke_tests_utils.get_timeout(
@@ -167,7 +167,7 @@ def test_cli_auto_retry(generic_cloud: str):
             # Chaos proxy will kill TCP connections every 30 seconds.
             f'python tests/chaos/chaos_proxy.py --port {port} --interval 30 & echo $! > /tmp/{name}-chaos.pid',
             # Both launch streaming and logs streaming should survive the chaos.
-            f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} \'{run_command}\'',
+            f'SKYPILOT_API_SERVER_ENDPOINT={api_proxy_url} sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} \'{run_command}\'',
             f'kill $(cat /tmp/{name}-chaos.pid)',
         ],
         timeout=smoke_tests_utils.get_timeout(generic_cloud),

@@ -5867,8 +5867,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             resources_dict,
             stable_cluster_internal_ips=internal_ips,
             env_vars=task_env_vars,
+            log_dir=log_dir,
             setup_cmd=self._setup_cmd,
-            setup_log_path=os.path.join(log_dir, 'setup.log'),
         )
 
         codegen.add_task(
@@ -5913,8 +5913,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             resources_dict,
             stable_cluster_internal_ips=internal_ips,
             env_vars=task_env_vars,
+            log_dir=log_dir,
             setup_cmd=self._setup_cmd,
-            setup_log_path=os.path.join(log_dir, 'setup.log'),
         )
 
         codegen.add_task(

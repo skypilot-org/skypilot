@@ -523,6 +523,14 @@ available_node_types:
                 resourceFieldRef:
                   containerName: ray-node
                   resource: requests.memory
+            # Disable Ray memory monitor to prevent Ray's memory manager 
+            # from interfering with kubernetes resource manager.
+            # If ray memory monitor is enabled, the ray memory monitor kills
+            # the running job is the job uses more than 95% of allocated memory,
+            # even if the job is not misbehaving or using its full allocated memory.
+            # This behavior does not give a chance for k8s scheduler to evict the pod.
+            - name: RAY_memory_monitor_refresh_ms
+              value: "0"
             {% for key, value in k8s_env_vars.items() if k8s_env_vars is not none %}
             - name: {{ key }}
               value: {{ value }}

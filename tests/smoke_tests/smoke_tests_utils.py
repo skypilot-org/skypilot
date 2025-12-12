@@ -556,7 +556,7 @@ def ensure_iterable_result(func):
 def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     # Fail fast if `sky` CLI somehow errors out.
     if check_sky_status:
-        test.commands.insert(0, 'sky status')
+        test.commands.insert(0, 'sky status -u')
 
     log_to_stdout = os.environ.get('LOG_TO_STDOUT', None)
     if log_to_stdout:

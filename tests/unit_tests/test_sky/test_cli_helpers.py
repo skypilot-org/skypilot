@@ -6,6 +6,7 @@ import traceback
 from typing import Any, Dict, List, Optional, Tuple, Union
 from unittest import mock
 
+import click
 import colorama
 import pytest
 
@@ -687,3 +688,20 @@ def test_handle_jobs_queue_request_only_in_progress_all_terminal():
 
     # Should return 0 since all jobs are terminal
     assert num_jobs == 0
+
+
+def test_natural_order_group_list_commands_hides_aliases_and_hidden():
+    """list_commands should hide duplicate command objects and hidden commands."""
+    group = command._NaturalOrderGroup()
+
+    base_cmd = click.Command('volumes')
+    group.add_command(base_cmd, name='volumes')
+    group.add_command(base_cmd, name='volume')  # alias pointing to same object
+
+    hidden_cmd = click.Command('hidden', hidden=True)
+    group.add_command(hidden_cmd, name='hidden')
+
+    other_cmd = click.Command('other')
+    group.add_command(other_cmd, name='other')
+
+    assert group.list_commands(ctx=None) == ['volumes', 'other']
