@@ -6,7 +6,6 @@ resources:
     job_recovery: EAGER_NEXT_REGION
 """
 import asyncio
-import copy
 import logging
 import os
 import traceback
