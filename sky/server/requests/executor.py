@@ -40,6 +40,7 @@ from sky import models
 from sky import sky_logging
 from sky import skypilot_config
 from sky.metrics import utils as metrics_utils
+from sky.provision.slurm import utils as slurm_utils
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
@@ -373,6 +374,10 @@ def override_request_env_and_config(
             using_remote_api_server=request_body.using_remote_api_server,
             user=user,
             request_id=request_id)
+        if request_body.slurm_ssh_credentials:
+            logger.debug('Setting slurm ssh credentials from client')
+            slurm_utils.set_client_ssh_credentials(
+                request_body.slurm_ssh_credentials)
         logger.debug(
             f'override path: {request_body.override_skypilot_config_path}')
         with skypilot_config.override_skypilot_config(
