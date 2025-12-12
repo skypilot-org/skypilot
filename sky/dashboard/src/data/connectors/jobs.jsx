@@ -10,7 +10,7 @@ import dashboardCache from '@/lib/cache';
 import { apiClient } from './client';
 
 // Configuration
-const DEFAULT_TAIL_LINES = 10000;
+const DEFAULT_TAIL_LINES = 5000;
 const DEFAULT_FIELDS = [
   'job_id',
   '_job_id',
