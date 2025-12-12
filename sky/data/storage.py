@@ -28,6 +28,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import seeweb as seeweb_adaptor
 from sky.clouds import cloud as sky_cloud
 from sky.data import data_transfer
 from sky.data import data_utils
@@ -51,6 +52,8 @@ StorageStatus = status_lib.StorageStatus
 Path = str
 SourceType = Union[Path, List[Path]]
 
+_SEEWEB_URL_PREFIX = 'seeweb://'
+
 # Clouds with object storage implemented in this module. Azure Blob
 # Storage isn't supported yet (even though Azure is).
 # TODO(Doyoung): need to add clouds.CLOUDFLARE() to support
@@ -64,6 +67,7 @@ STORE_ENABLED_CLOUDS: List[str] = [
     str(clouds.Nebius()),
     cloudflare.NAME,
     coreweave.NAME,
+    str(clouds.Seeweb()),
 ]
 
 # Maximum number of concurrent rsync upload processes
@@ -101,6 +105,12 @@ def get_cached_enabled_storage_cloud_names_or_refresh(
     if coreweave_is_enabled:
         enabled_clouds.append(coreweave.NAME)
 
+    try:
+        if seeweb_adaptor.check_storage_credentials():
+            enabled_clouds.append(str(clouds.Seeweb()))
+    except Exception:  # pylint: disable=broad-except
+        pass
+
     if raise_if_no_cloud_access and not enabled_clouds:
         raise exceptions.NoCloudAccessError(
             'No cloud access available for storage. '
@@ -135,6 +145,7 @@ class StoreType(enum.Enum):
     OCI = 'OCI'
     NEBIUS = 'NEBIUS'
     COREWEAVE = 'COREWEAVE'
+    SEEWEB = 'SEEWEB'
     VOLUME = 'VOLUME'
 
     @classmethod
@@ -710,6 +721,12 @@ class Storage(object):
         # external buckets, this can be deprecated.
         self.force_delete = False
 
+    def _wants_seeweb(self) -> bool:
+        if StoreType.SEEWEB in self.stores:
+            return True
+        return (isinstance(self.source, str) and
+                self.source.startswith(_SEEWEB_URL_PREFIX))
+
     def construct(self):
         """Constructs the storage object.
 
@@ -898,7 +915,15 @@ class Storage(object):
                             f'{source} in the file_mounts section of your YAML')
                 is_local_source = True
             elif split_path.scheme in [
-                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'cw'
+                    's3',
+                    'gs',
+                    'https',
+                    'r2',
+                    'cos',
+                    'oci',
+                    'nebius',
+                    'cw',
+                    'seeweb',
             ]:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
@@ -922,8 +947,8 @@ class Storage(object):
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
-                        f'Supported paths: local, s3://, gs://, https://, '
-                        f'r2://, cos://, oci://, nebius://, cw://. '
+                        'Supported paths: local, s3://, gs://, https://, '
+                        'r2://, cos://, oci://, nebius://, cw://, seeweb://. '
                         f'Got: {source}')
         return source, is_local_source
 
@@ -948,6 +973,7 @@ class Storage(object):
                     'oci',
                     'nebius',
                     'cw',
+                    'seeweb',
             ]:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageNameError(
@@ -1564,6 +1590,9 @@ class S3CompatibleStore(AbstractStore):
 
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
 
+    def _is_seeweb(self) -> bool:
+        return self.config.store_type == StoreType.SEEWEB.value
+
     def __init__(self,
                  name: str,
                  source: str,
@@ -2007,6 +2036,9 @@ class S3CompatibleStore(AbstractStore):
                     raise exceptions.StorageBucketGetError(
                         _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
                         f' To debug, consider running `{command}`.') from e
+
+            # For other errors, continue to check if this is an existing
+            # bucket source
 
         if isinstance(self.source, str) and self.source.startswith(
                 self.config.url_prefix):
@@ -4761,3 +4793,46 @@ class CoreWeaveStore(S3CompatibleStore):
         data_utils.verify_coreweave_bucket(bucket_name, retry=36)
 
         return result
+
+
+@register_s3_compatible_store
+class SeewebStore(S3CompatibleStore):
+    """S3-compatible backend for Seeweb Cloud Object Storage."""
+
+    _DEFAULT_REGION = 'eu-milano-1'
+
+    @classmethod
+    def get_config(cls) -> S3CompatibleConfig:
+        return S3CompatibleConfig(
+            store_type='SEEWEB',
+            url_prefix='seeweb://',
+            client_factory=lambda region: data_utils.create_seeweb_client(),
+            resource_factory=lambda name: seeweb_adaptor.resource('s3').Bucket(
+                name),
+            split_path=data_utils.split_seeweb_path,
+            verify_bucket=data_utils.verify_seeweb_bucket,
+            aws_profile=seeweb_adaptor.SEEWEB_PROFILE_NAME,
+            get_endpoint_url=seeweb_adaptor.get_endpoint,
+            cloud_name=str(clouds.Seeweb()),
+            default_region=cls._DEFAULT_REGION,
+            mount_cmd_factory=cls._get_seeweb_mount_cmd,
+        )
+
+    @classmethod
+    def _get_seeweb_mount_cmd(cls, bucket_name: str, mount_path: str,
+                              bucket_sub_path: Optional[str]) -> str:
+        endpoint_url = seeweb_adaptor.get_endpoint()
+        return mounting_utils.get_seeweb_mount_cmd(
+            seeweb_adaptor.SEEWEB_PROFILE_NAME, bucket_name, endpoint_url,
+            mount_path, bucket_sub_path)
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.SEEWEB.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.SEEWEB.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)

@@ -48,9 +48,6 @@ class Seeweb(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Custom disk tiers not supported. '
              'Seeweb does not support custom disk tiers.'),
-        clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
-            ('Storage mounting not supported. '
-             'Seeweb does not support storage mounting.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
             ('High availability controllers not supported. '
              'Seeweb does not support high availability controllers.'),

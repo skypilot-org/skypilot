@@ -105,6 +105,8 @@ setup_commands:
     sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;
     sudo apt update && sudo apt install -y patch || sudo yum install -y patch || true;
+    sudo apt-get install -y fuse fuse3 || sudo yum install -y fuse fuse3 || true;
+    [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
 
     {%- if docker_image is not none %}
     # Docker installed via cloud-init; ensure service will be started by cloud-init
