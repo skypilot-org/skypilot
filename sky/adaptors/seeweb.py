@@ -44,8 +44,8 @@ botocore = common.LazyImport('botocore',
 _LAZY_MODULES = (ecsapi, boto3, botocore)
 
 SEEWEB_PROFILE_NAME = 'seeweb'
-SEEWEB_CREDENTIALS_PATH = '~/.aws/credentials'
-SEEWEB_CONFIG_PATH = '~/.aws/config'
+SEEWEB_CREDENTIALS_PATH = '~/.seeweb_cloud/credentials'
+SEEWEB_CONFIG_PATH = '~/.seeweb_cloud/config'
 _ENDPOINT_ENV_VAR = 'SEEWEB_S3_ENDPOINT'
 _INDENT_PREFIX = '    '
 
