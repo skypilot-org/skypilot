@@ -4,8 +4,6 @@ This module contains tests for the CLI utilities in sky.utils.cli_utils.
 """
 import time
 
-import pytest
-
 from sky import backends
 from sky.resources import Resources
 from sky.utils import status_lib
@@ -385,12 +383,6 @@ def test_get_resources_fractional_cpu():
     mock_resources_k8s_fractional = Resources(infra='k8s/my-cluster-ctx',
                                                cpus='0.5',
                                                memory=4)
-    mock_handle_k8s_fractional = backends.CloudVmRayResourceHandle(
-        cluster_name='test-k8s-fractional',
-        cluster_name_on_cloud='test-k8s-fractional-cloud',
-        cluster_yaml=None,
-        launched_nodes=1,
-        launched_resources=mock_resources_k8s_fractional)
 
     simple, full = resources_utils.format_resource(mock_resources_k8s_fractional)
 
