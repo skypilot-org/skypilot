@@ -716,9 +716,15 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                     {nodesInContext.map((node, index) => {
                       // Format CPU display: "X of Y free" or just "Y" if free is unknown
                       let cpuDisplay = '-';
-                      if (node.cpu_count !== null && node.cpu_count !== undefined) {
+                      if (
+                        node.cpu_count !== null &&
+                        node.cpu_count !== undefined
+                      ) {
                         const cpuTotal = formatCpu(node.cpu_count);
-                        if (node.cpu_free !== null && node.cpu_free !== undefined) {
+                        if (
+                          node.cpu_free !== null &&
+                          node.cpu_free !== undefined
+                        ) {
                           const cpuFree = formatCpu(node.cpu_free);
                           cpuDisplay = `${cpuFree} of ${cpuTotal} free`;
                         } else {
@@ -728,9 +734,15 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
 
                       // Format memory display: "X GB of Y GB free" or just "Y GB" if free is unknown
                       let memoryDisplay = '-';
-                      if (node.memory_gb !== null && node.memory_gb !== undefined) {
+                      if (
+                        node.memory_gb !== null &&
+                        node.memory_gb !== undefined
+                      ) {
                         const memoryTotal = formatMemory(node.memory_gb);
-                        if (node.memory_free_gb !== null && node.memory_free_gb !== undefined) {
+                        if (
+                          node.memory_free_gb !== null &&
+                          node.memory_free_gb !== undefined
+                        ) {
                           const memoryFree = formatMemory(node.memory_free_gb);
                           memoryDisplay = `${memoryFree} of ${memoryTotal} free`;
                         } else {
