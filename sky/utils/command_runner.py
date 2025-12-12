@@ -876,8 +876,6 @@ class SSHCommandRunner(CommandRunner):
         log_dir = os.path.expanduser(os.path.dirname(log_path))
         os.makedirs(log_dir, exist_ok=True)
 
-        logger.info(f'--- command: {command} ---')
-
         executable = None
         if not process_stream:
             if stream_logs:
