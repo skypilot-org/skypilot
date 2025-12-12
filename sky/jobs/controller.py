@@ -337,7 +337,10 @@ class JobController:
             # Get full_resources_json using to_yaml_config from task resources
             full_resources_json = None
             if task.resources:
-                # Get the first Resources object from the set/list
+                # Get the first Resources object from the set/list.
+                # TODO(lloyd): This does not work with tasks that have an any_of
+                # config. When we're adding support for heterogeneity we should
+                # change this to use `_resources_to_config`.
                 task_resource = next(iter(task.resources))
                 full_resources_json = task_resource.to_yaml_config()
 

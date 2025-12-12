@@ -1645,7 +1645,6 @@ class Resources:
         other: Union[List['Resources'], 'Resources'],
         requested_num_nodes: int = 1,
         check_ports: bool = False,
-        check_cloud: bool = True,
     ) -> bool:
         """Returns whether this resources is less demanding than the other.
 
@@ -1660,21 +1659,19 @@ class Resources:
             resources_list = [self.less_demanding_than(o) for o in other]
             return requested_num_nodes <= sum(resources_list)
 
-        if check_cloud:
-            assert other.cloud is not None, 'Other cloud must be specified'
+        assert other.cloud is not None, 'Other cloud must be specified'
 
-            if self.cloud is not None and not self.cloud.is_same_cloud(
-                    other.cloud):
-                return False
-            # self.cloud <= other.cloud
+        if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
+            return False
+        # self.cloud <= other.cloud
 
-            if self.region is not None and self.region != other.region:
-                return False
-            # self.region <= other.region
+        if self.region is not None and self.region != other.region:
+            return False
+        # self.region <= other.region
 
-            if self.zone is not None and self.zone != other.zone:
-                return False
-            # self.zone <= other.zone
+        if self.zone is not None and self.zone != other.zone:
+            return False
+        # self.zone <= other.zone
 
         if self.image_id is not None:
             if other.image_id is None:
@@ -1746,10 +1743,8 @@ class Resources:
             # On Kubernetes, we can't launch a task that requires FUSE on a pod
             # that wasn't initialized with FUSE support at the start.
             # Other clouds don't have this limitation.
-            if check_cloud:
-                assert other.cloud is not None
-                if other.cloud.is_same_cloud(clouds.Kubernetes()):
-                    return False
+            if other.cloud.is_same_cloud(clouds.Kubernetes()):
+                return False
 
         # self <= other
         return True

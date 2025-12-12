@@ -814,8 +814,7 @@ def get_ready_replicas(
 def _task_fits(task_resources: 'resources_lib.Resources',
                free_resources: 'resources_lib.Resources') -> bool:
     """Check if the task resources fit in the free resources."""
-    if not task_resources.less_demanding_than(free_resources,
-                                              check_cloud=False):
+    if not task_resources.less_demanding_than(free_resources):
         return False
     if task_resources.cpus is not None:
         if (free_resources.cpus is None or
@@ -863,6 +862,10 @@ def get_free_worker_resources(
         # Get job IDs running on this worker
         job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
             pool, cluster_name)
+
+        if len(job_ids) == 0:
+            free_resources[cluster_name] = total_resources
+            continue
 
         # Get used resources
         # TODO(lloyd): We should batch the database calls here so that we
@@ -977,16 +980,20 @@ def get_next_cluster_name(
                                  'resources')
                     continue
 
-                # Check if all of the task resource options fit
-                fits = True
+                # Check if any of the task resource options fit
+                fits = False
                 for task_res in task_resources_list:
                     logger.debug(f'Task resources: {task_res!r}')
-                    if not _task_fits(task_res, free_resources_on_worker):
+                    if _task_fits(task_res, free_resources_on_worker):
+                        logger.debug(f'Task resources {task_res!r} fits'
+                                     ' in free resources '
+                                     f'{free_resources_on_worker!r}')
+                        fits = True
+                        break
+                    else:
                         logger.debug(f'Task resources {task_res!r} does not fit'
                                      ' in free resources '
                                      f'{free_resources_on_worker!r}')
-                        fits = False
-                        break
                 if fits:
                     idle_replicas.append(replica_info)
         # Also fall back to resource unaware scheduling if no idle replicas are
@@ -1699,16 +1706,19 @@ def _format_replica_table(replica_records: List[Dict[str, Any]], show_all: bool,
         if used_by is None:
             used_by_str = '-'
         else:
-            if len(used_by) > 2:
-                used_by_str = (
-                    f'{used_by[0]}, {used_by[1]}, +{len(used_by) - 2}'
-                    ' more')
-            elif len(used_by) == 2:
-                used_by_str = f'{used_by[0]}, {used_by[1]}'
-            elif len(used_by) == 1:
-                used_by_str = str(used_by[0])
+            if isinstance(used_by, str):
+                used_by_str = used_by
             else:
-                used_by_str = '-'
+                if len(used_by) > 2:
+                    used_by_str = (
+                        f'{used_by[0]}, {used_by[1]}, +{len(used_by) - 2}'
+                        ' more')
+                elif len(used_by) == 2:
+                    used_by_str = f'{used_by[0]}, {used_by[1]}'
+                elif len(used_by) == 1:
+                    used_by_str = str(used_by[0])
+                else:
+                    used_by_str = '-'
 
         replica_handle: Optional['backends.CloudVmRayResourceHandle'] = record[
             'handle']
