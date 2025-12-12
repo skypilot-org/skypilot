@@ -207,7 +207,8 @@ def format_resource(resource: 'resources_lib.Resources',
         except ValueError:
             cpu_to_add = f'cpus={resource.cpus}'
     elif vcpu is not None:
-        cpu_to_add = f'cpus={int(vcpu)}'
+        cpus_formatted = f'{vcpu:.1f}'.rstrip('0').rstrip('.')
+        cpu_to_add = f'cpus={cpus_formatted}'
 
     mem_to_add = None
     if mem is not None:
