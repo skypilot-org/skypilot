@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CircularProgress } from '@mui/material';
 import { useRouter } from 'next/router';
-import { Layout } from '@/components/elements/layout';
 import { Card } from '@/components/ui/card';
 import { useSingleManagedJob, getPoolStatus } from '@/data/connectors/jobs';
 import Link from 'next/link';
@@ -18,7 +17,11 @@ import {
   formatFullTimestamp,
   renderPoolLink,
 } from '@/components/utils';
-import { LogFilter, formatLogs, stripAnsiCodes } from '@/components/utils';
+import {
+  LogFilter,
+  stripAnsiCodes,
+  shouldDropLogLine,
+} from '@/components/utils';
 import {
   streamManagedJobLogs,
   downloadManagedJobLogs,
@@ -422,6 +425,18 @@ function JobDetailsContent({
   const updateTimeoutRef = useRef(null);
   const lastUpdateTimeRef = useRef(0);
 
+  // Log rendering safeguards / buffering (aligned with cluster job page)
+  const MAX_LINE_CHARS = 2000;
+  const MAX_RENDER_LINES = 10000;
+  const FLUSH_INTERVAL_MS = 100;
+  const buffersRef = useRef({ logs: [], controllerlogs: [] });
+  const partialRef = useRef({ logs: '', controllerlogs: '' });
+  const flushTimersRef = useRef({ logs: null, controllerlogs: null });
+  const progressMapRef = useRef({
+    logs: new Map(),
+    controllerlogs: new Map(),
+  });
+
   // Configuration for performance
   const BATCH_UPDATE_INTERVAL = 100; // Batch updates every 100ms
   const THROTTLE_INTERVAL = 50; // Minimum time between updates
@@ -630,73 +645,88 @@ function JobDetailsContent({
 
               const setLogsFunction =
                 logType === 'logs' ? setLogs : setControllerLogs;
+              const progressRegex = /\d+%\s*\|/;
 
-              setLogsFunction((prevLogs) => {
-                // Split the chunk into lines
-                const newLines = chunk
-                  .split('\n')
-                  .filter((line) => line.trim());
+              const scheduleFlush = () => {
+                if (flushTimersRef.current[logType]) return;
+                flushTimersRef.current[logType] = setTimeout(() => {
+                  flushTimersRef.current[logType] = null;
+                  setLogsFunction((prevLogs) => {
+                    const baseLines = prevLogs
+                      ? prevLogs
+                          .split('\n')
+                          .filter((l) => l && !progressRegex.test(l))
+                      : [];
+                    const combined = [
+                      ...baseLines,
+                      ...buffersRef.current[logType],
+                      ...Array.from(progressMapRef.current[logType].values()),
+                    ];
+                    buffersRef.current[logType] = [];
+                    let trimmed = combined;
+                    if (trimmed.length > MAX_RENDER_LINES) {
+                      trimmed = trimmed.slice(
+                        trimmed.length - MAX_RENDER_LINES
+                      );
+                    }
+                    const updatedLogs = trimmed.join('\n');
+                    if (logType === 'logs') {
+                      setCurrentLogLength(updatedLogs.length);
+                    } else {
+                      setCurrentControllerLogLength(updatedLogs.length);
+                    }
+                    return updatedLogs;
+                  });
+                }, FLUSH_INTERVAL_MS);
+              };
 
-                let updatedLogs = prevLogs;
+              const processChunkBuffered = (chunkText) => {
+                const parts = chunkText.split('\n');
+                parts[0] = partialRef.current[logType] + parts[0];
+                const endsWithNewline = chunkText.endsWith('\n');
+                partialRef.current[logType] = endsWithNewline
+                  ? ''
+                  : parts.pop() || '';
+
+                const newLines = parts.filter((line) => line.trim());
 
                 for (const line of newLines) {
-                  // Clean the line (remove ANSI codes)
-                  const cleanLine = stripAnsiCodes(line);
+                  let cleanLine = stripAnsiCodes(line);
+                  if (shouldDropLogLine(cleanLine)) {
+                    continue;
+                  }
+                  if (cleanLine.length > MAX_LINE_CHARS) {
+                    cleanLine =
+                      cleanLine.slice(0, MAX_LINE_CHARS) + ' … [truncated]';
+                  }
 
-                  // Check if this is a progress bar line
-                  const isProgressBar = /\d+%\s*\|/.test(cleanLine);
-
+                  const isProgressBar = progressRegex.test(cleanLine);
                   if (isProgressBar) {
-                    // Extract process identifier from the new line
                     const processMatch = cleanLine.match(/^\(([^)]+)\)/);
-
-                    if (processMatch && updatedLogs) {
-                      // Look for the last progress bar from the same process in existing logs
-                      const existingLines = updatedLogs.split('\n');
-                      let replaced = false;
-
-                      // Search from the end for efficiency
-                      for (let i = existingLines.length - 1; i >= 0; i--) {
-                        const existingLine = existingLines[i];
-                        if (/\d+%\s*\|/.test(existingLine)) {
-                          const existingProcessMatch =
-                            existingLine.match(/^\(([^)]+)\)/);
-                          if (
-                            existingProcessMatch &&
-                            existingProcessMatch[1] === processMatch[1]
-                          ) {
-                            // Found a progress bar from the same process, replace it
-                            existingLines[i] = cleanLine;
-                            updatedLogs = existingLines.join('\n');
-                            replaced = true;
-                            break;
-                          }
-                        }
-                      }
-
-                      if (!replaced) {
-                        // No existing progress bar from this process, append
-                        updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
-                      }
-                    } else {
-                      // First line or no process match, just append
-                      updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
+                    if (processMatch) {
+                      progressMapRef.current[logType].set(
+                        processMatch[1],
+                        cleanLine
+                      );
                     }
                   } else {
-                    // Regular log line, just append
-                    updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
+                    buffersRef.current[logType].push(cleanLine);
+                    if (
+                      buffersRef.current[logType].length >
+                      MAX_RENDER_LINES * 2
+                    ) {
+                      buffersRef.current[logType] = buffersRef.current[
+                        logType
+                      ].slice(
+                        buffersRef.current[logType].length - MAX_RENDER_LINES
+                      );
+                    }
                   }
                 }
+                scheduleFlush();
+              };
 
-                // Update length tracking
-                if (logType === 'logs') {
-                  setCurrentLogLength(updatedLogs.length);
-                } else {
-                  setCurrentControllerLogLength(updatedLogs.length);
-                }
-
-                return updatedLogs;
-              });
+              processChunkBuffered(chunk);
 
               // Auto-scroll after update
               requestAnimationFrame(() => {
@@ -707,6 +737,39 @@ function JobDetailsContent({
         })
           .then(() => {
             if (active) {
+              const setLogsFunction =
+                logType === 'logs' ? setLogs : setControllerLogs;
+              // Flush remaining partial/buffered lines
+              if (partialRef.current[logType]) {
+                buffersRef.current[logType].push(partialRef.current[logType]);
+                partialRef.current[logType] = '';
+              }
+              const progressRegex = /\d+%\s*\|/;
+              setLogsFunction((prevLogs) => {
+                const baseLines = prevLogs
+                  ? prevLogs
+                      .split('\n')
+                      .filter((l) => l && !progressRegex.test(l))
+                  : [];
+                const combined = [
+                  ...baseLines,
+                  ...buffersRef.current[logType],
+                  ...Array.from(progressMapRef.current[logType].values()),
+                ];
+                buffersRef.current[logType] = [];
+                let trimmed = combined;
+                if (trimmed.length > MAX_RENDER_LINES) {
+                  trimmed = trimmed.slice(trimmed.length - MAX_RENDER_LINES);
+                }
+                const updatedLogs = trimmed.join('\n');
+                if (logType === 'logs') {
+                  setCurrentLogLength(updatedLogs.length);
+                } else {
+                  setCurrentControllerLogLength(updatedLogs.length);
+                }
+                return updatedLogs;
+              });
+
               setIsLoading(false);
               if (isRefreshing) {
                 if (logType === 'logs') {
@@ -772,6 +835,15 @@ function JobDetailsContent({
         return () => {
           console.log(`Cleaning up ${logType} request`);
           active = false;
+
+          // Clear buffers and partials for this log type
+          buffersRef.current[logType] = [];
+          partialRef.current[logType] = '';
+          progressMapRef.current[logType].clear();
+          if (flushTimersRef.current[logType]) {
+            clearTimeout(flushTimersRef.current[logType]);
+            flushTimersRef.current[logType] = null;
+          }
 
           // Safely abort the controller if it matches the current one and hasn't been cleaned up yet
           if (activeRequestRef.current === controller) {

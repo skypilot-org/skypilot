@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Layout } from '@/components/elements/layout';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Card } from '@/components/ui/card';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -7,6 +6,9 @@ import { useClusterDetails } from '@/data/connectors/clusters';
 import {
   CustomTooltip as Tooltip,
   formatFullTimestamp,
+  LogFilter,
+  stripAnsiCodes,
+  shouldDropLogLine,
 } from '@/components/utils';
 import { RotateCwIcon, Download } from 'lucide-react';
 import { CircularProgress } from '@mui/material';
@@ -15,11 +17,11 @@ import {
   downloadJobLogs,
 } from '@/data/connectors/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
-import { LogFilter, formatLogs, stripAnsiCodes } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { CheckIcon, CopyIcon } from 'lucide-react';
+import PropTypes from 'prop-types';
 
 // Custom header component with buttons inline
 function JobHeader({
@@ -84,11 +86,24 @@ export function JobDetailPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
-  const [logs, setLogs] = useState('');
+  const [logLines, setLogLines] = useState([]);
+  const progressMapRef = useRef(new Map());
+  const bufferRef = useRef([]);
+  const flushTimerRef = useRef(null);
+  const [progressTick, setProgressTick] = useState(0);
+  const partialLineRef = useRef('');
   const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
   const PENDING_STATUSES = useMemo(() => ['INIT', 'PENDING', 'SETTING_UP'], []);
+
+  const MAX_LINE_CHARS = 2000;
+  const MAX_RENDER_LINES = 5000;
+  const FLUSH_INTERVAL_MS = 100;
+  const displayLines = useMemo(
+    () => [...logLines, ...Array.from(progressMapRef.current.values())],
+    [logLines, progressTick]
+  );
 
   const isPending = useMemo(() => {
     if (!clusterJobData || !job) return true;
@@ -104,17 +119,83 @@ export function JobDetailPage() {
   }, [loading, isInitialLoad]);
 
   const handleRefreshLogs = () => {
+    progressMapRef.current = new Map();
+    bufferRef.current = [];
+    partialLineRef.current = '';
+    setLogLines([]);
     setIsRefreshingLogs((prev) => !prev);
-    setLogs('');
   };
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
+
+    const scheduleFlush = () => {
+      if (flushTimerRef.current) return;
+      flushTimerRef.current = setTimeout(() => {
+        flushTimerRef.current = null;
+        setLogLines((prev) => {
+          if (bufferRef.current.length === 0) return prev;
+          const next = [...prev, ...bufferRef.current];
+          bufferRef.current = [];
+          const sliced =
+            next.length > MAX_RENDER_LINES
+              ? next.slice(next.length - MAX_RENDER_LINES)
+              : next;
+          return sliced;
+        });
+      }, FLUSH_INTERVAL_MS);
+    };
+
+    const appendProgressLine = (line) => {
+      const processMatch = line.match(/^\(([^)]+)\)/);
+      if (!processMatch) return;
+      progressMapRef.current.set(processMatch[1], line);
+      setProgressTick((v) => v + 1);
+    };
+
+    const processChunk = (chunk) => {
+      const parts = chunk.split('\n');
+      parts[0] = partialLineRef.current + parts[0];
+      const endsWithNewline = chunk.endsWith('\n');
+      partialLineRef.current = endsWithNewline ? '' : parts.pop() || '';
+
+      const newLines = parts.filter((line) => line.trim());
+      for (const line of newLines) {
+        let cleanLine = stripAnsiCodes(line);
+        if (shouldDropLogLine(cleanLine)) {
+          continue;
+        }
+        if (cleanLine.length > MAX_LINE_CHARS) {
+          cleanLine = cleanLine.slice(0, MAX_LINE_CHARS) + ' … [truncated]';
+        }
+
+        const isProgressBar = /\d+%\s*\|/.test(cleanLine);
+        if (isProgressBar) {
+          appendProgressLine(cleanLine);
+        } else {
+          bufferRef.current.push(cleanLine);
+          if (bufferRef.current.length > MAX_RENDER_LINES * 2) {
+            // avoid runaway buffer when flush is delayed
+            bufferRef.current = bufferRef.current.slice(
+              bufferRef.current.length - MAX_RENDER_LINES
+            );
+          }
+        }
+      }
+      scheduleFlush();
+    };
 
     if (!cluster || !job || isPending) {
       setIsLoadingLogs(false);
+      controller.abort();
       return () => {
         active = false;
+        controller.abort();
+        if (flushTimerRef.current) {
+          clearTimeout(flushTimerRef.current);
+          flushTimerRef.current = null;
+        }
       };
     }
 
@@ -125,74 +206,24 @@ export function JobDetailPage() {
       jobId: job,
       onNewLog: (chunk) => {
         if (active) {
-          setLogs((prevLogs) => {
-            // Split the chunk into lines
-            const newLines = chunk.split('\n').filter((line) => line.trim());
-
-            let updatedLogs = prevLogs;
-
-            for (const line of newLines) {
-              // Clean the line (remove ANSI codes)
-              const cleanLine = stripAnsiCodes(line);
-
-              // Check if this is a progress bar line
-              const isProgressBar = /\d+%\s*\|/.test(cleanLine);
-
-              if (isProgressBar) {
-                // Extract process identifier from the new line
-                const processMatch = cleanLine.match(/^\(([^)]+)\)/);
-
-                if (processMatch && updatedLogs) {
-                  // Look for the last progress bar from the same process in existing logs
-                  const existingLines = updatedLogs.split('\n');
-                  let replaced = false;
-
-                  // Search from the end for efficiency
-                  for (let i = existingLines.length - 1; i >= 0; i--) {
-                    const existingLine = existingLines[i];
-                    if (/\d+%\s*\|/.test(existingLine)) {
-                      const existingProcessMatch =
-                        existingLine.match(/^\(([^)]+)\)/);
-                      if (
-                        existingProcessMatch &&
-                        existingProcessMatch[1] === processMatch[1]
-                      ) {
-                        // Found a progress bar from the same process, replace it
-                        existingLines[i] = cleanLine;
-                        updatedLogs = existingLines.join('\n');
-                        replaced = true;
-                        break;
-                      }
-                    }
-                  }
-
-                  if (!replaced) {
-                    // No existing progress bar from this process, append
-                    updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
-                  }
-                } else {
-                  // First line or no process match, just append
-                  updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
-                }
-              } else {
-                // Regular log line, just append
-                updatedLogs += (updatedLogs ? '\n' : '') + cleanLine;
-              }
-            }
-
-            return updatedLogs;
-          });
+          processChunk(chunk);
         }
       },
       workspace: clusterData?.workspace,
+      signal: controller.signal,
     })
       .then(() => {
         if (active) {
+          if (partialLineRef.current) {
+            bufferRef.current.push(partialLineRef.current);
+            partialLineRef.current = '';
+            scheduleFlush();
+          }
           setIsLoadingLogs(false);
         }
       })
       .catch((error) => {
-        if (active) {
+        if (active && error.name !== 'AbortError') {
           console.error('Error streaming logs:', error);
           setIsLoadingLogs(false);
         }
@@ -200,6 +231,12 @@ export function JobDetailPage() {
 
     return () => {
       active = false;
+      controller.abort();
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      partialLineRef.current = '';
     };
   }, [cluster, job, isRefreshingLogs, isPending, clusterData]);
 
@@ -207,7 +244,10 @@ export function JobDetailPage() {
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     setIsRefreshingLogs((prev) => !prev);
-    setLogs('');
+    progressMapRef.current = new Map();
+    bufferRef.current = [];
+    partialLineRef.current = '';
+    setLogLines([]);
     try {
       if (refreshData) {
         await refreshData();
@@ -440,7 +480,7 @@ export function JobDetailPage() {
                     </div>
                   ) : (
                     <div className="max-h-96 overflow-y-auto">
-                      <LogFilter logs={logs} />
+                      <LogFilter logs={displayLines} />
                     </div>
                   )}
                 </div>
@@ -452,5 +492,16 @@ export function JobDetailPage() {
     </>
   );
 }
+
+JobHeader.propTypes = {
+  cluster: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  job: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  jobData: PropTypes.shape({
+    job: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  }),
+  onRefresh: PropTypes.func,
+  isRefreshing: PropTypes.bool,
+  loading: PropTypes.bool,
+};
 
 export default JobDetailPage;
