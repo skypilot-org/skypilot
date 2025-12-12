@@ -1424,25 +1424,6 @@ def get_allocated_gpu_qty_by_node(
     return allocated_qty_by_node
 
 
-@_retry_on_error(resource_type='pod')
-def get_allocated_cpu_memory_by_node(
-    *,
-    context: Optional[str] = None,
-) -> Dict[str, Tuple[float, float]]:
-    """Gets allocated CPU and memory by each node by fetching pods in
-    all namespaces in kubernetes cluster indicated by context.
-
-    Note: For better performance when you also need GPU allocation,
-    use get_allocated_resources_by_node() instead.
-
-    Returns:
-        Dict mapping node name to (allocated_cpu, allocated_memory_gb) tuple.
-    """
-    _, allocated_cpu_memory_by_node = get_allocated_resources_by_node(
-        context=context)
-    return allocated_cpu_memory_by_node
-
-
 def check_instance_fits(context: Optional[str],
                         instance: str) -> Tuple[bool, Optional[str]]:
     """Checks if the instance fits on the Kubernetes cluster.
