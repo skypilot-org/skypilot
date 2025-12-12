@@ -173,6 +173,54 @@ class TestWaitForJobNodes:
                     job_id, timeout=slurm._SLURM_DEFAULT_PROVISION_TIMEOUT)
 
 
+class TestGetJobsStateByName:
+    """Test SlurmClient.get_jobs_state_by_name()."""
+
+    def test_get_jobs_state_by_name_single_running(self):
+        """Test parsing single RUNNING job state."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        mock_output = 'RUNNING\n'
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, mock_output, '')
+
+            result = client.get_jobs_state_by_name('sky-3a5e-pilot-9b1gdacf')
+            mock_run.assert_called_once_with(
+                'squeue -h --name sky-3a5e-pilot-9b1gdacf -o "%T"',
+                require_outputs=True,
+                stream_logs=False,
+            )
+
+            assert result == ['RUNNING']
+
+    def test_get_jobs_state_by_name_multiple_jobs(self):
+        """Test parsing multiple jobs with different states."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        mock_output = 'RUNNING\nPENDING\nRUNNING\n'
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, mock_output, '')
+
+            result = client.get_jobs_state_by_name('sky-test-job')
+            mock_run.assert_called_once_with(
+                'squeue -h --name sky-test-job -o "%T"',
+                require_outputs=True,
+                stream_logs=False,
+            )
+
+            assert result == ['RUNNING', 'PENDING', 'RUNNING']
+
+
 class TestGetJobNodes:
     """Test SlurmClient.get_job_nodes()."""
 

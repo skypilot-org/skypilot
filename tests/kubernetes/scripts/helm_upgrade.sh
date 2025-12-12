@@ -131,10 +131,15 @@ get_previous_version() {
 
     # For skypilot-nightly, we need to include --devel flag to get dev versions
     if [ "$package_name" = "skypilot-nightly" ]; then
-        local versions=$(helm search repo skypilot/$package_name --versions --devel --output json | jq -r '.[].version' | sort -V)
+        local versions=$(helm search repo skypilot/$package_name --versions --devel --output json | jq -r '.[] | select(.name == "skypilot/'"$package_name"'").version' | sort -V)
     else
         # For skypilot (stable), we don't use --devel flag
-        local versions=$(helm search repo skypilot/$package_name --versions --output json | jq -r '.[].version' | sort -V)
+		# If the current_ver is an rc, we still don't want to use --devel,
+		# because we should compare against the latest stable (non-rc) version
+		# `helm search skypilot/skypilot` may also return charts for
+		# skypilot/skypilot-prometheus-server, so filter the package name in jq as
+		# well.
+        local versions=$(helm search repo skypilot/$package_name --versions --output json | jq -r '.[] | select(.name == "skypilot/'"$package_name"'").version' | sort -V)
     fi
 
     if [ -z "$versions" ]; then
@@ -162,7 +167,13 @@ get_previous_version() {
         last_version="$version"
     done <<< "$versions"
 
-    if [ -z "$previous_version" ]; then
+	if [[ "$current_ver" =~ [0-9]+\.[0-9]+\.[0-9]+rc[0-9]+ ]]; then
+		# When current version is an rc, it won't be in the available versions,
+		# since --devel is not used. We should just compare against the latest
+		# available version.
+		echo "Using the latest version $last_version since the current version $current_ver is an rc"
+		previous_version="$last_version"
+    elif [ -z "$previous_version" ]; then
         echo "Error: Could not find a previous version for $current_ver (looking for $helm_format_ver)"
         echo "available versions:"
         echo "$versions"

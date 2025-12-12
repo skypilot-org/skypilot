@@ -873,11 +873,17 @@ async def create_if_not_exists_async(request: Request) -> bool:
         f'({request_columns}) VALUES '
         f'({values_str}) ON CONFLICT(request_id) DO NOTHING RETURNING ROWID')
     request_row = request.to_row()
-    # Execute the SQL statement without getting the request lock.
-    # The request lock is used to prevent racing with cancellation codepath,
-    # but a request cannot be cancelled before it is created.
-    row = await _DB.execute_get_returning_value_async(sql_statement,
-                                                      request_row)
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(f'Start creating request {request.request_id}')
+    try:
+        # Execute the SQL statement without getting the request lock.
+        # The request lock is used to prevent racing with cancellation codepath,
+        # but a request cannot be cancelled before it is created.
+        row = await _DB.execute_get_returning_value_async(
+            sql_statement, request_row)
+    finally:
+        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            logger.debug(f'End creating request {request.request_id}')
     return True if row else False
 
 
@@ -1034,9 +1040,15 @@ _add_or_update_request_sql = (f'INSERT OR REPLACE INTO {REQUEST_TABLE} '
 def _add_or_update_request_no_lock(request: Request):
     """Add or update a REST request into the database."""
     assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        cursor.execute(_add_or_update_request_sql, request.to_row())
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(f'Start adding or updating request {request.request_id}')
+    try:
+        with _DB.conn:
+            cursor = _DB.conn.cursor()
+            cursor.execute(_add_or_update_request_sql, request.to_row())
+    finally:
+        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            logger.debug(f'End adding or updating request {request.request_id}')
 
 
 async def _add_or_update_request_no_lock_async(request: Request):
@@ -1125,8 +1137,14 @@ async def _delete_requests(request_ids: List[str]):
     """Clean up requests by their IDs."""
     id_list_str = ','.join(repr(request_id) for request_id in request_ids)
     assert _DB is not None
-    await _DB.execute_and_commit_async(
-        f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(f'Start deleting requests {request_ids}')
+    try:
+        await _DB.execute_and_commit_async(
+            f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
+    finally:
+        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            logger.debug(f'End deleting requests {request_ids}')
 
 
 async def clean_finished_requests_with_retention(retention_seconds: int,
