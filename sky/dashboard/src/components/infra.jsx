@@ -699,10 +699,10 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         Node
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600">
-                        CPU
+                        vCPU
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600">
-                        Memory
+                        Memory (GB)
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600">
                         GPU
@@ -732,18 +732,19 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         }
                       }
 
-                      // Format memory display: "X GB of Y GB free" or just "Y GB" if free is unknown
+                      // Format memory display: "X of Y free" or just "Y" if free is unknown
+                      // (GB is in column header, so don't include it in values)
                       let memoryDisplay = '-';
                       if (
                         node.memory_gb !== null &&
                         node.memory_gb !== undefined
                       ) {
-                        const memoryTotal = formatMemory(node.memory_gb);
+                        const memoryTotal = node.memory_gb.toFixed(1);
                         if (
                           node.memory_free_gb !== null &&
                           node.memory_free_gb !== undefined
                         ) {
-                          const memoryFree = formatMemory(node.memory_free_gb);
+                          const memoryFree = node.memory_free_gb.toFixed(1);
                           memoryDisplay = `${memoryFree} of ${memoryTotal} free`;
                         } else {
                           memoryDisplay = memoryTotal;

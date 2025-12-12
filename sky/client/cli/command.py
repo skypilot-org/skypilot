@@ -3899,7 +3899,8 @@ def show_gpus(
             cloud_str: str = 'Kubernetes',
             context_title_str: str = 'CONTEXT') -> str:
         node_table = log_utils.create_table([
-            context_title_str, 'NODE', 'CPU', 'MEMORY', 'GPU', 'GPU UTILIZATION'
+            context_title_str, 'NODE', 'vCPU', 'Memory (GB)', 'GPU',
+            'GPU UTILIZATION'
         ])
 
         no_permissions_str = '<no permissions>'
@@ -3946,8 +3947,8 @@ def show_gpus(
 
                 memory_str = '-'
                 if node_info.memory_gb is not None:
-                    # Format total memory
-                    memory_total_str = f'{node_info.memory_gb:.1f} GB'
+                    # Format total memory (without GB since it's in header)
+                    memory_total_str = f'{node_info.memory_gb:.1f}'
 
                     # Check if we have free memory info (use hasattr
                     # to check if field exists, then access directly)
@@ -3955,8 +3956,8 @@ def show_gpus(
                     if hasattr(node_info, 'memory_free_gb'):
                         memory_free_gb = node_info.memory_free_gb
                     if memory_free_gb is not None:
-                        # Format free memory
-                        memory_free_str = f'{memory_free_gb:.1f} GB'
+                        # Format free memory (without GB since it's in header)
+                        memory_free_str = f'{memory_free_gb:.1f}'
                         memory_str = (
                             f'{memory_free_str} of {memory_total_str} free')
                     else:
