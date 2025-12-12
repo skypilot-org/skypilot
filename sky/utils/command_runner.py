@@ -1367,6 +1367,8 @@ class SlurmCommandRunner(SSHCommandRunner):
         # Update the proxy command to be the login node proxy, which will
         # be used by super().run() to reach the compute node.
         self._ssh_proxy_command = login_node_proxy_command
+        # Clear the proxy jump since it's now embedded in the proxy command.
+        self._ssh_proxy_jump = None
         # Update self.ip to target the compute node.
         self.ip = slurm_node
         # Assume the compute node's SSH port is 22.
