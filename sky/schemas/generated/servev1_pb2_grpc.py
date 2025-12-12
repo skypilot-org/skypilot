@@ -69,6 +69,11 @@ class ServeServiceStub(object):
                 request_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceRequest.SerializeToString,
                 response_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceResponse.FromString,
                 _registered_method=True)
+        self.UpdateReplicas = channel.unary_unary(
+                '/serve.v1.ServeService/UpdateReplicas',
+                request_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateReplicasRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateReplicasResponse.FromString,
+                _registered_method=True)
 
 
 class ServeServiceServicer(object):
@@ -116,6 +121,13 @@ class ServeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def UpdateReplicas(self, request, context):
+        """Update replicas directly without creating a new version.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ServeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -148,6 +160,11 @@ def add_ServeServiceServicer_to_server(servicer, server):
                     servicer.UpdateService,
                     request_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceRequest.FromString,
                     response_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceResponse.SerializeToString,
+            ),
+            'UpdateReplicas': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateReplicas,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateReplicasRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateReplicasResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -311,6 +328,33 @@ class ServeService(object):
             '/serve.v1.ServeService/UpdateService',
             sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceRequest.SerializeToString,
             sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateReplicas(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/serve.v1.ServeService/UpdateReplicas',
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateReplicasRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateReplicasResponse.FromString,
             options,
             channel_credentials,
             insecure,

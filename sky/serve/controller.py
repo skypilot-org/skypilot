@@ -208,6 +208,61 @@ class SkyServeController:
                 },
                                               status_code=500)
 
+        @self._app.post('/controller/update_replicas')
+        async def update_replicas(request: fastapi.Request) -> fastapi.Response:
+            request_data = await request.json()
+            try:
+                min_replicas = request_data.get('min_replicas', None)
+                if min_replicas is None:
+                    return responses.JSONResponse(content={
+                        'message': 'Error: min_replicas is not specified.'
+                    },
+                                                  status_code=400)
+                if not isinstance(min_replicas, int) or min_replicas < 0:
+                    return responses.JSONResponse(content={
+                        'message': 'Error: min_replicas must be a non-negative '
+                                   'integer.'
+                    },
+                                                  status_code=400)
+
+                logger.info(f'Updating replicas to {min_replicas} for service '
+                            f'{self._service_name!r}')
+
+                # Only support fixed replicas for now.
+                self._autoscaler.min_replicas = min_replicas
+                self._autoscaler.target_num_replicas = min_replicas
+
+                # Update the service spec in serve_state for the current version
+                # for consistency.
+                record = serve_state.get_service_from_name(self._service_name)
+                if record is not None:
+                    current_version = record['version']
+                    current_spec = serve_state.get_spec(self._service_name,
+                                                        current_version)
+                    if current_spec is not None:
+                        # Create updated spec with new min_replicas
+                        updated_spec = current_spec.copy(
+                            min_replicas=min_replicas)
+                        # Get yaml content and update version spec
+                        yaml_content = serve_state.get_yaml_content(
+                            self._service_name, current_version)
+                        if yaml_content:
+                            serve_state.add_or_update_version(
+                                self._service_name, current_version,
+                                updated_spec, yaml_content)
+
+                return responses.JSONResponse(content={'message': 'Success'},
+                                              status_code=200)
+            except Exception as e:  # pylint: disable=broad-except
+                exception_str = common_utils.format_exception(e)
+                logger.error(f'Error in update_replicas: {exception_str}')
+                return responses.JSONResponse(content={
+                    'message': 'Error',
+                    'exception': exception_str,
+                    'traceback': traceback.format_exc()
+                },
+                                              status_code=500)
+
         @self._app.post('/controller/terminate_replica')
         async def terminate_replica(
                 request: fastapi.Request) -> fastapi.Response:

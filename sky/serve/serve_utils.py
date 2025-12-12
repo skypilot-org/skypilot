@@ -617,6 +617,48 @@ def update_service_encoded(service_name: str, version: int, mode: str,
     return message_utils.encode_payload(service_msg)
 
 
+def update_replicas_encoded(service_name: str, min_replicas: int,
+                            pool: bool) -> str:
+    """Update replicas directly without creating a new version.
+
+    Returns:
+        Encoded payload with success message.
+    """
+    noun = 'pool' if pool else 'service'
+    capnoun = noun.capitalize()
+    service_status = _get_service_status(service_name, pool=pool)
+    if service_status is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'{capnoun} {service_name!r} does not exist.')
+    controller_port = service_status['controller_port']
+    resp = requests.post(
+        _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+        '/controller/update_replicas',
+        json={
+            'min_replicas': min_replicas,
+        })
+    if resp.status_code == 404:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'The service is up-ed in an old version and does not '
+                'support direct replica update. Please use the version-based '
+                'update approach.')
+    elif resp.status_code == 400:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Client error during {noun} replica update: '
+                             f'{resp.text}')
+    elif resp.status_code == 500:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Server error during {noun} replica update: {resp.text}')
+    elif resp.status_code != 200:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Failed to update {noun} replicas: {resp.text}')
+
+    service_msg = resp.json()['message']
+    return message_utils.encode_payload(service_msg)
+
+
 def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
     # TODO(tian): Currently pool does not support terminating replica.
     service_status = _get_service_status(service_name, pool=False)
@@ -1680,6 +1722,16 @@ class ServeCodeGen:
             f'kwargs={{}} if serve_version < 3 else {{"pool": {pool}}}',
             f'msg = serve_utils.update_service_encoded({service_name!r}, '
             f'{version}, mode={mode!r}, **kwargs)',
+            'print(msg, end="", flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def update_replicas(cls, service_name: str, min_replicas: int,
+                        pool: bool) -> str:
+        code = [
+            f'msg = serve_utils.update_replicas_encoded({service_name!r}, '
+            f'{min_replicas}, {pool})',
             'print(msg, end="", flush=True)',
         ]
         return cls._build(code)
