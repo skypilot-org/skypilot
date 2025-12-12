@@ -804,23 +804,12 @@ def _add_k8s_annotations(task: 'task_lib.Task', job_id: int) -> None:
         # Get existing config overrides or create new dict
         config_overrides = resource.cluster_config_overrides
 
-        # Initialize nested structure if needed
-        if 'kubernetes' not in config_overrides:
-            config_overrides['kubernetes'] = {}
-        if 'pod_config' not in config_overrides['kubernetes']:
-            config_overrides['kubernetes']['pod_config'] = {}
-        if 'metadata' not in config_overrides['kubernetes']['pod_config']:
-            config_overrides['kubernetes']['pod_config']['metadata'] = {}
-        if 'annotations' not in config_overrides['kubernetes']['pod_config'][
-                'metadata']:
-            config_overrides['kubernetes']['pod_config']['metadata'][
-                'annotations'] = {}
-
-        # Add the managed job ID annotation
-        config_overrides['kubernetes']['pod_config']['metadata']['annotations'][
-            'skypilot-managed-job-id'] = str(job_id)
-        config_overrides['kubernetes']['pod_config']['metadata']['annotations'][
-            'skypilot-managed-job-name'] = str(task.name)
+        # Initialize nested structure and add annotations
+        annotations = config_overrides.setdefault('kubernetes', {}).setdefault(
+            'pod_config', {}).setdefault('metadata',
+                                         {}).setdefault('annotations', {})
+        annotations['skypilot-managed-job-id'] = str(job_id)
+        annotations['skypilot-managed-job-name'] = str(task.name)
         # Create new resource with updated config
         new_resource = resource.copy(_cluster_config_overrides=config_overrides)
         new_resources_list.append(new_resource)

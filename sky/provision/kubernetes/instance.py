@@ -954,9 +954,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         pod_spec['metadata']['labels'] = tags
     pod_spec['metadata']['labels'].update(
         {constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud})
-    if 'annotations' not in pod_spec['metadata']:
-        pod_spec['metadata']['annotations'] = {}
-    pod_spec['metadata']['annotations'].update({
+    pod_spec['metadata'].setdefault('annotations', {}).update({
         'skypilot-cluster-name': cluster_name,
     })
 
