@@ -12,7 +12,10 @@ export function useLogStreamer({
   maxLineChars = 2000,
   maxRenderLines = 5000,
   flushIntervalMs = 100,
-  onError = () => {},
+  onError = (error) => {
+    // mark parameter as used to satisfy lint while keeping signature
+    void error;
+  },
 }) {
   const [logLines, setLogLines] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -78,9 +81,19 @@ export function useLogStreamer({
 
     const appendProgressLine = (line) => {
       const processMatch = line.match(/^\(([^)]+)\)/);
-      if (!processMatch) return;
-      progressMapRef.current.set(processMatch[1], line);
-      setProgressTick((tick) => tick + 1);
+      if (processMatch) {
+        progressMapRef.current.set(processMatch[1], line);
+        setProgressTick((tick) => tick + 1);
+        return;
+      }
+      // Some progress bars (e.g. data processing) do not include a process
+      // prefix; fall back to treating them as regular log lines so they render.
+      bufferRef.current.push(line);
+      if (bufferRef.current.length > maxRenderLines * 2) {
+        bufferRef.current = bufferRef.current.slice(
+          bufferRef.current.length - maxRenderLines
+        );
+      }
     };
 
     const processChunk = (chunk) => {
@@ -141,7 +154,10 @@ export function useLogStreamer({
       })
       .catch((error) => {
         if (!active || error.name === 'AbortError') return;
-        onErrorRef.current?.(error);
+        const onErrorCb = onErrorRef.current;
+        if (onErrorCb) {
+          onErrorCb(error);
+        }
         setLogLines((prev) => [
           ...prev,
           `Error fetching logs: ${error.message}`,
