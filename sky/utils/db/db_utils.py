@@ -286,6 +286,78 @@ def drop_column_from_table_alembic(
             raise
 
 
+class _AsyncConnectionWrapper:
+    """Aiosqlite connection wrapper that discard connection"""
+
+    def __init__(self, db_path: str):
+        self._db_path = db_path
+        self._connection: Optional[aiosqlite.Connection] = None
+        self._lock: Optional[asyncio.Lock] = None
+
+    @classmethod
+    async def create(cls, db_path: str) -> '_AsyncConnectionWrapper':
+        wrapper = cls(db_path)
+        await wrapper._ensure_connection()
+        return wrapper
+
+    async def _ensure_connection(self) -> aiosqlite.Connection:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        if self._connection is None:
+            async with self._lock:
+                if self._connection is None:
+                    self._connection = await aiosqlite.connect(self._db_path)
+        return self._connection
+
+    async def _discard_connection(self) -> None:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        async with self._lock:
+            if self._connection is not None:
+                try:
+                    await self._connection.close()
+                finally:
+                    self._connection = None
+
+    async def _run(self, func: Callable[[aiosqlite.Connection], Any]) -> Any:
+        """Run the sql on aiosqlite connection
+
+        This is concurrent safe for coroutines:
+        1. _ensure_connection() and _discard_connection() is protected by
+           asyncio.lock.
+        2. discard_connection() will queue the close operation at the end
+           of the txn queue of the old connection, ensures the sqls submitted
+           before can be executed.
+        """
+        conn = await self._ensure_connection()
+        try:
+            return await func(conn)
+        except sqlite3.Error as e:
+            logger.error(f'SQLite error {e} encountered, discard the '
+                         'potentially borken connection')
+            await self._discard_connection()
+            raise
+
+    async def _execute(self, func: Callable[..., Any], *args, **kwargs) -> Any:
+        return await self._run(
+            # pylint: disable=protected-access
+            lambda conn: conn._execute(func, *args, **kwargs))
+
+    async def execute_fetchall(self, sql: str, parameters: Any = None):
+        return await self._run(
+            lambda conn: conn.execute_fetchall(sql, parameters))
+
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        if self._connection is None:
+            raise RuntimeError('Connection is not initialized.')
+        # pylint: disable=protected-access
+        return self._connection._conn
+
+    async def close(self) -> None:
+        await self._discard_connection()
+
+
 class SQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database."""
 
@@ -295,10 +367,10 @@ class SQLiteConn(threading.local):
         self.conn = sqlite3.connect(db_path, timeout=_DB_TIMEOUT_S)
         self.cursor = self.conn.cursor()
         create_table(self.cursor, self.conn)
-        self._async_conn: Optional[aiosqlite.Connection] = None
+        self._async_conn: Optional['_AsyncConnectionWrapper'] = None
         self._async_conn_lock: Optional[asyncio.Lock] = None
 
-    async def _get_async_conn(self) -> aiosqlite.Connection:
+    async def _get_async_conn(self) -> '_AsyncConnectionWrapper':
         """Get the shared aiosqlite connection for current thread.
 
         Typically, external caller should not get the connection directly,
@@ -330,20 +402,20 @@ class SQLiteConn(threading.local):
                     # Init logic like requests.init_db_within_lock will handle
                     # initialization like setting the WAL mode, so we do not
                     # duplicate that logic here.
-                    self._async_conn = await aiosqlite.connect(self.db_path)
+                    self._async_conn = await _AsyncConnectionWrapper.create(
+                        self.db_path)
         return self._async_conn
 
     async def execute_and_commit_async(self,
                                        sql: str,
-                                       parameters: Optional[
-                                           Iterable[Any]] = None) -> None:
+                                       parameters: Any = None) -> None:
         """Execute the sql and commit the transaction in a sync block."""
         conn = await self._get_async_conn()
 
         if parameters is None:
             parameters = []
 
-        def exec_and_commit(sql: str, parameters: Optional[Iterable[Any]]):
+        def exec_and_commit(sql: str, parameters: Any):
             # pylint: disable=protected-access
             conn._conn.execute(sql, parameters)
             conn._conn.commit()
@@ -354,23 +426,21 @@ class SQLiteConn(threading.local):
     @aiosqlite.context.contextmanager
     async def execute_fetchall_async(self,
                                      sql: str,
-                                     parameters: Optional[Iterable[Any]] = None
+                                     parameters: Any = None
                                     ) -> Iterable[sqlite3.Row]:
         conn = await self._get_async_conn()
         return await conn.execute_fetchall(sql, parameters)
 
-    async def execute_get_returning_value_async(
-            self,
-            sql: str,
-            parameters: Optional[Iterable[Any]] = None
-    ) -> Optional[sqlite3.Row]:
+    async def execute_get_returning_value_async(self,
+                                                sql: str,
+                                                parameters: Any = None
+                                               ) -> Optional[sqlite3.Row]:
         conn = await self._get_async_conn()
 
         if parameters is None:
             parameters = []
 
-        def exec_and_get_returning_value(sql: str,
-                                         parameters: Optional[Iterable[Any]]):
+        def exec_and_get_returning_value(sql: str, parameters: Any):
             # pylint: disable=protected-access
             row = conn._conn.execute(sql, parameters).fetchone()
             conn._conn.commit()

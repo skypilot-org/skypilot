@@ -1,5 +1,6 @@
 """Unit tests for database utilities with SKY_RUNTIME_DIR environment variable."""
 import os
+import sqlite3
 from unittest import mock
 
 import pytest
@@ -41,3 +42,49 @@ class TestSkyRuntimeDirEnvVar:
             db_path = call_args[0][0]
             expected_path = str(tmp_path / '.sky/test.db')
             assert expected_path in db_path
+
+
+@pytest.mark.asyncio
+async def test_async_connection_wrapper_discards_bad_connection(monkeypatch):
+    """Connections encountering sqlite errors should be discarded and rebuilt."""
+    created_connections = []
+    closed_connections = []
+
+    class FakeConn:
+
+        def __init__(self):
+            self._conn = object()
+
+        async def close(self):
+            closed_connections.append(self)
+
+        async def _execute(self, func, *args, **kwargs):
+            return await func(*args, **kwargs)
+
+        async def execute_fetchall(self, sql, parameters=None):
+            return []
+
+    async def fake_connect(db_path):
+        conn = FakeConn()
+        created_connections.append(conn)
+        return conn
+
+    monkeypatch.setattr(db_utils.aiosqlite, 'connect', fake_connect)
+
+    wrapper = await db_utils._AsyncConnectionWrapper.create('test_path')
+
+    async def failing_sql(_):
+        raise sqlite3.Error('boom')
+
+    with pytest.raises(sqlite3.Error):
+        await wrapper._run(failing_sql)
+
+    assert wrapper._connection is None
+    assert created_connections[0] in closed_connections
+
+    async def successful_sql(_):
+        return 'ok'
+
+    result = await wrapper._run(successful_sql)
+    assert result == 'ok'
+    assert wrapper._connection is created_connections[1]
