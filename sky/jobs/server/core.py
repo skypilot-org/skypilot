@@ -138,7 +138,7 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     return local_to_controller_file_mounts
 
 
-def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
+def _maybe_submit_job_locally(prefix: str, rank_to_dag: Dict[int, 'sky.Dag'],
                               num_jobs: int) -> Optional[List[int]]:
     """Submit the managed job locally if in consolidation mode.
 
@@ -154,13 +154,14 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
     # Create local directory for the managed job.
     pathlib.Path(prefix).expanduser().mkdir(parents=True, exist_ok=True)
     job_ids = []
-    pool = dag.pool
+    pool = rank_to_dag[0].pool
     pool_hash = None
     if pool is not None:
         pool_hash = serve_state.get_service_hash(pool)
         # Already checked in the sdk.
         assert pool_hash is not None, f'Pool {pool} not found'
-    for _ in range(num_jobs):
+    for rank in range(num_jobs):
+        dag = rank_to_dag[rank]
         # TODO(tian): We should have a separate name for each job when
         # submitting multiple jobs. Current blocker is that we are sharing
         # the same dag object for all jobs. Maybe we can do copy.copy() for
@@ -265,9 +266,6 @@ def launch(
                  ipaddress.ip_address(parsed.hostname).is_loopback)):
                 mutated_user_config.pop('db', None)
 
-    user_dag_str_user_specified = dag_utils.dump_chain_dag_to_yaml_str(
-        dag, use_user_specified_yaml=True)
-
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
     task_names = set()
@@ -359,8 +357,17 @@ def launch(
     # need to serialize the pool name in the dag. The dag object will be
     # preserved. See sky/admin_policy.py::MutatedUserRequest::decode.
     dag.pool = pool
+
+    rank_to_dag = {}
+    for rank in range(num_jobs):
+        rank_to_dag[rank] = copy.deepcopy(dag)
+        if num_jobs > 1:
+            rank_to_dag[rank].name = f'{dag.name}-{rank}'
+            for task_ in rank_to_dag[rank].tasks:
+                task_.name = f'{task_.name}-{rank}'
+
     consolidation_mode_job_ids = _maybe_submit_job_locally(
-        prefix, dag, num_jobs)
+        prefix, rank_to_dag, num_jobs)
 
     # This is only needed for non-consolidation mode. For consolidation
     # mode, the controller uses the same catalog as API server.
@@ -372,6 +379,12 @@ def launch(
         job_rank: Optional[int] = None,
         num_jobs: Optional[int] = None,
     ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
+        if job_rank:
+            dag = rank_to_dag[job_rank]
+        else:
+            dag = rank_to_dag[0]
+        user_dag_str_user_specified = dag_utils.dump_chain_dag_to_yaml_str(
+            dag, use_user_specified_yaml=True)
         rank_suffix = '' if job_rank is None else f'-{job_rank}'
         remote_original_user_yaml_path = (
             f'{prefix}/{dag.name}-{dag_uuid}{rank_suffix}.original_user_yaml')
