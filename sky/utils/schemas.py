@@ -1519,6 +1519,43 @@ def get_config_schema():
                     }
                 }
             },
+        },
+        'novita': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'imageUrl': {
+                    'type': 'string',
+                },
+                'imageAuth': {
+                    'type': 'string',
+                },
+                'imageAuthId': {
+                    'type': 'string',
+                },
+                'ports': {
+                    'type': 'string',
+                },
+                'envs': {
+                    'type': 'array',
+                },
+                'tools': {
+                    'type': 'array',
+                },
+                'command': {
+                    'type': 'string',
+                },
+                'networkStorages': {
+                    'type': 'array',
+                },
+                'networkId': {
+                    'type': 'string',
+                },
+                'rootfsSize': {
+                    'type': 'integer',
+                }
+            },
         }
     }
 

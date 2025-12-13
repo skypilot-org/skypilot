@@ -74,10 +74,10 @@ def _clear_request_level_cache():
 # To only run tests for managed jobs (without generic tests), use
 # --managed-jobs.
 all_clouds_in_smoke_tests = [
-    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
-    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace',
-    'primeintellect', 'runpod', 'vast', 'nebius', 'hyperbolic', 'seeweb',
-    'shadeform', 'coreweave', 'slurm'
+    'aws', 'azure', 'cloudflare', 'coreweave', 'cudo', 'do', 'fluidstack',
+    'gcp', 'hyperbolic', 'ibm', 'kubernetes', 'lambda', 'nebius', 'novita',
+    'oci', 'paperspace', 'primeintellect', 'runpod', 'scp', 'seeweb',
+    'shadeform', 'slurm', 'vast', 'vsphere'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -105,8 +105,9 @@ cloud_to_pytest_keyword = {
     'runpod': 'runpod',
     'nebius': 'nebius',
     'hyperbolic': 'hyperbolic',
-    'shadeform': 'shadeform',
+    'novita': 'novita',
     'seeweb': 'seeweb',
+    'shadeform': 'shadeform',
     'coreweave': 'coreweave',
     'slurm': 'slurm',
 }

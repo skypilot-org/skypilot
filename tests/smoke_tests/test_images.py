@@ -456,6 +456,7 @@ def test_image_no_conda():
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 @pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
+@pytest.mark.no_novita  # Novita does not support stopping instances
 @pytest.mark.no_shadeform  # Shadeform does not support stopping instances
 @pytest.mark.no_seeweb  # Seeweb does not support autodown
 @pytest.mark.no_slurm  # Slurm does not support stopping instances yet
@@ -612,6 +613,7 @@ def private_docker_registry_setup(request):
 
 @pytest.mark.no_azure
 @pytest.mark.no_kubernetes
+@pytest.mark.no_novita
 @pytest.mark.no_shadeform
 @pytest.mark.no_slurm  # Slurm does not support docker images and/or image_id
 @pytest.mark.parametrize(

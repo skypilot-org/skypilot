@@ -375,9 +375,17 @@ def get_hourly_cost_impl(
         price_str = 'SpotPrice'
     else:
         price_str = 'Price'
-        # For AWS/Azure/GCP on-demand instances, the price is the same across
-        # all the zones in the same region.
-        assert region is None or len(set(df[price_str])) == 1, df
+        # For AWS/Azure/GCP on-demand instances, the price is typically the same
+        # across all zones in the same region. However, for some clouds like
+        # Novita, the same instance type may have different prices in the same
+        # region (due to different configurations). We allow multiple prices and
+        # will select the cheapest one below.
+        if region is not None and len(set(df[price_str].dropna())) > 1:
+            # Log a debug message - we'll select the cheapest price below
+            logger.debug(
+                f'Instance type {instance_type!r} has multiple prices in '
+                f'region {region!r}: {sorted(set(df[price_str].dropna()))}. '
+                f'Selecting the cheapest.')
 
     if pd.isna(df[price_str]).all():
         with ux_utils.print_exception_no_traceback():
@@ -402,16 +410,37 @@ def get_vcpus_mem_from_instance_type_impl(
     if df.empty:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'No instance type {instance_type} found.')
-    assert len(set(df['vCPUs'])) == 1, ('Cannot determine the number of vCPUs '
-                                        f'of the instance type {instance_type}.'
-                                        f'\n{df}')
-    assert len(set(
-        df['MemoryGiB'])) == 1, ('Cannot determine the memory size '
-                                 f'of the instance type {instance_type}.'
-                                 f'\n{df}')
 
-    vcpus = df['vCPUs'].iloc[0]
-    mem = df['MemoryGiB'].iloc[0]
+    # For some clouds like Novita, the same instance type may have different
+    # vCPUs or MemoryGiB values (due to different configurations). In such cases,
+    # we use the most common value, or the first value if all are unique.
+    vcpus_set = set(df['vCPUs'].dropna())
+    if len(vcpus_set) > 1:
+        # Use the most common value, or first if all are unique
+        vcpus_value = df['vCPUs'].mode()
+        if len(vcpus_value) > 0:
+            vcpus = vcpus_value.iloc[0]
+        else:
+            vcpus = df['vCPUs'].iloc[0]
+        logger.debug(
+            f'Instance type {instance_type!r} has multiple vCPUs values: '
+            f'{sorted(vcpus_set)}. Using {vcpus}.')
+    else:
+        vcpus = df['vCPUs'].iloc[0]
+
+    mem_set = set(df['MemoryGiB'].dropna())
+    if len(mem_set) > 1:
+        # Use the most common value, or first if all are unique
+        mem_value = df['MemoryGiB'].mode()
+        if len(mem_value) > 0:
+            mem = mem_value.iloc[0]
+        else:
+            mem = df['MemoryGiB'].iloc[0]
+        logger.debug(
+            f'Instance type {instance_type!r} has multiple MemoryGiB values: '
+            f'{sorted(mem_set)}. Using {mem}.')
+    else:
+        mem = df['MemoryGiB'].iloc[0]
 
     return _get_value(vcpus), _get_value(mem)
 
