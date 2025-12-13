@@ -62,6 +62,7 @@ Create the configuration file:
        User myusername
        IdentityFile ~/.ssh/id_rsa
        # Optional: Port 22
+       # Optional: ProxyJump jumphost
        # Optional: ProxyCommand ssh -W %h:%p jumphost
 
    # Optional: Add more clusters if you have multiple Slurm clusters
@@ -70,6 +71,10 @@ Create the configuration file:
        User myusername
        IdentityFile ~/.ssh/id_rsa
    EOF
+
+.. note::
+
+    ``HostName``, ``User``, and ``IdentityFile`` are required fields.
 
 Verify your SSH connection works by running:
 
