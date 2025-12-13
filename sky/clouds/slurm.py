@@ -510,7 +510,7 @@ class Slurm(clouds.Cloud):
                     f'disabled. '
                     f'{cls._SSH_CONFIG_KEY_MAPPING.get(key, key.capitalize())} '
                     'is missing, please check your ~/.slurm/config '
-                    'and try again')
+                    'and try again.')
             except Exception as e:  # pylint: disable=broad-except
                 error_msg = (f'Credential check failed: '
                              f'{common_utils.format_exception(e)}')

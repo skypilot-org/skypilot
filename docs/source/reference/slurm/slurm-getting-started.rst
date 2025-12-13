@@ -49,14 +49,6 @@ Configuring Slurm clusters
 SkyPilot uses an SSH config-style file at ``~/.slurm/config`` to connect to Slurm clusters.
 Each host entry in this file represents a Slurm cluster.
 
-.. note::
-
-    The following fields are **required** for each cluster:
-
-    * ``HostName``: The login node hostname
-    * ``User``: Your username on the Slurm cluster
-    * ``IdentityFile``: Path to your SSH private key
-
 Create the configuration file:
 
 .. code-block:: bash
@@ -79,6 +71,10 @@ Create the configuration file:
        User myusername
        IdentityFile ~/.ssh/id_rsa
    EOF
+
+.. note::
+
+    ``HostName``, ``User``, and ``IdentityFile`` are required fields.
 
 Verify your SSH connection works by running:
 
