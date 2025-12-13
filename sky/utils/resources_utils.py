@@ -184,6 +184,7 @@ def format_resource(resource: 'resources_lib.Resources',
                     simplified_only: bool = False) -> Tuple[str, Optional[str]]:
     resource = resource.assert_launchable()
     is_k8s = str(resource.cloud).lower() == 'kubernetes'
+    vcpu, mem = None, None
     if resource.accelerators is None or is_k8s or not simplified_only:
         vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
             resource.instance_type)
@@ -196,18 +197,35 @@ def format_resource(resource: 'resources_lib.Resources',
         elements_simple.append(f'gpus={acc}:{count}')
         elements_full.append(f'gpus={acc}:{count}')
 
-    if (resource.accelerators is None or is_k8s):
-        if vcpu is not None:
-            elements_simple.append(f'cpus={int(vcpu)}')
-            elements_full.append(f'cpus={int(vcpu)}')
-        if mem is not None:
-            elements_simple.append(f'mem={int(mem)}')
-            elements_full.append(f'mem={int(mem)}')
+    cpu_to_add = None
+    if resource.cpus is not None and resource.cpus.strip():
+        cpus_str = resource.cpus.rstrip('+')
+        try:
+            cpus_float = float(cpus_str)
+            cpus_formatted = f'{cpus_float:.1f}'.rstrip('0').rstrip('.')
+            cpu_to_add = f'cpus={cpus_formatted}'
+        except ValueError:
+            cpu_to_add = f'cpus={resource.cpus}'
+    elif vcpu is not None:
+        cpus_formatted = f'{vcpu:.1f}'.rstrip('0').rstrip('.')
+        cpu_to_add = f'cpus={cpus_formatted}'
+
+    mem_to_add = None
+    if mem is not None:
+        mem_to_add = f'mem={int(mem)}'
+
+    if is_k8s or resource.accelerators is None:
+        if cpu_to_add:
+            elements_simple.append(cpu_to_add)
+            elements_full.append(cpu_to_add)
+        if mem_to_add:
+            elements_simple.append(mem_to_add)
+            elements_full.append(mem_to_add)
     elif not simplified_only:
-        if vcpu is not None:
-            elements_full.append(f'cpus={int(vcpu)}')
-        if mem is not None:
-            elements_full.append(f'mem={int(mem)}')
+        if cpu_to_add:
+            elements_full.append(cpu_to_add)
+        if mem_to_add:
+            elements_full.append(mem_to_add)
 
     if not is_k8s:
         instance_type_full = resource.instance_type

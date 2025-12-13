@@ -2,9 +2,8 @@
 
 This module contains tests for the CLI utilities in sky.utils.cli_utils.
 """
+import re
 import time
-
-import pytest
 
 from sky import backends
 from sky.resources import Resources
@@ -377,3 +376,43 @@ def test_get_resources_kubernetes():
     # Test K8s TPU resources
     resources_str = status_utils._get_resources(mock_record_k8s_tpu)
     assert resources_str == '1x(gpus=tpu-v4-8:1, cpus=8, mem=32, ...)'
+
+
+def test_get_resources_fractional_cpu():
+    from sky.utils import resources_utils
+
+    mock_resources_k8s_fractional = Resources(infra='k8s/my-cluster-ctx',
+                                               cpus='0.5',
+                                               memory=4,
+                                               instance_type='0.5CPU--4GB')
+
+    simple, full = resources_utils.format_resource(mock_resources_k8s_fractional)
+
+    assert 'cpus=0.5' in simple or 'cpus=0.5' in (full or '')
+    assert not re.search(r'\bcpus=0\b', simple)
+    if full:
+        assert not re.search(r'\bcpus=0\b', full)
+
+    mock_resources_k8s_fractional_plus = Resources(infra='k8s/my-cluster-ctx',
+                                                    cpus='0.5+',
+                                                    memory=4,
+                                                    instance_type='0.5CPU--4GB')
+    simple_plus, full_plus = resources_utils.format_resource(
+        mock_resources_k8s_fractional_plus)
+    assert 'cpus=0.5' in simple_plus or 'cpus=0.5' in (full_plus or '')
+
+    mock_resources_k8s_decimal = Resources(infra='k8s/my-cluster-ctx',
+                                            cpus='4.5',
+                                            memory=8,
+                                            instance_type='4.5CPU--8GB')
+    simple_decimal, full_decimal = resources_utils.format_resource(
+        mock_resources_k8s_decimal)
+    assert 'cpus=4.5' in simple_decimal or 'cpus=4.5' in (full_decimal or '')
+
+    mock_resources_k8s_int = Resources(infra='k8s/my-cluster-ctx',
+                                        cpus='4',
+                                        memory=8,
+                                        instance_type='4CPU--8GB')
+    simple_int, full_int = resources_utils.format_resource(
+        mock_resources_k8s_int)
+    assert 'cpus=4' in simple_int or 'cpus=4' in (full_int or '')
