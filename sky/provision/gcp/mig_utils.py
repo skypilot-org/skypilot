@@ -54,13 +54,20 @@ def create_region_instance_template(cluster_name_on_cloud: str, project_id: str,
                         credentials=None,
                         cache_discovery=False)
     config = node_config.copy()
-    config.pop(constants.MANAGED_INSTANCE_GROUP_CONFIG, None)
+    mig_config = config.pop(constants.MANAGED_INSTANCE_GROUP_CONFIG, None) or {}
 
     # We have to ignore user defined scheduling for DWS.
     # TODO: Add a warning log for this behvaiour.
     scheduling = config.get('scheduling', {})
     assert scheduling.get('provisioningModel') != 'SPOT', (
         'DWS does not support spot VMs.')
+
+    # Set instanceTerminationAction from MIG config (defaults to DELETE).
+    # STOP preserves boot disk and IP for subsequent runs.
+    termination_action = mig_config.get('termination_action', 'DELETE')
+    if 'scheduling' not in config:
+        config['scheduling'] = {}
+    config['scheduling']['instanceTerminationAction'] = termination_action
 
     reservations_affinity = config.pop('reservation_affinity', None)
     if reservations_affinity is not None:

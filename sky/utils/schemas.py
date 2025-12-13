@@ -1292,6 +1292,10 @@ def get_config_schema():
                         },
                         'provision_timeout': {
                             'type': 'integer',
+                        },
+                        'termination_action': {
+                            'type': 'string',
+                            'enum': ['DELETE', 'STOP'],
                         }
                     }
                 },
