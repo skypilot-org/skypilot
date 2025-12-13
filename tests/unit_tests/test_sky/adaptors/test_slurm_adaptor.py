@@ -30,6 +30,7 @@ PartitionName=GPU nodes (nvidia) AllowGroups=ALL AllowAccounts=ALL AllowQos=ALL 
             mock_run.assert_called_once_with(
                 'scontrol show partitions -o',
                 require_outputs=True,
+                separate_stderr=True,
                 stream_logs=False,
             )
 
@@ -61,6 +62,7 @@ class TestInfoNodes:
             mock_run.assert_called_once_with(
                 f'sinfo -h --Node -o "%N{slurm.SEP}%t{slurm.SEP}%G{slurm.SEP}%c{slurm.SEP}%m{slurm.SEP}%P"',
                 require_outputs=True,
+                separate_stderr=True,
                 stream_logs=False,
             )
 
@@ -193,6 +195,7 @@ class TestGetJobsStateByName:
             mock_run.assert_called_once_with(
                 'squeue -h --name sky-3a5e-pilot-9b1gdacf -o "%T"',
                 require_outputs=True,
+                separate_stderr=True,
                 stream_logs=False,
             )
 
@@ -215,6 +218,7 @@ class TestGetJobsStateByName:
             mock_run.assert_called_once_with(
                 'squeue -h --name sky-test-job -o "%T"',
                 require_outputs=True,
+                separate_stderr=True,
                 stream_logs=False,
             )
 
