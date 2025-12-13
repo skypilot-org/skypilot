@@ -105,6 +105,7 @@ class SlurmClient:
 
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
+                                              separate_stderr=True,
                                               stream_logs=False)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
@@ -134,6 +135,7 @@ class SlurmClient:
             cmd += ' --full'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
+                                              separate_stderr=True,
                                               stream_logs=False)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
@@ -153,6 +155,7 @@ class SlurmClient:
         cmd = 'sinfo'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
+                                              separate_stderr=True,
                                               stream_logs=False)
         subprocess_utils.handle_returncode(
             rc,
@@ -171,6 +174,7 @@ class SlurmClient:
                f'"%N{SEP}%t{SEP}%G{SEP}%c{SEP}%m{SEP}%P"')
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
+                                              separate_stderr=True,
                                               stream_logs=False)
         subprocess_utils.handle_returncode(
             rc,
@@ -223,6 +227,7 @@ class SlurmClient:
         cmd = f'scontrol show node {node_name}'
         rc, node_details, stderr = self._runner.run(cmd,
                                                     require_outputs=True,
+                                                    separate_stderr=True,
                                                     stream_logs=False)
         subprocess_utils.handle_returncode(
             rc,
@@ -232,15 +237,17 @@ class SlurmClient:
         node_info = _parse_scontrol_node_output(node_details)
         return node_info
 
-    def get_node_jobs(self, node_name: str) -> List[str]:
-        """Get the list of jobs for a given node name.
+    def get_jobs_gres(self, node_name: str) -> List[str]:
+        """Get the list of jobs GRES for a given node name.
 
         Returns:
-            A list of job names for the current user on the node.
+            A list of GRES specs (e.g., 'gres/gpu:h100:4')
+            for jobs on the node.
         """
         cmd = f'squeue --me -h --nodelist {node_name} -o "%b"'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
+                                              separate_stderr=True,
                                               stream_logs=False)
         subprocess_utils.handle_returncode(
             rc,
@@ -264,6 +271,7 @@ class SlurmClient:
         cmd = f'squeue -h --only-job-state --jobs {job_id} -o "%T"'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
+                                              separate_stderr=True,
                                               stream_logs=False)
         subprocess_utils.handle_returncode(
             rc,
@@ -280,6 +288,7 @@ class SlurmClient:
         cmd = f'squeue -h --name {job_name} -o "%T"'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
+                                              separate_stderr=True,
                                               stream_logs=False)
         subprocess_utils.handle_returncode(
             rc,
@@ -301,6 +310,7 @@ class SlurmClient:
         cmd = f'squeue -h --jobs {job_id} --states all -o "%r"'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
+                                              separate_stderr=True,
                                               stream_logs=False)
         subprocess_utils.handle_returncode(
             rc,
@@ -346,6 +356,7 @@ class SlurmClient:
             cmd = f'squeue -h --jobs {job_id} -o "%N"'
             rc, stdout, stderr = self._runner.run(cmd,
                                                   require_outputs=True,
+                                                  separate_stderr=True,
                                                   stream_logs=False)
 
             if rc == 0 and stdout.strip():
@@ -446,6 +457,7 @@ class SlurmClient:
         cmd = f'sbatch --partition={partition} {script_path}'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
+                                              separate_stderr=True,
                                               stream_logs=False)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
@@ -473,6 +485,7 @@ class SlurmClient:
         cmd = 'scontrol show partitions -o'
         rc, stdout, stderr = self._runner.run(cmd,
                                               require_outputs=True,
+                                              separate_stderr=True,
                                               stream_logs=False)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
