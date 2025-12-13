@@ -320,7 +320,7 @@ Volume mounting can be done directly in the task YAML on a per-task basis, or gl
 
 .. note::
 
-     The ``ssh`` section in ``~/.sky/config.yaml`` applies to every cluster launched on SSH node pools. To mount different paths per cluster, set the ``ssh`` config in the task YAML file as described in the per-task configuration section.
+   The ``ssh`` section in ``~/.sky/config.yaml`` applies to every cluster launched on SSH node pools. To mount different paths per cluster, set the ``ssh`` config in the task YAML file as described in the per-task configuration section.
 
 Cleanup
 -------

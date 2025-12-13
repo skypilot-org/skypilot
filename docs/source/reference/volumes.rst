@@ -341,7 +341,7 @@ When you terminate the cluster, the ephemeral volumes are automatically deleted:
 Mount PVCs
 ~~~~~~~~~~
 
-In addition to mount volumes, you can also mount PVCs directly to SkyPilot clusters and managed jobs.
+In addition to creating and mounting volumes via SkyPilot's volume management, you can also mount existing PersistentVolumeClaims (PVCs) directly to SkyPilot clusters and managed jobs.
 
 Mount PVCs for single context
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -392,7 +392,7 @@ Mount PVCs for single context
 
 .. note::
 
-     The ``kubernetes`` section in ``~/.sky/config.yaml`` applies to every cluster launched on Kubernetes. To mount different PVCs per cluster, set the ``kubernetes`` config in the task YAML file as described in the per-task configuration section.
+   The ``kubernetes`` section in ``~/.sky/config.yaml`` applies to every cluster launched on Kubernetes. To mount different PVCs per cluster, set the ``kubernetes`` config in the task YAML file as described in the per-task configuration section.
 
 Mount PVCs for multiple contexts
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
