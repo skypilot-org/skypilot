@@ -21,3 +21,4 @@ sphinxcontrib-qthelp==1.0.6
 sphinxcontrib-serializinghtml==1.1.9
 llms-txt
 pypandoc_binary
+verda>=1.17.4
