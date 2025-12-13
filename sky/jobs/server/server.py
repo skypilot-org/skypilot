@@ -242,3 +242,17 @@ async def pool_download_logs(
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
+
+
+@router.post('/task_events')
+async def task_events(request: fastapi.Request,
+                      body: payloads.GetJobTaskEventsBody) -> None:
+    """Gets task events for a managed job."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.JOBS_TASK_EVENTS,
+        request_body=body,
+        func=core.get_job_task_events,
+        schedule_type=api_requests.ScheduleType.SHORT,
+        request_cluster_name=common.JOB_CONTROLLER_NAME,
+    )

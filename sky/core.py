@@ -279,6 +279,143 @@ all_clusters, unmanaged_clusters, all_jobs, context
     return all_clusters, unmanaged_clusters, all_jobs, context
 
 
+@usage_lib.entrypoint
+def taint_node(
+    context: str,
+    node: str,
+    key: str,
+    value: str,
+    effect: str,
+    remove: bool = False,
+) -> None:
+    """Taint or untaint a Kubernetes node.
+
+    Args:
+        context: Kubernetes context to use. If None, uses current context.
+        node: Name of the node to taint.
+        key: Taint key.
+        value: Taint value.
+        effect: Taint effect (NoSchedule, PreferNoSchedule, or NoExecute).
+        remove: If True, remove the taint instead of adding it.
+
+    Raises:
+        exceptions.CloudUserIdentityError: if the Kubernetes config is invalid.
+        exceptions.ResourcesUnavailableError: if the node doesn't exist.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.adaptors import kubernetes
+
+    # Load Kubernetes config
+    v1 = kubernetes.core_api(context)
+
+    try:
+        # Get the current node to verify it exists
+        node_obj = v1.read_node(node)
+
+        # Prepare the taint
+        taints = node_obj.spec.taints or []
+        taint_key_value = f'{key}={value}:{effect}'
+
+        if remove:
+            # Remove the taint
+            taints = [
+                t for t in taints if not (
+                    t.key == key and t.value == value and t.effect == effect)
+            ]
+            logger.info(f'Removing taint {taint_key_value} from node {node}')
+        else:
+            # Add the taint (avoid duplicates)
+            taint_exists = any(
+                t.key == key and t.value == value and t.effect == effect
+                for t in taints)
+            if not taint_exists:
+                new_taint = kubernetes.models.V1Taint(key=key,
+                                                      value=value,
+                                                      effect=effect)
+                taints.append(new_taint)
+                logger.info(f'Adding taint {taint_key_value} to node {node}')
+            else:
+                logger.info(f'Taint {taint_key_value} already exists on '
+                            f'node {node}')
+
+        # Patch the node
+        body = {
+            'spec': {
+                'taints': [{
+                    'key': t.key,
+                    'value': t.value,
+                    'effect': t.effect
+                } for t in taints]
+            }
+        }
+        v1.patch_node(node, body)
+
+        action = 'removed from' if remove else 'added to'
+        logger.info(f'Successfully {action} node {node}')
+
+    except kubernetes.api_exception() as e:
+        if e.status == 404:
+            raise exceptions.ResourcesUnavailableError(
+                f'Node {node!r} not found in context {context!r}')
+        raise exceptions.CloudUserIdentityError(
+            f'Failed to taint node: {common_utils.format_exception(e)}')
+
+
+def cluster_events(cluster_name: Optional[str] = None,
+                   cluster_hash: Optional[str] = None,
+                   event_type: str = 'STATUS_CHANGE',
+                   include_timestamps: bool = False,
+                   limit: Optional[int] = None) -> List[Any]:
+    """Get events for a cluster.
+
+    Args:
+        cluster_name: Name of the cluster. Cannot be specified if cluster_hash
+            is specified.
+        cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
+            is specified.
+        event_type: Type of events to retrieve ('STATUS_CHANGE' or 'DEBUG').
+        include_timestamps: If True, returns list of dicts with 'reason' and
+            'transitioned_at' fields. If False, returns list of reason strings.
+        limit: If specified, returns at most this many events (most recent).
+            If None, returns all events.
+
+    Returns:
+        If include_timestamps is False: List of event reason strings.
+        If include_timestamps is True: List of dicts with 'reason' and
+            'transitioned_at' (unix timestamp) fields.
+        Events are ordered from oldest to newest.
+    """
+    event_type_enum = global_user_state.ClusterEventType(event_type)
+    return global_user_state.get_cluster_events(
+        cluster_name=cluster_name,
+        cluster_hash=cluster_hash,
+        event_type=event_type_enum,
+        include_timestamps=include_timestamps,
+        limit=limit)
+
+
+def get_cluster_failures(
+        cluster_name: Optional[str] = None,
+        cluster_hash: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Get active cluster failures for a given cluster or all clusters.
+
+    Args:
+        cluster_name: Name of the cluster to query failures for. Cannot be
+            specified if cluster_hash is specified. If both are None, returns
+            failures for all clusters.
+        cluster_hash: Hash of the cluster to query failures for. Cannot be
+            specified if cluster_name is specified. If both are None, returns
+            failures for all clusters.
+
+    Returns:
+        List of dictionaries containing failure records that match the
+        cluster(s) and don't have deleted_at set (i.e., active failures).
+        Each dict contains: cluster_hash, failure_mode, deleted_at.
+    """
+    return global_user_state.get_cluster_failures(cluster_name=cluster_name,
+                                                  cluster_hash=cluster_hash)
+
+
 def endpoints(cluster: str,
               port: Optional[Union[int, str]] = None) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).

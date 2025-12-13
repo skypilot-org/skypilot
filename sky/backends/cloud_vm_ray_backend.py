@@ -839,6 +839,23 @@ class RetryingVmProvisioner(object):
                     f'{prev_cluster_status.value}) was previously in '
                     f'{cloud} ({region.name}). Restarting.'
                     f'{colorama.Style.RESET_ALL}')
+
+                # Clear any existing cluster failures when reusing a cluster
+                # This resets the failure state when going through the
+                # provisioning flow
+                failures = global_user_state.get_cluster_failures(
+                    cluster_name=cluster_name)
+                if failures:
+                    global_user_state.clear_cluster_failures(failures)
+                    failure_details = [
+                        f'"{f["failure_mode"]}"' for f in failures
+                    ]
+                    plural = 's' if len(failures) > 1 else ''
+                    logger.info(
+                        f'{colorama.Style.DIM}Cleared {len(failures)} '
+                        f'existing cluster failure{plural} for cluster '
+                        f'{cluster_name!r}: "{", ".join(failure_details)}"'
+                        f'{colorama.Style.RESET_ALL}')
             yield zones
 
             # If it reaches here: the cluster status in the database gets
