@@ -10,7 +10,7 @@ import logging
 import os
 import traceback
 import typing
-from typing import Optional, Set
+from typing import List, Optional, Set
 
 from sky import backends
 from sky import dag as dag_lib
@@ -401,6 +401,8 @@ class StrategyExecutor:
                                         logger.debug('Restored env var: '
                                                      f'{env_var}: {value}')
                                         os.environ[env_var] = value
+
+                            _add_k8s_annotations(self.dag.tasks[0], self.job_id)
 
                             request_id = None
                             try:
@@ -799,3 +801,25 @@ def _get_logger_file(file_logger: logging.Logger) -> Optional[str]:
         if isinstance(handler, logging.FileHandler):
             return handler.baseFilename
     return None
+
+
+def _add_k8s_annotations(task: 'task_lib.Task', job_id: int) -> None:
+    # Add Kubernetes pod config annotation before launch
+    original_resources = task.resources
+    new_resources_list: List['resources.Resources'] = []
+    for resource in original_resources:
+        # Get existing config overrides or create new dict
+        config_overrides = resource.cluster_config_overrides
+
+        # Initialize nested structure and add annotations
+        annotations = config_overrides.setdefault('kubernetes', {}).setdefault(
+            'pod_config', {}).setdefault('metadata',
+                                         {}).setdefault('annotations', {})
+        annotations['skypilot-managed-job-id'] = str(job_id)
+        annotations['skypilot-managed-job-name'] = str(task.name)
+        # Create new resource with updated config
+        new_resource = resource.copy(_cluster_config_overrides=config_overrides)
+        new_resources_list.append(new_resource)
+
+    # Set the new resources back to the task
+    task.set_resources(new_resources_list)
