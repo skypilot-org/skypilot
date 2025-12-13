@@ -21,6 +21,8 @@ Supported volume types:
 
 - RunPod: `Network Volumes <https://docs.runpod.io/pods/storage/types#network-volume>`_
 
+With SSH node pools, you can mount host volumes or directories into SkyPilot clusters and managed jobs. See :ref:`SSH node pools <ssh-volumes>` for details.
+
 .. _volumes-on-kubernetes:
 
 Volumes on Kubernetes
@@ -112,7 +114,8 @@ Quickstart
 
 .. note::
 
-  For multi-node clusters, volumes are mounted to all nodes. You must configure ``config.access_mode`` to ``ReadWriteMany`` and use a ``storage_class_name`` that supports the ``ReadWriteMany`` access mode. Otherwise, SkyPilot will fail to launch the cluster.
+  - For multi-node clusters, volumes are mounted to all nodes. You must configure ``config.access_mode`` to ``ReadWriteMany`` and use a ``storage_class_name`` that supports the ``ReadWriteMany`` access mode. Otherwise, SkyPilot will fail to launch the cluster.
+  - If you want to mount a volume to all the cluster or jobs by default, you can use the admin policy to inject the volume path into the task YAML. See :ref:`add-volumes-policy` for details.
 
 .. _volumes-on-kubernetes-manage:
 
@@ -335,6 +338,103 @@ When you terminate the cluster, the ephemeral volumes are automatically deleted:
   $ sky down my-cluster
   # Cluster and its ephemeral volumes are deleted
 
+Mount PVCs
+~~~~~~~~~~
+
+In addition to mount volumes, you can also mount PVCs directly to SkyPilot clusters and managed jobs.
+
+Mount PVCs for single context
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**Per-task configuration:**
+
+.. code-block:: yaml
+
+    # task.yaml
+    run: |
+      echo "Hello, world!" > /mnt/data/hello.txt
+      ls -la /mnt/data
+    config:
+      kubernetes:
+        pod_config:
+          spec:
+            securityContext:
+              fsGroup: 1000
+              fsGroupChangePolicy: OnRootMismatch
+            containers:
+              - volumeMounts:
+                - mountPath: /mnt/data
+                  name: my-pvc
+            volumes:
+              - name: my-pvc
+                persistentVolumeClaim:
+                  claimName: my-pvc
+
+**Global configuration:**
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    kubernetes:
+      pod_config:
+        spec:
+          securityContext:
+            fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
+          containers:
+            - volumeMounts:
+              - mountPath: /mnt/data
+                name: my-pvc
+          volumes:
+            - name: my-pvc
+              persistentVolumeClaim:
+                claimName: my-pvc
+
+.. note::
+
+     The ``kubernetes`` section in ``~/.sky/config.yaml`` applies to every cluster launched on Kubernetes. To mount different PVCs per cluster, set the ``kubernetes`` config in the task YAML file as described in the per-task configuration section.
+
+Mount PVCs for multiple contexts
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you want to mount different PVCs for different Kubernetes contexts, you can set the ``allowed_contexts`` and ``context_configs`` in ``~/.sky/config.yaml``.
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    kubernetes:
+      allowed_contexts:
+        - context1
+        - context2
+      context_configs:
+        context1:
+          pod_config:
+            spec:
+              securityContext:
+                fsGroup: 1000
+                fsGroupChangePolicy: OnRootMismatch
+              containers:
+                - volumeMounts:
+                  - mountPath: /mnt/data
+                    name: my-pvc
+              volumes:
+                - name: my-pvc
+                  persistentVolumeClaim:
+                    claimName: pvc1
+        context2:
+          pod_config:
+            spec:
+              securityContext:
+                fsGroup: 1000
+                fsGroupChangePolicy: OnRootMismatch
+              containers:
+                - volumeMounts:
+                  - mountPath: /mnt/data
+                    name: my-pvc
+              volumes:
+                - name: my-pvc
+                  persistentVolumeClaim:
+                    claimName: pvc2
 
 .. _volumes-on-runpod:
 
