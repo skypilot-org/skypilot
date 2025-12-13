@@ -1,0 +1,140 @@
+# Search Tool Interaction Inference (Google Search backend)
+#
+# This example demonstrates inference using Search-R1 with a search/retrieval tool.
+# The model uses a Google Search–backed tool for answering questions that require external knowledge.
+# Both the Google search server and inference run on the same node.
+#
+# Usage:
+#   sky launch -c verl-infer-google llm/verl/verl-search-interaction-google-infer.yaml \
+#     --env MODEL_PATH=/checkpoints/hf_model \
+#     --env GOOGLE_API_KEY=your_key_here \
+#     --env GOOGLE_CSE_ID=your_cse_id_here \
+#     -y
+#
+# Requirements:
+#   - Single GPU for inference
+#   - Valid Google Programmable Search Engine (CSE) + API key
+
+resources:
+  accelerators: H100:1
+  memory: 128+
+  ports:
+    - 8000  # Google search server
+
+num_nodes: 1
+
+envs:
+  MODEL_PATH: ""          # Optional: Path to model checkpoint (defaults to base model)
+  GOOGLE_API_KEY: ""      # Required: Google API key
+  GOOGLE_CSE_ID: ""       # Required: Google Custom Search Engine ID
+  CHECKPOINT_BUCKET_NAME: verl-search-interaction-checkpoints
+
+file_mounts:
+  /checkpoints:
+    name: ${CHECKPOINT_BUCKET_NAME}
+    mode: MOUNT
+
+setup: |
+  set -e
+
+  echo "=== Search Tool Inference Setup (Google Search) ==="
+
+  # System dependencies
+  echo "Installing system dependencies..."
+  sudo apt update && sudo apt install -y iproute2 git
+
+  # Python environment
+  echo "Setting up Python virtual environment..."
+  uv venv --python 3.10 --seed
+  source .venv/bin/activate
+
+  echo "Installing PyTorch..."
+  uv pip install "torch==2.8.*" torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+  # Clone VERL repository (if infer.py relies on its code / configs)
+  echo "Cloning VERL repository..."
+  rm -rf verl
+  git clone https://github.com/volcengine/verl.git
+  cd verl
+  git checkout v0.6.0
+
+  echo "Installing VERL + SGLang dependencies..."
+  uv pip install -v -e .
+  uv pip install wheel
+  uv pip install packaging
+  uv pip install -r ./requirements_sglang.txt
+  uv pip install "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiFALSE-cp310-cp310-linux_x86_64.whl"
+
+  cd ..
+
+  # Clone Search-R1 for inference
+  echo "Cloning Search-R1 repository..."
+  rm -rf Search-R1
+  git clone https://github.com/PeterGriffinJin/Search-R1.git
+
+  # Install additional inference dependencies
+  cd Search-R1
+  if [ -f requirements.txt ]; then
+    echo "Installing Search-R1 requirements..."
+    uv pip install -r requirements.txt
+  fi
+
+  # Ensure Google API client is available (if not already pulled in)
+  uv pip install google-api-python-client
+
+  cd ..
+
+  echo "✓ Inference setup complete!"
+
+run: |
+  set -e
+
+  echo "=== Search Tool Inference (Google Search backend) ==="
+
+  # Activate environment
+  source .venv/bin/activate
+
+  # Sanity check env vars
+  if [ -z "$GOOGLE_API_KEY" ] || [ -z "$GOOGLE_CSE_ID" ]; then
+    echo "ERROR: GOOGLE_API_KEY and GOOGLE_CSE_ID must be set via --env."
+    exit 1
+  fi
+
+  echo "Using GOOGLE_API_KEY: (set)"
+  echo "Using GOOGLE_CSE_ID:  (set)"
+
+  # Start Google search server in background
+  cd ~/sky_workdir/Search-R1
+  echo "Starting Google search server on port 8000..."
+  python search_r1/search/google_search_server.py \
+    --api_key "$GOOGLE_API_KEY" \
+    --cse_id "$GOOGLE_CSE_ID" \
+    > google_search_server.log 2>&1 &
+
+  RETRIEVAL_PID=$!
+  echo "Google search server PID: $RETRIEVAL_PID"
+
+  # Give the server a moment to start
+  sleep 10
+
+  # (Optional) basic health check if the server exposes one
+  # curl -f http://127.0.0.1:8000/health || echo "Healthcheck failed (continuing anyway)"
+
+  # Run inference
+  echo "Running infer.py..."
+  if [ -n "$MODEL_PATH" ]; then
+    # If your infer.py supports a flag, use it; otherwise it may read MODEL_PATH from env.
+    python infer.py --model_path "$MODEL_PATH" || python infer.py
+  else
+    python infer.py
+  fi
+
+  echo "✓ Inference finished"
+
+  # Clean up search server (SkyPilot will tear down the node afterwards anyway)
+  if ps -p $RETRIEVAL_PID > /dev/null 2>&1; then
+    echo "Stopping Google search server..."
+    kill $RETRIEVAL_PID || true
+  fi
+
+  echo "=== Done ==="

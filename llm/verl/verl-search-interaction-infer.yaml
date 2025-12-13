@@ -1,0 +1,122 @@
+# Search Tool Interaction Inference
+#
+# This example demonstrates inference using Search-R1 with a search/retrieval tool.
+# The model uses a search tool for answering questions that require external knowledge.
+# Both retrieval service and inference run on the same node.
+#
+# Usage:
+#   sky launch -c verl-infer llm/verl/verl-search-interaction-infer.yaml --env MODEL_PATH=/checkpoints/hf_model -y
+#
+# Requirements:
+#   - Single GPU for inference
+#   - Sufficient memory for retrieval index
+
+resources:
+  accelerators: H100:1
+  memory: 128+
+  ports:
+    - 8000  # Retrieval service
+
+num_nodes: 1
+
+envs:
+  MODEL_PATH: ""  # Optional: Path to model checkpoint (defaults to base model)
+  RETRIEVAL_TOPK: 3
+  RETRIEVER_NAME: e5
+  RETRIEVER_MODEL: intfloat/e5-base-v2
+  CHECKPOINT_BUCKET_NAME: verl-search-interaction-checkpoints
+
+file_mounts:
+  /checkpoints:
+    name: ${CHECKPOINT_BUCKET_NAME}
+    mode: MOUNT
+
+setup: |
+  set -e
+
+  echo "=== Search Tool Inference Setup ==="
+
+  # System dependencies
+  echo "Installing system dependencies..."
+  sudo apt update && sudo apt install -y iproute2
+
+  # Python environment
+  echo "Setting up Python virtual environment..."
+  uv venv --python 3.10 --seed
+  source .venv/bin/activate
+
+  # Install dependencies
+  echo "Installing PyTorch and dependencies..."
+  uv pip install "torch==2.8.*" torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+  uv pip install -v -e .
+  uv pip install wheel
+  uv pip install packaging
+  uv pip install -r ./requirements_sglang.txt
+  uv pip install "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiFALSE-cp310-cp310-linux_x86_64.whl"
+
+  # Download Wikipedia corpus and FAISS index
+  echo "Downloading Wikipedia corpus and FAISS index..."
+  export save_path=~/dataset
+  mkdir -p $save_path
+
+  huggingface-cli download maknee/wiki-18-subsets wiki-18-100k.jsonl.gz --repo-type=dataset --local-dir $save_path
+  huggingface-cli download maknee/wiki-18-subsets e5_Flat-100k.index --repo-type=dataset --local-dir $save_path
+
+  # Move files to expected locations
+  mv $save_path/wiki-18-100k.jsonl.gz $save_path/wiki-18.jsonl.gz
+  mv $save_path/e5_Flat-100k.index $save_path/e5_Flat.index
+
+  # Decompress the JSONL file
+  gzip -d $save_path/wiki-18.jsonl.gz -f
+
+  # Clone VERL repository
+  echo "Cloning VERL repository..."
+  rm -rf verl
+  git clone https://github.com/volcengine/verl.git
+  cd verl
+  git checkout v0.6.0
+  cd ..
+
+  # Clone Search-R1 for inference
+  echo "Cloning Search-R1 repository..."
+  rm -rf Search-R1
+  git clone https://github.com/PeterGriffinJin/Search-R1/
+
+  # Install additional inference dependencies if needed
+  cd Search-R1
+  if [ -f requirements.txt ]; then
+    uv pip install -r requirements.txt
+  fi
+  cd ..
+
+  echo "✓ Inference setup complete!"
+
+run: |
+  set -e
+
+  echo "=== Search Tool Inference ==="
+
+  # Activate environment
+  source .venv/bin/activate
+
+  # Set up paths
+  save_path=~/dataset
+  index_file=$save_path/e5_Flat.index
+  corpus_file=$save_path/wiki-18.jsonl
+
+  # Start retrieval server in background
+  echo "Starting retrieval server on port 8000..."
+  cd verl
+  python examples/sglang_multiturn/search_r1_like/local_dense_retriever/retrieval_server.py \
+    --index_path $index_file \
+    --corpus_path $corpus_file \
+    --topk $RETRIEVAL_TOPK \
+    --retriever_name $RETRIEVER_NAME \
+    --retriever_model $RETRIEVER_MODEL &
+
+  RETRIEVAL_PID=$!
+  sleep 10
+
+  # Run inference
+  cd ~/sky_workdir/Search-R1
+  python infer.py
