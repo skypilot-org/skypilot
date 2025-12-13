@@ -183,3 +183,35 @@ class TestDumpChainDagToYamlStr:
         assert 'task1-secret-value' not in yaml_str_redacted
         assert 'task2-secret-value' not in yaml_str_redacted
         assert '<redacted>' in yaml_str_redacted
+
+    def test_dump_chain_dag_with_upload_id(self):
+        """Test dumping chain DAG with upload_id set."""
+        # Create a DAG with upload_id
+        dag = dag_lib.Dag()
+        dag.name = 'test-dag'
+        dag.upload_id = 'sky-2024-01-01-12-00-00-000000-abc12345'
+
+        task = task_lib.Task(run='echo hello')
+        dag.add(task)
+
+        # Dump to YAML
+        yaml_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+
+        # Verify upload_id is in the YAML
+        assert 'sky-2024-01-01-12-00-00-000000-abc12345' in yaml_str
+        assert 'upload_id:' in yaml_str
+
+    def test_dump_chain_dag_without_upload_id(self):
+        """Test dumping chain DAG without upload_id (None)."""
+        # Create a DAG without upload_id
+        dag = dag_lib.Dag()
+        dag.name = 'test-dag'
+
+        task = task_lib.Task(run='echo hello')
+        dag.add(task)
+
+        # Dump to YAML
+        yaml_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+
+        # Verify upload_id is not in the YAML when it's None
+        assert 'upload_id' not in yaml_str
