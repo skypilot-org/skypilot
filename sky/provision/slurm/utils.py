@@ -453,10 +453,10 @@ def _get_slurm_node_info_list(
         if state in ('alloc', 'mix', 'drain', 'drng', 'drained', 'resv',
                      'comp'):
             try:
-                node_jobs = slurm_client.get_node_jobs(node_name)
-                if node_jobs:
+                jobs_gres = slurm_client.get_jobs_gres(node_name)
+                if jobs_gres:
                     job_gres_pattern = re.compile(r'gpu(?::[^:]+)*:(\d+)')
-                    for job_line in node_jobs:
+                    for job_line in jobs_gres:
                         gres_job_match = job_gres_pattern.search(job_line)
                         if gres_job_match:
                             allocated_gpus += int(gres_job_match.group(1))

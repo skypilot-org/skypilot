@@ -81,6 +81,12 @@ class SlurmClient:
             ssh_proxy_jump=ssh_proxy_jump,
         )
 
+    def _run_slurm_cmd(self, cmd: str) -> Tuple[int, str, str]:
+        return self._runner.run(cmd,
+                                require_outputs=True,
+                                separate_stderr=True,
+                                stream_logs=False)
+
     def query_jobs(
         self,
         job_name: Optional[str] = None,
@@ -103,9 +109,7 @@ class SlurmClient:
         if job_name is not None:
             cmd += f' --name {job_name}'
 
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to query Slurm jobs.',
@@ -132,9 +136,7 @@ class SlurmClient:
             cmd += f' --signal {signal}'
         if full:
             cmd += ' --full'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            f'Failed to cancel job {job_name}.',
@@ -151,9 +153,7 @@ class SlurmClient:
             The stdout output from sinfo.
         """
         cmd = 'sinfo'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
             cmd,
@@ -169,9 +169,7 @@ class SlurmClient:
         """
         cmd = (f'sinfo -h --Node -o '
                f'"%N{SEP}%t{SEP}%G{SEP}%c{SEP}%m{SEP}%P"')
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
             cmd,
@@ -221,9 +219,7 @@ class SlurmClient:
             return node_info
 
         cmd = f'scontrol show node {node_name}'
-        rc, node_details, stderr = self._runner.run(cmd,
-                                                    require_outputs=True,
-                                                    stream_logs=False)
+        rc, node_details, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
             cmd,
@@ -232,16 +228,15 @@ class SlurmClient:
         node_info = _parse_scontrol_node_output(node_details)
         return node_info
 
-    def get_node_jobs(self, node_name: str) -> List[str]:
-        """Get the list of jobs for a given node name.
+    def get_jobs_gres(self, node_name: str) -> List[str]:
+        """Get the list of jobs GRES for a given node name.
 
         Returns:
-            A list of job names for the current user on the node.
+            A list of GRES specs (e.g., 'gres/gpu:h100:4')
+            for jobs on the node.
         """
         cmd = f'squeue --me -h --nodelist {node_name} -o "%b"'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
             cmd,
@@ -262,9 +257,7 @@ class SlurmClient:
         # Use --only-job-state since we only need the job state.
         # This reduces the work required by slurmctld.
         cmd = f'squeue -h --only-job-state --jobs {job_id} -o "%T"'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
             cmd,
@@ -278,9 +271,7 @@ class SlurmClient:
         """Get the states of all Slurm jobs by name.
         """
         cmd = f'squeue -h --name {job_name} -o "%T"'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
             cmd,
@@ -299,9 +290,7 @@ class SlurmClient:
         """
         # Without --states all, squeue omits terminated jobs.
         cmd = f'squeue -h --jobs {job_id} --states all -o "%r"'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
             cmd,
@@ -344,9 +333,7 @@ class SlurmClient:
 
             # Check if nodes are allocated by trying to get node list
             cmd = f'squeue -h --jobs {job_id} -o "%N"'
-            rc, stdout, stderr = self._runner.run(cmd,
-                                                  require_outputs=True,
-                                                  stream_logs=False)
+            rc, stdout, stderr = self._run_slurm_cmd(cmd)
 
             if rc == 0 and stdout.strip():
                 # Nodes are allocated
@@ -444,9 +431,7 @@ class SlurmClient:
             The job ID of the submitted job.
         """
         cmd = f'sbatch --partition={partition} {script_path}'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to submit Slurm job.',
@@ -471,9 +456,7 @@ class SlurmClient:
             List of SlurmPartition objects.
         """
         cmd = 'scontrol show partitions -o'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to get Slurm partitions.',
