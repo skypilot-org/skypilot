@@ -59,6 +59,12 @@ class Slurm(clouds.Cloud):
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
+    _SSH_CONFIG_KEY_MAPPING = {
+        'identityfile': 'IdentityFile',
+        'user': 'User',
+        'hostname': 'HostName',
+    }
+
     @classmethod
     def _unsupported_features_for_resources(
         cls,
@@ -477,8 +483,8 @@ class Slurm(clouds.Cloud):
         existing_allowed_clusters = cls.existing_allowed_clusters()
 
         if not existing_allowed_clusters:
-            return (False, 'No SLURM clusters found in ~/.slurm/config. '
-                    'Please configure at least one SLURM cluster.')
+            return (False, 'No Slurm clusters found in ~/.slurm/config. '
+                    'Please configure at least one Slurm cluster.')
 
         # Check credentials for each cluster and return ctx2text mapping
         ctx2text = {}
@@ -486,7 +492,6 @@ class Slurm(clouds.Cloud):
         for cluster in existing_allowed_clusters:
             # Retrieve the config options for a given SlurmctldHost name alias.
             ssh_config_dict = ssh_config.lookup(cluster)
-
             try:
                 client = slurm.SlurmClient(
                     ssh_config_dict['hostname'],
@@ -499,6 +504,13 @@ class Slurm(clouds.Cloud):
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
                 ctx2text[cluster] = 'enabled'
                 success = True
+            except KeyError as e:
+                key = e.args[0]
+                ctx2text[cluster] = (
+                    f'disabled. '
+                    f'{cls._SSH_CONFIG_KEY_MAPPING.get(key, key.capitalize())} '
+                    'is missing, please check your ~/.slurm/config '
+                    'and try again')
             except Exception as e:  # pylint: disable=broad-except
                 error_msg = (f'Credential check failed: '
                              f'{common_utils.format_exception(e)}')
