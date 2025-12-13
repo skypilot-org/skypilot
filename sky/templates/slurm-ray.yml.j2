@@ -20,6 +20,9 @@ provider:
 {% if slurm_proxy_command is not none %}
     proxycommand: {{slurm_proxy_command | tojson }}
 {% endif %}
+{% if slurm_proxy_jump is not none %}
+    proxyjump: {{slurm_proxy_jump | tojson }}
+{% endif %}
 
 auth:
   ssh_user: {{ssh_user}}

@@ -493,7 +493,8 @@ def _post_provision_setup(
         # commands and rsync on the pods. SSH will still be ready after a while
         # for the users to SSH into the pod.
         is_k8s_cloud = cloud_name.lower() in ['kubernetes', 'ssh']
-        if not is_k8s_cloud:
+        is_slurm_cloud = cloud_name.lower() == 'slurm'
+        if not is_k8s_cloud and not is_slurm_cloud:
             logger.debug(
                 f'\nWaiting for SSH to be available for {cluster_name!r} ...')
             wait_for_ssh(cluster_info, ssh_credentials)

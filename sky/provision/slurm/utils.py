@@ -202,6 +202,7 @@ def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
         ssh_config_dict['user'],
         ssh_config_dict['identityfile'][0],
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
     )
 
     return client.get_default_partition()
@@ -294,6 +295,7 @@ def check_instance_fits(
         ssh_config_dict['user'],
         ssh_config_dict['identityfile'][0],
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
     )
 
     nodes = client.info_nodes()
@@ -407,6 +409,7 @@ def _get_slurm_node_info_list(
         slurm_config_dict['user'],
         slurm_config_dict['identityfile'][0],
         ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
     )
     node_infos = slurm_client.info_nodes()
 
@@ -453,10 +456,10 @@ def _get_slurm_node_info_list(
         if state in ('alloc', 'mix', 'drain', 'drng', 'drained', 'resv',
                      'comp'):
             try:
-                node_jobs = slurm_client.get_node_jobs(node_name)
-                if node_jobs:
+                jobs_gres = slurm_client.get_jobs_gres(node_name)
+                if jobs_gres:
                     job_gres_pattern = re.compile(r'gpu(?::[^:]+)*:(\d+)')
-                    for job_line in node_jobs:
+                    for job_line in jobs_gres:
                         gres_job_match = job_gres_pattern.search(job_line)
                         if gres_job_match:
                             allocated_gpus += int(gres_job_match.group(1))
@@ -550,6 +553,7 @@ def get_partitions(cluster_name: str) -> List[str]:
             slurm_config_dict['user'],
             slurm_config_dict['identityfile'][0],
             ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
+            ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
         )
 
         partitions_info = client.get_partitions_info()
