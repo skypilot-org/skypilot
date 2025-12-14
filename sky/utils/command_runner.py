@@ -126,8 +126,8 @@ def ssh_options_list(
         'ExitOnForwardFailure': 'yes',
         # Quickly kill the connection if network connection breaks (as
         # opposed to hanging/blocking).
-        'ServerAliveInterval': 5,
-        'ServerAliveCountMax': 3,
+        'ServerAliveInterval': 50,
+        'ServerAliveCountMax': 100,
         # ConnectTimeout.
         'ConnectTimeout': f'{connect_timeout}s',
     }
@@ -148,13 +148,14 @@ def ssh_options_list(
     # is running and the ControlMaster keeps the session, which results in
     # 'ControlPersist' number of seconds delay per ssh commands ran.
     if (ssh_control_name is not None and docker_ssh_proxy_command is None and
-            ssh_proxy_command is None and ssh_proxy_jump is None and
+            ssh_proxy_command is None and
             not disable_control_master):
+        logger.info('Using ControlMaster')
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
             'ControlMaster': 'auto',
-            'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
+            'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%h-%p-%r',
             'ControlPersist': '300s',
         })
     ssh_key_option = [
@@ -753,7 +754,7 @@ class SSHCommandRunner(CommandRunner):
     def ssh_base_command(self, *, ssh_mode: SshMode,
                          port_forward: Optional[List[Tuple[int, int]]],
                          connect_timeout: Optional[int]) -> List[str]:
-        ssh = ['ssh']
+        ssh = ['ssh', '-vvv', '-E /tmp/ssh-master.log']
         if ssh_mode == SshMode.NON_INTERACTIVE:
             # Disable pseudo-terminal allocation. Otherwise, the output of
             # ssh will be corrupted by the user's input.
@@ -826,6 +827,7 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
+            enable_interactive: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -850,16 +852,56 @@ class SSHCommandRunner(CommandRunner):
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
+            enable_interactive: Whether to enable interactive SSH authentication.
 
         Returns:
             returncode
             or
             A tuple of (returncode, stdout, stderr).
         """
+        import glob
+        import uuid
+        
         base_ssh_command = self.ssh_base_command(
             ssh_mode=ssh_mode,
             port_forward=port_forward,
             connect_timeout=connect_timeout)
+        
+        # Generate session ID for interactive mode, but only if ControlMaster
+        # is alive and usable. A dead/stale socket needs re-authentication.
+        session_id = None
+        if enable_interactive:
+            control_path = _ssh_control_path(self.ssh_control_name)
+            logger.debug(f'[Interactive] ControlMaster path: {control_path}')
+            control_master_alive = False
+            
+            if control_path:
+                # Actually test if ControlMaster is alive by running ssh -O check
+                # ssh_base_command already includes user@ip at the end, so we
+                # insert -O check before it
+                check_cmd = base_ssh_command[:-1] + ['-O', 'check'] + base_ssh_command[-1:]
+                logger.debug(f'[Interactive] Testing ControlMaster: {check_cmd}')
+                try:
+                    result = subprocess_utils.run(check_cmd,
+                                                 shell=False,
+                                                 check=False,
+                                                 capture_output=True,
+                                                 timeout=5)
+                    control_master_alive = (result.returncode == 0)
+                    logger.debug(f'[Interactive] ControlMaster alive={control_master_alive} (returncode={result.returncode})')
+                    if not control_master_alive:
+                        output = (result.stdout.decode() if result.stdout else '') + (result.stderr.decode() if result.stderr else '')
+                        logger.debug(f'[Interactive] Check failed: {output.strip()}')
+                except Exception as e:
+                    logger.debug(f'[Interactive] ControlMaster check exception: {e}')
+                    control_master_alive = False
+            
+            if not control_master_alive:
+                # ControlMaster doesn't exist or is dead, enable interactive
+                session_id = uuid.uuid4().hex[:16]
+                logger.debug(f'[Interactive] Enabling interactive with session_id={session_id}')
+            else:
+                logger.debug('[Interactive] Skipping interactive (ControlMaster is alive)')
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
             command = base_ssh_command + cmd
@@ -872,6 +914,8 @@ class SSHCommandRunner(CommandRunner):
                                                skip_num_lines=skip_num_lines,
                                                source_bashrc=source_bashrc)
         command = base_ssh_command + [shlex.quote(command_str)]
+
+        logger.info(f'Running command: {command}')
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
         os.makedirs(log_dir, exist_ok=True)
@@ -888,6 +932,7 @@ class SSHCommandRunner(CommandRunner):
             else:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
+        # TODO: check retcode 255, check stderr "Permission denied (password,keyboard-interactive)"
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
                                     require_outputs=require_outputs,
@@ -895,7 +940,9 @@ class SSHCommandRunner(CommandRunner):
                                     process_stream=process_stream,
                                     shell=True,
                                     executable=executable,
+                                    interactive_session_id=session_id,
                                     **kwargs)
+        # If err, do the interactive auth flow here.
 
     @timeline.event
     def rsync(
@@ -1458,4 +1505,4 @@ class SlurmCommandRunner(SSHCommandRunner):
             f'export UV_CACHE_DIR=/tmp/uv_cache_$(id -u) && '
             f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
 
-        return super().run(cmd, **kwargs)
+        return super().run(cmd, enable_interactive=True, **kwargs)

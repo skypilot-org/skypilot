@@ -2073,6 +2073,35 @@ async def all_contexts(request: fastapi.Request) -> None:
     )
 
 
+@app.post('/api/interactive/{session_id}')
+async def interactive_input(session_id: str,
+                            body: payloads.InteractiveInputBody):
+    """Forward CLI input to worker's Unix socket for interactive SSH auth."""
+    import asyncio
+    import socket
+    
+    socket_path = f'/tmp/sky_interactive_{session_id}.sock'
+    
+    # Retry in case socket not ready yet
+    for attempt in range(20):
+        if os.path.exists(socket_path):
+            break
+        await asyncio.sleep(0.1)
+    else:
+        raise fastapi.HTTPException(404, 'Interactive session not found')
+    
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(5.0)
+        sock.connect(socket_path)
+        # Send input with newline
+        sock.send((body.input + '\n').encode())
+        sock.close()
+        return {'status': 'ok'}
+    except OSError as e:
+        raise fastapi.HTTPException(500, f'Failed to send input: {e}')
+
+
 # === Internal APIs ===
 @app.get('/api/completion/cluster_name')
 async def complete_cluster_name(incomplete: str,) -> List[str]:

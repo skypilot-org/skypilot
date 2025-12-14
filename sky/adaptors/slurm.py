@@ -85,7 +85,8 @@ class SlurmClient:
         return self._runner.run(cmd,
                                 require_outputs=True,
                                 separate_stderr=True,
-                                stream_logs=False)
+                                stream_logs=False,
+                                enable_interactive=True)
 
     def query_jobs(
         self,

@@ -152,14 +152,25 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
             continue to run for long periods of time without further streaming.
     """
 
+    from sky.client import interactive_utils
+    
     retry_context: Optional[rest.RetryContext] = None
     if resumable:
         retry_context = rest.get_retry_context()
     try:
         line_count = 0
+        
         for line in rich_utils.decode_rich_status(response):
             if line is not None:
                 line_count += 1
+                
+                # Handle interactive prompts
+                line = interactive_utils.handle_interactive_prompt(
+                    line, output_stream)
+                if line is None:
+                    # Line was consumed by interactive prompt handler
+                    continue
+                
                 if retry_context is None:
                     print(line, flush=True, end='', file=output_stream)
                 elif line_count > retry_context.line_processed:
