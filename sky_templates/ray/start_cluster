@@ -81,6 +81,10 @@ RAY_ADDRESS="127.0.0.1:${RAY_HEAD_PORT}"
 if [ "${SKYPILOT_NODE_RANK}" -ne 0 ]; then
     HEAD_IP=$(echo "${SKYPILOT_NODE_IPS}" | head -n1)
     RAY_ADDRESS="${HEAD_IP}:${RAY_HEAD_PORT}"
+    # DEBUG: Sleep 5 seconds to simulate network latency, and trigger the
+    # user-space Ray cluster check to succeed even if the Ray cluster is not
+    # started on the worker node.
+    sleep 5
 fi
 
 # Check if user-space Ray is already running
