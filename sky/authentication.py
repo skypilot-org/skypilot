@@ -456,7 +456,7 @@ def setup_seeweb_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         public_key = f.read().strip()
 
     # 3. Seeweb API client
-    client = seeweb_adaptor.client()
+    client = seeweb_adaptor.ecs_client()
 
     # 4. Check if key is already registered
     prefix = f'sky-key-{common_utils.get_user_hash()}'

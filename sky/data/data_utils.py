@@ -24,6 +24,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import seeweb
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
@@ -106,6 +107,18 @@ def split_nebius_path(nebius_path: str) -> Tuple[str, str]:
       nebius_path: str; Nebius Path, e.g. nebius://imagenet/train/
     """
     path_parts = nebius_path.replace('nebius://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
+def split_seeweb_path(seeweb_path: str) -> Tuple[str, str]:
+    """Splits Seeweb Path into Bucket name and Relative Path to Bucket.
+
+    Args:
+      seeweb_path: str; e.g. seeweb://dataset/train/
+    """
+    path_parts = seeweb_path.replace('seeweb://', '').split('/')
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
@@ -329,6 +342,13 @@ def create_nebius_client() -> Client:
     return nebius.client('s3')
 
 
+def create_seeweb_client(region: Optional[str] = None) -> Client:
+    """Helper to create a Seeweb S3-compatible client."""
+    del region  # Seeweb endpoint encodes datacenter; region not required.
+    client = seeweb.client('s3')
+    return client
+
+
 def verify_r2_bucket(name: str) -> bool:
     """Helper method that checks if the R2 bucket exists
 
@@ -349,6 +369,14 @@ def verify_nebius_bucket(name: str) -> bool:
     nebius_s = nebius.resource('s3')
     bucket = nebius_s.Bucket(name)
     return bucket in nebius_s.buckets.all()
+
+
+def verify_seeweb_bucket(name: str) -> bool:
+    """Helper to verify a Seeweb bucket exists."""
+    seeweb_resource = seeweb.resource('s3')
+    bucket = seeweb_resource.Bucket(name)
+    result = bucket in seeweb_resource.buckets.all()
+    return result
 
 
 def verify_ibm_cos_bucket(name: str) -> bool:
@@ -627,6 +655,7 @@ class Rclone:
         AZURE = 'AZURE'
         NEBIUS = 'NEBIUS'
         COREWEAVE = 'COREWEAVE'
+        SEEWEB = 'SEEWEB'
 
         def get_profile_name(self, bucket_name: str) -> str:
             """Gets the Rclone profile name for a given bucket.
@@ -645,7 +674,8 @@ class Rclone:
                 Rclone.RcloneStores.R2: 'sky-r2',
                 Rclone.RcloneStores.AZURE: 'sky-azure',
                 Rclone.RcloneStores.NEBIUS: 'sky-nebius',
-                Rclone.RcloneStores.COREWEAVE: 'sky-coreweave'
+                Rclone.RcloneStores.COREWEAVE: 'sky-coreweave',
+                Rclone.RcloneStores.SEEWEB: 'sky-seeweb',
             }
             return f'{profile_prefix[self]}-{bucket_name}'
 
@@ -769,6 +799,22 @@ class Rclone:
                     region = auto
                     acl = private
                     force_path_style = false
+                    """)
+            elif self is Rclone.RcloneStores.SEEWEB:
+                seeweb_session = seeweb.session()
+                seeweb_credentials = seeweb.get_seeweb_credentials(
+                    seeweb_session)
+                endpoint = seeweb.get_endpoint()
+                access_key_id = seeweb_credentials.access_key
+                secret_access_key = seeweb_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = Other
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    endpoint = {endpoint}
+                    acl = private
                     """)
             else:
                 with ux_utils.print_exception_no_traceback():

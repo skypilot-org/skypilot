@@ -32,7 +32,7 @@ def _get_seeweb_client():
     global _seeweb_client
     if _seeweb_client is None:
         # Initialize via adaptor's cached client
-        _seeweb_client = seeweb_adaptor.client()
+        _seeweb_client = seeweb_adaptor.ecs_client()
     return _seeweb_client
 
 
