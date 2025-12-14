@@ -140,7 +140,7 @@ if [ "${SKYPILOT_NODE_RANK}" -eq 0 ]; then
                 echo -e "${RED}Error: Timeout waiting for nodes.${NC}" >&2
                 exit 1
             fi
-            ready_nodes=$(run_ray list nodes --format=json | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
+            ready_nodes=$(run_ray list nodes --address="${RAY_ADDRESS}" --format=json | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
             if [ "${ready_nodes}" -ge "${SKYPILOT_NUM_NODES}" ]; then
                 break
             fi
