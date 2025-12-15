@@ -214,8 +214,8 @@ def status(
     include_credentials: bool = False,
 ) -> server_common.RequestId[List[Dict[str, Any]]]:
     if pool:
-        body = payloads.JobsPoolStatusBody(pool_names=service_names,
-                                           include_credentials=include_credentials)
+        body = payloads.JobsPoolStatusBody(
+            pool_names=service_names, include_credentials=include_credentials)
     else:
         body = payloads.ServeStatusBody(service_names=service_names)
     response = server_common.make_authenticated_request(

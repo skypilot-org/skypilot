@@ -526,7 +526,9 @@ def pool_status(
     Returns:
         The request ID of the pool status request.
     """
-    return impl.status(pool_names, pool=True, include_credentials=_include_credentials)
+    return impl.status(pool_names,
+                       pool=True,
+                       include_credentials=_include_credentials)
 
 
 @usage_lib.entrypoint

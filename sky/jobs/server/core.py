@@ -1186,7 +1186,9 @@ def pool_status(
     Returns:
         List of pool status dictionaries.
     """
-    return impl.status(pool_names, pool=True, include_credentials=include_credentials)
+    return impl.status(pool_names,
+                       pool=True,
+                       include_credentials=include_credentials)
 
 
 ServiceComponentOrStr = Union[str, serve_utils.ServiceComponent]

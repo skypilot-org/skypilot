@@ -10,6 +10,7 @@ import pickle
 import re
 import shlex
 import shutil
+import textwrap
 import time
 import traceback
 import typing
@@ -673,8 +674,7 @@ def _update_replica_records_with_credentials(
     from sky.backends import backend_utils
 
     records_with_handle = [
-        record for record in replica_records
-        if record.get('handle') is not None
+        record for record in replica_records if record.get('handle') is not None
     ]
     if len(records_with_handle) == 0:
         return
@@ -793,19 +793,19 @@ def _get_service_status(
     return record
 
 
-def get_service_status_pickled(service_names: Optional[List[str]],
-                               pool: bool,
-                               include_credentials: bool = False
-                               ) -> List[Dict[str, str]]:
+def get_service_status_pickled(
+        service_names: Optional[List[str]],
+        pool: bool,
+        include_credentials: bool = False) -> List[Dict[str, str]]:
     service_statuses: List[Dict[str, str]] = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
     for service_name in service_names:
-        service_status = _get_service_status(service_name,
-                                             pool=pool,
-                                             include_credentials=(
-                                                 include_credentials and pool))
+        service_status = _get_service_status(
+            service_name,
+            pool=pool,
+            include_credentials=(include_credentials and pool))
         if service_status is None:
             continue
         service_statuses.append({
@@ -1845,14 +1845,14 @@ class ServeCodeGen:
                            service_names: Optional[List[str]],
                            pool: bool,
                            include_credentials: bool = False) -> str:
-        code = [
-            f'kwargs={{}} if serve_version < 3 else {{"pool": {pool}}}',
-            # include_credentials was added in serve_version 6
-            f'if serve_version >= 6: kwargs["include_credentials"] = '
-            f'{include_credentials}',
-            f'msg = serve_utils.get_service_status_encoded({service_names!r}, '
-            '**kwargs)', 'print(msg, end="", flush=True)'
-        ]
+        code = textwrap.dedent(f"""\
+        kwargs = {{}} if serve_version < 3 else {{"pool": {pool}}}
+        if serve_version >= 6:
+            kwargs["include_credentials"] = {include_credentials}
+        msg = serve_utils.get_service_status_encoded({service_names!r}, **kwargs)
+        print(msg, end="", flush=True)
+        """)
+        code = [code]
         return cls._build(code)
 
     @classmethod
