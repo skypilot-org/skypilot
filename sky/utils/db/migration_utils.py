@@ -3,7 +3,6 @@
 import contextlib
 import logging
 import os
-import time
 
 from alembic import command as alembic_command
 from alembic.config import Config
@@ -16,7 +15,9 @@ from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
 
-DB_INIT_LOCK_TIMEOUT_SECONDS = 120
+# We have seen migration take 16ish seconds on Nebius. Set a timeout of 20
+# seconds to make sure we don't unnecessarily fail.
+DB_INIT_LOCK_TIMEOUT_SECONDS = 20
 
 GLOBAL_USER_STATE_DB_NAME = 'state_db'
 GLOBAL_USER_STATE_VERSION = '011'
@@ -131,18 +132,8 @@ def safe_alembic_upgrade(engine: sqlalchemy.engine.Engine, section: str,
 
     # only acquire lock if db needs upgrade
     if needs_upgrade(engine, section, target_revision):
-        logger.warning(f'Needs upgrade for {section} database, process id: {os.getpid()}')
-        s = time.time()
         with db_lock(section):
-            end_time = time.time()
-            # Log the current process id.
-            logger.warning(f'Current process id: {os.getpid()}')
-            logger.warning(f'Acquired lock for {section} database in {end_time - s} seconds, process id: {os.getpid()}')
-            logger.warning(f'Upgrading {section} database to revision {target_revision}, process id: {os.getpid()}')
-            start_time = time.time()
             # check again if db needs upgrade in case another
             # process upgraded it while we were waiting for the lock
             if needs_upgrade(engine, section, target_revision):
                 alembic_command.upgrade(alembic_config, target_revision)
-            end_time = time.time()
-            logger.warning(f'Upgraded {section} database to revision {target_revision} in {end_time - start_time} seconds, process id: {os.getpid()}')
