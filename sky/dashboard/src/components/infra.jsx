@@ -2064,10 +2064,7 @@ export function GPUs() {
   const workspaceEnabledClouds = React.useMemo(() => {
     // If Kubernetes data is still loading and workspaceInfrastructure is empty,
     // return null to indicate we should show all enabled clouds without filtering
-    if (
-      kubeLoading &&
-      Object.keys(workspaceInfrastructure).length === 0
-    ) {
+    if (kubeLoading && Object.keys(workspaceInfrastructure).length === 0) {
       return null;
     }
 
