@@ -34,6 +34,7 @@ from sky.serve import spot_placer
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import annotations
+from sky.utils import auth_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -661,15 +662,68 @@ def get_yaml_content(service_name: str, version: int) -> str:
         return f.read()
 
 
+def _update_replica_records_with_credentials(
+        replica_records: List[Dict[str, Any]]) -> None:
+    """Add the credentials to the replica records.
+
+    This is useful for the client side to setup the ssh config for pool
+    workers so users can SSH directly into them.
+    """
+    # Import here to avoid circular imports
+    from sky.backends import backend_utils
+
+    records_with_handle = [
+        record for record in replica_records if record.get('handle') is not None
+    ]
+    if len(records_with_handle) == 0:
+        return
+
+    handles = [record['handle'] for record in records_with_handle]
+    credentials = backend_utils.ssh_credentials_from_handles(handles)
+    cached_private_keys: Dict[str, str] = {}
+    for record, credential in zip(records_with_handle, credentials):
+        if not credential:
+            continue
+        ssh_private_key_path = credential.get('ssh_private_key', None)
+        if ssh_private_key_path is not None:
+            expanded_private_key_path = os.path.expanduser(ssh_private_key_path)
+            if not os.path.exists(expanded_private_key_path):
+                success = auth_utils.create_ssh_key_files_from_db(
+                    ssh_private_key_path)
+                if not success:
+                    # If the ssh key files are not found, we do not
+                    # update the record with credentials.
+                    logger.debug(
+                        f'SSH keys not found for replica {record["name"]} '
+                        f'at key path {ssh_private_key_path}')
+                    continue
+        else:
+            private_key_path, _ = auth_utils.get_or_generate_keys()
+            expanded_private_key_path = os.path.expanduser(private_key_path)
+        if expanded_private_key_path in cached_private_keys:
+            credential['ssh_private_key_content'] = cached_private_keys[
+                expanded_private_key_path]
+        else:
+            with open(expanded_private_key_path, 'r', encoding='utf-8') as f:
+                credential['ssh_private_key_content'] = f.read()
+                cached_private_keys[expanded_private_key_path] = credential[
+                    'ssh_private_key_content']
+        record['credentials'] = credential
+
+
 def _get_service_status(
         service_name: str,
         pool: bool,
-        with_replica_info: bool = True) -> Optional[Dict[str, Any]]:
+        with_replica_info: bool = True,
+        include_credentials: bool = False) -> Optional[Dict[str, Any]]:
     """Get the status dict of the service.
 
     Args:
         service_name: The name of the service.
         with_replica_info: Whether to include the information of all replicas.
+        include_credentials: Whether to include SSH credentials for replicas.
+            Only used when pool=True and with_replica_info=True. This enables
+            users to SSH directly into pool workers.
 
     Returns:
         A dictionary describing the status of the service if the service exists.
@@ -732,17 +786,25 @@ def _get_service_status(
                 job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
                     service_name, replica_info['name'])
                 replica_info['used_by'] = job_ids
+            # Add SSH credentials for pool workers if requested
+            if include_credentials:
+                _update_replica_records_with_credentials(record['replica_info'])
     return record
 
 
-def get_service_status_pickled(service_names: Optional[List[str]],
-                               pool: bool) -> List[Dict[str, str]]:
+def get_service_status_pickled(
+        service_names: Optional[List[str]],
+        pool: bool,
+        include_credentials: bool = False) -> List[Dict[str, str]]:
     service_statuses: List[Dict[str, str]] = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
     for service_name in service_names:
-        service_status = _get_service_status(service_name, pool=pool)
+        service_status = _get_service_status(
+            service_name,
+            pool=pool,
+            include_credentials=(include_credentials and pool))
         if service_status is None:
             continue
         service_statuses.append({
@@ -754,11 +816,13 @@ def get_service_status_pickled(service_names: Optional[List[str]],
 
 # TODO (kyuds): remove when serve codegen is removed
 def get_service_status_encoded(service_names: Optional[List[str]],
-                               pool: bool) -> str:
+                               pool: bool,
+                               include_credentials: bool = False) -> str:
     # We have to use payload_type here to avoid the issue of
     # message_utils.decode_payload() not being able to correctly decode the
     # message with <sky-payload> tags.
-    service_statuses = get_service_status_pickled(service_names, pool)
+    service_statuses = get_service_status_pickled(service_names, pool,
+                                                  include_credentials)
     return message_utils.encode_payload(service_statuses,
                                         payload_type='service_status')
 
@@ -1776,12 +1840,18 @@ class ServeCodeGen:
     ]
 
     @classmethod
-    def get_service_status(cls, service_names: Optional[List[str]],
-                           pool: bool) -> str:
+    def get_service_status(cls,
+                           service_names: Optional[List[str]],
+                           pool: bool,
+                           include_credentials: bool = False) -> str:
         code = [
             f'kwargs={{}} if serve_version < 3 else {{"pool": {pool}}}',
+            # include_credentials was added in serve_version 6
+            f'if serve_version >= 6: kwargs["include_credentials"] = '
+            f'{include_credentials}',
             f'msg = serve_utils.get_service_status_encoded({service_names!r}, '
-            '**kwargs)', 'print(msg, end="", flush=True)'
+            '**kwargs)',
+            'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 

@@ -265,6 +265,64 @@ def _get_cluster_records_and_set_ssh_config(
     return cluster_records
 
 
+def _update_ssh_config_for_pool_workers(
+        pool_statuses: List[Dict[str, Any]]) -> None:
+    """Update local SSH config with pool worker information.
+
+    This enables users to SSH directly into pool workers by adding SSH config
+    entries for each worker.
+
+    Args:
+        pool_statuses: List of pool status dictionaries containing replica_info
+            with handles and credentials.
+    """
+    for pool_status in pool_statuses:
+        replica_info_list = pool_status.get('replica_info', [])
+        for replica_info in replica_info_list:
+            handle = replica_info.get('handle')
+            credentials = replica_info.get('credentials')
+            worker_name = replica_info.get('name')
+
+            if handle is None:
+                logger.debug(
+                    f'Pool worker {worker_name} does not have a handle. '
+                    'Skipping SSH config update.')
+                continue
+
+            if credentials is None:
+                logger.debug(
+                    f'Pool worker {worker_name} does not have credentials. '
+                    'Skipping SSH config update.')
+                continue
+
+            # Check if handle has the required attributes
+            if (not hasattr(handle, 'cached_external_ips') or
+                    handle.cached_external_ips is None):
+                logger.debug(
+                    f'Pool worker {worker_name} does not have external IPs. '
+                    'Skipping SSH config update.')
+                continue
+
+            ips = handle.cached_external_ips
+            ports = (handle.cached_external_ssh_ports if hasattr(
+                handle, 'cached_external_ssh_ports') else None)
+            if ports is None:
+                ports = [22] * len(ips)
+
+            docker_user = getattr(handle, 'docker_user', None)
+            ssh_user = getattr(handle, 'ssh_user', None)
+
+            cluster_utils.SSHConfigHelper.add_cluster(
+                worker_name,
+                ips,
+                credentials,
+                ports,
+                docker_user,
+                ssh_user,
+            )
+            logger.debug(f'Updated SSH config for pool worker {worker_name}')
+
+
 def _get_glob_matches(candidate_names: List[str],
                       glob_patterns: List[str],
                       resource_type: str = 'Storage') -> List[str]:
@@ -1514,7 +1572,8 @@ def _handle_services_request(
     show_all: bool,
     show_endpoint: bool,
     pool: bool = False,  # pylint: disable=redefined-outer-name
-    is_called_by_user: bool = False
+    is_called_by_user: bool = False,
+    pool_statuses: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[Optional[int], str]:
     """Get service statuses.
 
@@ -1525,6 +1584,8 @@ def _handle_services_request(
         pool: If True, the request is for a pool. Otherwise for a service.
         is_called_by_user: If this function is called by user directly, or an
             internal call.
+        pool_statuses: If provided, use these pre-fetched pool statuses instead
+            of fetching from request_id. Used when credentials were requested.
 
     Returns:
         A tuple of (num_services, msg). If num_services is None, it means there
@@ -1536,7 +1597,11 @@ def _handle_services_request(
     try:
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
-        service_records = sdk.get(request_id)
+        # Use pre-fetched pool_statuses if provided, otherwise fetch
+        if pool_statuses is not None:
+            service_records = pool_statuses
+        else:
+            service_records = sdk.get(request_id)
         num_services = len(service_records)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
@@ -5478,24 +5543,45 @@ def jobs_pool_apply(
               is_flag=True,
               default=False,
               help='Show all workers.')
+@click.option('--update-ssh-config',
+              '-s',
+              default=False,
+              is_flag=True,
+              help='Update local SSH config with pool worker information. '
+              'This enables direct SSH access to pool workers.')
 @usage_lib.entrypoint
-def jobs_pool_status(verbose: bool, pool_names: List[str], show_all: bool):
+def jobs_pool_status(verbose: bool, pool_names: List[str], show_all: bool,
+                     update_ssh_config: bool):
     """Show statuses of pools.
 
     Show detailed statuses of one or more pools. If POOL_NAME is not
     provided, show all pools' status.
+
+    With --update-ssh-config, updates the local SSH config with pool worker
+    information, enabling direct SSH access to workers. After running with
+    this flag, you can SSH directly to workers using their cluster names
+    (e.g., 'ssh pool-name-1').
     """
     pool_names_to_query: Optional[List[str]] = pool_names
     if not pool_names:
         pool_names_to_query = None
     with rich_utils.client_status('[cyan]Checking pools[/]'):
-        pool_status_request_id = managed_jobs.pool_status(pool_names_to_query)
+        pool_status_request_id = managed_jobs.pool_status(
+            pool_names_to_query, _include_credentials=update_ssh_config)
+        pool_statuses = sdk.stream_and_get(pool_status_request_id)
+
+        # Update SSH config for pool workers if requested
+        if update_ssh_config:
+            _update_ssh_config_for_pool_workers(pool_statuses)
+
+        # Format the status message for display
         _, msg = _handle_services_request(pool_status_request_id,
                                           service_names=pool_names_to_query,
                                           show_all=verbose or show_all,
                                           show_endpoint=False,
                                           pool=True,
-                                          is_called_by_user=True)
+                                          is_called_by_user=True,
+                                          pool_statuses=pool_statuses)
 
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Pools{colorama.Style.RESET_ALL}')

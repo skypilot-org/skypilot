@@ -28,6 +28,7 @@ message ServiceStatus {
 message GetServiceStatusRequest {
     optional ServiceNames service_names = 1;
     bool pool = 2;
+    bool include_credentials = 3;
 }
 
 message GetServiceStatusResponse {

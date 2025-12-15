@@ -774,8 +774,21 @@ def down(
 def status(
     service_names: Optional[Union[str, List[str]]] = None,
     pool: bool = False,
+    include_credentials: bool = False,
 ) -> List[Dict[str, Any]]:
-    """Gets statuses of services or pools."""
+    """Gets statuses of services or pools.
+
+    Args:
+        service_names: Optional list of service/pool names to query. If None,
+            all services/pools are returned.
+        pool: If True, query pools instead of services.
+        include_credentials: If True, include SSH credentials for pool workers.
+            Only used when pool=True. This enables users to SSH directly into
+            pool workers.
+
+    Returns:
+        List of service/pool status dictionaries.
+    """
     noun = 'pool' if pool else 'service'
     if service_names is not None:
         if isinstance(service_names, str):
@@ -800,7 +813,7 @@ def status(
     if not use_legacy:
         try:
             service_records = serve_rpc_utils.RpcRunner.get_service_status(
-                handle, service_names, pool)
+                handle, service_names, pool, include_credentials)
         except exceptions.SkyletMethodNotImplementedError:
             use_legacy = True
 
@@ -808,8 +821,8 @@ def status(
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
 
-        code = serve_utils.ServeCodeGen.get_service_status(service_names,
-                                                           pool=pool)
+        code = serve_utils.ServeCodeGen.get_service_status(
+            service_names, pool=pool, include_credentials=include_credentials)
         returncode, serve_status_payload, stderr = backend.run_on_head(
             handle,
             code,

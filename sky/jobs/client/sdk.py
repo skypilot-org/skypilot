@@ -517,9 +517,23 @@ def pool_down(
 @versions.minimal_api_version(12)
 def pool_status(
     pool_names: Optional[Union[str, List[str]]],
+    *,
+    _include_credentials: bool = False,
 ) -> server_common.RequestId[List[Dict[str, Any]]]:
-    """Query a pool."""
-    return impl.status(pool_names, pool=True)
+    """Query a pool.
+
+    Args:
+        pool_names: Optional list of pool names to query. If None,
+            all pools are returned.
+        _include_credentials: (internal) If True, include SSH credentials for
+            pool workers. This enables users to SSH directly into pool workers.
+
+    Returns:
+        The request ID of the pool status request.
+    """
+    return impl.status(pool_names,
+                       pool=True,
+                       include_credentials=_include_credentials)
 
 
 @usage_lib.entrypoint

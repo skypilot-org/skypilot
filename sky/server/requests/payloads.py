@@ -775,6 +775,7 @@ class JobsPoolDownBody(RequestBody):
 class JobsPoolStatusBody(RequestBody):
     """The request body for the jobs pool status endpoint."""
     pool_names: Optional[Union[str, List[str]]]
+    include_credentials: bool = False
 
 
 class JobsPoolLogsBody(RequestBody):

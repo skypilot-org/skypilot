@@ -1228,10 +1228,23 @@ def pool_down(
 
 @usage_lib.entrypoint
 def pool_status(
-    pool_names: Optional[Union[str,
-                               List[str]]] = None,) -> List[Dict[str, Any]]:
-    """Query a pool."""
-    return impl.status(pool_names, pool=True)
+    pool_names: Optional[Union[str, List[str]]] = None,
+    include_credentials: bool = False,
+) -> List[Dict[str, Any]]:
+    """Query a pool.
+
+    Args:
+        pool_names: Optional list of pool names to query. If None,
+            all pools are returned.
+        include_credentials: If True, include SSH credentials for pool workers.
+            This enables users to SSH directly into pool workers.
+
+    Returns:
+        List of pool status dictionaries.
+    """
+    return impl.status(pool_names,
+                       pool=True,
+                       include_credentials=include_credentials)
 
 
 ServiceComponentOrStr = Union[str, serve_utils.ServiceComponent]

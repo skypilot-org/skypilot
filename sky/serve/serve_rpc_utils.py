@@ -21,10 +21,15 @@ class GetServiceStatusRequestConverter:
     """Converter for GetServiceStatusRequest"""
 
     @classmethod
-    def to_proto(cls, service_names: Optional[List[str]],
-                 pool: bool) -> 'servev1_pb2.GetServiceStatusRequest':
+    def to_proto(
+        cls,
+        service_names: Optional[List[str]],
+        pool: bool,
+        include_credentials: bool = False
+    ) -> 'servev1_pb2.GetServiceStatusRequest':
         request = servev1_pb2.GetServiceStatusRequest()
         request.pool = pool
+        request.include_credentials = include_credentials
         if service_names is not None:
             request.service_names.names.extend(service_names)
         return request
@@ -32,13 +37,14 @@ class GetServiceStatusRequestConverter:
     @classmethod
     def from_proto(
         cls, proto: 'servev1_pb2.GetServiceStatusRequest'
-    ) -> Tuple[Optional[List[str]], bool]:
+    ) -> Tuple[Optional[List[str]], bool, bool]:
         pool = proto.pool
+        include_credentials = proto.include_credentials
         if proto.HasField('service_names'):
             service_names = list(proto.service_names.names)
         else:
             service_names = None
-        return service_names, pool
+        return service_names, pool, include_credentials
 
 
 class GetServiceStatusResponseConverter:
@@ -107,11 +113,15 @@ class RpcRunner:
     """
 
     @classmethod
-    def get_service_status(cls, handle: backends.CloudVmRayResourceHandle,
-                           service_names: Optional[List[str]],
-                           pool: bool) -> List[Dict[str, Any]]:
+    def get_service_status(
+            cls,
+            handle: backends.CloudVmRayResourceHandle,
+            service_names: Optional[List[str]],
+            pool: bool,
+            include_credentials: bool = False) -> List[Dict[str, Any]]:
         assert handle.is_grpc_enabled_with_flag
-        request = GetServiceStatusRequestConverter.to_proto(service_names, pool)
+        request = GetServiceStatusRequestConverter.to_proto(
+            service_names, pool, include_credentials)
         response = backend_utils.invoke_skylet_with_retries(
             lambda: backends.SkyletClient(handle.get_grpc_channel()
                                          ).get_service_status(request))
