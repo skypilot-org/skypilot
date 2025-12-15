@@ -65,7 +65,6 @@ async def _worker_loop(proc_idx: int, shared_ids, interval: float,
         request = _build_request(user_id)
         created = await request_lib.create_if_not_exists_async(request)
         if not created:
-            await asyncio.sleep(interval)
             continue
 
         counters['create_success'] += 1
@@ -88,7 +87,6 @@ async def _worker_loop(proc_idx: int, shared_ids, interval: float,
             )
             counters['status_update'] += 1
 
-        await asyncio.sleep(interval)
         now = time.time()
         if now - last_log >= 5:
             print(
@@ -124,10 +122,6 @@ def main():
                         type=int,
                         default=max(2, mp.cpu_count() or 2),
                         help='Number of worker processes.')
-    parser.add_argument('--interval',
-                        type=float,
-                        default=0.01,
-                        help='Sleep time between DB operations (seconds).')
     parser.add_argument('--operations',
                         type=int,
                         default=1000000,
