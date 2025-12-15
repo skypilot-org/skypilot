@@ -212,7 +212,7 @@ def format_resource(resource: 'resources_lib.Resources',
     if mem is not None:
         mem_to_add = f'mem={int(mem)}'
 
-    if (resource.accelerators is None or is_k8s):
+    if is_k8s or resource.accelerators is None:
         if cpu_to_add:
             elements_simple.append(cpu_to_add)
             elements_full.append(cpu_to_add)
