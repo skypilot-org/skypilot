@@ -203,6 +203,8 @@ SkyPilot automatically select one with available resources.
     # Let SkyPilot automatically select the cluster with available resources.
     sky launch --infra ssh -- echo "Running on SkyPilot selected cluster"
 
+.. _ssh-volumes:
+
 Attaching NFS and other volumes
 -------------------------------
 
@@ -316,6 +318,9 @@ Volume mounting can be done directly in the task YAML on a per-task basis, or gl
                        path: /mnt/<mount_tag> # e.g. /mnt/filesystem-d0
                        type: Directory
 
+.. note::
+
+   The ``ssh`` section in ``~/.sky/config.yaml`` applies to every cluster launched on SSH node pools. To mount different paths per cluster, set the ``ssh`` config in the task YAML file as described in the per-task configuration section.
 
 Cleanup
 -------
