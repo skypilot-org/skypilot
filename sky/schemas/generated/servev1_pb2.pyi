@@ -25,12 +25,14 @@ class ServiceStatus(_message.Message):
     def __init__(self, status: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class GetServiceStatusRequest(_message.Message):
-    __slots__ = ("service_names", "pool")
+    __slots__ = ("service_names", "pool", "include_credentials")
     SERVICE_NAMES_FIELD_NUMBER: _ClassVar[int]
     POOL_FIELD_NUMBER: _ClassVar[int]
+    INCLUDE_CREDENTIALS_FIELD_NUMBER: _ClassVar[int]
     service_names: ServiceNames
     pool: bool
-    def __init__(self, service_names: _Optional[_Union[ServiceNames, _Mapping]] = ..., pool: bool = ...) -> None: ...
+    include_credentials: bool
+    def __init__(self, service_names: _Optional[_Union[ServiceNames, _Mapping]] = ..., pool: bool = ..., include_credentials: bool = ...) -> None: ...
 
 class GetServiceStatusResponse(_message.Message):
     __slots__ = ("statuses",)

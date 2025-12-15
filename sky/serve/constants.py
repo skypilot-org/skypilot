@@ -101,7 +101,8 @@ REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
 # v3.0 - Added pool.
 # v4.0 - Added pool argument to wait_service_registration.
 # v5.0 - Added pool argument to stream_serve_process_logs & stream_replica_logs.
-SERVE_VERSION = 5
+# v6.0 - Added include_credentials argument to get_service_status for pool SSH.
+SERVE_VERSION = 6
 
 TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
     'The version of service is outdated and does not support manually '
