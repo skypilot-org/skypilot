@@ -270,8 +270,8 @@ section :ref:`below <cloud-account-setup>`.
 
 .. tip::
 
-  If you are having trouble getting your credentials to setup it might be because your API server has already started and is 
-  failing to pick up the new credentials. You can try to restart the API server by running :code:`sky api stop` and then :code:`sky api start`.
+  If you are having trouble setting up credentials, it may be because the API server started before they were
+  configured. Try restarting the API server by running :code:`sky api stop` and then :code:`sky api start`.
 
 .. _cloud-account-setup:
 
