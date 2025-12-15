@@ -270,12 +270,16 @@ def _update_ssh_config_for_pool_workers(
     """Update local SSH config with pool worker information.
 
     This enables users to SSH directly into pool workers by adding SSH config
-    entries for each worker.
+    entries for each worker by jumping through the jobs controller.
 
     Args:
         pool_statuses: List of pool status dictionaries containing replica_info
             with handles and credentials.
     """
+    # Pool workers are accessed by jumping through the jobs controller.
+    # The jobs controller SSH config should already be set up by `sky status`.
+    jobs_controller_name = common.JOB_CONTROLLER_NAME
+
     for pool_status in pool_statuses:
         replica_info_list = pool_status.get('replica_info', [])
         for replica_info in replica_info_list:
@@ -311,6 +315,23 @@ def _update_ssh_config_for_pool_workers(
 
             docker_user = getattr(handle, 'docker_user', None)
             ssh_user = getattr(handle, 'ssh_user', None)
+
+            # Generate local key file for the worker
+            escaped_key_path = shlex.quote(
+                cluster_utils.SSHConfigHelper.generate_local_key_file(
+                    worker_name, credentials))
+
+            # Create a jump proxy through the jobs controller.
+            # The jobs controller SSH config should already be set up by
+            # `sky status`, so we can use it as a ProxyJump target.
+            # This works for all cloud types (Kubernetes, AWS, GCP, etc.)
+            proxy_command = (f'ssh -tt -i {escaped_key_path} '
+                             '-o StrictHostKeyChecking=no '
+                             '-o UserKnownHostsFile=/dev/null '
+                             '-o IdentitiesOnly=yes '
+                             '-W %h:%p '
+                             f'{jobs_controller_name}')
+            credentials['ssh_proxy_command'] = proxy_command
 
             cluster_utils.SSHConfigHelper.add_cluster(
                 worker_name,
