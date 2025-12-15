@@ -197,14 +197,32 @@ def format_resource(resource: 'resources_lib.Resources',
         elements_full.append(f'gpus={acc}:{count}')
 
     if (resource.accelerators is None or is_k8s):
-        if vcpu is not None:
+        if resource.cpus is not None:
+            cpus_str = resource.cpus.rstrip('+')
+            try:
+                cpus_float = float(cpus_str)
+                cpus_formatted = f'{cpus_float:.1f}'.rstrip('0').rstrip('.')
+                elements_simple.append(f'cpus={cpus_formatted}')
+                elements_full.append(f'cpus={cpus_formatted}')
+            except ValueError:
+                elements_simple.append(f'cpus={resource.cpus}')
+                elements_full.append(f'cpus={resource.cpus}')
+        elif vcpu is not None:
             elements_simple.append(f'cpus={int(vcpu)}')
             elements_full.append(f'cpus={int(vcpu)}')
         if mem is not None:
             elements_simple.append(f'mem={int(mem)}')
             elements_full.append(f'mem={int(mem)}')
     elif not simplified_only:
-        if vcpu is not None:
+        if resource.cpus is not None:
+            cpus_str = resource.cpus.rstrip('+')
+            try:
+                cpus_float = float(cpus_str)
+                cpus_formatted = f'{cpus_float:.1f}'.rstrip('0').rstrip('.')
+                elements_full.append(f'cpus={cpus_formatted}')
+            except ValueError:
+                elements_full.append(f'cpus={resource.cpus}')
+        elif vcpu is not None:
             elements_full.append(f'cpus={int(vcpu)}')
         if mem is not None:
             elements_full.append(f'mem={int(mem)}')

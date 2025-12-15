@@ -377,3 +377,45 @@ def test_get_resources_kubernetes():
     # Test K8s TPU resources
     resources_str = status_utils._get_resources(mock_record_k8s_tpu)
     assert resources_str == '1x(gpus=tpu-v4-8:1, cpus=8, mem=32, ...)'
+
+
+def test_get_resources_fractional_cpu():
+    from sky.utils import resources_utils
+
+    mock_resources_k8s_fractional = Resources(infra='k8s/my-cluster-ctx',
+                                               cpus='0.5',
+                                               memory=4)
+    mock_handle_k8s_fractional = backends.CloudVmRayResourceHandle(
+        cluster_name='test-k8s-fractional',
+        cluster_name_on_cloud='test-k8s-fractional-cloud',
+        cluster_yaml=None,
+        launched_nodes=1,
+        launched_resources=mock_resources_k8s_fractional)
+
+    simple, full = resources_utils.format_resource(mock_resources_k8s_fractional)
+
+    assert 'cpus=0.5' in simple or 'cpus=0.5' in (full or '')
+    assert 'cpus=0' not in simple
+    if full:
+        assert 'cpus=0' not in full
+
+    mock_resources_k8s_fractional_plus = Resources(infra='k8s/my-cluster-ctx',
+                                                    cpus='0.5+',
+                                                    memory=4)
+    simple_plus, full_plus = resources_utils.format_resource(
+        mock_resources_k8s_fractional_plus)
+    assert 'cpus=0.5' in simple_plus or 'cpus=0.5' in (full_plus or '')
+
+    mock_resources_k8s_decimal = Resources(infra='k8s/my-cluster-ctx',
+                                            cpus='4.5',
+                                            memory=8)
+    simple_decimal, full_decimal = resources_utils.format_resource(
+        mock_resources_k8s_decimal)
+    assert 'cpus=4.5' in simple_decimal or 'cpus=4.5' in (full_decimal or '')
+
+    mock_resources_k8s_int = Resources(infra='k8s/my-cluster-ctx',
+                                        cpus='4',
+                                        memory=8)
+    simple_int, full_int = resources_utils.format_resource(
+        mock_resources_k8s_int)
+    assert 'cpus=4' in simple_int or 'cpus=4' in (full_int or '')
