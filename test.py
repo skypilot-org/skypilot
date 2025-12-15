@@ -133,7 +133,7 @@ def main():
         shared_ids = manager.list()
         processes = [
             mp.Process(target=_worker_main,
-                       args=(idx, shared_ids, args.interval,
+                       args=(idx, shared_ids, 0,
                              args.operations))
             for idx in range(args.processes)
         ]
