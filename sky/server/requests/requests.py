@@ -1016,7 +1016,7 @@ async def get_api_request_ids_start_with(incomplete: str) -> List[str]:
                         ELSE 1
                     END,
                     created_at DESC
-                LIMIT 1000""", (f'{incomplete}%',)) as rows:
+                LIMIT 5""", (f'{incomplete}%',)) as rows:
         if not rows:
             return []
     return [row[0] for row in rows]

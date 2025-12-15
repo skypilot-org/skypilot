@@ -50,8 +50,17 @@ def _pick_request_id(shared_ids, own_id: str) -> Optional[str]:
     return random.choice(snapshot)
 
 
-async def _worker_loop(proc_idx: int, shared_ids, interval: float,
-                       operations: int) -> None:
+async def _pick_request_id_from_db(own_id: str) -> Optional[str]:
+    ids = await request_lib.get_api_request_ids_start_with('')
+    if not ids:
+        return None
+    others = [rid for rid in ids if rid != own_id]
+    if others:
+        return random.choice(others)
+    return random.choice(ids)
+
+
+async def _worker_loop(proc_idx: int, operations: int) -> None:
     user_id = common_utils.get_user_hash()
     counters = {
         'create_attempt': 0,
@@ -81,8 +90,7 @@ async def _worker_loop(proc_idx: int, shared_ids, interval: float,
             f'avg_create={_fmt_avg(durations["create"], counters["create_attempt"])} '
             f'avg_status={_fmt_avg(durations["status_update"], counters["status_update"])} '
             f'avg_get_request={_fmt_avg(durations["get_request"], counters["get_request"])} '
-            f'avg_get_status={_fmt_avg(durations["get_status"], counters["get_status"])} '
-            f'shared_ids={len(shared_ids)}')
+            f'avg_get_status={_fmt_avg(durations["get_status"], counters["get_status"])}')
 
     last_log = time.time()
     for _ in range(operations):
@@ -95,14 +103,13 @@ async def _worker_loop(proc_idx: int, shared_ids, interval: float,
             continue
 
         counters['create_success'] += 1
-        shared_ids.append(request.request_id)
         start = time.perf_counter()
         await request_lib.update_status_async(request.request_id,
                                               RequestStatus.RUNNING)
         durations['status_update'] += time.perf_counter() - start
         counters['status_update'] += 1
 
-        target_id = _pick_request_id(shared_ids, request.request_id)
+        target_id = await _pick_request_id_from_db(request.request_id)
         if target_id is not None:
             start = time.perf_counter()
             await request_lib.get_request_async(target_id)
@@ -132,9 +139,8 @@ async def _worker_loop(proc_idx: int, shared_ids, interval: float,
     _log_status('completed')
 
 
-def _worker_main(proc_idx: int, shared_ids, interval: float,
-                 operations: int) -> None:
-    asyncio.run(_worker_loop(proc_idx, shared_ids, interval, operations))
+def _worker_main(proc_idx: int, operations: int) -> None:
+    asyncio.run(_worker_loop(proc_idx, operations))
 
 
 def main():
@@ -151,18 +157,14 @@ def main():
                         help='Number of request cycles per process.')
     args = parser.parse_args()
 
-    with mp.Manager() as manager:
-        shared_ids = manager.list()
-        processes = [
-            mp.Process(target=_worker_main,
-                       args=(idx, shared_ids, 0,
-                             args.operations))
-            for idx in range(args.processes)
-        ]
-        for process in processes:
-            process.start()
-        for process in processes:
-            process.join()
+    processes = [
+        mp.Process(target=_worker_main, args=(idx, args.operations))
+        for idx in range(args.processes)
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join()
 
 
 if __name__ == '__main__':
