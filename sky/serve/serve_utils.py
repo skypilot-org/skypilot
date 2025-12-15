@@ -1709,19 +1709,16 @@ def _format_replica_table(replica_records: List[Dict[str, Any]], show_all: bool,
         elif isinstance(used_by, str):
             used_by_str = used_by
         else:
-            if isinstance(used_by, str):
-                used_by_str = used_by
+            if len(used_by) > 2:
+                used_by_str = (
+                    f'{used_by[0]}, {used_by[1]}, +{len(used_by) - 2}'
+                    ' more')
+            elif len(used_by) == 2:
+                used_by_str = f'{used_by[0]}, {used_by[1]}'
+            elif len(used_by) == 1:
+                used_by_str = str(used_by[0])
             else:
-                if len(used_by) > 2:
-                    used_by_str = (
-                        f'{used_by[0]}, {used_by[1]}, +{len(used_by) - 2}'
-                        ' more')
-                elif len(used_by) == 2:
-                    used_by_str = f'{used_by[0]}, {used_by[1]}'
-                elif len(used_by) == 1:
-                    used_by_str = str(used_by[0])
-                else:
-                    used_by_str = '-'
+                used_by_str = '-'
 
         replica_handle: Optional['backends.CloudVmRayResourceHandle'] = record[
             'handle']
