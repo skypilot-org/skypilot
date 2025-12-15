@@ -389,9 +389,9 @@ def test_get_resources_fractional_cpu():
     simple, full = resources_utils.format_resource(mock_resources_k8s_fractional)
 
     assert 'cpus=0.5' in simple or 'cpus=0.5' in (full or '')
-    assert not re.search(r'\bcpus=0\b', simple)
+    assert not re.search(r'\bcpus=0(?![.\d])', simple)
     if full:
-        assert not re.search(r'\bcpus=0\b', full)
+        assert not re.search(r'\bcpus=0(?![.\d])', full)
 
     mock_resources_k8s_fractional_plus = Resources(infra='k8s/my-cluster-ctx',
                                                     cpus='0.5+',
