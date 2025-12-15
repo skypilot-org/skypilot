@@ -268,6 +268,11 @@ section :ref:`below <cloud-account-setup>`.
 
   To check credentials only for specific clouds, pass the clouds as arguments: :code:`sky check aws gcp`
 
+.. tip::
+
+  If you are having trouble getting your credentials to setup it might be because your API server has already started and is 
+  failing to pick up the new credentials. You can try to restart the API server by running :code:`sky api stop` and then :code:`sky api start`.
+
 .. _cloud-account-setup:
 
 Set up Kubernetes or clouds
