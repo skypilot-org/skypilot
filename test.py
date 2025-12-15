@@ -7,7 +7,8 @@ from typing import Optional
 
 from sky.server.requests import payloads
 from sky.server.requests import requests as request_lib
-from sky.server.requests.requests import Request, RequestStatus
+from sky.server.requests.requests import Request
+from sky.server.requests.requests import RequestStatus
 from sky.skylet import constants as sky_constants
 from sky.utils import common_utils
 
