@@ -2062,6 +2062,15 @@ export function GPUs() {
 
   // Get enabled clouds for the selected workspace
   const workspaceEnabledClouds = React.useMemo(() => {
+    // If Kubernetes data is still loading and workspaceInfrastructure is empty,
+    // return null to indicate we should show all enabled clouds without filtering
+    if (
+      kubeLoading &&
+      Object.keys(workspaceInfrastructure).length === 0
+    ) {
+      return null;
+    }
+
     if (selectedWorkspace === 'all') {
       // Return all unique clouds across all workspaces
       const allCloudsSet = new Set();
@@ -2088,12 +2097,17 @@ export function GPUs() {
       });
       return Array.from(cloudsSet);
     }
-  }, [selectedWorkspace, workspaceInfrastructure]);
+  }, [selectedWorkspace, workspaceInfrastructure, kubeLoading]);
 
   // Filter cloud infrastructure data based on selected workspace
   const filteredCloudInfraData = React.useMemo(() => {
     if (!cloudInfraData || cloudInfraData.length === 0) {
       return [];
+    }
+    // If workspaceEnabledClouds is null (Kubernetes still loading),
+    // show all enabled clouds without filtering by workspace
+    if (workspaceEnabledClouds === null) {
+      return cloudInfraData;
     }
     return cloudInfraData.filter((cloud) => {
       return workspaceEnabledClouds.includes(cloud.name.toLowerCase());
