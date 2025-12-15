@@ -184,6 +184,7 @@ def format_resource(resource: 'resources_lib.Resources',
                     simplified_only: bool = False) -> Tuple[str, Optional[str]]:
     resource = resource.assert_launchable()
     is_k8s = resource.cloud.canonical_name() == 'kubernetes'
+    vcpu, mem = None, None
     if resource.accelerators is None or is_k8s or not simplified_only:
         vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
             resource.instance_type)
@@ -197,7 +198,7 @@ def format_resource(resource: 'resources_lib.Resources',
         elements_full.append(f'gpus={acc}:{count}')
 
     cpu_to_add = None
-    if resource.cpus is not None:
+    if resource.cpus is not None and resource.cpus.strip():
         cpus_str = resource.cpus.rstrip('+')
         try:
             cpus_float = float(cpus_str)
@@ -206,11 +207,13 @@ def format_resource(resource: 'resources_lib.Resources',
         except ValueError:
             cpu_to_add = f'cpus={resource.cpus}'
     elif vcpu is not None:
-        cpu_to_add = f'cpus={int(vcpu)}'
+        cpus_formatted = f'{vcpu:.1f}'.rstrip('0').rstrip('.')
+        cpu_to_add = f'cpus={cpus_formatted}'
 
     mem_to_add = None
     if mem is not None:
-        mem_to_add = f'mem={int(mem)}'
+        mem_formatted = f'{mem:.1f}'.rstrip('0').rstrip('.')
+        mem_to_add = f'mem={mem_formatted}'
 
     if is_k8s or resource.accelerators is None:
         if cpu_to_add:
