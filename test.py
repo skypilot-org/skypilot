@@ -60,54 +60,76 @@ async def _worker_loop(proc_idx: int, shared_ids, interval: float,
         'get_request': 0,
         'get_status': 0,
     }
+    durations = {
+        'create': 0.0,
+        'status_update': 0.0,
+        'get_request': 0.0,
+        'get_status': 0.0,
+    }
+
+    def _fmt_avg(total: float, count: int) -> str:
+        return f'{(total / count):.6f}s' if count else 'n/a'
+
+    def _log_status(label: str):
+        print(
+            f'[proc {proc_idx}] {label} '
+            f'create_attempt={counters["create_attempt"]} '
+            f'create_success={counters["create_success"]} '
+            f'status_update={counters["status_update"]} '
+            f'get_request={counters["get_request"]} '
+            f'get_status={counters["get_status"]} '
+            f'avg_create={_fmt_avg(durations["create"], counters["create_attempt"])} '
+            f'avg_status={_fmt_avg(durations["status_update"], counters["status_update"])} '
+            f'avg_get_request={_fmt_avg(durations["get_request"], counters["get_request"])} '
+            f'avg_get_status={_fmt_avg(durations["get_status"], counters["get_status"])} '
+            f'shared_ids={len(shared_ids)}')
+
     last_log = time.time()
     for _ in range(operations):
         counters['create_attempt'] += 1
         request = _build_request(user_id)
+        start = time.perf_counter()
         created = await request_lib.create_if_not_exists_async(request)
+        durations['create'] += time.perf_counter() - start
         if not created:
             continue
 
         counters['create_success'] += 1
         shared_ids.append(request.request_id)
+        start = time.perf_counter()
         await request_lib.update_status_async(request.request_id,
                                               RequestStatus.RUNNING)
+        durations['status_update'] += time.perf_counter() - start
         counters['status_update'] += 1
 
         target_id = _pick_request_id(shared_ids, request.request_id)
         if target_id is not None:
+            start = time.perf_counter()
             await request_lib.get_request_async(target_id)
+            durations['get_request'] += time.perf_counter() - start
+
+            start = time.perf_counter()
             await request_lib.get_request_status_async(target_id,
                                                        include_msg=False)
+            durations['get_status'] += time.perf_counter() - start
             counters['get_request'] += 1
             counters['get_status'] += 1
+
+            start = time.perf_counter()
             await request_lib.update_status_async(
                 target_id,
                 random.choice(
                     [RequestStatus.RUNNING, RequestStatus.SUCCEEDED]),
             )
+            durations['status_update'] += time.perf_counter() - start
             counters['status_update'] += 1
 
         now = time.time()
         if now - last_log >= 5:
-            print(
-                f'[proc {proc_idx}] ops '
-                f'create_attempt={counters["create_attempt"]} '
-                f'create_success={counters["create_success"]} '
-                f'status_update={counters["status_update"]} '
-                f'get_request={counters["get_request"]} '
-                f'get_status={counters["get_status"]} '
-                f'shared_ids={len(shared_ids)}')
+            _log_status('ops')
             last_log = now
 
-    print(
-        f'[proc {proc_idx}] completed '
-        f'create_attempt={counters["create_attempt"]} '
-        f'create_success={counters["create_success"]} '
-        f'status_update={counters["status_update"]} '
-        f'get_request={counters["get_request"]} '
-        f'get_status={counters["get_status"]} '
-        f'shared_ids={len(shared_ids)}')
+    _log_status('completed')
 
 
 def _worker_main(proc_idx: int, shared_ids, interval: float,
