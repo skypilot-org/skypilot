@@ -29,6 +29,7 @@ class GetServiceStatusRequestConverter:
     ) -> 'servev1_pb2.GetServiceStatusRequest':
         request = servev1_pb2.GetServiceStatusRequest()
         request.pool = pool
+        request.include_credentials = include_credentials
         if service_names is not None:
             request.service_names.names.extend(service_names)
         if include_credentials:
@@ -40,6 +41,7 @@ class GetServiceStatusRequestConverter:
         cls, proto: 'servev1_pb2.GetServiceStatusRequest'
     ) -> Tuple[Optional[List[str]], bool, bool]:
         pool = proto.pool
+        include_credentials = proto.include_credentials
         if proto.HasField('service_names'):
             service_names = list(proto.service_names.names)
         else:
