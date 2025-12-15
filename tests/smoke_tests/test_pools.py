@@ -1155,7 +1155,7 @@ def test_pools_num_jobs_basic(generic_cloud: str):
         with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
             write_yaml(pool_yaml, pool_config)
             write_yaml(job_yaml, job_config)
-            job_names = [f'{name}-job-{i}' for i in range(num_jobs)]
+            job_names = [f'{name}-job' for _ in range(num_jobs)]
             test = smoke_tests_utils.Test(
                 'test_pools_num_jobs',
                 [
