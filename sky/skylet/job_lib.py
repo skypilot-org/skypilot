@@ -469,6 +469,54 @@ def set_status(job_id: int, status: JobStatus) -> None:
 
 
 @init_db
+def update_metadata(job_id: int, metadata_update: Dict[str, Any]) -> None:
+    """Update job metadata with new key-value pairs.
+
+    Args:
+        job_id: The job ID to update.
+        metadata_update: A dict of key-value pairs to add/update in the
+            job's metadata.
+    """
+    # TODO(mraheja): remove pylint disabling when filelock version updated
+    # pylint: disable=abstract-class-instantiated
+    assert _DB is not None
+    with filelock.FileLock(_get_lock_path(job_id)):
+        # Retrieve current metadata
+        rows = _DB.cursor.execute('SELECT metadata FROM jobs WHERE job_id=(?)',
+                                  (job_id,))
+        row = rows.fetchone()
+        if row is None:
+            return
+
+        current_metadata = json.loads(row[0]) if row[0] else {}
+        # Merge with update
+        current_metadata.update(metadata_update)
+        # Save back
+        _DB.cursor.execute('UPDATE jobs SET metadata=(?) WHERE job_id=(?)',
+                           (json.dumps(current_metadata), job_id))
+        _DB.conn.commit()
+
+
+@init_db
+def get_metadata(job_id: int) -> Dict[str, Any]:
+    """Get job metadata.
+
+    Args:
+        job_id: The job ID to retrieve metadata for.
+
+    Returns:
+        A dict of the job's metadata, or empty dict if not found.
+    """
+    assert _DB is not None
+    rows = _DB.cursor.execute('SELECT metadata FROM jobs WHERE job_id=(?)',
+                              (job_id,))
+    row = rows.fetchone()
+    if row is None or row[0] is None:
+        return {}
+    return json.loads(row[0])
+
+
+@init_db
 def set_job_started(job_id: int) -> None:
     # TODO(mraheja): remove pylint disabling when filelock version updated.
     # pylint: disable=abstract-class-instantiated
@@ -1266,6 +1314,17 @@ class JobLibCodeGen:
             'hasattr(job_lib, "get_log_dir_for_jobs") else '
             'job_lib.run_timestamp_with_globbing_payload(job_ids)',
             'print(log_dirs, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def get_job_exit_codes(cls, job_id: Optional[int] = None) -> str:
+        """Generate shell command to retrieve exit codes from job metadata."""
+        code = [
+            f'job_id = {job_id} if {job_id} != None else job_lib.get_latest_job_id()',  # pylint: disable=line-too-long
+            'import json',
+            'metadata = job_lib.get_metadata(job_id) if job_id is not None else {}',  # pylint: disable=line-too-long
+            'print(json.dumps(metadata))'
         ]
         return cls._build(code)
 

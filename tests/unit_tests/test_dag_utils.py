@@ -61,6 +61,27 @@ def test_jobs_recovery_fill_default_values():
     assert resources[0].job_recovery['strategy'] == 'FAILOVER'
     assert resources[0].job_recovery['max_restarts_on_errors'] == 3
 
+    # Test with recover_on_exit_codes
+    task_str = textwrap.dedent("""\
+        resources:
+            cpus: 2+
+            job_recovery:
+                max_restarts_on_errors: 3
+                recover_on_exit_codes: [33, 137]
+        """)
+
+    task_config = yaml.safe_load(task_str)
+    task = task_lib.Task.from_yaml_config(task_config)
+    dag = dag_utils.convert_entrypoint_to_dag(task)
+    dag_utils.fill_default_config_in_dag_for_job_launch(dag)
+
+    resources = list(dag.tasks[0].resources)
+    assert len(resources) == 1
+    assert resources[0].job_recovery['strategy'].lower(
+    ) == registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default
+    assert resources[0].job_recovery['max_restarts_on_errors'] == 3
+    assert resources[0].job_recovery['recover_on_exit_codes'] == [33, 137]
+
     task_str = textwrap.dedent("""\
         resources:
             cpus: 2+

@@ -10,7 +10,7 @@ import logging
 import os
 import traceback
 import typing
-from typing import Optional, Set
+from typing import List, Optional, Set
 
 from sky import backends
 from sky import dag as dag_lib
@@ -74,6 +74,7 @@ class StrategyExecutor:
         starting: Set[int],
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
+        recover_on_exit_codes: Optional[List[int]] = None,
     ) -> None:
         """Initialize the strategy executor.
 
@@ -87,6 +88,8 @@ class StrategyExecutor:
             starting: Set of job IDs that are currently starting.
             starting_lock: Lock to synchronize starting jobs.
             starting_signal: Condition to signal when a job can start.
+            recover_on_exit_codes: List of exit codes that should trigger
+                recovery regardless of max_restarts_on_errors limit.
         """
         assert isinstance(backend, backends.CloudVmRayBackend), (
             'Only CloudVMRayBackend is supported.')
@@ -99,6 +102,7 @@ class StrategyExecutor:
         self.cluster_name = cluster_name
         self.backend = backend
         self.max_restarts_on_errors = max_restarts_on_errors
+        self.recover_on_exit_codes = recover_on_exit_codes or []
         self.job_id = job_id
         self.task_id = task_id
         self.pool = pool
@@ -144,16 +148,19 @@ class StrategyExecutor:
             job_recovery_name: Optional[str] = name
             max_restarts_on_errors = job_recovery.pop('max_restarts_on_errors',
                                                       0)
+            recover_on_exit_codes = job_recovery.pop('recover_on_exit_codes',
+                                                     None)
         else:
             job_recovery_name = job_recovery
             max_restarts_on_errors = 0
+            recover_on_exit_codes = None
         job_recovery_strategy = (registry.JOBS_RECOVERY_STRATEGY_REGISTRY.
                                  from_str(job_recovery_name))
         assert job_recovery_strategy is not None, job_recovery_name
         return job_recovery_strategy(cluster_name, backend, task,
                                      max_restarts_on_errors, job_id, task_id,
                                      pool, starting, starting_lock,
-                                     starting_signal)
+                                     starting_signal, recover_on_exit_codes)
 
     async def launch(self) -> float:
         """Launch the cluster for the first time.
@@ -596,15 +603,35 @@ class StrategyExecutor:
                 # NoClusterLaunchedError.
                 assert False, 'Unreachable'
 
-    def should_restart_on_failure(self) -> bool:
+    def should_restart_on_failure(self,
+                                  exit_codes: Optional[List[int]] = None
+                                 ) -> bool:
         """Increments counter & checks if job should be restarted on a failure.
+
+        Args:
+            exit_codes: List of exit codes from the failed job. If any exit code
+                matches recover_on_exit_codes, recovery will be triggered
+                regardless of max_restarts_on_errors limit.
 
         Returns:
             True if the job should be restarted, otherwise False.
         """
+        # Check if any exit code matches the configured recover_on_exit_codes
+        # This triggers recovery without incrementing the counter
+        if exit_codes and self.recover_on_exit_codes:
+            for exit_code in exit_codes:
+                if exit_code in self.recover_on_exit_codes:
+                    logger.info(f'Exit code {exit_code} matched '
+                                'recover_on_exit_codes, triggering recovery')
+                    return True
+
+        # Otherwise, check the max_restarts_on_errors counter
         self.restart_cnt_on_failure += 1
         if self.restart_cnt_on_failure > self.max_restarts_on_errors:
             return False
+        logger.info(f'Restart count {self.restart_cnt_on_failure} '
+                    'is less than max_restarts_on_errors, '
+                    'restarting job')
         return True
 
 
@@ -627,10 +654,11 @@ class FailoverStrategyExecutor(StrategyExecutor):
         starting: Set[int],
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
+        recover_on_exit_codes: Optional[List[int]] = None,
     ) -> None:
         super().__init__(cluster_name, backend, task, max_restarts_on_errors,
                          job_id, task_id, pool, starting, starting_lock,
-                         starting_signal)
+                         starting_signal, recover_on_exit_codes)
         # Note down the cloud/region of the launched cluster, so that we can
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is

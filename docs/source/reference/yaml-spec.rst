@@ -901,6 +901,23 @@ OR
       strategy: EAGER_NEXT_REGION
       max_restarts_on_errors: 3
 
+OR with exit code-based recovery:
+
+.. code-block:: yaml
+
+  resources:
+    job_recovery:
+      strategy: EAGER_NEXT_REGION
+      max_restarts_on_errors: 3
+      # Always recover on these exit codes
+      recover_on_exit_codes: [33, 137]
+
+Available fields:
+
+- :code:`strategy`: The recovery strategy to use (:code:`FAILOVER` or :code:`EAGER_NEXT_REGION`)
+- :code:`max_restarts_on_errors`: Maximum number of times to restart the job on user code errors (non-zero exit codes)
+- :code:`recover_on_exit_codes`: List of exit codes (0-255) that should always trigger recovery, regardless of :code:`max_restarts_on_errors` limit. Useful for specific transient errors like NCCL timeouts.
+
 
 .. _yaml-spec-envs:
 

@@ -324,6 +324,28 @@ can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the 
 
 This will restart the job, up to 3 times (for a total of 4 attempts), if your code has any non-zero exit code. Each restart runs on a newly provisioned temporary cluster.
 
+Recovering on specific exit codes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You can also specify a list of exit codes that should always trigger recovery, regardless of the :code:`max_restarts_on_errors` limit. This is useful when certain exit codes indicate transient errors that should always be retried (e.g., NCCL timeouts, specific GPU driver issues).
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100:8
+    job_recovery:
+      max_restarts_on_errors: 3
+      # Always recover if the job exits with code 33 or 137
+      recover_on_exit_codes: [33, 137]
+
+In this configuration:
+
+- If the job exits with code 33 or 137, it will be recovered **regardless** of how many restarts have already occurred
+- For any other non-zero exit code, the job will be recovered up to 3 times (as specified by :code:`max_restarts_on_errors`)
+
+.. note::
+  For multi-node jobs, recovery is triggered if **any** node exits with a code in :code:`recover_on_exit_codes`.
+
 
 When will my job be recovered?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -335,7 +357,7 @@ Here's how various kinds of failures will be handled by SkyPilot:
    :header-rows: 0
 
    * - User code fails (:code:`setup` or :code:`run` commands have non-zero exit code):
-     - If :code:`max_restarts_on_errors` is set, restart up to that many times. If :code:`max_restarts_on_errors` is not set, or we run out of restarts, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
+     - If the exit code is in :code:`recover_on_exit_codes`, always restart. Otherwise, if :code:`max_restarts_on_errors` is set, restart up to that many times. If neither condition is met, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
    * - Instances are preempted or underlying hardware fails:
      - Tear down the old temporary cluster and provision a new one in another region, then restart the job.
    * - Can't find available resources due to cloud quota or capacity restrictions:

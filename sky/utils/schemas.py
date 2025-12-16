@@ -226,6 +226,15 @@ def _get_single_resources_schema():
                             'type': 'integer',
                             'minimum': 0,
                         },
+                        'recover_on_exit_codes': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'integer',
+                                'minimum': 0,
+                                'maximum': 255,
+                            },
+                            'uniqueItems': True,
+                        },
                     }
                 }],
             },
