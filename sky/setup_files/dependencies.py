@@ -144,9 +144,10 @@ aws_dependencies = [
     'awscli>=1.27.10',
     'botocore>=1.29.10',
     'boto3>=1.26.1',
-    # NOTE: required by awscli. To avoid ray automatically installing
-    # the latest version.
-    'colorama < 0.4.5',
+    # NOTE: colorama required by awscli. Current latest colorama is 0.4.6, so
+    # this is a no-op. However, we pin to the same as aws cli dependencies to
+    # avoid ray automatically installing the latest version.
+    'colorama<0.4.7',
 ]
 
 # Kubernetes 32.0.0 has an authentication bug:
