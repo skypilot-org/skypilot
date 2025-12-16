@@ -361,22 +361,6 @@ def validate_service_task(task: 'sky.Task', pool: bool) -> None:
                                  f'{sys_name} will replenish preempted spot '
                                  f'with {policy_description} instances.')
 
-    if pool:
-        accelerators = set()
-        for resource in task.resources:
-            if resource.accelerators is not None:
-                if isinstance(resource.accelerators, str):
-                    accelerators.add(resource.accelerators)
-                elif isinstance(resource.accelerators, dict):
-                    accelerators.update(resource.accelerators.keys())
-                elif isinstance(resource.accelerators, list):
-                    accelerators.update(resource.accelerators)
-        if len(accelerators) > 1:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Heterogeneous clusters are not supported for '
-                                 'pools please specify one accelerator '
-                                 'for all workers.')
-
     # Try to create a spot placer from the task yaml. Check if the task yaml
     # is valid for spot placer.
     spot_placer.SpotPlacer.from_task(task.service, task)
@@ -1026,6 +1010,28 @@ def get_next_cluster_name(
         logger.info(f'Selected replica {replica_info.replica_id} with cluster '
                     f'{replica_info.cluster_name!r} for job {job_id!r} in pool '
                     f'{service_name!r}')
+
+        # If job has heterogeneous resources (any_of/ordered), update
+        # full_resources to the specific resource that was selected for this
+        # worker. This must happen before releasing the filelock to ensure
+        # atomicity with the scheduling decision.
+        if resource_aware and len(task_resources_list) > 1:
+            assert free_resources is not None
+            free_resources_on_worker = free_resources.get(
+                replica_info.cluster_name)
+            if free_resources_on_worker is not None:
+                # Find which task resource fits on this worker
+                for task_res in task_resources_list:
+                    if _task_fits(task_res, free_resources_on_worker):
+                        # Update full_resources in database to this specific
+                        # resource
+                        logger.debug(
+                            f'Updating full_resources for job {job_id!r} '
+                            f'to selected resource: {task_res!r}')
+                        managed_job_state.update_job_full_resources(
+                            job_id, task_res.to_yaml_config())
+                        break
+
         managed_job_state.set_current_cluster_name(job_id,
                                                    replica_info.cluster_name)
         return replica_info.cluster_name
