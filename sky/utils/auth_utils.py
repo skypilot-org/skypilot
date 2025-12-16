@@ -66,15 +66,24 @@ def _ensure_key_permissions(private_key_path: str,
     volume mounts, umask) can modify file permissions after creation.
     SSH requires private keys to have strict permissions (0600) and the
     parent directory to not be group/world writable (0700).
+
+    This function is best-effort and will not raise exceptions if permission
+    changes fail (e.g., due to permission denied or read-only filesystem).
     """
+
+    def _safe_chmod(path: str, mode: int) -> None:
+        """Attempt to chmod, logging warning on failure."""
+        try:
+            if os.path.exists(path):
+                os.chmod(path, mode)
+        except OSError as e:
+            logger.warning(f'Failed to set permissions on {path}: {e}')
+
     # Ensure parent directory has correct permissions (0700)
     key_dir = os.path.dirname(private_key_path)
-    if os.path.exists(key_dir):
-        os.chmod(key_dir, 0o700)
-    if os.path.exists(private_key_path):
-        os.chmod(private_key_path, 0o600)
-    if os.path.exists(public_key_path):
-        os.chmod(public_key_path, 0o644)
+    _safe_chmod(key_dir, 0o700)
+    _safe_chmod(private_key_path, 0o600)
+    _safe_chmod(public_key_path, 0o644)
 
 
 def _save_key_pair(private_key_path: str, public_key_path: str,
