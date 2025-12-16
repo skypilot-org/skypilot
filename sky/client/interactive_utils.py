@@ -31,18 +31,21 @@ def _process_prompt_and_get_input(
     Returns:
         Tuple of (processed_line, session_id, user_input).
         - If no prompt found: (original_line, None, None)
-        - If prompt found: (None, session_id, user_input)
+        - If prompt found: (None, session_id, user_input).
     """
     match = SKY_INPUT_PATTERN.search(line)
     if not match:
         return line, None, None
 
     session_id = match.group(1)
+    # Extract prompt text before the <sky-input> tag
+    prompt_text = line[:match.start()].rstrip()
 
-    # Temporarily stop the spinner.
-    with rich_utils.client_status('') as status:
-        status.stop()
-        # Prompt already displayed by backend, just get input.
+    # Temporarily stop the spinner to get user input.
+    with rich_utils.safe_logger():
+        # Display prompt text if present, then get input on the same line.
+        if prompt_text:
+            print(prompt_text, end=' ', flush=True)
         try:
             user_input = getpass.getpass('')
         except EOFError:

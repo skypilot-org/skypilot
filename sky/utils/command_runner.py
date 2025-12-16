@@ -865,7 +865,9 @@ class SSHCommandRunner(CommandRunner):
                     try:
                         data = os.read(pty_m_fd, 4096)
                         if data:
-                            print(data.decode('utf-8'), flush=True)
+                            print(data.decode('utf-8', errors='replace'),
+                                  end='',
+                                  flush=True)
                     except OSError as e:
                         logger.error(f'[ControlMaster] PTY read error: {e}')
                         break
@@ -907,18 +909,22 @@ class SSHCommandRunner(CommandRunner):
                 if self._ssh_proxy_jump is not None:
                     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
-            result = log_lib.run_with_log(' '.join(command),
-                                          log_path,
-                                          require_outputs=require_outputs,
-                                          stream_logs=stream_logs,
-                                          process_stream=process_stream,
-                                          shell=True,
-                                          executable=executable,
-                                          stdin=pty_s_fd,
-                                          preexec_fn=setup_pty_session,
-                                          **kwargs)
-
-            # Clean up daemon threads and PTY.
+            return log_lib.run_with_log(' '.join(command),
+                                        log_path,
+                                        require_outputs=require_outputs,
+                                        stream_logs=stream_logs,
+                                        process_stream=process_stream,
+                                        shell=True,
+                                        executable=executable,
+                                        stdin=pty_s_fd,
+                                        preexec_fn=setup_pty_session,
+                                        **kwargs)
+        except Exception as e:
+            logger.error(f'[ControlMaster] Exception in setup: {e}')
+            raise
+        finally:
+            # Clean up daemon threads and PTY file descriptors.
+            # This always executes, preventing file descriptor leaks.
             stop_event.set()
             sock_server.close()
             socket_path = interactive_utils.get_socket_path(session_id)
@@ -926,16 +932,6 @@ class SSHCommandRunner(CommandRunner):
                 os.unlink(socket_path)
             os.close(pty_m_fd)
             os.close(pty_s_fd)
-
-            return result
-        except Exception as e:
-            logger.error(f'[ControlMaster] Exception in setup: {e}')
-            stop_event.set()
-            sock_server.close()
-            socket_path = interactive_utils.get_socket_path(session_id)
-            if os.path.exists(socket_path):
-                os.unlink(socket_path)
-            raise
 
     def close_cached_connection(self) -> None:
         """Close the cached connection to the remote machine.
