@@ -3,6 +3,8 @@
 
 [Verl](https://github.com/volcengine/verl) is the most popular open-source reinforcement learning framework for LLMs, supporting PPO, GRPO, and other algorithms.
 
+Also see [`search-tooling/`](search-tooling/) for tool-augmented “search” workflows (Search-R1 style), including Google Search–backed inference and a Wikipedia FAISS retrieval service used for inference and training.
+
 ## Why SkyPilot + Verl?
 
 SkyPilot makes RL training **easy and cost-effective**:
@@ -46,10 +48,6 @@ sky status --endpoint 8280 verl
   <img src="https://i.imgur.com/6Lwuldi.png" alt="Ray Dashboard showing distributed RLHF training" width="90%"/>
 </p>
 <p align="center"><i>Ray dashboard showing real-time monitoring of distributed training across multiple nodes</i></p>
-
-## Search tooling (Google search / retrieval)
-
-See [`search-tooling/README.md`](search-tooling/README.md) for search-enabled inference and training examples (Google Search backend + Wikipedia retrieval service).
 
 ## Learn More
 
