@@ -173,7 +173,6 @@ async def stream_response_async(request_id: Optional[str],
             if line is not None:
                 line_count += 1
 
-                # Handle interactive prompts
                 line = await interactive_utils.handle_interactive_prompt_async(
                     line)
                 if line is None:

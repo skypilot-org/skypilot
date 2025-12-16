@@ -5,15 +5,14 @@ import typing
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.utils import rich_utils
 
 if typing.TYPE_CHECKING:
     import aiohttp
-    import requests
 else:
     aiohttp = adaptors_common.LazyImport('aiohttp')
-    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -35,7 +34,6 @@ def _process_prompt_and_get_input(
         - If prompt found: (None, session_id, user_input)
     """
     match = SKY_INPUT_PATTERN.search(line)
-
     if not match:
         return line, None, None
 
@@ -44,7 +42,7 @@ def _process_prompt_and_get_input(
     # Temporarily stop the spinner.
     with rich_utils.client_status('') as status:
         status.stop()
-        # Prompt already displayed by backend, just get input
+        # Prompt already displayed by backend, just get input.
         try:
             user_input = getpass.getpass('')
         except EOFError:
@@ -64,17 +62,15 @@ def handle_interactive_prompt(line: str) -> typing.Optional[str]:
         prompt (meaning the line was consumed and should not be printed).
     """
     processed_line, session_id, user_input = _process_prompt_and_get_input(line)
-
     if session_id is None:
         return processed_line
 
-    # Send to API server
-    api_url = server_common.get_server_url()
     try:
-        requests.post(
-            f'{api_url}/api/interactive/{session_id}',
+        server_common.make_authenticated_request(
+            'POST',
+            f'/api/interactive/{session_id}',
             json={'input': user_input},
-            timeout=30,
+            timeout=client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
         )
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to send interactive input: {e}')
@@ -93,20 +89,20 @@ async def handle_interactive_prompt_async(line: str) -> typing.Optional[str]:
         prompt (meaning the line was consumed and should not be printed).
     """
     processed_line, session_id, user_input = _process_prompt_and_get_input(line)
-
     if session_id is None:
         return processed_line
 
-    # Send to API server
-    api_url = server_common.get_server_url()
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(
-                    f'{api_url}/api/interactive/{session_id}',
-                    json={'input': user_input},
-                    timeout=aiohttp.ClientTimeout(total=30),
-            ):
-                pass
+            await server_common.make_authenticated_request_async(
+                session,
+                'POST',
+                f'/api/interactive/{session_id}',
+                json={'input': user_input},
+                timeout=aiohttp.ClientTimeout(
+                    connect=client_common.
+                    API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS),
+            )
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to send interactive input: {e}')
 

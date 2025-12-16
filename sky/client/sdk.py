@@ -163,7 +163,6 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
             if line is not None:
                 line_count += 1
 
-                # Handle interactive prompts
                 line = interactive_utils.handle_interactive_prompt(line)
                 if line is None:
                     # Line was consumed by interactive prompt handler
