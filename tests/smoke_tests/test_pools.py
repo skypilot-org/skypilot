@@ -1365,41 +1365,46 @@ def test_pools_heterogeneous_resource_scheduling(generic_cloud: str):
         write_yaml(pool_yaml, pool_config)
         write_yaml(job_yaml, job_config)
 
-        # Commands to launch 5 jobs
-        launch_jobs_cmds = []
-        for i in range(5):
+        # Build test commands
+        test_cmds = [
+            _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                  pool_yaml=pool_yaml.name),
+            wait_until_pool_ready(pool_name, timeout=timeout),
+        ]
+
+        # Launch first 4 jobs and wait for each to be RUNNING
+        for i in range(4):
             job_name = f'{job_name_prefix}-{i}'
-            launch_jobs_cmds.append(
+            test_cmds.extend([
                 f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} '
                 f'--name {job_name} -d -y); '
                 f'echo "$s"; '
-                f'echo; echo; echo "$s" | grep "Job submitted"')
+                f'echo; echo; echo "$s" | grep "Job submitted"',
+                wait_until_job_status(job_name, ['RUNNING'], timeout=timeout),
+            ])
 
-        # Check that exactly 4 jobs are running and 1 is pending/waiting
-        check_job_counts = (
-            f'running_count=$(sky jobs queue --pool {pool_name} | grep RUNNING | wc -l | xargs); '
-            f'pending_count=$(sky jobs queue --pool {pool_name} | grep -E "PENDING|WAITING" | wc -l | xargs); '
-            f'echo "Running jobs: $running_count"; '
-            f'echo "Pending/waiting jobs: $pending_count"; '
-            f'if [ "$running_count" -ne 4 ]; then '
-            f'  echo "Expected 4 running jobs, got $running_count"; exit 1; '
-            f'fi; '
-            f'if [ "$pending_count" -ne 1 ]; then '
-            f'  echo "Expected 1 pending/waiting job, got $pending_count"; exit 1; '
-            f'fi; '
-            f'echo "Resource-aware scheduling working correctly!"')
+        # Launch 5th job
+        fifth_job_name = f'{job_name_prefix}-4'
+        test_cmds.extend([
+            f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} '
+            f'--name {fifth_job_name} -d -y); '
+            f'echo "$s"; '
+            f'echo; echo; echo "$s" | grep "Job submitted"',
+            # Wait for it to be PENDING
+            wait_until_job_status(fifth_job_name, ['PENDING'],
+                                  bad_statuses=[],
+                                  timeout=timeout),
+            # Sleep 60 seconds
+            'sleep 60',
+            # Verify it's still PENDING or WAITING (not running)
+            wait_until_job_status(fifth_job_name, ['PENDING'],
+                                  bad_statuses=['RUNNING'],
+                                  timeout=30),
+        ])
 
         test = smoke_tests_utils.Test(
             'test_pools_heterogeneous_resource_scheduling',
-            [
-                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
-                                                      pool_yaml=pool_yaml.name),
-                wait_until_pool_ready(pool_name, timeout=timeout),
-                *launch_jobs_cmds,
-                # Wait a bit for jobs to be scheduled
-                'sleep 60',
-                check_job_counts,
-            ],
+            test_cmds,
             timeout=smoke_tests_utils.get_timeout(generic_cloud) * 2,
             teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10),
         )
