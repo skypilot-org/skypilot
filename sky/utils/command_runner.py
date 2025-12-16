@@ -145,7 +145,7 @@ def ssh_options_list(
     # SSH Control will have a severe delay when using docker_ssh_proxy_command.
     # TODO(tian): Investigate why.
     #
-    # We disable ControlMaster when ssh_proxy_command or ssh_proxy_jump is used,
+    # We disable ControlMaster when ssh_proxy_command is used,
     # because the master connection will be idle although the connection might
     # be shared by other ssh commands that is not idle. In that case, user's
     # custom proxy command may drop the connection due to idle timeout, since it

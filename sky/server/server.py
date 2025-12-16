@@ -2077,7 +2077,6 @@ async def all_contexts(request: fastapi.Request) -> None:
 @app.post('/api/interactive/{session_id}')
 async def interactive_input(session_id: str,
                             body: payloads.InteractiveInputBody):
-    """Forward CLI input to worker's Unix socket for interactive SSH auth."""
     try:
         interactive_utils.send_to_socket(session_id, body.input)
         return {'status': 'ok'}
