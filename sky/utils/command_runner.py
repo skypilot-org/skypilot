@@ -647,6 +647,7 @@ class SSHCommandRunner(CommandRunner):
         docker_user: Optional[str] = None,
         disable_control_master: Optional[bool] = False,
         port_forward_execute_remote_command: Optional[bool] = False,
+        enable_interactive_auth: bool = False,
     ):
         """Initialize SSHCommandRunner.
 
@@ -737,6 +738,7 @@ class SSHCommandRunner(CommandRunner):
             self._docker_ssh_proxy_command = None
         self.port_forward_execute_remote_command = (
             port_forward_execute_remote_command)
+        self.enable_interactive_auth = enable_interactive_auth
 
     def port_forward_command(
             self,
@@ -975,7 +977,6 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
-            enable_interactive: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -1000,8 +1001,6 @@ class SSHCommandRunner(CommandRunner):
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
-            enable_interactive: Whether to enable interactive SSH
-                authentication.
 
         Returns:
             returncode
@@ -1043,7 +1042,7 @@ class SSHCommandRunner(CommandRunner):
                 command += [f'> {log_path}']
             executable = '/bin/bash'
 
-        if not enable_interactive:
+        if not self.enable_interactive_auth:
             return log_lib.run_with_log(' '.join(command),
                                         log_path,
                                         require_outputs=require_outputs,
@@ -1640,4 +1639,4 @@ class SlurmCommandRunner(SSHCommandRunner):
             f'export UV_CACHE_DIR=/tmp/uv_cache_$(id -u) && '
             f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
 
-        return super().run(cmd, enable_interactive=True, **kwargs)
+        return super().run(cmd, **kwargs)

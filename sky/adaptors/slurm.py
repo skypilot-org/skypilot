@@ -79,14 +79,14 @@ class SlurmClient:
             ssh_key,
             ssh_proxy_command=ssh_proxy_command,
             ssh_proxy_jump=ssh_proxy_jump,
+            enable_interactive_auth=True,
         )
 
     def _run_slurm_cmd(self, cmd: str) -> Tuple[int, str, str]:
         return self._runner.run(cmd,
                                 require_outputs=True,
                                 separate_stderr=True,
-                                stream_logs=False,
-                                enable_interactive=True)
+                                stream_logs=False)
 
     def query_jobs(
         self,
