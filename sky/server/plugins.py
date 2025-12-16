@@ -164,6 +164,7 @@ def load_plugins(extension_context: ExtensionContext):
 
     for plugin_config in config.get('plugins', []):
         class_path = plugin_config['class']
+        logger.debug(f'Loading plugins: {class_path}')
         module_path, class_name = class_path.rsplit('.', 1)
         try:
             module = importlib.import_module(module_path)
