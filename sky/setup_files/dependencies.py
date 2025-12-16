@@ -146,7 +146,7 @@ aws_dependencies = [
     'boto3>=1.26.1',
     # NOTE: colorama required by awscli. Current latest colorama is 0.4.6, so
     # this is a no-op. However, we pin to the same as aws cli dependencies to
-    # avoid ray automatically installing the latest version.
+    # avoid ray automatically installing a latest version in the future.
     'colorama<0.4.7',
 ]
 
