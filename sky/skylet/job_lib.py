@@ -1321,7 +1321,7 @@ class JobLibCodeGen:
     def get_job_exit_codes(cls, job_id: Optional[int] = None) -> str:
         """Generate shell command to retrieve exit codes from job metadata."""
         code = [
-            f'job_id = {job_id} if {job_id} != None else job_lib.get_latest_job_id()',  # pylint: disable=line-too-long
+            f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',  # pylint: disable=line-too-long
             'import json',
             'metadata = job_lib.get_metadata(job_id) if job_id is not None else {}',  # pylint: disable=line-too-long
             'print(json.dumps(metadata))'
