@@ -188,6 +188,10 @@ sky launch -c dynamo nvidia-dynamo.sky.yaml --env MODEL_NAME=meta-llama/Llama-3.
 
 ## What's next
 
+SkyServe support for Nvidia Dynamo is coming soon. 
+
+More resources:
+
 * [AI on Kubernetes Without the Pain](https://blog.skypilot.co/ai-on-kubernetes/)
 * [SkyPilot AI Gallery](https://docs.skypilot.co/en/latest/gallery/index.html)
 * [SkyPilot Docs](https://docs.skypilot.co)
