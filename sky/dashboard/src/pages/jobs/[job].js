@@ -39,6 +39,8 @@ import dashboardCache from '@/lib/cache';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import PropTypes from 'prop-types';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import { useLogStreamer } from '@/hooks/useLogStreamer';
+import PropTypes from 'prop-types';
 
 function JobDetails() {
   const router = useRouter();
