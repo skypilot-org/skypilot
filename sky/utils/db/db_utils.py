@@ -7,6 +7,7 @@ import pathlib
 import sqlite3
 import threading
 import typing
+import weakref
 from typing import Any, Callable, Dict, Iterable, Literal, Optional, Union
 
 import aiosqlite
@@ -22,6 +23,8 @@ from sky.skylet import runtime_utils
 logger = sky_logging.init_logger(__name__)
 if typing.TYPE_CHECKING:
     from sqlalchemy.orm import Session
+
+_cursor_gc_refs: set[weakref.ReferenceType[sqlite3.Cursor]] = set()
 
 # This parameter (passed to sqlite3.connect) controls how long we will wait to
 # obtains a database lock (not necessarily during connection, but whenever it is
@@ -379,12 +382,17 @@ class SQLiteConn(threading.local):
 
         def exec_fetch_all(sql: str, parameters: Optional[Iterable[Any]]):
             # pylint: disable=protected-access
-            with safe_cursor_on_connection(conn._conn) as cursor:
-                cursor.execute(sql, parameters)
-                # Note(dev): sqlite3.Connection cannot be patched, keep
-                # fault_point here to test the integrity of exec_fetch_all()
-                fault_point()
-                return cursor.fetchall()
+            cursor = conn._conn.execute(sql, parameters)
+            def _on_cursor_gc(ref, query=sql):
+                _cursor_gc_refs.discard(ref)
+                logger.warning('sqlite cursor gc for query: %s', query)
+
+            cursor_ref = weakref.ref(cursor, _on_cursor_gc)
+            _cursor_gc_refs.add(cursor_ref)
+            # Note(dev): sqlite3.Connection cannot be patched, keep
+            # fault_point here to test the integrity of exec_fetch_all()
+            fault_point()
+            return cursor.fetchall()
 
         # pylint: disable=protected-access
         return await conn._execute(exec_fetch_all, sql, parameters)

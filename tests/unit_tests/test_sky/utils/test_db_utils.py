@@ -51,6 +51,13 @@ async def isolated_database(tmp_path):
     db_path = tmp_path / 'db_utils_async.db'
 
     def create_table(cursor, conn):
+        try:
+            cursor.execute('PRAGMA journal_mode=WAL')
+        except sqlite3.OperationalError as e:
+            if 'database is locked' not in str(e):
+                raise
+            # If the database is locked, it is OK to continue, as the WAL mode
+            # is not critical and is likely to be enabled by other processes.
         cursor.execute('CREATE TABLE IF NOT EXISTS items ('
                        'id INTEGER PRIMARY KEY AUTOINCREMENT, value TEXT)')
         conn.commit()
@@ -75,7 +82,11 @@ async def test_execute_fetchall_async_error_does_not_stall_read_txn(
                                side_effect=sqlite3.OperationalError('BOOM')):
             async with conn.execute_fetchall_async('SELECT * FROM items') as _:
                 pass
-
+    import gc
+    gc.collect()
+    print(f'check refs, {len(db_utils._cursor_gc_refs)}')
+    for ref in db_utils._cursor_gc_refs:
+        print(ref())
     # Another connection writes to the database while the failed read is cleaned
     # up to ensure there is no lingering read transaction.
     with sqlite3.connect(db_path) as external_conn:
