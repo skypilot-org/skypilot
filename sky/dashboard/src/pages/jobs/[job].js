@@ -36,8 +36,6 @@ import { formatJobYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
 import dashboardCache from '@/lib/cache';
-import { useLogStreamer } from '@/hooks/useLogStreamer';
-import PropTypes from 'prop-types';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import PropTypes from 'prop-types';
