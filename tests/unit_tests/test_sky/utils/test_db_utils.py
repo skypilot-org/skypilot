@@ -86,7 +86,27 @@ async def test_execute_fetchall_async_error_does_not_stall_read_txn(
     gc.collect()
     print(f'check refs, {len(db_utils._cursor_gc_refs)}')
     for ref in db_utils._cursor_gc_refs:
-        print(ref())
+        obj = ref()
+        print(obj)
+        if obj is None:
+            continue
+        for idx, holder in enumerate(gc.get_referrers(obj)):
+            if isinstance(holder, type(gc.get_objects().__class__)):
+                # unlikely, but keep generic
+                print(f'  ref[{idx}] type={type(holder)}')
+                continue
+            if isinstance(holder, dict):
+                keys = list(holder.keys())
+                print(f'  ref[{idx}] type=dict keys={keys}')
+                continue
+            if hasattr(holder, 'f_code'):
+                # frame object
+                code = holder.f_code
+                print(
+                    f'  ref[{idx}] frame {code.co_filename}:{holder.f_lineno} {code.co_name}'
+                )
+                continue
+            print(f'  ref[{idx}] type={type(holder)} repr={holder}')
     # Another connection writes to the database while the failed read is cleaned
     # up to ensure there is no lingering read transaction.
     with sqlite3.connect(db_path) as external_conn:
