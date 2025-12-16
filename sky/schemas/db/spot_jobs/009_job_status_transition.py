@@ -1,7 +1,7 @@
 """Add job_task_events table for tracking managed job task events.
 
-Revision ID: 008
-Revises: 007
+Revision ID: 009
+Revises: 008
 Create Date: 2025-12-11
 
 """
@@ -14,8 +14,8 @@ from sky.jobs.state import Base
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
-revision: str = '008'
-down_revision: Union[str, Sequence[str], None] = '007'
+revision: str = '009'
+down_revision: Union[str, Sequence[str], None] = '008'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
