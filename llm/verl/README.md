@@ -47,17 +47,9 @@ sky status --endpoint 8280 verl
 </p>
 <p align="center"><i>Ray dashboard showing real-time monitoring of distributed training across multiple nodes</i></p>
 
-## Google search with VeRL
+## Search tooling (Google search / retrieval)
 
-Google searching with a model
-
-```bash
-sky launch -c verl-infer-google llm/verl/verl-search-interaction-google-infer.yaml \
-  --env MODEL_PATH=/checkpoints/hf_model \
-  --env GOOGLE_API_KEY=your_key_here \
-  --env GOOGLE_CSE_ID=your_cse_id_here \
-  -y
-```
+See [`search-tooling/README.md`](search-tooling/README.md) for search-enabled inference and training examples (Google Search backend + Wikipedia retrieval service).
 
 ## Learn More
 
