@@ -136,7 +136,6 @@ setup_commands:
   - {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
-    chmod 600 ~/.ssh/sky-cluster-key;
     {%- for fs in filesystems %}
     sudo mkdir {{ fs.filesystem_mount_path }};
     sudo mount -t virtiofs {{ fs.filesystem_mount_tag }} {{ fs.filesystem_mount_path }};

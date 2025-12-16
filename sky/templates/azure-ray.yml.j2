@@ -115,7 +115,7 @@ setup_commands:
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
   # Line 'sudo mv /etc/nccl.conf /etc/nccl.conf.bak' removes the default nccl.conf which is wrongly configured on many multi-GPU Azure VM, causing failure for multi-GPU workloads using NCCL.
-  - mkdir -p ~/.ssh; touch ~/.ssh/config; chmod 600 ~/.ssh/sky-cluster-key;
+  - mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}
     {{ copy_skypilot_templates_commands }}

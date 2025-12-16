@@ -254,7 +254,6 @@ setup_commands:
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
-    chmod 600 ~/.ssh/sky-cluster-key;
     {%- if docker_image is none %}
     sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;

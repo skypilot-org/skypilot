@@ -68,7 +68,7 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - chmod 600 ~/.ssh/sky-cluster-key; echo "setup commands runs at $(date)" > /tmp/provision.tmp.out || true;
+  - echo "setup commands runs at $(date)" > /tmp/provision.tmp.out || true;
     {%- if os_type == "ubuntu" %}
     sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;

@@ -99,7 +99,6 @@ setup_commands:
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
-    chmod 600 ~/.ssh/sky-cluster-key;
     touch ~/.bashrc;
     echo "127.0.0.1 $(hostname)" | sudo tee -a /etc/hosts || true;
     echo "127.0.0.1 localhost" | sudo tee -a /etc/hosts || true;
