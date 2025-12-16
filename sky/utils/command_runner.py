@@ -1042,16 +1042,6 @@ class SSHCommandRunner(CommandRunner):
                 command += [f'> {log_path}']
             executable = '/bin/bash'
 
-        if not self.enable_interactive_auth:
-            return log_lib.run_with_log(' '.join(command),
-                                        log_path,
-                                        require_outputs=require_outputs,
-                                        stream_logs=stream_logs,
-                                        process_stream=process_stream,
-                                        shell=True,
-                                        executable=executable,
-                                        **kwargs)
-
         result = log_lib.run_with_log(' '.join(command),
                                       log_path,
                                       require_outputs=require_outputs,
@@ -1060,6 +1050,9 @@ class SSHCommandRunner(CommandRunner):
                                       shell=True,
                                       executable=executable,
                                       **kwargs)
+        if not self.enable_interactive_auth:
+            return result
+
         if require_outputs:
             returncode, _, _ = result
         else:
