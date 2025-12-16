@@ -1,14 +1,24 @@
 """Runner for commands to be executed on the cluster."""
 import enum
+import fcntl
 import hashlib
 import os
 import pathlib
+import pty
 import re
+import select
 import shlex
+import signal
+import socket
 import sys
+import termios
+import threading
 import time
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Tuple, Type,
                     Union)
+import uuid
+
+import colorama
 
 from sky import exceptions
 from sky import sky_logging
@@ -19,6 +29,7 @@ from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import control_master_utils
 from sky.utils import git as git_utils
+from sky.utils import interactive_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
@@ -126,8 +137,8 @@ def ssh_options_list(
         'ExitOnForwardFailure': 'yes',
         # Quickly kill the connection if network connection breaks (as
         # opposed to hanging/blocking).
-        'ServerAliveInterval': 50,
-        'ServerAliveCountMax': 100,
+        'ServerAliveInterval': 5,
+        'ServerAliveCountMax': 3,
         # ConnectTimeout.
         'ConnectTimeout': f'{connect_timeout}s',
     }
@@ -148,14 +159,12 @@ def ssh_options_list(
     # is running and the ControlMaster keeps the session, which results in
     # 'ControlPersist' number of seconds delay per ssh commands ran.
     if (ssh_control_name is not None and docker_ssh_proxy_command is None and
-            ssh_proxy_command is None and
-            not disable_control_master):
-        logger.info('Using ControlMaster')
+            ssh_proxy_command is None and not disable_control_master):
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
             'ControlMaster': 'auto',
-            'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%h-%p-%r',
+            'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
             'ControlPersist': '300s',
         })
     ssh_key_option = [
@@ -754,7 +763,7 @@ class SSHCommandRunner(CommandRunner):
     def ssh_base_command(self, *, ssh_mode: SshMode,
                          port_forward: Optional[List[Tuple[int, int]]],
                          connect_timeout: Optional[int]) -> List[str]:
-        ssh = ['ssh', '-vvv', '-E /tmp/ssh-master.log']
+        ssh = ['ssh']
         if ssh_mode == SshMode.NON_INTERACTIVE:
             # Disable pseudo-terminal allocation. Otherwise, the output of
             # ssh will be corrupted by the user's input.
@@ -786,6 +795,145 @@ class SSHCommandRunner(CommandRunner):
             disable_control_master=self.disable_control_master) + [
                 f'{self.ssh_user}@{self.ip}'
             ]
+
+    def _retry_with_interactive_auth(
+            self, session_id: str, command: List[str], log_path: str,
+            require_outputs: bool, process_stream: bool, stream_logs: bool,
+            executable: str,
+            **kwargs) -> Union[int, Tuple[int, str, str], Tuple[int, int]]:
+        """Retries command with interactive auth.
+
+        This handles SSH connections requiring keyboard-interactive
+        authentication (e.g., 2FA) by using a PTY and monitoring for auth
+        prompts. Once authenticated, establishes a persistent ControlMaster
+        socket (if enabled) that other SSH sessions can reuse without
+        re-authenticating.
+
+        See ssh_options_list for when ControlMaster is not enabled.
+        """
+        extra_options = [
+            # Override ControlPersist to reduce frequency of manual user
+            # intervention. The default from ssh_options_list is only 5m.
+            #
+            # NOTE: When used with ProxyJump, the connection can die
+            # earlier than expected, so it is recommended to also enable
+            # ControlMaster on the jump host's SSH config. It is hard to
+            # tell why exactly, because enabling -v makes this problem
+            # disappear for some reasons.
+            '-o',
+            'ControlPersist=1d',
+        ]
+        if self._ssh_proxy_jump is not None:
+            logger.warning(f'{colorama.Fore.YELLOW}When using ProxyJump, it is '
+                           'recommended to also enable ControlMaster on the '
+                           'jump host\'s SSH config to keep the authenticated '
+                           f'connection alive for longer.{colorama.Fore.RESET}')
+        command = command[:1] + extra_options + command[1:]
+
+        # Create Unix socket for user input
+        sock_server = interactive_utils.create_socket_server(session_id)
+
+        stop_event = threading.Event()
+        prompt_sent = threading.Event()
+
+        # Create PTY for SSH
+        pty_m_fd, pty_s_fd = pty.openpty()
+
+        def socket_to_pty():
+            """Forward socket input to PTY master."""
+            while not stop_event.is_set():
+                try:
+                    conn, _ = sock_server.accept()
+                    data = conn.recv(4096)
+                    if data:
+                        os.write(pty_m_fd, data)
+                        prompt_sent.clear()
+                    conn.close()
+                except socket.timeout:
+                    continue
+                except OSError:
+                    break
+
+        def detect_and_log_prompts():
+            """Monitor PTY for prompts and write output to stdout."""
+            echo_disabled_since = 0
+            while not stop_event.is_set():
+                rlist, _, _ = select.select([pty_m_fd], [], [], 0.1)
+                if pty_m_fd in rlist:
+                    try:
+                        data = os.read(pty_m_fd, 4096)
+                        if data:
+                            print(data.decode('utf-8'), flush=True)
+                    except OSError as e:
+                        logger.error(f'[ControlMaster] PTY read error: {e}')
+                        break
+
+                if not prompt_sent.is_set():
+                    echo_disabled = subprocess_utils.is_echo_disabled(pty_m_fd)
+                    if echo_disabled and echo_disabled_since == 0:
+                        echo_disabled_since = time.time()
+                    elif not echo_disabled:
+                        echo_disabled_since = 0
+
+                    # Wait a moment for the prompt to be printed.
+                    echo_stable = (echo_disabled and
+                                   time.time() - echo_disabled_since > 0.1)
+                    if echo_stable:
+                        # Signal frontend to ask user for input.
+                        input_signal = f'<sky-input session="{session_id}"/>'
+                        print(input_signal, flush=True)
+                        prompt_sent.set()
+
+        # Start background threads
+        socket_thread = threading.Thread(target=socket_to_pty, daemon=True)
+        socket_thread.start()
+        prompt_thread = threading.Thread(target=detect_and_log_prompts,
+                                         daemon=True)
+        prompt_thread.start()
+
+        try:
+
+            def setup_pty_session():
+                # Set PTY as controlling terminal so SSH can access /dev/tty
+                # for keyboard-interactive auth. Without this:
+                # "can't open /dev/tty: Device not configured"
+                fcntl.ioctl(pty_s_fd, termios.TIOCSCTTY, 0)
+                # Ignore SIGHUP so ControlMaster survives when PTY closes.
+                signal.signal(signal.SIGHUP, signal.SIG_IGN)
+                # Ignore SIGTERM so ControlMaster survives subprocess_daemon
+                # killing the process group.
+                if self._ssh_proxy_jump is not None:
+                    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+            result = log_lib.run_with_log(' '.join(command),
+                                          log_path,
+                                          require_outputs=require_outputs,
+                                          stream_logs=stream_logs,
+                                          process_stream=process_stream,
+                                          shell=True,
+                                          executable=executable,
+                                          stdin=pty_s_fd,
+                                          preexec_fn=setup_pty_session,
+                                          **kwargs)
+
+            # Clean up daemon threads and PTY.
+            stop_event.set()
+            sock_server.close()
+            socket_path = interactive_utils.get_socket_path(session_id)
+            if os.path.exists(socket_path):
+                os.unlink(socket_path)
+            os.close(pty_m_fd)
+            os.close(pty_s_fd)
+
+            return result
+        except Exception as e:
+            logger.error(f'[ControlMaster] Exception in setup: {e}')
+            stop_event.set()
+            sock_server.close()
+            socket_path = interactive_utils.get_socket_path(session_id)
+            if os.path.exists(socket_path):
+                os.unlink(socket_path)
+            raise
 
     def close_cached_connection(self) -> None:
         """Close the cached connection to the remote machine.
@@ -852,56 +1000,20 @@ class SSHCommandRunner(CommandRunner):
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
-            enable_interactive: Whether to enable interactive SSH authentication.
+            enable_interactive: Whether to enable interactive SSH
+                authentication.
 
         Returns:
             returncode
             or
             A tuple of (returncode, stdout, stderr).
         """
-        import glob
-        import uuid
-        
+
         base_ssh_command = self.ssh_base_command(
             ssh_mode=ssh_mode,
             port_forward=port_forward,
             connect_timeout=connect_timeout)
-        
-        # Generate session ID for interactive mode, but only if ControlMaster
-        # is alive and usable. A dead/stale socket needs re-authentication.
-        session_id = None
-        if enable_interactive:
-            control_path = _ssh_control_path(self.ssh_control_name)
-            logger.debug(f'[Interactive] ControlMaster path: {control_path}')
-            control_master_alive = False
-            
-            if control_path:
-                # Actually test if ControlMaster is alive by running ssh -O check
-                # ssh_base_command already includes user@ip at the end, so we
-                # insert -O check before it
-                check_cmd = base_ssh_command[:-1] + ['-O', 'check'] + base_ssh_command[-1:]
-                logger.debug(f'[Interactive] Testing ControlMaster: {check_cmd}')
-                try:
-                    result = subprocess_utils.run(check_cmd,
-                                                 shell=False,
-                                                 check=False,
-                                                 capture_output=True,
-                                                 timeout=5)
-                    control_master_alive = (result.returncode == 0)
-                    logger.debug(f'[Interactive] ControlMaster alive={control_master_alive} (returncode={result.returncode})')
-                    if not control_master_alive:
-                        output = (result.stdout.decode() if result.stdout else '') + (result.stderr.decode() if result.stderr else '')
-                        logger.debug(f'[Interactive] Check failed: {output.strip()}')
-                except Exception as e:
-                    logger.debug(f'[Interactive] ControlMaster check exception: {e}')
-                    control_master_alive = False
-            
-            if not control_master_alive:
-                # ControlMaster doesn't exist or is dead, enable interactive
-                session_id = uuid.uuid4().hex[:16]
-                logger.debug(f'[Interactive] Enabling interactive with session_id={session_id}')
-            else:
-                logger.debug('[Interactive] Skipping interactive (ControlMaster is alive)')
+
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
             command = base_ssh_command + cmd
@@ -914,8 +1026,6 @@ class SSHCommandRunner(CommandRunner):
                                                skip_num_lines=skip_num_lines,
                                                source_bashrc=source_bashrc)
         command = base_ssh_command + [shlex.quote(command_str)]
-
-        logger.info(f'Running command: {command}')
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
         os.makedirs(log_dir, exist_ok=True)
@@ -932,17 +1042,42 @@ class SSHCommandRunner(CommandRunner):
             else:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
-        # TODO: check retcode 255, check stderr "Permission denied (password,keyboard-interactive)"
-        return log_lib.run_with_log(' '.join(command),
-                                    log_path,
-                                    require_outputs=require_outputs,
-                                    stream_logs=stream_logs,
-                                    process_stream=process_stream,
-                                    shell=True,
-                                    executable=executable,
-                                    interactive_session_id=session_id,
-                                    **kwargs)
-        # If err, do the interactive auth flow here.
+
+        if not enable_interactive:
+            return log_lib.run_with_log(' '.join(command),
+                                        log_path,
+                                        require_outputs=require_outputs,
+                                        stream_logs=stream_logs,
+                                        process_stream=process_stream,
+                                        shell=True,
+                                        executable=executable,
+                                        **kwargs)
+
+        result = log_lib.run_with_log(' '.join(command),
+                                      log_path,
+                                      require_outputs=require_outputs,
+                                      stream_logs=stream_logs,
+                                      process_stream=process_stream,
+                                      shell=True,
+                                      executable=executable,
+                                      **kwargs)
+        if require_outputs:
+            returncode, _, _ = result
+        else:
+            returncode = result
+
+        if returncode != 255:
+            return result
+        # Exit code 255 indicates an SSH connection error. It does not
+        # necessarily mean an auth failure, but when ControlMaster is used,
+        # the stdout/stderr does not contain the auth failure message,
+        # which is why we don't check the output here, and just attempt
+        # the interactive auth flow.
+        session_id = str(uuid.uuid4())
+        return self._retry_with_interactive_auth(session_id, command, log_path,
+                                                 require_outputs,
+                                                 process_stream, stream_logs,
+                                                 executable, **kwargs)
 
     @timeline.event
     def rsync(

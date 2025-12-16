@@ -83,6 +83,7 @@ from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
+from sky.utils import interactive_utils
 from sky.utils import perf_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -2077,26 +2078,8 @@ async def all_contexts(request: fastapi.Request) -> None:
 async def interactive_input(session_id: str,
                             body: payloads.InteractiveInputBody):
     """Forward CLI input to worker's Unix socket for interactive SSH auth."""
-    import asyncio
-    import socket
-    
-    socket_path = f'/tmp/sky_interactive_{session_id}.sock'
-    
-    # Retry in case socket not ready yet
-    for attempt in range(20):
-        if os.path.exists(socket_path):
-            break
-        await asyncio.sleep(0.1)
-    else:
-        raise fastapi.HTTPException(404, 'Interactive session not found')
-    
     try:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(5.0)
-        sock.connect(socket_path)
-        # Send input with newline
-        sock.send((body.input + '\n').encode())
-        sock.close()
+        interactive_utils.send_to_socket(session_id, body.input)
         return {'status': 'ok'}
     except OSError as e:
         raise fastapi.HTTPException(500, f'Failed to send input: {e}')

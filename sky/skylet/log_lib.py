@@ -171,7 +171,6 @@ def run_with_log(
     line_processor: Optional[log_utils.LineProcessor] = None,
     streaming_prefix: Optional[str] = None,
     log_cmd: bool = False,
-    interactive_session_id: Optional[str] = None,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str], Tuple[int, int]]:
     """Runs a command and logs its output to a file.
@@ -212,123 +211,6 @@ def run_with_log(
     # the terminal output when typing in the terminal that starts the API
     # server.
     stdin = kwargs.pop('stdin', subprocess.DEVNULL)
-    pty_master_fd = None
-    pty_slave_fd = None
-    socket_path = None
-    sock_server = None
-    stop_event = None
-    prompt_sent = None
-    
-    if interactive_session_id:
-        import pty
-        import socket
-        import select
-        import threading
-        import base64
-        
-        # Create PTY
-        pty_master_fd, pty_slave_fd = pty.openpty()
-        stdin = pty_slave_fd
-        
-        # Create Unix socket for input from CLI
-        socket_path = f'/tmp/sky_interactive_{interactive_session_id}.sock'
-        if os.path.exists(socket_path):
-            os.unlink(socket_path)
-        sock_server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock_server.bind(socket_path)
-        sock_server.listen(1)
-        sock_server.settimeout(0.5)
-        
-        stop_event = threading.Event()
-        prompt_sent = threading.Event()  # Avoid duplicate prompts
-        
-        def socket_to_pty():
-            """Forward socket input to PTY master."""
-            while not stop_event.is_set():
-                try:
-                    conn, _ = sock_server.accept()
-                    data = conn.recv(4096)
-                    if data:
-                        os.write(pty_master_fd, data)
-                        prompt_sent.clear()  # Reset for next prompt
-                    conn.close()
-                except socket.timeout:
-                    continue
-                except OSError:
-                    break
-        
-        def detect_prompts():
-            """Monitor PTY for ECHO disabled (password prompt) or prompt patterns."""
-            import re
-            import time as time_module
-            from sky.utils import subprocess_utils
-            
-            # Patterns that indicate an interactive prompt
-            prompt_patterns = [
-                rb'[Pp]assword:\s*$',
-                rb'[Vv]erification [Cc]ode:\s*$',
-                rb'\(yes/no(/\[fingerprint\])?\)\?\s*$',
-                rb'\[Y/n\]\s*$',
-                rb'\[y/N\]\s*$',
-            ]
-            
-            def looks_like_prompt(data: bytes) -> bool:
-                return any(re.search(p, data) for p in prompt_patterns)
-            
-            buffer = b''
-            last_data_time = 0
-            echo_disabled_since = 0
-            print(f'[DEBUG] detect_prompts thread started for session {interactive_session_id}', flush=True)
-            while not stop_event.is_set():
-                # Check for data from PTY
-                rlist, _, _ = select.select([pty_master_fd], [], [], 0.1)
-                if pty_master_fd in rlist:
-                    try:
-                        data = os.read(pty_master_fd, 4096)
-                        if data:
-                            buffer += data
-                            last_data_time = time_module.time()
-                            # Also write to stdout so it appears in logs
-                            sys.stdout.buffer.write(data)
-                            sys.stdout.flush()
-                            print(f'[DEBUG] PTY received {len(data)} bytes: {data[:100]!r}', flush=True)
-                    except OSError as e:
-                        print(f'[DEBUG] PTY read error: {e}', flush=True)
-                        break
-                
-                # Check if we should emit SKY_INPUT signal
-                if buffer and not prompt_sent.is_set():
-                    echo_disabled = subprocess_utils.is_echo_disabled(pty_master_fd)
-                    time_since_data = time_module.time() - last_data_time if last_data_time else 0
-                    
-                    # Track when ECHO was first disabled
-                    if echo_disabled and echo_disabled_since == 0:
-                        echo_disabled_since = time_module.time()
-                    elif not echo_disabled:
-                        echo_disabled_since = 0
-                    
-                    # Wait for both: ECHO disabled for 300ms AND no new data for 200ms
-                    # This ensures we capture the full prompt text
-                    echo_stable = (echo_disabled and 
-                                   time_module.time() - echo_disabled_since > 0.3 and
-                                   time_since_data > 0.2)
-                    pattern_match = (time_since_data > 0.3 and looks_like_prompt(buffer))
-                    
-                    if echo_stable or pattern_match:
-                        # Stop the rich status spinner before prompting
-                        print('<sky-payload>"<rich_stop></rich_stop>"</sky-payload>', flush=True)
-                        
-                        # Emit control sequence using text-safe markers
-                        prompt_b64 = base64.b64encode(buffer).decode()
-                        signal = f'<sky-input session="{interactive_session_id}" prompt="{prompt_b64}"/>'
-                        print(f'[DEBUG] Emitting SKY_INPUT signal (echo_stable={echo_stable}, pattern_match={pattern_match})', flush=True)
-                        print(signal, flush=True)
-                        buffer = b''
-                        prompt_sent.set()  # Don't send again until input received
-        
-        threading.Thread(target=socket_to_pty, daemon=True).start()
-        threading.Thread(target=detect_prompts, daemon=True).start()
-    
     if log_cmd:
         with open(log_path, 'a', encoding='utf-8') as f:
             print(f'Running command: {cmd}', file=f)
@@ -339,11 +221,6 @@ def run_with_log(
                           shell=shell,
                           stdin=stdin,
                           **kwargs) as proc:
-        # Close slave in parent after child inherits it
-        if pty_slave_fd is not None:
-            os.close(pty_slave_fd)
-            pty_slave_fd = None
-        
         try:
             if ctx is not None:
                 # When runs in coroutine, use kill_pg if available to avoid
@@ -428,21 +305,6 @@ def run_with_log(
             # causing the stream handling stuck at `readline`.
             subprocess_utils.kill_children_processes()
             raise
-        finally:
-            # Cleanup socket if interactive mode was enabled
-            # NOTE: We intentionally do NOT close pty_master_fd here because
-            # SSH ControlMaster may have forked a background process that still
-            # references the PTY. Closing it would send SIGHUP and kill the
-            # ControlMaster, defeating the purpose of connection caching.
-            # The OS will clean up the fd when all processes using it exit.
-            if stop_event is not None:
-                stop_event.set()
-            if sock_server is not None:
-                sock_server.close()
-            if socket_path is not None and os.path.exists(socket_path):
-                os.unlink(socket_path)
-            # pty_slave_fd was already closed after subprocess started
-            # pty_master_fd is intentionally left open for ControlMaster
 
 
 def make_task_bash_script(codegen: str,
