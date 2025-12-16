@@ -1726,11 +1726,11 @@ def set_current_cluster_name(job_id: int, current_cluster_name: str) -> None:
 def update_job_full_resources(job_id: int,
                               full_resources_json: Dict[str, Any]) -> None:
     """Update the full_resources column for a job.
-    
+
     This is called after scheduling to set the specific resource that was
     selected from an any_of or ordered list. The update happens within the
     filelock in get_next_cluster_name to ensure atomicity.
-    
+
     Args:
         job_id: The spot_job_id to update
         full_resources_json: The resolved resource configuration (single
@@ -1923,10 +1923,10 @@ def get_nonterminal_job_ids_by_pool(pool: str,
 
 def _is_any_of(resource_config: Dict[str, Any]) -> bool:
     """Check if resource config is heterogeneous (any_of or ordered).
-    
+
     Args:
         resource_config: Resource configuration dictionary
-        
+
     Returns:
         True if the config contains 'any_of' or 'ordered' keys, indicating
         heterogeneous resources that haven't been resolved to a specific
