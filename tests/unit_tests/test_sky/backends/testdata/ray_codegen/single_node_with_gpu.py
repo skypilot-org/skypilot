@@ -501,6 +501,7 @@ if not success:
     msg += f'Failed workers: ' + ', '.join([f'(pid={pid}, returncode={returncode})' for pid, returncode in failed_workers_and_returncodes])
     msg += f'. See error logs above for more details.[0m'
     print(msg, flush=True)
+    job_lib.update_metadata(2, {'exit_codes': setup_returncodes})
     job_lib.set_status(2, job_lib.JobStatus.FAILED_SETUP)
     # This waits for all streaming logs to finish.
     time.sleep(1)
@@ -569,6 +570,8 @@ if script is not None:
             ))
 returncodes, _ = get_or_fail(futures, pg)
 if sum(returncodes) != 0:
+    # Save exit codes to job metadata for potential recovery logic
+    job_lib.update_metadata(2, {'exit_codes': returncodes})
     job_lib.set_status(2, job_lib.JobStatus.FAILED)
     # Schedule the next pending job immediately to make the job
     # scheduling more efficient.
