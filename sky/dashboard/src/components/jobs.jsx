@@ -53,6 +53,7 @@ import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
+import { PluginSlot } from '@/plugins/PluginSlot';
 import {
   FilterDropdown,
   Filters,
@@ -1118,7 +1119,11 @@ export function ManagedJobsTable({
                           {formatDuration(item.job_duration)}
                         </TableCell>
                         <TableCell>
-                          <StatusBadge status={item.status} />
+                          <PluginSlot
+                            name="jobs.table.status.badge"
+                            context={item}
+                            fallback={<StatusBadge status={item.status} statusTooltip={item.statusTooltip} />}
+                          />
                         </TableCell>
                         <TableCell>
                           {item.infra && item.infra !== '-' ? (

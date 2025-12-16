@@ -44,6 +44,7 @@ import {
 } from '@/components/elements/modals';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { useMobile } from '@/hooks/useMobile';
+import { PluginSlot } from '@/plugins/PluginSlot';
 import {
   Select,
   SelectContent,
@@ -901,7 +902,11 @@ export function ClusterTable({
                   return (
                     <TableRow key={index}>
                       <TableCell>
-                        <StatusBadge status={item.status} />
+                        <PluginSlot
+                          name="clusters.table.status.badge"
+                          context={item}
+                          fallback={<StatusBadge status={item.status} statusTooltip={item.statusTooltip} />}
+                        />
                       </TableCell>
                       <TableCell>
                         <Link

@@ -35,6 +35,7 @@ import Head from 'next/head';
 import { formatYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
+import { PluginSlot } from '@/plugins/PluginSlot';
 
 // Helper function to format autostop information, similar to _get_autostop in CLI utils
 const formatAutostop = (autostop, toDown) => {
@@ -456,7 +457,11 @@ function ActiveTab({
                   Status
                 </div>
                 <div className="text-base mt-1">
-                  <StatusBadge status={clusterData.status} />
+                  <PluginSlot
+                    name="clusters.detail.status.badge"
+                    context={clusterData}
+                    fallback={<StatusBadge status={clusterData.status} />}
+                  />
                 </div>
               </div>
               <div>
@@ -547,12 +552,18 @@ function ActiveTab({
                   Last Event
                 </div>
                 <div className="text-base mt-1">
-                  <NonCapitalizedTooltip
-                    content={clusterData.last_event || '-'}
-                    className="text-sm text-muted-foreground"
-                  >
-                    <span>{clusterData.last_event || '-'}</span>
-                  </NonCapitalizedTooltip>
+                  <PluginSlot
+                    name="clusters.detail.last_event"
+                    context={{ last_event: clusterData.last_event }}
+                    fallback={
+                      <NonCapitalizedTooltip
+                        content={clusterData.last_event || '-'}
+                        className="text-sm text-muted-foreground"
+                      >
+                        <span>{clusterData.last_event || '-'}</span>
+                      </NonCapitalizedTooltip>
+                    }
+                  />
                 </div>
               </div>
               {/* Show duration and cost for historical clusters */}
@@ -813,6 +824,15 @@ function ActiveTab({
           />
         </div>
       )}
+
+      {/* Plugin Slot: Cluster Detail Events */}
+      <PluginSlot
+        name="clusters.detail.events"
+        context={{
+          clusterHash: clusterData.cluster_hash,
+        }}
+        wrapperClassName="mb-8"
+      />
     </div>
   );
 }

@@ -2265,7 +2265,7 @@ def _update_cluster_status(
     cluster_failures = global_user_state.get_cluster_failures(
         record['cluster_hash'])
 
-    logger.info(f'cluster_failures: {cluster_failures}')
+    logger.debug(f'cluster_failures: {cluster_failures}')
 
     def get_node_counts_from_ray_status(
             runner: command_runner.CommandRunner) -> Tuple[int, int, str, str]:

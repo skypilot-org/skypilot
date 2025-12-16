@@ -151,9 +151,11 @@ export const status2Badge = (status) => {
 };
 
 // Reusable StatusBadge component with tooltip
-export const StatusBadge = ({ status }) => {
+export const StatusBadge = ({ status, statusTooltip }) => {
+  const tooltipContent = statusTooltip || status;
+
   return (
-    <Tooltip content={status} className="text-muted-foreground text-sm">
+    <Tooltip content={tooltipContent} className="text-muted-foreground text-sm">
       <span>{status2Badge(status)}</span>
     </Tooltip>
   );

@@ -9,20 +9,24 @@ import React, {
 } from 'react';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { apiClient } from '@/data/connectors/client';
+import dashboardCache from '@/lib/cache';
 
 const PluginContext = createContext({
   topNavLinks: [],
   routes: [],
+  components: {},
 });
 
 const initialState = {
   topNavLinks: [],
   routes: [],
+  components: {}, // Map of slot name → array of component configs
 };
 
 const actions = {
   REGISTER_TOP_NAV_LINK: 'REGISTER_TOP_NAV_LINK',
   REGISTER_ROUTE: 'REGISTER_ROUTE',
+  REGISTER_COMPONENT: 'REGISTER_COMPONENT',
 };
 
 function pluginReducer(state, action) {
@@ -37,6 +41,20 @@ function pluginReducer(state, action) {
         ...state,
         routes: upsertById(state.routes, action.payload),
       };
+    case actions.REGISTER_COMPONENT: {
+      const { slot } = action.payload;
+      const existing = state.components[slot] || [];
+      const updated = upsertById(existing, action.payload);
+      // Sort by order (lower order = renders first)
+      updated.sort((a, b) => (a.order || 100) - (b.order || 100));
+      return {
+        ...state,
+        components: {
+          ...state.components,
+          [slot]: updated,
+        },
+      };
+    }
     default:
       return state;
   }
@@ -212,6 +230,36 @@ function normalizeRoute(route) {
   };
 }
 
+function normalizeComponent(config) {
+  if (
+    !config ||
+    typeof config !== 'object' ||
+    !config.id ||
+    !config.slot ||
+    typeof config.component !== 'function'
+  ) {
+    console.warn(
+      '[SkyDashboardPlugin] Invalid component registration:',
+      config
+    );
+    return null;
+  }
+
+  return {
+    id: String(config.id),
+    slot: String(config.slot),
+    component: config.component,
+    order: Number.isFinite(config.order) ? config.order : 100,
+    conditions: config.conditions && typeof config.conditions === 'object'
+      ? {
+          pages: Array.isArray(config.conditions.pages)
+            ? config.conditions.pages.map(String)
+            : undefined,
+        }
+      : undefined,
+  };
+}
+
 function createPluginApi(dispatch) {
   return {
     registerTopNavLink(link) {
@@ -236,10 +284,22 @@ function createPluginApi(dispatch) {
       });
       return normalized.id;
     },
+    registerComponent(config) {
+      const normalized = normalizeComponent(config);
+      if (!normalized) {
+        return null;
+      }
+      dispatch({
+        type: actions.REGISTER_COMPONENT,
+        payload: normalized,
+      });
+      return normalized.id;
+    },
     getContext() {
       return {
         basePath: BASE_PATH,
         apiEndpoint: ENDPOINT,
+        dashboardCache: dashboardCache,
       };
     },
   };
@@ -342,4 +402,27 @@ export function usePluginRoute(pathname) {
     }
     return routes.find((route) => route.path === pathname) || null;
   }, [pathname, routes]);
+}
+
+export function usePluginComponents(slot) {
+  const { components } = usePluginState();
+  return useMemo(() => {
+    if (!slot) {
+      return [];
+    }
+    const slotComponents = components[slot] || [];
+    // Filter by conditions if needed (e.g., page-specific components)
+    if (typeof window === 'undefined') {
+      return slotComponents;
+    }
+    const currentPath = window.location.pathname;
+    return slotComponents.filter((config) => {
+      if (config.conditions?.pages) {
+        return config.conditions.pages.some((page) =>
+          currentPath.includes(page)
+        );
+      }
+      return true;
+    });
+  }, [slot, components]);
 }
