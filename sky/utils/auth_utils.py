@@ -60,12 +60,17 @@ def _generate_rsa_key_pair() -> Tuple[str, str]:
 
 def _ensure_key_permissions(private_key_path: str,
                             public_key_path: str) -> None:
-    """Ensure SSH key files have correct permissions.
+    """Ensure SSH key files and parent directory have correct permissions.
 
     This is necessary because external factors (e.g., Kubernetes fsGroup,
     volume mounts, umask) can modify file permissions after creation.
-    SSH requires private keys to have strict permissions (0600).
+    SSH requires private keys to have strict permissions (0600) and the
+    parent directory to not be group/world writable (0700).
     """
+    # Ensure parent directory has correct permissions (0700)
+    key_dir = os.path.dirname(private_key_path)
+    if os.path.exists(key_dir):
+        os.chmod(key_dir, 0o700)
     if os.path.exists(private_key_path):
         os.chmod(private_key_path, 0o600)
     if os.path.exists(public_key_path):
