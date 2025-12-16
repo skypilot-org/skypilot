@@ -3769,16 +3769,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                   up=True,
                                   stream_logs=False)
 
-        cd = f'cd {SKY_REMOTE_WORKDIR}'
-        mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
-                      f'touch {remote_log_path}')
+        mkdir_code = f'mkdir -p {remote_log_dir} && touch {remote_log_path}'
         encoded_script = shlex.quote(codegen)
         create_script_code = f'{{ echo {encoded_script} > {script_path}; }}'
         job_submit_cmd = (
             # JOB_CMD_IDENTIFIER is used for identifying the process
             # retrieved with pid is the same driver process.
             f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
-            f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}'
+            f'{constants.SKY_PYTHON_CMD} -u {script_path}'
             # Do not use &>, which is not POSIX and may not work.
             # Note that the order of ">filename 2>&1" matters.
             f'> {remote_log_path} 2>&1')
@@ -5867,8 +5865,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             resources_dict,
             stable_cluster_internal_ips=internal_ips,
             env_vars=task_env_vars,
+            log_dir=log_dir,
             setup_cmd=self._setup_cmd,
-            setup_log_path=os.path.join(log_dir, 'setup.log'),
         )
 
         codegen.add_task(
@@ -5913,8 +5911,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             resources_dict,
             stable_cluster_internal_ips=internal_ips,
             env_vars=task_env_vars,
+            log_dir=log_dir,
             setup_cmd=self._setup_cmd,
-            setup_log_path=os.path.join(log_dir, 'setup.log'),
         )
 
         codegen.add_task(

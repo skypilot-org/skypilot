@@ -19,6 +19,15 @@ SEP = r'\x1f'
 # Matches PartitionName=<name> and captures until the next field
 _PARTITION_NAME_REGEX = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
 
+# Default timeout for waiting for job nodes to be allocated, in seconds.
+_SLURM_DEFAULT_PROVISION_TIMEOUT = 10
+
+
+class SlurmPartition(NamedTuple):
+    """Information about the Slurm partitions."""
+    name: str
+    is_default: bool
+
 
 # TODO(kevin): Add more API types for other client functions.
 class NodeInfo(NamedTuple):
@@ -43,6 +52,7 @@ class SlurmClient:
         ssh_user: str,
         ssh_key: Optional[str],
         ssh_proxy_command: Optional[str] = None,
+        ssh_proxy_jump: Optional[str] = None,
     ):
         """Initialize SlurmClient.
 
@@ -52,12 +62,14 @@ class SlurmClient:
             ssh_user: SSH username.
             ssh_key: Path to SSH private key, or None for keyless SSH.
             ssh_proxy_command: Optional SSH proxy command.
+            ssh_proxy_jump: Optional SSH proxy jump destination.
         """
         self.ssh_host = ssh_host
         self.ssh_port = ssh_port
         self.ssh_user = ssh_user
         self.ssh_key = ssh_key
         self.ssh_proxy_command = ssh_proxy_command
+        self.ssh_proxy_jump = ssh_proxy_jump
 
         # Internal runner for executing Slurm CLI commands
         # on the controller node.
@@ -66,7 +78,14 @@ class SlurmClient:
             ssh_user,
             ssh_key,
             ssh_proxy_command=ssh_proxy_command,
+            ssh_proxy_jump=ssh_proxy_jump,
         )
+
+    def _run_slurm_cmd(self, cmd: str) -> Tuple[int, str, str]:
+        return self._runner.run(cmd,
+                                require_outputs=True,
+                                separate_stderr=True,
+                                stream_logs=False)
 
     def query_jobs(
         self,
@@ -90,13 +109,11 @@ class SlurmClient:
         if job_name is not None:
             cmd += f' --name {job_name}'
 
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to query Slurm jobs.',
-                                           stderr=stderr)
+                                           stderr=f'{stdout}\n{stderr}')
 
         job_ids = stdout.strip().splitlines()
         return job_ids
@@ -119,13 +136,11 @@ class SlurmClient:
             cmd += f' --signal {signal}'
         if full:
             cmd += ' --full'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            f'Failed to cancel job {job_name}.',
-                                           stderr=stderr)
+                                           stderr=f'{stdout}\n{stderr}')
         logger.debug(f'Successfully cancelled job {job_name}: {stdout}')
 
     def info(self) -> str:
@@ -138,11 +153,12 @@ class SlurmClient:
             The stdout output from sinfo.
         """
         cmd = 'sinfo'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
-            rc, cmd, 'Failed to get Slurm cluster information.', stderr=stderr)
+            rc,
+            cmd,
+            'Failed to get Slurm cluster information.',
+            stderr=f'{stdout}\n{stderr}')
         return stdout
 
     def info_nodes(self) -> List[NodeInfo]:
@@ -153,11 +169,12 @@ class SlurmClient:
         """
         cmd = (f'sinfo -h --Node -o '
                f'"%N{SEP}%t{SEP}%G{SEP}%c{SEP}%m{SEP}%P"')
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
-            rc, cmd, 'Failed to get Slurm node information.', stderr=stderr)
+            rc,
+            cmd,
+            'Failed to get Slurm node information.',
+            stderr=f'{stdout}\n{stderr}')
 
         nodes = []
         for line in stdout.splitlines():
@@ -202,29 +219,29 @@ class SlurmClient:
             return node_info
 
         cmd = f'scontrol show node {node_name}'
-        rc, node_details, _ = self._runner.run(cmd,
-                                               require_outputs=True,
-                                               stream_logs=False)
+        rc, node_details, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
             cmd,
             f'Failed to get detailed node information for {node_name}.',
-            stderr=node_details)
+            stderr=f'{node_details}\n{stderr}')
         node_info = _parse_scontrol_node_output(node_details)
         return node_info
 
-    def get_node_jobs(self, node_name: str) -> List[str]:
-        """Get the list of jobs for a given node name.
+    def get_jobs_gres(self, node_name: str) -> List[str]:
+        """Get the list of jobs GRES for a given node name.
 
         Returns:
-            A list of job names for the current user on the node.
+            A list of GRES specs (e.g., 'gres/gpu:h100:4')
+            for jobs on the node.
         """
         cmd = f'squeue --me -h --nodelist {node_name} -o "%b"'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
-            rc, cmd, f'Failed to get jobs for node {node_name}.', stderr=stderr)
+            rc,
+            cmd,
+            f'Failed to get jobs for node {node_name}.',
+            stderr=f'{stdout}\n{stderr}')
         return stdout.splitlines()
 
     def get_job_state(self, job_id: str) -> Optional[str]:
@@ -240,24 +257,59 @@ class SlurmClient:
         # Use --only-job-state since we only need the job state.
         # This reduces the work required by slurmctld.
         cmd = f'squeue -h --only-job-state --jobs {job_id} -o "%T"'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
-        if rc != 0:
-            # Job may not exist
-            logger.debug(f'Failed to get job state for job {job_id}: {stderr}')
-            return None
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd,
+            f'Failed to get job state for job {job_id}.',
+            stderr=f'{stdout}\n{stderr}')
 
         state = stdout.strip()
         return state if state else None
 
+    def get_jobs_state_by_name(self, job_name: str) -> List[str]:
+        """Get the states of all Slurm jobs by name.
+        """
+        cmd = f'squeue -h --name {job_name} -o "%T"'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd,
+            f'Failed to get job state for job {job_name}.',
+            stderr=f'{stdout}\n{stderr}')
+
+        states = stdout.splitlines()
+        return states
+
     @timeline.event
-    def wait_for_job_nodes(self, job_id: str, timeout: int = 300) -> None:
+    def get_job_reason(self, job_id: str) -> Optional[str]:
+        """Get the reason a job is in its current state
+
+        Args:
+            job_id: The Slurm job ID.
+        """
+        # Without --states all, squeue omits terminated jobs.
+        cmd = f'squeue -h --jobs {job_id} --states all -o "%r"'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd,
+            f'Failed to get job reason for job {job_id}.',
+            stderr=f'{stdout}\n{stderr}')
+
+        output = stdout.strip()
+        if not output:
+            return None
+
+        return output if output != 'None' else None
+
+    @timeline.event
+    def wait_for_job_nodes(self, job_id: str, timeout: int) -> None:
         """Wait for a Slurm job to have nodes allocated.
 
         Args:
             job_id: The Slurm job ID.
-            timeout: Maximum time to wait in seconds (default: 300).
+            timeout: Maximum time to wait in seconds.
         """
         start_time = time.time()
         last_state = None
@@ -281,9 +333,7 @@ class SlurmClient:
 
             # Check if nodes are allocated by trying to get node list
             cmd = f'squeue -h --jobs {job_id} -o "%N"'
-            rc, stdout, stderr = self._runner.run(cmd,
-                                                  require_outputs=True,
-                                                  stream_logs=False)
+            rc, stdout, stderr = self._run_slurm_cmd(cmd)
 
             if rc == 0 and stdout.strip():
                 # Nodes are allocated
@@ -291,7 +341,8 @@ class SlurmClient:
                     f'Job {job_id} has nodes allocated: {stdout.strip()}')
                 return
             elif rc != 0:
-                logger.debug(f'Failed to get nodes for job {job_id}: {stderr}')
+                logger.debug(f'Failed to get nodes for job {job_id}: '
+                             f'{stdout}\n{stderr}')
 
             # Wait before checking again
             time.sleep(2)
@@ -300,9 +351,11 @@ class SlurmClient:
                            f'{timeout} seconds. Last state: {last_state}')
 
     @timeline.event
-    def get_job_nodes(self,
-                      job_id: str,
-                      wait: bool = True) -> Tuple[List[str], List[str]]:
+    def get_job_nodes(
+            self,
+            job_id: str,
+            wait: bool = True,
+            timeout: Optional[int] = None) -> Tuple[List[str], List[str]]:
         """Get the list of nodes and their IPs for a given job ID.
 
         The ordering is guaranteed to be stable for the lifetime of the job.
@@ -310,6 +363,7 @@ class SlurmClient:
         Args:
             job_id: The Slurm job ID.
             wait: If True, wait for nodes to be allocated before returning.
+            timeout: Maximum time to wait in seconds. Only used when wait=True.
 
         Returns:
             A tuple of (nodes, node_ips) where nodes is a list of node names
@@ -317,7 +371,9 @@ class SlurmClient:
         """
         # Wait for nodes to be allocated if requested
         if wait:
-            self.wait_for_job_nodes(job_id)
+            if timeout is None:
+                timeout = _SLURM_DEFAULT_PROVISION_TIMEOUT
+            self.wait_for_job_nodes(job_id, timeout=timeout)
 
         cmd = (
             f'squeue -h --jobs {job_id} -o "%N" | tr \',\' \'\\n\' | '
@@ -327,11 +383,12 @@ class SlurmClient:
             f'awk -F= \'{{print $2}}\' | awk \'{{print $1}}\'); '
             f'echo "$node $ip"; '
             f'done')
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
-            rc, cmd, f'Failed to get nodes for job {job_id}.', stderr=stderr)
+            rc,
+            cmd,
+            f'Failed to get nodes for job {job_id}.',
+            stderr=f'{stdout}\n{stderr}')
         logger.debug(f'Successfully got nodes for job {job_id}: {stdout}')
 
         node_info = {}
@@ -355,32 +412,6 @@ class SlurmClient:
 
         return nodes, node_ips
 
-    def get_partitions(self) -> List[str]:
-        """Get unique partition names in the Slurm cluster.
-
-        Returns:
-            List of partition names. The default partition will not have a '*'
-            at the end of the name.
-        """
-        cmd = 'scontrol show partitions -o'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
-        subprocess_utils.handle_returncode(rc,
-                                           cmd,
-                                           'Failed to get Slurm partitions.',
-                                           stderr=stderr)
-
-        # Extract partition names from PartitionName= fields
-        partitions = []
-        for line in stdout.strip().splitlines():
-            match = _PARTITION_NAME_REGEX.search(line)
-            if match:
-                partition = match.group(1).strip()
-                if partition:
-                    partitions.append(partition)
-        return partitions
-
     def submit_job(
         self,
         partition: str,
@@ -398,9 +429,7 @@ class SlurmClient:
             The job ID of the submitted job.
         """
         cmd = f'sbatch --partition={partition} {script_path}'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to submit Slurm job.',
@@ -418,27 +447,49 @@ class SlurmClient:
 
         return job_id
 
+    def get_partitions_info(self) -> List[SlurmPartition]:
+        """Get the partitions information for the Slurm cluster.
+
+        Returns:
+            List of SlurmPartition objects.
+        """
+        cmd = 'scontrol show partitions -o'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(rc,
+                                           cmd,
+                                           'Failed to get Slurm partitions.',
+                                           stderr=f'{stdout}\n{stderr}')
+
+        partitions = []
+        for line in stdout.strip().splitlines():
+            is_default = False
+            match = _PARTITION_NAME_REGEX.search(line)
+            if 'Default=YES' in line:
+                is_default = True
+            if match:
+                partition = match.group(1).strip()
+                if partition:
+                    partitions.append(
+                        SlurmPartition(name=partition, is_default=is_default))
+        return partitions
+
     def get_default_partition(self) -> Optional[str]:
-        """Get the default partition for the Slurm cluster.
+        """Get the default partition name for the Slurm cluster.
 
         Returns:
             The default partition name, or None if it cannot be determined.
         """
-        cmd = 'scontrol show partition -o'
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
-        if rc != 0:
-            logger.debug(f'Failed to get default partition: {stderr}')
-            return None
-
-        for line in stdout.strip().splitlines():
-            if 'Default=YES' in line:
-                match = _PARTITION_NAME_REGEX.search(line)
-                if match:
-                    partition = match.group(1).strip()
-                    if partition:
-                        return partition
-
-        logger.debug('No default partition found')
+        partitions = self.get_partitions_info()
+        for partition in partitions:
+            if partition.is_default:
+                return partition.name
         return None
+
+    def get_partitions(self) -> List[str]:
+        """Get unique partition names in the Slurm cluster.
+
+        Returns:
+            List of partition names. The default partition will not have a '*'
+            at the end of the name.
+        """
+        return [partition.name for partition in self.get_partitions_info()]

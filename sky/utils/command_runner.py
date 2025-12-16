@@ -90,6 +90,7 @@ def ssh_options_list(
     ssh_control_name: Optional[str],
     *,
     ssh_proxy_command: Optional[str] = None,
+    ssh_proxy_jump: Optional[str] = None,
     docker_ssh_proxy_command: Optional[str] = None,
     connect_timeout: Optional[int] = None,
     port: int = 22,
@@ -133,11 +134,11 @@ def ssh_options_list(
     # SSH Control will have a severe delay when using docker_ssh_proxy_command.
     # TODO(tian): Investigate why.
     #
-    # We disable ControlMaster when ssh_proxy_command is used, because the
-    # master connection will be idle although the connection might be shared
-    # by other ssh commands that is not idle. In that case, user's custom proxy
-    # command may drop the connection due to idle timeout, since it will only
-    # see the idle master connection. It is an issue even with the
+    # We disable ControlMaster when ssh_proxy_command or ssh_proxy_jump is used,
+    # because the master connection will be idle although the connection might
+    # be shared by other ssh commands that is not idle. In that case, user's
+    # custom proxy command may drop the connection due to idle timeout, since it
+    # will only see the idle master connection. It is an issue even with the
     # ServerAliveInterval set, since the keepalive message may not be recognized
     # by the custom proxy command, such as AWS SSM Session Manager.
     #
@@ -147,7 +148,8 @@ def ssh_options_list(
     # is running and the ControlMaster keeps the session, which results in
     # 'ControlPersist' number of seconds delay per ssh commands ran.
     if (ssh_control_name is not None and docker_ssh_proxy_command is None and
-            ssh_proxy_command is None and not disable_control_master):
+            ssh_proxy_command is None and ssh_proxy_jump is None and
+            not disable_control_master):
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
@@ -172,6 +174,15 @@ def ssh_options_list(
             # Due to how log_lib.run_with_log() works (using shell=True) we
             # must quote this value.
             'ProxyCommand': shlex.quote(ssh_proxy_command),
+        })
+
+    if ssh_proxy_jump is not None:
+        logger.debug(f'--- ProxyJump: {ssh_proxy_jump} ---')
+        if ssh_proxy_command is not None:
+            logger.warning('Both ProxyCommand and ProxyJump are specified. '
+                           'ProxyCommand will take precedence.')
+        arg_dict.update({
+            'ProxyJump': shlex.quote(ssh_proxy_jump),
         })
 
     return ssh_key_option + [
@@ -622,6 +633,7 @@ class SSHCommandRunner(CommandRunner):
         ssh_private_key: Optional[str],
         ssh_control_name: Optional[str] = '__default__',
         ssh_proxy_command: Optional[str] = None,
+        ssh_proxy_jump: Optional[str] = None,
         docker_user: Optional[str] = None,
         disable_control_master: Optional[bool] = False,
         port_forward_execute_remote_command: Optional[bool] = False,
@@ -644,6 +656,8 @@ class SSHCommandRunner(CommandRunner):
             ssh_proxy_command: Optional, the value to pass to '-o
                 ProxyCommand'. Useful for communicating with clusters without
                 public IPs using a "jump server".
+            ssh_proxy_jump: Optional, the value to pass to '-o ProxyJump' flag.
+                Similar to ssh_proxy_command, but more modern.
             port: The port to use for ssh.
             docker_user: The docker user to use for ssh. If specified, the
                 command will be run inside a docker container which have a ssh
@@ -663,6 +677,7 @@ class SSHCommandRunner(CommandRunner):
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
+        self._ssh_proxy_jump = ssh_proxy_jump
         self.disable_control_master = (
             disable_control_master or
             control_master_utils.should_disable_control_master())
@@ -763,6 +778,7 @@ class SSHCommandRunner(CommandRunner):
             self.ssh_private_key,
             self.ssh_control_name,
             ssh_proxy_command=self._ssh_proxy_command,
+            ssh_proxy_jump=self._ssh_proxy_jump,
             docker_ssh_proxy_command=docker_ssh_proxy_command,
             port=self.port,
             connect_timeout=connect_timeout,
@@ -920,6 +936,7 @@ class SSHCommandRunner(CommandRunner):
                 self.ssh_private_key,
                 self.ssh_control_name,
                 ssh_proxy_command=self._ssh_proxy_command,
+                ssh_proxy_jump=self._ssh_proxy_jump,
                 docker_ssh_proxy_command=docker_ssh_proxy_command,
                 port=self.port,
                 disable_control_master=self.disable_control_master))
@@ -1312,7 +1329,8 @@ class SlurmCommandRunner(SSHCommandRunner):
             runner.rsync(source, target, up=True)
 
         Args:
-            node: (ip, port) The IP address and port of the remote machine.
+            node: (ip, port) The IP address and port of the remote machine
+              (login node).
             ssh_user: SSH username.
             ssh_private_key: Path to SSH private key.
             sky_dir: The private directory for the SkyPilot cluster on the
@@ -1320,7 +1338,8 @@ class SlurmCommandRunner(SSHCommandRunner):
             skypilot_runtime_dir: The directory for the SkyPilot runtime
               on the Slurm cluster.
             job_id: The Slurm job ID for this instance.
-            slurm_node: The Slurm node hostname for this instance.
+            slurm_node: The Slurm node hostname for this instance
+              (compute node).
             **kwargs: Additional arguments forwarded to SSHCommandRunner
               (e.g., ssh_proxy_command).
         """
@@ -1329,6 +1348,32 @@ class SlurmCommandRunner(SSHCommandRunner):
         self.skypilot_runtime_dir = skypilot_runtime_dir
         self.job_id = job_id
         self.slurm_node = slurm_node
+
+        # Build a chained ProxyCommand that goes through the login node to reach
+        # the compute node where the job is running.
+
+        # First, build SSH options to reach the login node, using the user's
+        # existing proxy command or proxy jump if provided.
+        proxy_ssh_options = ' '.join(
+            ssh_options_list(self.ssh_private_key,
+                             None,
+                             ssh_proxy_command=self._ssh_proxy_command,
+                             ssh_proxy_jump=self._ssh_proxy_jump,
+                             port=self.port,
+                             disable_control_master=True))
+        login_node_proxy_command = (f'ssh {proxy_ssh_options} '
+                                    f'-W %h:%p {self.ssh_user}@{self.ip}')
+
+        # Update the proxy command to be the login node proxy, which will
+        # be used by super().run() to reach the compute node.
+        self._ssh_proxy_command = login_node_proxy_command
+        # Clear the proxy jump since it's now embedded in the proxy command.
+        self._ssh_proxy_jump = None
+        # Update self.ip to target the compute node.
+        self.ip = slurm_node
+        # Assume the compute node's SSH port is 22.
+        # TODO(kevin): Make this configurable if needed.
+        self.port = 22
 
     def rsync(
         self,
@@ -1351,24 +1396,15 @@ class SlurmCommandRunner(SSHCommandRunner):
         # if the target dir is in a shared filesystem, since it will
         # be accessible by the compute node.
 
-        # Build ProxyCommand to proxy through the Slurm login node to
-        # the compute node where the job is running.
-        proxy_ssh_options = ' '.join(
-            ssh_options_list(self.ssh_private_key,
-                             None,
-                             ssh_proxy_command=self._ssh_proxy_command,
-                             port=self.port,
-                             disable_control_master=True))
-        login_node_proxy_command = (f'ssh {proxy_ssh_options} '
-                                    f'-W %h:%p {self.ssh_user}@{self.ip}')
-
-        # Build the complete SSH option to pass in to rsync -e 'ssh ...',
-        # utilizing the login node proxy command we have above.
+        # Build SSH options for rsync using the ProxyCommand set up in __init__
+        # to reach the compute node through the login node.
         ssh_options = ' '.join(
             ssh_options_list(
-                None,  # Assume no key needed to ssh from login to compute node
+                # Assume nothing and rely on default SSH behavior when -i is
+                # not specified.
                 None,
-                ssh_proxy_command=login_node_proxy_command,
+                None,
+                ssh_proxy_command=self._ssh_proxy_command,
                 disable_control_master=True))
         rsh_option = f'ssh {ssh_options}'
 
@@ -1415,15 +1451,11 @@ class SlurmCommandRunner(SSHCommandRunner):
         cmd = (
             f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
             f'"{self.skypilot_runtime_dir}" && '
-            # Set the uv cache directory to /tmp/uv_cache to speed up
-            # package installation. Otherwise it defaults to ~/.cache/uv.
-            # This also means we can share the uv cache between multiple
-            # SkyPilot clusters.
-            f'export UV_CACHE_DIR=/tmp/uv_cache && '
+            # Set the uv cache directory to /tmp/uv_cache_$(id -u) to speed up
+            # package installation while avoiding permission conflicts when
+            # multiple users share the same host. Otherwise it defaults to
+            # ~/.cache/uv.
+            f'export UV_CACHE_DIR=/tmp/uv_cache_$(id -u) && '
             f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
-        ssh_options = ('-o StrictHostKeyChecking=no '
-                       '-o UserKnownHostsFile=/dev/null '
-                       '-o LogLevel=ERROR')
-        cmd = f'ssh {ssh_options} {self.slurm_node} {shlex.quote(cmd)}'
 
         return super().run(cmd, **kwargs)

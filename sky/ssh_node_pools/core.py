@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 from sky import clouds
+from sky.ssh_node_pools import constants
 from sky.ssh_node_pools import deploy
 from sky.usage import usage_lib
 from sky.utils import common_utils
@@ -16,8 +17,8 @@ class SSHNodePoolManager:
     """Manager for SSH Node Pool configurations."""
 
     def __init__(self):
-        self.config_path = Path.home() / '.sky' / 'ssh_node_pools.yaml'
-        self.keys_dir = Path.home() / '.sky' / 'ssh_keys'
+        self.config_path = Path(constants.DEFAULT_SSH_NODE_POOLS_PATH)
+        self.keys_dir = Path(constants.NODE_POOLS_KEY_DIR)
         self.keys_dir.mkdir(parents=True, exist_ok=True)
 
     def get_all_pools(self) -> Dict[str, Any]:
@@ -148,10 +149,7 @@ def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
             If None, the first cluster in the file is used.
         cleanup: If True, clean up the cluster instead of deploying.
     """
-    deploy.deploy_ssh_cluster(
-        cleanup=cleanup,
-        infra=infra,
-    )
+    deploy.run(cleanup=cleanup, infra=infra)
 
 
 @usage_lib.entrypoint

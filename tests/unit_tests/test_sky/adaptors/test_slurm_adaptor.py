@@ -1,5 +1,6 @@
 """Unit tests for Slurm adaptor."""
 
+import time
 import unittest.mock as mock
 
 import pytest
@@ -29,6 +30,7 @@ PartitionName=GPU nodes (nvidia) AllowGroups=ALL AllowAccounts=ALL AllowQos=ALL 
             mock_run.assert_called_once_with(
                 'scontrol show partitions -o',
                 require_outputs=True,
+                separate_stderr=True,
                 stream_logs=False,
             )
 
@@ -60,6 +62,7 @@ class TestInfoNodes:
             mock_run.assert_called_once_with(
                 f'sinfo -h --Node -o "%N{slurm.SEP}%t{slurm.SEP}%G{slurm.SEP}%c{slurm.SEP}%m{slurm.SEP}%P"',
                 require_outputs=True,
+                separate_stderr=True,
                 stream_logs=False,
             )
 
@@ -84,3 +87,205 @@ class TestInfoNodes:
             assert result[2].cpus == 4
             assert result[2].memory_gb == 32
             assert result[2].partition == 'tpu nodes'
+
+
+class TestWaitForJobNodes:
+    """Test SlurmClient.wait_for_job_nodes()."""
+
+    def test_wait_for_job_nodes_uses_default_timeout(self):
+        """Test that wait_for_job_nodes uses default timeout of 10 seconds."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        job_id = '12345'
+        start_time = time.time()
+
+        # Mock get_job_state to return PENDING, then RUNNING
+        # Mock squeue to return empty initially, then nodes
+        with mock.patch.object(client, 'get_job_state') as mock_get_state, \
+             mock.patch.object(client._runner, 'run') as mock_run:
+            mock_get_state.side_effect = ['PENDING', 'PENDING', 'RUNNING']
+            # First two calls return empty (no nodes), third returns nodes
+            mock_run.side_effect = [
+                (0, '', ''),  # No nodes allocated yet
+                (0, '', ''),  # Still no nodes
+                (0, 'node1,node2', ''),  # Nodes allocated
+            ]
+
+            # Should succeed quickly since nodes are allocated
+            client.wait_for_job_nodes(
+                job_id, timeout=slurm._SLURM_DEFAULT_PROVISION_TIMEOUT)
+
+            # Verify it didn't wait the full default timeout
+            elapsed = time.time() - start_time
+            assert elapsed < 5, 'Should complete quickly when nodes are allocated'
+
+    def test_wait_for_job_nodes_uses_custom_timeout(self):
+        """Test that wait_for_job_nodes uses custom timeout when provided."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        job_id = '12345'
+        custom_timeout = 2
+
+        # Mock get_job_state to always return PENDING
+        # Mock squeue to always return empty (no nodes)
+        with mock.patch.object(client, 'get_job_state') as mock_get_state, \
+             mock.patch.object(client._runner, 'run') as mock_run, \
+             mock.patch('time.sleep') as mock_sleep:
+            mock_get_state.return_value = 'PENDING'
+            mock_run.return_value = (0, '', '')  # No nodes allocated
+
+            start_time = time.time()
+            try:
+                client.wait_for_job_nodes(job_id, timeout=custom_timeout)
+                assert False, 'Should raise TimeoutError'
+            except TimeoutError as e:
+                assert f'{custom_timeout} seconds' in str(e)
+                # Verify it waited approximately the custom timeout
+                elapsed = time.time() - start_time
+                # Allow some margin for test execution time
+                assert custom_timeout <= elapsed < (custom_timeout * 1.5)
+
+    def test_wait_for_job_nodes_raises_on_job_termination(self):
+        """Test that wait_for_job_nodes raises when job terminates."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        job_id = '12345'
+
+        with mock.patch.object(client, 'get_job_state') as mock_get_state:
+            mock_get_state.return_value = 'FAILED'
+
+            with pytest.raises(RuntimeError,
+                               match='terminated with state FAILED'):
+                client.wait_for_job_nodes(
+                    job_id, timeout=slurm._SLURM_DEFAULT_PROVISION_TIMEOUT)
+
+
+class TestGetJobsStateByName:
+    """Test SlurmClient.get_jobs_state_by_name()."""
+
+    def test_get_jobs_state_by_name_single_running(self):
+        """Test parsing single RUNNING job state."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        mock_output = 'RUNNING\n'
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, mock_output, '')
+
+            result = client.get_jobs_state_by_name('sky-3a5e-pilot-9b1gdacf')
+            mock_run.assert_called_once_with(
+                'squeue -h --name sky-3a5e-pilot-9b1gdacf -o "%T"',
+                require_outputs=True,
+                separate_stderr=True,
+                stream_logs=False,
+            )
+
+            assert result == ['RUNNING']
+
+    def test_get_jobs_state_by_name_multiple_jobs(self):
+        """Test parsing multiple jobs with different states."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        mock_output = 'RUNNING\nPENDING\nRUNNING\n'
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, mock_output, '')
+
+            result = client.get_jobs_state_by_name('sky-test-job')
+            mock_run.assert_called_once_with(
+                'squeue -h --name sky-test-job -o "%T"',
+                require_outputs=True,
+                separate_stderr=True,
+                stream_logs=False,
+            )
+
+            assert result == ['RUNNING', 'PENDING', 'RUNNING']
+
+
+class TestGetJobNodes:
+    """Test SlurmClient.get_job_nodes()."""
+
+    def test_get_job_nodes_passes_timeout_to_wait_for_job_nodes(self):
+        """Test that get_job_nodes passes timeout to wait_for_job_nodes."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        job_id = '12345'
+        custom_timeout = 20
+
+        with mock.patch.object(client, 'wait_for_job_nodes') as mock_wait, \
+             mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, 'node1 10.0.0.1\nnode2 10.0.0.2', '')
+
+            client.get_job_nodes(job_id, wait=True, timeout=custom_timeout)
+
+            # Verify wait_for_job_nodes was called with the custom timeout
+            mock_wait.assert_called_once_with(job_id, timeout=custom_timeout)
+
+    def test_get_job_nodes_uses_default_timeout_when_not_provided(self):
+        """Test that get_job_nodes uses default timeout when not provided."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        job_id = '12345'
+
+        with mock.patch.object(client, 'wait_for_job_nodes') as mock_wait, \
+             mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, 'node1 10.0.0.1\nnode2 10.0.0.2', '')
+
+            client.get_job_nodes(job_id, wait=True)
+
+            # Verify wait_for_job_nodes was called with None (which becomes default)
+            mock_wait.assert_called_once_with(
+                job_id, timeout=slurm._SLURM_DEFAULT_PROVISION_TIMEOUT)
+
+    def test_get_job_nodes_skips_wait_when_wait_false(self):
+        """Test that get_job_nodes skips waiting when wait=False."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        job_id = '12345'
+
+        with mock.patch.object(client, 'wait_for_job_nodes') as mock_wait, \
+             mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, 'node1 10.0.0.1\nnode2 10.0.0.2', '')
+
+            client.get_job_nodes(job_id, wait=False)
+
+            # Verify wait_for_job_nodes was not called
+            mock_wait.assert_not_called()

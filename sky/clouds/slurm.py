@@ -36,8 +36,6 @@ class Slurm(clouds.Cloud):
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Slurm.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not '
-                                                       'supported in Slurm.',
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             'Customized multiple network interfaces are not supported in '
             'Slurm.',
@@ -60,6 +58,12 @@ class Slurm(clouds.Cloud):
     # Using the latest SkyPilot provisioner API to provision and check status.
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+
+    _SSH_CONFIG_KEY_MAPPING = {
+        'identityfile': 'IdentityFile',
+        'user': 'User',
+        'hostname': 'HostName',
+    }
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -325,7 +329,13 @@ class Slurm(clouds.Cloud):
         if zones and len(zones) > 0:
             partition = zones[0].name
         else:
-            partition = slurm_utils.get_cluster_default_partition(cluster)
+            partitions = slurm_utils.get_partitions(cluster)
+            if not partitions:
+                raise ValueError(f'No partitions found for cluster {cluster}.')
+            # get_partitions returns the default partition first, then sorted
+            # alphabetically, so this also handles the case where the cluster
+            # does not have a default partition.
+            partition = partitions[0]
 
         # cluster is our target slurmctld host.
         ssh_config = slurm_utils.get_slurm_ssh_config()
@@ -361,6 +371,7 @@ class Slurm(clouds.Cloud):
             'ssh_port': str(ssh_config_dict.get('port', 22)),
             'ssh_user': ssh_config_dict['user'],
             'slurm_proxy_command': ssh_config_dict.get('proxycommand', None),
+            'slurm_proxy_jump': ssh_config_dict.get('proxyjump', None),
             # TODO(jwj): Solve naming collision with 'ssh_private_key'.
             # Please refer to slurm-ray.yml.j2 'ssh' and 'auth' sections.
             'slurm_private_key': ssh_config_dict['identityfile'][0],
@@ -472,8 +483,8 @@ class Slurm(clouds.Cloud):
         existing_allowed_clusters = cls.existing_allowed_clusters()
 
         if not existing_allowed_clusters:
-            return (False, 'No SLURM clusters found in ~/.slurm/config. '
-                    'Please configure at least one SLURM cluster.')
+            return (False, 'No Slurm clusters found in ~/.slurm/config. '
+                    'Please configure at least one Slurm cluster.')
 
         # Check credentials for each cluster and return ctx2text mapping
         ctx2text = {}
@@ -481,18 +492,25 @@ class Slurm(clouds.Cloud):
         for cluster in existing_allowed_clusters:
             # Retrieve the config options for a given SlurmctldHost name alias.
             ssh_config_dict = ssh_config.lookup(cluster)
-
             try:
                 client = slurm.SlurmClient(
                     ssh_config_dict['hostname'],
                     int(ssh_config_dict.get('port', 22)),
                     ssh_config_dict['user'],
                     ssh_config_dict['identityfile'][0],
-                    ssh_proxy_command=ssh_config_dict.get('proxycommand', None))
+                    ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+                    ssh_proxy_jump=ssh_config_dict.get('proxyjump', None))
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
                 ctx2text[cluster] = 'enabled'
                 success = True
+            except KeyError as e:
+                key = e.args[0]
+                ctx2text[cluster] = (
+                    f'disabled. '
+                    f'{cls._SSH_CONFIG_KEY_MAPPING.get(key, key.capitalize())} '
+                    'is missing, please check your ~/.slurm/config '
+                    'and try again.')
             except Exception as e:  # pylint: disable=broad-except
                 error_msg = (f'Credential check failed: '
                              f'{common_utils.format_exception(e)}')
@@ -570,20 +588,11 @@ class Slurm(clouds.Cloud):
 
     @classmethod
     def expand_infras(cls) -> List[str]:
-        """Returns a list of enabled Slurm cluster/partition combinations.
+        """Returns a list of enabled Slurm clusters.
 
-        Each is returned as 'Slurm/cluster-name/partition' to be displayed
-        as a separate option in the optimizer.
+        Each is returned as 'Slurm/cluster-name'.
         """
         infras = []
         for cluster in cls.existing_allowed_clusters(silent=True):
-            try:
-                partitions = slurm_utils.get_partitions(cluster)
-                for partition in partitions:
-                    infras.append(
-                        f'{cls.canonical_name()}/{cluster}/{partition}')
-            except Exception as e:  # pylint: disable=broad-except
-                # Fall back to cluster-only if partition fetch fails
-                logger.debug(f'Failed to get partitions for {cluster}: {e}')
-                infras.append(f'{cls.canonical_name()}/{cluster}')
+            infras.append(f'{cls.canonical_name()}/{cluster}')
         return infras
