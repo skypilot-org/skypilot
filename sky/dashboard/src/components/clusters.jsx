@@ -905,7 +905,12 @@ export function ClusterTable({
                         <PluginSlot
                           name="clusters.table.status.badge"
                           context={item}
-                          fallback={<StatusBadge status={item.status} statusTooltip={item.statusTooltip} />}
+                          fallback={
+                            <StatusBadge
+                              status={item.status}
+                              statusTooltip={item.statusTooltip}
+                            />
+                          }
                         />
                       </TableCell>
                       <TableCell>

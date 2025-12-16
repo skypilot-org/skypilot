@@ -250,13 +250,14 @@ function normalizeComponent(config) {
     slot: String(config.slot),
     component: config.component,
     order: Number.isFinite(config.order) ? config.order : 100,
-    conditions: config.conditions && typeof config.conditions === 'object'
-      ? {
-          pages: Array.isArray(config.conditions.pages)
-            ? config.conditions.pages.map(String)
-            : undefined,
-        }
-      : undefined,
+    conditions:
+      config.conditions && typeof config.conditions === 'object'
+        ? {
+            pages: Array.isArray(config.conditions.pages)
+              ? config.conditions.pages.map(String)
+              : undefined,
+          }
+        : undefined,
   };
 }
 

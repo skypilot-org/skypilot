@@ -1122,7 +1122,12 @@ export function ManagedJobsTable({
                           <PluginSlot
                             name="jobs.table.status.badge"
                             context={item}
-                            fallback={<StatusBadge status={item.status} statusTooltip={item.statusTooltip} />}
+                            fallback={
+                              <StatusBadge
+                                status={item.status}
+                                statusTooltip={item.statusTooltip}
+                              />
+                            }
                           />
                         </TableCell>
                         <TableCell>

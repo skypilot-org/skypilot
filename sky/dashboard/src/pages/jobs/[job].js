@@ -378,7 +378,9 @@ function ControllerLogsSection({
   return (
     <div id="controller-logs-section" className="mt-6">
       <Card>
-        <div className={`flex items-center justify-between px-4 ${isExpanded ? 'pt-4' : 'py-4'}`}>
+        <div
+          className={`flex items-center justify-between px-4 ${isExpanded ? 'pt-4' : 'py-4'}`}
+        >
           <button
             onClick={toggleExpanded}
             className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
@@ -402,9 +404,7 @@ function ControllerLogsSection({
                 <button
                   onClick={() =>
                     downloadManagedJobLogs({
-                      jobId: parseInt(
-                        Array.isArray(jobId) ? jobId[0] : jobId
-                      ),
+                      jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
                       controller: true,
                     })
                   }
