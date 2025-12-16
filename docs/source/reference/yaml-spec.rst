@@ -916,7 +916,7 @@ Available fields:
 
 - :code:`strategy`: The recovery strategy to use (:code:`FAILOVER` or :code:`EAGER_NEXT_REGION`)
 - :code:`max_restarts_on_errors`: Maximum number of times to restart the job on user code errors (non-zero exit codes)
-- :code:`recover_on_exit_codes`: List of exit codes (0-255) that should always trigger recovery, regardless of :code:`max_restarts_on_errors` limit. Useful for specific transient errors like NCCL timeouts.
+- :code:`recover_on_exit_codes`: List of exit codes (0-255) that should always trigger recovery. Restarts triggered by these exit codes do not count towards the :code:`max_restarts_on_errors` limit. Useful for specific transient errors like NCCL timeouts.
 
 
 .. _yaml-spec-envs:
