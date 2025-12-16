@@ -753,14 +753,14 @@ To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml
 .. note::
   You must **restart the API server** after making this change for it to take effect.
 
-.. code-block:: bash
+  .. code-block:: bash
 
-   # Update NAMESPACE / RELEASE_NAME if you are using custom values.
-   NAMESPACE=skypilot
-   RELEASE_NAME=skypilot
-   # Restart the API server to pick up the config change
-   kubectl -n $NAMESPACE rollout restart deployment $RELEASE_NAME-api-server
+     # Update NAMESPACE / RELEASE_NAME if you are using custom values.
+     NAMESPACE=skypilot
+     RELEASE_NAME=skypilot
+     # Restart the API server to pick up the config change
+     kubectl -n $NAMESPACE rollout restart deployment $RELEASE_NAME-api-server
 
-See :ref:`more about the Kubernetes upgrade strategy of the API server <sky-api-server-graceful-upgrade>`.
+  See :ref:`more about the Kubernetes upgrade strategy of the API server <sky-api-server-graceful-upgrade>`.
 
 The jobs controller will use a bit of overhead - it reserves an extra 2GB of memory for itself, which may reduce the amount of requests your API server can handle. To counteract, you can increase the amount of CPU and memory allocated to the API server: See :ref:`sky-api-server-resources-tuning`.
