@@ -340,7 +340,7 @@ You can also specify a list of exit codes that should always trigger recovery, r
 
 In this configuration:
 
-- If the job exits with code 33 or 137, it will be recovered **regardless** of how many restarts have already occurred
+- If the job exits with code 33 or 137, it will be recovered. Restarts triggered by these specific exit codes do not count towards the `max_restarts_on_errors` limit.
 - For any other non-zero exit code, the job will be recovered up to 3 times (as specified by :code:`max_restarts_on_errors`)
 
 .. note::
