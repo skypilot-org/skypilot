@@ -15,17 +15,17 @@
 #   * Specify SUPER_USER=0 to create a service account with minimal permissions
 #
 # Usage:
-#   # Create "sky-sa" service account with minimal permissions in "default" namespace and generate kubeconfig
+#   # Create "sky-sa" service account in "default" namespace and generate kubeconfig
 #   $ ./generate_kubeconfig.sh
 #
-#   # Create "my-sa" service account with minimal permissions in "my-namespace" namespace and generate kubeconfig
+#   # Create "my-sa" service account in "my-namespace" namespace and generate kubeconfig
 #   $ SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_kubeconfig.sh
 #
 #   # Use an existing service account "my-sa" in "my-namespace" namespace and generate kubeconfig
 #   $ SKIP_SA_CREATION=1 SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_kubeconfig.sh
 #
-#   # Create "sky-sa" service account with cluster-admin permissions in "default" namespace
-#   $ SUPER_USER=1 ./generate_kubeconfig.sh
+#   # Create "sky-sa" service account with minimal permissions in "default" namespace (manual setup may be required)
+#   $ SUPER_USER=0 ./generate_kubeconfig.sh
 
 set -eu -o pipefail
 
