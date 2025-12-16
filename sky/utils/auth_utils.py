@@ -58,6 +58,20 @@ def _generate_rsa_key_pair() -> Tuple[str, str]:
     return public_key, private_key
 
 
+def _ensure_key_permissions(private_key_path: str,
+                            public_key_path: str) -> None:
+    """Ensure SSH key files have correct permissions.
+
+    This is necessary because external factors (e.g., Kubernetes fsGroup,
+    volume mounts, umask) can modify file permissions after creation.
+    SSH requires private keys to have strict permissions (0600).
+    """
+    if os.path.exists(private_key_path):
+        os.chmod(private_key_path, 0o600)
+    if os.path.exists(public_key_path):
+        os.chmod(public_key_path, 0o644)
+
+
 def _save_key_pair(private_key_path: str, public_key_path: str,
                    private_key: str, public_key: str) -> None:
     key_dir = os.path.dirname(private_key_path)
@@ -76,6 +90,11 @@ def _save_key_pair(private_key_path: str, public_key_path: str,
               encoding='utf-8',
               opener=functools.partial(os.open, mode=0o644)) as f:
         f.write(public_key)
+
+    # Explicitly set permissions to ensure they are correct regardless of
+    # umask or pre-existing file permissions. The opener's mode parameter
+    # only applies when creating new files, and is still subject to umask.
+    _ensure_key_permissions(private_key_path, public_key_path)
 
 
 def get_or_generate_keys() -> Tuple[str, str]:
@@ -105,6 +124,9 @@ def get_or_generate_keys() -> Tuple[str, str]:
     assert os.path.exists(public_key_path), (
         'Private key found, but associated public key '
         f'{public_key_path} does not exist.')
+    # Ensure correct permissions every time, as external factors (e.g.,
+    # Kubernetes fsGroup) can modify them after creation.
+    _ensure_key_permissions(private_key_path, public_key_path)
     return private_key_path, public_key_path
 
 
@@ -133,6 +155,9 @@ def create_ssh_key_files_from_db(private_key_path: str) -> bool:
     lock_dir = os.path.dirname(lock_path)
 
     if os.path.exists(private_key_path) and os.path.exists(public_key_path):
+        # Ensure correct permissions every time, as external factors (e.g.,
+        # Kubernetes fsGroup) can modify them after creation.
+        _ensure_key_permissions(private_key_path, public_key_path)
         return True
     # We should have the folder ~/.sky/generated/ssh to have 0o700 permission,
     # as the ssh configs will be written to this folder as well in
@@ -150,4 +175,7 @@ def create_ssh_key_files_from_db(private_key_path: str) -> bool:
     assert os.path.exists(public_key_path), (
         'Private key found, but associated public key '
         f'{public_key_path} does not exist.')
+    # Ensure correct permissions every time, as external factors (e.g.,
+    # Kubernetes fsGroup) can modify them after creation.
+    _ensure_key_permissions(private_key_path, public_key_path)
     return True
