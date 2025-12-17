@@ -32,8 +32,6 @@ def test_interactive_auth_websocket_bridge_and_terminal_handling():
             async def __aenter__(self):
                 # Capture terminal settings AFTER setraw was called
                 self.settings_during = termios.tcgetattr(stdin_slave)
-                # Signal that we are connected and ready
-                self.ready.set()
                 return self
 
             async def __aexit__(self, *args):
@@ -47,6 +45,11 @@ def test_interactive_auth_websocket_bridge_and_terminal_handling():
                 return self
 
             async def __anext__(self):
+                # Signal readiness on first iteration. This ensures connect_read_pipe
+                # (which happens before stdout_task starts) is complete.
+                if not self.ready.is_set():
+                    self.ready.set()
+
                 if not self.to_send:
                     # Wait for stdin data before completing
                     await asyncio.to_thread(self.data_received.wait, 5.0)
