@@ -1057,7 +1057,7 @@ class GKEAutoscaler(Autoscaler):
             vcpus, mem = clouds.GCP.get_vcpus_mem_from_instance_type(
                 machine_type)
         except ValueError as e:
-            logger.error(
+            logger.warning(
                 f'Failed to get vcpu and memory from instance type '
                 f'{machine_type}. Skipping the fit check for node pool '
                 f'{node_pool_name}, assuming the node pool can create a node '
