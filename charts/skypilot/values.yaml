@@ -499,7 +499,7 @@ runpodCredentials:
 digitaloceanCredentials:
   enabled: false
   # Name of the secret containing the Digital Ocean credentials. Only used if enabled is true.
-  digitaloceanSecretName: digitalocean-credentials
+  digitaloceanSecretName: digitalocean-credentials  
 
 # Populate Lambda credentials from the secret with key `api_key`
 lambdaCredentials:
@@ -584,68 +584,6 @@ prometheus:
         regex: ;(.+)
         target_label: node
         replacement: $1
-    # DCGM exporter scrape job for in-cluster GPU metrics
-    # honor_labels: false will create exported_* labels when there are conflicts
-    - job_name: 'dcgm-exporter'
-      honor_labels: false
-      scrape_interval: 15s
-      kubernetes_sd_configs:
-        - role: endpoints
-          namespaces:
-            names:
-            - nvidia-device-plugin
-      relabel_configs:
-        # Keep only endpoints for dcgm-exporter service
-        - source_labels: [__meta_kubernetes_service_name]
-          action: keep
-          regex: nvidia-device-plugin-dcgm-exporter
-        # Keep only metrics port
-        - source_labels: [__meta_kubernetes_endpoint_port_name]
-          action: keep
-          regex: metrics
-        # Add pod label
-        - source_labels: [__meta_kubernetes_pod_name]
-          action: replace
-          target_label: pod
-        # Add namespace label
-        - source_labels: [__meta_kubernetes_namespace]
-          action: replace
-          target_label: namespace
-        # Add node label
-        - source_labels: [__meta_kubernetes_pod_node_name]
-          action: replace
-          target_label: node
-    # kube-state-metrics scrape job for in-cluster pod labels
-    # honor_labels: false will create exported_* labels when there are conflicts
-    - job_name: 'kube-state-metrics'
-      honor_labels: false
-      scrape_interval: 30s
-      kubernetes_sd_configs:
-        - role: endpoints
-          namespaces:
-            names:
-            - skypilot
-      relabel_configs:
-        # Keep only endpoints for kube-state-metrics service
-        - source_labels: [__meta_kubernetes_service_name]
-          action: keep
-          regex: skypilot-kube-state-metrics
-        # Keep only http port
-        - source_labels: [__meta_kubernetes_endpoint_port_name]
-          action: keep
-          regex: http
-        # Add pod label
-        - source_labels: [__meta_kubernetes_pod_name]
-          action: replace
-          target_label: pod
-        # Add namespace label
-        - source_labels: [__meta_kubernetes_namespace]
-          action: replace
-          target_label: namespace
-        # Add node label
-        - source_labels: [__meta_kubernetes_pod_node_name]
-          action: replace
-          target_label: node
     {{ if .Values.useDedicatedScrapeConfig }}
     - job_name: 'skypilot-api-server-metrics'
       honor_labels: true
