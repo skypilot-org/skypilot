@@ -40,7 +40,9 @@ def cleanup(context: Optional[str] = None) -> Tuple[bool, str]:
             success = True
         except subprocess.CalledProcessError as e:
             output = e.output.decode('utf-8')
-            reason = 'Error deleting existing GPU labeler resources: ' + output
+            stderr = e.stderr.decode('utf-8')
+            reason = ('Error deleting existing GPU labeler resources: ' +
+                      output + stderr)
         return success, reason
 
 
@@ -183,9 +185,17 @@ def wait_for_jobs_completion(jobs_to_node_names: Dict[str, str],
     batch_v1 = kubernetes.batch_api(context=context)
     w = kubernetes.watch()
     completed_jobs = []
+    # Use resource_version="0" to start from the oldest available version.
+    # In multi-replica API server environments, replicas may be at different
+    # resource versions due to replication lag. Without specifying this, the
+    # watch may get version X from one replica but connect to another replica
+    # that only has up to version Y < X, causing "Too large resource version"
+    # errors. Using "0" ensures all replicas can serve the request from their
+    # oldest available version, avoiding version mismatches.
     for event in w.stream(func=batch_v1.list_namespaced_job,
                           namespace=namespace,
-                          timeout_seconds=timeout):
+                          timeout_seconds=timeout,
+                          resource_version='0'):
         job = event['object']
         job_name = job.metadata.name
         if job_name in jobs_to_node_names:
@@ -212,7 +222,7 @@ def wait_for_jobs_completion(jobs_to_node_names: Dict[str, str],
         _format_string(
             f'Timed out after waiting {timeout} seconds '
             'for job to complete', colorama.Style.DIM))
-    return False  #Timed out
+    return False  # Timed out
 
 
 def main():

@@ -67,6 +67,7 @@ from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
 from sky.workspaces import core as workspaces_core
 
@@ -82,7 +83,6 @@ if typing.TYPE_CHECKING:
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
-    from sky.utils import volume as volume_lib
 else:
     yaml = adaptors_common.LazyImport('yaml')
     requests = adaptors_common.LazyImport('requests')
@@ -142,10 +142,23 @@ _CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
 
 CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 WORKSPACE_LOCK_TIMEOUT_SECONDS = 10
-CLUSTER_TUNNEL_LOCK_TIMEOUT_SECONDS = 10
+CLUSTER_TUNNEL_LOCK_TIMEOUT_SECONDS = 10.0
 
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
+
+# The maximum size of a command line arguments is 128 KB, i.e. the command
+# executed with /bin/sh should be less than 128KB.
+# https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
+#
+# If a user have very long run or setup commands, the generated command may
+# exceed the limit, as we directly include scripts in job submission commands.
+# If the command is too long, we instead write it to a file, rsync and execute
+# it.
+#
+# We use 100KB as a threshold to be safe for other arguments that
+# might be added during ssh.
+_MAX_INLINE_SCRIPT_LENGTH = 100 * 1024
 
 _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
                             'please retry after a while.')
@@ -223,6 +236,18 @@ _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH = [
 
 _ACK_MESSAGE = 'ack'
 _FORWARDING_FROM_MESSAGE = 'Forwarding from'
+
+
+def is_command_length_over_limit(command: str) -> bool:
+    """Check if the length of the command exceeds the limit.
+
+    We calculate the length of the command after quoting the command twice as
+    when it is executed by the CommandRunner, the command will be quoted twice
+    to ensure the correctness, which will add significant length to the command.
+    """
+
+    quoted_length = len(shlex.quote(shlex.quote(command)))
+    return quoted_length > _MAX_INLINE_SCRIPT_LENGTH
 
 
 def is_ip(s: str) -> bool:
@@ -608,6 +633,11 @@ def get_expirable_clouds(
     return expirable_clouds
 
 
+def _get_volume_name(path: str, cluster_name_on_cloud: str) -> str:
+    path_hash = hashlib.md5(path.encode()).hexdigest()[:6]
+    return f'{cluster_name_on_cloud}-{path_hash}'
+
+
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
@@ -621,7 +651,7 @@ def write_cluster_config(
     zones: Optional[List[clouds.Zone]] = None,
     dryrun: bool = False,
     keep_launch_fields_in_existing_config: bool = True,
-    volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
+    volume_mounts: Optional[List['volume_utils.VolumeMount']] = None,
 ) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
@@ -855,12 +885,6 @@ def write_cluster_config(
     if to_provision.labels:
         labels.update(to_provision.labels)
 
-    # Dump the Ray ports to a file for Ray job submission
-    dump_port_command = (
-        f'{constants.SKY_PYTHON_CMD} -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
-        f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", encoding="utf-8"))\''
-    )
-
     # We disable conda auto-activation if the user has specified a docker image
     # to use, which is likely to already have a conda environment activated.
     conda_auto_activate = ('true' if to_provision.extract_docker_image() is None
@@ -876,14 +900,24 @@ def write_cluster_config(
         cluster_name)
 
     volume_mount_vars = []
+    ephemeral_volume_mount_vars = []
     if volume_mounts is not None:
         for vol in volume_mounts:
-            volume_mount_vars.append({
-                'name': vol.volume_name,
-                'path': vol.path,
-                'volume_name_on_cloud': vol.volume_config.name_on_cloud,
-                'volume_id_on_cloud': vol.volume_config.id_on_cloud,
-            })
+            if vol.is_ephemeral:
+                volume_name = _get_volume_name(vol.path, cluster_name_on_cloud)
+                vol.volume_name = volume_name
+                vol.volume_config.cloud = repr(cloud)
+                vol.volume_config.region = region.name
+                vol.volume_config.name = volume_name
+                ephemeral_volume_mount_vars.append(vol.to_yaml_config())
+            else:
+                volume_info = volume_utils.VolumeInfo(
+                    name=vol.volume_name,
+                    path=vol.path,
+                    volume_name_on_cloud=vol.volume_config.name_on_cloud,
+                    volume_id_on_cloud=vol.volume_config.id_on_cloud,
+                )
+                volume_mount_vars.append(volume_info)
 
     runcmd = skypilot_config.get_effective_region_config(
         cloud=str(to_provision.cloud).lower(),
@@ -937,6 +971,9 @@ def write_cluster_config(
                         '{conda_auto_activate}',
                         conda_auto_activate).replace('{is_custom_docker}',
                                                      is_custom_docker),
+                # Currently only used by Slurm. For other clouds, it is
+                # already part of ray_skypilot_installation_commands
+                'setup_sky_dirs_commands': constants.SETUP_SKY_DIRS_COMMANDS,
                 'ray_skypilot_installation_commands':
                     (constants.RAY_SKYPILOT_INSTALLATION_COMMANDS.replace(
                         '{sky_wheel_hash}',
@@ -947,12 +984,14 @@ def write_cluster_config(
                         '{sky_wheel_hash}',
                         wheel_hash).replace('{cloud}',
                                             str(cloud).lower()),
+                'copy_skypilot_templates_commands':
+                    constants.COPY_SKYPILOT_TEMPLATES_COMMANDS,
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
                 'ray_port': constants.SKY_REMOTE_RAY_PORT,
                 'ray_dashboard_port': constants.SKY_REMOTE_RAY_DASHBOARD_PORT,
                 'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
-                'dump_port_command': dump_port_command,
+                'dump_port_command': instance_setup.DUMP_RAY_PORTS,
                 # Sky-internal constants.
                 'sky_ray_cmd': constants.SKY_RAY_CMD,
                 # pip install needs to have python env activated to make sure
@@ -989,9 +1028,10 @@ def write_cluster_config(
 
                 # Volume mounts
                 'volume_mounts': volume_mount_vars,
+                'ephemeral_volume_mounts': ephemeral_volume_mount_vars,
 
-                # runcmd to append to the cloud-init cloud config passed to the
-                # machine's UserData. This is currently only used by AWS.
+                # runcmd to run before any of the SkyPilot runtime setup commands.
+                # This is currently only used by AWS and Kubernetes.
                 'runcmd': runcmd,
             }),
         output_path=tmp_yaml_path)
@@ -1046,9 +1086,9 @@ def write_cluster_config(
         with open(tmp_yaml_path, 'w', encoding='utf-8') as f:
             f.write(restored_yaml_content)
 
-    # Read the cluster name from the tmp yaml file, to take the backward
-    # compatbility restortion above into account.
-    # TODO: remove this after 2 minor releases, 0.10.0.
+    # Read the cluster_name_on_cloud from the restored yaml. This is a hack to
+    # make sure that launching on the same cluster across multiple users works
+    # correctly. See #8232.
     yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
     config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
 
@@ -1097,17 +1137,21 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
     """
     config = yaml_utils.read_yaml(tmp_yaml_path)
     # Check the availability of the cloud type.
-    if isinstance(cloud, (
+    if isinstance(
+            cloud,
+        (
             clouds.AWS,
             clouds.OCI,
             clouds.SCP,
+            # TODO(jwj): Handle Slurm-specific auth logic
+            clouds.Slurm,
             clouds.Vsphere,
             clouds.Cudo,
             clouds.Paperspace,
             clouds.Azure,
             clouds.DO,
             clouds.Nebius,
-    )):
+        )):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)
@@ -1951,7 +1995,8 @@ def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
 
 @context_utils.cancellation_guard
 def _query_cluster_status_via_cloud_api(
-    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+    retry_if_missing: bool,
 ) -> List[Tuple[status_lib.ClusterStatus, Optional[str]]]:
     """Returns the status of the cluster as a list of tuples corresponding
     to the node status and an optional reason string for said status.
@@ -1978,8 +2023,11 @@ def _query_cluster_status_via_cloud_api(
         cloud_name = repr(handle.launched_resources.cloud)
         try:
             node_status_dict = provision_lib.query_instances(
-                cloud_name, cluster_name, cluster_name_on_cloud,
-                provider_config)
+                cloud_name,
+                cluster_name,
+                cluster_name_on_cloud,
+                provider_config,
+                retry_if_missing=retry_if_missing)
             logger.debug(f'Querying {cloud_name} cluster '
                          f'{cluster_name_in_hint} '
                          f'status:\n{pprint.pformat(node_status_dict)}')
@@ -2160,6 +2208,7 @@ def check_can_clone_disk_and_override_task(
 def _update_cluster_status(
         cluster_name: str,
         record: Dict[str, Any],
+        retry_if_missing: bool,
         include_user_info: bool = True,
         summary_response: bool = False) -> Optional[Dict[str, Any]]:
     """Update the cluster status.
@@ -2206,7 +2255,8 @@ def _update_cluster_status(
         return record
     cluster_name = handle.cluster_name
 
-    node_statuses = _query_cluster_status_via_cloud_api(handle)
+    node_statuses = _query_cluster_status_via_cloud_api(
+        handle, retry_if_missing=retry_if_missing)
 
     all_nodes_up = (all(status[0] == status_lib.ClusterStatus.UP
                         for status in node_statuses) and
@@ -2254,6 +2304,11 @@ def _update_cluster_status(
             total_nodes = handle.launched_nodes * handle.num_ips_per_node
 
             cloud_name = repr(handle.launched_resources.cloud).lower()
+            # Initialize variables in case all retries fail
+            ready_head = 0
+            ready_workers = 0
+            output = ''
+            stderr = ''
             for i in range(5):
                 try:
                     ready_head, ready_workers, output, stderr = (
@@ -2342,7 +2397,12 @@ def _update_cluster_status(
     # remain healthy for a while before the cloud completely preempts the VMs.
     # We have mitigated this by again first querying the VM state from the cloud
     # provider.
-    if all_nodes_up and run_ray_status_to_check_ray_cluster_healthy():
+    cloud = handle.launched_resources.cloud
+
+    # For Slurm, skip Ray health check since it doesn't use Ray.
+    should_check_ray = cloud is not None and cloud.uses_ray()
+    if all_nodes_up and (not should_check_ray or
+                         run_ray_status_to_check_ray_cluster_healthy()):
         # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.
@@ -2381,7 +2441,8 @@ def _update_cluster_status(
             # and check again. This is a best-effort leak prevention check.
             # See https://github.com/skypilot-org/skypilot/issues/4431.
             time.sleep(_LAUNCH_DOUBLE_CHECK_DELAY)
-            node_statuses = _query_cluster_status_via_cloud_api(handle)
+            node_statuses = _query_cluster_status_via_cloud_api(
+                handle, retry_if_missing=False)
             # Note: even if all the node_statuses are UP now, we will still
             # consider this cluster abnormal, and its status will be INIT.
 
@@ -2625,7 +2686,8 @@ def refresh_cluster_record(
         cluster_lock_already_held: bool = False,
         cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS,
         include_user_info: bool = True,
-        summary_response: bool = False) -> Optional[Dict[str, Any]]:
+        summary_response: bool = False,
+        retry_if_missing: bool = True) -> Optional[Dict[str, Any]]:
     """Refresh the cluster, and return the possibly updated record.
 
     The function will update the cached cluster status in the global state. For
@@ -2654,6 +2716,8 @@ def refresh_cluster_record(
           value is <0, do not timeout (wait for the lock indefinitely). By
           default, this is set to CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS. Warning:
           if correctness is required, you must set this to -1.
+        retry_if_missing: Whether to retry the call to the cloud api if the
+          cluster is not found when querying the live status on the cloud.
 
     Returns:
         If the cluster is terminated or does not exist, return None.
@@ -2700,6 +2764,7 @@ def refresh_cluster_record(
 
             if cluster_lock_already_held:
                 return _update_cluster_status(cluster_name, record,
+                                              retry_if_missing,
                                               include_user_info,
                                               summary_response)
 
@@ -2717,6 +2782,7 @@ def refresh_cluster_record(
                         return record
                     # Update and return the cluster status.
                     return _update_cluster_status(cluster_name, record,
+                                                  retry_if_missing,
                                                   include_user_info,
                                                   summary_response)
 
@@ -2754,7 +2820,8 @@ def refresh_cluster_status_handle(
     *,
     force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
     cluster_lock_already_held: bool = False,
-    cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
+    cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS,
+    retry_if_missing: bool = True,
 ) -> Tuple[Optional[status_lib.ClusterStatus],
            Optional[backends.ResourceHandle]]:
     """Refresh the cluster, and return the possibly updated status and handle.
@@ -2769,7 +2836,8 @@ def refresh_cluster_status_handle(
         cluster_lock_already_held=cluster_lock_already_held,
         cluster_status_lock_timeout=cluster_status_lock_timeout,
         include_user_info=False,
-        summary_response=True)
+        summary_response=True,
+        retry_if_missing=retry_if_missing)
     if record is None:
         return None, None
     return record['status'], record['handle']
@@ -3117,23 +3185,22 @@ def refresh_cluster_records() -> None:
     Raises:
         None
     """
-    exclude_managed_clusters = True
-    if env_options.Options.SHOW_DEBUG_INFO.get():
-        exclude_managed_clusters = False
+    # We force to exclude managed clusters to avoid multiple sources
+    # manipulating them. For example, SkyServe assumes the replica manager
+    # is the only source of truth for the cluster status.
     cluster_names = set(
-        global_user_state.get_cluster_names(
-            exclude_managed_clusters=exclude_managed_clusters,))
+        global_user_state.get_cluster_names(exclude_managed_clusters=True))
 
     # TODO(syang): we should try not to leak
     # request info in backend_utils.py.
     # Refactor this to use some other info to
     # determine if a launch is in progress.
-    requests = requests_lib.get_request_tasks(
-        req_filter=requests_lib.RequestTaskFilter(
-            status=[requests_lib.RequestStatus.RUNNING],
-            include_request_names=['sky.launch']))
     cluster_names_with_launch_request = {
-        request.cluster_name for request in requests
+        request.cluster_name for request in requests_lib.get_request_tasks(
+            req_filter=requests_lib.RequestTaskFilter(
+                status=[requests_lib.RequestStatus.RUNNING],
+                include_request_names=['sky.launch'],
+                fields=['cluster_name']))
     }
     cluster_names_without_launch_request = (cluster_names -
                                             cluster_names_with_launch_request)
@@ -3157,6 +3224,7 @@ def get_clusters(
     all_users: bool = True,
     include_credentials: bool = False,
     summary_response: bool = False,
+    include_handle: bool = True,
     # Internal only:
     # pylint: disable=invalid-name
     _include_is_managed: bool = False,
@@ -3240,12 +3308,11 @@ def get_clusters(
         """Add resource str to record"""
         for record in _get_records_with_handle(records):
             handle = record['handle']
-            record[
-                'resources_str'] = resources_utils.get_readable_resources_repr(
-                    handle, simplify=True)
-            record[
-                'resources_str_full'] = resources_utils.get_readable_resources_repr(
-                    handle, simplify=False)
+            resource_str_simple, resource_str_full = (
+                resources_utils.get_readable_resources_repr(
+                    handle, simplified_only=False))
+            record['resources_str'] = resource_str_simple
+            record['resources_str_full'] = resource_str_full
             if not summary_response:
                 record['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
 
@@ -3313,6 +3380,8 @@ def get_clusters(
             record['accelerators'] = (
                 f'{handle.launched_resources.accelerators}'
                 if handle.launched_resources.accelerators else None)
+            if not include_handle:
+                record.pop('handle', None)
 
     # Add handle info to the records
     _update_records_with_handle_info(records)
@@ -3356,13 +3425,13 @@ def get_clusters(
     # request info in backend_utils.py.
     # Refactor this to use some other info to
     # determine if a launch is in progress.
-    requests = requests_lib.get_request_tasks(
-        req_filter=requests_lib.RequestTaskFilter(
-            status=[requests_lib.RequestStatus.RUNNING],
-            include_request_names=['sky.launch'],
-            cluster_names=cluster_names))
     cluster_names_with_launch_request = {
-        request.cluster_name for request in requests
+        request.cluster_name for request in requests_lib.get_request_tasks(
+            req_filter=requests_lib.RequestTaskFilter(
+                status=[requests_lib.RequestStatus.RUNNING],
+                include_request_names=['sky.launch'],
+                cluster_names=cluster_names,
+                fields=['cluster_name']))
     }
     # Preserve the index of the cluster name as it appears on "records"
     cluster_names_without_launch_request = [
@@ -3606,13 +3675,8 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
     `stderr`. Typically due to the local client version just got updated, and
     the remote runtime is an older version.
     """
-    pattern = re.compile(r'AttributeError: module \'sky\.(.*)\' has no '
-                         r'attribute \'(.*)\'')
     if returncode != 0:
-        # TODO(zhwu): Backward compatibility for old SkyPilot runtime version on
-        # the remote cluster. Remove this after 0.10.0 is released.
-        attribute_error = re.findall(pattern, stderr)
-        if attribute_error or 'SkyPilot runtime is too old' in stderr:
+        if 'SkyPilot runtime is too old' in stderr:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'{colorama.Fore.RED}SkyPilot runtime needs to be updated '

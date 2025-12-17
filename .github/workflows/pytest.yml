@@ -21,11 +21,8 @@ jobs:
           # Group them based on running time to save CI time and resources
           - tests/unit_tests
           - tests/test_cli.py
-          - "tests/test_optimizer_dryruns.py -k \"partial\""
-          - "tests/test_optimizer_dryruns.py -k \"not partial\""
           - tests/test_jobs_and_serve.py tests/test_yaml_parser.py tests/test_global_user_state.py tests/test_config.py tests/test_jobs.py tests/test_list_accelerators.py tests/test_wheels.py tests/test_api.py tests/test_storage.py tests/test_api_compatibility.py
           - tests/test_no_parellel.py
-          - tests/test_optimizer_random_dag.py
           - tests/test_ssh_proxy_lag.py
         include:
           # We separate out the random DAG tests because its flaky due to catalog updates.
@@ -34,16 +31,10 @@ jobs:
             test-name: "Unit Tests"
           - test-path: tests/test_cli.py
             test-name: "CLI Tests"
-          - test-path: "tests/test_optimizer_dryruns.py -k \"partial\""
-            test-name: "Optimizer Dryruns Part 1"
-          - test-path: "tests/test_optimizer_dryruns.py -k \"not partial\""
-            test-name: "Optimizer Dryruns Part 2"
           - test-path: tests/test_jobs_and_serve.py tests/test_yaml_parser.py tests/test_global_user_state.py tests/test_config.py tests/test_jobs.py tests/test_list_accelerators.py tests/test_wheels.py tests/test_api.py tests/test_storage.py tests/test_api_compatibility.py tests/test_infra_k8s_alias.py
             test-name: "Jobs, Serve, Wheels, API, Config, Optimizer & Storage Tests"
           - test-path: tests/test_no_parellel.py
             test-name: "No Parallel Tests"
-          - test-path: tests/test_optimizer_random_dag.py
-            test-name: "Optimizer Random DAG Tests"
           - test-path: tests/test_ssh_proxy_lag.py
             test-name: "Event Loop Lag Tests"
     runs-on: ubuntu-latest
@@ -51,31 +42,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-      - name: Install the latest version of uv
-        uses: astral-sh/setup-uv@v4
+      - name: Run Python Tests
+        uses: ./.github/actions/run-python-tests
         with:
-          version: "latest"
           python-version: ${{ matrix.python-version }}
-      - name: Install dependencies
-        run: |
-          uv venv --seed ~/test-env
-          source ~/test-env/bin/activate
-          uv pip install --prerelease=allow "azure-cli>=2.65.0"
-          # Use -e to include examples and tests folder in the path for unit
-          # tests to access them.
-          uv pip install -e ".[all]"
-          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0
-      - name: Run tests with pytest
-        env:
-          TEST_PATH: ${{ matrix.test-path }}
-          TEST_NAME: ${{ matrix.test-name }}
-        run: |
-          source ~/test-env/bin/activate
-          if [[ "$TEST_NAME" == "No Parallel Tests" || "$TEST_NAME" == "Event Loop Lag Tests" ]]; then
-            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 0 --dist no $TEST_PATH"
-          else
-            SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 4 --dist worksteal $TEST_PATH"
-          fi
+          test-path: ${{ matrix.test-path }}
+          test-name: ${{ matrix.test-name }}
+          buildkite-analytics-token: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
 
   limited-deps-test:
     # Test with limited dependencies to ensure cloud module imports don't break
@@ -105,12 +78,39 @@ jobs:
           uv pip install --prerelease=allow "azure-cli>=2.65.0"
           # Install limited dependencies only
           uv pip install -e ".[kubernetes,aws,gcp,azure]"
-          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0
+          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 buildkite-test-collector
+      - name: Set branch name and commit message
+        id: set_env
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+            {
+              echo "message<<EOF"
+              echo "${{ github.event.pull_request.title }}"
+              echo "EOF"
+            } >> $GITHUB_OUTPUT
+          else
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            # For push events after merge, head_commit.message contains the merge commit message
+            # which includes the PR title. For merge_group events, use merge_group.head_commit.message
+            {
+              echo "message<<EOF"
+              if [ "${{ github.event_name }}" == "merge_group" ]; then
+                echo "${{ github.event.merge_group.head_commit.message }}"
+              else
+                echo "${{ github.event.head_commit.message }}"
+              fi
+              echo "EOF"
+            } >> $GITHUB_OUTPUT
+          fi
       - name: Run tests with pytest
         env:
           TEST_PATH: ${{ matrix.test-path }}
+          BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
         run: |
           source ~/test-env/bin/activate
+          export GITHUB_REF="${{ steps.set_env.outputs.branch }}"
+          export TEST_ANALYTICS_COMMIT_MESSAGE="${{ steps.set_env.outputs.message }}"
           SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 0 --dist no $TEST_PATH"
 
   failover-test:
@@ -142,8 +142,36 @@ jobs:
           # Use -e to include examples and tests folder in the path for unit
           # tests to access them.
           uv pip install -e ".[all]"
-          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 moto==5.1.2
+          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 moto==5.1.2 buildkite-test-collector
+      - name: Set branch name and commit message
+        id: set_env
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+            {
+              echo "message<<EOF"
+              echo "${{ github.event.pull_request.title }}"
+              echo "EOF"
+            } >> $GITHUB_OUTPUT
+          else
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            # For push events after merge, head_commit.message contains the merge commit message
+            # which includes the PR title. For merge_group events, use merge_group.head_commit.message
+            {
+              echo "message<<EOF"
+              if [ "${{ github.event_name }}" == "merge_group" ]; then
+                echo "${{ github.event.merge_group.head_commit.message }}"
+              else
+                echo "${{ github.event.head_commit.message }}"
+              fi
+              echo "EOF"
+            } >> $GITHUB_OUTPUT
+          fi
       - name: Run tests with pytest
+        env:
+          BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
         run: |
           source ~/test-env/bin/activate
+          export GITHUB_REF="${{ steps.set_env.outputs.branch }}"
+          export TEST_ANALYTICS_COMMIT_MESSAGE="${{ steps.set_env.outputs.message }}"
           SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal ${{ matrix.test-path }}

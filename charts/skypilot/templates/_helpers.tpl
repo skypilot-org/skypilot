@@ -31,7 +31,30 @@
   {{- fail "Error\nDeploying a SkyPilot API server requires at least 4 CPU cores and 8 GiB memory. You can either:\n1. Change `--set apiService.resources.requests.cpu` and `--set apiService.resources.requests.memory` to meet the requirements or unset them to use defaults\n2. add `--set apiService.skipResourceCheck=true` in command args to bypass this check (not recommended for production)\nto resolve this issue and then try again." -}}
 {{- end -}}
 
-{{- end -}} 
+{{- end -}}
+
+{{/*
+Resolve the image name, overriding the registry when global.imageRegistry is set.
+Usage: {{ include "common.image" (dict "root" . "image" "repo/name:tag") }}
+*/}}
+{{- define "common.image" -}}
+{{- $image := default "" .image -}}
+{{- $registry := default "" .root.Values.global.imageRegistry -}}
+{{- if $registry -}}
+  {{- $imagePath := trimPrefix "/" $image -}}
+  {{- $parts := splitList "/" $imagePath -}}
+  {{- if gt (len $parts) 1 -}}
+    {{- $first := index $parts 0 -}}
+    {{- if or (contains "." $first) (contains ":" $first) (eq $first "localhost") -}}
+      {{- $imagePath = join "/" (slice $parts 1) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- printf "%s/%s" (trimSuffix "/" $registry) $imagePath -}}
+{{- else -}}
+  {{- $image -}}
+{{- end -}}
+{{- end -}}
+
 
 {{/*
 Check for apiService.config during upgrade and display warning
@@ -54,7 +77,7 @@ Create the name of the service account to use
 {{- else -}}
 {{ .Release.Name }}-api-sa
 {{- end -}}
-{{- end -}} 
+{{- end -}}
 
 {{/*
 Create the namespace if not exist
@@ -101,14 +124,6 @@ false
 http://{{ .Release.Name }}-oauth2-proxy:4180
 {{- end -}}
 
-{{- define "skypilot.serviceAccountAuthEnabled" -}}
-{{- if ne .Values.auth.serviceAccount.enabled nil -}}
-{{- .Values.auth.serviceAccount.enabled -}}
-{{- else -}}
-{{- .Values.apiService.enableServiceAccounts -}}
-{{- end -}}
-{{- end -}}
-
 {{- define "skypilot.ingressBasicAuthEnabled" -}}
 {{- if and .Values.ingress.enabled (or .Values.ingress.authSecret .Values.ingress.authCredentials) -}}
 true
@@ -122,6 +137,16 @@ false
 true
 {{- else -}}
 false
+{{- end -}}
+{{- end -}}
+
+{{- define "skypilot.serviceAccountAuthEnabled" -}}
+{{- if include "skypilot.ingressBasicAuthEnabled" . | trim | eq "true" -}}
+false
+{{- else if and .Values.auth .Values.auth.serviceAccount (ne .Values.auth.serviceAccount.enabled nil) -}}
+{{- .Values.auth.serviceAccount.enabled -}}
+{{- else -}}
+{{- .Values.apiService.enableServiceAccounts -}}
 {{- end -}}
 {{- end -}}
 

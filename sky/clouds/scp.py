@@ -41,10 +41,7 @@ class SCP(clouds.Cloud):
     # Reference: https://cloud.samsungsds.com/openapiguide/#/docs
     #            /v2-en-virtual_server-definitions-VirtualServerCreateV3Request
     _MAX_CLUSTER_NAME_LEN_LIMIT = 28
-    # MULTI_NODE: Multi-node is not supported by the implementation yet.
-    _MULTI_NODE = 'Multi-node is not supported by the SCP Cloud yet.'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.MULTI_NODE: _MULTI_NODE,
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             (f'Migrating disk is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.IMAGE_ID:
@@ -74,7 +71,9 @@ class SCP(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         features = cls._CLOUD_UNSUPPORTED_FEATURES
         if resources.use_spot:
@@ -92,10 +91,15 @@ class SCP(clouds.Cloud):
         return catalog.regions(clouds='scp')
 
     @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: Optional[str],
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
 
         del accelerators, zone  # unused
         if use_spot:

@@ -95,7 +95,8 @@ class ManagedJobEvent(SkyletEvent):
     def _run(self):
         if not os.path.exists(
                 os.path.expanduser(
-                    managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE)):
+                    managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE)
+        ) and not managed_job_utils.is_consolidation_mode():
             # Note: since the skylet is started before the user setup (in
             # jobs-controller.yaml.j2) runs, it's possible that we hit this
             # before the indicator file is written. However, since we will wait
@@ -108,21 +109,16 @@ class ManagedJobEvent(SkyletEvent):
                 # TODO(cooperc): Move this to a shared function also called by
                 # sdk.api_stop(). (#7229)
                 try:
-                    with open(os.path.expanduser(
-                            scheduler.JOB_CONTROLLER_PID_PATH),
-                              'r',
-                              encoding='utf-8') as f:
-                        pids = f.read().split('\n')[:-1]
-                        for pid in pids:
-                            if subprocess_utils.is_process_alive(
-                                    int(pid.strip())):
+                    records = scheduler.get_controller_process_records()
+                    if records is not None:
+                        for record in records:
+                            if managed_job_utils.controller_process_alive(
+                                    record, quiet=False):
                                 subprocess_utils.kill_children_processes(
-                                    parent_pids=[int(pid.strip())], force=True)
-                    os.remove(
-                        os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
-                except FileNotFoundError:
-                    # its fine we will create it
-                    pass
+                                    parent_pids=[record.pid], force=True)
+                        os.remove(
+                            os.path.expanduser(
+                                scheduler.JOB_CONTROLLER_PID_PATH))
                 except Exception as e:  # pylint: disable=broad-except
                     # in case we get perm issues or something is messed up, just
                     # ignore it and assume the process is dead
@@ -240,7 +236,7 @@ class AutostopEvent(SkyletEvent):
                     RAY_PROVISIONER_SKYPILOT_TERMINATOR):
                 logger.info('Using new provisioner to stop the cluster.')
                 self._stop_cluster_with_new_provisioner(autostop_config, config,
-                                                        provider_name)
+                                                        provider_name, cloud)
                 return
             logger.info('Not using new provisioner to stop the cluster. '
                         f'Cloud of this cluster: {provider_name}')
@@ -318,7 +314,8 @@ class AutostopEvent(SkyletEvent):
             raise NotImplementedError
 
     def _stop_cluster_with_new_provisioner(self, autostop_config,
-                                           cluster_config, provider_name):
+                                           cluster_config, provider_name,
+                                           cloud):
         # pylint: disable=import-outside-toplevel
         from sky import provision as provision_lib
         autostop_lib.set_autostopping_started()
@@ -326,13 +323,25 @@ class AutostopEvent(SkyletEvent):
         cluster_name_on_cloud = cluster_config['cluster_name']
         is_cluster_multinode = cluster_config['max_workers'] > 0
 
+        # Clear AWS credentials from environment to force boto3 to use IAM
+        # role attached to the instance (lowest priority in credential chain).
+        # This allows the cluster to stop/terminate itself using its IAM role.
         os.environ.pop('AWS_ACCESS_KEY_ID', None)
         os.environ.pop('AWS_SECRET_ACCESS_KEY', None)
+        os.environ.pop('AWS_SESSION_TOKEN', None)
+        # Point boto3 to /dev/null to skip reading credentials from files.
+        os.environ['AWS_SHARED_CREDENTIALS_FILE'] = '/dev/null'
+        os.environ['AWS_CONFIG_FILE'] = '/dev/null'
 
         # Stop the ray autoscaler to avoid scaling up, during
         # stopping/terminating of the cluster.
-        logger.info('Stopping the ray cluster.')
-        subprocess.run(f'{constants.SKY_RAY_CMD} stop', shell=True, check=True)
+        if not cloud.uses_ray():
+            logger.info('Skipping ray stop as cloud does not use Ray.')
+        else:
+            logger.info('Stopping the ray cluster.')
+            subprocess.run(f'{constants.SKY_RAY_CMD} stop',
+                           shell=True,
+                           check=True)
 
         operation_fn = provision_lib.stop_instances
         if autostop_config.down:

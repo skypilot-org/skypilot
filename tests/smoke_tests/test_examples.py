@@ -21,8 +21,8 @@ from sky.skylet import constants
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
 def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
                                                                         str]):
-    if generic_cloud == 'kubernetes':
-        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    if generic_cloud in ('kubernetes', 'slurm'):
+        accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -73,8 +73,8 @@ def test_min_gpt(generic_cloud: str, train_file: str, accelerator: Dict[str,
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
 def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
-    if generic_cloud == 'kubernetes':
-        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    if generic_cloud in ('kubernetes', 'slurm'):
+        accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -122,6 +122,62 @@ def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Test ray basic ----------
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
+@pytest.mark.no_seeweb  # Seeweb does not support multi-node
+def test_ray_basic(generic_cloud: str) -> None:
+    name = smoke_tests_utils.get_cluster_name()
+
+    with tempfile.TemporaryDirectory(
+            suffix='ray_basic_tmp_workdir') as temp_dir:
+        # Copy main.py to temp directory
+        with open('examples/ray_basic/main.py', 'r', encoding='utf-8') as f:
+            main_content = f.read()
+        main_path = os.path.join(temp_dir, 'main.py')
+        with open(main_path, 'w', encoding='utf-8') as f:
+            f.write(main_content)
+
+        with open('examples/ray_basic/ray.yaml', 'r', encoding='utf-8') as f:
+            content = f.read()
+        modified_content = content.replace('workdir: .', f'workdir: {temp_dir}')
+
+        # Create a temporary YAML file with the modified content
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(modified_content)
+            f.flush()
+            yaml_file_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'ray_basic',
+            [
+                f'sky launch -y -c {name} --infra {generic_cloud} {yaml_file_path}',
+                f'sky logs {name} 1 --status',
+                f'outputs=$(sky logs {name} 1); echo "$outputs" && '
+                f'echo "$outputs" | grep "All 2 nodes have joined" && '
+                f'echo "$outputs" | grep "Sum of squares: 328350" && '
+                f'echo "$outputs" | grep "SUCCEEDED"',
+                # Test that running on existing Ray cluster works
+                f'sky exec {name} {yaml_file_path}',
+                f'sky logs {name} 2 --status',
+                f'outputs=$(sky logs {name} 2); echo "$outputs" && '
+                f'echo "$outputs" | grep "Ray cluster is already running" && '
+                f'echo "$outputs" | grep "Sum of squares: 328350" && '
+                f'echo "$outputs" | grep "SUCCEEDED"',
+                # Test that stopping the Ray cluster works
+                f'sky exec {name} --num-nodes 2 "~/sky_templates/ray/stop_cluster"',
+                f'sky logs {name} 3 --status',
+                f'outputs=$(sky logs {name} 3); echo "$outputs" && '
+                f'echo "$outputs" | grep "Ray cluster successfully stopped" && '
+                f'echo "$outputs" | grep "SUCCEEDED"',
+            ],
+            f'sky down -y {name}; rm {yaml_file_path}',
+            timeout=10 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Test NeMo RL ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
@@ -138,14 +194,14 @@ def test_ray_train(generic_cloud: str, accelerator: Dict[str, str]) -> None:
 def test_nemorl(generic_cloud: str, accelerator: Dict[str, str]) -> None:
     cpu = '10+'
     memory = '60+'
-    if generic_cloud == 'kubernetes':
-        accelerator = smoke_tests_utils.get_avaliabe_gpus_for_k8s_tests()
+    if generic_cloud in ('kubernetes', 'slurm'):
+        accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
     else:
         accelerator = accelerator.get(generic_cloud, 'L4')
 
     infra = generic_cloud
     if generic_cloud == 'aws':
-        infra = 'aws/ap-northeast-1'
+        infra = 'aws'
 
     name = smoke_tests_utils.get_cluster_name()
     original_yaml_path = 'llm/nemorl/nemorl.sky.yaml'

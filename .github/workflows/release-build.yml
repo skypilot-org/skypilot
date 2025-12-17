@@ -6,11 +6,16 @@ on:
   workflow_dispatch:
     inputs:
       release_version:
-        description: 'Release version (e.g., 0.9.0)'
+        description: 'Release version (e.g., 0.9.0 or 0.9.0rc1)'
         required: false
         type: string
       skip_version_checks:
         description: 'Skip version verification steps'
+        required: false
+        type: boolean
+        default: false
+      skip_smoke_tests:
+        description: 'Skip smoke tests (recommended when promoting tested RC to stable)'
         required: false
         type: boolean
         default: false
@@ -184,6 +189,10 @@ jobs:
 
   smoke-tests:
     needs: release-build
+    if: |
+      always() && 
+      needs.release-build.result == 'success' &&
+      github.event.inputs.skip_smoke_tests != 'true'
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ needs.release-build.outputs.new_commit_sha }}
@@ -198,6 +207,10 @@ jobs:
 
   quicktest-core:
     needs: release-build
+    if: |
+      always() && 
+      needs.release-build.result == 'success' &&
+      github.event.inputs.skip_smoke_tests != 'true'
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ needs.release-build.outputs.new_commit_sha }}
@@ -213,6 +226,10 @@ jobs:
 
   quicktest-core-previous-minor:
     needs: release-build
+    if: |
+      always() && 
+      needs.release-build.result == 'success' &&
+      github.event.inputs.skip_smoke_tests != 'true'
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ needs.release-build.outputs.new_commit_sha }}
@@ -228,6 +245,10 @@ jobs:
 
   smoke-tests-remote-server-kubernetes:
     needs: release-build
+    if: |
+      always() && 
+      needs.release-build.result == 'success' &&
+      github.event.inputs.skip_smoke_tests != 'true'
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ needs.release-build.outputs.new_commit_sha }}
@@ -244,6 +265,10 @@ jobs:
 
   release-tests:
     needs: release-build
+    if: |
+      always() && 
+      needs.release-build.result == 'success' &&
+      github.event.inputs.skip_smoke_tests != 'true'
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ needs.release-build.outputs.new_commit_sha }}
@@ -271,34 +296,96 @@ jobs:
           TEST_BRANCH: ${{ needs.release-build.outputs.test_branch }}
           RELEASE_BRANCH: ${{ needs.release-build.outputs.release_branch }}
           RELEASE_VERSION: ${{ needs.release-build.outputs.release_version }}
-          SMOKE_TEST_BUILD: ${{ needs.smoke-tests.outputs.build_number }}
-          QUICKTEST_BUILD: ${{ needs.quicktest-core.outputs.build_number }}
-          QUICKTEST_PREV_MINOR_BUILD: ${{ needs.quicktest-core-previous-minor.outputs.build_number }}
-          REMOTE_SERVER_K8S_BUILD: ${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}
-          RELEASE_TEST_BUILD: ${{ needs.release-tests.outputs.build_number }}
+          SKIP_SMOKE_TESTS: ${{ github.event.inputs.skip_smoke_tests }}
         run: |
           # Configure git
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
 
-          # Create PR with buildkite links
-          PR_BODY="Release ${RELEASE_VERSION}
+          # Detect if this is an RC promotion
+          SOURCE_BRANCH="${{ github.ref_name }}"
+          IS_RC_PROMOTION="false"
+          if [[ "$SOURCE_BRANCH" =~ ^releases/.*rc[0-9]+$ ]]; then
+            IS_RC_PROMOTION="true"
+            RC_VERSION=$(echo "$SOURCE_BRANCH" | sed 's/releases\///')
+          fi
+
+          # Build PR body based on whether tests were skipped
+          if [ "$SKIP_SMOKE_TESTS" == "true" ]; then
+            if [ "$IS_RC_PROMOTION" == "true" ]; then
+              PR_BODY="## Promote RC to Stable Release ${RELEASE_VERSION}
+          
+          **Source:** \`$SOURCE_BRANCH\` (RC version: $RC_VERSION)  
+          **Target:** Stable release \`${RELEASE_VERSION}\`
+          
+          ⚠️ **Smoke tests were SKIPPED** - This release is being promoted from a tested RC.
+          
+          ### Pre-release Testing
+          This version was previously tested as release candidate \`$RC_VERSION\` and deemed stable by early adopters.
+          
+          ### Changes in this PR
+          - Updated \`sky/__init__.py\`: \`$RC_VERSION\` → \`${RELEASE_VERSION}\`
+          - Updated \`charts/skypilot/values.yaml\`: Docker image tag \`$RC_VERSION\` → \`${RELEASE_VERSION}\`"
+            else
+              PR_BODY="Release ${RELEASE_VERSION}
+          
+          ⚠️ **Smoke tests were SKIPPED** - Please ensure manual testing was performed."
+            fi
+          else
+            # Normal release with test results
+            PR_BODY="Release ${RELEASE_VERSION}
 
           Buildkite Test Links:
-          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${SMOKE_TEST_BUILD}) - $([ "${{ needs.smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_BUILD}) - $([ "${{ needs.quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-          - [Smoke Tests Remote Server Kubernetes](https://buildkite.com/skypilot-1/smoke-tests/builds/${REMOTE_SERVER_K8S_BUILD}) - $([ "${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")"
-          if [ "${{ needs.quicktest-core-previous-minor.result }}" == "success" ] || [ "${{ needs.quicktest-core-previous-minor.result }}" == "failure" ]; then
-            PR_BODY="${PR_BODY}
-          - [Quicktest Core (vs Previous Minor)](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_PREV_MINOR_BUILD}) - $([ "${{ needs.quicktest-core-previous-minor.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")"
-          fi
-          PR_BODY="${PR_BODY}
-          - [Release Tests](https://buildkite.com/skypilot-1/release/builds/${RELEASE_TEST_BUILD}) - ⏳ (not waiting for completion)
+          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${{ needs.smoke-tests.outputs.build_number }}) - $([ "${{ needs.smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.quicktest-core.outputs.build_number }}) - $([ "${{ needs.quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Quicktest Core (vs Previous Minor)](https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.quicktest-core-previous-minor.outputs.build_number }}) - $([ "${{ needs.quicktest-core-previous-minor.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Smoke Tests Remote Server Kubernetes](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}) - $([ "${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Release Tests](https://buildkite.com/skypilot-1/release/builds/${{ needs.release-tests.outputs.build_number }}) - ⏳ (not waiting for completion)
 
           *Release Tests may take up to 24 hours to complete and might fail due to resource constraints.*"
+          fi
 
           echo "Creating PR from ${TEST_BRANCH} to ${RELEASE_BRANCH}"
 
           gh pr create --base ${RELEASE_BRANCH} --head ${TEST_BRANCH} \
             --title "Release ${RELEASE_VERSION}" \
             --body "${PR_BODY}"
+
+      - name: Summary
+        if: always()
+        env:
+          SKIP_SMOKE_TESTS: ${{ github.event.inputs.skip_smoke_tests }}
+        run: |
+          if [ "$SKIP_SMOKE_TESTS" == "true" ]; then
+            SOURCE_BRANCH="${{ github.ref_name }}"
+            if [[ "$SOURCE_BRANCH" =~ ^releases/.*rc[0-9]+$ ]]; then
+              RC_VERSION=$(echo "$SOURCE_BRANCH" | sed 's/releases\///')
+              cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          # Release ${{ needs.release-build.outputs.release_version }}
+
+          ## RC Promotion
+          Promoting from \`$RC_VERSION\` to stable version \`${{ needs.release-build.outputs.release_version }}\`
+
+          ⚠️ **Smoke tests were SKIPPED** - This release was promoted from a tested RC.
+          EOF
+            else
+              cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          # Release ${{ needs.release-build.outputs.release_version }}
+
+          ⚠️ **Smoke tests were SKIPPED** - Please ensure manual testing was performed.
+          EOF
+            fi
+          else
+            cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          # Release ${{ needs.release-build.outputs.release_version }}
+
+          ## Buildkite Test Links
+          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${{ needs.smoke-tests.outputs.build_number }}) - $([ "${{ needs.smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.quicktest-core.outputs.build_number }}) - $([ "${{ needs.quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Quicktest Core (vs Previous Minor)](https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.quicktest-core-previous-minor.outputs.build_number }}) - $([ "${{ needs.quicktest-core-previous-minor.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Smoke Tests Remote Server Kubernetes](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}) - $([ "${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Release Tests](https://buildkite.com/skypilot-1/release/builds/${{ needs.release-tests.outputs.build_number }}) - ⏳ (not waiting for completion)
+
+          *Release Tests may take up to 24 hours to complete and might fail due to resource constraints.*
+          EOF
+          fi

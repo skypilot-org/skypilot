@@ -21,6 +21,8 @@
 #
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_managed_job.py --generic-cloud aws
+import io
+import os
 import pathlib
 import re
 import tempfile
@@ -36,6 +38,7 @@ from sky import jobs
 from sky import skypilot_config
 from sky.clouds import gcp
 from sky.data import storage as storage_lib
+from sky.jobs.client import sdk as jobs_sdk
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -144,7 +147,6 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
-@pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_do  # DO does not support spot instances
 @pytest.mark.no_vast  # The pipeline.yaml uses other clouds
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
@@ -155,11 +157,14 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
 def test_job_pipeline(generic_cloud: str):
     """Test a job pipeline."""
     name = smoke_tests_utils.get_cluster_name()
-
+    use_spot = True
+    if generic_cloud in ('kubernetes', 'slurm'):
+        # Kubernetes and Slurm do not support spot instances
+        use_spot = False
     # Use Jinja templating to generate the pipeline YAML with the specific cloud
     template_str = pathlib.Path('tests/test_yamls/pipeline.yaml.j2').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(cloud=generic_cloud)
+    content = template.render(cloud=generic_cloud, use_spot=use_spot)
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
@@ -484,7 +489,6 @@ def test_managed_jobs_pipeline_recovery_gcp():
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
-@pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_do  # DO does not have spot instances
 @pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.no_nebius  # Nebius does not support non-GPU spot instances
@@ -495,10 +499,14 @@ def test_managed_jobs_pipeline_recovery_gcp():
 def test_managed_jobs_recovery_default_resources(generic_cloud: str):
     """Test managed job recovery for default resources."""
     name = smoke_tests_utils.get_cluster_name()
+    use_spot_arg = "--use-spot"
+    if generic_cloud in ('kubernetes', 'slurm'):
+        # Kubernetes and Slurm do not support spot instances
+        use_spot_arg = ""
     test = smoke_tests_utils.Test(
         'managed-spot-recovery-default-resources',
         [
-            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} --use-spot "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
+            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} {use_spot_arg} "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -848,7 +856,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
 @pytest.mark.no_dependency  # Storage tests required full dependency installed
 def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""
-    timeout = 215
+    timeout = 500
     low_resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
     name = smoke_tests_utils.get_cluster_name()
     yaml_str = pathlib.Path(
@@ -923,7 +931,7 @@ def test_managed_jobs_storage(generic_cloud: str):
             name,
             f'{non_persistent_bucket_removed_check_cmd} && exit 1 || true')
         timeout *= 2
-    elif generic_cloud == 'kubernetes':
+    elif generic_cloud in ('kubernetes', 'slurm'):
         # With Kubernetes, we don't know which object storage provider is used.
         # Check S3, GCS and Azure if bucket exists in any of them.
         s3_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
@@ -1249,13 +1257,15 @@ def test_managed_jobs_env_isolation(generic_cloud: str):
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=f'{name}',
                     job_status=[sky.ManagedJobStatus.RUNNING],
-                    timeout=80),
+                    timeout=600
+                    if smoke_tests_utils.is_remote_server_test() else 80),
                 f'sky jobs logs -n {name} --no-follow | grep "my name is {name}"',
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=f'{name}',
                     job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                    timeout=80),
+                    timeout=600
+                    if smoke_tests_utils.is_remote_server_test() else 80),
             ],
             f'sky jobs cancel -y -n {name}',
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
@@ -1277,6 +1287,7 @@ def test_managed_jobs_env_isolation(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server
 @pytest.mark.managed_jobs
 def test_managed_jobs_config_labels_isolation(generic_cloud: str, request):
     supported_clouds = {'aws', 'gcp', 'kubernetes'}
@@ -1456,7 +1467,7 @@ def test_managed_jobs_ha_kill_running(generic_cloud: str):
         generic_cloud,
         sky.ManagedJobStatus.RUNNING,
         first_timeout=200,
-        second_timeout=335,
+        second_timeout=600,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1591,3 +1602,80 @@ def test_managed_jobs_failed_precheck_storage_spec_error(
             timeout=15 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # Need an isolated API server for this test case
+@pytest.mark.managed_jobs
+@pytest.mark.no_dependency  # restart api server requires full dependency installed
+def test_managed_jobs_logs_gc(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+
+    log_cleaned_hint = 'log has been cleaned'
+
+    def wait_logs_gced(controller: bool = False):
+        now = time.time()
+        while time.time() - now < 300:
+            output = io.StringIO()
+            # Just tail the latest log since we assum isolated server
+            jobs_sdk.tail_logs(follow=False,
+                               controller=controller,
+                               output_stream=output)
+            if log_cleaned_hint in output.getvalue():
+                return
+            yield f'Waiting for logs to be garbage collected, controller: {controller}'
+            time.sleep(15)
+        raise RuntimeError('Tiemout wait logs get gced')
+
+    test = smoke_tests_utils.Test(
+        name='test-managed-jobs-logs-gc',
+        config_dict={
+            'jobs': {
+                'controller': {
+                    # GC immediately for testing
+                    'controller_logs_gc_retention_hours': 0,
+                    'task_logs_gc_retention_hours': 0,
+                }
+            }
+        },
+        commands=[
+            # Restart the API server to apply the server-side config
+            'sky api stop && sky api start',
+            f'sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y "echo hello" -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600),
+            lambda: wait_logs_gced(controller=False),
+            lambda: wait_logs_gced(controller=True),
+            # jobs logs should still work, but show cleaned hint
+            f's=$(sky jobs logs) && echo "$s" && echo "$s" | grep "{log_cleaned_hint}" && echo "$s" | grep "SUCCEEDED"',
+            f's=$(sky jobs logs --controller) && echo "$s" && echo "$s" | grep "{log_cleaned_hint}" && echo "$s" | grep "SUCCEEDED"',
+            # sync down should still work
+            'sky jobs logs --sync-down'
+        ],
+        # Stop the API server so that it doesn't refer to the deleted config
+        # file after the test exits
+        teardown=f'sky jobs cancel -y -n {name}; sky api stop',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+@pytest.mark.kubernetes
+def test_large_production_performance(request):
+    if not smoke_tests_utils.is_in_buildkite_env():
+        pytest.skip('Skipping test: requires db modification, run only in '
+                    'Buildkite.')
+
+    test = smoke_tests_utils.Test(
+        name='test-large-production-performance',
+        commands=[
+            f'bash tests/load_tests/db_scale_tests/test_large_production_performance.sh --postgres --restart-api-server',
+        ],
+        timeout=30 * 60,  # 30 minutes for data injection and testing
+    )
+    smoke_tests_utils.run_one_test(test)

@@ -6,7 +6,7 @@ determine the return type based on the value of require_outputs.
 """
 import enum
 import typing
-from typing import Any, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
 from typing_extensions import Literal
 
@@ -27,6 +27,7 @@ def ssh_options_list(
     ssh_control_name: Optional[str],
     *,
     ssh_proxy_command: Optional[str] = ...,
+    ssh_proxy_jump: Optional[str] = ...,
     docker_ssh_proxy_command: Optional[str] = ...,
     timeout: int = ...,
     port: int = ...,
@@ -130,7 +131,7 @@ class SSHCommandRunner(CommandRunner):
     ip: str
     port: int
     ssh_user: str
-    ssh_private_key: str
+    ssh_private_key: Optional[str]
     ssh_control_name: Optional[str]
     docker_user: str
     disable_control_master: Optional[bool]
@@ -140,9 +141,10 @@ class SSHCommandRunner(CommandRunner):
         self,
         node: Tuple[str, int],
         ssh_user: str,
-        ssh_private_key: str,
+        ssh_private_key: Optional[str],
         ssh_control_name: Optional[str] = ...,
         ssh_proxy_command: Optional[str] = ...,
+        ssh_proxy_jump: Optional[str] = ...,
         docker_user: Optional[str] = ...,
         disable_control_master: Optional[bool] = ...,
         port_forward_execute_remote_command: Optional[bool] = ...,
@@ -216,7 +218,8 @@ class SSHCommandRunner(CommandRunner):
               up: bool,
               log_path: str = ...,
               stream_logs: bool = ...,
-              max_retry: int = ...) -> None:
+              max_retry: int = ...,
+              get_remote_home_dir: Callable[[], str] = ...) -> None:
         ...
 
     def port_forward_command(
@@ -303,6 +306,28 @@ class KubernetesCommandRunner(CommandRunner):
             port_forward: List[Tuple[int, int]],
             connect_timeout: int = 1,
             ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
+        ...
+
+
+class SlurmCommandRunner(SSHCommandRunner):
+    """Runner for Slurm commands."""
+    sky_dir: str
+    skypilot_runtime_dir: str
+    job_id: str
+    slurm_node: str
+
+    def __init__(
+        self,
+        node: Tuple[str, int],
+        ssh_user: str,
+        ssh_private_key: Optional[str],
+        *,
+        sky_dir: str,
+        skypilot_runtime_dir: str,
+        job_id: str,
+        slurm_node: str,
+        **kwargs,
+    ) -> None:
         ...
 
 

@@ -26,6 +26,7 @@ Install SkyPilot using pip:
           pip install "skypilot[aws]"
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
+          pip install "skypilot[coreweave]"
           # Nebius is only supported for Python >= 3.10
           pip install "skypilot[nebius]"
           # Clouds below are supported/maintained by community/cloud providers.
@@ -35,6 +36,7 @@ Install SkyPilot using pip:
           pip install "skypilot[fluidstack]"
           pip install "skypilot[paperspace]"
           pip install "skypilot[cudo]"
+          pip install "skypilot[shadeform]"
           # IBM is only supported for Python <= 3.11
           pip install "skypilot[ibm]"
           # SCP is only supported for Python <= 3.11
@@ -63,6 +65,7 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[aws]"
           pip install "skypilot-nightly[gcp]"
           pip install "skypilot-nightly[azure]"
+          pip install "skypilot-nightly[coreweave]"
           # Nebius is only supported for Python >= 3.10
           pip install "skypilot-nightly[nebius]"
           # Clouds below are supported/maintained by community/cloud providers.
@@ -73,6 +76,7 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[paperspace]"
           pip install "skypilot-nightly[do]"
           pip install "skypilot-nightly[cudo]"
+          pip install "skypilot-nightly[shadeform]"
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[vsphere]"
@@ -111,6 +115,7 @@ Install SkyPilot using pip:
           pip install -e ".[fluidstack]"
           pip install -e ".[paperspace]"
           pip install -e ".[cudo]"
+          pip install -e ".[shadeform]"
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"
@@ -241,12 +246,14 @@ This will produce a summary like:
     Paperspace: enabled
     Fluidstack: enabled
     Cudo: enabled
+    Shadeform: enabled
     IBM: enabled
     SCP: enabled
     Seeweb: enabled
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled
+    Slurm: enabled
 
 If any cloud's credentials or dependencies are missing, ``sky check`` will
 output hints on how to resolve them. You can also refer to the cloud setup
@@ -260,6 +267,11 @@ section :ref:`below <cloud-account-setup>`.
 .. tip::
 
   To check credentials only for specific clouds, pass the clouds as arguments: :code:`sky check aws gcp`
+
+.. tip::
+
+  If you are having trouble setting up credentials, it may be because the API server started before they were
+  configured. Try restarting the API server by running :code:`sky api stop` and then :code:`sky api start`.
 
 .. _cloud-account-setup:
 
@@ -292,6 +304,35 @@ See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
 .. tip::
    If you do not have access to a Kubernetes cluster, you can :ref:`deploy a local Kubernetes cluster on your laptop <kubernetes-setup-kind>` with ``sky local up``.
 
+.. _slurm-installation:
+
+Slurm
+~~~~~
+
+.. note::
+
+    **Early Access:** Slurm support is under active development. If you're interested in trying it out,
+    please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
+
+SkyPilot can run workloads on Slurm clusters. The only requirement is SSH access to a Slurm login node.
+
+To configure Slurm support, create a ``~/.slurm/config`` file with your Slurm cluster configuration and add the SSH credentials to connect to the Slurm login node.
+
+.. code-block:: shell
+
+  # Create the Slurm config directory
+  mkdir -p ~/.slurm
+
+  # Add your Slurm cluster configuration
+  cat > ~/.slurm/config << EOF
+  Host mycluster
+      HostName login.mycluster.myorg.com
+      User myusername
+      IdentityFile ~/.ssh/id_rsa
+  EOF
+
+See :ref:`SkyPilot on Slurm <slurm-overview>` for more.
+
 .. _aws-installation:
 
 AWS
@@ -320,15 +361,40 @@ To use AWS IAM Identity Center (AWS SSO), see :ref:`here<aws-sso>` for instructi
 GCP
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: shell
+.. tab-set::
 
-  conda install -c conda-forge google-cloud-sdk
+    .. tab-item:: Conda
+        :sync: gcp-conda-tab
 
-  gcloud init
+        .. code-block:: shell
 
-  # Run this if you don't have a credentials file.
-  # This will generate ~/.config/gcloud/application_default_credentials.json.
-  gcloud auth application-default login
+          # Install Google Cloud SDK via conda-forge
+          conda install -c conda-forge google-cloud-sdk
+
+          # Initialize gcloud
+          gcloud init
+
+          # Run this if you don't have a credentials file.
+          # This will generate ~/.config/gcloud/application_default_credentials.json.
+          gcloud auth application-default login
+
+    .. tab-item:: Manual Install
+        :sync: gcp-archive-download-tab
+
+        For MacOS with Silicon Chips:
+
+        .. code-block:: shell
+
+          curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-darwin-arm.tar.gz gcloud.tar.gz
+          tar -xf gcloud.tar.gz
+          ./google-cloud-sdk/install.sh
+          # Update your path with the newly installed gcloud
+
+        If you are using other architecture or OS,
+        follow the `Google Cloud SDK installation instructions <https://cloud.google.com/sdk/docs/install#installation_instructions>`_ to download the appropriate package.
+
+        Be sure to complete the optional step that adds ``gcloud`` to your ``PATH``.
+        This step is required for SkyPilot to recognize that your ``gcloud`` installation is configured correctly.
 
 .. tip::
 
@@ -356,6 +422,64 @@ Azure
   az account set -s <subscription_id>
 
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
+
+
+.. _coreweave-installation:
+
+CoreWeave
+~~~~~~~~~
+
+`CoreWeave <https://www.coreweave.com/>`__ integrates with SkyPilot through the :ref:`Kubernetes <kubernetes-installation>` integration. To set up:
+
+1. Launch a Coreweave CKS cluster from the CoreWeave console.
+2. Get your `kubeconfig <https://docs.coreweave.com/docs/products/cks/auth-access/manage-api-access-tokens>`_ from the CoreWeave console and place it at ``~/.kube/config``.
+
+.. tip::
+
+  CoreWeave also offers InfiniBand networking for high-performance distributed training. You can enable InfiniBand support by adding ``network_tier: best`` to your SkyPilot task configuration.
+
+.. _coreweave-caios-installation:
+
+CoreWeave Object Storage (CAIOS)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You can optionally set up `CoreWeave Object Storage (CAIOS) <https://docs.coreweave.com/docs/products/storage/object-storage/get-started-caios>`_ as an S3-compatible object storage that can be used with SkyPilot for storing and accessing data in your workloads.
+
+To get CAIOS Access Key ID and Secret Access Key:
+
+1. Log into your `CoreWeave Cloud console <https://cloud.coreweave.com/>`__.
+2. Navigate to **Object Storage** → **Keys** in the left sidebar.
+3. Generate a new key pair.
+
+SkyPilot uses separate configuration files for CAIOS to avoid conflicts with your AWS credentials. Run the following command to configure your CAIOS access credentials:
+
+.. code-block:: shell
+
+  AWS_SHARED_CREDENTIALS_FILE=~/.coreweave/cw.credentials aws configure --profile cw
+
+When prompted, enter your CAIOS credentials:
+
+.. code-block:: text
+
+  AWS Access Key ID [None]: <your_access_key_id>
+  AWS Secret Access Key [None]: <your_secret_access_key>
+  Default region name [None]:
+  Default output format [None]: json
+
+Next, configure the endpoint URL and addressing style for CoreWeave Object Storage. This tells AWS CLI how to connect to CoreWeave's S3-compatible service:
+
+.. code-block:: shell
+
+  # For external access (outside CoreWeave CKS clusters)
+  AWS_CONFIG_FILE=~/.coreweave/cw.config aws configure set endpoint_url https://cwobject.com --profile cw
+  AWS_CONFIG_FILE=~/.coreweave/cw.config aws configure set s3.addressing_style virtual --profile cw
+
+.. note::
+
+  CAIOS offers two endpoints for different use cases. Choose the right endpoint:
+
+  - **External access (slow but accessible from anywhere)**: Use ``https://cwobject.com`` when launching SkyPilot clusters in non-CoreWeave CKS clusters. This endpoint is accessible from anywhere and uses secure HTTPS.
+  - **Internal access (fast but only accessible within CoreWeave's network)**: Use ``http://cwlota.com`` only if you are launching SkyPilot clusters inside CoreWeave CKS clusters and do not need to upload local data to the bucket. The LOTA endpoint provides faster access within CoreWeave's network but only supports HTTP and is not accessible externally. Refer to `LOTA documentation <https://docs.coreweave.com/docs/products/storage/object-storage/lota/about>`_ for more details.
 
 
 
@@ -532,8 +656,15 @@ Cudo Compute |community-badge|
 
 If you want to want to use SkyPilot with a different Cudo Compute account or project, run :code:`cudoctl init` again.
 
+Shadeform |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+`Shadeform <https://www.shadeform.ai/>`_ is a cloud GPU marketplace that offers GPUs across a variety of vetted cloud providers. To configure Shadeform access, go to the `API Key Management <https://platform.shadeform.ai/settings/api>`_ page within your Shadeform account to generate a key and then add it to :code:`~/.shadeform/api_key`:
 
+.. code-block:: shell
+
+  mkdir -p ~/.shadeform
+  echo "<your_api_key_here>" > ~/.shadeform/api_key
 
 IBM |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

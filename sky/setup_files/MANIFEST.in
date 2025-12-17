@@ -1,5 +1,5 @@
 include sky/backends/monkey_patches/*.py
-exclude sky/clouds/service_catalog/data_fetchers/analyze.py
+exclude sky/catalog/data_fetchers/analyze.py
 include sky/provision/kubernetes/manifests/*
 include sky/provision/azure/*
 include sky/setup_files/*
@@ -21,3 +21,8 @@ include sky/users/*.conf
 include sky/utils/*.sh
 include sky/setup_files/alembic.ini
 recursive-include sky/schemas/db *
+
+# SkyPilot templates package
+recursive-include sky_templates/ray *
+recursive-include sky_templates *.py
+include sky_templates/README.md

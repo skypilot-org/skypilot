@@ -20,6 +20,7 @@ from uvicorn.supervisors import multiprocess
 from sky import sky_logging
 from sky.server import daemons
 from sky.server import metrics as metrics_lib
+from sky.server import plugins
 from sky.server import state
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
@@ -46,11 +47,11 @@ except ValueError:
 
 # TODO(aylei): use decorator to register requests that need to be proactively
 # cancelled instead of hardcoding here.
-_RETRIABLE_REQUEST_NAMES = [
+_RETRIABLE_REQUEST_NAMES = {
     'sky.logs',
     'sky.jobs.logs',
     'sky.serve.logs',
-]
+}
 
 
 def add_timestamp_prefix_for_server_logs() -> None:
@@ -151,37 +152,38 @@ class Server(uvicorn.Server):
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
             ]
-            reqs = requests_lib.get_request_tasks(
-                req_filter=requests_lib.RequestTaskFilter(status=statuses))
-            if not reqs:
+            requests = [(request_task.request_id, request_task.name)
+                        for request_task in requests_lib.get_request_tasks(
+                            req_filter=requests_lib.RequestTaskFilter(
+                                status=statuses, fields=['request_id', 'name']))
+                       ]
+            if not requests:
                 break
-            logger.info(f'{len(reqs)} on-going requests '
+            logger.info(f'{len(requests)} on-going requests '
                         'found, waiting for them to finish...')
             # Proactively cancel internal requests and logs requests since
             # they can run for infinite time.
-            internal_request_ids = [
+            internal_request_ids = {
                 d.id for d in daemons.INTERNAL_REQUEST_DAEMONS
-            ]
+            }
             if time.time() - start_time > _WAIT_REQUESTS_TIMEOUT_SECONDS:
                 logger.warning('Timeout waiting for on-going requests to '
                                'finish, cancelling all on-going requests.')
-                for req in reqs:
-                    self.interrupt_request_for_retry(req.request_id)
+                for request_id, _ in requests:
+                    self.interrupt_request_for_retry(request_id)
                 break
             interrupted = 0
-            for req in reqs:
-                if req.request_id in internal_request_ids:
-                    self.interrupt_request_for_retry(req.request_id)
-                    interrupted += 1
-                elif req.name in _RETRIABLE_REQUEST_NAMES:
-                    self.interrupt_request_for_retry(req.request_id)
+            for request_id, name in requests:
+                if (name in _RETRIABLE_REQUEST_NAMES or
+                        request_id in internal_request_ids):
+                    self.interrupt_request_for_retry(request_id)
                     interrupted += 1
                 # TODO(aylei): interrupt pending requests to accelerate the
                 # shutdown.
             # If some requests are not interrupted, wait for them to finish,
             # otherwise we just check again immediately to accelerate the
             # shutdown process.
-            if interrupted < len(reqs):
+            if interrupted < len(requests):
                 time.sleep(_WAIT_REQUESTS_INTERVAL_SECONDS)
 
     def interrupt_request_for_retry(self, request_id: str) -> None:
@@ -236,6 +238,10 @@ def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):
     server = Server(config=config, max_db_connections=max_db_connections)
     try:
         if config.workers is not None and config.workers > 1:
+            # When workers > 1, uvicorn does not run server app in the main
+            # process. In this case, plugins are not loaded at this point, so
+            # load plugins here without uvicorn app.
+            plugins.load_plugins(plugins.ExtensionContext())
             sock = config.bind_socket()
             SlowStartMultiprocess(config, target=server.run,
                                   sockets=[sock]).run()

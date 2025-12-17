@@ -90,7 +90,7 @@ class Precondition(abc.ABC):
         while True:
             if self.timeout > 0 and time.time() - start_time > self.timeout:
                 # Cancel the request on timeout.
-                api_requests.set_request_failed(
+                await api_requests.set_request_failed_async(
                     self.request_id,
                     exceptions.RequestCancelled(
                         f'Request {self.request_id} precondition wait timed '
@@ -98,13 +98,15 @@ class Precondition(abc.ABC):
                 return False
 
             # Check if the request has been cancelled
-            request = await api_requests.get_request_async(self.request_id)
+            request = await api_requests.get_request_async(self.request_id,
+                                                           fields=['status'])
             if request is None:
                 logger.error(f'Request {self.request_id} not found')
                 return False
             if request.status == api_requests.RequestStatus.CANCELLED:
                 logger.debug(f'Request {self.request_id} cancelled')
                 return False
+            del request
 
             try:
                 met, status_msg = await self.check()
@@ -116,7 +118,7 @@ class Precondition(abc.ABC):
                         self.request_id, status_msg)
                     last_status_msg = status_msg
             except (Exception, SystemExit, KeyboardInterrupt) as e:  # pylint: disable=broad-except
-                api_requests.set_request_failed(self.request_id, e)
+                await api_requests.set_request_failed_async(self.request_id, e)
                 logger.info(f'Request {self.request_id} failed due to '
                             f'{common_utils.format_exception(e)}')
                 return False
@@ -166,7 +168,10 @@ class ClusterStartCompletePrecondition(Precondition):
                     api_requests.RequestStatus.RUNNING
                 ],
                 include_request_names=['sky.launch', 'sky.start'],
-                cluster_names=[self.cluster_name]))
+                cluster_names=[self.cluster_name],
+                # Only get the request ID to avoid fetching the whole request.
+                # We're only interested in the count, not the whole request.
+                fields=['request_id']))
         if len(requests) == 0:
             # No running or pending tasks, the start process is done.
             return True, None

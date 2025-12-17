@@ -11,6 +11,7 @@ import pytest
 from sky.clouds import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import resources_utils
 
 
 class TestKubernetesExistingAllowedContexts(unittest.TestCase):
@@ -379,7 +380,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         setattr(self.resources, 'assert_launchable', lambda: self.resources)
 
         # Import NetworkTier for setting network_tier
-        from sky.utils import resources_utils
         self.resources.network_tier = resources_utils.NetworkTier.BEST
 
         self.cluster_name = "test-cluster"
@@ -439,7 +439,9 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         # Call make_deploy_resources_variables
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
             resources=self.resources,
-            cluster_name=self.cluster_name,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
             region=self.region,
             zones=None,
             num_nodes=1,
@@ -506,7 +508,9 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         # Call make_deploy_resources_variables
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
             resources=self.resources,
-            cluster_name=self.cluster_name,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
             region=self.region,
             zones=None,
             num_nodes=1,
@@ -539,7 +543,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         """Test that IPC_LOCK capability is disabled when network tier is not BEST."""
 
         # Modify resources to not use BEST network tier
-        from sky.utils import resources_utils
         self.resources.network_tier = resources_utils.NetworkTier.STANDARD
 
         # Setup mocks - when network tier is not BEST, _detect_network_type returns NONE
@@ -575,7 +578,9 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         # Call make_deploy_resources_variables
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
             resources=self.resources,
-            cluster_name=self.cluster_name,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
             region=self.region,
             zones=None,
             num_nodes=1,
@@ -608,7 +613,7 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
 
         # Create resources with GPU and BEST network tier (mimicking H100:8 --network-tier best)
         gpu_resources = mock.MagicMock()
-        gpu_resources.instance_type = "8CPU--32GB--8xH100"  # Instance with 8 H100 GPUs
+        gpu_resources.instance_type = "8CPU--32GB--H100:8"  # Instance with 8 H100 GPUs
         gpu_resources.accelerators = {'H100': 8}
         gpu_resources.use_spot = False
         gpu_resources.region = "nebius-context"
@@ -620,7 +625,6 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         setattr(gpu_resources, 'assert_launchable', lambda: gpu_resources)
 
         # Set network tier to BEST
-        from sky.utils import resources_utils
         gpu_resources.network_tier = resources_utils.NetworkTier.BEST
 
         # Setup mocks - cluster supports high performance networking (Nebius)
@@ -663,7 +667,9 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         # Call make_deploy_resources_variables
         deploy_vars = k8s_cloud.make_deploy_resources_variables(
             resources=gpu_resources,
-            cluster_name="test-nebius-gpu-cluster",
+            cluster_name=resources_utils.ClusterName(
+                display_name="test-nebius-gpu-cluster",
+                name_on_cloud="test-nebius-gpu-cluster"),
             region=mock.MagicMock(name="nebius-context"),
             zones=None,
             num_nodes=1,
@@ -690,6 +696,220 @@ class TestKubernetesSecurityContextMerging(unittest.TestCase):
         self.assertEqual(deploy_vars['k8s_acc_label_values'], ['H100'])
         self.assertEqual(deploy_vars['k8s_resource_key'], 'nvidia.com/gpu')
         self.assertFalse(deploy_vars['tpu_requested'])  # H100 is GPU, not TPU
+
+
+class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
+    """Test cases for Kubernetes.make_deploy_resources_variables method."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        # Create a mock resources object for testing
+        self.resources = mock.MagicMock()
+        self.resources.instance_type = "2CPU--4GB"
+        self.resources.accelerators = None
+        self.resources.use_spot = False
+        self.resources.region = "my-k8s-cluster"
+        self.resources.zone = None
+        self.resources.cluster_config_overrides = {}
+        self.resources.image_id = None
+
+        # Mock the assert_launchable method
+        setattr(self.resources, 'assert_launchable', lambda: self.resources)
+
+        # Import NetworkTier for setting network_tier
+        self.resources.network_tier = resources_utils.NetworkTier.BEST
+
+        self.cluster_name = "test-k8s-cluster"
+        self.region = mock.MagicMock()
+        self.region.name = "my-k8s-cluster"
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_kubernetes_cloud_uses_kubernetes_config_for_provision_timeout(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_accelerator_label_keys,
+            mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes):
+        """Test that Kubernetes cloud uses 'kubernetes' config (not 'ssh') for provision_timeout."""
+
+        # Setup mocks
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, '')
+
+        mock_get_current_context.return_value = "my-k8s-cluster"
+        mock_get_namespace.return_value = "default"
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+
+        # Track calls to get_effective_region_config
+        config_calls = []
+
+        def config_side_effect(cloud,
+                               keys,
+                               region,
+                               default_value=None,
+                               override_configs=None):
+            config_calls.append({
+                'cloud': cloud,
+                'keys': keys,
+                'region': region
+            })
+            # Return different values based on cloud and keys
+            if cloud == 'kubernetes' and keys == ('provision_timeout',):
+                return 3600  # Kubernetes-specific timeout
+            elif cloud == 'ssh' and keys == ('provision_timeout',):
+                return 7200  # SSH-specific timeout (should not be used)
+            elif keys == ('remote_identity',):
+                return 'SERVICE_ACCOUNT'
+            elif keys == ('high_availability', 'storage_class_name'):
+                return None
+            return default_value
+
+        mock_get_cloud_config_value.side_effect = config_side_effect
+
+        # Mock networking
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = "portforward"
+        mock_get_port_mode.return_value = mock_port_mode
+
+        # Mock image
+        mock_get_image.return_value = "test-image:latest"
+
+        # Create Kubernetes cloud instance
+        k8s_cloud = kubernetes.Kubernetes()
+
+        # Verify Kubernetes cloud has correct _REPR
+        self.assertEqual(k8s_cloud._REPR, 'Kubernetes')
+
+        # Call make_deploy_resources_variables
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=self.resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
+            region=self.region,
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        # Verify that provision_timeout was retrieved from 'kubernetes' config
+        provision_timeout_calls = [
+            call for call in config_calls
+            if call['keys'] == ('provision_timeout',)
+        ]
+        self.assertEqual(len(provision_timeout_calls), 1)
+        self.assertEqual(provision_timeout_calls[0]['cloud'], 'kubernetes')
+        # The region should be the context name
+        self.assertEqual(provision_timeout_calls[0]['region'], 'my-k8s-cluster')
+
+        # Verify the timeout value is set in deploy vars
+        self.assertIn('timeout', deploy_vars)
+        self.assertEqual(deploy_vars['timeout'], '3600')
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_kubernetes_cloud_uses_context_specific_config(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_accelerator_label_keys,
+            mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes):
+        """Test that Kubernetes cloud uses context-specific config when available."""
+
+        # Setup mocks
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, '')
+
+        mock_get_current_context.return_value = "prod-k8s-cluster"
+        mock_get_namespace.return_value = "default"
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+
+        # Simulate context-specific config
+        def config_side_effect(cloud,
+                               keys,
+                               region,
+                               default_value=None,
+                               override_configs=None):
+            if cloud == 'kubernetes' and keys == ('provision_timeout',):
+                if region == 'prod-k8s-cluster':
+                    return 5400  # Context-specific timeout
+                else:
+                    return 3600  # Default Kubernetes timeout
+            elif keys == ('remote_identity',):
+                return 'SERVICE_ACCOUNT'
+            elif keys == ('high_availability', 'storage_class_name'):
+                return None
+            return default_value
+
+        mock_get_cloud_config_value.side_effect = config_side_effect
+
+        # Mock networking
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = "portforward"
+        mock_get_port_mode.return_value = mock_port_mode
+
+        # Mock image
+        mock_get_image.return_value = "test-image:latest"
+
+        # Create Kubernetes cloud instance and resources for prod cluster
+        k8s_cloud = kubernetes.Kubernetes()
+        prod_resources = mock.MagicMock()
+        prod_resources.instance_type = "2CPU--4GB"
+        prod_resources.accelerators = None
+        prod_resources.use_spot = False
+        prod_resources.region = "prod-k8s-cluster"
+        prod_resources.zone = None
+        prod_resources.cluster_config_overrides = {}
+        prod_resources.image_id = None
+        setattr(prod_resources, 'assert_launchable', lambda: prod_resources)
+
+        prod_resources.network_tier = resources_utils.NetworkTier.BEST
+
+        prod_region = mock.MagicMock()
+        prod_region.name = "prod-k8s-cluster"
+
+        # Call make_deploy_resources_variables
+        deploy_vars = k8s_cloud.make_deploy_resources_variables(
+            resources=prod_resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name="test-prod-cluster",
+                name_on_cloud="test-prod-cluster"),
+            region=prod_region,
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        # Verify the context-specific timeout is used
+        self.assertIn('timeout', deploy_vars)
+        self.assertEqual(deploy_vars['timeout'], '5400')
+
+
+class TestKubernetesSecurityContext(unittest.TestCase):
+    """Test cases for Kubernetes security context handling."""
 
     @patch('sky.skypilot_config.get_effective_region_config')
     def test_user_security_context_merged_with_ipc_lock_capability(
@@ -1189,7 +1409,7 @@ class TestCloudFlare403ErrorDetection(unittest.TestCase):
 
     def test_check_nvidia_runtime_class_retries_on_cloudflare_403(self):
         """Test that check_nvidia_runtime_class retries on CloudFlare 403.
-        
+
         Simulates CloudFlare proxy returning transient 403 on first
         call, then succeeding on retry.
         """
@@ -1270,6 +1490,504 @@ class TestCloudFlare403ErrorDetection(unittest.TestCase):
                     context='test-context')
 
             self.assertEqual(call_count['count'], 1)
+
+
+class TestKubernetesUnsupportedFeaturesForResources(unittest.TestCase):
+    """Test cases for Kubernetes._unsupported_features_for_resources method."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        # Clear any cached results
+        kubernetes.Kubernetes.logged_unreachable_contexts.clear()
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.get_spot_label')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_basic_unsupported_features(self, mock_detect_network_type,
+                                        mock_get_spot_label,
+                                        mock_existing_allowed_contexts):
+        """Test basic unsupported features without spot or network tier support."""
+        mock_existing_allowed_contexts.return_value = ['test-context']
+        mock_get_spot_label.return_value = (None, None)  # No spot support
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, '')
+
+        resources = mock.MagicMock()
+        resources.region = None
+        resources.network_tier = None
+
+        from sky import clouds
+        result = kubernetes.Kubernetes._unsupported_features_for_resources(
+            resources)
+
+        # Should have basic unsupported features
+        self.assertIn(clouds.CloudImplementationFeatures.STOP, result)
+        self.assertIn(clouds.CloudImplementationFeatures.AUTOSTOP, result)
+        self.assertIn(clouds.CloudImplementationFeatures.SPOT_INSTANCE, result)
+        self.assertIn(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
+                      result)
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.get_spot_label')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_spot_instance_supported(self, mock_detect_network_type,
+                                     mock_get_spot_label,
+                                     mock_existing_allowed_contexts):
+        """Test when spot instances are supported."""
+        mock_existing_allowed_contexts.return_value = ['test-context']
+        mock_get_spot_label.return_value = ('spot-label-key',
+                                            'spot-label-value')
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, '')
+
+        resources = mock.MagicMock()
+        resources.region = 'test-context'
+        resources.network_tier = None
+
+        from sky import clouds
+        result = kubernetes.Kubernetes._unsupported_features_for_resources(
+            resources, region='test-context')
+
+        # Spot instance should not be in unsupported features
+        self.assertNotIn(clouds.CloudImplementationFeatures.SPOT_INSTANCE,
+                         result)
+        # Other features should still be unsupported
+        self.assertIn(clouds.CloudImplementationFeatures.STOP, result)
+        self.assertIn(clouds.CloudImplementationFeatures.AUTOSTOP, result)
+        self.assertIn(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
+                      result)
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.get_spot_label')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_custom_network_tier_supported(self, mock_detect_network_type,
+                                           mock_get_spot_label,
+                                           mock_existing_allowed_contexts):
+        """Test when custom network tier is supported."""
+        mock_existing_allowed_contexts.return_value = ['test-context']
+        mock_get_spot_label.return_value = (None, None)
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NEBIUS, '')
+
+        resources = mock.MagicMock()
+        resources.region = 'test-context'
+        resources.network_tier = resources_utils.NetworkTier.BEST
+
+        from sky import clouds
+        result = kubernetes.Kubernetes._unsupported_features_for_resources(
+            resources, region='test-context')
+
+        # Custom network tier should not be in unsupported features
+        self.assertNotIn(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
+                         result)
+        # Other features should still be unsupported
+        self.assertIn(clouds.CloudImplementationFeatures.STOP, result)
+        self.assertIn(clouds.CloudImplementationFeatures.AUTOSTOP, result)
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.get_spot_label')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_both_spot_and_network_tier_supported(
+            self, mock_detect_network_type, mock_get_spot_label,
+            mock_existing_allowed_contexts):
+        """Test when both spot and custom network tier are supported."""
+        mock_existing_allowed_contexts.return_value = ['test-context']
+        mock_get_spot_label.return_value = ('spot-label-key',
+                                            'spot-label-value')
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.GCP_TCPX, 'a3-highgpu-8g')
+
+        resources = mock.MagicMock()
+        resources.region = 'test-context'
+        resources.network_tier = resources_utils.NetworkTier.BEST
+
+        from sky import clouds
+        result = kubernetes.Kubernetes._unsupported_features_for_resources(
+            resources, region='test-context')
+
+        # Both should not be in unsupported features
+        self.assertNotIn(clouds.CloudImplementationFeatures.SPOT_INSTANCE,
+                         result)
+        self.assertNotIn(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
+                         result)
+        # Other features should still be unsupported
+        self.assertIn(clouds.CloudImplementationFeatures.STOP, result)
+        self.assertIn(clouds.CloudImplementationFeatures.AUTOSTOP, result)
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.get_spot_label')
+    def test_api_unreachable(self, mock_get_spot_label,
+                             mock_existing_allowed_contexts):
+        """Test when Kubernetes API is unreachable."""
+        mock_existing_allowed_contexts.return_value = ['test-context']
+        from sky import exceptions as sky_exceptions
+        mock_get_spot_label.side_effect = (
+            sky_exceptions.KubeAPIUnreachableError('API unreachable'))
+
+        resources = mock.MagicMock()
+        resources.region = 'test-context'
+        resources.network_tier = None
+
+        from sky import clouds
+        result = kubernetes.Kubernetes._unsupported_features_for_resources(
+            resources, region='test-context')
+
+        # Should return base unsupported features
+        self.assertIn(clouds.CloudImplementationFeatures.STOP, result)
+        self.assertIn(clouds.CloudImplementationFeatures.AUTOSTOP, result)
+        self.assertIn(clouds.CloudImplementationFeatures.SPOT_INSTANCE, result)
+        self.assertIn(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
+                      result)
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.get_spot_label')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_multiple_contexts(self, mock_detect_network_type,
+                               mock_get_spot_label,
+                               mock_existing_allowed_contexts):
+        """Test with multiple contexts."""
+        mock_existing_allowed_contexts.return_value = ['context1', 'context2']
+
+        # First context supports spot, second doesn't
+        def spot_label_side_effect(context):
+            if context == 'context1':
+                return ('spot-key', 'spot-value')
+            return (None, None)
+
+        mock_get_spot_label.side_effect = spot_label_side_effect
+
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, '')
+
+        resources = mock.MagicMock()
+        resources.region = None
+        resources.network_tier = None
+
+        from sky import clouds
+        result = kubernetes.Kubernetes._unsupported_features_for_resources(
+            resources)
+
+        # If any context supports spot, it should not be in unsupported
+        self.assertNotIn(clouds.CloudImplementationFeatures.SPOT_INSTANCE,
+                         result)
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    def test_no_contexts_available(self, mock_existing_allowed_contexts):
+        """Test when no contexts are available."""
+        mock_existing_allowed_contexts.return_value = []
+
+        resources = mock.MagicMock()
+        resources.region = None
+        resources.network_tier = None
+
+        from sky import clouds
+        result = kubernetes.Kubernetes._unsupported_features_for_resources(
+            resources)
+
+        # Should return base unsupported features
+        self.assertIn(clouds.CloudImplementationFeatures.STOP, result)
+        self.assertIn(clouds.CloudImplementationFeatures.AUTOSTOP, result)
+        self.assertIn(clouds.CloudImplementationFeatures.SPOT_INSTANCE, result)
+        self.assertIn(clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
+                      result)
+
+
+class TestKubernetesRegionsWithOffering(unittest.TestCase):
+    """Test cases for Kubernetes.regions_with_offering method."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        kubernetes.Kubernetes.logged_unreachable_contexts.clear()
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    def test_no_instance_type_returns_all_regions(
+            self, mock_existing_allowed_contexts):
+        """Test that when instance_type is None, all regions are returned."""
+        mock_existing_allowed_contexts.return_value = ['ctx1', 'ctx2', 'ctx3']
+
+        regions = kubernetes.Kubernetes.regions_with_offering(
+            instance_type=None,
+            accelerators=None,
+            use_spot=False,
+            region=None,
+            zone=None,
+            resources=None)
+
+        self.assertEqual(len(regions), 3)
+        region_names = [r.name for r in regions]
+        self.assertIn('ctx1', region_names)
+        self.assertIn('ctx2', region_names)
+        self.assertIn('ctx3', region_names)
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    def test_filter_by_region(self, mock_existing_allowed_contexts):
+        """Test filtering by specific region."""
+        mock_existing_allowed_contexts.return_value = ['ctx1', 'ctx2', 'ctx3']
+
+        regions = kubernetes.Kubernetes.regions_with_offering(
+            instance_type=None,
+            accelerators=None,
+            use_spot=False,
+            region='ctx2',
+            zone=None,
+            resources=None)
+
+        self.assertEqual(len(regions), 1)
+        self.assertEqual(regions[0].name, 'ctx2')
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.clouds.kubernetes.Kubernetes.check_features_are_supported')
+    def test_filter_by_required_features(self, mock_check_features,
+                                         mock_existing_allowed_contexts):
+        """Test filtering by resources' required features."""
+        mock_existing_allowed_contexts.return_value = ['ctx1', 'ctx2', 'ctx3']
+
+        # ctx1 and ctx3 support features, ctx2 doesn't
+        def check_features_side_effect(resources, features, region):
+            if region == 'ctx2':
+                from sky import exceptions as sky_exceptions
+                raise sky_exceptions.NotSupportedError('Not supported')
+
+        mock_check_features.side_effect = check_features_side_effect
+
+        resources = mock.MagicMock()
+        resources.get_required_cloud_features.return_value = {}
+
+        regions = kubernetes.Kubernetes.regions_with_offering(
+            instance_type=None,
+            accelerators=None,
+            use_spot=False,
+            region=None,
+            zone=None,
+            resources=resources)
+
+        self.assertEqual(len(regions), 2)
+        region_names = [r.name for r in regions]
+        self.assertIn('ctx1', region_names)
+        self.assertIn('ctx3', region_names)
+        self.assertNotIn('ctx2', region_names)
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.check_instance_fits')
+    def test_instance_fits_in_cluster(self, mock_check_instance_fits,
+                                      mock_existing_allowed_contexts):
+        """Test when instance type fits in the cluster."""
+        mock_existing_allowed_contexts.return_value = ['ctx1', 'ctx2']
+        mock_check_instance_fits.return_value = (True, None)
+
+        regions = kubernetes.Kubernetes.regions_with_offering(
+            instance_type='4CPU--8GB',
+            accelerators=None,
+            use_spot=False,
+            region=None,
+            zone=None,
+            resources=None)
+
+        self.assertEqual(len(regions), 2)
+        self.assertEqual(mock_check_instance_fits.call_count, 2)
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.check_instance_fits')
+    def test_instance_does_not_fit_no_autoscaler(
+            self, mock_check_instance_fits, mock_existing_allowed_contexts):
+        """Test when instance doesn't fit and no autoscaler configured."""
+        mock_existing_allowed_contexts.return_value = ['ctx1']
+        mock_check_instance_fits.return_value = (False, 'Not enough resources')
+
+        regions = kubernetes.Kubernetes.regions_with_offering(
+            instance_type='8CPU--16GB',
+            accelerators=None,
+            use_spot=False,
+            region=None,
+            zone=None,
+            resources=None)
+
+        # Should return empty list since instance doesn't fit
+        self.assertEqual(len(regions), 0)
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.check_instance_fits')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.provision.kubernetes.utils.get_autoscaler')
+    def test_instance_does_not_fit_with_autoscaler_can_create(
+            self, mock_get_autoscaler, mock_get_config,
+            mock_check_instance_fits, mock_existing_allowed_contexts):
+        """Test instance doesn't fit but autoscaler can create it."""
+        mock_existing_allowed_contexts.return_value = ['ctx1']
+        mock_check_instance_fits.return_value = (False, 'Not enough resources')
+        mock_get_config.return_value = 'gke'
+
+        mock_autoscaler = mock.Mock()
+        mock_autoscaler.can_query_backend = True
+        mock_autoscaler.can_create_new_instance_of_type.return_value = True
+        mock_get_autoscaler.return_value = mock_autoscaler
+
+        regions = kubernetes.Kubernetes.regions_with_offering(
+            instance_type='8CPU--16GB',
+            accelerators=None,
+            use_spot=False,
+            region=None,
+            zone=None,
+            resources=None)
+
+        # Should return the region since autoscaler can create it
+        self.assertEqual(len(regions), 1)
+        self.assertEqual(regions[0].name, 'ctx1')
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.check_instance_fits')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.provision.kubernetes.utils.get_autoscaler')
+    def test_unsupported_autoscaler_type(self, mock_get_autoscaler,
+                                         mock_get_config,
+                                         mock_check_instance_fits,
+                                         mock_existing_allowed_contexts):
+        """Test with autoscaler type that can't query backend."""
+        mock_existing_allowed_contexts.return_value = ['ctx1']
+        mock_check_instance_fits.return_value = (False, 'Not enough resources')
+        # Use a valid autoscaler type (generic kubernetes)
+        mock_get_config.return_value = 'generic'
+
+        mock_autoscaler = mock.Mock()
+        mock_autoscaler.can_query_backend = False
+        mock_get_autoscaler.return_value = mock_autoscaler
+
+        regions = kubernetes.Kubernetes.regions_with_offering(
+            instance_type='8CPU--16GB',
+            accelerators=None,
+            use_spot=False,
+            region=None,
+            zone=None,
+            resources=None)
+
+        # Should return the region (rely on autoscaler without checks)
+        self.assertEqual(len(regions), 1)
+        self.assertEqual(regions[0].name, 'ctx1')
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.check_instance_fits')
+    def test_api_unreachable_context_excluded(self, mock_check_instance_fits,
+                                              mock_existing_allowed_contexts):
+        """Test that unreachable contexts are excluded."""
+        mock_existing_allowed_contexts.return_value = ['ctx1', 'ctx2']
+
+        def check_instance_side_effect(context, instance_type):
+            if context == 'ctx1':
+                from sky import exceptions as sky_exceptions
+                raise sky_exceptions.KubeAPIUnreachableError('API unreachable')
+            return (True, None)
+
+        mock_check_instance_fits.side_effect = check_instance_side_effect
+
+        regions = kubernetes.Kubernetes.regions_with_offering(
+            instance_type='4CPU--8GB',
+            accelerators=None,
+            use_spot=False,
+            region=None,
+            zone=None,
+            resources=None)
+
+        # Only ctx2 should be returned
+        self.assertEqual(len(regions), 1)
+        self.assertEqual(regions[0].name, 'ctx2')
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.provision.kubernetes.utils.check_instance_fits')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.provision.kubernetes.utils.get_autoscaler')
+    def test_autoscaler_cannot_create_instance(self, mock_get_autoscaler,
+                                               mock_get_config,
+                                               mock_check_instance_fits,
+                                               mock_existing_allowed_contexts):
+        """Test when autoscaler exists but cannot create instance type."""
+        mock_existing_allowed_contexts.return_value = ['ctx1']
+        mock_check_instance_fits.return_value = (False, 'Not enough resources')
+        mock_get_config.return_value = 'gke'
+
+        mock_autoscaler = mock.Mock()
+        mock_autoscaler.can_query_backend = True
+        mock_autoscaler.can_create_new_instance_of_type.return_value = False
+        mock_get_autoscaler.return_value = mock_autoscaler
+
+        regions = kubernetes.Kubernetes.regions_with_offering(
+            instance_type='8CPU--16GB',
+            accelerators=None,
+            use_spot=False,
+            region=None,
+            zone=None,
+            resources=None)
+
+        # Should return empty list
+        self.assertEqual(len(regions), 0)
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    @patch('sky.clouds.kubernetes.Kubernetes.check_features_are_supported')
+    @patch('sky.provision.kubernetes.utils.check_instance_fits')
+    def test_complex_scenario_with_multiple_filters(
+            self, mock_check_instance_fits, mock_check_features,
+            mock_existing_allowed_contexts):
+        """Test complex scenario with multiple filtering conditions."""
+        mock_existing_allowed_contexts.return_value = [
+            'ctx1', 'ctx2', 'ctx3', 'ctx4'
+        ]
+
+        # ctx2 doesn't support required features
+        def check_features_side_effect(resources, features, region):
+            if region == 'ctx2':
+                from sky import exceptions as sky_exceptions
+                raise sky_exceptions.NotSupportedError('Not supported')
+
+        mock_check_features.side_effect = check_features_side_effect
+
+        # ctx3 doesn't have enough resources
+        def check_instance_side_effect(context, instance_type):
+            if context == 'ctx3':
+                return (False, 'Not enough resources')
+            return (True, None)
+
+        mock_check_instance_fits.side_effect = check_instance_side_effect
+
+        resources = mock.MagicMock()
+        resources.get_required_cloud_features.return_value = {}
+
+        regions = kubernetes.Kubernetes.regions_with_offering(
+            instance_type='4CPU--8GB',
+            accelerators=None,
+            use_spot=False,
+            region=None,
+            zone=None,
+            resources=resources)
+
+        # Only ctx1 and ctx4 should be returned
+        self.assertEqual(len(regions), 2)
+        region_names = [r.name for r in regions]
+        self.assertIn('ctx1', region_names)
+        self.assertIn('ctx4', region_names)
+
+    @patch('sky.clouds.kubernetes.Kubernetes.existing_allowed_contexts')
+    def test_no_contexts_available(self, mock_existing_allowed_contexts):
+        """Test when no contexts are available."""
+        mock_existing_allowed_contexts.return_value = []
+
+        regions = kubernetes.Kubernetes.regions_with_offering(
+            instance_type='4CPU--8GB',
+            accelerators=None,
+            use_spot=False,
+            region=None,
+            zone=None,
+            resources=None)
+
+        self.assertEqual(len(regions), 0)
 
 
 if __name__ == '__main__':

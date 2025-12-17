@@ -49,6 +49,7 @@ install_requires = [
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*',
     'ijson',
+    'orjson',
     'requests',
     # SkyPilot inherits from uvicorn.Server to customize the behavior of
     # uvicorn, so we need to pin uvicorn version to avoid potential break
@@ -83,6 +84,7 @@ install_requires = [
     'bcrypt==4.0.1',
     'pyjwt',
     'gitpython',
+    'paramiko',
     'types-paramiko',
     'alembic',
     'aiohttp',
@@ -147,6 +149,14 @@ aws_dependencies = [
     'colorama < 0.4.5',
 ]
 
+# Kubernetes 32.0.0 has an authentication bug:
+# https://github.com/kubernetes-client/python/issues/2333
+kubernetes_dependencies = [
+    'kubernetes>=20.0.0,!=32.0.0',
+    'websockets',
+    'python-dateutil',
+]
+
 # azure-cli cannot be installed normally by uv, so we need to work around it in
 # a few places.
 AZURE_CLI = 'azure-cli>=2.65.0'
@@ -187,18 +197,28 @@ cloud_dependencies: Dict[str, List[str]] = {
     'docker': ['docker'] + local_ray,
     'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
+    'coreweave': aws_dependencies + kubernetes_dependencies,
     'scp': local_ray,
     'oci': ['oci'],
-    # Kubernetes 32.0.0 has an authentication bug: https://github.com/kubernetes-client/python/issues/2333 # pylint: disable=line-too-long
-    'kubernetes': [
-        'kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'
-    ],
-    'ssh': ['kubernetes>=20.0.0,!=32.0.0', 'websockets', 'python-dateutil'],
+    'kubernetes': kubernetes_dependencies,
+    'ssh': kubernetes_dependencies,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1
-    # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python 3.11+
-    # stdlib provides tomllib; on lower versions we depend on tomli explicitly.
-    'runpod': ['runpod>=1.6.1', 'tomli; python_version < "3.11"'],
+    'runpod': [
+        # For the container registry auth api. Reference:
+        # https://github.com/runpod/runpod-python/releases/tag/1.6.1
+        'runpod>=1.6.1',
+        # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python
+        # 3.11+ stdlib provides tomllib; on lower versions we depend on tomli
+        # explicitly. Instead of installing tomli conditionally, we install it
+        # explicitly. This is because the conditional installation of tomli does
+        # not work with controller package installation code.
+        'tomli',
+        # runpod installs aiodns (via aiohttp[speedups]), which is incompatible
+        # with pycares 5.0.0 due to deprecations.
+        # See https://github.com/aio-libs/aiodns/issues/214
+        'pycares<5',
+    ],
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
@@ -217,13 +237,14 @@ cloud_dependencies: Dict[str, List[str]] = {
     'nebius': [
         # Nebius requires grpcio and protobuf, so we need to include
         # our constraints here.
-        'nebius>=0.2.47',
+        'nebius>=0.3.12',
         GRPC,
         PROTOBUF,
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
-    'seeweb': ['ecsapi>=0.2.0'],
+    'seeweb': ['ecsapi==0.4.0'],
     'shadeform': [],  # No dependencies needed for shadeform
+    'slurm': [],  # No dependencies needed for slurm
 }
 
 # Calculate which clouds should be included in the [all] installation.

@@ -56,10 +56,79 @@ import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { Card } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 // Set the refresh interval to align with other pages
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
+
+// Shared GPU utilization bar to avoid duplicating percentage math and markup
+const GpuUtilizationBar = ({
+  gpu,
+  heightClass = 'h-4',
+  wrapperClassName = '',
+}) => {
+  const total = gpu?.gpu_total || 0;
+  const notReady = gpu?.gpu_not_ready || 0;
+  const free = gpu?.gpu_free || 0;
+  const used = Math.max(0, total - free - notReady);
+  const notReadyLabel = `${notReady} not ready`;
+  const usedLabel = `${used} used`;
+  const freeLabel = `${free} free`;
+  const toPercentage = total > 0 ? (value) => (value / total) * 100 : () => 0;
+  const notReadyPercentage = toPercentage(notReady);
+  const usedPercentage = toPercentage(used);
+  const freePercentage = toPercentage(free);
+
+  return (
+    <div
+      className={`bg-gray-100 rounded-md flex overflow-hidden shadow-sm ${heightClass} ${wrapperClassName}`.trim()}
+    >
+      {notReadyPercentage > 0 && (
+        <div
+          style={{
+            width: `${notReadyPercentage}%`,
+            fontSize: 'clamp(8px, 1.2vw, 12px)',
+          }}
+          title={notReadyLabel}
+          className="bg-gray-400 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
+        >
+          {notReadyPercentage > 15 && notReadyLabel}
+        </div>
+      )}
+      {usedPercentage > 0 && (
+        <div
+          style={{
+            width: `${usedPercentage}%`,
+            fontSize: 'clamp(8px, 1.2vw, 12px)',
+          }}
+          title={usedLabel}
+          className="bg-yellow-500 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
+        >
+          {usedPercentage > 15 && usedLabel}
+        </div>
+      )}
+      {freePercentage > 0 && (
+        <div
+          style={{
+            width: `${freePercentage}%`,
+            fontSize: 'clamp(8px, 1.2vw, 12px)',
+          }}
+          title={freeLabel}
+          className="bg-green-700 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
+        >
+          {freePercentage > 15 && freeLabel}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
 export function InfrastructureSection({
@@ -75,8 +144,10 @@ export function InfrastructureSection({
   jobsData = {},
   isJobsDataLoading = true,
   isSSH = false, // To differentiate between SSH and Kubernetes
+  isSlurm = false, // To differentiate Slurm clusters
   actionButton = null, // Optional action button for the header
   contextWorkspaceMap = {}, // Mapping of contexts to workspaces
+  contextErrors = {}, // Mapping of contexts to error messages
 }) {
   // Add defensive check for contexts
   const safeContexts = contexts || [];
@@ -126,10 +197,14 @@ export function InfrastructureSection({
                 {safeContexts.length === 1
                   ? isSSH
                     ? 'pool'
-                    : 'context'
+                    : isSlurm
+                      ? 'cluster'
+                      : 'context'
                   : isSSH
                     ? 'pools'
-                    : 'contexts'}
+                    : isSlurm
+                      ? 'clusters'
+                      : 'contexts'}
               </span>
             </div>
             {actionButton}
@@ -141,7 +216,7 @@ export function InfrastructureSection({
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/4">
-                        {isSSH ? 'Node Pool' : 'Context'}
+                        Name
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
                         Clusters
@@ -216,8 +291,8 @@ export function InfrastructureSection({
                       // Get workspace information for this context
                       const workspaces = contextWorkspaceMap[context] || [];
                       const workspaceDisplay =
-                        workspaces.length > 0
-                          ? ` (${workspaces.join(', ')})`
+                        workspaces.length > 1
+                          ? ` (workspaces: ${workspaces.join(', ')})`
                           : '';
 
                       return (
@@ -282,15 +357,19 @@ export function InfrastructureSection({
                             ) : (
                               <span
                                 className={
-                                  nodes.length === 0 ? 'text-gray-400' : ''
+                                  nodes.length === 0 && contextErrors[context]
+                                    ? 'text-gray-400'
+                                    : ''
                                 }
                                 title={
-                                  nodes.length === 0
-                                    ? 'Context may be unavailable or timed out'
+                                  nodes.length === 0 && contextErrors[context]
+                                    ? contextErrors[context]
                                     : ''
                                 }
                               >
-                                {nodes.length === 0 ? '0*' : nodes.length}
+                                {nodes.length === 0 && contextErrors[context]
+                                  ? '0*'
+                                  : nodes.length}
                               </span>
                             )}
                           </td>
@@ -309,22 +388,7 @@ export function InfrastructureSection({
                                 <CircularProgress size={16} />
                               </div>
                             ) : (
-                              <span
-                                className={
-                                  totalGpus === 0 && nodes.length === 0
-                                    ? 'text-gray-400'
-                                    : ''
-                                }
-                                title={
-                                  totalGpus === 0 && nodes.length === 0
-                                    ? 'Context may be unavailable or timed out'
-                                    : ''
-                                }
-                              >
-                                {totalGpus === 0 && nodes.length === 0
-                                  ? '0*'
-                                  : totalGpus}
-                              </span>
+                              totalGpus
                             )}
                           </td>
                         </tr>
@@ -363,27 +427,20 @@ export function InfrastructureSection({
                       className={`bg-white divide-y divide-gray-200 ${gpus.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
                     >
                       {gpus.map((gpu) => {
-                        const usedGpus = gpu.gpu_total - gpu.gpu_free;
-                        const freePercentage =
-                          gpu.gpu_total > 0
-                            ? (gpu.gpu_free / gpu.gpu_total) * 100
-                            : 0;
-                        const usedPercentage =
-                          gpu.gpu_total > 0
-                            ? (usedGpus / gpu.gpu_total) * 100
-                            : 0;
-
                         // Find the requestable quantities from contexts
                         const requestableQtys = groupedPerContextGPUs
                           ? Object.values(groupedPerContextGPUs)
                               .flat()
-                              .filter(
-                                (g) =>
-                                  g.gpu_name === gpu.gpu_name &&
-                                  (isSSH
-                                    ? g.context.startsWith('ssh-')
-                                    : !g.context.startsWith('ssh-'))
-                              )
+                              .filter((g) => {
+                                if (g.gpu_name !== gpu.gpu_name) return false;
+                                if (isSlurm) return true; // For Slurm, include all
+                                // For Kubernetes/SSH, filter by context type
+                                const contextKey = g.context || g.cluster;
+                                if (!contextKey) return false;
+                                return isSSH
+                                  ? contextKey.startsWith('ssh-')
+                                  : !contextKey.startsWith('ssh-');
+                              })
                               .map((g) => g.gpu_requestable_qty_per_node)
                               .filter((qty, i, arr) => arr.indexOf(qty) === i) // Unique values
                               .join(', ')
@@ -399,26 +456,11 @@ export function InfrastructureSection({
                             </td>
                             <td className="p-3 w-2/3">
                               <div className="flex items-center gap-3">
-                                <div className="flex-1 bg-gray-100 rounded-md h-5 flex overflow-hidden shadow-sm min-w-[100px] w-full">
-                                  {usedPercentage > 0 && (
-                                    <div
-                                      style={{ width: `${usedPercentage}%` }}
-                                      className="bg-yellow-500 h-full flex items-center justify-center text-white text-xs font-medium"
-                                    >
-                                      {usedPercentage > 15 &&
-                                        `${usedGpus} used`}
-                                    </div>
-                                  )}
-                                  {freePercentage > 0 && (
-                                    <div
-                                      style={{ width: `${freePercentage}%` }}
-                                      className="bg-green-700 h-full flex items-center justify-center text-white text-xs font-medium"
-                                    >
-                                      {freePercentage > 15 &&
-                                        `${gpu.gpu_free} free`}
-                                    </div>
-                                  )}
-                                </div>
+                                <GpuUtilizationBar
+                                  gpu={gpu}
+                                  heightClass="h-5"
+                                  wrapperClassName="flex-1 min-w-[100px] w-full"
+                                />
                               </div>
                             </td>
                           </tr>
@@ -574,12 +616,6 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
             {gpusInContext.map((gpu) => {
-              const usedGpus = gpu.gpu_total - gpu.gpu_free;
-              const freePercentage =
-                gpu.gpu_total > 0 ? (gpu.gpu_free / gpu.gpu_total) * 100 : 0;
-              const usedPercentage =
-                gpu.gpu_total > 0 ? (usedGpus / gpu.gpu_total) * 100 : 0;
-
               return (
                 <div
                   key={gpu.gpu_name}
@@ -596,23 +632,12 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                       {gpu.gpu_free} free / {gpu.gpu_total} total
                     </span>
                   </div>
-                  <div className="w-full bg-gray-100 rounded-md h-4 flex overflow-hidden shadow-sm">
-                    {usedPercentage > 0 && (
-                      <div
-                        style={{ width: `${usedPercentage}%` }}
-                        className="bg-yellow-500 h-full flex items-center justify-center text-white text-xs"
-                      >
-                        {usedPercentage > 15 && `${usedGpus} used`}
-                      </div>
-                    )}
-                    {freePercentage > 0 && (
-                      <div
-                        style={{ width: `${freePercentage}%` }}
-                        className="bg-green-700 h-full flex items-center justify-center text-white text-xs"
-                      >
-                        {freePercentage > 15 && `${gpu.gpu_free} free`}
-                      </div>
-                    )}
+                  <div className="w-full">
+                    <GpuUtilizationBar
+                      gpu={gpu}
+                      heightClass="h-4"
+                      wrapperClassName="w-full"
+                    />
                   </div>
                 </div>
               );
@@ -656,7 +681,9 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                           {node.gpu_name}
                         </td>
                         <td className="p-3 whitespace-nowrap text-right text-gray-700">
-                          {`${node.gpu_free} of ${node.gpu_total} free`}
+                          {node.is_ready === false
+                            ? `0 of ${node.gpu_total} free (Node NotReady)`
+                            : `${node.gpu_free} of ${node.gpu_total} free`}
                         </td>
                       </tr>
                     ))}
@@ -1618,11 +1645,15 @@ export function GPUs() {
   const [allGPUs, setAllGPUs] = useState([]);
   const [perContextGPUs, setPerContextGPUs] = useState([]);
   const [perNodeGPUs, setPerNodeGPUs] = useState([]);
+  const [allSlurmGPUs, setAllSlurmGPUs] = useState([]);
+  const [perClusterSlurmGPUs, setPerClusterSlurmGPUs] = useState([]);
+  const [perNodeSlurmGPUs, setPerNodeSlurmGPUs] = useState([]);
   const [cloudInfraData, setCloudInfraData] = useState([]);
   const [totalClouds, setTotalClouds] = useState(0);
   const [enabledClouds, setEnabledClouds] = useState(0);
   const [contextStats, setContextStats] = useState({});
   const [contextWorkspaceMap, setContextWorkspaceMap] = useState({});
+  const [contextErrors, setContextErrors] = useState({});
 
   // Workspace-aware infrastructure state
   const [workspaceInfrastructure, setWorkspaceInfrastructure] = useState({});
@@ -1676,6 +1707,7 @@ export function GPUs() {
         setPerNodeGPUs([]);
         setContextStats({});
         setContextWorkspaceMap({});
+        setContextErrors({});
         setAvailableWorkspaces([]);
         setKubeDataLoaded(true);
         setKubeLoading(false);
@@ -1720,8 +1752,12 @@ export function GPUs() {
           allGPUs: fetchedAllGPUs,
           perContextGPUs: fetchedPerContextGPUs,
           perNodeGPUs: fetchedPerNodeGPUs,
+          allSlurmGPUs: fetchedAllSlurmGPUs,
+          perClusterSlurmGPUs: fetchedPerClusterSlurmGPUs,
+          perNodeSlurmGPUs: fetchedPerNodeSlurmGPUs,
           contextStats: fetchedContextStats,
           contextWorkspaceMap: fetchedContextWorkspaceMap,
+          contextErrors: fetchedContextErrors,
         } = infraData;
 
         setWorkspaceInfrastructure(fetchedWorkspaceInfrastructure || {});
@@ -1729,8 +1765,12 @@ export function GPUs() {
         setAllGPUs(fetchedAllGPUs || []);
         setPerContextGPUs(fetchedPerContextGPUs || []);
         setPerNodeGPUs(fetchedPerNodeGPUs || []);
+        setAllSlurmGPUs(fetchedAllSlurmGPUs || []);
+        setPerClusterSlurmGPUs(fetchedPerClusterSlurmGPUs || []);
+        setPerNodeSlurmGPUs(fetchedPerNodeSlurmGPUs || []);
         setContextStats(fetchedContextStats || {});
         setContextWorkspaceMap(fetchedContextWorkspaceMap || {});
+        setContextErrors(fetchedContextErrors || {});
 
         // Extract available workspaces from the workspace infrastructure data
         const workspaceNames = Object.keys(
@@ -1746,8 +1786,12 @@ export function GPUs() {
         setAllGPUs([]);
         setPerContextGPUs([]);
         setPerNodeGPUs([]);
+        setAllSlurmGPUs([]);
+        setPerClusterSlurmGPUs([]);
+        setPerNodeSlurmGPUs([]);
         setContextStats({});
         setContextWorkspaceMap({});
+        setContextErrors({});
         setAvailableWorkspaces([]);
         setKubeDataLoaded(true);
         setKubeLoading(false);
@@ -1759,8 +1803,12 @@ export function GPUs() {
       setAllGPUs([]);
       setPerContextGPUs([]);
       setPerNodeGPUs([]);
+      setAllSlurmGPUs([]);
+      setPerClusterSlurmGPUs([]);
+      setPerNodeSlurmGPUs([]);
       setContextStats({});
       setContextWorkspaceMap({});
+      setContextErrors({});
       setAvailableWorkspaces([]);
       setKubeDataLoaded(true);
       setKubeLoading(false);
@@ -1770,8 +1818,14 @@ export function GPUs() {
   const fetchManagedJobsData = async (forceRefresh) => {
     try {
       const jobsData = forceRefresh
-        ? await getManagedJobs({ allUsers: true })
-        : await dashboardCache.get(getManagedJobs, [{ allUsers: true }]);
+        ? await getManagedJobs({
+            allUsers: true,
+            skipFinished: true,
+            fields: ['cloud', 'region'],
+          })
+        : await dashboardCache.get(getManagedJobs, [
+            { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
+          ]);
       const jobs = jobsData?.jobs || [];
       setSshAndKubeJobsData(await getContextJobs(jobs));
       setSshAndKubeJobsDataLoading(false);
@@ -1903,7 +1957,11 @@ export function GPUs() {
   useEffect(() => {
     let isCurrent = true;
     const interval = setInterval(() => {
-      if (isCurrent && refreshDataRef.current) {
+      if (
+        isCurrent &&
+        refreshDataRef.current &&
+        window.document.visibilityState === 'visible'
+      ) {
         // Calls the latest fetchData from the ref, with showLoadingIndicators: false
         refreshDataRef.current({ showLoadingIndicators: false });
       }
@@ -1932,7 +1990,9 @@ export function GPUs() {
   const handleRefresh = () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    dashboardCache.invalidate(getManagedJobs, [
+      { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
+    ]);
     dashboardCache.invalidate(getWorkspaceInfrastructure);
     dashboardCache.invalidate(getCloudInfrastructure, [false]);
     dashboardCache.invalidate(getSSHNodePools);
@@ -2000,6 +2060,51 @@ export function GPUs() {
     [selectedWorkspace, contextWorkspaceMap]
   );
 
+  // Get enabled clouds for the selected workspace
+  const workspaceEnabledClouds = React.useMemo(() => {
+    if (selectedWorkspace === 'all') {
+      // Return all unique clouds across all workspaces
+      const allCloudsSet = new Set();
+      Object.values(workspaceInfrastructure).forEach((wsData) => {
+        if (wsData.clouds && Array.isArray(wsData.clouds)) {
+          wsData.clouds.forEach((cloud) => {
+            // Extract base cloud name (e.g., 'aws' from 'aws', 'kubernetes' from 'kubernetes/context')
+            const baseCloud = cloud.toLowerCase().split('/')[0];
+            allCloudsSet.add(baseCloud);
+          });
+        }
+      });
+      return Array.from(allCloudsSet);
+    } else {
+      // Return clouds for the selected workspace only
+      const wsData = workspaceInfrastructure[selectedWorkspace];
+      if (!wsData || !wsData.clouds || !Array.isArray(wsData.clouds)) {
+        return [];
+      }
+      const cloudsSet = new Set();
+      wsData.clouds.forEach((cloud) => {
+        const baseCloud = cloud.toLowerCase().split('/')[0];
+        cloudsSet.add(baseCloud);
+      });
+      return Array.from(cloudsSet);
+    }
+  }, [selectedWorkspace, workspaceInfrastructure]);
+
+  // Filter cloud infrastructure data based on selected workspace
+  const filteredCloudInfraData = React.useMemo(() => {
+    if (!cloudInfraData || cloudInfraData.length === 0) {
+      return [];
+    }
+    return cloudInfraData.filter((cloud) => {
+      return workspaceEnabledClouds.includes(cloud.name.toLowerCase());
+    });
+  }, [cloudInfraData, workspaceEnabledClouds]);
+
+  // Calculate enabled clouds count for the selected workspace
+  const filteredEnabledCloudsCount = React.useMemo(() => {
+    return filteredCloudInfraData.length;
+  }, [filteredCloudInfraData]);
+
   // Separate SSH contexts from Kubernetes contexts using allKubeContextNames
   const sshContexts = React.useMemo(() => {
     if (!allKubeContextNames || !Array.isArray(allKubeContextNames)) {
@@ -2052,6 +2157,43 @@ export function GPUs() {
     return allGPUs.filter((gpu) => kubeGpuNames.has(gpu.gpu_name));
   }, [allGPUs, perContextGPUs]);
 
+  // Extract Slurm cluster names from perClusterSlurmGPUs
+  const slurmClusters = React.useMemo(() => {
+    if (!perClusterSlurmGPUs || !Array.isArray(perClusterSlurmGPUs)) {
+      return [];
+    }
+    const clusters = [
+      ...new Set(perClusterSlurmGPUs.map((gpu) => gpu.cluster)),
+    ];
+    return clusters.sort();
+  }, [perClusterSlurmGPUs]);
+
+  // Group perClusterSlurmGPUs by cluster
+  const groupedPerClusterSlurmGPUs = React.useMemo(() => {
+    if (!perClusterSlurmGPUs) return {};
+    return perClusterSlurmGPUs.reduce((acc, gpu) => {
+      const { cluster } = gpu;
+      if (!acc[cluster]) {
+        acc[cluster] = [];
+      }
+      acc[cluster].push(gpu);
+      return acc;
+    }, {});
+  }, [perClusterSlurmGPUs]);
+
+  // Group perNodeSlurmGPUs by cluster
+  const groupedPerNodeSlurmGPUs = React.useMemo(() => {
+    if (!perNodeSlurmGPUs) return {};
+    return perNodeSlurmGPUs.reduce((acc, node) => {
+      const { cluster } = node;
+      if (!acc[cluster]) {
+        acc[cluster] = [];
+      }
+      acc[cluster].push(node);
+      return acc;
+    }, {});
+  }, [perNodeSlurmGPUs]);
+
   // Group perNodeGPUs by context
   const groupedPerNodeGPUs = React.useMemo(() => {
     if (!perNodeGPUs) return {};
@@ -2079,14 +2221,21 @@ export function GPUs() {
   const handleContextClick = (context) => {
     setSelectedContext(context);
     // Use push instead of replace for proper browser history
-    router.push(`/infra/${encodeURIComponent(context)}`);
+    const targetPath = `/infra/${encodeURIComponent(context)}`;
+    // Only navigate if we're not already on the target path
+    if (router.asPath !== targetPath) {
+      router.push(targetPath);
+    }
   };
 
   // Handler to go back to main view
   const handleBackClick = () => {
     setSelectedContext(null);
     // Use push instead of replace for proper browser history
-    router.push('/infra');
+    // Only navigate if we're not already on the infra page
+    if (router.asPath !== '/infra') {
+      router.push('/infra');
+    }
   };
 
   // Render context details
@@ -2154,12 +2303,14 @@ export function GPUs() {
           <div className="flex items-center mb-4">
             <h3 className="text-lg font-semibold">Cloud</h3>
             <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-              {enabledClouds} of {totalClouds} enabled
+              {filteredEnabledCloudsCount} of {totalClouds} enabled
             </span>
           </div>
-          {!cloudInfraData || cloudInfraData.length === 0 ? (
+          {!filteredCloudInfraData || filteredCloudInfraData.length === 0 ? (
             <p className="text-sm text-gray-500">
-              No enabled clouds available.
+              {selectedWorkspace === 'all'
+                ? 'No enabled clouds available.'
+                : `No enabled clouds for workspace "${selectedWorkspace}".`}
             </p>
           ) : (
             <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
@@ -2178,7 +2329,7 @@ export function GPUs() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {cloudInfraData.map((cloud) => {
+                  {filteredCloudInfraData.map((cloud) => {
                     // Check if cloud data is complete
                     const hasCompleteData =
                       cloudDataLoaded &&
@@ -2248,6 +2399,7 @@ export function GPUs() {
         isJobsDataLoading={sshAndKubeJobsDataLoading}
         isSSH={true}
         contextWorkspaceMap={contextWorkspaceMap}
+        contextErrors={contextErrors}
         actionButton={
           // TODO: Add back when SSH Node Pool add operation is more robust
           // <button
@@ -2279,6 +2431,28 @@ export function GPUs() {
         isJobsDataLoading={sshAndKubeJobsDataLoading}
         isSSH={false}
         contextWorkspaceMap={contextWorkspaceMap}
+        contextErrors={contextErrors}
+      />
+    );
+  };
+
+  const renderSlurmInfrastructure = () => {
+    return (
+      <InfrastructureSection
+        title="Slurm"
+        isLoading={kubeLoading}
+        isDataLoaded={kubeDataLoaded}
+        contexts={slurmClusters}
+        gpus={allSlurmGPUs}
+        groupedPerContextGPUs={groupedPerClusterSlurmGPUs}
+        groupedPerNodeGPUs={groupedPerNodeSlurmGPUs}
+        handleContextClick={handleContextClick}
+        contextStats={{}}
+        jobsData={{}}
+        isJobsDataLoading={false}
+        isSSH={false}
+        isSlurm={true}
+        contextWorkspaceMap={{}}
       />
     );
   };
@@ -2312,7 +2486,16 @@ export function GPUs() {
       });
     };
 
-    // Always add all three sections (they handle their own loading/empty states)
+    // Always add all sections (they handle their own loading/empty states)
+
+    // Add Slurm section (always show) - Priority 1 to show at top
+    const slurmHasActivity = slurmClusters.length > 0;
+    sections.push({
+      name: 'Slurm',
+      render: renderSlurmInfrastructure,
+      hasActivity: slurmHasActivity,
+      priority: 1, // Slurm gets priority 1 within same activity level
+    });
 
     // Add Kubernetes section (always show)
     // Kubernetes section is active if there are any contexts available (similar to Cloud logic)
@@ -2321,7 +2504,7 @@ export function GPUs() {
       name: 'Kubernetes',
       render: renderKubernetesInfrastructure,
       hasActivity: kubeHasActivity,
-      priority: 1, // Kubernetes gets priority 1 within same activity level
+      priority: 2, // Kubernetes gets priority 2 within same activity level
     });
 
     // Add Cloud section (always show)
@@ -2331,7 +2514,7 @@ export function GPUs() {
       name: 'Cloud',
       render: renderCloudInfrastructure,
       hasActivity: cloudHasActivity,
-      priority: 2, // Cloud gets priority 2 within same activity level
+      priority: 3, // Cloud gets priority 3 within same activity level
     });
 
     // Add SSH section (always show)
@@ -2341,7 +2524,7 @@ export function GPUs() {
       name: 'SSH Node Pool',
       render: renderSSHNodePoolInfrastructure,
       hasActivity: sshHasActivity,
-      priority: 3, // SSH gets priority 3 within same activity level
+      priority: 4, // SSH gets priority 4 within same activity level
     });
 
     // Dynamic sorting: enabled/active sections move to front automatically
@@ -2411,25 +2594,25 @@ export function GPUs() {
           {/* Workspace Selector */}
           {availableWorkspaces.length > 0 && (
             <div className="flex items-center mr-4">
-              <label
-                htmlFor="workspace-selector"
-                className="text-sm font-medium text-gray-700 mr-2"
-              >
+              <label className="text-sm font-medium text-gray-700 mr-2">
                 Workspace:
               </label>
-              <select
-                id="workspace-selector"
+              <Select
                 value={selectedWorkspace}
-                onChange={(e) => setSelectedWorkspace(e.target.value)}
-                className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-blue focus:border-transparent"
+                onValueChange={setSelectedWorkspace}
               >
-                <option value="all">All Workspaces</option>
-                {availableWorkspaces.map((workspace) => (
-                  <option key={workspace} value={workspace}>
-                    {workspace}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="w-40 h-8 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Workspaces</SelectItem>
+                  {availableWorkspaces.map((workspace) => (
+                    <SelectItem key={workspace} value={workspace}>
+                      {workspace}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           )}
 

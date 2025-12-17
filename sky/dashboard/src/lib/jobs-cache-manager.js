@@ -178,15 +178,7 @@ class JobsCacheManager {
       };
     } catch (error) {
       console.error('Error in getPaginatedJobs:', error);
-      return {
-        jobs: [],
-        total: 0,
-        totalNoFilter: 0,
-        controllerStopped: false,
-        statusCounts: {},
-        fromCache: false,
-        cacheStatus: 'error',
-      };
+      throw error;
     }
   }
 
@@ -198,6 +190,12 @@ class JobsCacheManager {
     const fullDataResponse = await dashboardCache.get(getManagedJobs, [
       filterOptions,
     ]);
+
+    // If upstream indicates to skip cache (e.g., transient error), do not
+    // update the full dataset cache and propagate the response upward.
+    if (fullDataResponse && fullDataResponse.__skipCache) {
+      return fullDataResponse;
+    }
 
     if (fullDataResponse.controllerStopped || !fullDataResponse.jobs) {
       return fullDataResponse;

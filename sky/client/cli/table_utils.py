@@ -1,7 +1,7 @@
 """Utilities for formatting tables for CLI output."""
 import abc
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import prettytable
 
@@ -88,15 +88,23 @@ def format_storage_table(storages: List[responses.StorageRecord],
         return 'No existing storage.'
 
 
-def format_job_table(jobs: List[responses.ManagedJobRecord],
-                     show_all: bool,
-                     show_user: bool,
-                     max_jobs: Optional[int] = None):
+def format_job_table(
+    jobs: List[responses.ManagedJobRecord],
+    show_all: bool,
+    show_user: bool,
+    pool_status: Optional[List[Dict[str, Any]]] = None,
+    max_jobs: Optional[int] = None,
+    status_counts: Optional[Dict[str, int]] = None,
+):
     jobs = [job.model_dump() for job in jobs]
-    return managed_jobs.format_job_table(jobs,
-                                         show_all=show_all,
-                                         show_user=show_user,
-                                         max_jobs=max_jobs)
+    return managed_jobs.format_job_table(
+        jobs,
+        pool_status=pool_status,
+        show_all=show_all,
+        show_user=show_user,
+        max_jobs=max_jobs,
+        job_status_counts=status_counts,
+    )
 
 
 _BASIC_COLUMNS = [
@@ -200,20 +208,21 @@ class PVCVolumeTable(VolumeTable):
         """Create the PVC volume table."""
         #  If show_all is False, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
-        #   AGE, STATUS, LAST_USE, USED_BY
+        #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL
         #  If show_all is True, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
-        #   AGE, STATUS, LAST_USE, USED_BY, NAME_ON_CLOUD
+        #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL, NAME_ON_CLOUD
         #   STORAGE_CLASS, ACCESS_MODE
 
+        columns = _BASIC_COLUMNS + [
+            'IS_EPHEMERAL',
+        ]
         if show_all:
-            columns = _BASIC_COLUMNS + [
+            columns = columns + [
                 'NAME_ON_CLOUD',
                 'STORAGE_CLASS',
                 'ACCESS_MODE',
             ]
-        else:
-            columns = _BASIC_COLUMNS
 
         table = log_utils.create_table(columns)
         return table
@@ -224,6 +233,7 @@ class PVCVolumeTable(VolumeTable):
         """Add rows to the PVC volume table."""
         for row in volumes:
             table_row = self._get_row_base_columns(row, show_all)
+            table_row.append(row.get('is_ephemeral', False))
             if show_all:
                 table_row.append(row.get('name_on_cloud', ''))
                 table_row.append(

@@ -30,6 +30,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import click
+from conftest import all_clouds_in_smoke_tests
 from conftest import cloud_to_pytest_keyword
 from conftest import default_clouds_to_run
 import requests
@@ -42,6 +43,7 @@ QUEUE_GENERIC_CLOUD = 'generic_cloud'
 QUEUE_EKS = 'eks'
 QUEUE_GKE = 'gke'
 QUEUE_KIND = 'kind'
+QUEUE_BENCHMARK = 'single_container'
 # We use a separate queue for generic cloud tests on remote servers because:
 # - generic_cloud queue has high concurrency on a single VM
 # - remote-server requires launching a docker container per test
@@ -60,6 +62,9 @@ CLOUD_QUEUE_MAP = {
     'gcp': QUEUE_GENERIC_CLOUD,
     'azure': QUEUE_GENERIC_CLOUD,
     'nebius': QUEUE_GENERIC_CLOUD,
+    'lambda': QUEUE_GENERIC_CLOUD,
+    'runpod': QUEUE_GENERIC_CLOUD,
+    'slurm': QUEUE_GENERIC_CLOUD,
     'kubernetes': QUEUE_KIND
 }
 
@@ -68,8 +73,11 @@ GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
                        'edit directly.\n')
 
 
-def _get_buildkite_queue(cloud: str, remote_server: bool,
-                         run_on_cloud_kube_backend: bool, args: str) -> str:
+def _get_buildkite_queue(cloud: str,
+                         remote_server: bool,
+                         run_on_cloud_kube_backend: bool,
+                         args: str,
+                         benchmark_test: bool = False) -> str:
     """Get the Buildkite queue for a given cloud.
 
     We use a separate queue for generic cloud tests on remote servers because:
@@ -79,10 +87,16 @@ def _get_buildkite_queue(cloud: str, remote_server: bool,
 
     Kubernetes has low concurrency on a single VM originally,
     so remote-server won't drain VM resources, we can reuse the same queue.
+
+    For benchmark test, we use a dedicated benchmark queue that has guaranteed
+    resources offering to get reliable performance results.
     """
     env_queue = os.environ.get('BUILDKITE_QUEUE', None)
     if env_queue:
         return env_queue
+
+    if benchmark_test:
+        return QUEUE_BENCHMARK
 
     if '--env-file' in args:
         # TODO(zeping): Remove this when test requirements become more varied.
@@ -113,8 +127,8 @@ def _parse_args(args: Optional[str] = None):
     parser = argparse.ArgumentParser(
         description="Process cloud arguments for tests")
 
-    # Flags for recognized clouds
-    for cloud in PYTEST_TO_CLOUD_KEYWORD.keys():
+    # Flags for recognized clouds - use cloud names (e.g., --lambda) to match pytest
+    for cloud in all_clouds_in_smoke_tests:
         parser.add_argument(f"--{cloud}", action="store_true")
 
     # Generic cloud argument, which takes a value (e.g., --generic-cloud aws)
@@ -138,8 +152,8 @@ def _parse_args(args: Optional[str] = None):
     # Collect chosen clouds from the flags
     # TODO(zpoint): get default clouds from the conftest.py
     default_clouds_to_run = []
-    for cloud in PYTEST_TO_CLOUD_KEYWORD.keys():
-        if getattr(parsed_args, cloud):
+    for cloud in all_clouds_in_smoke_tests:
+        if getattr(parsed_args, cloud, False):
             default_clouds_to_run.append(cloud)
     if default_clouds_to_run:
         default_clouds_to_run = list(
@@ -198,6 +212,7 @@ def _extract_marked_tests(
     rerun failures. Additionally, the parallelism would be controlled by pytest
     instead of the buildkite job queue.
     """
+    # Args are already in the format pytest expects (cloud names like --lambda)
     cmd = f'pytest {file_path} --collect-only {args}'
     output = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
@@ -242,6 +257,7 @@ def _extract_marked_tests(
         clouds_to_include = []
         run_on_cloud_kube_backend = ('resource_heavy' in marks and
                                      'kubernetes' in default_clouds_to_run)
+        benchmark_test = 'benchmark' in marks
 
         for mark in marks:
             if mark not in PYTEST_TO_CLOUD_KEYWORD:
@@ -280,7 +296,8 @@ def _extract_marked_tests(
                           ] * (len(final_clouds_to_include) - len(param_list))
         function_cloud_map[function_name] = (final_clouds_to_include, [
             _get_buildkite_queue(cloud, remote_server,
-                                 run_on_cloud_kube_backend, args)
+                                 run_on_cloud_kube_backend, args,
+                                 benchmark_test)
             for cloud in final_clouds_to_include
         ], param_list, [
             extra_args for _ in range(len(final_clouds_to_include))

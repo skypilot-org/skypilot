@@ -1,0 +1,1 @@
+../../generated-examples/coreweave_infiniband.md

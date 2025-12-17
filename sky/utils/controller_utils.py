@@ -23,10 +23,10 @@ from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
-from sky.jobs import state as managed_job_state
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
+from sky.server import config as server_config
 from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -569,7 +569,15 @@ def shared_controller_vars_to_fill(
         # with a remote API server.
         constants.USING_REMOTE_API_SERVER_ENV_VAR: str(
             common_utils.get_using_remote_api_server()),
+        constants.IS_SKYPILOT_SERVE_CONTROLLER:
+            ('true'
+             if controller == Controllers.SKY_SERVE_CONTROLLER else 'false'),
     })
+    override_concurrent_launches = os.environ.get(
+        constants.SERVE_OVERRIDE_CONCURRENT_LAUNCHES, None)
+    if override_concurrent_launches is not None:
+        env_vars[constants.SERVE_OVERRIDE_CONCURRENT_LAUNCHES] = str(
+            int(override_concurrent_launches))
     if skypilot_config.loaded():
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
         env_vars[
@@ -1227,34 +1235,130 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
 
 # ======================= Resources Management Functions =======================
 
-# Based on testing, assume a running job process uses 350MB memory. We use the
-# same estimation for service controller process.
-JOB_MEMORY_MB = 350
-# Monitoring process for service is 1GB. This is based on an old estimation but
-# we keep it here for now.
+# Monitoring process for service is 512MB. This is based on an old
+# estimation but we keep it here for now.
 # TODO(tian): Remeasure this.
-SERVE_MONITORING_MEMORY_MB = 1024
-# The ratio of service controller process to job process. We will treat each
-# service as SERVE_PROC_RATIO job processes.
-SERVE_PROC_RATIO = SERVE_MONITORING_MEMORY_MB / JOB_MEMORY_MB
-# Past 2000 simultaneous jobs, we become unstable.
-# See https://github.com/skypilot-org/skypilot/issues/4649.
-MAX_JOB_LIMIT = 2000
-# Number of ongoing launches launches allowed per CPU, for managed jobs.
-JOB_LAUNCHES_PER_CPU = 4
-# Number of ongoing launches launches allowed per CPU, for services. This is
-# also based on an old estimation, but SKyServe indeed spawn a new process
-# for each launch operation, so it should be slightly more resources demanding
-# than managed jobs.
-SERVE_LAUNCHES_PER_CPU = 2
-# The ratio of service launch to job launch. This is inverted as the parallelism
-# is determined by 1 / LAUNCHES_PER_CPU.
-SERVE_LAUNCH_RATIO = JOB_LAUNCHES_PER_CPU / SERVE_LAUNCHES_PER_CPU
+SERVE_MONITORING_MEMORY_MB = 512
+# The resource consumption ratio of service launch to serve down.
+SERVE_LAUNCH_RATIO = 2.0
 
 # The _RESOURCES_LOCK should be held whenever we are checking the parallelism
 # control or updating the schedule_state of any job or service. Any code that
 # takes this lock must conclude by calling maybe_schedule_next_jobs.
 _RESOURCES_LOCK = '~/.sky/locks/controller_resources.lock'
+
+# keep 2GB reserved after the controllers
+MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB = 2048
+
+# NOTE: In the current implementation, we only consider the memory
+# The ratio of resources consumption for managed jobs and pool/serve.
+# This measures pool_resources / jobs_resources. If 2 GB memory is allocated to
+# jobs, then 2 * POOL_JOBS_RESOURCES_RATIO GB memory is allocated to pool/serve.
+POOL_JOBS_RESOURCES_RATIO = 1
+# Number of ongoing launches launches allowed per worker. Can probably be
+# increased a bit to around 16 but keeping it lower to just to be safe
+LAUNCHES_PER_WORKER = 8
+# Number of ongoing launches allowed per service. Can probably be increased
+# a bit as well.
+LAUNCHES_PER_SERVICE = 4
+
+# Based on testing, each worker takes around 200-300MB memory. Keeping it
+# higher to be safe.
+JOB_WORKER_MEMORY_MB = 400
+# this can probably be increased to around 300-400 but keeping it lower to just
+# to be safe
+MAX_JOBS_PER_WORKER = 200
+# Maximum number of controllers that can be running. Hard to handle more than
+# 512 launches at once.
+MAX_CONTROLLERS = 512 // LAUNCHES_PER_WORKER
+# Limit the number of jobs that can be running at once on the entire jobs
+# controller cluster. It's hard to handle cancellation of more than 2000 jobs at
+# once.
+# TODO(cooperc): Once we eliminate static bottlenecks (e.g. sqlite), remove this
+# hardcoded max limit.
+MAX_TOTAL_RUNNING_JOBS = 2000
+
+
+def compute_memory_reserved_for_controllers(
+        reserve_for_controllers: bool, reserve_extra_for_pool: bool) -> float:
+    reserved_memory_mb = 0.0
+    if reserve_for_controllers:
+        reserved_memory_mb = float(MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
+        if reserve_extra_for_pool:
+            reserved_memory_mb *= (1. + POOL_JOBS_RESOURCES_RATIO)
+    return reserved_memory_mb
+
+
+def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
+    controller_reserved = compute_memory_reserved_for_controllers(
+        reserve_for_controllers=True, reserve_extra_for_pool=pool)
+    total_memory_mb = (common_utils.get_mem_size_gb() * 1024 -
+                       controller_reserved)
+    if not consolidation_mode:
+        return total_memory_mb
+    config = server_config.compute_server_config(
+        deploy=True, quiet=True, reserved_memory_mb=controller_reserved)
+    used = 0.0
+    used += ((config.long_worker_config.garanteed_parallelism +
+              config.long_worker_config.burstable_parallelism) *
+             server_config.LONG_WORKER_MEM_GB * 1024)
+    used += ((config.short_worker_config.garanteed_parallelism +
+              config.short_worker_config.burstable_parallelism) *
+             server_config.SHORT_WORKER_MEM_GB * 1024)
+    return total_memory_mb - used
+
+
+def _is_consolidation_mode(pool: bool) -> bool:
+    return skypilot_config.get_nested(
+        ('jobs' if pool else 'serve', 'controller', 'consolidation_mode'),
+        default_value=False)
+
+
+@annotations.lru_cache(scope='request')
+def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
+    """Returns the number of jobs controllers / services that should be running.
+
+    This is the number of controllers / services that should be running
+    to maximize resource utilization.
+
+    In consolidation mode, we use the existing API server so our resource
+    requirements are just for the job controllers / services. We try taking
+    up as much memory as possible left over from the API server.
+
+    In non-consolidation mode, we have to take into account the memory of the
+    API server workers. We limit to only 8 launches per worker, so our logic is
+    each controller will take CONTROLLER_MEMORY_MB + 8 * WORKER_MEMORY_MB. We
+    leave some leftover room for ssh codegen and ray status overhead.
+    """
+    consolidation_mode = _is_consolidation_mode(pool)
+
+    total_memory_mb = _get_total_usable_memory_mb(pool, consolidation_mode)
+
+    # In consolidation mode, we assume the API server is running in deployment
+    # mode, hence resource management (i.e. how many requests are allowed) is
+    # done by the API server.
+    resource_per_unit_worker = 0.
+    # Otherwise, it runs a local API server on the jobs/serve controller.
+    # We need to do the resource management ourselves.
+    if not consolidation_mode:
+        launches_per_worker = (LAUNCHES_PER_WORKER
+                               if pool else LAUNCHES_PER_SERVICE)
+        resource_per_unit_worker = (launches_per_worker *
+                                    server_config.LONG_WORKER_MEM_GB * 1024)
+
+    # If running pool on jobs controller, we need to account for the resources
+    # consumed by the jobs.
+    ratio = (1. + POOL_JOBS_RESOURCES_RATIO) if pool else 1.
+    resource_per_unit = ratio * (raw_resource_per_unit +
+                                 resource_per_unit_worker)
+
+    return max(int(total_memory_mb / resource_per_unit), 1)
+
+
+def get_number_of_jobs_controllers() -> int:
+    return min(
+        MAX_CONTROLLERS,
+        _get_parallelism(pool=True, raw_resource_per_unit=JOB_WORKER_MEMORY_MB))
 
 
 @annotations.lru_cache(scope='global', maxsize=1)
@@ -1264,40 +1368,42 @@ def get_resources_lock_path() -> str:
     return path
 
 
-@annotations.lru_cache(scope='request')
-def _get_job_parallelism() -> int:
-    job_memory = JOB_MEMORY_MB * 1024 * 1024
-    job_limit = min(psutil.virtual_memory().total // job_memory, MAX_JOB_LIMIT)
-    return max(job_limit, 1)
+def _get_number_of_services(pool: bool) -> int:
+    return _get_parallelism(pool=pool,
+                            raw_resource_per_unit=SERVE_MONITORING_MEMORY_MB *
+                            POOL_JOBS_RESOURCES_RATIO)
 
 
 @annotations.lru_cache(scope='request')
-def _get_launch_parallelism() -> int:
-    cpus = os.cpu_count()
-    return cpus * JOB_LAUNCHES_PER_CPU if cpus is not None else 1
+def _get_request_parallelism(pool: bool) -> int:
+    # NOTE(dev): One smoke test depends on this value.
+    # tests/smoke_tests/test_sky_serve.py::test_skyserve_new_autoscaler_update
+    # assumes 4 concurrent launches.
+    override_concurrent_launches = os.environ.get(
+        constants.SERVE_OVERRIDE_CONCURRENT_LAUNCHES, None)
+    if override_concurrent_launches is not None and not pool:
+        return int(override_concurrent_launches)
+    # Limitation per service x number of services
+    launches_per_worker = (LAUNCHES_PER_WORKER
+                           if pool else LAUNCHES_PER_SERVICE)
+    return (launches_per_worker * POOL_JOBS_RESOURCES_RATIO *
+            _get_number_of_services(pool))
 
 
-def can_provision() -> bool:
-    # We always prioritize terminating over provisioning, to save the cost on
-    # idle resources.
-    if serve_state.total_number_scheduled_to_terminate_replicas() > 0:
-        return False
-    return can_terminate()
+def can_provision(pool: bool) -> bool:
+    # TODO(tian): probe API server to see if there is any pending provision
+    # requests.
+    return can_terminate(pool)
 
 
-def can_start_new_process() -> bool:
-    num_procs = (serve_state.get_num_services() * SERVE_PROC_RATIO +
-                 managed_job_state.get_num_alive_jobs())
-    return num_procs < _get_job_parallelism()
+def can_start_new_process(pool: bool) -> bool:
+    return serve_state.get_num_services() < _get_number_of_services(pool)
 
 
-# We limit the number of terminating replicas to the number of CPUs. This is
-# just a temporary solution to avoid overwhelming the controller. After one job
-# controller PR, we should use API server to handle resources management.
-def can_terminate() -> bool:
+def can_terminate(pool: bool) -> bool:
+    # TODO(tian): probe API server to see if there is any pending terminate
+    # requests.
     num_terminating = (
-        serve_state.total_number_provisioning_replicas() * SERVE_LAUNCH_RATIO +
-        # Each terminate process will take roughly the same CPUs as job launch.
-        serve_state.total_number_terminating_replicas() +
-        managed_job_state.get_num_launching_jobs())
-    return num_terminating < _get_launch_parallelism()
+        serve_state.total_number_provisioning_replicas() +
+        serve_state.total_number_terminating_replicas() / SERVE_LAUNCH_RATIO)
+    return num_terminating < _get_request_parallelism(pool)

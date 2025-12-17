@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from sky.clouds import ssh
-from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import resources_utils
 
 
 class TestSSHExistingAllowedContexts(unittest.TestCase):
@@ -301,6 +301,218 @@ class TestSSHExistingAllowedContexts(unittest.TestCase):
                 self.assertEqual(sorted(result), ['ssh-prod', 'ssh-staging'])
                 # Should log empty tuple since all node pool contexts exist
                 mock_log.assert_called_once_with(())
+
+
+class TestSSHMakeDeployResourcesVariables(unittest.TestCase):
+    """Test cases for SSH.make_deploy_resources_variables method."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        # Create a mock resources object for testing
+        self.resources = mock.MagicMock()
+        self.resources.instance_type = "2CPU--4GB"
+        self.resources.accelerators = None
+        self.resources.use_spot = False
+        self.resources.region = "ssh-my-cluster"
+        self.resources.zone = None
+        self.resources.cluster_config_overrides = {}
+        self.resources.image_id = None
+
+        # Mock the assert_launchable method
+        setattr(self.resources, 'assert_launchable', lambda: self.resources)
+
+        # Import NetworkTier for setting network_tier
+        from sky.utils import resources_utils
+        self.resources.network_tier = resources_utils.NetworkTier.BEST
+
+        self.cluster_name = "test-ssh-cluster"
+        self.region = mock.MagicMock()
+        self.region.name = "ssh-my-cluster"
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_ssh_cloud_uses_ssh_config_for_provision_timeout(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_accelerator_label_keys,
+            mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes):
+        """Test that SSH cloud uses 'ssh' config (not 'kubernetes') for provision_timeout."""
+
+        # Setup mocks
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, '')
+
+        mock_get_current_context.return_value = "ssh-my-cluster"
+        mock_get_namespace.return_value = "default"
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+
+        # Track calls to get_effective_region_config
+        config_calls = []
+
+        def config_side_effect(cloud,
+                               keys,
+                               region,
+                               default_value=None,
+                               override_configs=None):
+            config_calls.append({
+                'cloud': cloud,
+                'keys': keys,
+                'region': region
+            })
+            # Return different values based on cloud and keys
+            if cloud == 'ssh' and keys == ('provision_timeout',):
+                return 7200  # SSH-specific timeout
+            elif cloud == 'kubernetes' and keys == ('provision_timeout',):
+                return 3600  # K8s-specific timeout (should not be used)
+            elif keys == ('remote_identity',):
+                return 'SERVICE_ACCOUNT'
+            elif keys == ('high_availability', 'storage_class_name'):
+                return None
+            return default_value
+
+        mock_get_cloud_config_value.side_effect = config_side_effect
+
+        # Mock networking
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = "portforward"
+        mock_get_port_mode.return_value = mock_port_mode
+
+        # Mock image
+        mock_get_image.return_value = "test-image:latest"
+
+        # Create SSH cloud instance
+        ssh_cloud = ssh.SSH()
+
+        # Verify SSH cloud has correct _REPR
+        self.assertEqual(ssh_cloud._REPR, 'SSH')
+
+        # Call make_deploy_resources_variables
+        deploy_vars = ssh_cloud.make_deploy_resources_variables(
+            resources=self.resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
+            region=self.region,
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        # Verify that provision_timeout was retrieved from 'ssh' config
+        provision_timeout_calls = [
+            call for call in config_calls
+            if call['keys'] == ('provision_timeout',)
+        ]
+        self.assertEqual(len(provision_timeout_calls), 1)
+        self.assertEqual(provision_timeout_calls[0]['cloud'], 'ssh')
+        # The region should be the context name (with 'ssh-' prefix)
+        self.assertEqual(provision_timeout_calls[0]['region'], 'ssh-my-cluster')
+
+        # Verify the timeout value is set in deploy vars
+        self.assertIn('timeout', deploy_vars)
+        self.assertEqual(deploy_vars['timeout'], '7200')
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_ssh_cloud_uses_context_specific_config(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_accelerator_label_keys,
+            mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes):
+        """Test that SSH cloud uses context-specific config when available."""
+
+        # Setup mocks
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, '')
+
+        mock_get_current_context.return_value = "ssh-prod-cluster"
+        mock_get_namespace.return_value = "default"
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+
+        # Simulate context-specific config
+        def config_side_effect(cloud,
+                               keys,
+                               region,
+                               default_value=None,
+                               override_configs=None):
+            if cloud == 'ssh' and keys == ('provision_timeout',):
+                if region == 'ssh-prod-cluster':
+                    return 9000  # Context-specific timeout
+                else:
+                    return 7200  # Default SSH timeout
+            elif keys == ('remote_identity',):
+                return 'SERVICE_ACCOUNT'
+            elif keys == ('high_availability', 'storage_class_name'):
+                return None
+            return default_value
+
+        mock_get_cloud_config_value.side_effect = config_side_effect
+
+        # Mock networking
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = "portforward"
+        mock_get_port_mode.return_value = mock_port_mode
+
+        # Mock image
+        mock_get_image.return_value = "test-image:latest"
+
+        # Create SSH cloud instance and resources for prod cluster
+        ssh_cloud = ssh.SSH()
+        prod_resources = mock.MagicMock()
+        prod_resources.instance_type = "2CPU--4GB"
+        prod_resources.accelerators = None
+        prod_resources.use_spot = False
+        prod_resources.region = "ssh-prod-cluster"
+        prod_resources.zone = None
+        prod_resources.cluster_config_overrides = {}
+        prod_resources.image_id = None
+        setattr(prod_resources, 'assert_launchable', lambda: prod_resources)
+
+        from sky.utils import resources_utils
+        prod_resources.network_tier = resources_utils.NetworkTier.BEST
+
+        prod_region = mock.MagicMock()
+        prod_region.name = "ssh-prod-cluster"
+
+        # Call make_deploy_resources_variables
+        deploy_vars = ssh_cloud.make_deploy_resources_variables(
+            resources=prod_resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name="test-prod-cluster",
+                name_on_cloud="test-prod-cluster"),
+            region=prod_region,
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        # Verify the context-specific timeout is used
+        self.assertIn('timeout', deploy_vars)
+        self.assertEqual(deploy_vars['timeout'], '9000')
 
 
 if __name__ == '__main__':

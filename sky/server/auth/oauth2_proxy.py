@@ -16,6 +16,7 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.jobs import utils as managed_job_utils
+from sky.server import middleware_utils
 from sky.server.auth import authn
 from sky.server.auth import loopback
 from sky.users import permission
@@ -36,6 +37,7 @@ OAUTH2_PROXY_BASE_URL_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL'
 OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED'
 
 
+@middleware_utils.websocket_aware
 class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle authentication by delegating to OAuth2 Proxy."""
 
@@ -126,13 +128,10 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def _authenticate(self, request: fastapi.Request, call_next,
                             session: aiohttp.ClientSession):
-        forwarded_headers = dict(request.headers)
+        forwarded_headers = {}
         auth_url = f'{self.proxy_base}/oauth2/auth'
         forwarded_headers['X-Forwarded-Uri'] = str(request.url).rstrip('/')
-        # Remove content-length and content-type headers and drop request body
-        # to reduce the auth overhead.
-        forwarded_headers.pop('content-length', None)
-        forwarded_headers.pop('content-type', None)
+        forwarded_headers['Host'] = request.url.hostname
         logger.debug(f'authenticate request: {auth_url}, '
                      f'headers: {forwarded_headers}')
 

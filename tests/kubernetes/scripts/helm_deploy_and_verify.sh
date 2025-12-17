@@ -68,8 +68,10 @@ echo "Deploying SkyPilot API server..."
 if [ "$HELM_VERSION" = "latest" ]; then
     extra_flag="--devel"
 else
-    # Convert PEP440 version to SemVer if needed (e.g., 1.0.0.dev20250609 -> 1.0.0-dev.20250609)
-    SEMVER_VERSION=$(echo "$HELM_VERSION" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)/\1-dev.\2/')
+    # Convert PEP440 version to SemVer if needed
+	# 0.11.0rc1 -> 0.11.0-rc.1
+	# 1.0.0.dev20250609 -> 1.0.0-dev.20250609
+    SEMVER_VERSION=$(echo "$HELM_VERSION" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)rc([0-9]+)/\1-rc.\2/' | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)/\1-dev.\2/')
     extra_flag="--version $SEMVER_VERSION"
 fi
 

@@ -197,12 +197,11 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                     f.write(request.codegen)
                 os.chmod(script_path, 0o755)
 
-            cd = f'cd {constants.SKY_REMOTE_WORKDIR}'
             job_submit_cmd = (
                 # JOB_CMD_IDENTIFIER is used for identifying the process
                 # retrieved with pid is the same driver process.
                 f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
-                f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}'
+                f'{constants.SKY_PYTHON_CMD} -u {script_path}'
                 # Do not use &>, which is not POSIX and may not work.
                 # Note that the order of ">filename 2>&1" matters.
                 f' > {remote_log_path} 2>&1')
@@ -407,18 +406,22 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
         context: grpc.ServicerContext
     ) -> managed_jobsv1_pb2.GetJobTableResponse:
         try:
-            accessible_workspaces = list(request.accessible_workspaces)
-            job_ids = list(request.job_ids.ids) if request.job_ids else None
+            accessible_workspaces = (
+                list(request.accessible_workspaces.workspaces)
+                if request.HasField('accessible_workspaces') else None)
+            job_ids = (list(request.job_ids.ids)
+                       if request.HasField('job_ids') else None)
             user_hashes: Optional[List[Optional[str]]] = None
-            if request.user_hashes:
+            if request.HasField('user_hashes'):
                 user_hashes = list(request.user_hashes.hashes)
                 # For backwards compatibility, we show jobs that do not have a
                 # user_hash. TODO: Remove before 0.12.0.
                 if request.show_jobs_without_user_hash:
                     user_hashes.append(None)
-            statuses = list(
-                request.statuses.statuses) if request.statuses else None
-
+            statuses = (list(request.statuses.statuses)
+                        if request.HasField('statuses') else None)
+            fields = (list(request.fields.fields)
+                      if request.HasField('fields') else None)
             job_queue = managed_job_utils.get_managed_job_queue(
                 skip_finished=request.skip_finished,
                 accessible_workspaces=accessible_workspaces,
@@ -432,7 +435,9 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 page=request.page if request.HasField('page') else None,
                 limit=request.limit if request.HasField('limit') else None,
                 user_hashes=user_hashes,
-                statuses=statuses)
+                statuses=statuses,
+                fields=fields,
+            )
             jobs = job_queue['jobs']
             total = job_queue['total']
             total_no_filter = job_queue['total_no_filter']
@@ -440,7 +445,20 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
 
             jobs_info = []
             for job in jobs:
+                converted_metadata = None
+                metadata = job.get('metadata')
+                if metadata:
+                    converted_metadata = {
+                        k: v for k, v in metadata.items() if v is not None
+                    }
+                schedule_state = job.get('schedule_state')
+                if schedule_state is not None:
+                    schedule_state = managed_job_state.ManagedJobScheduleState(
+                        schedule_state).to_protobuf()
                 job_info = managed_jobsv1_pb2.ManagedJobInfo(
+                    # The `spot.job_id`, which can be used to identify
+                    # different tasks for the same job
+                    _job_id=job.get('_job_id'),
                     job_id=job.get('job_id'),
                     task_id=job.get('task_id'),
                     job_name=job.get('job_name'),
@@ -449,8 +467,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     workspace=job.get('workspace'),
                     status=managed_job_state.ManagedJobStatus(
                         job.get('status')).to_protobuf(),
-                    schedule_state=managed_job_state.ManagedJobScheduleState(
-                        job.get('schedule_state')).to_protobuf(),
+                    schedule_state=schedule_state,
                     resources=job.get('resources'),
                     cluster_resources=job.get('cluster_resources'),
                     cluster_resources_full=job.get('cluster_resources_full'),
@@ -468,11 +485,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     end_at=job.get('end_at'),
                     user_yaml=job.get('user_yaml'),
                     entrypoint=job.get('entrypoint'),
-                    metadata={
-                        k: v
-                        for k, v in job.get('metadata', {}).items()
-                        if v is not None
-                    },
+                    metadata=converted_metadata,
                     pool=job.get('pool'),
                     pool_hash=job.get('pool_hash'))
                 jobs_info.append(job_info)
@@ -483,6 +496,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 total_no_filter=total_no_filter,
                 status_counts=status_counts)
         except Exception as e:  # pylint: disable=broad-except
+            logger.error(e, exc_info=True)
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def GetAllJobIdsByName(  # type: ignore[return]

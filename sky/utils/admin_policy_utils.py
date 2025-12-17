@@ -2,8 +2,9 @@
 import contextlib
 import copy
 import importlib
+import typing
 from typing import Iterator, Optional, Tuple, Union
-import urllib.parse
+from urllib import parse as urlparse
 
 import colorama
 
@@ -13,17 +14,21 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
+from sky.server.requests import request_names
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
+if typing.TYPE_CHECKING:
+    from sky import models
+
 
 def _is_url(policy_string: str) -> bool:
     """Check if the policy string is a URL."""
     try:
-        parsed = urllib.parse.urlparse(policy_string)
+        parsed = urlparse.urlparse(policy_string)
         return parsed.scheme in ('http', 'https')
     except Exception:  # pylint: disable=broad-except
         return False
@@ -73,6 +78,7 @@ def _get_policy_impl(
 @contextlib.contextmanager
 def apply_and_use_config_in_current_request(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
+    request_name: request_names.AdminPolicyRequestName,
     request_options: Optional[admin_policy.RequestOptions] = None,
     at_client_side: bool = False,
 ) -> Iterator['dag_lib.Dag']:
@@ -86,7 +92,8 @@ def apply_and_use_config_in_current_request(
     Refer to `apply()` for more details.
     """
     original_config = skypilot_config.to_dict()
-    dag, mutated_config = apply(entrypoint, request_options, at_client_side)
+    dag, mutated_config = apply(entrypoint, request_name, request_options,
+                                at_client_side)
     if mutated_config != original_config:
         with skypilot_config.replace_skypilot_config(mutated_config):
             yield dag
@@ -96,6 +103,7 @@ def apply_and_use_config_in_current_request(
 
 def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
+    request_name: request_names.AdminPolicyRequestName,
     request_options: Optional[admin_policy.RequestOptions] = None,
     at_client_side: bool = False,
 ) -> Tuple['dag_lib.Dag', config_utils.Config]:
@@ -126,9 +134,13 @@ def apply(
     if policy is None:
         return dag, skypilot_config.to_dict()
 
+    user = None
     if at_client_side:
         logger.info(f'Applying client admin policy: {policy}')
     else:
+        # When being called by the server, the middleware has set the
+        # current user and this information is available at this point.
+        user = common_utils.get_current_user()
         logger.info(f'Applying server admin policy: {policy}')
     config = copy.deepcopy(skypilot_config.to_dict())
     mutated_dag = dag_lib.Dag()
@@ -136,8 +148,9 @@ def apply(
 
     mutated_config = None
     for task in dag.tasks:
-        user_request = admin_policy.UserRequest(task, config, request_options,
-                                                at_client_side)
+        user_request = admin_policy.UserRequest(task, config, request_name,
+                                                request_options, at_client_side,
+                                                user)
         try:
             mutated_user_request = policy.apply(user_request)
         # Avoid duplicate exception wrapping.

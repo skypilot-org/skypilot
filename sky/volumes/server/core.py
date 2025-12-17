@@ -27,16 +27,10 @@ VOLUME_LOCK_TIMEOUT_SECONDS = 20
 
 def volume_refresh():
     """Refreshes the volume status."""
-    volumes = global_user_state.get_volumes()
+    volumes = volume_list(is_ephemeral=False)
     for volume in volumes:
-        volume_name = volume.get('name')
-        config = volume.get('handle')
-        if config is None:
-            logger.warning(f'Volume {volume_name} has no handle.'
-                           'Skipping status refresh...')
-            continue
-        cloud = config.cloud
-        usedby_pods, _ = provision.get_volume_usedby(cloud, config)
+        volume_name = volume.name
+        usedby_pods = volume.usedby_pods
         with _volume_lock(volume_name):
             latest_volume = global_user_state.get_volume_by_name(volume_name)
             if latest_volume is None:
@@ -57,7 +51,8 @@ def volume_refresh():
                         volume_name, status=status_lib.VolumeStatus.IN_USE)
 
 
-def volume_list() -> List[responses.VolumeRecord]:
+def volume_list(
+        is_ephemeral: Optional[bool] = None) -> List[responses.VolumeRecord]:
     """Gets the volumes.
 
     Returns:
@@ -79,11 +74,12 @@ def volume_list() -> List[responses.VolumeRecord]:
                 'status': sky.VolumeStatus,
                 'usedby_pods': List[str],
                 'usedby_clusters': List[str],
+                'is_ephemeral': bool,
             }
         ]
     """
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
-        volumes = global_user_state.get_volumes()
+        volumes = global_user_state.get_volumes(is_ephemeral=is_ephemeral)
         cloud_to_configs: Dict[str, List[models.VolumeConfig]] = {}
         for volume in volumes:
             config = volume.get('handle')
@@ -118,6 +114,7 @@ def volume_list() -> List[responses.VolumeRecord]:
                 'last_use': volume.get('last_use'),
                 'usedby_pods': [],
                 'usedby_clusters': [],
+                'is_ephemeral': volume.get('is_ephemeral', False),
             }
             status = volume.get('status')
             if status is not None:
@@ -148,11 +145,12 @@ def volume_list() -> List[responses.VolumeRecord]:
         return records
 
 
-def volume_delete(names: List[str]) -> None:
+def volume_delete(names: List[str], ignore_not_found: bool = False) -> None:
     """Deletes volumes.
 
     Args:
         names: List of volume names to delete.
+        ignore_not_found: If True, ignore volumes that are not found.
 
     Raises:
         ValueError: If the volume does not exist
@@ -162,6 +160,8 @@ def volume_delete(names: List[str]) -> None:
         for name in names:
             volume = global_user_state.get_volume_by_name(name)
             if volume is None:
+                if ignore_not_found:
+                    continue
                 raise ValueError(f'Volume {name} not found.')
             config = volume.get('handle')
             if config is None:
@@ -184,6 +184,7 @@ def volume_delete(names: List[str]) -> None:
             with _volume_lock(name):
                 provision.delete_volume(cloud, config)
                 global_user_state.delete_volume(name)
+        logger.info(f'Deleted volumes: {names}')
 
 
 def volume_apply(
@@ -195,6 +196,8 @@ def volume_apply(
     size: Optional[str],
     config: Dict[str, Any],
     labels: Optional[Dict[str, str]] = None,
+    use_existing: Optional[bool] = None,
+    is_ephemeral: bool = False,
 ) -> None:
     """Creates or registers a volume.
 
@@ -207,7 +210,8 @@ def volume_apply(
         size: The size of the volume.
         config: The configuration of the volume.
         labels: The labels of the volume.
-
+        use_existing: Whether to use an existing volume.
+        is_ephemeral: Whether the volume is ephemeral.
     """
     with rich_utils.safe_status(ux_utils.spinner_message('Creating volume')):
         # Reuse the method for cluster name on cloud to
@@ -215,10 +219,13 @@ def volume_apply(
         cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud)
         assert cloud_obj is not None
         region, zone = cloud_obj.validate_region_zone(region, zone)
-        name_uuid = str(uuid.uuid4())[:6]
-        name_on_cloud = common_utils.make_cluster_name_on_cloud(
-            name, max_length=cloud_obj.max_cluster_name_length())
-        name_on_cloud += '-' + name_uuid
+        if use_existing:
+            name_on_cloud = name
+        else:
+            name_uuid = str(uuid.uuid4())[:6]
+            name_on_cloud = common_utils.make_cluster_name_on_cloud(
+                name, max_length=cloud_obj.max_cluster_name_length())
+            name_on_cloud += '-' + name_uuid
         config = models.VolumeConfig(
             name=name,
             type=volume_type,
@@ -238,8 +245,13 @@ def volume_apply(
                 logger.info(f'Volume {name} already exists.')
                 return
             config = provision.apply_volume(cloud, config)
-            global_user_state.add_volume(name, config,
-                                         status_lib.VolumeStatus.READY)
+            global_user_state.add_volume(
+                name,
+                config,
+                status_lib.VolumeStatus.READY,
+                is_ephemeral,
+            )
+        logger.info(f'Created volume {name} on cloud {cloud}')
 
 
 @contextlib.contextmanager

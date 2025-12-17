@@ -26,6 +26,7 @@ from sky.serve import constants as serve_constants
 from sky.serve import serve_rpc_utils
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.server.requests import request_names
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import admin_policy_utils
@@ -122,6 +123,18 @@ def _get_service_record(
     return service_statuses[0]
 
 
+def _maybe_display_run_warning(task: 'task_lib.Task') -> None:
+    # We do not block the user from creating a pool with a run section
+    # in order to enable using the same yaml for pool creation
+    # and job submission. But we want to make it clear that 'run' will not
+    # be respected here.
+    if task.run is not None:
+        logger.warning(
+            f'{colorama.Fore.YELLOW} Pool creation does not support the '
+            '`run` section. Creating the pool while ignoring the '
+            f'`run` section.{colorama.Style.RESET_ALL}')
+
+
 def up(
     task: 'task_lib.Task',
     service_name: Optional[str] = None,
@@ -152,16 +165,15 @@ def up(
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
-    dag, mutated_user_config = admin_policy_utils.apply(dag)
+    dag, mutated_user_config = admin_policy_utils.apply(
+        dag, request_name=request_names.AdminPolicyRequestName.SERVE_UP)
     dag.resolve_and_validate_volumes()
     dag.pre_mount_volumes()
     task = dag.tasks[0]
     assert task.service is not None
     if pool:
-        if task.run is not None:
-            logger.warning(f'{colorama.Fore.YELLOW}The `run` section will be '
-                           f'ignored for pool.{colorama.Style.RESET_ALL}')
-        # Use dummy run script for cluster pool.
+        _maybe_display_run_warning(task)
+        # Use dummy run script for pool.
         task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
     with rich_utils.safe_status(
@@ -277,6 +289,8 @@ def up(
                         task=controller_task,
                         cluster_name=controller_name,
                         retry_until_up=True,
+                        _request_name=request_names.AdminPolicyRequestName.
+                        SERVE_LAUNCH_CONTROLLER,
                         _disable_controller_check=True,
                     )
         else:
@@ -503,28 +517,10 @@ def update(
                     f'{workers} is not supported. Ignoring the update.')
 
         # Load the existing task configuration from the service's YAML file
-        latest_yaml_path = serve_utils.generate_task_yaml_file_name(
-            service_name, service_record['version'], expand_user=False)
+        yaml_content = service_record['pool_yaml']
 
-        logger.debug('Loading existing task configuration from '
-                     f'{latest_yaml_path} to create a new modified task.')
-
-        # Get the path locally.
-        with tempfile.NamedTemporaryFile(
-                prefix=f'service-task-{service_name}-',
-                mode='w',
-        ) as service_file:
-            try:
-                backend.download_file(handle, latest_yaml_path,
-                                      service_file.name)
-            except exceptions.CommandError as e:
-                raise RuntimeError(
-                    f'Failed to download the old task configuration from '
-                    f'{latest_yaml_path}: {e.error_msg}') from e
-
-            # Load the existing task configuration
-            existing_config = yaml_utils.read_yaml(service_file.name)
-            task = task_lib.Task.from_yaml_config(existing_config)
+        # Load the existing task configuration
+        task = task_lib.Task.from_yaml_str(yaml_content)
 
         if task.service is None:
             with ux_utils.print_exception_no_traceback():
@@ -541,13 +537,12 @@ def update(
     # and get the mutated config.
     # TODO(cblmemo,zhwu): If a user sets a new skypilot_config, the update
     # will not apply the config.
-    dag, _ = admin_policy_utils.apply(task)
+    dag, _ = admin_policy_utils.apply(
+        task, request_name=request_names.AdminPolicyRequestName.SERVE_UPDATE)
     task = dag.tasks[0]
     if pool:
-        if task.run is not None:
-            logger.warning(f'{colorama.Fore.YELLOW}The `run` section will be '
-                           f'ignored for pool.{colorama.Style.RESET_ALL}')
-        # Use dummy run script for cluster pool.
+        _maybe_display_run_warning(task)
+        # Use dummy run script for pool.
         task.run = serve_constants.POOL_DUMMY_RUN_COMMAND
 
     assert task.service is not None
@@ -669,10 +664,20 @@ def update(
         f'Please use {ux_utils.BOLD}{cmd} {service_name} '
         f'{ux_utils.RESET_BOLD}to check the latest status.')
 
+    if pool:
+        logs_cmd = f'`sky jobs pool logs {service_name} <worker_id>`'
+        unit_noun = 'Workers'
+
+    else:
+        logs_cmd = f'`sky serve logs {service_name} <replica_id>`'
+        unit_noun = 'Replicas'
     logger.info(
         ux_utils.finishing_message(
             f'Successfully updated {noun} {service_name!r} '
-            f'to version {current_version}.'))
+            f'to version {current_version}.',
+            follow_up_message=
+            f'\n{unit_noun} are updating, use {ux_utils.BOLD}{logs_cmd}'
+            f'{ux_utils.RESET_BOLD} to check their status.'))
 
 
 def apply(

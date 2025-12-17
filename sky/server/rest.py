@@ -4,6 +4,8 @@ import asyncio
 import contextlib
 import contextvars
 import functools
+import html
+import re
 import time
 import typing
 from typing import Any, Callable, cast, Optional, TypeVar
@@ -32,7 +34,15 @@ else:
 
 F = TypeVar('F', bound=Callable[..., Any])
 
-_RETRY_CONTEXT = contextvars.ContextVar('retry_context', default=None)
+
+class RetryContext:
+
+    def __init__(self):
+        self.line_processed = 0
+
+
+_RETRY_CONTEXT: contextvars.ContextVar[Optional[RetryContext]] = (
+    contextvars.ContextVar('retry_context', default=None))
 
 _session = requests.Session()
 # Tune connection pool size, otherwise the default max is just 10.
@@ -57,11 +67,8 @@ _transient_errors = [
     urllib3.exceptions.HTTPError,
 ]
 
-
-class RetryContext:
-
-    def __init__(self):
-        self.line_processed = 0
+_HTML_TITLE_RE = re.compile(r'<title[^>]*>(.*?)</title>',
+                            re.IGNORECASE | re.DOTALL)
 
 
 @contextlib.contextmanager
@@ -249,8 +256,73 @@ def handle_server_unavailable(response: 'requests.Response') -> None:
         if 'detail' in response_data:
             error_msg = response_data['detail']
     except Exception:  # pylint: disable=broad-except
-        if response.text:
-            error_msg = response.text
+        error_msg = handle_response_text(response)
+
+    with ux_utils.print_exception_no_traceback():
+        raise exceptions.ServerTemporarilyUnavailableError(error_msg)
+
+
+def handle_response_text(response: 'requests.Response') -> str:
+    """Handle the plaintext response to get the error message
+
+    There is a special handling for html content which might be returned
+    by the reverse proxy to make the error message more user-friendly.
+    """
+    error_msg = ''
+    if isinstance(response, str):
+        text, headers = response, {}
+    else:
+        text = getattr(response, 'text', '')
+        headers = getattr(response, 'headers', {}) or {}
+    if not isinstance(text, str):
+        text = str(text) if text is not None else ''
+    if not text:
+        return ''
+    content_type = headers.get('Content-Type', '')
+    is_html = isinstance(content_type, str) and 'html' in (content_type.lower())
+    if not is_html:
+        stripped = text.lstrip()
+        is_html = stripped.startswith('<') and '<title' in stripped.lower()
+    if is_html:
+        match = _HTML_TITLE_RE.search(text)
+        if match:
+            title = html.unescape(match.group(1)).strip()
+            if title:
+                error_msg = title
+    if not error_msg:
+        error_msg = text
+    return error_msg
+
+
+async def handle_server_unavailable_async(
+        response: 'aiohttp.ClientResponse') -> None:
+    """Async version: Handle 503 (Service Unavailable) error
+
+    The client get 503 error in the following cases:
+    1. The reverse proxy cannot find any ready backend endpoints to serve the
+       request, e.g. when there is and rolling-update.
+    2. The skypilot API server has temporary resource issue, e.g. when the
+       cucurrency of the handling process is exhausted.
+
+    We expect the caller (CLI or SDK) retry on these cases and show clear wait
+    message to the user to let user decide whether keep waiting or abort the
+    request.
+    """
+    if response.status != 503:
+        return
+
+    error_msg = ''
+    try:
+        response_data = await response.json()
+        if 'detail' in response_data:
+            error_msg = response_data['detail']
+    except Exception:  # pylint: disable=broad-except
+        try:
+            text = await response.text()
+            if text:
+                error_msg = text
+        except Exception:  # pylint: disable=broad-except
+            pass
 
     with ux_utils.print_exception_no_traceback():
         raise exceptions.ServerTemporarilyUnavailableError(error_msg)
@@ -332,7 +404,7 @@ async def request_without_retry_async(session: 'aiohttp.ClientSession',
         response = await session.request(method, url, **kwargs)
 
         # Handle server unavailability (503 status) - same as sync version
-        handle_server_unavailable(response)
+        await handle_server_unavailable_async(response)
 
         # Set remote API version and version from headers - same as sync version
         remote_api_version = response.headers.get(constants.API_VERSION_HEADER)

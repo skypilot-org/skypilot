@@ -6,7 +6,7 @@ ManagedJobCodeGen.
 """
 import asyncio
 import collections
-import datetime
+from datetime import datetime
 import enum
 import os
 import pathlib
@@ -39,7 +39,6 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
-from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import controller_utils
@@ -108,6 +107,21 @@ _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
 _JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE = (
     '~/.sky/.jobs_controller_consolidation_reloaded_signal')
 
+# The response fields for managed jobs that require cluster handle
+_CLUSTER_HANDLE_FIELDS = [
+    'cluster_resources',
+    'cluster_resources_full',
+    'cloud',
+    'region',
+    'zone',
+    'infra',
+    'accelerators',
+]
+
+# The response fields for managed jobs that are not stored in the database
+# These fields will be mapped to the DB fields in the `_update_fields`.
+_NON_DB_FIELDS = _CLUSTER_HANDLE_FIELDS + ['user_yaml', 'user_name', 'details']
+
 
 class ManagedJobQueueResultType(enum.Enum):
     """The type of the managed job queue result."""
@@ -172,31 +186,27 @@ def _validate_consolidation_mode_config(
         controller_cn = (
             controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
         if global_user_state.cluster_with_name_exists(controller_cn):
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InconsistentConsolidationModeError(
-                    f'{colorama.Fore.RED}Consolidation mode for jobs is '
-                    f'enabled, but the controller cluster '
-                    f'{controller_cn} is still running. Please '
-                    'terminate the controller cluster first.'
-                    f'{colorama.Style.RESET_ALL}')
+            logger.warning(
+                f'{colorama.Fore.RED}Consolidation mode for jobs is enabled, '
+                f'but the controller cluster {controller_cn} is still running. '
+                'Please terminate the controller cluster first.'
+                f'{colorama.Style.RESET_ALL}')
     else:
-        all_jobs = managed_job_state.get_managed_jobs()
-        if all_jobs:
+        total_jobs = managed_job_state.get_managed_jobs_total()
+        if total_jobs > 0:
             nonterminal_jobs = (
                 managed_job_state.get_nonterminal_job_ids_by_name(
                     None, None, all_users=True))
             if nonterminal_jobs:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.InconsistentConsolidationModeError(
-                        f'{colorama.Fore.RED}Consolidation mode '
-                        'is disabled, but there are still '
-                        f'{len(nonterminal_jobs)} managed jobs '
-                        'running. Please terminate those jobs '
-                        f'first.{colorama.Style.RESET_ALL}')
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
+                    f'but there are still {len(nonterminal_jobs)} managed jobs '
+                    'running. Please terminate those jobs first.'
+                    f'{colorama.Style.RESET_ALL}')
             else:
                 logger.warning(
                     f'{colorama.Fore.YELLOW}Consolidation mode is disabled, '
-                    f'but there are {len(all_jobs)} jobs from previous '
+                    f'but there are {total_jobs} jobs from previous '
                     'consolidation mode. Reset the `jobs.controller.'
                     'consolidation_mode` to `true` and run `sky jobs queue` '
                     'to see those jobs. Switching to normal mode will '
@@ -219,14 +229,11 @@ def is_consolidation_mode(on_api_restart: bool = False) -> bool:
     signal_file = pathlib.Path(
         _JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE).expanduser()
 
-    restart_signal_file_exists = signal_file.exists()
-    consolidation_mode = (config_consolidation_mode and
-                          restart_signal_file_exists)
-
     if on_api_restart:
         if config_consolidation_mode:
             signal_file.touch()
     else:
+        restart_signal_file_exists = signal_file.exists()
         if not restart_signal_file_exists:
             if config_consolidation_mode:
                 logger.warning(f'{colorama.Fore.YELLOW}Consolidation mode for '
@@ -245,57 +252,79 @@ def is_consolidation_mode(on_api_restart: bool = False) -> bool:
     # have related config and will always seemingly disabled for consolidation
     # mode. Check #6611 for more details.
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        _validate_consolidation_mode_config(consolidation_mode)
-    return consolidation_mode
+        _validate_consolidation_mode_config(config_consolidation_mode)
+    return config_consolidation_mode
 
 
-def ha_recovery_for_consolidation_mode():
-    """Recovery logic for HA mode."""
+def ha_recovery_for_consolidation_mode() -> None:
+    """Recovery logic for consolidation mode.
+
+    This should only be called from the managed-job-status-refresh-daemon, due
+    so that we have correct ordering recovery -> controller start -> job status
+    updates. This also should ensure correct operation during a rolling update.
+    """
     # No setup recovery is needed in consolidation mode, as the API server
     # already has all runtime installed. Directly start jobs recovery here.
     # Refers to sky/templates/kubernetes-ray.yml.j2 for more details.
-    runner = command_runner.LocalProcessCommandRunner()
     scheduler.maybe_start_controllers()
     with open(constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format('jobs_'),
-              'w',
+              'a',
               encoding='utf-8') as f:
         start = time.time()
-        f.write(f'Starting HA recovery at {datetime.datetime.now()}\n')
-        for job in managed_job_state.get_managed_jobs():
+        f.write(f'Starting HA recovery at {datetime.now()}\n')
+        jobs, _ = managed_job_state.get_managed_jobs_with_filters(fields=[
+            'job_id', 'controller_pid', 'controller_pid_started_at',
+            'schedule_state', 'status'
+        ])
+        for job in jobs:
             job_id = job['job_id']
             controller_pid = job['controller_pid']
+            controller_pid_started_at = job.get('controller_pid_started_at')
 
             # In consolidation mode, it is possible that only the API server
             # process is restarted, and the controller process is not. In such
             # case, we don't need to do anything and the controller process will
-            # just keep running.
+            # just keep running. However, in most cases, the controller process
+            # will also be stopped - either by a pod restart in k8s API server,
+            # or by `sky api stop`, which will stop controllers.
+            # TODO(cooperc): Make sure we cannot have a controller process
+            # running across API server restarts for consistency.
             if controller_pid is not None:
                 try:
-                    if controller_process_alive(controller_pid, job_id):
-                        f.write(f'Controller pid {controller_pid} for '
-                                f'job {job_id} is still running. '
-                                'Skipping recovery.\n')
+                    # Note: We provide the legacy job id to the
+                    # controller_process_alive just in case, but we shouldn't
+                    # have a running legacy job controller process at this point
+                    if controller_process_alive(
+                            managed_job_state.ControllerPidRecord(
+                                pid=controller_pid,
+                                started_at=controller_pid_started_at), job_id):
+                        message = (f'Controller pid {controller_pid} for '
+                                   f'job {job_id} is still running. '
+                                   'Skipping recovery.\n')
+                        logger.debug(message)
+                        f.write(message)
                         continue
                 except Exception:  # pylint: disable=broad-except
                     # _controller_process_alive may raise if psutil fails; we
                     # should not crash the recovery logic because of this.
-                    f.write('Error checking controller pid '
-                            f'{controller_pid} for job {job_id}\n')
+                    message = ('Error checking controller pid '
+                               f'{controller_pid} for job {job_id}\n')
+                    logger.warning(message, exc_info=True)
+                    f.write(message)
 
+            # Controller process is not set or not alive.
             if job['schedule_state'] not in [
                     managed_job_state.ManagedJobScheduleState.DONE,
                     managed_job_state.ManagedJobScheduleState.WAITING,
+                    # INACTIVE job may be mid-submission, don't set to WAITING.
+                    managed_job_state.ManagedJobScheduleState.INACTIVE,
             ]:
-                script = managed_job_state.get_ha_recovery_script(job_id)
-                if script is None:
-                    f.write(f'Job {job_id}\'s recovery script does not exist. '
-                            'Skipping recovery. Job schedule state: '
-                            f'{job["schedule_state"]}\n')
-                    continue
-                runner.run(script)
-                f.write(f'Job {job_id} completed recovery at '
-                        f'{datetime.datetime.now()}\n')
-        f.write(f'HA recovery completed at {datetime.datetime.now()}\n')
+                managed_job_state.reset_job_for_recovery(job_id)
+                message = (f'Job {job_id} completed recovery at '
+                           f'{datetime.now()}\n')
+                logger.info(message)
+                f.write(message)
+        f.write(f'HA recovery completed at {datetime.now()}\n')
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
 
@@ -395,17 +424,67 @@ async def get_job_status(
     return None
 
 
-def controller_process_alive(pid: int, job_id: int) -> bool:
-    """Check if the controller process is alive."""
+def controller_process_alive(record: managed_job_state.ControllerPidRecord,
+                             legacy_job_id: Optional[int] = None,
+                             quiet: bool = True) -> bool:
+    """Check if the controller process is alive.
+
+    If legacy_job_id is provided, this will also return True for a legacy
+    single-job controller process with that job id, based on the cmdline. This
+    is how the old check worked before #7051.
+    """
     try:
-        if pid < 0:
-            # new job controller process will always be negative
-            pid = -pid
-        process = psutil.Process(pid)
-        cmd_str = ' '.join(process.cmdline())
-        return process.is_running() and ((f'--job-id {job_id}' in cmd_str) or
-                                         ('controller' in cmd_str))
-    except psutil.NoSuchProcess:
+        process = psutil.Process(record.pid)
+
+        if record.started_at is not None:
+            if process.create_time() != record.started_at:
+                if not quiet:
+                    logger.debug(f'Controller process {record.pid} has started '
+                                 f'at {record.started_at} but process has '
+                                 f'started at {process.create_time()}')
+                return False
+        else:
+            # If we can't check the create_time try to check the cmdline instead
+            cmd_str = ' '.join(process.cmdline())
+            # pylint: disable=line-too-long
+            # Pre-#7051 cmdline: /path/to/python -u -m sky.jobs.controller <dag.yaml_path> --job-id <job_id>
+            # Post-#7051 cmdline: /path/to/python -u -msky.jobs.controller
+            # pylint: enable=line-too-long
+            if ('-m sky.jobs.controller' not in cmd_str and
+                    '-msky.jobs.controller' not in cmd_str):
+                if not quiet:
+                    logger.debug(f'Process {record.pid} is not a controller '
+                                 'process - missing "-m sky.jobs.controller" '
+                                 f'from cmdline: {cmd_str}')
+                return False
+            if (legacy_job_id is not None and '--job-id' in cmd_str and
+                    f'--job-id {legacy_job_id}' not in cmd_str):
+                if not quiet:
+                    logger.debug(f'Controller process {record.pid} has the '
+                                 f'wrong --job-id (expected {legacy_job_id}) '
+                                 f'in cmdline: {cmd_str}')
+                return False
+
+            # On linux, psutil.Process(pid) will return a valid process object
+            # even if the pid is actually a thread ID within the process. This
+            # hugely inflates the number of valid-looking pids, increasing the
+            # chance that we will falsely believe a controller is alive. The pid
+            # file should never contain thread IDs, just process IDs. We can
+            # check this with psutil.pid_exists(pid), which is false for TIDs.
+            # See pid_exists in psutil/_pslinux.py
+            if not psutil.pid_exists(record.pid):
+                if not quiet:
+                    logger.debug(
+                        f'Controller process {record.pid} is not a valid '
+                        'process id.')
+                return False
+
+        return process.is_running()
+
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess,
+            OSError) as e:
+        if not quiet:
+            logger.debug(f'Controller process {record.pid} is not running: {e}')
         return False
 
 
@@ -439,9 +518,8 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         This function should not throw any exception. If it fails, it will
         capture the error message, and log/return it.
         """
-        managed_job_state.remove_ha_recovery_script(job_id)
         error_msg = None
-        tasks = managed_job_state.get_managed_jobs(job_id)
+        tasks = managed_job_state.get_managed_job_tasks(job_id)
         for task in tasks:
             pool = task.get('pool', None)
             if pool is None:
@@ -464,43 +542,6 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                     logger.exception(error_msg, exc_info=e)
         return error_msg
 
-    # For backwards compatible jobs
-    # TODO(cooperc): Remove before 0.11.0.
-    def _handle_legacy_job(job_id: int):
-        controller_status = job_lib.get_status(job_id)
-        if controller_status is None or controller_status.is_terminal():
-            logger.error(f'Controller process for legacy job {job_id} is '
-                         'in an unexpected state.')
-
-            cleanup_error = _cleanup_job_clusters(job_id)
-            if cleanup_error:
-                # Unconditionally set the job to failed_controller if the
-                # cleanup fails.
-                managed_job_state.set_failed(
-                    job_id,
-                    task_id=None,
-                    failure_type=managed_job_state.ManagedJobStatus.
-                    FAILED_CONTROLLER,
-                    failure_reason=
-                    'Legacy controller process has exited abnormally, and '
-                    f'cleanup failed: {cleanup_error}. For more details, run: '
-                    f'sky jobs logs --controller {job_id}',
-                    override_terminal=True)
-                return
-
-            # It's possible for the job to have transitioned to
-            # another terminal state while between when we checked its
-            # state and now. In that case, set_failed won't do
-            # anything, which is fine.
-            managed_job_state.set_failed(
-                job_id,
-                task_id=None,
-                failure_type=managed_job_state.ManagedJobStatus.
-                FAILED_CONTROLLER,
-                failure_reason=(
-                    'Legacy controller process has exited abnormally. For '
-                    f'more details, run: sky jobs logs --controller {job_id}'))
-
     # Get jobs that need checking (non-terminal or not DONE)
     job_ids = managed_job_state.get_jobs_to_check_status(job_id)
     if not job_ids:
@@ -510,29 +551,22 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
 
     for job_id in job_ids:
         assert job_id is not None
-        tasks = managed_job_state.get_managed_jobs(job_id)
+        tasks = managed_job_state.get_managed_job_tasks(job_id)
         # Note: controller_pid and schedule_state are in the job_info table
         # which is joined to the spot table, so all tasks with the same job_id
         # will have the same value for these columns. This is what lets us just
         # take tasks[0]['controller_pid'] and tasks[0]['schedule_state'].
         schedule_state = tasks[0]['schedule_state']
 
-        # Backwards compatibility: this job was submitted when ray was still
-        # used for managing the parallelism of job controllers, before #4485.
-        # TODO(cooperc): Remove before 0.11.0.
-        if (schedule_state is
-                managed_job_state.ManagedJobScheduleState.INVALID):
-            _handle_legacy_job(job_id)
-            continue
-
         # Handle jobs with schedule state (non-legacy jobs):
         pid = tasks[0]['controller_pid']
+        pid_started_at = tasks[0].get('controller_pid_started_at')
         if schedule_state == managed_job_state.ManagedJobScheduleState.DONE:
             # There are two cases where we could get a job that is DONE.
             # 1. At query time (get_jobs_to_check_status), the job was not yet
-            #    DONE, but since then (before get_managed_jobs is called) it has
-            #    hit a terminal status, marked itself done, and exited. This is
-            #    fine.
+            #    DONE, but since then (before get_managed_job_tasks is called)
+            #    it has hit a terminal status, marked itself done, and exited.
+            #    This is fine.
             # 2. The job is DONE, but in a non-terminal status. This is
             #    unexpected. For instance, the task status is RUNNING, but the
             #    job schedule_state is DONE.
@@ -579,7 +613,9 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             failure_reason = f'No controller pid set for {schedule_state.value}'
         else:
             logger.debug(f'Checking controller pid {pid}')
-            if controller_process_alive(pid, job_id):
+            if controller_process_alive(
+                    managed_job_state.ControllerPidRecord(
+                        pid=pid, started_at=pid_started_at), job_id):
                 # The controller is still running, so this job is fine.
                 continue
 
@@ -799,7 +835,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                         f'{job_status.value}. Skipped.')
             continue
         elif job_status == managed_job_state.ManagedJobStatus.PENDING:
-            # the if is a short circuit, this will be atomic.
+            # the "if PENDING" is a short circuit, this will be atomic.
             cancelled = managed_job_state.set_pending_cancelled(job_id)
             if cancelled:
                 cancelled_job_ids.append(job_id)
@@ -807,38 +843,35 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
         update_managed_jobs_statuses(job_id)
 
-        job_controller_pid = managed_job_state.get_job_controller_pid(job_id)
-        if job_controller_pid is not None and job_controller_pid < 0:
-            # This is a consolidated job controller, so we need to cancel the
-            # with the controller server API
-            try:
-                # we create a file as a signal to the controller server
-                signal_file = pathlib.Path(
-                    managed_job_constants.CONSOLIDATED_SIGNAL_PATH, f'{job_id}')
-                signal_file.touch()
-                cancelled_job_ids.append(job_id)
-            except OSError as e:
-                logger.error(f'Failed to cancel job {job_id} '
-                             f'with controller server: {e}')
-                # don't add it to the to be cancelled job ids, since we don't
-                # know for sure yet.
-                continue
-            continue
-
         job_workspace = managed_job_state.get_workspace(job_id)
         if current_workspace is not None and job_workspace != current_workspace:
             wrong_workspace_job_ids.append(job_id)
             continue
 
-        # Send the signal to the jobs controller.
-        signal_file = (pathlib.Path(
-            managed_job_constants.SIGNAL_FILE_PREFIX.format(job_id)))
-        # Filelock is needed to prevent race condition between signal
-        # check/removal and signal writing.
-        with filelock.FileLock(str(signal_file) + '.lock'):
-            with signal_file.open('w', encoding='utf-8') as f:
-                f.write(UserSignal.CANCEL.value)
-                f.flush()
+        if managed_job_state.is_legacy_controller_process(job_id):
+            # The job is running on a legacy single-job controller process.
+            # TODO(cooperc): Remove this handling for 0.13.0
+
+            # Send the signal to the jobs controller.
+            signal_file = (pathlib.Path(
+                managed_job_constants.SIGNAL_FILE_PREFIX.format(job_id)))
+            # Filelock is needed to prevent race condition between signal
+            # check/removal and signal writing.
+            with filelock.FileLock(str(signal_file) + '.lock'):
+                with signal_file.open('w', encoding='utf-8') as f:
+                    f.write(UserSignal.CANCEL.value)
+                    f.flush()
+        else:
+            # New controller process.
+            try:
+                signal_file = pathlib.Path(
+                    managed_job_constants.CONSOLIDATED_SIGNAL_PATH, f'{job_id}')
+                signal_file.touch()
+            except OSError as e:
+                logger.error(f'Failed to cancel job {job_id}: {e}')
+                # Don't add it to the to be cancelled job ids
+                continue
+
         cancelled_job_ids.append(job_id)
 
     wrong_workspace_job_str = ''
@@ -886,6 +919,14 @@ def cancel_jobs_by_pool(pool_name: str,
     return cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
 
 
+def controller_log_file_for_job(job_id: int,
+                                create_if_not_exists: bool = False) -> str:
+    log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
+    if create_if_not_exists:
+        os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(log_dir, f'{job_id}.log')
+
+
 def stream_logs_by_id(job_id: int,
                       follow: bool = True,
                       tail: Optional[int] = None) -> Tuple[str, int]:
@@ -918,13 +959,20 @@ def stream_logs_by_id(job_id: int,
             if managed_job_status.is_failed():
                 job_msg = ('\nFailure reason: '
                            f'{managed_job_state.get_failure_reason(job_id)}')
-            log_file_exists = False
+            log_file_ever_existed = False
             task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
                 job_id)
             num_tasks = len(task_info)
-            for task_id, task_name, task_status, log_file in task_info:
+            for (task_id, task_name, task_status, log_file,
+                 logs_cleaned_at) in task_info:
                 if log_file:
-                    log_file_exists = True
+                    log_file_ever_existed = True
+                    if logs_cleaned_at is not None:
+                        ts_str = datetime.fromtimestamp(
+                            logs_cleaned_at).strftime('%Y-%m-%d %H:%M:%S')
+                        print(f'Task {task_name}({task_id}) log has been '
+                              f'cleaned at {ts_str}.')
+                        continue
                     task_str = (f'Task {task_name}({task_id})'
                                 if task_name else f'Task {task_id}')
                     if num_tasks > 1:
@@ -959,7 +1007,7 @@ def stream_logs_by_id(job_id: int,
                                 f'{task_str} finished '
                                 f'(status: {task_status.value}).'),
                                   flush=True)
-            if log_file_exists:
+            if log_file_ever_existed:
                 # Add the "Job finished" message for terminal states
                 if managed_job_status.is_terminal():
                     print(ux_utils.finishing_message(
@@ -1187,7 +1235,8 @@ def stream_logs(job_id: Optional[int],
     if controller:
         if job_id is None:
             assert job_name is not None
-            managed_jobs = managed_job_state.get_managed_jobs()
+            managed_jobs, _ = managed_job_state.get_managed_jobs_with_filters(
+                name_match=job_name, fields=['job_id', 'job_name', 'status'])
             # We manually filter the jobs by name, instead of using
             # get_nonterminal_job_ids_by_name, as with `controller=True`, we
             # should be able to show the logs for jobs in terminal states.
@@ -1210,9 +1259,7 @@ def stream_logs(job_id: Optional[int],
             job_id = managed_job_ids.pop()
         assert job_id is not None, (job_id, job_name)
 
-        controller_log_path = os.path.join(
-            os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR),
-            f'{job_id}.log')
+        controller_log_path = controller_log_file_for_job(job_id)
         job_status = None
 
         # Wait for the log file to be written
@@ -1313,11 +1360,87 @@ def dump_managed_job_queue(
     limit: Optional[int] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
     statuses: Optional[List[str]] = None,
+    fields: Optional[List[str]] = None,
 ) -> str:
     return message_utils.encode_payload(
         get_managed_job_queue(skip_finished, accessible_workspaces, job_ids,
                               workspace_match, name_match, pool_match, page,
-                              limit, user_hashes, statuses))
+                              limit, user_hashes, statuses, fields))
+
+
+def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
+    """Update the fields list to include the necessary fields.
+
+    Args:
+        fields: The fields to update.
+
+    It will:
+    - Add the necessary dependent fields to the list.
+    - Remove the fields that are not in the DB.
+    - Determine if cluster handle is required.
+
+    Returns:
+        A tuple containing the updated fields and a boolean indicating if
+        cluster handle is required.
+    """
+    cluster_handle_required = True
+    if _cluster_handle_not_required(fields):
+        cluster_handle_required = False
+    # Copy the list to avoid modifying the original list
+    new_fields = fields.copy()
+    # status and job_id are always included
+    if 'status' not in new_fields:
+        new_fields.append('status')
+    if 'job_id' not in new_fields:
+        new_fields.append('job_id')
+    # user_hash is required if user_name is present
+    if 'user_name' in new_fields and 'user_hash' not in new_fields:
+        new_fields.append('user_hash')
+    if 'job_duration' in new_fields:
+        if 'last_recovered_at' not in new_fields:
+            new_fields.append('last_recovered_at')
+        if 'end_at' not in new_fields:
+            new_fields.append('end_at')
+    if 'job_name' in new_fields and 'task_name' not in new_fields:
+        new_fields.append('task_name')
+    if 'details' in new_fields:
+        if 'schedule_state' not in new_fields:
+            new_fields.append('schedule_state')
+        if 'priority' not in new_fields:
+            new_fields.append('priority')
+        if 'failure_reason' not in new_fields:
+            new_fields.append('failure_reason')
+    if 'user_yaml' in new_fields:
+        if 'original_user_yaml_path' not in new_fields:
+            new_fields.append('original_user_yaml_path')
+        if 'original_user_yaml_content' not in new_fields:
+            new_fields.append('original_user_yaml_content')
+    if cluster_handle_required:
+        if 'task_name' not in new_fields:
+            new_fields.append('task_name')
+        if 'current_cluster_name' not in new_fields:
+            new_fields.append('current_cluster_name')
+    # Remove _NON_DB_FIELDS
+    # These fields have been mapped to the DB fields in the above code, so we
+    # don't need to include them in the updated fields.
+    for field in _NON_DB_FIELDS:
+        if field in new_fields:
+            new_fields.remove(field)
+    return new_fields, cluster_handle_required
+
+
+def _cluster_handle_not_required(fields: List[str]) -> bool:
+    """Determine if cluster handle is not required.
+
+    Args:
+        fields: The fields to check if they contain any of the cluster handle
+        fields.
+
+    Returns:
+        True if the fields do not contain any of the cluster handle fields,
+        False otherwise.
+    """
+    return not any(field in fields for field in _CLUSTER_HANDLE_FIELDS)
 
 
 def get_managed_job_queue(
@@ -1331,146 +1454,153 @@ def get_managed_job_queue(
     limit: Optional[int] = None,
     user_hashes: Optional[List[Optional[str]]] = None,
     statuses: Optional[List[str]] = None,
+    fields: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    # Make sure to get all jobs - some logic below (e.g. high priority job
-    # detection) requires a full view of the jobs table.
-    jobs = managed_job_state.get_managed_jobs()
+    """Get the managed job queue.
 
-    # Figure out what the highest priority blocking job is. We need to know in
-    # order to determine if other jobs are blocked by a higher priority job, or
-    # just by the limited controller resources.
+    Args:
+        skip_finished: Whether to skip finished jobs.
+        accessible_workspaces: The accessible workspaces.
+        job_ids: The job ids.
+        workspace_match: The workspace name to match.
+        name_match: The job name to match.
+        pool_match: The pool name to match.
+        page: The page number.
+        limit: The limit number.
+        user_hashes: The user hashes.
+        statuses: The statuses.
+        fields: The fields to include in the response.
+
+    Returns:
+        A dictionary containing the managed job queue.
+    """
+    cluster_handle_required = True
+    updated_fields = None
+    # The caller only need to specify the fields in the
+    # `class ManagedJobRecord` in `response.py`, and the `_update_fields`
+    # function will add the necessary dependent fields to the list, for
+    # example, if the caller specifies `['user_name']`, the `_update_fields`
+    # function will add `['user_hash']` to the list.
+    if fields:
+        updated_fields, cluster_handle_required = _update_fields(fields)
+
+    total_no_filter = managed_job_state.get_managed_jobs_total()
+
+    status_counts = managed_job_state.get_status_count_with_filters(
+        fields=fields,
+        job_ids=job_ids,
+        accessible_workspaces=accessible_workspaces,
+        workspace_match=workspace_match,
+        name_match=name_match,
+        pool_match=pool_match,
+        user_hashes=user_hashes,
+        skip_finished=skip_finished,
+    )
+
+    jobs, total = managed_job_state.get_managed_jobs_with_filters(
+        fields=updated_fields,
+        job_ids=job_ids,
+        accessible_workspaces=accessible_workspaces,
+        workspace_match=workspace_match,
+        name_match=name_match,
+        pool_match=pool_match,
+        user_hashes=user_hashes,
+        statuses=statuses,
+        skip_finished=skip_finished,
+        page=page,
+        limit=limit,
+    )
+
+    if cluster_handle_required:
+        # Fetch the cluster name to handle map for managed clusters only.
+        cluster_name_to_handle = (
+            global_user_state.get_cluster_name_to_handle_map(is_managed=True))
+
     highest_blocking_priority = constants.MIN_PRIORITY
-    for job in jobs:
-        if job['schedule_state'] not in (
-                # LAUNCHING and ALIVE_BACKOFF jobs will block other jobs with
-                # lower priority.
-                managed_job_state.ManagedJobScheduleState.LAUNCHING,
-                managed_job_state.ManagedJobScheduleState.ALIVE_BACKOFF,
-                # It's possible for a WAITING/ALIVE_WAITING job to be ready to
-                # launch, but the scheduler just hasn't run yet.
-                managed_job_state.ManagedJobScheduleState.WAITING,
-                managed_job_state.ManagedJobScheduleState.ALIVE_WAITING):
-            # This job will not block others.
-            continue
-
-        priority = job.get('priority')
-        if priority is not None and priority > highest_blocking_priority:
-            highest_blocking_priority = priority
-
-    total_no_filter = len(jobs)
-
-    if user_hashes:
-        jobs = [
-            job for job in jobs if job.get('user_hash', None) in user_hashes
-        ]
-    if accessible_workspaces:
-        jobs = [
-            job for job in jobs
-            if job.get('workspace', constants.SKYPILOT_DEFAULT_WORKSPACE) in
-            accessible_workspaces
-        ]
-    if skip_finished:
-        # Filter out the finished jobs. If a multi-task job is partially
-        # finished, we will include all its tasks.
-        non_finished_tasks = list(
-            filter(
-                lambda job: not managed_job_state.ManagedJobStatus(job[
-                    'status']).is_terminal(), jobs))
-        non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
-        jobs = list(
-            filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
-    if job_ids:
-        jobs = [job for job in jobs if job['job_id'] in job_ids]
-
-    jobs, total, status_counts = filter_jobs(jobs,
-                                             workspace_match,
-                                             name_match,
-                                             pool_match,
-                                             page,
-                                             limit,
-                                             statuses=statuses)
-
-    job_ids = set(job['job_id'] for job in jobs)
-    job_id_to_pool_info = (
-        managed_job_state.get_pool_and_submit_info_from_job_ids(job_ids))
-    cluster_names: Dict[int, str] = {}
-    for job in jobs:
-        # pool info is (pool, cluster_name, job_id_on_pool_cluster)
-        pool_info = job_id_to_pool_info.get(job['job_id'], None)
-        if pool_info and pool_info[0]:
-            cluster_name = pool_info[1]
-        else:
-            cluster_name = generate_managed_job_cluster_name(
-                job['task_name'], job['job_id'])
-        cluster_names[job['job_id']] = cluster_name
-    cluster_name_to_handles = global_user_state.get_handles_from_cluster_names(
-        set(cluster_names.values()))
+    if not fields or 'details' in fields:
+        # Figure out what the highest priority blocking job is. We need to know
+        # in order to determine if other jobs are blocked by a higher priority
+        # job, or just by the limited controller resources.
+        highest_blocking_priority = (
+            managed_job_state.get_managed_jobs_highest_priority())
 
     for job in jobs:
-        end_at = job['end_at']
-        if end_at is None:
-            end_at = time.time()
+        if not fields or 'job_duration' in fields:
+            end_at = job['end_at']
+            if end_at is None:
+                end_at = time.time()
 
-        job_submitted_at = job['last_recovered_at'] - job['job_duration']
-        if job['status'] == managed_job_state.ManagedJobStatus.RECOVERING:
-            # When job is recovering, the duration is exact job['job_duration']
-            job_duration = job['job_duration']
-        elif job_submitted_at > 0:
-            job_duration = end_at - job_submitted_at
-        else:
-            # When job_start_at <= 0, that means the last_recovered_at is not
-            # set yet, i.e. the job is not started.
-            job_duration = 0
-        job['job_duration'] = job_duration
-        job['status'] = job['status'].value
-        job['schedule_state'] = job['schedule_state'].value
-
-        cluster_name = cluster_names[job['job_id']]
-        handle = cluster_name_to_handles.get(cluster_name, None)
-        if isinstance(handle, backends.CloudVmRayResourceHandle):
-            resources_str = resources_utils.get_readable_resources_repr(
-                handle, simplify=True)
-            resources_str_full = resources_utils.get_readable_resources_repr(
-                handle, simplify=False)
-            job['cluster_resources'] = resources_str
-            job['cluster_resources_full'] = resources_str_full
-            job['cloud'] = str(handle.launched_resources.cloud)
-            job['region'] = handle.launched_resources.region
-            job['zone'] = handle.launched_resources.zone
-            job['infra'] = infra_utils.InfraInfo(
-                str(handle.launched_resources.cloud),
-                handle.launched_resources.region,
-                handle.launched_resources.zone).formatted_str()
-            job['accelerators'] = handle.launched_resources.accelerators
-        else:
-            # FIXME(zongheng): display the last cached values for these.
-            job['cluster_resources'] = '-'
-            job['cluster_resources_full'] = '-'
-            job['cloud'] = '-'
-            job['region'] = '-'
-            job['zone'] = '-'
-            job['infra'] = '-'
-
-        # Add details about schedule state / backoff.
-        state_details = None
-        if job['schedule_state'] == 'ALIVE_BACKOFF':
-            state_details = 'In backoff, waiting for resources'
-        elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
-            priority = job.get('priority')
-            if (priority is not None and priority < highest_blocking_priority):
-                # Job is lower priority than some other blocking job.
-                state_details = 'Waiting for higher priority jobs to launch'
+            job_submitted_at = job['last_recovered_at'] - job['job_duration']
+            if job['status'] == managed_job_state.ManagedJobStatus.RECOVERING:
+                # When job is recovering, the duration is exact
+                # job['job_duration']
+                job_duration = job['job_duration']
+            elif job_submitted_at > 0:
+                job_duration = end_at - job_submitted_at
             else:
-                state_details = 'Waiting for other jobs to launch'
-
-        if state_details and job['failure_reason']:
-            job['details'] = f'{state_details} - {job["failure_reason"]}'
-        elif state_details:
-            job['details'] = state_details
-        elif job['failure_reason']:
-            job['details'] = f'Failure: {job["failure_reason"]}'
+                # When job_start_at <= 0, that means the last_recovered_at
+                # is not set yet, i.e. the job is not started.
+                job_duration = 0
+            job['job_duration'] = job_duration
+        job['status'] = job['status'].value
+        if not fields or 'schedule_state' in fields:
+            job['schedule_state'] = job['schedule_state'].value
         else:
-            job['details'] = None
+            job['schedule_state'] = None
+
+        if cluster_handle_required:
+            cluster_name = job.get('current_cluster_name', None)
+            if cluster_name is None:
+                cluster_name = generate_managed_job_cluster_name(
+                    job['task_name'], job['job_id'])
+            handle = cluster_name_to_handle.get(
+                cluster_name, None) if cluster_name is not None else None
+            if isinstance(handle, backends.CloudVmRayResourceHandle):
+                resources_str_simple, resources_str_full = (
+                    resources_utils.get_readable_resources_repr(
+                        handle, simplified_only=False))
+                assert resources_str_full is not None
+                job['cluster_resources'] = resources_str_simple
+                job['cluster_resources_full'] = resources_str_full
+                job['cloud'] = str(handle.launched_resources.cloud)
+                job['region'] = handle.launched_resources.region
+                job['zone'] = handle.launched_resources.zone
+                job['infra'] = infra_utils.InfraInfo(
+                    str(handle.launched_resources.cloud),
+                    handle.launched_resources.region,
+                    handle.launched_resources.zone).formatted_str()
+                job['accelerators'] = handle.launched_resources.accelerators
+            else:
+                # FIXME(zongheng): display the last cached values for these.
+                job['cluster_resources'] = '-'
+                job['cluster_resources_full'] = '-'
+                job['cloud'] = '-'
+                job['region'] = '-'
+                job['zone'] = '-'
+                job['infra'] = '-'
+
+        if not fields or 'details' in fields:
+            # Add details about schedule state / backoff.
+            state_details = None
+            if job['schedule_state'] == 'ALIVE_BACKOFF':
+                state_details = 'In backoff, waiting for resources'
+            elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
+                priority = job.get('priority')
+                if (priority is not None and
+                        priority < highest_blocking_priority):
+                    # Job is lower priority than some other blocking job.
+                    state_details = 'Waiting for higher priority jobs to launch'
+                else:
+                    state_details = 'Waiting for other jobs to launch'
+
+            if state_details and job['failure_reason']:
+                job['details'] = f'{state_details} - {job["failure_reason"]}'
+            elif state_details:
+                job['details'] = state_details
+            elif job['failure_reason']:
+                job['details'] = f'Failure: {job["failure_reason"]}'
+            else:
+                job['details'] = None
 
     return {
         'jobs': jobs,
@@ -1581,21 +1711,14 @@ def load_managed_job_queue(
         total_no_filter = total
         result_type = ManagedJobQueueResultType.LIST
 
-    job_id_to_user_hash: Dict[int, str] = {}
+    all_users = global_user_state.get_all_users()
+    all_users_map = {user.id: user.name for user in all_users}
     for job in jobs:
+        job['status'] = managed_job_state.ManagedJobStatus(job['status'])
         if 'user_hash' in job and job['user_hash'] is not None:
             # Skip jobs that do not have user_hash info.
             # TODO(cooperc): Remove check before 0.12.0.
-            job_id_to_user_hash[job['job_id']] = job['user_hash']
-    user_hash_to_user = global_user_state.get_users(
-        job_id_to_user_hash.values())
-
-    for job in jobs:
-        job['status'] = managed_job_state.ManagedJobStatus(job['status'])
-        if job['job_id'] in job_id_to_user_hash:
-            user_hash = job_id_to_user_hash[job['job_id']]
-            user = user_hash_to_user.get(user_hash, None)
-            job['user_name'] = user.name if user is not None else None
+            job['user_name'] = all_users_map.get(job['user_hash'])
     return jobs, total, result_type, total_no_filter, status_counts
 
 
@@ -1620,29 +1743,40 @@ def _get_job_status_from_tasks(
 
 
 @typing.overload
-def format_job_table(tasks: List[Dict[str, Any]],
-                     show_all: bool,
-                     show_user: bool,
-                     return_rows: Literal[False] = False,
-                     max_jobs: Optional[int] = None) -> str:
+def format_job_table(
+    tasks: List[Dict[str, Any]],
+    show_all: bool,
+    show_user: bool,
+    return_rows: Literal[False] = False,
+    pool_status: Optional[List[Dict[str, Any]]] = None,
+    max_jobs: Optional[int] = None,
+    job_status_counts: Optional[Dict[str, int]] = None,
+) -> str:
     ...
 
 
 @typing.overload
-def format_job_table(tasks: List[Dict[str, Any]],
-                     show_all: bool,
-                     show_user: bool,
-                     return_rows: Literal[True],
-                     max_jobs: Optional[int] = None) -> List[List[str]]:
+def format_job_table(
+    tasks: List[Dict[str, Any]],
+    show_all: bool,
+    show_user: bool,
+    return_rows: Literal[True],
+    pool_status: Optional[List[Dict[str, Any]]] = None,
+    max_jobs: Optional[int] = None,
+    job_status_counts: Optional[Dict[str, int]] = None,
+) -> List[List[str]]:
     ...
 
 
 def format_job_table(
-        tasks: List[Dict[str, Any]],
-        show_all: bool,
-        show_user: bool,
-        return_rows: bool = False,
-        max_jobs: Optional[int] = None) -> Union[str, List[List[str]]]:
+    tasks: List[Dict[str, Any]],
+    show_all: bool,
+    show_user: bool,
+    return_rows: bool = False,
+    pool_status: Optional[List[Dict[str, Any]]] = None,
+    max_jobs: Optional[int] = None,
+    job_status_counts: Optional[Dict[str, int]] = None,
+) -> Union[str, List[List[str]]]:
     """Returns managed jobs as a formatted string.
 
     Args:
@@ -1651,13 +1785,15 @@ def format_job_table(
         max_jobs: The maximum number of jobs to show in the table.
         return_rows: If True, return the rows as a list of strings instead of
           all rows concatenated into a single string.
+        pool_status: List of pool status dictionaries with replica_info.
+        job_status_counts: The counts of each job status.
 
     Returns: A formatted string of managed jobs, if not `return_rows`; otherwise
       a list of "rows" (each of which is a list of str).
     """
     jobs = collections.defaultdict(list)
     # Check if the tasks have user information from kubernetes.
-    # This is only used for sky status --kubernetes.
+    # This is only used for sky status-kubernetes.
     tasks_have_k8s_user = any([task.get('user') for task in tasks])
     if max_jobs and tasks_have_k8s_user:
         raise ValueError('max_jobs is not supported when tasks have user info.')
@@ -1667,17 +1803,38 @@ def format_job_table(
             return (task['user'], task['job_id'])
         return task['job_id']
 
+    def _get_job_id_to_worker_map(
+            pool_status: Optional[List[Dict[str, Any]]]) -> Dict[int, int]:
+        """Create a mapping from job_id to worker replica_id.
+
+        Args:
+            pool_status: List of pool status dictionaries with replica_info.
+
+        Returns:
+            Dictionary mapping job_id to replica_id (worker ID).
+        """
+        job_to_worker: Dict[int, int] = {}
+        if pool_status is None:
+            return job_to_worker
+        for pool in pool_status:
+            replica_info = pool.get('replica_info', [])
+            for replica in replica_info:
+                used_by = replica.get('used_by')
+                if used_by is not None:
+                    for job_id in used_by:
+                        job_to_worker[job_id] = replica.get('replica_id')
+        return job_to_worker
+
+    # Create mapping from job_id to worker replica_id
+    job_to_worker = _get_job_id_to_worker_map(pool_status)
+
     for task in tasks:
         # The tasks within the same job_id are already sorted
         # by the task_id.
         jobs[get_hash(task)].append(task)
 
-    status_counts: Dict[str, int] = collections.defaultdict(int)
     workspaces = set()
     for job_tasks in jobs.values():
-        managed_job_status = _get_job_status_from_tasks(job_tasks)[0]
-        if not managed_job_status.is_terminal():
-            status_counts[managed_job_status.value] += 1
         workspaces.add(job_tasks[0].get('workspace',
                                         constants.SKYPILOT_DEFAULT_WORKSPACE))
 
@@ -1720,9 +1877,15 @@ def format_job_table(
     job_table = log_utils.create_table(columns)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
-    for task in tasks:
-        if not task['status'].is_terminal():
-            status_counts[task['status'].value] += 1
+    if job_status_counts:
+        for status_value, count in job_status_counts.items():
+            status = managed_job_state.ManagedJobStatus(status_value)
+            if not status.is_terminal():
+                status_counts[status_value] = count
+    else:
+        for task in tasks:
+            if not task['status'].is_terminal():
+                status_counts[task['status'].value] += 1
 
     all_tasks = tasks
     if max_jobs is not None:
@@ -1808,7 +1971,12 @@ def format_job_table(
             if pool is None:
                 pool = '-'
 
+            # Add worker information if job is assigned to a worker
             job_id = job_hash[1] if tasks_have_k8s_user else job_hash
+            # job_id is now always an integer, use it to look up worker
+            if job_id in job_to_worker and pool != '-':
+                pool = f'{pool} (worker={job_to_worker[job_id]})'
+
             job_values = [
                 job_id,
                 '',
@@ -1851,6 +2019,12 @@ def format_job_table(
             pool = task.get('pool')
             if pool is None:
                 pool = '-'
+
+            # Add worker information if task is assigned to a worker
+            task_job_id = task['job_id']
+            if task_job_id in job_to_worker and pool != '-':
+                pool = f'{pool} (worker={job_to_worker[task_job_id]})'
+
             values = [
                 task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
                 task['task_id'] if len(job_tasks) > 1 else '-',
@@ -1970,7 +2144,8 @@ def _job_proto_to_dict(
         # and Protobuf encodes int64 as decimal strings in JSON,
         # so we need to convert them back to ints.
         # https://protobuf.dev/programming-guides/json/#field-representation
-        if field.type == descriptor.FieldDescriptor.TYPE_INT64:
+        if (field.type == descriptor.FieldDescriptor.TYPE_INT64 and
+                job_dict.get(field.name) is not None):
             job_dict[field.name] = int(job_dict[field.name])
     job_dict['status'] = managed_job_state.ManagedJobStatus.from_protobuf(
         job_dict['status'])
@@ -2014,6 +2189,7 @@ class ManagedJobCodeGen:
         limit: Optional[int] = None,
         user_hashes: Optional[List[Optional[str]]] = None,
         statuses: Optional[List[str]] = None,
+        fields: Optional[List[str]] = None,
     ) -> str:
         code = textwrap.dedent(f"""\
         if managed_job_version < 9:
@@ -2032,7 +2208,7 @@ class ManagedJobCodeGen:
                                 page={page!r},
                                 limit={limit!r},
                                 user_hashes={user_hashes!r})
-        else:
+        elif managed_job_version < 12:
             job_table = utils.dump_managed_job_queue(
                                 skip_finished={skip_finished},
                                 accessible_workspaces={accessible_workspaces!r},
@@ -2044,6 +2220,19 @@ class ManagedJobCodeGen:
                                 limit={limit!r},
                                 user_hashes={user_hashes!r},
                                 statuses={statuses!r})
+        else:
+            job_table = utils.dump_managed_job_queue(
+                                skip_finished={skip_finished},
+                                accessible_workspaces={accessible_workspaces!r},
+                                job_ids={job_ids!r},
+                                workspace_match={workspace_match!r},
+                                name_match={name_match!r},
+                                pool_match={pool_match!r},
+                                page={page!r},
+                                limit={limit!r},
+                                user_hashes={user_hashes!r},
+                                statuses={statuses!r},
+                                fields={fields!r})
         print(job_table, flush=True)
         """)
         return cls._build(code)
@@ -2108,6 +2297,18 @@ class ManagedJobCodeGen:
         # Get and print raw job table (load_managed_job_queue can parse this directly)
         job_table = utils.dump_managed_job_queue()
         print(job_table, flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
+    def get_version(cls) -> str:
+        """Generate code to get controller version."""
+        code = textwrap.dedent("""\
+        from sky.skylet import constants as controller_constants
+
+        # Get controller version
+        controller_version = controller_constants.SKYLET_VERSION
+        print(f"controller_version:{controller_version}", flush=True)
         """)
         return cls._build(code)
 

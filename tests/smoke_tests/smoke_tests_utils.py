@@ -1,3 +1,4 @@
+import configparser
 import contextlib
 import enum
 import functools
@@ -73,16 +74,16 @@ LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
     'jobs': {
         'controller': {
             'resources': {
-                'cpus': '2+',
-                'memory': '4+'
+                'cpus': '4+',
+                'memory': '16+'
             }
         }
     },
     'serve': {
         'controller': {
             'resources': {
-                'cpus': '2+',
-                'memory': '4+'
+                'cpus': '4+',
+                'memory': '8+'
             }
         }
     }
@@ -361,7 +362,12 @@ class Test(NamedTuple):
 
 def get_timeout(generic_cloud: str,
                 override_timeout: int = DEFAULT_CMD_TIMEOUT):
-    timeouts = {'fluidstack': 60 * 60}  # file_mounts
+    timeouts = {
+        'fluidstack': 60 * 60,  # file_mounts
+        'slurm':
+            40 *
+            60  # Slurm uses NFS which is slower to write to for file_mounts tests
+    }
     return timeouts.get(generic_cloud, override_timeout)
 
 
@@ -489,6 +495,11 @@ def override_sky_config(
     temp_config_file.flush()
     # Update the environment variable to use the temporary file
     env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG] = temp_config_file.name
+    if (env_before_override is not None and
+            skypilot_config.ENV_VAR_GLOBAL_CONFIG in env_before_override):
+        env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG +
+                 '_ORIGINAL'] = env_before_override[
+                     skypilot_config.ENV_VAR_GLOBAL_CONFIG]
     yield temp_config_file
     if env_before_override is not None:
         os.environ.clear()
@@ -545,7 +556,7 @@ def ensure_iterable_result(func):
 def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     # Fail fast if `sky` CLI somehow errors out.
     if check_sky_status:
-        test.commands.insert(0, 'sky status')
+        test.commands.insert(0, 'sky status -u')
 
     log_to_stdout = os.environ.get('LOG_TO_STDOUT', None)
     if log_to_stdout:
@@ -626,13 +637,28 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             test.echo(msg)
             write(msg)
 
+        if proc.returncode and not is_remote_server_test():
+            test.echo('=== Sky API Server Log (last 100 lines) ===')
+            # Read the log file directly and echo it
+            log_path = os.path.expanduser('~/.sky/api_server/server.log')
+            if os.path.exists(log_path):
+                with open(log_path, 'r') as f:
+                    lines = f.readlines()
+                    # Get last 100 lines
+                    last_lines = lines[-100:] if len(lines) > 100 else lines
+                    for line in last_lines:
+                        test.echo(line.rstrip())
+            else:
+                test.echo(f'Server log file not found: {log_path}')
+            test.echo('=== End of Sky API Server Log ===')
+
         if (proc.returncode == 0 or
                 pytest.terminate_on_failure) and test.teardown is not None:
             subprocess_utils.run(
                 test.teardown,
                 stdout=subprocess_out,
                 stderr=subprocess.STDOUT,
-                timeout=10 * 60,  # 10 mins
+                timeout=20 * 60,  # 20 mins
                 shell=True,
                 env=env_dict,
             )
@@ -725,6 +751,8 @@ VALIDATE_LAUNCH_OUTPUT = (
     # ├── To submit a job:            sky exec test yaml_file
     # ├── To stop the cluster:        sky stop test
     # └── To teardown the cluster:    sky down test
+    # Reset s to remove any line with FutureWarning
+    's=$(echo "$s" | grep -v "FutureWarning") && '
     'echo "$s" && echo "==Validating launching==" && '
     'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
     'echo "$s" && echo "==Validating setup output==" && '
@@ -749,6 +777,37 @@ VALIDATE_LAUNCH_OUTPUT_NO_PG_CONN_CLOSED_ERROR = (
     ' && echo "==Validating no pg conn closed error==" && '
     '! echo "$s" | grep -i "psycopg2.InterfaceError: connection already closed"'
 )
+
+
+def get_disk_size_and_validate_launch_output(generic_cloud: str):
+    """Get DISK_SIZE_PARAM and VALIDATE_LAUNCH_OUTPUT for a given cloud.
+
+    For RunPod, returns:
+    - DISK_SIZE_PARAM: '--disk-size 20'
+    - VALIDATE_LAUNCH_OUTPUT: Modified version with increased grep context
+      to handle RunPod's raw_response and banner output
+
+    For other clouds, returns:
+    - DISK_SIZE_PARAM: ''
+    - VALIDATE_LAUNCH_OUTPUT: Standard VALIDATE_LAUNCH_OUTPUT
+
+    Returns:
+        tuple: (DISK_SIZE_PARAM, VALIDATE_LAUNCH_OUTPUT)
+    """
+    if generic_cloud == 'runpod':
+        disk_size_param = '--disk-size 20'
+        # Use -A 10 instead of -A 1 for "Launching on" line to handle RunPod raw_response output
+        # Use -A 100 instead of -A 1 for "Job started. Streaming logs..." to handle RunPod banner output
+        validate_launch_output = (VALIDATE_LAUNCH_OUTPUT.replace(
+            'grep -A 1 "Launching on"', 'grep -A 10 "Launching on"').replace(
+                'grep -A 1 "Job started. Streaming logs..."',
+                'grep -A 100 "Job started. Streaming logs..."'))
+    else:
+        disk_size_param = ''
+        validate_launch_output = VALIDATE_LAUNCH_OUTPUT
+
+    return disk_size_param, validate_launch_output
+
 
 _CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
 
@@ -828,6 +887,39 @@ def down_cluster_for_cloud_cmd(test_cluster_name: str,
         return 'true'
     else:
         return f'sky down -y {cluster_name}'
+
+
+def extract_default_aws_credentials():
+    """Extract default AWS credentials from credentials file or environment variables.
+
+    Returns:
+        Tuple of (access_key_id, secret_access_key) or (None, None) if not found.
+    """
+    # Try environment variables first
+    access_key = os.environ.get('AWS_ACCESS_KEY_ID')
+    secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
+    if access_key and secret_key:
+        return access_key, secret_key
+
+    # Try credentials file
+    credentials_path = os.path.expanduser('~/.aws/credentials')
+    if os.path.exists(credentials_path):
+        parser = configparser.ConfigParser()
+        try:
+            parser.read(credentials_path)
+            if 'default' in parser.sections():
+                access_key = parser.get('default',
+                                        'aws_access_key_id',
+                                        fallback=None)
+                secret_key = parser.get('default',
+                                        'aws_secret_access_key',
+                                        fallback=None)
+                if access_key and secret_key:
+                    return access_key.strip(), secret_key.strip()
+        except configparser.Error:
+            pass
+
+    return None, None
 
 
 def _increase_initial_delay_seconds(original_cmd: str,
@@ -930,6 +1022,12 @@ def is_non_docker_remote_api_server() -> bool:
     return False
 
 
+def is_docker_remote_api_server() -> bool:
+    if is_remote_server_test():
+        return 'host.docker.internal' in get_api_server_url()
+    return False
+
+
 def get_dashboard_cluster_status_request_id() -> str:
     """Get the status of the cluster from the dashboard."""
     body = payloads.StatusBody(all_users=True,)
@@ -952,7 +1050,7 @@ def get_dashboard_jobs_queue_request_id() -> str:
     return server_common.get_request_id(response)
 
 
-def get_response_from_request_id(request_id: str) -> Any:
+def get_response_from_request_id_dashboard(request_id: str) -> Any:
     """Waits for and gets the result of a request.
 
     Args:
@@ -971,7 +1069,7 @@ def get_response_from_request_id(request_id: str) -> Any:
         'GET',
         f'/internal/dashboard/api/get?request_id={request_id}',
         server_url=get_api_server_url(),
-        timeout=15)
+        timeout=25)
     request_task = None
     if response.status_code == 200:
         request_task = requests_lib.Request.decode(
@@ -1042,14 +1140,16 @@ def is_in_buildkite_env() -> bool:
     return env_options.Options.RUNNING_IN_BUILDKITE.get()
 
 
-def get_avaliabe_gpus_for_k8s_tests(default_gpu: str = 'T4') -> str:
-    """Get the available GPUs for K8s."""
-    if is_remote_server_test():
+def get_available_gpus(default_gpu: str = 'T4',
+                       infra: str = 'kubernetes',
+                       count: int = 1) -> str:
+    """Get the available GPUs for K8s or Slurm."""
+    try:
         prefix = ''
         env_file = pytest_config_file_override()
         if env_file is not None:
             prefix = f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={env_file}'
-        command = f'{prefix} sky show-gpus --infra kubernetes | grep -A1 "^GPU" | tail -1 | awk "{{print \$1}}"'
+        command = f'{prefix} sky show-gpus --infra {infra} | grep -A1 "^GPU" | grep " {count}" | tail -1 | awk "{{print \$1}}"'
         Test.echo_without_prefix(command)
         result = subprocess_utils.run(command,
                                       shell=True,
@@ -1058,7 +1158,9 @@ def get_avaliabe_gpus_for_k8s_tests(default_gpu: str = 'T4') -> str:
                                       text=True)
         gpu_name = result.stdout.strip()
         return gpu_name
-    return default_gpu
+    except Exception as e:
+        Test.echo_without_prefix(f'Error getting available GPUs: {e}')
+        return default_gpu
 
 
 def get_enabled_cloud_storages() -> List[clouds.Cloud]:

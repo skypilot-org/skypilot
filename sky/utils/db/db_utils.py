@@ -17,6 +17,7 @@ from sqlalchemy.ext import asyncio as sqlalchemy_async
 
 from sky import sky_logging
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 
 logger = sky_logging.init_logger(__name__)
 if typing.TYPE_CHECKING:
@@ -72,6 +73,18 @@ def safe_cursor(db_path: str):
         cursor.close()
         conn.commit()
         conn.close()
+
+
+@contextlib.contextmanager
+def safe_cursor_on_connection(conn: 'sqlite3.Connection'):
+    """A auto-committing, auto-closing cursor on an existing connection."""
+    # Ensure commit() is called when the context is exited.
+    with conn:
+        cursor = conn.cursor()
+        try:
+            yield cursor
+        finally:
+            cursor.close()
 
 
 def add_column_to_table(
@@ -185,7 +198,7 @@ def add_column_to_table_sqlalchemy(
             pass
         else:
             raise
-    #postgressql
+    #postgresql
     except sqlalchemy_exc.ProgrammingError as e:
         if 'already exists' in str(e):
             pass
@@ -285,6 +298,11 @@ def drop_column_from_table_alembic(
             raise
 
 
+def fault_point():
+    """For test fault injection."""
+    pass
+
+
 class SQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database."""
 
@@ -344,8 +362,8 @@ class SQLiteConn(threading.local):
 
         def exec_and_commit(sql: str, parameters: Optional[Iterable[Any]]):
             # pylint: disable=protected-access
-            conn._conn.execute(sql, parameters)
-            conn._conn.commit()
+            with safe_cursor_on_connection(conn._conn) as cursor:
+                cursor.execute(sql, parameters)
 
         # pylint: disable=protected-access
         await conn._execute(exec_and_commit, sql, parameters)
@@ -356,7 +374,41 @@ class SQLiteConn(threading.local):
                                      parameters: Optional[Iterable[Any]] = None
                                     ) -> Iterable[sqlite3.Row]:
         conn = await self._get_async_conn()
-        return await conn.execute_fetchall(sql, parameters)
+        if parameters is None:
+            parameters = []
+
+        def exec_fetch_all(sql: str, parameters: Optional[Iterable[Any]]):
+            # pylint: disable=protected-access
+            with safe_cursor_on_connection(conn._conn) as cursor:
+                cursor.execute(sql, parameters)
+                # Note(dev): sqlite3.Connection cannot be patched, keep
+                # fault_point here to test the integrity of exec_fetch_all()
+                fault_point()
+                return cursor.fetchall()
+
+        # pylint: disable=protected-access
+        return await conn._execute(exec_fetch_all, sql, parameters)
+
+    async def execute_get_returning_value_async(
+            self,
+            sql: str,
+            parameters: Optional[Iterable[Any]] = None
+    ) -> Optional[sqlite3.Row]:
+        conn = await self._get_async_conn()
+
+        if parameters is None:
+            parameters = []
+
+        def exec_and_get_returning_value(sql: str,
+                                         parameters: Optional[Iterable[Any]]):
+            # pylint: disable=protected-access
+            with safe_cursor_on_connection(conn._conn) as cursor:
+                cursor.execute(sql, parameters)
+                return cursor.fetchone()
+
+        # pylint: disable=protected-access
+        return await conn._execute(exec_and_get_returning_value, sql,
+                                   parameters)
 
     async def close(self):
         if self._async_conn is not None:
@@ -382,21 +434,28 @@ def get_max_connections():
 
 @typing.overload
 def get_engine(
-        db_name: str,
+        db_name: Optional[str],
         async_engine: Literal[False] = False) -> sqlalchemy.engine.Engine:
     ...
 
 
 @typing.overload
-def get_engine(db_name: str,
+def get_engine(db_name: Optional[str],
                async_engine: Literal[True]) -> sqlalchemy_async.AsyncEngine:
     ...
 
 
 def get_engine(
-    db_name: str,
+    db_name: Optional[str],
     async_engine: bool = False
 ) -> Union[sqlalchemy.engine.Engine, sqlalchemy_async.AsyncEngine]:
+    """Get the engine for the given database name.
+
+    Args:
+        db_name: The name of the database. ONLY used for SQLite. On Postgres,
+        we use a single database, which we get from the connection string.
+        async_engine: Whether to return an async engine.
+    """
     conn_string = None
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         conn_string = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
@@ -404,32 +463,45 @@ def get_engine(
         if async_engine:
             conn_string = conn_string.replace('postgresql://',
                                               'postgresql+asyncpg://')
-            # This is an AsyncEngine, instead of a (normal, synchronous) Engine,
-            # so we should not put it in the cache. Instead, just return.
-            return sqlalchemy_async.create_async_engine(
-                conn_string, poolclass=sqlalchemy.NullPool)
         with _db_creation_lock:
+            # We use the same cache for both sync and async engines
+            # because we change the conn_string in the async case,
+            # so they would not overlap.
             if conn_string not in _postgres_engine_cache:
-                logger.debug('Creating a new postgres engine with '
-                             f'maximum {_max_connections} connections')
+                engine_type = 'sync' if not async_engine else 'async'
+                logger.debug(
+                    f'Creating a new postgres {engine_type} engine with '
+                    f'maximum {_max_connections} connections')
                 if _max_connections == 0:
-                    _postgres_engine_cache[conn_string] = (
-                        sqlalchemy.create_engine(
-                            conn_string, poolclass=sqlalchemy.pool.NullPool))
-                elif _max_connections == 1:
-                    _postgres_engine_cache[conn_string] = (
-                        sqlalchemy.create_engine(
-                            conn_string, poolclass=sqlalchemy.pool.StaticPool))
+                    kw_args = {'poolclass': sqlalchemy.NullPool}
+                    if async_engine:
+                        _postgres_engine_cache[conn_string] = (
+                            sqlalchemy_async.create_async_engine(
+                                conn_string, **kw_args))
+                    else:
+                        _postgres_engine_cache[conn_string] = (
+                            sqlalchemy.create_engine(conn_string, **kw_args))
                 else:
-                    _postgres_engine_cache[conn_string] = (
-                        sqlalchemy.create_engine(
-                            conn_string,
-                            poolclass=sqlalchemy.pool.QueuePool,
-                            size=_max_connections,
-                            max_overflow=0))
+                    kw_args = {
+                        'pool_size': _max_connections,
+                        'max_overflow': max(0, 5 - _max_connections),
+                        'pool_pre_ping': True,
+                        'pool_recycle': 1800
+                    }
+                    if async_engine:
+                        kw_args[
+                            'poolclass'] = sqlalchemy.pool.AsyncAdaptedQueuePool
+                        _postgres_engine_cache[conn_string] = (
+                            sqlalchemy_async.create_async_engine(
+                                conn_string, **kw_args))
+                    else:
+                        kw_args['poolclass'] = sqlalchemy.pool.QueuePool
+                        _postgres_engine_cache[conn_string] = (
+                            sqlalchemy.create_engine(conn_string, **kw_args))
             engine = _postgres_engine_cache[conn_string]
     else:
-        db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
+        assert db_name is not None, 'db_name must be provided for SQLite'
+        db_path = runtime_utils.get_runtime_dir_path(f'.sky/{db_name}.db')
         pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
         if async_engine:
             # This is an AsyncEngine, instead of a (normal, synchronous) Engine,

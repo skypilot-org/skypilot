@@ -14,7 +14,8 @@ import shutil
 import subprocess
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
+                    Union)
 
 import ijson
 
@@ -109,8 +110,9 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
             return {
                 'NCCL_SOCKET_IFNAME': 'eth0',
                 'NCCL_IB_HCA': 'ibp',
-                'UCX_NET_DEVICES': ('ibp0:1,ibp1:1,ibp2:1,ibp3:1,'
-                                    'ibp4:1,ibp5:1,ibp6:1,ibp7:1')
+                # Restrict UCX to TCP to avoid unneccsary errors. NCCL doesn't use UCX
+                'UCX_TLS': 'tcp',
+                'UCX_NET_DEVICES': 'eth0',
             }
         else:
             # GCP clusters and generic clusters - environment variables are
@@ -736,6 +738,7 @@ def detect_gpu_label_formatter(
         for label, value in node.metadata.labels.items():
             node_labels[node.metadata.name].append((label, value))
 
+    invalid_label_values: List[Tuple[str, str, str, str]] = []
     # Check if the node labels contain any of the GPU label prefixes
     for lf in LABEL_FORMATTER_REGISTRY:
         skip = False
@@ -749,17 +752,21 @@ def detect_gpu_label_formatter(
                     if valid:
                         return lf(), node_labels
                     else:
-                        logger.warning(f'GPU label {label} matched for label '
-                                       f'formatter {lf.__class__.__name__}, '
-                                       f'but has invalid value {value}. '
-                                       f'Reason: {reason}. '
-                                       'Skipping...')
+                        invalid_label_values.append(
+                            (label, lf.__name__, value, reason))
                         skip = True
                         break
             if skip:
                 break
         if skip:
             continue
+
+    for label, lf_name, value, reason in invalid_label_values:
+        logger.warning(f'GPU label {label} matched for label '
+                       f'formatter {lf_name}, '
+                       f'but has invalid value {value}. '
+                       f'Reason: {reason}. '
+                       'Skipping...')
 
     return None, node_labels
 
@@ -1199,14 +1206,23 @@ class V1NodeAddress:
 
 
 @dataclasses.dataclass
+class V1NodeCondition:
+    """Represents a Kubernetes node condition."""
+    type: str
+    status: str
+
+
+@dataclasses.dataclass
 class V1NodeStatus:
     allocatable: Dict[str, str]
     capacity: Dict[str, str]
     addresses: List[V1NodeAddress]
+    conditions: List[V1NodeCondition]
 
 
 @dataclasses.dataclass
 class V1Node:
+    """Represents a Kubernetes node."""
     metadata: V1ObjectMeta
     status: V1NodeStatus
 
@@ -1224,7 +1240,23 @@ class V1Node:
                            V1NodeAddress(type=addr['type'],
                                          address=addr['address'])
                            for addr in data['status'].get('addresses', [])
+                       ],
+                       conditions=[
+                           V1NodeCondition(type=cond['type'],
+                                           status=cond['status'])
+                           for cond in data['status'].get('conditions', [])
                        ]))
+
+    def is_ready(self) -> bool:
+        """Check if the node is ready based on its conditions.
+
+        A node is considered ready if it has a 'Ready' condition with
+        status 'True'.
+        """
+        for condition in self.status.conditions:
+            if condition.type == 'Ready':
+                return condition.status == 'True'
+        return False
 
 
 @annotations.lru_cache(scope='request', maxsize=10)
@@ -1444,11 +1476,12 @@ def check_instance_fits(context: Optional[str],
             return False, str(e)
         # Get the set of nodes that have the GPU type
         gpu_nodes = [
-            node for node in nodes if gpu_label_key in node.metadata.labels and
+            node for node in nodes
+            if node.is_ready() and gpu_label_key in node.metadata.labels and
             node.metadata.labels[gpu_label_key] in gpu_label_values
         ]
         if not gpu_nodes:
-            return False, f'No GPU nodes found with {acc_type} on the cluster'
+            return False, f'No ready GPU nodes found with {acc_type} on the cluster'
         if is_tpu_on_gke(acc_type):
             # If requested accelerator is a TPU type, check if the cluster
             # has sufficient TPU resource to meet the requirement.
@@ -1472,7 +1505,9 @@ def check_instance_fits(context: Optional[str],
             f'enough CPU (> {k8s_instance_type.cpus} CPUs) and/or '
             f'memory (> {k8s_instance_type.memory} G). ')
     else:
-        candidate_nodes = nodes
+        candidate_nodes = [node for node in nodes if node.is_ready()]
+        if not candidate_nodes:
+            return False, 'No ready nodes found in the cluster.'
         not_fit_reason_prefix = (f'No nodes found with enough '
                                  f'CPU (> {k8s_instance_type.cpus} CPUs) '
                                  'and/or memory '
@@ -1878,11 +1913,17 @@ class PodValidator:
 
         if isinstance(klass, str):
             if klass.startswith('list['):
-                sub_kls = re.match(r'list\[(.*)\]', klass).group(1)
+                match = re.match(r'list\[(.*)\]', klass)
+                if match is None:
+                    raise ValueError(f'Invalid list type format: {klass}')
+                sub_kls = match.group(1)
                 return [cls.__validate(sub_data, sub_kls) for sub_data in data]
 
             if klass.startswith('dict('):
-                sub_kls = re.match(r'dict\(([^,]*), (.*)\)', klass).group(2)
+                match = re.match(r'dict\(([^,]*), (.*)\)', klass)
+                if match is None:
+                    raise ValueError(f'Invalid dict type format: {klass}')
+                sub_kls = match.group(2)
                 return {k: cls.__validate(v, sub_kls) for k, v in data.items()}
 
             # convert str to class
@@ -2327,16 +2368,9 @@ class KubernetesInstanceType:
     @staticmethod
     def is_valid_instance_type(name: str) -> bool:
         """Returns whether the given name is a valid instance type."""
-        # Before https://github.com/skypilot-org/skypilot/pull/4756,
-        # the accelerators are appended with format "--{a}{type}",
-        # e.g. "4CPU--16GB--1V100".
-        # Check both patterns to keep backward compatibility.
-        # TODO(romilb): Backward compatibility, remove after 0.11.0.
-        prev_pattern = re.compile(
-            r'^(\d+(\.\d+)?CPU--\d+(\.\d+)?GB)(--\d+\S+)?$')
         pattern = re.compile(
             r'^(\d+(\.\d+)?CPU--\d+(\.\d+)?GB)(--[\w\d-]+:\d+)?$')
-        return bool(pattern.match(name)) or bool(prev_pattern.match(name))
+        return bool(pattern.match(name))
 
     @classmethod
     def _parse_instance_type(
@@ -2353,29 +2387,11 @@ class KubernetesInstanceType:
             r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_type>[\w\d-]+):(?P<accelerator_count>\d+))?$'  # pylint: disable=line-too-long
         )
         match = pattern.match(name)
-        # TODO(romilb): Backward compatibility, remove after 0.11.0.
-        prev_pattern = re.compile(
-            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_count>\d+)(?P<accelerator_type>\S+))?$'  # pylint: disable=line-too-long
-        )
-        prev_match = prev_pattern.match(name)
         if match:
             cpus = float(match.group('cpus'))
             memory = float(match.group('memory'))
             accelerator_count = match.group('accelerator_count')
             accelerator_type = match.group('accelerator_type')
-            if accelerator_count:
-                accelerator_count = int(accelerator_count)
-                accelerator_type = str(accelerator_type)
-            else:
-                accelerator_count = None
-                accelerator_type = None
-            return cpus, memory, accelerator_count, accelerator_type
-        # TODO(romilb): Backward compatibility, remove after 0.11.0.
-        elif prev_match:
-            cpus = float(prev_match.group('cpus'))
-            memory = float(prev_match.group('memory'))
-            accelerator_count = prev_match.group('accelerator_count')
-            accelerator_type = prev_match.group('accelerator_type')
             if accelerator_count:
                 accelerator_count = int(accelerator_count)
                 accelerator_type = str(accelerator_type)
@@ -2682,26 +2698,22 @@ def combine_pod_config_fields(
     merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
     # We don't use override_configs in `get_effective_region_config`, as merging
     # the pod config requires special handling.
-    if isinstance(cloud, clouds.SSH):
-        kubernetes_config = skypilot_config.get_effective_region_config(
-            cloud='ssh', region=None, keys=('pod_config',), default_value={})
-        override_pod_config = config_utils.get_cloud_config_value_from_dict(
-            dict_config=cluster_config_overrides,
-            cloud='ssh',
-            keys=('pod_config',),
-            default_value={})
-    else:
-        kubernetes_config = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
-            region=context,
-            keys=('pod_config',),
-            default_value={})
-        override_pod_config = config_utils.get_cloud_config_value_from_dict(
-            dict_config=cluster_config_overrides,
-            cloud='kubernetes',
-            region=context,
-            keys=('pod_config',),
-            default_value={})
+    cloud_str = 'ssh' if isinstance(cloud, clouds.SSH) else 'kubernetes'
+    context_str = context
+    if isinstance(cloud, clouds.SSH) and context is not None:
+        assert context.startswith('ssh-'), 'SSH context must start with "ssh-"'
+        context_str = context[len('ssh-'):]
+    kubernetes_config = skypilot_config.get_effective_region_config(
+        cloud=cloud_str,
+        region=context_str,
+        keys=('pod_config',),
+        default_value={})
+    override_pod_config = config_utils.get_cloud_config_value_from_dict(
+        dict_config=cluster_config_overrides,
+        cloud=cloud_str,
+        region=context_str,
+        keys=('pod_config',),
+        default_value={})
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
@@ -2720,9 +2732,11 @@ def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
     Obeys the same add or update semantics as combine_pod_config_fields().
     """
     merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
+    context, cloud_str = get_cleaned_context_and_cloud_str(context)
+
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata',),
         default_value={})
@@ -2730,7 +2744,7 @@ def combine_metadata_fields(cluster_yaml_obj: Dict[str, Any],
     # Get custom_metadata from task-level config overrides
     override_custom_metadata = config_utils.get_cloud_config_value_from_dict(
         dict_config=cluster_config_overrides,
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata',),
         default_value={})
@@ -2787,9 +2801,11 @@ def merge_custom_metadata(
 
     Merge is done in-place, so return is not required
     """
+    context, cloud_str = get_cleaned_context_and_cloud_str(context)
+
     # Get custom_metadata from global config
     custom_metadata = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata',),
         default_value={})
@@ -2798,7 +2814,7 @@ def merge_custom_metadata(
     if cluster_config_overrides is not None:
         override_custom_metadata = config_utils.get_cloud_config_value_from_dict(
             dict_config=cluster_config_overrides,
-            cloud='kubernetes',
+            cloud=cloud_str,
             region=context,
             keys=('custom_metadata',),
             default_value={})
@@ -3090,16 +3106,23 @@ def get_kubernetes_node_info(
 
         accelerator_count = get_node_accelerator_count(context,
                                                        node.status.allocatable)
+        # Check if node is ready
+        node_is_ready = node.is_ready()
+
         if accelerator_count == 0:
             node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
                 name=node.metadata.name,
                 accelerator_type=accelerator_name,
                 total={'accelerator_count': 0},
                 free={'accelerators_available': 0},
-                ip_address=node_ip)
+                ip_address=node_ip,
+                is_ready=node_is_ready)
             continue
 
-        if not has_accelerator_nodes or error_on_get_allocated_gpu_qty_by_node:
+        if not node_is_ready:
+            # If node is not ready, report 0 available GPUs
+            accelerators_available = 0
+        elif not has_accelerator_nodes or error_on_get_allocated_gpu_qty_by_node:
             accelerators_available = -1
         else:
             allocated_qty = allocated_qty_by_node[node.metadata.name]
@@ -3117,7 +3140,8 @@ def get_kubernetes_node_info(
             accelerator_type=accelerator_name,
             total={'accelerator_count': int(accelerator_count)},
             free={'accelerators_available': int(accelerators_available)},
-            ip_address=node_ip)
+            ip_address=node_ip,
+            is_ready=node_is_ready)
     hint = ''
     if has_multi_host_tpu:
         hint = ('(Note: Multi-host TPUs are detected and excluded from the '
@@ -3149,7 +3173,11 @@ def filter_pods(namespace: str,
                 context: Optional[str],
                 tag_filters: Dict[str, str],
                 status_filters: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Filters pods by tags and status."""
+    """Filters pods by tags and status.
+
+    Returned dict is sorted by name, with workers sorted by their numeric suffix.
+    This ensures consistent ordering for SSH configuration and other operations.
+    """
     non_included_pod_statuses = POD_STATUSES.copy()
 
     field_selector = ''
@@ -3167,7 +3195,32 @@ def filter_pods(namespace: str,
     pods = [
         pod for pod in pod_list.items if pod.metadata.deletion_timestamp is None
     ]
-    return {pod.metadata.name: pod for pod in pods}
+
+    # Sort pods by name, with workers sorted by their numeric suffix.
+    # This ensures consistent ordering (e.g., cluster-head, cluster-worker1,
+    # cluster-worker2, cluster-worker3, ...) even when Kubernetes API
+    # returns them in arbitrary order. This works even if there were
+    # somehow pod names other than head/worker ones, and those end up at
+    # the end of the list.
+    def get_pod_sort_key(
+        pod: V1Pod
+    ) -> Union[Tuple[Literal[0], str], Tuple[Literal[1], int], Tuple[Literal[2],
+                                                                     str]]:
+        name = pod.metadata.name
+        name_suffix = name.split('-')[-1]
+        if name_suffix == 'head':
+            return (0, name)
+        elif name_suffix.startswith('worker'):
+            try:
+                return (1, int(name_suffix.split('worker')[-1]))
+            except (ValueError, IndexError):
+                return (2, name)
+        else:
+            return (2, name)
+
+    sorted_pods = sorted(pods, key=get_pod_sort_key)
+
+    return {pod.metadata.name: pod for pod in sorted_pods}
 
 
 def _remove_pod_annotation(pod: Any,
@@ -3296,13 +3349,13 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
 
     try:
         pods = kubernetes.core_api(context).list_pod_for_all_namespaces(
-            label_selector='skypilot-cluster',
+            label_selector=provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
             _request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
             'Timed out trying to get SkyPilot pods from Kubernetes cluster. '
             'Please check if the cluster is healthy and retry. To debug, run: '
-            'kubectl get pods --selector=skypilot-cluster --all-namespaces'
+            'kubectl get pods --selector=skypilot-cluster-name --all-namespaces'
         ) from None
     return pods
 
@@ -3439,7 +3492,8 @@ def process_skypilot_pods(
     serve_controllers: List[KubernetesSkyPilotClusterInfo] = []
 
     for pod in pods:
-        cluster_name_on_cloud = pod.metadata.labels.get('skypilot-cluster')
+        cluster_name_on_cloud = pod.metadata.labels.get(
+            provision_constants.TAG_SKYPILOT_CLUSTER_NAME)
         cluster_name = cluster_name_on_cloud.rsplit(
             '-', 1
         )[0]  # Remove the user hash to get cluster name (e.g., mycluster-2ea4)
@@ -3726,3 +3780,13 @@ def should_exclude_pod_from_gpu_allocation(pod) -> bool:
         return True
 
     return False
+
+
+def get_cleaned_context_and_cloud_str(
+        context: Optional[str]) -> Tuple[Optional[str], str]:
+    """Return the cleaned context and relevant cloud string from a context."""
+    cloud_str = 'kubernetes'
+    if context is not None and context.startswith('ssh-'):
+        cloud_str = 'ssh'
+        context = context[len('ssh-'):]
+    return context, cloud_str

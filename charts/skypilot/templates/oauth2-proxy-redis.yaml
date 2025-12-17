@@ -23,9 +23,17 @@ spec:
         app: {{ .Release.Name }}-oauth2-proxy-redis
         skypilot.co/component: oauth2-proxy-redis
     spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: redis
-        image: {{ index $oauth2 "redis-image" | default "redis:7-alpine" }}
+        image: {{ include "common.image" (dict "root" . "image" (default "redis:7-alpine" (index $oauth2 "redis-image"))) }}
+        {{- with $.Values.global.extraEnvs }}
+        env:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         ports:
         - containerPort: 6379
         resources:
