@@ -14,14 +14,16 @@ def send_fd(sock: socket.socket, fd: int) -> None:
     SCM_RIGHTS allows us to send or receive a set of open
     file descriptors from another process.
 
-    See: https://man7.org/linux/man-pages/man7/unix.7.html
+    See:
+    https://man7.org/linux/man-pages/man7/unix.7.html
+    https://man7.org/linux/man-pages/man3/cmsg.3.html
 
     Args:
         sock: Connected Unix socket.
         fd: File descriptor to send.
     """
     sock.sendmsg(
-        [b'x'],
+        [b'x'],  # Dummy data
         [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [fd]))])
 
 
