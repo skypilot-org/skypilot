@@ -341,11 +341,15 @@ You can also specify a list of exit codes that should always trigger recovery, r
 
 In this configuration:
 
-- If the job exits with code 33 or 137, it will be recovered. Restarts triggered by these specific exit codes do not count towards the `max_restarts_on_errors` limit.
+- If the job exits with code 33 or 34, it will be recovered. Restarts triggered by these specific exit codes do not count towards the `max_restarts_on_errors` limit.
 - For any other non-zero exit code, the job will be recovered up to 3 times (as specified by :code:`max_restarts_on_errors`)
 
 .. note::
   For multi-node jobs, recovery is triggered if **any** node exits with a code in :code:`recover_on_exit_codes`.
+
+.. warning::
+
+  You should **not** use exit code 137 in :code:`recover_on_exit_codes`. This code is used internally by SkyPilot and including it may interfere with proper recovery behavior.
 
 
 When will my job be recovered?
