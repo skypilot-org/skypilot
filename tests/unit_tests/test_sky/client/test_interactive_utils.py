@@ -45,9 +45,10 @@ def test_interactive_auth_websocket_bridge_and_terminal_handling():
                 return self
 
             async def __anext__(self):
-                # Signal readiness on first iteration. This ensures connect_read_pipe
-                # (which happens before stdout_task starts) is complete.
+                # Signal readiness on first iteration, but first yield to the event
+                # loop so stdin_task can start its read() call before we write data.
                 if not self.ready.is_set():
+                    await asyncio.sleep(0)
                     self.ready.set()
 
                 if not self.to_send:
