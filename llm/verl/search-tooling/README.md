@@ -4,6 +4,8 @@ This folder contains SkyPilot YAMLs for training and inference with tool-augment
 - a **Google Search** backend, or
 - a **Wikipedia retrieval service** (FAISS index).
 
+See this [blog](https://blog.skypilot.co/verl-tool-calling/) for how the YAMLs are used for training a RL agent that can use Google search.
+
 ## Inference (Google Search backend)
 
 ```bash
