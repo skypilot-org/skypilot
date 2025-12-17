@@ -491,12 +491,8 @@ def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     use_spot = True
     accelerator = 'T4'
-    if generic_cloud == 'kubernetes':
-        # EKS does not support spot instances
-        # Assume tests using a remote api server endpoint do not support spot instances
-        use_spot = not smoke_tests_utils.is_eks_cluster()
-    if generic_cloud == 'slurm':
-        # Slurm does not support spot instances
+    if generic_cloud == 'kubernetes' or generic_cloud == 'slurm':
+        # Slurm and Kubernetes do not support spot instances
         use_spot = False
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
