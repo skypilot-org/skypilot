@@ -995,8 +995,8 @@ class GKEAutoscaler(Autoscaler):
         logger.debug(
             f'checking if autoscale-enabled node pool {node_pool_name} '
             f'can create a node satisfying {instance_type}')
-        k8s_instance_type = (KubernetesInstanceType.
-            from_instance_type(instance_type))
+        k8s_instance_type = (
+            KubernetesInstanceType.from_instance_type(instance_type))
         node_config = node_pool['config']
         machine_type = node_config['machineType']
 
