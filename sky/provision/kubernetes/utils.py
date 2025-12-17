@@ -1004,8 +1004,8 @@ class GKEAutoscaler(Autoscaler):
         logger.debug(
             f'checking if autoscale-enabled node pool {node_pool_name} '
             f'can create a node satisfying {instance_type}')
-        k8s_instance_type = KubernetesInstanceType.\
-            from_instance_type(instance_type)
+        k8s_instance_type = (KubernetesInstanceType.
+            from_instance_type(instance_type))
         node_config = node_pool['config']
         machine_type = node_config['machineType']
 
@@ -1053,7 +1053,16 @@ class GKEAutoscaler(Autoscaler):
                          f'{node_pool_name}.')
             return True
 
-        vcpus, mem = clouds.GCP.get_vcpus_mem_from_instance_type(machine_type)
+        try:
+            vcpus, mem = clouds.GCP.get_vcpus_mem_from_instance_type(
+                machine_type)
+        except ValueError as e:
+            logger.error(
+                f'Failed to get vcpu and memory from instance type '
+                f'{machine_type}. Skipping the fit check for node pool '
+                f'{node_pool_name}, assuming the node pool can create a node '
+                f'satisfying {k8s_instance_type}. Error: {e}')
+            return True
         if vcpus is not None and vcpus < k8s_instance_type.cpus:
             logger.debug(f'vcpu check failed for {machine_type} '
                          f'on node pool {node_pool_name}')
