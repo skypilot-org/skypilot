@@ -107,7 +107,7 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     # If so, we should use cloud storage even in consolidation mode to persist
     # files across rolling updates and pod restarts.
     has_explicit_bucket = skypilot_config.get_nested(('jobs', 'bucket'),
-                                                      None) is not None
+                                                     None) is not None
     storage_clouds = (
         storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
     force_disable_cloud_bucket = skypilot_config.get_nested(
