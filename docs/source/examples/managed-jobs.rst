@@ -335,8 +335,9 @@ You can also specify a list of exit codes that should always trigger recovery, r
     accelerators: A100:8
     job_recovery:
       max_restarts_on_errors: 3
-      # Always recover if the job exits with code 33 or 137
-      recover_on_exit_codes: [33, 137]
+      # Always recover if the job exits with code 33 or 34.
+      # In a multi-node job, recovery is triggered if any node exits with a code in [33, 34].
+      recover_on_exit_codes: [33, 34]
 
 In this configuration:
 
