@@ -94,8 +94,20 @@ def create_region_instance_template(cluster_name_on_cloud: str, project_id: str,
 
 
 def create_managed_instance_group(project_id: str, zone: str, group_name: str,
-                                  instance_template_url: str,
-                                  size: int) -> dict:
+                                  instance_template_url: str, size: int,
+                                  termination_action: str = 'DO_NOTHING') -> dict:
+    """Create a managed instance group.
+
+    Args:
+        project_id: GCP project ID.
+        zone: GCP zone.
+        group_name: Name of the managed instance group.
+        instance_template_url: URL of the instance template.
+        size: Initial size of the MIG.
+        termination_action: Action to take when run duration expires or resize
+            request fails. One of 'DELETE', 'STOP', or 'DO_NOTHING'.
+            Defaults to 'DO_NOTHING'.
+    """
     logger.debug(f'Creating managed instance group {group_name!r}.')
     compute = gcp.build('compute',
                         'v1',
@@ -109,7 +121,7 @@ def create_managed_instance_group(project_id: str, zone: str, group_name: str,
             'instanceTemplate': instance_template_url,
             'target_size': size,
             'instanceLifecyclePolicy': {
-                'defaultActionOnFailure': 'DO_NOTHING',
+                'defaultActionOnFailure': termination_action,
             },
             'updatePolicy': {
                 'type': 'OPPORTUNISTIC',
