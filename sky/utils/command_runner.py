@@ -909,7 +909,6 @@ class SSHCommandRunner(CommandRunner):
                                         process_stream=process_stream,
                                         shell=True,
                                         executable=executable,
-                                        stdin=pty_s_fd,
                                         preexec_fn=setup_pty_session,
                                         **kwargs)
         except Exception as e:
