@@ -16,9 +16,11 @@ import posixpath
 import re
 import resource
 import shutil
+import socket
 import struct
 import sys
 import threading
+import time
 import traceback
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 import uuid
@@ -2060,6 +2062,123 @@ async def kubernetes_pod_ssh_proxy(
             pid=os.getpid(), reason=reason).inc()
 
 
+@app.websocket('/ssh-interactive-auth')
+async def ssh_interactive_auth(websocket: fastapi.WebSocket,
+                               session_id: str) -> None:
+    """Proxies PTY for SSH interactive authentication via websocket.
+
+    This endpoint receives a PTY file descriptor from a worker process
+    and bridges it bidirectionally with a websocket connection, allowing
+    the client to handle interactive SSH authentication (e.g., 2FA).
+
+    Detects auth completion by monitoring terminal echo state and data flow.
+    """
+    await websocket.accept()
+    logger.info(f'WebSocket connection accepted for SSH auth session: '
+                f'{session_id}')
+
+    loop = asyncio.get_running_loop()
+
+    # Connect to worker process to receive PTY file descriptor
+    fd_socket_path = interactive_utils.get_pty_socket_path(session_id)
+    fd_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    master_fd = -1
+    try:
+        # Connect to worker's FD-passing socket
+        await loop.sock_connect(fd_sock, fd_socket_path)
+        master_fd = await loop.run_in_executor(None, interactive_utils.recv_fd,
+                                               fd_sock)
+        logger.debug(f'Received PTY master fd {master_fd} for session '
+                     f'{session_id}')
+
+        # Bridge PTY ↔ websocket bidirectionally
+        async def websocket_to_pty():
+            """Forward websocket messages to PTY."""
+            try:
+                async for message in websocket.iter_bytes():
+                    await loop.run_in_executor(None, os.write, master_fd,
+                                               message)
+            except fastapi.WebSocketDisconnect:
+                logger.error(f'WebSocket disconnected for session {session_id}')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error in websocket_to_pty: {e}')
+
+        async def pty_to_websocket():
+            """Forward PTY output to websocket and detect auth completion.
+
+            Detects auth completion by monitoring terminal echo state.
+            Echo is disabled during password prompts and enabled after
+            successful authentication. Auth is considered complete when
+            echo has been enabled for a sustained period (1s).
+            """
+            echo_enabled_since = None
+
+            async def signal_auth_completion():
+                """Signal worker process that auth is done."""
+                logger.debug('Interactive auth complete')
+                try:
+                    await loop.sock_sendall(fd_sock, b'OK')
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.error(f'Failed to signal completion: {e}')
+
+            try:
+                while True:
+                    try:
+                        data = await loop.run_in_executor(
+                            None, os.read, master_fd, 4096)
+                    except OSError as e:
+                        logger.error(f'PTY read error (likely closed): {e}')
+                        break
+
+                    if not data:
+                        break
+
+                    await websocket.send_bytes(data)
+
+                    # Check echo state to detect auth completion.
+                    try:
+                        echo_disabled = subprocess_utils.is_echo_disabled(
+                            master_fd)
+                    except OSError:
+                        # PTY closed
+                        break
+
+                    if not echo_disabled:
+                        if echo_enabled_since is None:
+                            echo_enabled_since = time.time()
+                        elif time.time() - echo_enabled_since > 1.0:
+                            # TODO(kevin): Find a more robust way to detect
+                            # auth completion.
+                            await signal_auth_completion()
+                            break
+                    else:
+                        # Echo disabled (password prompt active).
+                        echo_enabled_since = None
+
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error in pty_to_websocket: {e}')
+            finally:
+                try:
+                    await websocket.close()
+                except Exception:  # pylint: disable=broad-except
+                    pass
+
+        await asyncio.gather(websocket_to_pty(), pty_to_websocket())
+
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Error in SSH interactive auth websocket: {e}')
+        raise
+    finally:
+        # Clean up
+        if master_fd >= 0:
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
+        fd_sock.close()
+        logger.debug(f'SSH interactive auth session {session_id} completed')
+
+
 @app.get('/all_contexts')
 async def all_contexts(request: fastapi.Request) -> None:
     """Gets all Kubernetes and SSH node pool contexts."""
@@ -2072,16 +2191,6 @@ async def all_contexts(request: fastapi.Request) -> None:
         func=core.get_all_contexts,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
-
-
-@app.post('/api/interactive/{session_id}')
-async def interactive_input(session_id: str,
-                            body: payloads.InteractiveInputBody):
-    try:
-        interactive_utils.send_to_socket(session_id, body.input)
-        return {'status': 'ok'}
-    except OSError as e:
-        raise fastapi.HTTPException(500, f'Failed to send input: {e}')
 
 
 # === Internal APIs ===

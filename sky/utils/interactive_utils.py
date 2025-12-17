@@ -1,41 +1,42 @@
 """Utilities for server-side interactive SSH functionality."""
-import os
+import array
 import socket
 
 
-def get_socket_path(session_id: str) -> str:
-    """Get the Unix socket path for interactive SSH session input."""
-    return f'/tmp/sky_interactive_{session_id}.sock'
+def get_pty_socket_path(session_id: str) -> str:
+    """Get the Unix socket path for PTY file descriptor passing."""
+    return f'/tmp/sky_pty_{session_id}.sock'
 
 
-def create_socket_server(session_id: str,
-                         timeout: float = 0.5) -> socket.socket:
-    """Create and bind a Unix socket server for receiving interactive input."""
-    socket_path = get_socket_path(session_id)
-    if os.path.exists(socket_path):
-        os.unlink(socket_path)
-    sock_server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock_server.bind(socket_path)
-    sock_server.listen(1)
-    sock_server.settimeout(timeout)
-    return sock_server
-
-
-def send_to_socket(session_id: str, data: str, timeout: float = 5.0) -> None:
-    """Send user input data to the Unix socket for an interactive session.
+def send_fd(sock: socket.socket, fd: int) -> None:
+    """Send file descriptor via Unix socket using SCM_RIGHTS.
 
     Args:
-        session_id: The unique session identifier.
-        data: The data to send.
-        timeout: Connection timeout in seconds.
+        sock: Connected Unix socket.
+        fd: File descriptor to send.
+    """
+    sock.sendmsg(
+        [b'x'],
+        [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [fd]))])
+
+
+def recv_fd(sock: socket.socket) -> int:
+    """Receive file descriptor via Unix socket using SCM_RIGHTS.
+
+    Args:
+        sock: Connected Unix socket.
+
+    Returns:
+        Received file descriptor.
 
     Raises:
-        OSError: If the socket connection fails.
+        RuntimeError: If no file descriptor was received.
     """
-    socket_path = get_socket_path(session_id)
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    sock.connect(socket_path)
-    # Send input with newline
-    sock.send((data + '\n').encode())
-    sock.close()
+    # NOTE: recvmsg() has no async equivalent
+    _, ancdata, _, _ = sock.recvmsg(
+        1, socket.CMSG_SPACE(array.array('i', [0]).itemsize))
+    if not ancdata:
+        raise RuntimeError('No file descriptor received - '
+                           'sender may have closed connection')
+    _, _, cmsg_data = ancdata[0]
+    return array.array('i', cmsg_data)[0]

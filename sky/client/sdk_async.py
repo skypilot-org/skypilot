@@ -173,10 +173,10 @@ async def stream_response_async(request_id: Optional[str],
             if line is not None:
                 line_count += 1
 
-                line = await interactive_utils.handle_interactive_prompt_async(
+                line = await interactive_utils.handle_interactive_auth_async(
                     line)
                 if line is None:
-                    # Line was consumed by interactive prompt handler
+                    # Line was consumed by interactive auth handler
                     continue
 
                 if retry_context is None:

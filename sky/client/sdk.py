@@ -163,9 +163,9 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
             if line is not None:
                 line_count += 1
 
-                line = interactive_utils.handle_interactive_prompt(line)
+                line = interactive_utils.handle_interactive_auth(line)
                 if line is None:
-                    # Line was consumed by interactive prompt handler
+                    # Line was consumed by interactive auth handler
                     continue
 
                 if retry_context is None:

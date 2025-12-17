@@ -6,7 +6,6 @@ import os
 import pathlib
 import pty
 import re
-import select
 import shlex
 import signal
 import socket
@@ -806,10 +805,13 @@ class SSHCommandRunner(CommandRunner):
         """Retries command with interactive auth.
 
         This handles SSH connections requiring keyboard-interactive
-        authentication (e.g., 2FA) by using a PTY and monitoring for auth
-        prompts. Once authenticated, establishes a persistent ControlMaster
-        socket (if enabled) that other SSH sessions can reuse without
-        re-authenticating.
+        authentication (e.g., 2FA) by using a PTY for auth prompts and
+        establishing a persistent ControlMaster socket (if enabled) that
+        other SSH sessions can reuse without re-authenticating.
+
+        The PTY is bridged to a websocket connection that allows the client
+        to handle interactive authentication. Command output flows through
+        normal stdout/stderr pipes, which gets printed to log_path.
 
         See ssh_options_list for when ControlMaster is not enabled.
         """
@@ -832,68 +834,55 @@ class SSHCommandRunner(CommandRunner):
                            f'connection alive for longer.{colorama.Fore.RESET}')
         command = command[:1] + extra_options + command[1:]
 
-        # Create Unix socket for user input
-        sock_server = interactive_utils.create_socket_server(session_id)
-
-        stop_event = threading.Event()
-        prompt_sent = threading.Event()
-
-        # Create PTY for SSH
+        # Create PTY for SSH. PTY slave for stdin from user, PTY master
+        # for password/auth prompts from SSH.
         pty_m_fd, pty_s_fd = pty.openpty()
 
-        def socket_to_pty():
-            """Forward socket input to PTY master."""
-            while not stop_event.is_set():
-                try:
-                    conn, _ = sock_server.accept()
-                    data = conn.recv(4096)
-                    if data:
-                        os.write(pty_m_fd, data)
-                        prompt_sent.clear()
-                    conn.close()
-                except socket.timeout:
-                    continue
-                except OSError:
-                    break
+        # Create Unix socket to pass PTY master fd to websocket handler
+        fd_socket_path = interactive_utils.get_pty_socket_path(session_id)
+        if os.path.exists(fd_socket_path):
+            os.unlink(fd_socket_path)
+        fd_server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        fd_server.bind(fd_socket_path)
+        fd_server.listen(1)
+        fd_server.settimeout(60)
 
-        def detect_and_log_prompts():
-            """Monitor PTY for prompts and write output to stdout."""
-            echo_disabled_since = 0
-            while not stop_event.is_set():
-                rlist, _, _ = select.select([pty_m_fd], [], [], 0.1)
-                if pty_m_fd in rlist:
+        # Signal client to initiate websocket for interactive auth
+        interactive_signal = f'<sky-interactive session="{session_id}"/>'
+        print(interactive_signal, flush=True)
+
+        def handle_unix_socket_connection():
+            """Background thread to handle Unix socket connection."""
+            conn = None
+            try:
+                # Wait for websocket handler to connect.
+                conn, _ = fd_server.accept()
+                # Send PTY master fd through Unix socket.
+                interactive_utils.send_fd(conn, pty_m_fd)
+                # Blocks until 'OK' received.
+                auth_signal = conn.recv(2)
+                if auth_signal != b'OK':
+                    raise RuntimeError('Interactive auth failed, expected '
+                                       f'"OK" but got {auth_signal}')
+            except socket.timeout:
+                logger.warning('Timeout waiting for Unix socket '
+                               'connection for interactive auth')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error in Unix socket connection: {e}')
+            finally:
+                if conn is not None:
                     try:
-                        data = os.read(pty_m_fd, 4096)
-                        if data:
-                            print(data.decode('utf-8', errors='replace'),
-                                  end='',
-                                  flush=True)
-                    except OSError as e:
-                        logger.error(f'[ControlMaster] PTY read error: {e}')
-                        break
+                        conn.close()
+                    except:  # pylint: disable=bare-except
+                        pass
+                try:
+                    os.close(pty_m_fd)
+                except:  # pylint: disable=bare-except
+                    pass
 
-                if not prompt_sent.is_set():
-                    echo_disabled = subprocess_utils.is_echo_disabled(pty_m_fd)
-                    if echo_disabled and echo_disabled_since == 0:
-                        echo_disabled_since = time.time()
-                    elif not echo_disabled:
-                        echo_disabled_since = 0
-
-                    # Wait a moment for the prompt to be printed.
-                    echo_stable = (echo_disabled and
-                                   time.time() - echo_disabled_since > 0.1)
-                    if echo_stable:
-                        # Signal frontend to ask user for input.
-                        input_signal = f'<sky-input session="{session_id}"/>'
-                        print(input_signal, flush=True)
-                        prompt_sent.set()
-
-        # Start background threads
-        socket_thread = threading.Thread(target=socket_to_pty, daemon=True)
-        socket_thread.start()
-        prompt_thread = threading.Thread(target=detect_and_log_prompts,
-                                         daemon=True)
-        prompt_thread.start()
+        unix_sock_thread = threading.Thread(
+            target=handle_unix_socket_connection, daemon=True)
+        unix_sock_thread.start()
 
         try:
 
@@ -923,14 +912,14 @@ class SSHCommandRunner(CommandRunner):
             logger.error(f'[ControlMaster] Exception in setup: {e}')
             raise
         finally:
-            # Clean up daemon threads and PTY file descriptors.
-            # This always executes, preventing file descriptor leaks.
-            stop_event.set()
-            sock_server.close()
-            socket_path = interactive_utils.get_socket_path(session_id)
-            if os.path.exists(socket_path):
-                os.unlink(socket_path)
-            os.close(pty_m_fd)
+            # Clean up PTY fds and sockets.
+            fd_server.close()
+            if os.path.exists(fd_socket_path):
+                os.unlink(fd_socket_path)
+            try:
+                os.close(pty_m_fd)
+            except OSError:
+                pass  # Already closed by background thread
             os.close(pty_s_fd)
 
     def close_cached_connection(self) -> None:
