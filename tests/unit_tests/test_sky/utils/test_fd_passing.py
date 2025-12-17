@@ -1,4 +1,4 @@
-"""Tests for server-side interactive SSH socket utilities."""
+"""Tests for file descriptor passing used for interactive SSH auth."""
 import os
 import socket
 import tempfile

@@ -32,6 +32,7 @@ def test_interactive_auth_websocket_bridge_and_terminal_handling():
             async def __aenter__(self):
                 # Capture terminal settings AFTER setraw was called
                 self.settings_during = termios.tcgetattr(stdin_slave)
+                # Signal that we are connected and ready
                 self.ready.set()
                 return self
 
@@ -57,15 +58,12 @@ def test_interactive_auth_websocket_bridge_and_terminal_handling():
         stdin_file = os.fdopen(os.dup(stdin_slave), 'r')
         stdout_file = os.fdopen(os.dup(stdout_slave), 'w')
 
-        def write_data_when_ready():
-            """Write data after reader is ready (no timing assumptions)."""
-            mock_ws.ready.wait(timeout=5.0)
+        def simulate_user():
+            """Simulate user typing password."""
+            if not mock_ws.ready.wait(timeout=5.0):
+                return
             os.write(stdin_master, b'123456\n')
-
-        def close_master_after_read():
-            """Close master after data is read -> sends EOF."""
             mock_ws.data_received.wait(timeout=5.0)
-            os.close(stdin_master)
 
         with mock.patch('sys.stdin', stdin_file), \
              mock.patch('sys.stdout', stdout_file), \
@@ -80,16 +78,13 @@ def test_interactive_auth_websocket_bridge_and_terminal_handling():
 
             assert os.isatty(stdin_file.fileno()), "stdin must be a tty"
 
-            write_thread = threading.Thread(target=write_data_when_ready)
-            close_thread = threading.Thread(target=close_master_after_read)
-            write_thread.start()
-            close_thread.start()
+            user_thread = threading.Thread(target=simulate_user)
+            user_thread.start()
 
             asyncio.run(
                 interactive_utils._handle_interactive_auth_websocket('test'))
 
-            write_thread.join(timeout=5.0)
-            close_thread.join(timeout=5.0)
+            user_thread.join(timeout=5.0)
 
         # stdin -> websocket
         assert b'123456\n' in b''.join(mock_ws.sent), "stdin->websocket failed"
