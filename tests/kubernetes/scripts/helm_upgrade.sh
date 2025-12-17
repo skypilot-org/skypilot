@@ -179,10 +179,6 @@ get_previous_version() {
         # When current version is an rc, it won't be in the available versions,
         # since --devel is not used. We should just compare against the latest
         # available version.
-        if [ -z "$last_version" ]; then
-            echo "Error: No versions found to use as previous version for RC $current_ver"
-            exit 1
-        fi
         echo "Using the latest version $last_version since the current version $current_ver is an rc"
         previous_version="$last_version"
     elif [ -z "$previous_version" ]; then
