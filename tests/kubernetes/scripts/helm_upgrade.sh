@@ -153,7 +153,7 @@ get_previous_version() {
     # Convert current version format to match helm repo format
     # Convert 0.11.0rc1 -> 0.11.0-rc.1
     # Convert 1.0.0.dev20250913 -> 1.0.0-dev.20250913
-    local helm_format_ver=$(echo "$current_ver" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)rc([0-9]+)/\1-rc.\2/' | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)/\1-dev.\2/')
+    local helm_format_ver=$(echo "$current_ver" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)rc([0-9]+)/\1-rc.\2/;s/([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)/\1-dev.\2/')
     echo "Looking for version: $helm_format_ver"
 
     # Check if current version is an RC version (before conversion)
