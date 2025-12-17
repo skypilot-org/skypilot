@@ -862,22 +862,26 @@ class SSHCommandRunner(CommandRunner):
                 # Blocks until 'OK' received.
                 auth_signal = conn.recv(2)
                 if auth_signal != b'OK':
-                    raise RuntimeError('Interactive auth failed, expected '
-                                       f'"OK" but got {auth_signal}')
+                    # Auth failed. Don't raise exception - the SSH process
+                    # will fail with a proper error message. This background
+                    # thread exception would just be noise.
+                    logger.debug(
+                        'Interactive auth did not complete successfully')
+                    return
             except socket.timeout:
-                logger.warning('Timeout waiting for Unix socket '
-                               'connection for interactive auth')
+                logger.debug('Timeout waiting for interactive auth connection')
             except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Error in Unix socket connection: {e}')
+                raise RuntimeError(f'Error in Unix socket connection: '
+                                   f'{common_utils.format_exception(e)}') from e
             finally:
                 if conn is not None:
                     try:
                         conn.close()
-                    except:  # pylint: disable=bare-except
+                    except Exception:  # pylint: disable=broad-except
                         pass
                 try:
                     os.close(pty_m_fd)
-                except:  # pylint: disable=bare-except
+                except Exception:  # pylint: disable=broad-except
                     pass
 
         unix_sock_thread = threading.Thread(

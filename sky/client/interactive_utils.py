@@ -42,8 +42,7 @@ async def _handle_interactive_auth_websocket(session_id: str) -> None:
     ws_url = (f'{websocket_proto}://{server_fqdn}'
               f'/ssh-interactive-auth?session_id={session_id}')
 
-    logger.info(f'Starting interactive SSH authentication for session '
-                f'{session_id}')
+    logger.info('Starting interactive SSH authentication...')
 
     headers = {}
     # Add service account auth if available
@@ -57,22 +56,25 @@ async def _handle_interactive_auth_websocket(session_id: str) -> None:
         old_settings = termios.tcgetattr(sys.stdin.fileno())
         tty.setraw(sys.stdin.fileno())
 
+    # Duplicate stdin/stdout fds before passing to asyncio.
+    # When asyncio's loop.connect_read_pipe()/connect_write_pipe() is called,
+    # it creates a transport that takes ownership of the file passed to it.
+    # By duplicating the fds, we give asyncio independent copies that it can
+    # safely close, while preserving the original sys.stdin/stdout.
+    stdin_dup_fd = os.dup(sys.stdin.fileno())
+    stdout_dup_fd = os.dup(sys.stdout.fileno())
+
     try:
         async with websockets.connect(ws_url,
                                       additional_headers=headers,
                                       ping_interval=None) as ws:
             loop = asyncio.get_running_loop()
 
-            # Set up stdin reader using asyncio.StreamReader (cancellable)
             stdin_reader = asyncio.StreamReader()
             stdin_protocol = asyncio.StreamReaderProtocol(stdin_reader)
-            await loop.connect_read_pipe(lambda: stdin_protocol, sys.stdin)
+            stdin_dup_file = os.fdopen(stdin_dup_fd, 'rb', buffering=0)
+            await loop.connect_read_pipe(lambda: stdin_protocol, stdin_dup_file)
 
-            # Set up stdout writer using asyncio.StreamWriter
-            # Dup stdout fd so when the transport closes, it only closes the
-            # dup, not the original sys.stdout (which would break Rich console
-            # later)
-            stdout_dup_fd = os.dup(sys.stdout.fileno())
             stdout_dup_file = os.fdopen(stdout_dup_fd, 'wb', buffering=0)
             stdout_transport, stdout_protocol = await loop.connect_write_pipe(
                 asyncio.streams.FlowControlMixin,
