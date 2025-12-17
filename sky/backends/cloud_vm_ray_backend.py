@@ -2732,6 +2732,13 @@ class SkyletClient:
     ) -> 'jobsv1_pb2.GetLogDirsForJobsResponse':
         return self._jobs_stub.GetLogDirsForJobs(request, timeout=timeout)
 
+    def get_job_metadata(
+        self,
+        request: 'jobsv1_pb2.GetJobMetadataRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'jobsv1_pb2.GetJobMetadataResponse':
+        return self._jobs_stub.GetJobMetadata(request, timeout=timeout)
+
     def tail_logs(
         self,
         request: 'jobsv1_pb2.TailLogsRequest',

@@ -94,6 +94,11 @@ class JobsServiceStub(object):
                 request_serializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.GetLogDirsForJobsRequest.SerializeToString,
                 response_deserializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.GetLogDirsForJobsResponse.FromString,
                 _registered_method=True)
+        self.GetJobMetadata = channel.unary_unary(
+                '/jobs.v1.JobsService/GetJobMetadata',
+                request_serializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.GetJobMetadataRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.GetJobMetadataResponse.FromString,
+                _registered_method=True)
 
 
 class JobsServiceServicer(object):
@@ -176,6 +181,13 @@ class JobsServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetJobMetadata(self, request, context):
+        """Get job metadata (including exit codes).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_JobsServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -233,6 +245,11 @@ def add_JobsServiceServicer_to_server(servicer, server):
                     servicer.GetLogDirsForJobs,
                     request_deserializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.GetLogDirsForJobsRequest.FromString,
                     response_serializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.GetLogDirsForJobsResponse.SerializeToString,
+            ),
+            'GetJobMetadata': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetJobMetadata,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.GetJobMetadataRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_jobsv1__pb2.GetJobMetadataResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -531,6 +548,33 @@ class JobsService(object):
             '/jobs.v1.JobsService/GetLogDirsForJobs',
             sky_dot_schemas_dot_generated_dot_jobsv1__pb2.GetLogDirsForJobsRequest.SerializeToString,
             sky_dot_schemas_dot_generated_dot_jobsv1__pb2.GetLogDirsForJobsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetJobMetadata(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/jobs.v1.JobsService/GetJobMetadata',
+            sky_dot_schemas_dot_generated_dot_jobsv1__pb2.GetJobMetadataRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_jobsv1__pb2.GetJobMetadataResponse.FromString,
             options,
             channel_credentials,
             insecure,

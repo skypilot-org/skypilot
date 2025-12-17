@@ -477,8 +477,6 @@ def update_metadata(job_id: int, metadata_update: Dict[str, Any]) -> None:
         metadata_update: A dict of key-value pairs to add/update in the
             job's metadata.
     """
-    # TODO(mraheja): remove pylint disabling when filelock version updated
-    # pylint: disable=abstract-class-instantiated
     assert _DB is not None
     with filelock.FileLock(_get_lock_path(job_id)):
         # Retrieve current metadata
@@ -1323,7 +1321,7 @@ class JobLibCodeGen:
         code = [
             f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',  # pylint: disable=line-too-long
             'import json',
-            'metadata = job_lib.get_metadata(job_id) if job_id is not None else {}',  # pylint: disable=line-too-long
+            'metadata = job_lib.get_metadata(job_id) if job_id is not None and int(constants.SKYLET_VERSION) >= 28 else {}',  # pylint: disable=line-too-long
             'print(json.dumps(metadata))'
         ]
         return cls._build(code)

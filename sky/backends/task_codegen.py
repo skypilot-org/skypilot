@@ -215,7 +215,8 @@ class TaskCodeGen:
             textwrap.dedent(f"""\
             if sum(returncodes) != 0:
                 # Save exit codes to job metadata for potential recovery logic
-                job_lib.update_metadata({self.job_id!r}, {{'exit_codes': returncodes}})
+                if int(constants.SKYLET_VERSION) >= 28:
+                    job_lib.update_metadata({self.job_id!r}, {{'exit_codes': returncodes}})
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 # Schedule the next pending job immediately to make the job
                 # scheduling more efficient.
@@ -485,7 +486,8 @@ class RayCodeGen(TaskCodeGen):
                     msg += f'Failed workers: ' + ', '.join([f'(pid={{pid}}, returncode={{returncode}})' for pid, returncode in failed_workers_and_returncodes])
                     msg += f'. See error logs above for more details.{colorama.Style.RESET_ALL}'
                     print(msg, flush=True)
-                    job_lib.update_metadata({self.job_id!r}, {{'exit_codes': setup_returncodes}})
+                    if int(constants.SKYLET_VERSION) >= 28:
+                        job_lib.update_metadata({self.job_id!r}, {{'exit_codes': setup_returncodes}})
                     job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
                     # This waits for all streaming logs to finish.
                     time.sleep(1)
@@ -903,7 +905,8 @@ class SlurmCodeGen(TaskCodeGen):
                         msg += f' See error logs above for more details.{colorama.Style.RESET_ALL}'
                         print(msg, flush=True)
                         returncodes = [returncode]
-                        job_lib.update_metadata({self.job_id!r}, {{'exit_codes': returncodes}})
+                        if int(constants.SKYLET_VERSION) >= 28:
+                            job_lib.update_metadata({self.job_id!r}, {{'exit_codes': returncodes}})
                         job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
                         sys.exit(1)
                     time.sleep(0.1)

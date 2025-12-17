@@ -1725,6 +1725,80 @@ def test_managed_jobs_exit_code_recovery(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.managed_jobs
+def test_managed_jobs_exit_code_recovery_multinode(generic_cloud: str):
+    """Test managed job recovery based on specific exit codes in multi-node 
+    jobs."""
+    name = smoke_tests_utils.get_cluster_name()
+
+    # Create YAML with exit code recovery for multi-node job
+    yaml_content = textwrap.dedent("""\
+        num_nodes: 2
+
+        resources:
+          cpus: 2+
+          job_recovery:
+            max_restarts_on_errors: 0
+            recover_on_exit_codes: [29]
+
+        run: |
+          # Node 1 sleeps for 30 seconds then fails.
+          # Node 0 sleeps for 30 seconds then succeeds.
+          echo "Node: $SKYPILOT_NODE_RANK starting"
+          if [ "$SKYPILOT_NODE_RANK" == "1" ]; then
+            sleep 30
+            echo "Node 1 failing"
+            exit 29
+          fi
+          # Node 0 sleeps for 30 seconds.
+          if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+            sleep 30
+            echo "Node 0 finishing"
+            exit 0
+          fi
+        """)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'managed_jobs_exit_code_recovery_multinode',
+            [
+                f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} {yaml_path} -y -d',
+                # Wait for job to start running
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[
+                        sky.ManagedJobStatus.RUNNING,
+                    ],
+                    timeout=300),
+                # Wait a bit for the job to fail and start recovery
+                'sleep 60',
+                # Check that recovery count is greater than 0
+                # Recovery count is NF-2 (third column from the end)
+                f'for i in {{1..20}}; do '
+                f'  RECOVERY_COUNT=$(sky jobs queue | grep {name} | head -n1 | awk \'{{print $(NF-2)}}\'); '
+                f'  echo "Recovery count: $RECOVERY_COUNT"; '
+                f'  if [ "$RECOVERY_COUNT" != "-" ] && [ "$RECOVERY_COUNT" -gt 0 ]; then '
+                f'    echo "Recovery count is greater than 0: $RECOVERY_COUNT"; '
+                f'    exit 0; '
+                f'  fi; '
+                f'  echo "Waiting for recovery count to increase (attempt $i/20)..."; '
+                f'  sleep 15; '
+                f'done; '
+                f'echo "Recovery count did not increase after 5 minutes"; '
+                f'exit 1',
+            ],
+            f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=25 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_remote_server
 @pytest.mark.no_dependency
 @pytest.mark.kubernetes

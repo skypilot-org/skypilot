@@ -47,8 +47,11 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import psutil
+
+    from sky.schemas.generated import jobsv1_pb2
 else:
     psutil = adaptors_common.LazyImport('psutil')
+    jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
 
 logger = sky_logging.init_logger('sky.jobs.controller')
 
@@ -251,28 +254,50 @@ class JobController:
             List of exit codes, or None if not available.
         """
         try:
-            # Use JobLibCodeGen to generate the command
-            code = job_lib.JobLibCodeGen.get_job_exit_codes(job_id)
+            use_legacy = not handle.is_grpc_enabled_with_flag
 
-            returncode, stdout, stderr = await context_utils.to_thread(
-                self._backend.run_on_head,
-                handle,
-                code,
-                stream_logs=False,
-                require_outputs=True,
-                separate_stderr=True)
+            if not use_legacy:
+                try:
+                    request = jobsv1_pb2.GetJobMetadataRequest()
+                    if job_id is not None:
+                        request.job_id = job_id
 
-            if returncode != 0:
-                logger.debug(f'Failed to retrieve job metadata: {stderr}')
-                return None
+                    response = await context_utils.to_thread(
+                        backend_utils.invoke_skylet_with_retries,
+                        lambda: cloud_vm_ray_backend.SkyletClient(
+                            handle.get_grpc_channel()).get_job_metadata(request)
+                    )
 
-            # Parse the output
-            metadata = json.loads(stdout.strip())
-            exit_codes = metadata.get('exit_codes')
-            return exit_codes
+                    metadata = json.loads(response.metadata_json)
+                    exit_codes = metadata.get('exit_codes')
+                    return exit_codes
+                except exceptions.SkyletMethodNotImplementedError:
+                    # Fall back to legacy if RPC not implemented
+                    use_legacy = True
+
+            if use_legacy:
+                # Use existing SSH-based code generation
+                code = job_lib.JobLibCodeGen.get_job_exit_codes(job_id)
+
+                returncode, stdout, stderr = await context_utils.to_thread(
+                    self._backend.run_on_head,
+                    handle,
+                    code,
+                    stream_logs=False,
+                    require_outputs=True,
+                    separate_stderr=True)
+
+                if returncode != 0:
+                    logger.debug(f'Failed to retrieve job metadata: {stderr}')
+                    return None
+
+                metadata = json.loads(stdout.strip())
+                exit_codes = metadata.get('exit_codes')
+                return exit_codes
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to retrieve job exit codes: {e}')
             return None
+        return None
 
     async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
@@ -417,9 +442,7 @@ class JobController:
             logger.info(f'Cluster launch completed in {launch_time:.2f}s')
             assert remote_job_submitted_at is not None, remote_job_submitted_at
         job_id_on_pool_cluster: Optional[int] = None
-        if self._pool is None:
-            job_id_on_pool_cluster = None
-        else:
+        if self._pool:
             # Update the cluster name when using pool.
             cluster_name, job_id_on_pool_cluster = (
                 await
@@ -689,7 +712,7 @@ class JobController:
                             ]
                             if matching_codes:
                                 exit_code_msg = (
-                                    f' (Exit code(s) {matching_codes} matched '
+                                    f'(Exit code(s) {matching_codes} matched '
                                     'recover_on_exit_codes '
                                     f'[{recover_codes}])')
                         logger.info(
