@@ -3,7 +3,7 @@
 
 [Verl](https://github.com/volcengine/verl) is the most popular open-source reinforcement learning framework for LLMs, supporting PPO, GRPO, and other algorithms.
 
-Also see [`search-tooling/`](search-tooling/) and this [blog](https://blog.skypilot.co/verl-tool-calling/) for tool-augmented “search” workflows (Search-R1 style), including Google Search–backed inference and a Wikipedia FAISS retrieval service used for inference and training.
+Also see [`search-tooling/`](https://github.com/skypilot-org/skypilot/tree/master/llm/verl/search-tooling) and this [blog](https://blog.skypilot.co/verl-tool-calling/) for tool-augmented “search” workflows (Search-R1 style), including Google Search–backed inference and a Wikipedia FAISS retrieval service used for inference and training.
 
 ## Why SkyPilot + Verl?
 
