@@ -251,6 +251,20 @@ function JobDetails() {
               </Card>
             </div>
 
+            {/* GPU Metrics Plugin Slot */}
+            <PluginSlot
+              name="jobs.detail.gpu-metrics"
+              context={{
+                jobId: detailJobData.id,
+                jobName: detailJobData.name,
+                jobData: detailJobData,
+                pool: detailJobData.pool,
+                userHash: detailJobData.user_hash,
+                infra: detailJobData.full_infra || detailJobData.infra,
+              }}
+              wrapperClassName="mt-6"
+            />
+
             {/* Logs Section */}
             <div id="logs-section" className="mt-6">
               <Card>
