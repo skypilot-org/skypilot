@@ -191,7 +191,6 @@ SERIES_TO_DESCRIPTION = {
     'c3': 'C3 Instance',
     'c3d': 'C3D Instance',
     'c4': 'C4 Instance',
-    'c4a': 'C4A Instance',
     'c4d': 'C4D Instance',
     'e2': 'E2 Instance',
     'f1': 'Micro Instance with burstable CPU',
