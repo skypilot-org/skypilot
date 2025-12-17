@@ -11,6 +11,11 @@ def get_pty_socket_path(session_id: str) -> str:
 def send_fd(sock: socket.socket, fd: int) -> None:
     """Send file descriptor via Unix socket using SCM_RIGHTS.
 
+    SCM_RIGHTS allows us to send or receive a set of open
+    file descriptors from another process.
+
+    See: https://man7.org/linux/man-pages/man7/unix.7.html
+
     Args:
         sock: Connected Unix socket.
         fd: File descriptor to send.
