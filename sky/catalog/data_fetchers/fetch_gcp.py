@@ -189,6 +189,10 @@ SERIES_TO_DESCRIPTION = {
     'c2': 'Compute optimized',
     'c2d': 'C2D AMD Instance',
     'c3': 'C3 Instance',
+    'c3d': 'C3D Instance',
+    'c4': 'C4 Instance',
+    'c4a': 'C4A Instance',
+    'c4d': 'C4D Instance',
     'e2': 'E2 Instance',
     'f1': 'Micro Instance with burstable CPU',
     'g1': 'Small Instance with 1 VCPU',
@@ -376,8 +380,13 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
                 is_cpu = True
             elif resource_group == 'RAM':
                 is_memory = True
+            elif resource_group == 'LocalSSD':
+                # Ignore local SSD pricing for now, as we do not include disk
+                # pricing for instances for now.
+                # TODO(zhwu): Handle local SSD pricing.
+                pass
             else:
-                assert resource_group == 'N1Standard'
+                assert resource_group == 'N1Standard', (resource_group, sku)
                 if 'Core' in description:
                     is_cpu = True
                 elif 'Ram' in description:
