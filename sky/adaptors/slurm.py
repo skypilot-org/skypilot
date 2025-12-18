@@ -238,7 +238,7 @@ class SlurmClient:
             A list of GRES specs (e.g., 'gres/gpu:h100:4')
             for jobs on the node.
         """
-        cmd = f'squeue --me -h --nodelist {node_name} -o "%b"'
+        cmd = f'squeue -h --nodelist {node_name} -o "%b"'
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
