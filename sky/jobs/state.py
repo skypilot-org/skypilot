@@ -3,6 +3,7 @@
 # that we can easily switch to a s3-based storage.
 import asyncio
 import collections
+import datetime
 import enum
 import functools
 import ipaddress
@@ -154,8 +155,8 @@ ha_recovery_script_table = sqlalchemy.Table(
     sqlalchemy.Column('script', sqlalchemy.Text),
 )
 
-job_task_events_table = sqlalchemy.Table(
-    'job_task_events',
+job_events_table = sqlalchemy.Table(
+    'job_events',
     Base.metadata,
     sqlalchemy.Column('id',
                       sqlalchemy.Integer,
@@ -166,7 +167,7 @@ job_task_events_table = sqlalchemy.Table(
     sqlalchemy.Column('new_status', sqlalchemy.Text),
     sqlalchemy.Column('code', sqlalchemy.Text),
     sqlalchemy.Column('reason', sqlalchemy.Text),
-    sqlalchemy.Column('transitioned_at', sqlalchemy.Float, index=True),
+    sqlalchemy.Column('timestamp', sqlalchemy.DateTime, index=True),
 )
 
 
@@ -785,8 +786,8 @@ def set_pending(
     metadata: str,
 ):
     """Set the task to pending state."""
-    add_job_task_event(job_id, task_id, ManagedJobStatus.PENDING,
-                       'Job submitted to queue')
+    add_job_event(job_id, task_id, ManagedJobStatus.PENDING,
+                  'Job submitted to queue')
 
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -809,8 +810,8 @@ async def set_backoff_pending_async(job_id: int, task_id: int):
     This should only be used to transition from STARTING or RECOVERING back to
     PENDING.
     """
-    await add_job_task_event_async(job_id, task_id, ManagedJobStatus.PENDING,
-                                   'Job is in backoff')
+    await add_job_event_async(job_id, task_id, ManagedJobStatus.PENDING,
+                              'Job is in backoff')
 
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
@@ -851,8 +852,8 @@ async def set_restarting_async(job_id: int, task_id: int, recovering: bool):
     if recovering:
         target_status = ManagedJobStatus.RECOVERING
 
-    await add_job_task_event_async(job_id, task_id, target_status,
-                                   'Job is restarting')
+    await add_job_event_async(job_id, task_id, target_status,
+                              'Job is restarting')
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
         result = await session.execute(
@@ -962,8 +963,8 @@ def set_pending_cancelled(job_id: int):
     Returns:
         True if the job was cancelled, False otherwise.
     """
-    add_job_task_event(job_id, None, ManagedJobStatus.CANCELLED,
-                       'Job has been cancelled')
+    add_job_event(job_id, None, ManagedJobStatus.CANCELLED,
+                  'Job has been cancelled')
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Subquery to get the spot_job_ids that match the joined condition
@@ -2059,8 +2060,8 @@ async def set_starting_async(job_id: int,
                              full_resources_json: Optional[Dict[str,
                                                                 Any]] = None):
     """Set the task to starting state."""
-    await add_job_task_event_async(job_id, task_id, ManagedJobStatus.STARTING,
-                                   'Job is starting')
+    await add_job_event_async(job_id, task_id, ManagedJobStatus.STARTING,
+                              'Job is starting')
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     logger.info('Launching the spot cluster...')
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
@@ -2098,8 +2099,8 @@ async def set_starting_async(job_id: int,
 async def set_started_async(job_id: int, task_id: int, start_time: float,
                             callback_func: AsyncCallbackType):
     """Set the task to started state."""
-    await add_job_task_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
-                                   'Job has started')
+    await add_job_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
+                              'Job has started')
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     logger.info('Job started.')
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
@@ -2155,8 +2156,8 @@ async def set_recovering_async(
     """Set the task to recovering state, and update the job duration."""
     if reason is None:
         reason = 'Cluster preempted or failed, recovering'
-    await add_job_task_event_async(job_id, task_id, ManagedJobStatus.RECOVERING,
-                                   reason, code)
+    await add_job_event_async(job_id, task_id, ManagedJobStatus.RECOVERING,
+                              reason, code)
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     logger.info('=== Recovering... ===')
     current_time = time.time()
@@ -2205,8 +2206,8 @@ async def set_recovering_async(
 async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
                               callback_func: AsyncCallbackType):
     """Set the task to recovered."""
-    await add_job_task_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
-                                   'Job has recovered')
+    await add_job_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
+                              'Job has recovered')
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
         result = await session.execute(
@@ -2239,8 +2240,8 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
 async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
                               callback_func: AsyncCallbackType):
     """Set the task to succeeded, if it is in a non-terminal state."""
-    await add_job_task_event_async(job_id, task_id, ManagedJobStatus.SUCCEEDED,
-                                   'Job has succeeded')
+    await add_job_event_async(job_id, task_id, ManagedJobStatus.SUCCEEDED,
+                              'Job has succeeded')
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
         result = await session.execute(
@@ -2278,8 +2279,8 @@ async def set_failed_async(
     override_terminal: bool = False,
 ):
     """Set an entire job or task to failed."""
-    await add_job_task_event_async(job_id, task_id, failure_type,
-                                   f'Job failed: {failure_reason}')
+    await add_job_event_async(job_id, task_id, failure_type,
+                              f'Job failed: {failure_reason}')
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     assert failure_type.is_failed(), failure_type
     end_time = time.time() if end_time is None else end_time
@@ -2333,8 +2334,8 @@ async def set_failed_async(
 async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
     """Set tasks in the job as cancelling, if they are in non-terminal
     states."""
-    await add_job_task_event_async(job_id, None, ManagedJobStatus.CANCELLING,
-                                   'Job is cancelling')
+    await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLING,
+                              'Job is cancelling')
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
         result = await session.execute(
@@ -2357,8 +2358,8 @@ async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
 @_init_db_async
 async def set_cancelled_async(job_id: int, callback_func: AsyncCallbackType):
     """Set tasks in the job as cancelled, if they are in CANCELLING state."""
-    await add_job_task_event_async(job_id, None, ManagedJobStatus.CANCELLED,
-                                   'Job has been cancelled')
+    await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLED,
+                              'Job has been cancelled')
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
         result = await session.execute(
@@ -2638,25 +2639,24 @@ def set_controller_logs_cleaned(job_ids: List[int], logs_cleaned_at: float):
 
 
 @_init_db
-def add_job_task_event(job_id: int,
-                       task_id: Optional[int],
-                       new_status: ManagedJobStatus,
-                       reason: str,
-                       transitioned_at: Optional[float] = None) -> None:
-    """Add a job task event record to the audit log.
+def add_job_event(job_id: int,
+                  task_id: Optional[int],
+                  new_status: ManagedJobStatus,
+                  reason: str,
+                  timestamp: Optional[datetime.datetime] = None) -> None:
+    """Add a job event record to the audit log.
 
     Args:
         job_id: The spot_job_id of the managed job.
         task_id: The task_id within the managed job. If None, adds an
             event record for all tasks in the job.
         new_status: The new status being transitioned to. Can be a
-            ManagedJobStatus enum or a string value.
+            ManagedJobStatus enum.
         reason: A description of why the event occurred.
-        transitioned_at: The timestamp of the event. If None, uses
-            current time.
+        timestamp: The timestamp of the event. If None, uses current time.
     """
-    if transitioned_at is None:
-        transitioned_at = time.time()
+    if timestamp is None:
+        timestamp = datetime.datetime.now()
 
     status_value = new_status.value
 
@@ -2665,7 +2665,7 @@ def add_job_task_event(job_id: int,
         task_ids = [tid for tid, _ in _get_all_task_ids_statuses(job_id)]
         if not task_ids:
             logger.warning(f'No tasks found for job {job_id}, '
-                           'skipping status transition record')
+                           'skipping job event record')
             return
     else:
         task_ids = [task_id]
@@ -2673,12 +2673,12 @@ def add_job_task_event(job_id: int,
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         for tid in task_ids:
-            session.execute(job_task_events_table.insert().values(
+            session.execute(job_events_table.insert().values(
                 spot_job_id=job_id,
                 task_id=tid,
                 new_status=status_value,
                 reason=reason,
-                transitioned_at=transitioned_at,
+                timestamp=timestamp,
             ))
         session.commit()
 
@@ -2695,28 +2695,27 @@ async def _get_all_task_ids_async(job_id: int) -> List[int]:
 
 
 @_init_db_async
-async def add_job_task_event_async(
+async def add_job_event_async(
         job_id: int,
         task_id: Optional[int],
         new_status: ManagedJobStatus,
         reason: str,
         code: Optional[str] = None,
-        transitioned_at: Optional[float] = None) -> None:
-    """Add a job task event record to the audit log (async version).
+        timestamp: Optional[datetime.datetime] = None) -> None:
+    """Add a job event record to the audit log (async version).
 
     Args:
         job_id: The spot_job_id of the managed job.
         task_id: The task_id within the managed job. If None, adds an
             event record for all tasks in the job.
         new_status: The new status being transitioned to. Can be a
-            ManagedJobStatus enum or a string value.
+            ManagedJobStatus enum.
         reason: A description of why the event occurred.
         code: Optional error category code for failures.
-        transitioned_at: The timestamp of the event. If None, uses
-            current time.
+        timestamp: The timestamp of the event. If None, uses current time.
     """
-    if transitioned_at is None:
-        transitioned_at = time.time()
+    if timestamp is None:
+        timestamp = datetime.datetime.now()
 
     status_value = new_status.value
 
@@ -2725,7 +2724,7 @@ async def add_job_task_event_async(
         task_ids = await _get_all_task_ids_async(job_id)
         if not task_ids:
             logger.warning(f'No tasks found for job {job_id}, '
-                           'skipping status transition record')
+                           'skipping job event record')
             return
     else:
         task_ids = [task_id]
@@ -2733,21 +2732,21 @@ async def add_job_task_event_async(
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
         for tid in task_ids:
-            await session.execute(job_task_events_table.insert().values(
+            await session.execute(job_events_table.insert().values(
                 spot_job_id=job_id,
                 task_id=tid,
                 new_status=status_value,
                 code=code,
                 reason=reason,
-                transitioned_at=transitioned_at,
+                timestamp=timestamp,
             ))
         await session.commit()
 
 
 @_init_db
-def get_job_task_events(job_id: int,
-                        task_id: Optional[int] = None,
-                        limit: Optional[int] = None) -> List[Dict[str, Any]]:
+def get_job_events(job_id: int,
+                   task_id: Optional[int] = None,
+                   limit: Optional[int] = None) -> List[Dict[str, Any]]:
     """Get task events for a managed job.
 
     Args:
@@ -2758,25 +2757,25 @@ def get_job_task_events(job_id: int,
             returns the most recent N events.
 
     Returns:
-        List of event records, ordered by transitioned_at descending
+        List of event records, ordered by timestamp descending
         (most recent first) if limit is specified, otherwise ascending.
     """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         query = sqlalchemy.select(
-            job_task_events_table.c.spot_job_id,
-            job_task_events_table.c.task_id,
-            job_task_events_table.c.new_status,
-            job_task_events_table.c.code,
-            job_task_events_table.c.reason,
-            job_task_events_table.c.transitioned_at,
-        ).where(job_task_events_table.c.spot_job_id == job_id)
+            job_events_table.c.spot_job_id,
+            job_events_table.c.task_id,
+            job_events_table.c.new_status,
+            job_events_table.c.code,
+            job_events_table.c.reason,
+            job_events_table.c.timestamp,
+        ).where(job_events_table.c.spot_job_id == job_id)
 
         if task_id is not None:
-            query = query.where(job_task_events_table.c.task_id == task_id)
+            query = query.where(job_events_table.c.task_id == task_id)
 
-        # Order by transitioned_at descending to get most recent first
-        query = query.order_by(job_task_events_table.c.transitioned_at.desc())
+        # Order by timestamp descending to get most recent first
+        query = query.order_by(job_events_table.c.timestamp.desc())
 
         if limit is not None:
             query = query.limit(limit)
@@ -2788,5 +2787,5 @@ def get_job_task_events(job_id: int,
             'new_status': ManagedJobStatus(row[2]),
             'code': row[3],
             'reason': row[4],
-            'transitioned_at': row[5],
+            'timestamp': row[5],
         } for row in rows]

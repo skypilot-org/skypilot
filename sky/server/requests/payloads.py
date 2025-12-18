@@ -883,7 +883,7 @@ class ClusterFailuresBody(RequestBody):
     cluster_hash: Optional[str] = None
 
 
-class GetJobTaskEventsBody(RequestBody):
+class GetJobEventsBody(RequestBody):
     """The request body for the get job task events endpoint."""
     job_id: int
     task_id: Optional[int] = None

@@ -1,4 +1,4 @@
-"""Add job_task_events table for tracking managed job task events.
+"""Add job_events table for tracking managed job events.
 
 Revision ID: 009
 Revises: 008
@@ -21,12 +21,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    """Create job_task_events table for tracking task events."""
+    """Create job_events table for tracking job events."""
     with op.get_context().autocommit_block():
         db_utils.add_table_to_db_sqlalchemy(Base.metadata, op.get_bind(),
-                                            'job_task_events')
+                                            'job_events')
 
 
 def downgrade():
-    """Drop job_task_events table."""
+    """Drop job_events table."""
     pass

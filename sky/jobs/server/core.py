@@ -1226,7 +1226,7 @@ def pool_sync_down_logs(
 
 
 @usage_lib.entrypoint
-def get_job_task_events(
+def get_job_events(
     job_id: int,
     task_id: Optional[int] = None,
     limit: Optional[int] = 10,
@@ -1241,6 +1241,6 @@ def get_job_task_events(
     Returns:
         List of task event records.
     """
-    return managed_job_state.get_job_task_events(job_id=job_id,
-                                                 task_id=task_id,
-                                                 limit=limit)
+    return managed_job_state.get_job_events(job_id=job_id,
+                                            task_id=task_id,
+                                            limit=limit)
