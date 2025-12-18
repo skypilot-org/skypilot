@@ -136,6 +136,7 @@ class SSHCommandRunner(CommandRunner):
     docker_user: str
     disable_control_master: Optional[bool]
     port_forward_execute_remote_command: Optional[bool]
+    enable_interactive_auth: bool
 
     def __init__(
         self,
@@ -148,6 +149,7 @@ class SSHCommandRunner(CommandRunner):
         docker_user: Optional[str] = ...,
         disable_control_master: Optional[bool] = ...,
         port_forward_execute_remote_command: Optional[bool] = ...,
+        enable_interactive_auth: bool = ...,
     ) -> None:
         ...
 
