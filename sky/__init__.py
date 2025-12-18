@@ -152,6 +152,7 @@ Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 Nebius = clouds.Nebius
 Hyperbolic = clouds.Hyperbolic
+PPIO = clouds.PPIO
 Shadeform = clouds.Shadeform
 Seeweb = clouds.Seeweb
 
@@ -180,6 +181,7 @@ __all__ = [
     'Seeweb',
     'Optimizer',
     'OptimizeTarget',
+    'PPIO',
     'backends',
     'list_accelerators',
     '__root_dir__',
