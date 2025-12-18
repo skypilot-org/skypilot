@@ -17,8 +17,9 @@ export const apiClient = {
       const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
 
       if (body !== undefined) {
-        body['env_vars'] = {
-          SKYPILOT_IS_FROM_DASHBOARD: 'true',
+        body.env_vars = {
+          ...(body.env_vars || {}),
+          'SKYPILOT_IS_FROM_DASHBOARD': 'true',
         };
       }
 
