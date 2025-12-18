@@ -153,9 +153,9 @@ class StrategyExecutor:
             recover_on_exit_codes: Optional[List[int]] = None
             if isinstance(recover_exit_codes, int):
                 recover_on_exit_codes = [recover_exit_codes]
-            elif isinstance(recover_on_exit_codes, list):
+            elif isinstance(recover_exit_codes, list):
                 recover_on_exit_codes = [
-                    int(code) for code in recover_on_exit_codes
+                    int(code) for code in recover_exit_codes
                 ]
         else:
             job_recovery_name = job_recovery
