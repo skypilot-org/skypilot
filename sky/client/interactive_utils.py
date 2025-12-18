@@ -56,15 +56,17 @@ async def _handle_interactive_auth_websocket(session_id: str) -> None:
         old_settings = termios.tcgetattr(sys.stdin.fileno())
         tty.setraw(sys.stdin.fileno())
 
-    # Duplicate stdin/stdout fds before passing to asyncio.
-    # When asyncio's loop.connect_read_pipe()/connect_write_pipe() is called,
-    # it creates a transport that takes ownership of the file passed to it.
-    # By duplicating the fds, we give asyncio independent copies that it can
-    # safely close, while preserving the original sys.stdin/stdout.
-    stdin_dup_fd = os.dup(sys.stdin.fileno())
-    stdout_dup_fd = os.dup(sys.stdout.fileno())
-
+    stdin_dup_fd = None
+    stdout_dup_fd = None
     try:
+        # Duplicate stdin/stdout fds before passing to asyncio.
+        # When asyncio's loop.connect_read/write_pipe() is called,
+        # it creates a transport that takes ownership of the file passed to it.
+        # By duplicating the fds, we give asyncio independent copies that it can
+        # safely close, while preserving the original sys.stdin/stdout.
+        stdin_dup_fd = os.dup(sys.stdin.fileno())
+        stdout_dup_fd = os.dup(sys.stdout.fileno())
+
         async with websockets.connect(ws_url,
                                       additional_headers=headers,
                                       ping_interval=None) as ws:
@@ -73,9 +75,11 @@ async def _handle_interactive_auth_websocket(session_id: str) -> None:
             stdin_reader = asyncio.StreamReader()
             stdin_protocol = asyncio.StreamReaderProtocol(stdin_reader)
             stdin_dup_file = os.fdopen(stdin_dup_fd, 'rb', buffering=0)
+            stdin_dup_fd = None  # File object now owns the FD
             await loop.connect_read_pipe(lambda: stdin_protocol, stdin_dup_file)
 
             stdout_dup_file = os.fdopen(stdout_dup_fd, 'wb', buffering=0)
+            stdout_dup_fd = None  # File object now owns the FD
             stdout_transport, stdout_protocol = await loop.connect_write_pipe(
                 asyncio.streams.FlowControlMixin,
                 stdout_dup_file)  # type: ignore
@@ -118,31 +122,29 @@ async def _handle_interactive_auth_websocket(session_id: str) -> None:
                 await stdin_task
             except asyncio.CancelledError:
                 pass
-
-            # Restore terminal settings after websocket closes
-            if old_settings:
-                termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN,
-                                  old_settings)
-                # Flush any buffered input from stdin
-                termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
-                # Ensure stdout is in blocking mode (can be non-blocking after
-                # asyncio transport operations)
-                flags = fcntl.fcntl(sys.stdout.fileno(), fcntl.F_GETFL)
-                fcntl.fcntl(sys.stdout.fileno(), fcntl.F_SETFL,
-                            flags & ~os.O_NONBLOCK)
-                old_settings = None
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Failed to handle interactive authentication: {e}')
         raise
     finally:
-        # Restore terminal settings if not already done
+        # Restore terminal settings if they were changed
         if old_settings:
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN,
                               old_settings)
-            # Ensure stdout is in blocking mode
+            # Flush any buffered input from stdin
+            termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
+            # Ensure stdout is in blocking mode (can be non-blocking after
+            # asyncio transport operations)
             flags = fcntl.fcntl(sys.stdout.fileno(), fcntl.F_GETFL)
             fcntl.fcntl(sys.stdout.fileno(), fcntl.F_SETFL,
                         flags & ~os.O_NONBLOCK)
+
+        for fd in [stdin_dup_fd, stdout_dup_fd]:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    # Already closed by asyncio or never opened
+                    pass
 
 
 def handle_interactive_auth(line: str) -> typing.Optional[str]:

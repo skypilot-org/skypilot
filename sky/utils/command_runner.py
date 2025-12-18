@@ -871,8 +871,8 @@ class SSHCommandRunner(CommandRunner):
             except socket.timeout:
                 logger.debug('Timeout waiting for interactive auth connection')
             except Exception as e:  # pylint: disable=broad-except
-                raise RuntimeError(f'Error in Unix socket connection: '
-                                   f'{common_utils.format_exception(e)}') from e
+                logger.error(f'Error in Unix socket connection: '
+                             f'{common_utils.format_exception(e)}')
             finally:
                 if conn is not None:
                     try:
