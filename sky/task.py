@@ -348,7 +348,8 @@ class Task:
           blocked_resources: A set of resources that this task cannot run on.
           links: A dictionary of links where keys are descriptive strings and
             values are URLs. These links will be displayed in the dashboard.
-            Instance links are automatically populated when running on real clouds.
+            Instance links are automatically populated when running on real
+            clouds.
           _file_mounts_mapping: (Internal use only) A dictionary of file mounts
             mapping.
           _volume_mounts: (Internal use only) A list of volume mounts.
@@ -439,8 +440,6 @@ class Task:
             dag.add(self)
 
         self._user_specified_yaml = _user_specified_yaml
-
-        self.links = links or {}
 
     def validate(self,
                  skip_file_mounts: bool = False,
@@ -1279,29 +1278,6 @@ class Task:
         assert self.file_mounts is not None
         self.file_mounts.update(file_mounts)
         self.expand_and_validate_file_mounts()
-        return self
-
-    def set_links(self, links: Dict[str, str]) -> 'Task':
-        """Sets the links for this task.
-
-        Links are a dictionary mapping descriptive labels to URLs. These links
-        will be displayed in the dashboard.
-
-        Example:
-            .. code-block:: python
-
-                task.set_links({
-                    'Instance': 'https://console.cloud.google.com/compute/instances/...',
-                    'Documentation': 'https://docs.example.com',
-                })
-
-        Args:
-          links: A dictionary mapping link labels to URLs.
-
-        Returns:
-          self: The current task, with links set.
-        """
-        self.links = links
         return self
 
     def set_storage_mounts(
