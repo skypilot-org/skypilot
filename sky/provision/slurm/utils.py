@@ -109,9 +109,18 @@ def get_slurm_ssh_config_dict(cluster_name: str) -> Dict[str, Any]:
                                              delete=False) as tmp_file:
                 tmp_file.write(key_bytes)
                 tmp_path = tmp_file.name
-            # SSH requires private keys to have restricted permissions
-            os.chmod(tmp_path, 0o600)
-            os.rename(tmp_path, key_path)
+            try:
+                # SSH requires private keys to have restricted permissions
+                os.chmod(tmp_path, 0o600)
+                os.rename(tmp_path, key_path)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Failed to chmod/rename {tmp_path}: '
+                             f'{common_utils.format_exception(e)}')
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+                raise
 
         ssh_config_dict['identityfile'] = [key_path]  # type: ignore[assignment]
 
