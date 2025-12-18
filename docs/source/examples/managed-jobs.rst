@@ -763,4 +763,8 @@ To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml
 
   See :ref:`more about the Kubernetes upgrade strategy of the API server <sky-api-server-graceful-upgrade>`.
 
+.. warning::
+
+  When using consolidation mode with :ref:`RollingUpdate upgrade strategy <sky-api-server-upgrade-strategy>`, local file mounts and workdirs for managed jobs are stored locally on the API server pod. These files will be lost during a rolling update unless you configure a cloud storage bucket via ``jobs.bucket`` in your :ref:`SkyPilot config <config-yaml>`. If you use local file mounts or workdirs in managed jobs with rolling update, make sure to configure ``jobs.bucket`` to persist files across updates.
+
 The jobs controller will use a bit of overhead - it reserves an extra 2GB of memory for itself, which may reduce the amount of requests your API server can handle. To counteract, you can increase the amount of CPU and memory allocated to the API server: See :ref:`sky-api-server-resources-tuning`.

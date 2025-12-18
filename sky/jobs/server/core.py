@@ -25,6 +25,7 @@ from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.catalog import common as service_catalog_common
+from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
@@ -94,10 +95,10 @@ _MANAGED_JOB_FIELDS_FOR_QUEUE_KUBERNETES = [
 
 
 def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
-    """Warn if file mounts or workdir may be lost during rolling update.
+    """Warn if local file mounts or workdir may be lost during rolling update.
 
     When rolling update is enabled with consolidation mode but no jobs bucket
-    is configured, file mounts and workdirs are stored locally on the API
+    is configured, local file mounts and workdirs are stored locally on the API
     server pod and will be lost during a rolling update.
     """
     # If rolling update is not enabled, don't warn.
@@ -112,16 +113,28 @@ def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
     if skypilot_config.get_nested(('jobs', 'bucket'), None) is not None:
         return
 
-    # Check if any task has file_mounts or workdir
-    has_file_mounts = any(task_.file_mounts for task_ in dag.tasks)
-    has_workdir = any(task_.workdir for task_ in dag.tasks)
-    if not has_file_mounts and not has_workdir:
+    # Check if any task has local file_mounts (not cloud store URLs) or workdir
+    has_local_file_mounts = False
+    has_local_workdir = False
+    for task_ in dag.tasks:
+        if task_.file_mounts:
+            for src in task_.file_mounts.values():
+                if not data_utils.is_cloud_store_url(src):
+                    has_local_file_mounts = True
+                    break
+        if task_.workdir and isinstance(task_.workdir, str):
+            has_local_workdir = True
+            break
+        if has_local_file_mounts:
+            break
+
+    if not has_local_file_mounts and not has_local_workdir:
         return
 
     logger.warning(
-        f'{colorama.Fore.YELLOW}WARNING: File mounts or workdir detected with '
-        'rolling update strategy enabled and no jobs bucket configured. These '
-        'files will be stored locally and may be lost during API server '
+        f'{colorama.Fore.YELLOW}WARNING: Local file mounts or workdir detected '
+        'with rolling update strategy enabled and no jobs bucket configured. '
+        'These files will be stored locally and may be lost during API server '
         'updates. To persist files across updates, configure a cloud storage '
         f'bucket in your SkyPilot config under `jobs.bucket`.'
         f'{colorama.Style.RESET_ALL}')
