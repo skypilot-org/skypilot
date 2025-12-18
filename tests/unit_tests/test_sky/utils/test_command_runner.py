@@ -234,6 +234,9 @@ class TestSSHCommandRunnerInteractiveAuth:
                 try:
                     if sock is not None:
                         sock.close()
+                except OSError:
+                    pass
+                try:
                     if pty_master_fd is not None:
                         os.close(pty_master_fd)
                 except OSError:
