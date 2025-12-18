@@ -32,7 +32,7 @@ class RequestName(str, enum.Enum):
     CLUSTER_JOB_DOWNLOAD_LOGS = 'download_logs'
     CLUSTER_COST_REPORT = 'cost_report'
     CLUSTER_EVENTS = 'cluster_events'
-    GET_CLUSTER_FAILURES = 'get_cluster_failures'
+    CLUSTER_FAILURES = 'cluster_failures'
     # Storage requests
     STORAGE_LS = 'storage_ls'
     STORAGE_DELETE = 'storage_delete'

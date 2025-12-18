@@ -877,8 +877,8 @@ class ClusterEventsBody(RequestBody):
         int] = None  # If specified, returns at most this many events
 
 
-class GetClusterFailuresBody(RequestBody):
-    """The request body for the get cluster failures endpoint."""
+class ClusterFailuresBody(RequestBody):
+    """The request body for the cluster failures endpoint."""
     cluster_name: Optional[str] = None
     cluster_hash: Optional[str] = None
 
