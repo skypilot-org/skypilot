@@ -1007,7 +1007,7 @@ class AWS(clouds.Cloud):
                 hints += (
                     ' To ensure S3 mounting and other features work correctly '
                     'on Kubernetes and other clouds, '
-                    'please use SkyPilot with static aws credentials '
+                    'please use SkyPilot with static AWS credentials '
                     '(e.g., ~/.aws/credentials) by unsetting '
                     'the AWS_PROFILE environment variable.')
             else:
