@@ -218,7 +218,7 @@ export async function getManagedJobs(options = {}) {
         entrypoint: job.entrypoint,
         git_commit: job.metadata?.git_commit || '-',
         metadata: job.metadata || {},
-        links: job.links ? (typeof job.links === 'string' ? JSON.parse(job.links) : job.links) : {},  // Parse JSON string to object if needed
+        links: job.links || {},
         pool: job.pool,
         pool_hash: job.pool_hash,
         current_cluster_name: job.current_cluster_name,

@@ -14,8 +14,8 @@ import sqlalchemy as sa
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
-revision: str = '008'
-down_revision: Union[str, Sequence[str], None] = '007'
+revision: str = '009'
+down_revision: Union[str, Sequence[str], None] = '008'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -25,7 +25,7 @@ def upgrade():
     with op.get_context().autocommit_block():
         db_utils.add_column_to_table_alembic('spot',
                                              'links',
-                                             sa.Text(),
+                                             sa.JSON(),
                                              server_default=None)
 
 

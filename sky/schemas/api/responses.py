@@ -203,6 +203,7 @@ class ManagedJobRecord(ResponseBaseModel):
     current_cluster_name: Optional[str] = None
     job_id_on_pool_cluster: Optional[int] = None
     accelerators: Optional[Dict[str, int]] = None
+    links: Optional[Dict[str, str]] = None
 
 
 class VolumeRecord(ResponseBaseModel):

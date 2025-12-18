@@ -96,7 +96,7 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('specs', sqlalchemy.Text),
     sqlalchemy.Column('local_log_file', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
-    sqlalchemy.Column('links', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('links', sqlalchemy.JSON, server_default=None),
     sqlalchemy.Column('logs_cleaned_at', sqlalchemy.Float, server_default=None),
     sqlalchemy.Column('full_resources', sqlalchemy.JSON, server_default=None),
 )
@@ -356,7 +356,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'specs': r.get('specs'),
         'local_log_file': r.get('local_log_file'),
         'metadata': r.get('metadata'),
-        'links': r.get('links'),  # JSON string, parse only when needed
+        'links': r.get('links'),  # SQLAlchemy JSON type, already parsed
         # columns from job_info table (some may be None for legacy jobs)
         '_job_info_job_id': r.get(job_info_table.c.spot_job_id
                                  ),  # ambiguous, use table.column
@@ -2323,10 +2323,11 @@ async def update_links_async(job_id: int, task_id: int,
                              links: Dict[str, str]) -> None:
     """Update the links for a managed job task.
     
-    Links are stored as JSON text in the database to avoid overhead.
-    They should only be parsed when needed (e.g., in the dashboard).
+    Links are stored as JSON in the database. SQLAlchemy handles
+    serialization/deserialization automatically.
     """
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    logger.info(f'Updating external links with these: {links}')
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
         # Get existing links and merge with new links
         result = await session.execute(
@@ -2337,18 +2338,18 @@ async def update_links_async(job_id: int, task_id: int,
         existing_links_row = result.fetchone()
         existing_links = {}
         if existing_links_row and existing_links_row[0]:
-            existing_links = json.loads(existing_links_row[0])
+            existing_links = existing_links_row[0]
         
         # Merge new links into existing
         existing_links.update(links)
         
-        # Update the database with JSON string (keep as text, don't parse)
+        # Update the database (SQLAlchemy JSON type handles serialization)
         await session.execute(
             sqlalchemy.update(spot_table).where(
                 sqlalchemy.and_(
                     spot_table.c.spot_job_id == job_id,
                     spot_table.c.task_id == task_id)).values({
-                        spot_table.c.links: json.dumps(existing_links),
+                        spot_table.c.links: existing_links,
                     }))
         await session.commit()
 

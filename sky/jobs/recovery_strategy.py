@@ -489,6 +489,11 @@ class StrategyExecutor:
                             self.job_id_on_pool_cluster = job_id_on_pool_cluster
                             await state.set_job_id_on_pool_cluster_async(
                                 self.job_id, job_id_on_pool_cluster)
+                        # Save user-defined links to database at the start of launch
+                        task = self.dag.tasks[0]
+                        if task.links:
+                            await state.update_links_async(self.job_id, self.task_id, task.links)
+                            logger.debug(f'Saved user-defined links: {task.links}')
                         logger.info('Managed job cluster launched.')
                     except (exceptions.InvalidClusterNameError,
                             exceptions.NoCloudAccessError,
@@ -561,10 +566,9 @@ class StrategyExecutor:
                                     instance_links = (
                                         instance_links_utils.generate_instance_links(
                                             cluster_info, region=region))
+                                    logger.info(f'LLOYD: instance_links: {instance_links}')
                                     if instance_links:
-                                        # Update task links
-                                        self.task.update_links(instance_links)
-                                        # Store links directly in database links column
+                                        # Store instance links directly in database
                                         await state.update_links_async(
                                             self.job_id, self.task_id,
                                             instance_links)
