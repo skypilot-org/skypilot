@@ -1005,8 +1005,10 @@ class AWS(clouds.Cloud):
             hints = 'AWS SSO is set.'
             if static_credential_exists:
                 hints += (
-                    ' To ensure multiple clouds work correctly, please use SkyPilot '
-                    'with static credentials (e.g., ~/.aws/credentials) by unsetting '
+                    ' To ensure S3 mounting and other features work correctly '
+                    'on Kubernetes and other clouds, '
+                    'please use SkyPilot with static aws credentials '
+                    '(e.g., ~/.aws/credentials) by unsetting '
                     'the AWS_PROFILE environment variable.')
             else:
                 hints += single_cloud_hint
