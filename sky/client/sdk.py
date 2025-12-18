@@ -30,6 +30,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
+from sky.client import interactive_utils
 from sky.client import oauth as oauth_lib
 from sky.jobs import scheduler
 from sky.jobs import utils as managed_job_utils
@@ -157,9 +158,16 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
         retry_context = rest.get_retry_context()
     try:
         line_count = 0
+
         for line in rich_utils.decode_rich_status(response):
             if line is not None:
                 line_count += 1
+
+                line = interactive_utils.handle_interactive_auth(line)
+                if line is None:
+                    # Line was consumed by interactive auth handler
+                    continue
+
                 if retry_context is None:
                     print(line, flush=True, end='', file=output_stream)
                 elif line_count > retry_context.line_processed:
