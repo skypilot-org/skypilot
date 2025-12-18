@@ -719,8 +719,10 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
             'metadata': json.loads(row[JobInfoLoc.METADATA.value]),
         })
         if int(constants.SKYLET_VERSION) >= 28:
-            records[-1]['exit_codes'] = (json.loads(
-                row[JobInfoLoc.EXIT_CODES.value]))
+            exit_code_str = row[JobInfoLoc.EXIT_CODES.value]
+            records[-1]['exit_codes'] = ([
+                int(code) for code in exit_code_str.split(',')
+            ])
     return records
 
 
