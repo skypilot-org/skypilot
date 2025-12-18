@@ -46,10 +46,8 @@ def test_interactive_auth_websocket_bridge_and_terminal_handling():
                 return self
 
             async def __anext__(self):
-                # Signal readiness on first iteration, but first yield to the event
-                # loop so stdin_task can start its read() call before we write data.
+                # Signal readiness on first iteration.
                 if not self.ready.is_set():
-                    await asyncio.sleep(0)
                     self.ready.set()
 
                 if not self.to_send:
@@ -60,19 +58,8 @@ def test_interactive_auth_websocket_bridge_and_terminal_handling():
 
         mock_ws = MockWebsocket()
 
-        # Create lightweight mocks that just provide fileno() without wrapping
-        # the fd in a Python file object (which can interfere with asyncio's
-        # connect_read_pipe on Linux due to buffering/state issues).
-        class FdMock:
-
-            def __init__(self, fd):
-                self._fd = fd
-
-            def fileno(self):
-                return self._fd
-
-        stdin_mock = FdMock(stdin_slave)
-        stdout_mock = FdMock(stdout_slave)
+        stdin_file = os.fdopen(os.dup(stdin_slave), 'r')
+        stdout_file = os.fdopen(os.dup(stdout_slave), 'w')
 
         def simulate_user():
             """Simulate user typing password."""
@@ -81,8 +68,8 @@ def test_interactive_auth_websocket_bridge_and_terminal_handling():
             os.write(stdin_master, b'123456\n')
             mock_ws.data_received.wait(timeout=5.0)
 
-        with mock.patch('sys.stdin', stdin_mock), \
-             mock.patch('sys.stdout', stdout_mock), \
+        with mock.patch('sys.stdin', stdin_file), \
+             mock.patch('sys.stdout', stdout_file), \
              mock.patch('sky.client.interactive_utils.websockets.connect',
                         return_value=mock_ws), \
              mock.patch('sky.server.common.get_server_url',
@@ -92,7 +79,7 @@ def test_interactive_auth_websocket_bridge_and_terminal_handling():
              mock.patch('sky.server.common.get_cookie_header_for_url',
                         return_value={}):
 
-            assert os.isatty(stdin_mock.fileno()), "stdin must be a tty"
+            assert os.isatty(stdin_file.fileno()), "stdin must be a tty"
 
             user_thread = threading.Thread(target=simulate_user)
             user_thread.start()
