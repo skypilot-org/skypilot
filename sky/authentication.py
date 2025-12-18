@@ -420,6 +420,27 @@ def setup_shadeform_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     return configure_ssh_info(config)
 
+def setup_ppio_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for PPIO.
+    
+    Note: PPIO only requires API key authentication. SSH keys are generated
+    locally for connecting to instances, but are not uploaded to PPIO.
+    Instances are created with default SSH access configured by PPIO.
+    """
+    # Generate SSH key pair for local use (connecting to instances)
+    # PPIO doesn't require SSH keys to be uploaded to their platform
+    _, public_key_path = auth_utils.get_or_generate_keys()
+
+    # Configure SSH info in the config
+    # PPIO instances use default SSH configuration provided by the platform
+    config.setdefault('auth', {})
+    config['auth']['ssh_public_key'] = public_key_path
+    # SSH user is typically 'root' or 'ubuntu' depending on the image
+    # This will be determined from the instance metadata
+    config['auth'][
+        'ssh_user'] = 'ppio'  # Default, may be overridden by instance info
+
+    return configure_ssh_info(config)
 
 def setup_primeintellect_authentication(
         config: Dict[str, Any]) -> Dict[str, Any]:

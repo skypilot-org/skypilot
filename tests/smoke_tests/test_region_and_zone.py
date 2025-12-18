@@ -240,6 +240,7 @@ def test_gcp_zone():
 # is running remotely. We should fix this.
 @pytest.mark.no_vast  # Requires AWS
 @pytest.mark.no_hyperbolic  # Requires AWS
+@pytest.mark.no_ppio  # Requires AWS
 @pytest.mark.no_shadeform  # Requires AWS
 @pytest.mark.no_seeweb  # Seeweb does not support storage mounting yet.
 @pytest.mark.no_dependency  # Requires full dependency installed

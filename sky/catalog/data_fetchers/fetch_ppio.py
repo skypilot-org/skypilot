@@ -1,0 +1,127 @@
+"""A script that generates the PPIO catalog.
+Usage:
+    python fetch_ppio.py [-h] [--api-key API_KEY]
+                               [--api-key-path API_KEY_PATH]
+If neither --api-key nor --api-key-path are provided, this script will parse
+`~/.ppio/api_key` to look for PPIO API key.
+"""
+import argparse
+import csv
+import os
+from typing import Dict
+
+import requests
+
+ENDPOINT = 'https://api.ppinfra.com/gpu-instance/openapi/v1/products'
+DEFAULT_PPIO_API_KEY_PATH = os.path.expanduser('~/.ppio/api_key')
+
+
+def parse_gpu_info(instance: Dict) -> Dict:
+    """Parse GPU information for the catalog."""
+
+    manufacturer = 'NVIDIA'
+    if instance['name'] == 'MI300X':
+        manufacturer = 'AMD'
+    elif instance['name'] == 'GAUDI2':
+        manufacturer = 'Intel'
+
+    # Convert memory from GiB to MiB for compatibility with list_accelerators_impl
+    memory_mib = int(instance['memoryPerGpu'] * 1024)
+
+    return {
+        'Gpus': [{
+            'Id': instance['id'],
+            'Name': instance['name'],
+            'Manufacturer': manufacturer,
+            'Count': 1,
+            'MemoryInfo': {
+                'SizeInMiB': memory_mib
+            },
+            'MinRootFS': instance['minRootFS'],
+            'MaxRootFS': instance['maxRootFS'],
+            'TotalGpuMemoryInMiB': memory_mib
+        }]
+    }
+
+
+def create_catalog(api_key: str, output_path: str) -> None:
+    """Create PPIO catalog by fetching from API."""
+    headers = {'Authorization': f'Bearer {api_key}'}
+
+    params = {'available': 'true'}
+
+    response = requests.get(ENDPOINT,
+                            headers=headers,
+                            params=params,
+                            timeout=30)
+    response.raise_for_status()
+
+    data = response.json()
+    dataArr = data.get('data', [])
+
+    instance_types = list(
+        filter(
+            lambda x: x.get('availableDeploy', False) and x.get('canBuy', True)
+            and not x.get('activityProduct', False), dataArr))
+
+    with open(output_path, mode='w', encoding='utf-8') as f:
+        writer = csv.writer(f, delimiter=',', quotechar='"')
+        writer.writerow([
+            'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
+            'MemoryGiB', 'Price', 'Region', 'GpuInfo', 'SpotPrice'
+        ])
+        for instance in instance_types:
+            name = instance['name']
+            id = instance['id']
+            vcpus = int(instance['cpuPerGpu'])
+            memory_gb = int(instance['memoryPerGpu'])
+            price = float(instance['price']) / 100000
+            gpu_count = 1
+            gpu_info_dict = parse_gpu_info(instance)
+            gpu_info = repr(gpu_info_dict)
+
+            # Write entry for each available region
+            for regionItem in instance.get('regions', []):
+                if gpu_count > 0:
+                    region = regionItem
+                    writer.writerow([
+                        f'{gpu_count}x_{name}_{id}',
+                        name,
+                        # id,
+                        gpu_count,
+                        vcpus,
+                        memory_gb,
+                        price,
+                        region,
+                        gpu_info,
+                        ''
+                    ])
+
+
+def get_api_key(cmdline_args: argparse.Namespace) -> str:
+    """Get PPIO API key from cmdline or default path."""
+    api_key = cmdline_args.api_key
+    if api_key is None:
+        if cmdline_args.api_key_path is not None:
+            with open(cmdline_args.api_key_path, mode='r',
+                      encoding='utf-8') as f:
+                api_key = f.read().strip()
+        else:
+            # Read from ~/.ppio/api_key
+            with open(DEFAULT_PPIO_API_KEY_PATH, mode='r',
+                      encoding='utf-8') as f:
+                api_key = f.read().strip()
+    assert api_key is not None, (
+        f'API key not found. Please provide via --api-key or place in '
+        f'{DEFAULT_PPIO_API_KEY_PATH}')
+    return api_key
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--api-key', help='PPIO API key.')
+    parser.add_argument('--api-key-path',
+                        help='path of file containing PPIO API key.')
+    args = parser.parse_args()
+    os.makedirs('ppio', exist_ok=True)
+    create_catalog(get_api_key(args), 'ppio/vms.csv')
