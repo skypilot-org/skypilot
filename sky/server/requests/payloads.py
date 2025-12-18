@@ -149,6 +149,17 @@ class RequestBody(BasePayload):
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
+        if data.get('from_dashboard', False):
+            # Limit the env vars to avoid leaking other API server env vars like
+            # SKYPILOT_DEBUG to the request.
+            data['env_vars'] = {
+                constants.USER_ID_ENV_VAR: data['env_vars']
+                                           [constants.USER_ID_ENV_VAR],
+                constants.USER_ENV_VAR: data['env_vars']
+                                        [constants.USER_ENV_VAR],
+                usage_constants.USAGE_RUN_ID_ENV_VAR: data['env_vars'][
+                    usage_constants.USAGE_RUN_ID_ENV_VAR],
+            }
         usage_lib_entrypoint = usage_lib.messages.usage.entrypoint
         if usage_lib_entrypoint is None:
             usage_lib_entrypoint = ''

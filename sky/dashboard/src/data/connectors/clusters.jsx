@@ -55,6 +55,7 @@ export async function getClusters({ clusterNames = null } = {}) {
       include_credentials: false,
       include_handle: false,
       summary_response: clusterNames == null,
+      from_dashboard: true,
     });
 
     const clusterData = clusters.map((cluster) => {
