@@ -229,8 +229,6 @@ class TestSSHCommandRunnerInteractiveAuth:
                 # Wait for auth to complete
                 time.sleep(1.0)
 
-                # Send OK signal
-                sock.send(b'OK')
                 sock.close()
                 os.close(pty_master_fd)
 
