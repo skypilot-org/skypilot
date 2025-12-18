@@ -239,7 +239,12 @@ def zip_files_and_folders(items: List[str],
         warnings.filterwarnings('ignore',
                                 category=UserWarning,
                                 message='Duplicate name:')
-        with zipfile.ZipFile(output_file, 'w') as zipf:
+        # Use ZIP_DEFLATED compression with level 6 (balanced speed/size)
+        # Significantly reduces download times for large log files.
+        with zipfile.ZipFile(output_file,
+                             'w',
+                             compression=zipfile.ZIP_DEFLATED,
+                             compresslevel=6) as zipf:
             for item in items:
                 item = os.path.expanduser(item)
                 if not os.path.isfile(item) and not os.path.isdir(item):
