@@ -1239,3 +1239,145 @@ secrets:
             assert value.get_secret_value() == expected_secrets[key]
     finally:
         os.unlink(yaml_path)
+
+
+def test_from_yaml_config_with_links():
+    """Test parsing links from YAML configuration."""
+    config = {
+        'run': 'echo hello',
+        'links': {
+            'Dashboard': 'https://example.com/dashboard',
+            'Metrics': 'https://metrics.example.com',
+            'Screenshot': 'https://example.com/screenshot.png'
+        }
+    }
+
+    task_obj = task.Task.from_yaml_config(config)
+
+    # Check that links are parsed correctly
+    assert task_obj.links == {
+        'Dashboard': 'https://example.com/dashboard',
+        'Metrics': 'https://metrics.example.com',
+        'Screenshot': 'https://example.com/screenshot.png'
+    }
+
+    # Check other fields
+    assert task_obj.run == 'echo hello'
+
+
+def test_from_yaml_config_links_empty():
+    """Test that empty links dict is handled correctly."""
+    config = {
+        'run': 'echo hello',
+        'links': {}
+    }
+
+    task_obj = task.Task.from_yaml_config(config)
+    assert task_obj.links == {}
+
+
+def test_from_yaml_config_links_none():
+    """Test that None links is handled correctly."""
+    config = {
+        'run': 'echo hello',
+        'links': None
+    }
+
+    task_obj = task.Task.from_yaml_config(config)
+    assert task_obj.links == {}
+
+
+def test_from_yaml_config_without_links():
+    """Test that task without links field has empty links dict."""
+    config = {
+        'run': 'echo hello',
+    }
+
+    task_obj = task.Task.from_yaml_config(config)
+    assert task_obj.links == {}
+
+
+def test_task_initialization_with_links():
+    """Test Task initialization with links parameter."""
+    links = {
+        'Dashboard': 'https://example.com/dashboard',
+        'Docs': 'https://docs.example.com'
+    }
+    task_obj = task.Task(run='echo hello', links=links)
+
+    assert task_obj.links == links
+    assert task_obj.run == 'echo hello'
+
+
+def test_links_to_yaml_config():
+    """Test that links are correctly serialized to YAML config."""
+    links = {
+        'Dashboard': 'https://example.com/dashboard',
+        'Screenshot': 'https://example.com/screenshot.png'
+    }
+    task_obj = task.Task(run='echo hello', links=links)
+
+    yaml_config = task_obj.to_yaml_config()
+
+    assert 'links' in yaml_config
+    assert yaml_config['links'] == links
+
+
+def test_links_to_yaml_config_empty():
+    """Test that empty links are not included in YAML config."""
+    task_obj = task.Task(run='echo hello', links={})
+
+    yaml_config = task_obj.to_yaml_config()
+
+    # Empty links should not be included (no_empty=True)
+    assert 'links' not in yaml_config
+
+
+def test_links_from_yaml_file():
+    """Test that links are parsed correctly from an actual YAML file."""
+    yaml_content = """
+run: echo hello
+links:
+  Dashboard: https://example.com/dashboard
+  Metrics: https://metrics.example.com
+  Screenshot: https://example.com/screenshot.png
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                     delete=False) as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_path = f.name
+
+    try:
+        task_obj = task.Task.from_yaml(yaml_path)
+
+        expected_links = {
+            'Dashboard': 'https://example.com/dashboard',
+            'Metrics': 'https://metrics.example.com',
+            'Screenshot': 'https://example.com/screenshot.png'
+        }
+        assert task_obj.links == expected_links
+    finally:
+        os.unlink(yaml_path)
+
+
+def test_links_roundtrip():
+    """Test that links survive a roundtrip from config to task and back."""
+    original_links = {
+        'Dashboard': 'https://example.com/dashboard',
+        'API Docs': 'https://api.example.com/docs',
+        'Monitoring': 'https://grafana.example.com'
+    }
+    config = {
+        'run': 'echo hello',
+        'links': original_links
+    }
+
+    # Parse config into task
+    task_obj = task.Task.from_yaml_config(config)
+
+    # Convert back to config
+    new_config = task_obj.to_yaml_config()
+
+    assert new_config['links'] == original_links

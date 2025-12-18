@@ -54,7 +54,6 @@ function JobDetails() {
   const [domReady, setDomReady] = useState(false);
   const [refreshLogsFlag, setRefreshLogsFlag] = useState(0);
   const [refreshControllerLogsFlag, setRefreshControllerLogsFlag] = useState(0);
-  const [isLinksExpanded, setIsLinksExpanded] = useState(false);
   const isMobile = useMobile();
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
@@ -246,82 +245,9 @@ function JobDetails() {
                     isLoadingControllerLogs={isLoadingControllerLogs}
                     refreshFlag={0}
                     poolsData={poolsData}
+                    links={detailJobData.links}
                   />
                 </div>
-              </Card>
-            </div>
-
-            {/* Links Section */}
-            <div id="links-section" className="mt-6">
-              <Card>
-                <button
-                  onClick={() => setIsLinksExpanded(!isLinksExpanded)}
-                  className="flex items-center justify-between w-full px-4 py-4 text-left focus:outline-none"
-                >
-                  <div className="flex items-center">
-                    {isLinksExpanded ? (
-                      <ChevronDownIcon className="w-5 h-5 mr-2 text-gray-500" />
-                    ) : (
-                      <ChevronRightIcon className="w-5 h-5 mr-2 text-gray-500" />
-                    )}
-                    <h3 className="text-lg font-semibold">Links</h3>
-                    {detailJobData.links &&
-                      Object.keys(detailJobData.links).length > 0 && (
-                        <span className="ml-2 text-sm text-gray-500">
-                          ({Object.keys(detailJobData.links).length})
-                        </span>
-                      )}
-                  </div>
-                </button>
-                {isLinksExpanded && (
-                  <div className="px-4 pb-4">
-                    {detailJobData.links &&
-                    Object.keys(detailJobData.links).length > 0 ? (
-                      <div className="space-y-4">
-                        {Object.entries(detailJobData.links).map(([label, url]) => {
-                          // Check if URL points to an image
-                          const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'];
-                          const isImage = imageExtensions.some(ext => 
-                            url.toLowerCase().includes(ext)
-                          );
-                          
-                          return (
-                            <div key={label} className="flex flex-col">
-                              <a
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:text-blue-800 hover:underline text-base"
-                              >
-                                {label}
-                              </a>
-                              {isImage && (
-                                <a
-                                  href={url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="mt-2"
-                                >
-                                  <img
-                                    src={url}
-                                    alt={label}
-                                    className="max-w-md max-h-64 rounded-md border border-gray-200 shadow-sm hover:shadow-md transition-shadow"
-                                    onError={(e) => {
-                                      // Hide the image if it fails to load
-                                      e.target.style.display = 'none';
-                                    }}
-                                  />
-                                </a>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-gray-500 text-sm">No links found</div>
-                    )}
-                  </div>
-                )}
               </Card>
             </div>
 
@@ -466,6 +392,7 @@ function JobDetailsContent({
   isLoadingControllerLogs,
   refreshFlag,
   poolsData,
+  links,
 }) {
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
   const [expandedYamlDocs, setExpandedYamlDocs] = useState({});
@@ -798,9 +725,9 @@ function JobDetailsContent({
         </div>
       </div>
 
-      {/* Entrypoint section - spans both columns */}
+      {/* Entrypoint section */}
       {(jobData.entrypoint || jobData.dag_yaml) && (
-        <div className="col-span-2">
+        <div>
           <div className="flex items-center">
             <div className="text-gray-600 font-medium text-base">
               Entrypoint
@@ -928,6 +855,57 @@ function JobDetailsContent({
           </div>
         </div>
       )}
+
+      {/* Links section */}
+      <div>
+        <div className="text-gray-600 font-medium text-base">Links</div>
+        <div className="text-base mt-1">
+          {links && Object.keys(links).length > 0 ? (
+            <div className="space-y-3">
+              {Object.entries(links).map(([label, url]) => {
+                // Check if URL points to an image
+                const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'];
+                const isImage = imageExtensions.some(ext => 
+                  url.toLowerCase().includes(ext)
+                );
+                
+                return (
+                  <div key={label} className="flex flex-col">
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800 hover:underline"
+                    >
+                      {label}
+                    </a>
+                    {isImage && (
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2"
+                      >
+                        <img
+                          src={url}
+                          alt={label}
+                          className="max-w-full max-h-48 rounded-md border border-gray-200 shadow-sm hover:shadow-md transition-shadow"
+                          onError={(e) => {
+                            // Hide the image if it fails to load
+                            e.target.style.display = 'none';
+                          }}
+                        />
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <span className="text-gray-400">-</span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -964,6 +942,7 @@ JobDetailsContent.propTypes = {
   isLoadingControllerLogs: PropTypes.bool,
   refreshFlag: PropTypes.number,
   poolsData: PropTypes.array,
+  links: PropTypes.object,
 };
 
 export default JobDetails;
