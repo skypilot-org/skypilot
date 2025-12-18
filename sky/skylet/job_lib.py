@@ -720,9 +720,12 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
         })
         if int(constants.SKYLET_VERSION) >= 28:
             exit_code_str = row[JobInfoLoc.EXIT_CODES.value]
-            records[-1]['exit_codes'] = ([
-                int(code) for code in exit_code_str.split(',')
-            ])
+            if not isinstance(exit_code_str, str):
+                records[-1]['exit_codes'] = None
+            else:
+                records[-1]['exit_codes'] = ([
+                    int(code) for code in exit_code_str.split(',')
+                ])
     return records
 
 
