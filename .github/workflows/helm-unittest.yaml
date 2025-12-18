@@ -22,7 +22,7 @@ jobs:
     - name: Set up Helm
       uses: azure/setup-helm@v4
       with:
-        version: '3.14.0'
+        version: '3.15.0'
 
     - name: Install helm unittest plugin
       run: |
