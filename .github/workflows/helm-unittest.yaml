@@ -22,11 +22,11 @@ jobs:
     - name: Set up Helm
       uses: azure/setup-helm@v4
       with:
-        version: '3.15.0'
+        version: '3.14.0'
 
     - name: Install helm unittest plugin
       run: |
-        helm plugin install https://github.com/helm-unittest/helm-unittest.git
+        helm plugin install https://github.com/helm-unittest/helm-unittest.git --version 6f82a998e0b5461762ca959f87f5dd344af5e4eb
 
     - name: Update chart dependencies
       run: |
