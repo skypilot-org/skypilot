@@ -1400,9 +1400,9 @@ class SlurmCommandRunner(SSHCommandRunner):
         # to reach the compute node through the login node.
         ssh_options = ' '.join(
             ssh_options_list(
-                # Assume nothing and rely on default SSH behavior when -i is
-                # not specified.
-                None,
+                # Use the same private key as the one used for
+                # connecting to the login node.
+                self.ssh_private_key,
                 None,
                 ssh_proxy_command=self._ssh_proxy_command,
                 disable_control_master=True))
