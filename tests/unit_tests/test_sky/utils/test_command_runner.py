@@ -179,6 +179,8 @@ class TestSSHCommandRunnerInteractiveAuth:
         auth_error = []
 
         def simulate_websocket_handler():
+            sock = None
+            pty_master_fd = None
             try:
                 fd_socket_path = interactive_utils.get_pty_socket_path(
                     session_id)
@@ -196,10 +198,6 @@ class TestSSHCommandRunnerInteractiveAuth:
                 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 sock.connect(fd_socket_path)
                 pty_master_fd = interactive_utils.recv_fd(sock)
-                if pty_master_fd is None:
-                    auth_error.append('Failed to receive PTY fd')
-                    sock.close()
-                    return
 
                 # Wait for and read prompt from SSH
                 # Use select to wait for data to be available
@@ -234,11 +232,10 @@ class TestSSHCommandRunnerInteractiveAuth:
             finally:
                 # Cleanup - fd may already be closed if SSH exited
                 try:
-                    sock.close()
-                except OSError:
-                    pass
-                try:
-                    os.close(pty_master_fd)
+                    if sock is not None:
+                        sock.close()
+                    if pty_master_fd is not None:
+                        os.close(pty_master_fd)
                 except OSError:
                     pass
                 auth_handler_done.set()
