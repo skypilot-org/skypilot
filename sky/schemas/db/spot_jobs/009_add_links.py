@@ -1,8 +1,8 @@
 """Add links column for storing cluster instance links.
 
-Revision ID: 008
-Revises: 007
-Create Date: 2025-01-XX
+Revision ID: 009
+Revises: 008
+Create Date: 2025-12-17
 
 """
 # pylint: disable=invalid-name
@@ -32,4 +32,3 @@ def upgrade():
 def downgrade():
     """No downgrade logic."""
     pass
-

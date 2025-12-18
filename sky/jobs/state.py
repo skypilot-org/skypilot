@@ -2355,17 +2355,16 @@ async def update_metadata_async(job_id: int, task_id: int,
         # Get existing metadata and merge with new metadata
         result = await session.execute(
             sqlalchemy.select(spot_table.c.metadata).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id)))
+                sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                spot_table.c.task_id == task_id)))
         existing_metadata_row = result.fetchone()
         existing_metadata = {}
         if existing_metadata_row and existing_metadata_row[0]:
             existing_metadata = json.loads(existing_metadata_row[0])
-        
+
         # Merge new metadata into existing
         existing_metadata.update(metadata)
-        
+
         # Update the database
         await session.execute(
             sqlalchemy.update(spot_table).where(
@@ -2381,7 +2380,7 @@ async def update_metadata_async(job_id: int, task_id: int,
 async def update_links_async(job_id: int, task_id: int,
                              links: Dict[str, str]) -> None:
     """Update the links for a managed job task.
-    
+
     Links are stored as JSON in the database. SQLAlchemy handles
     serialization/deserialization automatically.
     """
@@ -2391,25 +2390,23 @@ async def update_links_async(job_id: int, task_id: int,
         # Get existing links and merge with new links
         result = await session.execute(
             sqlalchemy.select(spot_table.c.links).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id)))
+                sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                spot_table.c.task_id == task_id)))
         existing_links_row = result.fetchone()
         existing_links = {}
         if existing_links_row and existing_links_row[0]:
             existing_links = existing_links_row[0]
-        
+
         # Merge new links into existing
         existing_links.update(links)
-        
+
         # Update the database (SQLAlchemy JSON type handles serialization)
         await session.execute(
             sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id)).values({
-                        spot_table.c.links: existing_links,
-                    }))
+                sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                spot_table.c.task_id == task_id)).values({
+                                    spot_table.c.links: existing_links,
+                                }))
         await session.commit()
 
 

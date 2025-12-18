@@ -37,8 +37,7 @@ def generate_instance_links(
         aws_region = region or provider_config.get('region', 'us-east-1')
         instance_url = (
             f'https://{aws_region}.console.aws.amazon.com/ec2/v2/home'
-            f'?region={aws_region}#Instances:instanceId={head_instance_id}'
-        )
+            f'?region={aws_region}#Instances:instanceId={head_instance_id}')
         links['AWS Instance'] = instance_url
 
     elif provider_name == 'gcp':
@@ -49,8 +48,8 @@ def generate_instance_links(
         if project_id and zone:
             instance_url = (
                 f'https://console.cloud.google.com/compute/instancesDetail'
-                f'/zones/{zone}/instances/{head_instance_id}?project={project_id}'
-            )
+                f'/zones/{zone}/instances/{head_instance_id}?project='
+                f'{project_id}')
             links['GCP Instance'] = instance_url
 
     elif provider_name == 'azure':
@@ -62,9 +61,8 @@ def generate_instance_links(
             instance_url = (
                 f'https://portal.azure.com/#@/resource/subscriptions'
                 f'/{subscription_id}/resourceGroups/{resource_group}'
-                f'/providers/Microsoft.Compute/virtualMachines/{head_instance_id}'
-            )
+                '/providers/Microsoft.Compute/virtualMachines/'
+                f'{head_instance_id}')
             links['Azure Instance'] = instance_url
 
     return links
-
