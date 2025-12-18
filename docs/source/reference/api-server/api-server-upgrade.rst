@@ -220,6 +220,10 @@ The following table compares the two upgrade strategies:
      - Development environments, simple setups
      - Production environments requiring high availability
 
+.. warning::
+
+    When using ``RollingUpdate`` with consolidation mode enabled, file mounts and workdirs for managed jobs are stored locally on the API server pod. These files will be lost during a rolling update unless you configure a cloud storage bucket via ``jobs.bucket`` in your :ref:`SkyPilot config <config-yaml>`. If you use file mounts or workdirs in managed jobs with rolling update, make sure to configure ``jobs.bucket`` to persist files across updates.
+
 To use the ``RollingUpdate`` strategy, you need to:
 
 * :ref:`Back the API server with a persistent database <api-server-persistence-db>`;

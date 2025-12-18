@@ -93,6 +93,40 @@ _MANAGED_JOB_FIELDS_FOR_QUEUE_KUBERNETES = [
 ]
 
 
+def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
+    """Warn if file mounts or workdir may be lost during rolling update.
+
+    When rolling update is enabled with consolidation mode but no jobs bucket
+    is configured, file mounts and workdirs are stored locally on the API
+    server pod and will be lost during a rolling update.
+    """
+    # If rolling update is not enabled, don't warn.
+    if os.environ.get(skylet_constants.SKYPILOT_ROLLING_UPDATE_ENABLED) is None:
+        return
+
+    # If consolidation mode is not enabled, don't warn.
+    if not managed_job_utils.is_consolidation_mode():
+        return
+
+    # If a jobs bucket is configured, don't warn.
+    if skypilot_config.get_nested(('jobs', 'bucket'), None) is not None:
+        return
+
+    # Check if any task has file_mounts or workdir
+    has_file_mounts = any(task_.file_mounts for task_ in dag.tasks)
+    has_workdir = any(task_.workdir for task_ in dag.tasks)
+    if not has_file_mounts and not has_workdir:
+        return
+
+    logger.warning(
+        f'{colorama.Fore.YELLOW}WARNING: File mounts or workdir detected with '
+        'rolling update strategy enabled and no jobs bucket configured. These '
+        'files will be stored locally and may be lost during API server '
+        'updates. To persist files across updates, configure a cloud storage '
+        f'bucket in your SkyPilot config under `jobs.bucket`.'
+        f'{colorama.Style.RESET_ALL}')
+
+
 def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     """Upload files to the controller.
 
@@ -352,6 +386,9 @@ def launch(
                         'removed, consider removing the cluster from SkyPilot '
                         f'with:\n\n`sky down {cluster_name} --purge`\n\n'
                         f'Reason: {common_utils.format_exception(e)}')
+
+    # Warn if file mounts may be lost during rolling update
+    _warn_file_mounts_rolling_update(dag)
 
     local_to_controller_file_mounts = _upload_files_to_controller(dag)
     controller = controller_utils.Controllers.JOBS_CONTROLLER
