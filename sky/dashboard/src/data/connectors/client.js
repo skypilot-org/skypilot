@@ -19,7 +19,7 @@ export const apiClient = {
       if (body !== undefined) {
         body.env_vars = {
           ...(body.env_vars || {}),
-          'SKYPILOT_IS_FROM_DASHBOARD': 'true',
+          SKYPILOT_IS_FROM_DASHBOARD: 'true',
         };
       }
 
