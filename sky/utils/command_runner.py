@@ -859,15 +859,9 @@ class SSHCommandRunner(CommandRunner):
                 conn, _ = fd_server.accept()
                 # Send PTY master fd through Unix socket.
                 interactive_utils.send_fd(conn, pty_m_fd)
-                # Blocks until 'OK' received.
-                auth_signal = conn.recv(2)
-                if auth_signal != b'OK':
-                    # Auth failed. Don't raise exception - the SSH process
-                    # will fail with a proper error message. This background
-                    # thread exception would just be noise.
-                    logger.debug(
-                        'Interactive auth did not complete successfully')
-                    return
+                # We don't need to block here to wait for the websocket
+                # handler, as SSH will continue by itself once auth
+                # is complete.
             except socket.timeout:
                 logger.debug('Timeout waiting for interactive auth connection')
             except Exception as e:  # pylint: disable=broad-except
@@ -912,8 +906,7 @@ class SSHCommandRunner(CommandRunner):
                                         preexec_fn=setup_pty_session,
                                         **kwargs)
         except Exception as e:
-            logger.error(f'[ControlMaster] Exception in setup: {e}')
-            raise
+            raise RuntimeError(f'Exception in setup: {e}') from e
         finally:
             # Clean up PTY fds and sockets.
             fd_server.close()

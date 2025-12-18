@@ -20,7 +20,6 @@ import socket
 import struct
 import sys
 import threading
-import time
 import traceback
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 import uuid
@@ -2099,7 +2098,9 @@ async def ssh_interactive_auth(websocket: fastapi.WebSocket,
                     await loop.run_in_executor(None, os.write, master_fd,
                                                message)
             except fastapi.WebSocketDisconnect:
-                logger.error(f'WebSocket disconnected for session {session_id}')
+                logger.debug(f'WebSocket disconnected for session {session_id}')
+            except asyncio.CancelledError:
+                pass
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in websocket_to_pty: {e}')
 
@@ -2111,16 +2112,6 @@ async def ssh_interactive_auth(websocket: fastapi.WebSocket,
             successful authentication. Auth is considered complete when
             echo has been enabled for a sustained period (1s).
             """
-            echo_enabled_since = None
-
-            async def signal_auth_completion():
-                """Signal worker process that auth is done."""
-                logger.debug('Interactive auth complete')
-                try:
-                    await loop.sock_sendall(fd_sock, b'OK')
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.error(f'Failed to signal completion: {e}')
-
             try:
                 while True:
                     try:
@@ -2134,27 +2125,8 @@ async def ssh_interactive_auth(websocket: fastapi.WebSocket,
                         break
 
                     await websocket.send_bytes(data)
-
-                    # Check echo state to detect auth completion.
-                    try:
-                        echo_disabled = subprocess_utils.is_echo_disabled(
-                            master_fd)
-                    except OSError:
-                        # PTY closed
-                        break
-
-                    if not echo_disabled:
-                        if echo_enabled_since is None:
-                            echo_enabled_since = time.time()
-                        elif time.time() - echo_enabled_since > 1.0:
-                            # TODO(kevin): Find a more robust way to detect
-                            # auth completion.
-                            await signal_auth_completion()
-                            break
-                    else:
-                        # Echo disabled (password prompt active).
-                        echo_enabled_since = None
-
+            except asyncio.CancelledError:
+                pass
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in pty_to_websocket: {e}')
             finally:
