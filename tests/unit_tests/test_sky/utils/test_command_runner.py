@@ -229,12 +229,18 @@ class TestSSHCommandRunnerInteractiveAuth:
                 # Wait for auth to complete
                 time.sleep(1.0)
 
-                sock.close()
-                os.close(pty_master_fd)
-
             except Exception as e:
                 auth_error.append(str(e))
             finally:
+                # Cleanup - fd may already be closed if SSH exited
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+                try:
+                    os.close(pty_master_fd)
+                except OSError:
+                    pass
                 auth_handler_done.set()
 
         handler_thread = threading.Thread(target=simulate_websocket_handler,
