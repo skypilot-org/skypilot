@@ -351,9 +351,11 @@ def get_effective_region_config(
     3. if not found at cloud level,
        return either default_value if specified or None
 
-    Note: This function currently only supports getting region-specific
-    config from "kubernetes" cloud. For other clouds, this function behaves
-    identically to get_nested().
+    Note: This function supports getting region-specific config from:
+    - "kubernetes" and "ssh" clouds (using context_configs)
+    - "slurm" cloud (using cluster_configs)
+    - "nebius" and "oci" clouds (using region_configs)
+    For other clouds, this function behaves identically to get_nested().
     """
     return config_utils.get_cloud_config_value_from_dict(
         dict_config=_get_loaded_config(),

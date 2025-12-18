@@ -1420,6 +1420,22 @@ def get_config_schema():
                 'provision_timeout': {
                     'type': 'integer',
                 },
+                'cluster_configs': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {},
+                    # Properties are slurm cluster names.
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'require_user_ssh_credentials': {
+                                'type': 'boolean',
+                            },
+                        },
+                    },
+                },
             }
         },
         'oci': {

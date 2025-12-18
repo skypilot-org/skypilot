@@ -12,6 +12,7 @@ from paramiko.config import SSHConfig
 
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -87,7 +88,8 @@ def get_slurm_ssh_config_dict(cluster_name: str) -> Dict[str, Any]:
     # Check for credentials in the current execution context
     # This works for both multiprocess workers and coroutines
     slurm_ssh_credentials = _get_client_ssh_credentials()
-    if slurm_ssh_credentials and cluster_name in slurm_ssh_credentials:
+    if (slurm_ssh_credentials is not None and
+            cluster_name in slurm_ssh_credentials):
         cred = slurm_ssh_credentials[cluster_name]
         ssh_config_dict['user'] = cred.ssh_user
 
@@ -123,6 +125,18 @@ def get_slurm_ssh_config_dict(cluster_name: str) -> Dict[str, Any]:
                 raise
 
         ssh_config_dict['identityfile'] = [key_path]  # type: ignore[assignment]
+    else:
+        require_user_ssh_credentials = (
+            skypilot_config.get_effective_region_config(
+                cloud='slurm',
+                region=cluster_name,
+                keys=('require_user_ssh_credentials',),
+                default_value=False))
+        if require_user_ssh_credentials:
+            raise ValueError('User SSH credentials are required for cluster '
+                             f'{cluster_name}. Set User and IdentityFile in '
+                             '~/.slurm/config and try again.')
+        # Otherwise, return ssh_config_dict as is.
 
     return ssh_config_dict
 
