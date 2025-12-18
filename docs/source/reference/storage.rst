@@ -316,6 +316,35 @@ To manage buckets created by SkyPilot, the sky CLI provides two commands:
     by SkyPilot. Externally created buckets or public buckets are not listed
     in :code:`sky storage ls` and cannot be managed through SkyPilot.
 
+
+FAQ
+---
+
+* **Is AWS SSO supported?**
+
+  AWS SSO credentials are only supported when accessing S3 buckets from AWS VMs.
+  When accessing S3 buckets from Kubernetes clusters, static AWS credentials
+  (e.g., ``~/.aws/credentials``) are required.
+
+  If you encounter ``NoCredentialProviders`` errors or I/O errors when mounting
+  S3 buckets on Kubernetes, ensure you are using static credentials instead of
+  SSO-based authentication.
+
+* **Which architectures are supported?**
+
+  S3 storage mounting (including S3-compatible services like Cloudflare R2,
+  CoreWeave Object Storage, and Nebius) works on all architectures including
+  ARM64 (e.g., Apple Silicon, AWS Graviton). SkyPilot automatically uses the
+  optimal mounting tool for each architecture: goofys for x86_64 and rclone for
+  ARM64.
+
+* **I am unable to create buckets on CoreWeave CAIOS.**
+
+  CoreWeave buckets may take a long time to become accessible after creation.
+  Therefore, SkyPilot does not automatically create them. Please manually create
+  your CoreWeave bucket and verify its accessibility before using it with SkyPilot.
+
+
 Storage YAML reference
 ----------------------
 
@@ -364,30 +393,3 @@ Storage YAML reference
           other workers mounting the same Storage). With COPY mode, files are
           copied at VM initialization and any writes to the mount path will
           not be replicated on the bucket.
-
-FAQ
----
-
-* **Is AWS SSO supported?**
-
-  AWS SSO credentials are only supported when accessing S3 buckets from AWS VMs.
-  When accessing S3 buckets from Kubernetes clusters, static AWS credentials
-  (e.g., ``~/.aws/credentials``) are required.
-
-  If you encounter ``NoCredentialProviders`` errors or I/O errors when mounting
-  S3 buckets on Kubernetes, ensure you are using static credentials instead of
-  SSO-based authentication.
-
-* **Which architectures are supported?**
-
-  S3 storage mounting (including S3-compatible services like Cloudflare R2,
-  CoreWeave Object Storage, and Nebius) works on all architectures including
-  ARM64 (e.g., Apple Silicon, AWS Graviton). SkyPilot automatically uses the
-  optimal mounting tool for each architecture: goofys for x86_64 and rclone for
-  ARM64.
-
-* **I am unable to create buckets on CoreWeave CAIOS.**
-
-  CoreWeave buckets may take a long time to become accessible after creation.
-  Therefore, SkyPilot does not automatically create them. Please manually create
-  your CoreWeave bucket and verify its accessibility before using it with SkyPilot.
