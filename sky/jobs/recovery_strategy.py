@@ -148,8 +148,15 @@ class StrategyExecutor:
             job_recovery_name: Optional[str] = name
             max_restarts_on_errors = job_recovery.pop('max_restarts_on_errors',
                                                       0)
-            recover_on_exit_codes = job_recovery.pop('recover_on_exit_codes',
-                                                     None)
+            recover_exit_codes = job_recovery.pop('recover_on_exit_codes', None)
+            # Normalize single integer to list
+            recover_on_exit_codes: Optional[List[int]] = None
+            if isinstance(recover_exit_codes, int):
+                recover_on_exit_codes = [recover_exit_codes]
+            elif isinstance(recover_on_exit_codes, list):
+                recover_on_exit_codes = [
+                    int(code) for code in recover_on_exit_codes
+                ]
         else:
             job_recovery_name = job_recovery
             max_restarts_on_errors = 0

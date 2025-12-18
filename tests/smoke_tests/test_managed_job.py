@@ -1727,8 +1727,7 @@ def test_managed_jobs_exit_code_recovery(generic_cloud: str):
 
 @pytest.mark.managed_jobs
 def test_managed_jobs_exit_code_recovery_multinode(generic_cloud: str):
-    """Test managed job recovery based on specific exit codes in multi-node 
-    jobs."""
+    """Test managed job recovery based on exit codes in multi-node jobs."""
     name = smoke_tests_utils.get_cluster_name()
 
     # Create YAML with exit code recovery for multi-node job

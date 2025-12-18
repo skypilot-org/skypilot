@@ -208,35 +208,49 @@ def _get_single_resources_schema():
             },
             'job_recovery': {
                 # Either a string or a dict.
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'object',
-                    'required': [],
-                    'additionalProperties': False,
-                    'properties': {
-                        'strategy': {
-                            'anyOf': [{
-                                'type': 'string',
-                            }, {
-                                'type': 'null',
-                            }],
-                        },
-                        'max_restarts_on_errors': {
-                            'type': 'integer',
-                            'minimum': 0,
-                        },
-                        'recover_on_exit_codes': {
-                            'type': 'array',
-                            'items': {
+                'anyOf': [
+                    {
+                        'type': 'string',
+                    },
+                    {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'strategy': {
+                                'anyOf': [{
+                                    'type': 'string',
+                                }, {
+                                    'type': 'null',
+                                }],
+                            },
+                            'max_restarts_on_errors': {
                                 'type': 'integer',
                                 'minimum': 0,
-                                'maximum': 255,
                             },
-                            'uniqueItems': True,
-                        },
+                            'recover_on_exit_codes': {
+                                'anyOf': [
+                                    {
+                                        # Single exit code
+                                        'type': 'integer',
+                                        'minimum': 0,
+                                        'maximum': 255,
+                                    },
+                                    {
+                                        # List of exit codes
+                                        'type': 'array',
+                                        'items': {
+                                            'type': 'integer',
+                                            'minimum': 0,
+                                            'maximum': 255,
+                                        },
+                                        'uniqueItems': True,
+                                    },
+                                ],
+                            },
+                        }
                     }
-                }],
+                ],
             },
             'volumes': {
                 'type': 'array',

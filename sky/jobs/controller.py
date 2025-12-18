@@ -244,7 +244,7 @@ class JobController:
         self, job_id: Optional[int],
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
     ) -> Optional[list]:
-        """Retrieve exit codes from job metadata on the remote cluster.
+        """Retrieve exit codes from the remote cluster.
 
         Args:
             job_id: The job ID on the remote cluster.
@@ -258,18 +258,18 @@ class JobController:
 
             if not use_legacy:
                 try:
-                    request = jobsv1_pb2.GetJobMetadataRequest()
+                    request = jobsv1_pb2.GetJobExitCodesRequest()
                     if job_id is not None:
                         request.job_id = job_id
 
                     response = await context_utils.to_thread(
                         backend_utils.invoke_skylet_with_retries,
                         lambda: cloud_vm_ray_backend.SkyletClient(
-                            handle.get_grpc_channel()).get_job_metadata(request)
-                    )
+                            handle.get_grpc_channel()).get_job_exit_codes(
+                                request))
 
-                    metadata = json.loads(response.metadata_json)
-                    exit_codes = metadata.get('exit_codes')
+                    exit_codes = list(
+                        response.exit_codes) if response.exit_codes else None
                     return exit_codes
                 except exceptions.SkyletMethodNotImplementedError:
                     # Fall back to legacy if RPC not implemented
@@ -288,11 +288,10 @@ class JobController:
                     separate_stderr=True)
 
                 if returncode != 0:
-                    logger.debug(f'Failed to retrieve job metadata: {stderr}')
+                    logger.debug(f'Failed to retrieve exit codes: {stderr}')
                     return None
 
-                metadata = json.loads(stdout.strip())
-                exit_codes = metadata.get('exit_codes')
+                exit_codes = json.loads(stdout.strip())
                 return exit_codes
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to retrieve job exit codes: {e}')

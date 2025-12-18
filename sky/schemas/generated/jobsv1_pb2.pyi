@@ -253,14 +253,14 @@ class GetLogDirsForJobsResponse(_message.Message):
     job_log_dirs: _containers.ScalarMap[int, str]
     def __init__(self, job_log_dirs: _Optional[_Mapping[int, str]] = ...) -> None: ...
 
-class GetJobMetadataRequest(_message.Message):
+class GetJobExitCodesRequest(_message.Message):
     __slots__ = ("job_id",)
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     job_id: int
     def __init__(self, job_id: _Optional[int] = ...) -> None: ...
 
-class GetJobMetadataResponse(_message.Message):
-    __slots__ = ("metadata_json",)
-    METADATA_JSON_FIELD_NUMBER: _ClassVar[int]
-    metadata_json: str
-    def __init__(self, metadata_json: _Optional[str] = ...) -> None: ...
+class GetJobExitCodesResponse(_message.Message):
+    __slots__ = ("exit_codes",)
+    EXIT_CODES_FIELD_NUMBER: _ClassVar[int]
+    exit_codes: _containers.RepeatedScalarFieldContainer[int]
+    def __init__(self, exit_codes: _Optional[_Iterable[int]] = ...) -> None: ...

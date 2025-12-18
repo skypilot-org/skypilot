@@ -554,7 +554,7 @@ returncodes, _ = get_or_fail(futures, pg)
 if sum(returncodes) != 0:
     # Save exit codes to job metadata for potential recovery logic
     if int(constants.SKYLET_VERSION) >= 28:
-        job_lib.update_metadata(3, {'exit_codes': returncodes})
+        job_lib.set_exit_codes(3, returncodes)
     job_lib.set_status(3, job_lib.JobStatus.FAILED)
     # Schedule the next pending job immediately to make the job
     # scheduling more efficient.

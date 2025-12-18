@@ -1,6 +1,5 @@
 """gRPC service implementations for skylet."""
 
-import json
 import os
 from typing import List, Optional
 
@@ -387,19 +386,18 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def GetJobMetadata(  # type: ignore[return]
-            self, request: jobsv1_pb2.GetJobMetadataRequest,
-            context: grpc.ServicerContext) -> jobsv1_pb2.GetJobMetadataResponse:
+    def GetJobExitCodes(  # type: ignore[return]
+            self, request: jobsv1_pb2.GetJobExitCodesRequest,
+            context: grpc.ServicerContext
+    ) -> jobsv1_pb2.GetJobExitCodesResponse:
         try:
             job_id = request.job_id if request.HasField(
                 'job_id') else job_lib.get_latest_job_id()
-            if job_id is None:
-                metadata = {}
-            else:
-                metadata = job_lib.get_metadata(job_id)
-            metadata_json = json.dumps(metadata)
-            return jobsv1_pb2.GetJobMetadataResponse(
-                metadata_json=metadata_json)
+            exit_codes: Optional[List[int]] = None
+            if job_id:
+                exit_codes_list = job_lib.get_exit_codes(job_id)
+                exit_codes = exit_codes_list if exit_codes_list else []
+            return jobsv1_pb2.GetJobExitCodesResponse(exit_codes=exit_codes)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 

@@ -529,7 +529,7 @@ if script or True:
             print(msg, flush=True)
             returncodes = [returncode]
             if int(constants.SKYLET_VERSION) >= 28:
-                job_lib.update_metadata(2, {'exit_codes': returncodes})
+                job_lib.set_exit_codes(2, returncodes)
             job_lib.set_status(2, job_lib.JobStatus.FAILED_SETUP)
             sys.exit(1)
         time.sleep(0.1)
@@ -601,7 +601,7 @@ else:
 if sum(returncodes) != 0:
     # Save exit codes to job metadata for potential recovery logic
     if int(constants.SKYLET_VERSION) >= 28:
-        job_lib.update_metadata(2, {'exit_codes': returncodes})
+        job_lib.set_exit_codes(2, returncodes)
     job_lib.set_status(2, job_lib.JobStatus.FAILED)
     # Schedule the next pending job immediately to make the job
     # scheduling more efficient.

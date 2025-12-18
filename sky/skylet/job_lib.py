@@ -66,6 +66,7 @@ class JobInfoLoc(enum.IntEnum):
     PID = 9
     LOG_PATH = 10
     METADATA = 11
+    EXIT_CODES = 12
 
 
 def create_table(cursor, conn):
@@ -124,6 +125,8 @@ def create_table(cursor, conn):
                                  'metadata',
                                  'TEXT DEFAULT \'{}\'',
                                  value_to_replace_existing_entries='{}')
+    db_utils.add_column_to_table(cursor, conn, 'jobs', 'exit_codes',
+                                 'TEXT DEFAULT NULL')
     conn.commit()
 
 
@@ -388,10 +391,16 @@ def add_job(job_name: str,
     assert _DB is not None
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
-    _DB.cursor.execute(
-        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)',
-        (job_name, username, job_submitted_at, JobStatus.INIT.value,
-         run_timestamp, None, resources_str, metadata))
+    if int(constants.SKYLET_VERSION) >= 28:
+        _DB.cursor.execute(
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?, null)',  # pylint: disable=line-too-long
+            (job_name, username, job_submitted_at, JobStatus.INIT.value,
+             run_timestamp, None, resources_str, metadata))
+    else:
+        _DB.cursor.execute(
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)',  # pylint: disable=line-too-long
+            (job_name, username, job_submitted_at, JobStatus.INIT.value,
+             run_timestamp, None, resources_str, metadata))
     _DB.conn.commit()
     rows = _DB.cursor.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                               (run_timestamp,))
@@ -469,49 +478,38 @@ def set_status(job_id: int, status: JobStatus) -> None:
 
 
 @init_db
-def update_metadata(job_id: int, metadata_update: Dict[str, Any]) -> None:
-    """Update job metadata with new key-value pairs.
+def set_exit_codes(job_id: int, exit_codes: List[int]) -> None:
+    """Set exit codes for a job as comma-separated string.
 
     Args:
         job_id: The job ID to update.
-        metadata_update: A dict of key-value pairs to add/update in the
-            job's metadata.
+        exit_codes: A list of exit codes to store.
     """
     assert _DB is not None
+    exit_codes_str = ','.join(str(code) for code in exit_codes)
     with filelock.FileLock(_get_lock_path(job_id)):
-        # Retrieve current metadata
-        rows = _DB.cursor.execute('SELECT metadata FROM jobs WHERE job_id=(?)',
-                                  (job_id,))
-        row = rows.fetchone()
-        if row is None:
-            return
-
-        current_metadata = json.loads(row[0]) if row[0] else {}
-        # Merge with update
-        current_metadata.update(metadata_update)
-        # Save back
-        _DB.cursor.execute('UPDATE jobs SET metadata=(?) WHERE job_id=(?)',
-                           (json.dumps(current_metadata), job_id))
+        _DB.cursor.execute('UPDATE jobs SET exit_codes=(?) WHERE job_id=(?)',
+                           (exit_codes_str, job_id))
         _DB.conn.commit()
 
 
 @init_db
-def get_metadata(job_id: int) -> Dict[str, Any]:
-    """Get job metadata.
+def get_exit_codes(job_id: int) -> Optional[List[int]]:
+    """Get exit codes for a job from comma-separated string.
 
     Args:
-        job_id: The job ID to retrieve metadata for.
+        job_id: The job ID to retrieve exit codes for.
 
     Returns:
-        A dict of the job's metadata, or empty dict if not found.
+        A list of exit codes, or None if not found.
     """
     assert _DB is not None
-    rows = _DB.cursor.execute('SELECT metadata FROM jobs WHERE job_id=(?)',
+    rows = _DB.cursor.execute('SELECT exit_codes FROM jobs WHERE job_id=(?)',
                               (job_id,))
     row = rows.fetchone()
     if row is None or row[0] is None:
-        return {}
-    return json.loads(row[0])
+        return None
+    return [int(code) for code in row[0].split(',')]
 
 
 @init_db
@@ -720,6 +718,9 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
             'pid': row[JobInfoLoc.PID.value],
             'metadata': json.loads(row[JobInfoLoc.METADATA.value]),
         })
+        if int(constants.SKYLET_VERSION) >= 28:
+            records[-1]['exit_codes'] = (json.loads(
+                row[JobInfoLoc.EXIT_CODES.value]))
     return records
 
 
@@ -1317,12 +1318,11 @@ class JobLibCodeGen:
 
     @classmethod
     def get_job_exit_codes(cls, job_id: Optional[int] = None) -> str:
-        """Generate shell command to retrieve exit codes from job metadata."""
+        """Generate shell command to retrieve exit codes."""
         code = [
             f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',  # pylint: disable=line-too-long
-            'import json',
-            'metadata = job_lib.get_metadata(job_id) if job_id is not None and int(constants.SKYLET_VERSION) >= 28 else {}',  # pylint: disable=line-too-long
-            'print(json.dumps(metadata))'
+            'exit_codes = job_lib.get_exit_codes(job_id) if job_id is not None and int(constants.SKYLET_VERSION) >= 28 else {}',  # pylint: disable=line-too-long
+            'print(exit_codes, flush=True)',
         ]
         return cls._build(code)
 

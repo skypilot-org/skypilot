@@ -337,6 +337,7 @@ You can also specify a list of exit codes that should always trigger recovery, r
       max_restarts_on_errors: 3
       # Always recover if the job exits with code 33 or 34.
       # In a multi-node job, recovery is triggered if any node exits with a code in [33, 34].
+      # Can also use a single integer: recover_on_exit_codes: 33
       recover_on_exit_codes: [33, 34]
 
 In this configuration:

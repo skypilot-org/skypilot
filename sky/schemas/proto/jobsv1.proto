@@ -25,8 +25,8 @@ service JobsService {
   rpc GetJobEndedTimestamp(GetJobEndedTimestampRequest) returns (GetJobEndedTimestampResponse);
   // Get log directories for jobs.
   rpc GetLogDirsForJobs(GetLogDirsForJobsRequest) returns (GetLogDirsForJobsResponse);
-  // Get job metadata (including exit codes).
-  rpc GetJobMetadata(GetJobMetadataRequest) returns (GetJobMetadataResponse);
+  // Get job exit codes.
+  rpc GetJobExitCodes(GetJobExitCodesRequest) returns (GetJobExitCodesResponse);
 }
 
 enum JobStatus {
@@ -167,10 +167,10 @@ message GetLogDirsForJobsResponse {
   map<int64, string> job_log_dirs = 1;
 }
 
-message GetJobMetadataRequest {
+message GetJobExitCodesRequest {
   optional int64 job_id = 1;
 }
 
-message GetJobMetadataResponse {
-  string metadata_json = 1;
+message GetJobExitCodesResponse {
+  repeated int32 exit_codes = 1;
 }
