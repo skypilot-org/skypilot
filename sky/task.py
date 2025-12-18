@@ -440,6 +440,8 @@ class Task:
 
         self._user_specified_yaml = _user_specified_yaml
 
+        self.links = links or {}
+
     def validate(self,
                  skip_file_mounts: bool = False,
                  skip_workdir: bool = False):
@@ -1300,18 +1302,6 @@ class Task:
           self: The current task, with links set.
         """
         self.links = links
-        return self
-
-    def update_links(self, links: Dict[str, str]) -> 'Task':
-        """Updates the links for this task.
-
-        Args:
-          links: A dictionary mapping link labels to URLs to add or update.
-
-        Returns:
-          self: The current task, with links updated.
-        """
-        self.links.update(links)
         return self
 
     def set_storage_mounts(
