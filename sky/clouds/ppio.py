@@ -268,88 +268,25 @@ class PPIO(clouds.Cloud):
                                                             separators=(',',
                                                                         ':'))
 
-        # Get imageUrl from cluster_config_overrides if specified
-        image_url = None
+        # Get PPIO config from cluster_config_overrides if specified
         if resources.cluster_config_overrides:
             ppio_config = resources.cluster_config_overrides.get('ppio', {})
-            image_url = ppio_config.get('imageUrl')
-        if image_url:
-            resources_vars['image_url'] = image_url
-
-        # Get imageAuth from cluster_config_overrides if specified
-        image_auth = None
-        if resources.cluster_config_overrides:
-            ppio_config = resources.cluster_config_overrides.get('ppio', {})
-            image_auth = ppio_config.get('imageAuth')
-        if image_auth:
-            resources_vars['image_auth'] = image_auth
-
-        # Get imageAuthId from cluster_config_overrides if specified
-        image_auth_id = None
-        if resources.cluster_config_overrides:
-            ppio_config = resources.cluster_config_overrides.get('ppio', {})
-            image_auth_id = ppio_config.get('imageAuthId')
-        if image_auth_id:
-            resources_vars['image_auth_id'] = image_auth_id
-
-        # Get ports from cluster_config_overrides if specified
-        ports = None
-        if resources.cluster_config_overrides:
-            ppio_config = resources.cluster_config_overrides.get('ppio', {})
-            ports = ppio_config.get('ports')
-        if ports:
-            resources_vars['ports'] = ports
-
-        # Get envs from cluster_config_overrides if specified
-        envs = None
-        if resources.cluster_config_overrides:
-            ppio_config = resources.cluster_config_overrides.get('ppio', {})
-            envs = ppio_config.get('envs')
-        if envs:
-            resources_vars['envs'] = envs
-
-        # Get tools from cluster_config_overrides if specified
-        tools = None
-        if resources.cluster_config_overrides:
-            ppio_config = resources.cluster_config_overrides.get('ppio', {})
-            tools = ppio_config.get('tools')
-        if tools:
-            resources_vars['tools'] = tools
-
-        # Get command from cluster_config_overrides if specified
-        command = None
-        if resources.cluster_config_overrides:
-            ppio_config = resources.cluster_config_overrides.get('ppio', {})
-            command = ppio_config.get('command')
-        if command:
-            resources_vars['command'] = command
-
-        # Get networkStorages from cluster_config_overrides if specified
-        network_storages = None
-        if resources.cluster_config_overrides:
-            ppio_config = resources.cluster_config_overrides.get('ppio', {})
-            network_storages = ppio_config.get('networkStorages')
-        if network_storages:
-            resources_vars['network_storages'] = network_storages
-
-        # Get networkId from cluster_config_overrides if specified
-        network_id = None
-        if resources.cluster_config_overrides:
-            ppio_config = resources.cluster_config_overrides.get('ppio', {})
-            network_id = ppio_config.get('networkId')
-
-        if network_id:
-            resources_vars['network_id'] = network_id
-
-        # Get rootfsSize from cluster_config_overrides if specified
-        rootfs_size = None
-        if resources.cluster_config_overrides:
-            ppio_config = resources.cluster_config_overrides.get('ppio', {})
-            rootfs_size = ppio_config.get('rootfsSize')
-
-        if rootfs_size is not None:
-            resources_vars['rootfs_size'] = rootfs_size
-
+            key_map = {
+                'imageUrl': 'image_url',
+                'imageAuth': 'image_auth',
+                'imageAuthId': 'image_auth_id',
+                'ports': 'ports',
+                'envs': 'envs',
+                'tools': 'tools',
+                'command': 'command',
+                'networkStorages': 'network_storages',
+                'networkId': 'network_id',
+                'rootfsSize': 'rootfs_size',
+            }
+            for config_key, var_key in key_map.items():
+                value = ppio_config.get(config_key)
+                if value is not None:
+                    resources_vars[var_key] = value
         return resources_vars
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
