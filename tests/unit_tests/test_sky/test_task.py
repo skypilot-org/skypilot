@@ -1267,10 +1267,7 @@ def test_from_yaml_config_with_links():
 
 def test_from_yaml_config_links_empty():
     """Test that empty links dict is handled correctly."""
-    config = {
-        'run': 'echo hello',
-        'links': {}
-    }
+    config = {'run': 'echo hello', 'links': {}}
 
     task_obj = task.Task.from_yaml_config(config)
     assert task_obj.links == {}
@@ -1278,10 +1275,7 @@ def test_from_yaml_config_links_empty():
 
 def test_from_yaml_config_links_none():
     """Test that None links is handled correctly."""
-    config = {
-        'run': 'echo hello',
-        'links': None
-    }
+    config = {'run': 'echo hello', 'links': None}
 
     task_obj = task.Task.from_yaml_config(config)
     assert task_obj.links == {}
@@ -1369,10 +1363,7 @@ def test_links_roundtrip():
         'API Docs': 'https://api.example.com/docs',
         'Monitoring': 'https://grafana.example.com'
     }
-    config = {
-        'run': 'echo hello',
-        'links': original_links
-    }
+    config = {'run': 'echo hello', 'links': original_links}
 
     # Parse config into task
     task_obj = task.Task.from_yaml_config(config)

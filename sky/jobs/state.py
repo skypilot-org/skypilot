@@ -2385,7 +2385,7 @@ async def update_links_async(job_id: int, task_id: int,
     serialization/deserialization automatically.
     """
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
-    logger.info(f'Updating external links with these: {links}')
+    logger.info(f'Updating external links with: {links}')
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
         # Get existing links and merge with new links
         result = await session.execute(
