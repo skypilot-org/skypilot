@@ -320,15 +320,15 @@ To manage buckets created by SkyPilot, the sky CLI provides two commands:
 FAQ
 ---
 
-* **Is AWS SSO supported?**
+* **Are AWS SSO credentials supported?**
 
   AWS SSO credentials are only supported when accessing S3 buckets from AWS VMs.
   When accessing S3 buckets from Kubernetes clusters, static AWS credentials
   (e.g., ``~/.aws/credentials``) are required.
 
-  If you encounter ``NoCredentialProviders`` errors or I/O errors when mounting
-  S3 buckets on Kubernetes, ensure you are using static credentials instead of
-  SSO-based authentication.
+  On EKS clusters, you can optionally set up IAM Roles for Service Accounts 
+  (IRSA) to allow SkyPilot pods to access S3 buckets without static AWS 
+  credentials. See :ref:`aws-eks-irsa` for setup instructions. 
 
 * **Which architectures are supported?**
 
