@@ -930,6 +930,29 @@ class Storage(object):
     def _validate_storage_spec(self, name: Optional[str]) -> None:
         """Validates the storage spec and updates local fields if necessary."""
 
+        def validate_s3_mount_mode_credentials():
+            """Check S3 MOUNT mode is not used with non-static credentials.
+
+            goofys (used for MOUNT mode) does not support SSO, IAM roles, or
+            container credentials. Users must use MOUNT_CACHED mode instead.
+            """
+            if self.mode != StorageMode.MOUNT:
+                return
+
+            # Check if this storage uses S3
+            is_s3_storage = False
+            if isinstance(self.source, str) and self.source.startswith('s3://'):
+                is_s3_storage = True
+            elif StoreType.S3 in self.stores:
+                is_s3_storage = True
+
+            if is_s3_storage and clouds.AWS.should_use_env_auth_for_s3():
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        'mode: MOUNT is not supported when using AWS SSO or '
+                        'IAM role credentials to access S3. Please use '
+                        'mode: MOUNT_CACHED instead.')
+
         def validate_name(name):
             """ Checks for validating the storage name.
 
@@ -958,6 +981,9 @@ class Storage(object):
                         '`source: s3://mybucket/`). If you are trying to '
                         'create a new bucket, please use the `store` field to '
                         'specify the store type (e.g. `store: s3`).')
+
+        # MOUNT mode does not work on S3 with SSO credentials - check early
+        validate_s3_mount_mode_credentials()
 
         if self.source is None:
             # If the mode is COPY, the source must be specified
@@ -4544,25 +4570,6 @@ class S3Store(S3CompatibleStore):
             default_region=cls._DEFAULT_REGION,
             mount_cmd_factory=mounting_utils.get_s3_mount_cmd,
         )
-
-    def mount_command(self, mount_path: str) -> str:
-        """Get mount command for S3.
-
-        Raises an error if using non-static credentials (SSO, IAM role) since
-        goofys does not support these credential types. Users should use
-        MOUNT_CACHED mode instead which uses rclone with env_auth.
-        """
-        if clouds.AWS.should_use_env_auth_for_s3():
-            raise exceptions.NotSupportedError(
-                'S3 MOUNT mode is not supported when using AWS SSO or IAM '
-                'role credentials.\n'
-                'Please use MOUNT_CACHED mode instead, which '
-                'supports environment-based authentication:\n'
-                '  file_mounts:\n'
-                '    /path/to/mount:\n'
-                '      source: s3://your-bucket\n'
-                '      mode: MOUNT_CACHED')
-        return super().mount_command(mount_path)
 
     def mount_cached_command(self, mount_path: str) -> str:
         install_cmd = mounting_utils.get_rclone_install_cmd()
