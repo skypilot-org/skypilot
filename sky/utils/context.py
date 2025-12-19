@@ -17,6 +17,8 @@ from typing_extensions import ParamSpec
 if TYPE_CHECKING:
     from sky.skypilot_config import ConfigContext
 
+_PROCESS_GLOBAL_VARS = {}
+
 
 class SkyPilotContext(object):
     """SkyPilot typed context vars for threads and coroutines.
@@ -65,6 +67,8 @@ class SkyPilotContext(object):
         self._log_file_handle = None
         self.env_overrides = {}
         self.config_context = None
+        self.request_context = None
+        self.vars = {}
 
     def cancel(self):
         """Cancel the context."""
@@ -113,6 +117,12 @@ class SkyPilotContext(object):
             self._log_file_handle.close()
             self._log_file_handle = None
 
+    def set_var(self, key: str, value: Any):
+        self.vars[key] = value
+
+    def get_var(self, key: str) -> Optional[Any]:
+        return self.vars.get(key)
+
     def __enter__(self):
         return self
 
@@ -148,6 +158,28 @@ def get() -> Optional[SkyPilotContext]:
     polling the cancellation event if it is not.
     """
     return _CONTEXT.get()
+
+
+def set_context_var(key: str, value: Any):
+    ctx = get()
+    if ctx is not None:
+        # Set the var in context
+        ctx.set_var(key, value)
+    else:
+        # Fallback to process-isolated assumption, where we thought
+        # modifying process-scope vars is safe.
+        _PROCESS_GLOBAL_VARS[key] = value
+
+
+def get_context_var(key: str) -> Any:
+    ctx = get()
+    value = None
+    if ctx is not None:
+        value = ctx.get_var(key)
+    if value is None:
+        # Fallback to the variable set in process-scope
+        value = _PROCESS_GLOBAL_VARS.get(key)
+    return value
 
 
 class ContextualEnviron(MutableMapping[str, str]):

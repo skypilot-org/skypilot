@@ -29,6 +29,7 @@ from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.utils import annotations
+from sky.utils import context
 from sky.utils import ux_utils
 from sky.utils import validator
 
@@ -300,7 +301,6 @@ _current_user: Optional['models.User'] = None
 _current_request_id: Optional[str] = None
 
 
-# TODO(aylei,hailong): request context should be contextual
 def set_request_context(client_entrypoint: Optional[str],
                         client_command: Optional[str],
                         using_remote_api_server: bool,
@@ -310,22 +310,20 @@ def set_request_context(client_entrypoint: Optional[str],
     This is useful when we are on the SkyPilot API server side and we have a
     client entrypoint and command from the client.
     """
-    global _current_command
-    global _current_client_entrypoint
-    global _using_remote_api_server
-    global _current_user
-    global _current_request_id
-    _current_command = client_command
-    _current_client_entrypoint = client_entrypoint
-    _using_remote_api_server = using_remote_api_server
-    _current_user = user
-    _current_request_id = request_id
+    # This function will be called in process executor and coroutine executor.
+    # context.set_context_var ensures the context is safe in both cases.
+    context.set_context_var('client_entrypoint', client_entrypoint)
+    context.set_context_var('client_command', client_command)
+    context.set_context_var('using_remote_api_server', using_remote_api_server)
+    context.set_context_var('user', user)
+    context.set_context_var('request_id', request_id)
 
 
 def get_current_request_id() -> str:
     """Returns the current request id."""
-    if _current_request_id is not None:
-        return _current_request_id
+    value = context.get_context_var('request_id')
+    if value is not None:
+        return value
     return 'dummy-request-id'
 
 
@@ -335,21 +333,25 @@ def get_current_command() -> str:
     Normally uses get_pretty_entry_point(), but will use the client command on
     the server side.
     """
-    if _current_command is not None:
-        return _current_command
-
+    value = context.get_context_var('command')
+    if value is not None:
+        return value
     return get_pretty_entrypoint_cmd()
 
 
 def get_current_user() -> 'models.User':
     """Returns the user in current server session."""
-    if _current_user is not None:
-        return _current_user
+    value = context.get_context_var('user')
+    if value is not None:
+        return value
     return models.User.get_current_user()
 
 
 def get_current_user_name() -> str:
     """Returns the user name in current server session."""
+    value = context.get_context_var('user_name')
+    if value is not None:
+        return value
     name = get_current_user().name
     assert name is not None
     return name
@@ -370,8 +372,7 @@ def get_local_user_name() -> str:
 
 def set_current_user(user: 'models.User'):
     """Sets the current user."""
-    global _current_user
-    _current_user = user
+    context.set_context_var('user', user)
 
 
 def get_current_client_entrypoint(server_entrypoint: str) -> str:
@@ -380,8 +381,9 @@ def get_current_client_entrypoint(server_entrypoint: str) -> str:
     Gets the client entrypoint from the context, if it is not set, returns the
     server entrypoint.
     """
-    if _current_client_entrypoint is not None:
-        return _current_client_entrypoint
+    value = context.get_context_var('client_entrypoint')
+    if value is not None:
+        return value
     return server_entrypoint
 
 
