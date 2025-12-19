@@ -1906,6 +1906,8 @@ async def kubernetes_pod_ssh_proxy(
     # Run core.status in another thread to avoid blocking the event loop.
     # TODO(aylei): core.status() will be called with server user, which has
     # permission to all workspaces, this will break workspace isolation.
+    # It is ok for now, as users with limited access will not get the ssh config
+    # for the clusters in non-accessible workspaces.
     with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
         cluster_records = await context_utils.to_thread_with_executor(
             thread_pool_executor, core.status, cluster_name, all_users=True)
