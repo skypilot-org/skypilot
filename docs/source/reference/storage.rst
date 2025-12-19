@@ -322,13 +322,15 @@ FAQ
 
 * **Are AWS SSO credentials supported?**
 
-  AWS SSO credentials are only supported when accessing S3 buckets from AWS VMs.
-  When accessing S3 buckets from Kubernetes clusters, static AWS credentials
-  (e.g., ``~/.aws/credentials``) are required.
-
-  On EKS clusters, you can set up IAM roles (via Pod Identity or IRSA) to 
+  AWS SSO credentials are only supported when accessing S3 from EC2 or EKS clusters with ``mode: MOUNT_CACHED``.
+  ``mode: MOUNT`` is not supported when using AWS SSO credentials.
+  
+  On EKS clusters, you must set up IAM roles (via Pod Identity or IRSA) to 
   allow SkyPilot pods to access S3 buckets without static AWS credentials. 
   See :ref:`aws-eks-iam-roles` for setup instructions. 
+
+  When accessing S3 buckets outside of EC2 or EKS, static AWS credentials
+  (e.g., ``~/.aws/credentials``) are required.
 
 * **Which architectures are supported?**
 
