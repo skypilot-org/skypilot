@@ -133,9 +133,8 @@ def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
 
     logger.warning(
         f'{colorama.Fore.YELLOW}WARNING: Local file mounts or workdir detected '
-        'with rolling update strategy enabled and no jobs bucket configured. '
-        'These files will be stored locally and may be lost during API server '
-        'updates. To persist files across updates, configure a cloud storage '
+        'with rolling update enabled for API server. '
+        'To persist files across API server restarts/update, configure a cloud '
         f'bucket in your SkyPilot config under `jobs.bucket`.'
         f'{colorama.Style.RESET_ALL}')
 
