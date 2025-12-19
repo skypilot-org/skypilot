@@ -18,56 +18,8 @@ This example shows how to scale SAM3 video segmentation across multiple GPU work
 
 ## Quick start: Single-node testing
 
-For quick testing on a single node without pools, create a `test-single.yaml` YAML that combines setup with a simple run command:
+For quick testing on a single node without pools, use `test-single.yaml` which combines setup and run in a single task:
 
-```yaml
-# test-single.yaml
-resources:
-  accelerators: L40S:1
-
-file_mounts:
-  ~/.kaggle/kaggle.json: ~/.kaggle/kaggle.json
-  /outputs:
-    source: s3://my-skypilot-bucket
-
-secrets:
-  HF_TOKEN: null 
-
-workdir: .
-
-setup: |
-  # Same setup as pool.yaml
-  sudo apt-get update && sudo apt-get install -y unzip ffmpeg
-  uv venv .venv --python 3.12
-  source .venv/bin/activate
-  pip install kaggle
-  uv pip install torch==2.6.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-  # Install transformers from specific commit with SAM3 support
-  uv pip install git+https://github.com/huggingface/transformers.git@c3fb1b1a6ca1102f62b139c83a088a97e5a55477
-  uv pip install accelerate opencv-python pillow numpy kernels
-  # Download soccer video dataset from Kaggle (store in S3 to avoid re-downloading)
-  DATASET_PATH=/outputs/datasets/soccer-videos
-  if [ ! -d "$DATASET_PATH" ]; then
-    echo "Downloading dataset from Kaggle to S3..."
-    mkdir -p /outputs/datasets
-    kaggle datasets download shreyamainkar/football-soccer-videos-dataset
-    unzip -q football-soccer-videos-dataset.zip -d $DATASET_PATH
-    rm -f football-soccer-videos-dataset.zip
-  fi
-  ln -sf $DATASET_PATH soccer-videos
-  echo "Setup complete!"
-
-run: |
-  source .venv/bin/activate
-  # Process all videos on a single node
-  for video in soccer-videos/*.mp4; do
-    echo "Processing: $video"
-    python process_segmentation.py "$video" || echo "Failed: $video"
-  done
-  echo "All videos processed!"
-```
-
-Then launch with:
 ```bash
 export HF_TOKEN=... # SAM3 is a gated model; set your Hugging Face token here
 sky launch -c sam3-test test-single.yaml --secret HF_TOKEN
@@ -96,7 +48,7 @@ Wait for all workers to show `READY` status.
 ### Step 3: Submit batch jobs
 
 ```bash
-sky jobs launch --pool sam3-pool --num-jobs 10 job.yaml
+sky jobs launch --pool sam3-pool --num-jobs 10 --secret HF_TOKEN job.yaml
 ```
 
 This submits 10 parallel jobs to process the entire dataset. Three will start immediately (one per worker), and the rest will queue up.
@@ -139,14 +91,14 @@ sky jobs pool down sam3-pool
 
 The pool YAML defines the worker infrastructure:
 - **Workers**: Number of GPU instances
-- **Resources**: L40S GPU per worker
+- **Resources**: H100 GPU per worker
 - **File mounts**: Kaggle credentials and S3 output bucket
 - **Setup**: Runs once per worker to install dependencies and download the dataset
 
 ### Job configuration (`job.yaml`)
 
 The job YAML defines the workload:
-- **Resources**: Must match pool resources (L40S GPU)
+- **Resources**: Must match pool resources (H100 GPU)
 - **Run**: Processes assigned chunk of videos on each job
 
 ### Work distribution
@@ -162,7 +114,7 @@ The bash script in the `run` section calculates which videos each job should pro
 The `process_segmentation.py` script:
 1. Loads SAM3 model from Hugging Face
 2. Processes each video frame-by-frame
-3. Uses text prompts ("person", "ball") to detect and segment objects
+3. Uses text prompts ("soccer player", "ball") to detect and segment objects
 4. Overlays colored masks on video frames
 5. Saves segmented videos and metadata to S3
 
@@ -182,7 +134,7 @@ s3://my-skypilot-bucket/segmentation_results/
 
 Each metadata JSON contains:
 - Number of frames processed
-- Objects detected (persons, balls)
+- Objects detected (players, balls)
 - Output video path
 
 ## Customization
@@ -200,13 +152,10 @@ python process_segmentation.py video.mp4 --sample-fps 0
 
 ### Limit frames per video
 
-By default, the script limits processing to 200 frames per video to avoid GPU out-of-memory errors on long videos. To change this, use the `--max-frames` argument:
+By default, all sampled frames are processed. To limit this (useful for long videos or to avoid OOM), use the `--max-frames` argument:
 ```bash
-# Process up to 300 frames per video
-python process_segmentation.py video.mp4 --max-frames 300
-
-# No limit (process all sampled frames)
-python process_segmentation.py video.mp4 --max-frames 0
+# Process up to 200 frames per video
+python process_segmentation.py video.mp4 --max-frames 200
 ```
 
 ### Custom output directory

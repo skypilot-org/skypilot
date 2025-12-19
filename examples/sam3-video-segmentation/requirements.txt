@@ -1,0 +1,11 @@
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+kaggle==1.6.3
+accelerate
+torch==2.6.0
+torchvision
+torchaudio
+git+https://github.com/huggingface/transformers.git@c3fb1b1a6ca1102f62b139c83a088a97e5a55477
+opencv-python
+pillow
+numpy

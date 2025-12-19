@@ -1,7 +1,7 @@
 name: sam3-segmentation-job
 
 resources:
-  accelerators: L40S:1
+  accelerators: H100:1
 
 secrets:
   HF_TOKEN: null
@@ -11,7 +11,7 @@ run: |
   echo "Job rank: ${SKYPILOT_JOB_RANK}/${SKYPILOT_NUM_JOBS}"
 
   # Get list of all videos
-  VIDEO_DIR=./soccer-videos
+  VIDEO_DIR=/outputs/datasets/soccer-videos
   mapfile -t VIDEOS < <(find ${VIDEO_DIR} -name "*.mp4" | sort)
   TOTAL_VIDEOS=${#VIDEOS[@]}
   echo "Total videos: ${TOTAL_VIDEOS}"
