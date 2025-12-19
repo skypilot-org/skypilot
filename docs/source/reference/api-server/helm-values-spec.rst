@@ -77,6 +77,7 @@ Below is the available helm value keys and the default value of each key:
     :ref:`extraEnvs <helm-values-apiService-extraEnvs>`: null
     :ref:`extraVolumes <helm-values-apiService-extraVolumes>`: null
     :ref:`extraVolumeMounts <helm-values-apiService-extraVolumeMounts>`: null
+    :ref:`sidecarContainers <helm-values-apiService-sidecarContainers>`: null
     :ref:`logs <helm-values-apiService-logs>`:
       :ref:`retention <helm-values-apiService-logs-retention>`:
         :ref:`enabled <helm-values-apiService-logs-retention-enabled>`: false
@@ -791,6 +792,25 @@ Default: ``null``
       - name: my-volume
         mountPath: /my-path
         subPath: my-file
+
+.. _helm-values-apiService-sidecarContainers:
+
+``apiService.sidecarContainers``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Additional containers to run alongside the API server.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    sidecarContainers:
+      - name: my-sidecar
+        image: busybox
+        args:
+          - sleep
+          - "3600"
 
 .. _helm-values-apiService-logs:
 
