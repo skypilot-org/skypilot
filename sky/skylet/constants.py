@@ -176,9 +176,12 @@ DISABLE_GPU_ECC_COMMAND = (
     '{ sudo reboot || echo "Failed to reboot. ECC mode may not be disabled"; } '
     '|| true; ')
 
-SETUP_SKY_DIRS_COMMANDS = (f'mkdir -p ~/sky_workdir && '
-                           f'mkdir -p ~/.sky/sky_app && '
-                           f'mkdir -p {SKY_RUNTIME_DIR}/.sky;')
+SETUP_SKY_DIRS_COMMANDS = (
+    f'mkdir -p ~/sky_workdir && '
+    f'mkdir -p ~/.sky/sky_app && '
+    f'mkdir -p {SKY_RUNTIME_DIR}/.sky && '
+    # Create empty links file for runtime link syncing
+    'touch ~/.sky/links;')
 
 # Install conda on the remote cluster if it is not already installed.
 # We use conda with python 3.10 to be consistent across multiple clouds with
@@ -434,6 +437,12 @@ SKYPILOT_SETUP_NUM_GPUS_PER_NODE = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SETUP_NUM_GPUS_PER_NODE')
 SKYPILOT_NUM_GPUS_PER_NODE = f'{SKYPILOT_ENV_VAR_PREFIX}NUM_GPUS_PER_NODE'
 SKYPILOT_NODE_RANK = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_RANK'
+
+# Environment variable and path for runtime links that users can append to
+# during job execution. The controller periodically syncs this file to the
+# dashboard.
+SKYPILOT_LINKS_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}LINKS'
+SKYPILOT_LINKS_PATH = '~/.sky/links'
 
 # Placeholder for the SSH user in proxy command, replaced when the ssh_user is
 # known after provisioning.

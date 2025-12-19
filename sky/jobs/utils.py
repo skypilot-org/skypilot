@@ -742,6 +742,79 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
             raise
 
 
+async def sync_links_from_cluster(
+    backend: 'backends.CloudVmRayBackend',
+    cluster_name: str,
+    job_id: int,
+    task_id: int,
+) -> None:
+    """Sync runtime links from the cluster's links file to the database.
+
+    Reads the ~/.sky/links file from the cluster, parses lines in key:value
+    format, and updates the database with new links. This function handles
+    errors gracefully - if the file doesn't exist or can't be read, it simply
+    returns without error.
+
+    Args:
+        backend: The backend instance to use for SSH.
+        cluster_name: The name of the cluster to sync from.
+        job_id: The managed job ID.
+        task_id: The task ID within the job.
+    """
+    logger.info(f'Syncing links from cluster {cluster_name} for job {job_id}')
+    try:
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        if handle is None:
+            logger.debug(
+                f'Cluster {cluster_name} not found, skipping link sync')
+            return
+
+        # Read the links file from the cluster
+        links_path = constants.SKYPILOT_LINKS_PATH
+        # Use cat with error suppression - file may not exist or be empty
+        code = f'cat {links_path} 2>/dev/null || true'
+        returncode, stdout, stderr = backend.run_on_head(
+            handle,
+            code,
+            stream_logs=False,
+            require_outputs=True,
+        )
+
+        if returncode != 0:
+            logger.info(f'Failed to read links file from {cluster_name}: '
+                        f'{stderr}')
+            return
+
+        # Parse the links file - each line is "key:value"
+        links: Dict[str, str] = {}
+
+        logger.debug(f'Link file contents: {stdout}')
+        for line in stdout.strip().split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            # Split on first colon only (URLs contain colons)
+            parts = line.split(':', 1)
+            if len(parts) == 2:
+                key, value = parts[0].strip(), parts[1].strip()
+                if key and value:
+                    links[key] = value
+            else:
+                logger.debug(f'Skipping malformed link line: {line}')
+
+        if links:
+            logger.debug(f'Syncing {len(links)} links from cluster '
+                         f'{cluster_name} for job {job_id}')
+            await managed_job_state.update_links_async(job_id, task_id, links)
+        else:
+            logger.debug('No links found in links file')
+
+    except Exception as e:  # pylint: disable=broad-except
+        # Don't fail the job if link sync fails
+        logger.debug(f'Error syncing links from cluster {cluster_name}: '
+                     f'{common_utils.format_exception(e)}')
+
+
 def event_callback_func(
         job_id: int, task_id: Optional[int],
         task: Optional['sky.Task']) -> managed_job_state.AsyncCallbackType:

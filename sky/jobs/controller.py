@@ -467,6 +467,12 @@ class JobController:
                             'seconds.')
                 continue
 
+            # Sync runtime links from the cluster to the database.
+            # This is done periodically to pick up any links the user has
+            # appended to the SKYPILOT_LINKS file during job execution.
+            await managed_job_utils.sync_links_from_cluster(
+                self._backend, cluster_name, self._job_id, task_id)
+
             # NOTE: we do not check cluster status first because race condition
             # can occur, i.e. cluster can be down during the job status check.
             # NOTE: If fetching the job status fails or we force to transit to
@@ -532,6 +538,10 @@ class JobController:
                         f'Failed to download and stream logs: '
                         f'{common_utils.format_exception(e)}',
                         exc_info=True)
+                # Final sync of runtime links before cleanup - capture any links
+                # added near the end of the job.
+                await managed_job_utils.sync_links_from_cluster(
+                    self._backend, cluster_name, self._job_id, task_id)
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
                 await self._cleanup_cluster(cluster_name)
@@ -638,6 +648,10 @@ class JobController:
                     else:
                         logger.info(
                             f'Task {task_id} failed and will not be retried')
+                        # Final sync of runtime links before marking failed -
+                        # capture any links added before the job failed.
+                        await managed_job_utils.sync_links_from_cluster(
+                            self._backend, cluster_name, self._job_id, task_id)
                         await managed_job_state.set_failed_async(
                             self._job_id,
                             task_id,

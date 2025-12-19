@@ -5821,6 +5821,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     cluster_name=handle.cluster_name,
                     job_id=str(job_id))
         env_vars.update(self._skypilot_predefined_env_vars(handle))
+        # Set the SKYPILOT_LINKS env var pointing to a file where users can
+        # append runtime links. For managed jobs, these are synced to the
+        # dashboard periodically.
+        env_vars[constants.SKYPILOT_LINKS_ENV_VAR] = (
+            constants.SKYPILOT_LINKS_PATH)
         return env_vars
 
     def _get_managed_job_user_id(self, task: task_lib.Task) -> Optional[str]:
@@ -5857,6 +5862,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         task_env_vars = self._get_task_env_vars(task, job_id, handle)
 
+        # For managed jobs, prepend links file creation to setup command
+        setup_cmd = self._setup_cmd
+        if task.managed_job_dag is not None:
+            links_path = constants.SKYPILOT_LINKS_PATH
+            create_links_file_cmd = (
+                f'mkdir -p $(dirname {links_path}) && touch {links_path}')
+            if setup_cmd is not None:
+                setup_cmd = f'{create_links_file_cmd} && {setup_cmd}'
+            else:
+                setup_cmd = create_links_file_cmd
+
         codegen = self._get_task_codegen_class(handle)
 
         codegen.add_prologue(job_id)
@@ -5866,7 +5882,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             stable_cluster_internal_ips=internal_ips,
             env_vars=task_env_vars,
             log_dir=log_dir,
-            setup_cmd=self._setup_cmd,
+            setup_cmd=setup_cmd,
         )
 
         codegen.add_task(
@@ -5903,6 +5919,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         task_env_vars = self._get_task_env_vars(task, job_id, handle)
 
+        # For managed jobs, prepend links file creation to setup command
+        setup_cmd = self._setup_cmd
+        if task.managed_job_dag is not None:
+            links_path = constants.SKYPILOT_LINKS_PATH
+            create_links_file_cmd = (
+                f'mkdir -p $(dirname {links_path}) && touch {links_path}')
+            if setup_cmd is not None:
+                setup_cmd = f'{create_links_file_cmd} && {setup_cmd}'
+            else:
+                setup_cmd = create_links_file_cmd
+
         codegen = self._get_task_codegen_class(handle)
 
         codegen.add_prologue(job_id)
@@ -5912,7 +5939,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             stable_cluster_internal_ips=internal_ips,
             env_vars=task_env_vars,
             log_dir=log_dir,
-            setup_cmd=self._setup_cmd,
+            setup_cmd=setup_cmd,
         )
 
         codegen.add_task(
