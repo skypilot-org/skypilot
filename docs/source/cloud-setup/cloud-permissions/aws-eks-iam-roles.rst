@@ -47,7 +47,7 @@ Prerequisites
 - An S3 bucket you want to access
 
 
-Environment Variables
+Environment variables
 ---------------------
 
 Set these variables for your environment:
@@ -70,12 +70,12 @@ Set these variables for your environment:
     $ export K8S_SERVICE_ACCOUNT="skypilot-service-account"
 
 
-Option 1: EKS Pod Identity (Recommended)
+Option 1: EKS Pod Identity (recommended)
 ----------------------------------------
 
 EKS Pod Identity is the simpler method. It uses the Pod Identity Agent addon to automatically inject AWS credentials into pods.
 
-Step 1: Verify Pod Identity Agent is installed
+Step 1: Verify Pod Identity agent is installed
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: console
@@ -158,7 +158,7 @@ Step 3: Create IAM role with Pod Identity trust policy
         --role-name $IAM_ROLE_NAME \
         --policy-arn $IAM_POLICY_ARN
 
-Step 4: Create Pod Identity Association
+Step 4: Create Pod Identity association
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: console
@@ -173,7 +173,7 @@ Step 4: Create Pod Identity Association
 No service account annotation is needed. Proceed to :ref:`eks-iam-configure-skypilot`.
 
 
-Option 2: IRSA (IAM Roles for Service Accounts)
+Option 2: IRSA (IAM roles for service accounts)
 -----------------------------------------------
 
 IRSA uses OIDC federation to allow pods to assume IAM roles. This method works on all EKS clusters but requires more setup.
@@ -322,7 +322,7 @@ Add the following to your ``~/.sky/config.yaml`` to prevent SkyPilot from upload
 See :ref:`config-yaml-aws-remote-identity` for more details.
 
 
-Test the Setup
+Test the setup
 --------------
 
 Launch a SkyPilot task with S3 mount:
