@@ -690,9 +690,8 @@ class Rclone:
                         """)
                 else:
                     # Use static credentials for shared-credentials-file
-                    aws_credentials = (
-                        aws.session().get_credentials().get_frozen_credentials()
-                    )
+                    aws_credentials = (aws.session().get_credentials().
+                                       get_frozen_credentials())
                     access_key_id = aws_credentials.access_key
                     secret_access_key = aws_credentials.secret_key
                     config = textwrap.dedent(f"""\
