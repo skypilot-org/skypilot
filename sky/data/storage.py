@@ -4545,6 +4545,25 @@ class S3Store(S3CompatibleStore):
             mount_cmd_factory=mounting_utils.get_s3_mount_cmd,
         )
 
+    def mount_command(self, mount_path: str) -> str:
+        """Get mount command for S3.
+
+        Raises an error if using non-static credentials (SSO, IAM role) since
+        goofys does not support these credential types. Users should use
+        MOUNT_CACHED mode instead which uses rclone with env_auth.
+        """
+        if clouds.AWS.should_use_env_auth_for_s3():
+            raise exceptions.NotSupportedError(
+                'S3 MOUNT mode is not supported when using AWS SSO or IAM '
+                'role credentials.\n'
+                'Please use MOUNT_CACHED mode instead, which '
+                'supports environment-based authentication:\n'
+                '  file_mounts:\n'
+                '    /path/to/mount:\n'
+                '      source: s3://your-bucket\n'
+                '      mode: MOUNT_CACHED')
+        return super().mount_command(mount_path)
+
     def mount_cached_command(self, mount_path: str) -> str:
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (

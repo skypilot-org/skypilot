@@ -1007,7 +1007,7 @@ class AWS(clouds.Cloud):
                 hints += (
                     ' To ensure S3 mounting and other features work correctly '
                     'on Kubernetes and other clouds, '
-                    'please use SkyPilot with static aws credentials '
+                    'please use SkyPilot with static AWS credentials '
                     '(e.g., ~/.aws/credentials) by unsetting '
                     'the AWS_PROFILE environment variable.')
             else:
@@ -1082,6 +1082,31 @@ class AWS(clouds.Cloud):
             if _is_access_key_of_type(identity_type.value):
                 return identity_type
         return AWSIdentityType.SHARED_CREDENTIALS_FILE
+
+    @classmethod
+    def should_use_env_auth_for_s3(cls) -> bool:
+        """Returns True if S3 should use environment-based auth.
+
+        When using non-static AWS credentials (SSO, IAM role, container role),
+        we should not embed credentials into rclone config. Instead, we should
+        use env_auth=true so that rclone uses the AWS SDK credential chain,
+        which properly handles temporary credentials and IAM roles.
+
+        Returns:
+            True if environment-based auth should be used, False for static
+            credentials that can be embedded.
+        """
+        identity_type = cls._current_identity_type()
+        if identity_type is None:
+            return False
+        # These credential types use temporary credentials that should not be
+        # embedded in config files. They rely on the AWS SDK credential chain.
+        non_static_types = {
+            AWSIdentityType.SSO,
+            AWSIdentityType.IAM_ROLE,
+            AWSIdentityType.CONTAINER_ROLE,
+        }
+        return identity_type in non_static_types
 
     @classmethod
     @aws_profile_aware_lru_cache(scope='request',
