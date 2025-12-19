@@ -106,7 +106,7 @@ SSO login has limited functionality *across multiple clouds*. If you use multipl
 
 .. tip::
 
-    If you are running SkyPilot on an EKS cluster and need S3 access without static credentials, see :ref:`aws-eks-irsa` for setting up IAM Roles for Service Accounts (IRSA).
+    If you are running SkyPilot on an EKS cluster and need S3 access without static credentials, see :ref:`aws-eks-iam-roles` for setting up IAM roles for EKS pods.
 
 .. list-table::
    :header-rows: 1
@@ -618,4 +618,4 @@ Common issues
 .. toctree::
    :hidden:
 
-   aws-eks-irsa
+   aws-eks-iam-roles

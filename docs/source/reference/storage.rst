@@ -326,9 +326,9 @@ FAQ
   When accessing S3 buckets from Kubernetes clusters, static AWS credentials
   (e.g., ``~/.aws/credentials``) are required.
 
-  On EKS clusters, you can optionally set up IAM Roles for Service Accounts 
-  (IRSA) to allow SkyPilot pods to access S3 buckets without static AWS 
-  credentials. See :ref:`aws-eks-irsa` for setup instructions. 
+  On EKS clusters, you can set up IAM roles (via Pod Identity or IRSA) to 
+  allow SkyPilot pods to access S3 buckets without static AWS credentials. 
+  See :ref:`aws-eks-iam-roles` for setup instructions. 
 
 * **Which architectures are supported?**
 
