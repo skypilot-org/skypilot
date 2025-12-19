@@ -374,9 +374,8 @@ def override_request_env_and_config(
             using_remote_api_server=request_body.using_remote_api_server,
             user=user,
             request_id=request_id)
-        if request_body.slurm_ssh_credentials:
-            slurm_utils.set_client_ssh_credentials(
-                request_body.slurm_ssh_credentials)
+        slurm_utils.set_client_ssh_credentials(
+            request_body.slurm_ssh_credentials)
         logger.debug(
             f'override path: {request_body.override_skypilot_config_path}')
         with skypilot_config.override_skypilot_config(
