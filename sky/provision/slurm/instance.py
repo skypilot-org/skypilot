@@ -170,6 +170,7 @@ def _create_virtual_instance(
     skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
     sky_home_dir = _sky_cluster_home_dir(cluster_name_on_cloud)
     ready_signal = f'{sky_home_dir}/.sky_sbatch_ready'
+    slurm_marker_file = f'{sky_home_dir}/{slurm_utils.SLURM_MARKER_FILE}'
 
     # Build the sbatch script
     gpu_directive = ''
@@ -217,6 +218,8 @@ def _create_virtual_instance(
         mkdir -p {sky_home_dir}
         # Create sky runtime directory on each node.
         srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}
+        # Marker file to indicate we're in a Slurm cluster.
+        touch {slurm_marker_file}
         # Suppress login messages.
         touch {sky_home_dir}/.hushlogin
         # Signal that the sbatch script has completed setup.
@@ -499,8 +502,9 @@ def terminate_instances(
     # TODO(kevin): Validate this assumption. Another way would be to
     # mount the private key to the remote cluster, like we do with
     # other clouds' API keys.
-    if slurm_utils.is_inside_slurm_job():
-        logger.debug('Running inside a Slurm job, using machine\'s ssh config')
+    if slurm_utils.is_inside_slurm_cluster():
+        logger.debug(
+            'Running inside a Slurm cluster, using machine\'s ssh config')
         ssh_private_key = None
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
