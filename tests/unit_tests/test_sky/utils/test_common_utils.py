@@ -465,7 +465,7 @@ class TestRedactSecretsValues:
 
 @pytest.mark.asyncio
 async def test_set_request_context_coroutine_is_context_safe():
-    orginial_user = common_utils.get_current_user()
+    original_user = common_utils.get_current_user()
 
     async def run_in_coroutine():
         context.initialize()
