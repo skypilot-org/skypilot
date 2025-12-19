@@ -392,8 +392,9 @@ def get_using_remote_api_server() -> bool:
     if os.getenv(constants.USING_REMOTE_API_SERVER_ENV_VAR) is not None:
         return os.getenv(constants.USING_REMOTE_API_SERVER_ENV_VAR,
                          '').lower() in ('true', '1')
-    if _using_remote_api_server is not None:
-        return _using_remote_api_server
+    value = context.get_context_var('using_remote_api_server')
+    if value is not None:
+        return value
     # This gets the right status for the local client.
     # TODO(zhwu): This is to prevent circular import. We should refactor this.
     # pylint: disable=import-outside-toplevel
