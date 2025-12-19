@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 from sky.utils.db import db_utils
 
-# revision identifiers, used by Alembic.π
+# revision identifiers, used by Alembic.
 revision: str = '011'
 down_revision: Union[str, Sequence[str], None] = '010'
 branch_labels: Union[str, Sequence[str], None] = None

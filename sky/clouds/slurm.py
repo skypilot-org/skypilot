@@ -497,7 +497,7 @@ class Slurm(clouds.Cloud):
                     ssh_proxy_jump=ssh_config_dict.get('proxyjump', None))
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
-                ctx2text[cluster] = 'enabled'
+                ctx2text[cluster] = f'enabled (user: {ssh_config_dict["user"]})'
                 success = True
             except KeyError as e:
                 key = e.args[0]

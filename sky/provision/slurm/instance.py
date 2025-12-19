@@ -310,6 +310,7 @@ def query_instances(
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
+    slurm_utils.maybe_recreate_ssh_key_cache(ssh_key)
     client = slurm.SlurmClient(
         ssh_host,
         ssh_port,
@@ -407,7 +408,7 @@ def get_cluster_info(
     ssh_key = ssh_config_dict['private_key']
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
-
+    slurm_utils.maybe_recreate_ssh_key_cache(ssh_key)
     client = slurm.SlurmClient(
         ssh_host,
         ssh_port,
@@ -504,6 +505,9 @@ def terminate_instances(
         ssh_private_key = None
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
+    
+    if ssh_private_key is not None:
+        slurm_utils.maybe_recreate_ssh_key_cache(ssh_private_key)
 
     client = slurm.SlurmClient(
         ssh_host,
@@ -599,6 +603,10 @@ def get_command_runners(
     # of the cluster yaml.
     ssh_proxy_jump = cluster_info.provider_config.get('ssh', {}).get(
         'proxyjump', None)
+    
+    # This is the only time when the server may not have the private key cached,
+    # say after a restart, and the cache is not yet populated.
+    slurm_utils.maybe_recreate_ssh_key_cache(ssh_private_key)
     runners = [
         command_runner.SlurmCommandRunner(
             (instance_info.external_ip or '', instance_info.ssh_port),

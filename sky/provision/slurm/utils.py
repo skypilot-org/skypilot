@@ -1,7 +1,6 @@
 """Slurm utilities for SkyPilot."""
 import base64
 import copy
-import hashlib
 import math
 import os
 import re
@@ -11,19 +10,20 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from paramiko.config import SSHConfig
 
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import context
+from sky.utils import locks
 
 logger = sky_logging.init_logger(__name__)
 
 DEFAULT_SLURM_PATH = '~/.slurm/config'
 
 # Cache directory for decoded SSH keys from client credentials.
-# Keys are cached by content hash to avoid regenerating temp files per request.
 SLURM_SSH_KEY_CACHE_DIR = '~/.sky/generated/slurm_ssh_keys'
 
 # The global loaded client SSH credentials.
@@ -74,7 +74,89 @@ def set_client_ssh_credentials(credentials: Optional[Dict[str, Any]]) -> None:
         # Running in coroutine - set in context
         ctx.slurm_client_ssh_credentials = credentials
 
+def _ssh_key_cache_path(user_hash: str, cluster_name: str) -> str:
+    """Get the path to the Slurm SSH key cache file
+    for a given user and cluster.
+    """
+    cache_dir = os.path.expanduser(SLURM_SSH_KEY_CACHE_DIR)
+    return os.path.join(cache_dir, user_hash, cluster_name)
 
+def _ssh_key_lock_id(user_hash: str, cluster_name: str) -> str:
+    """Get the lock ID for Slurm SSH key operations."""
+    return f'slurm_ssh_key_{user_hash}_{cluster_name}'
+
+def _write_key_to_file(key_bytes: bytes, key_path: str) -> None:
+    """Writes the SSH private key to a file.
+
+    Writes to a temporary file first, sets permissions to 0o600,
+    and then atomically renames it to the target path.
+    """
+    tmp_path = None
+    try:
+        key_dir = os.path.dirname(key_path)
+        os.makedirs(key_dir, mode=0o700, exist_ok=True)
+
+        # Write to temp file first, then atomic rename to avoid race
+        # conditions when multiple concurrent requests write the same key.
+        with tempfile.NamedTemporaryFile(mode='wb',
+                                         dir=key_dir,
+                                         delete=False) as tmp_file:
+            tmp_file.write(key_bytes)
+            tmp_file.flush()
+            tmp_path = tmp_file.name
+
+        # SSH requires private keys to have restricted permissions
+        os.chmod(tmp_path, 0o600)
+        os.rename(tmp_path, key_path)
+    except Exception: # pylint: disable=broad-except
+        if tmp_path is not None:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        raise
+
+
+def maybe_recreate_ssh_key_cache(key_path: str) -> None:
+    """Recreate Slurm SSH key cache file from database if missing."""
+    expanded_key_path = os.path.expanduser(key_path)
+    if os.path.isfile(expanded_key_path):
+        return
+
+    cache_dir = os.path.expanduser(SLURM_SSH_KEY_CACHE_DIR)
+    if not expanded_key_path.startswith(cache_dir):
+        # Could be default keys in ~/.ssh/ for instance.
+        return
+
+    # Extract user_hash and cluster_name from pathcluster_name.
+    # Path: SLURM_SSH_KEY_CACHE_DIR/<user_hash>/<cluster_name>
+    user_cache_dir, cluster_name = os.path.split(expanded_key_path)
+    user_hash = os.path.basename(user_cache_dir)
+
+    try:
+        with locks.get_lock(_ssh_key_lock_id(user_hash, cluster_name)):
+            # Double-check if the file was created while waiting for the lock.
+            if os.path.isfile(expanded_key_path):
+                return
+
+            db_private_key = global_user_state.get_slurm_ssh_private_key(
+                user_hash, cluster_name)
+            if not db_private_key:
+                raise RuntimeError(
+                    f'No private key found for user {user_hash} and '
+                    f'cluster {cluster_name} in the database.')
+
+            key_bytes = db_private_key.encode('utf-8')
+            # We can assume that if the file exists, it is not stale, because we
+            # always update the file on disk when we get credentials from the
+            # client. See get_slurm_ssh_config_dict for more.
+            if not os.path.isfile(expanded_key_path):
+                _write_key_to_file(key_bytes, expanded_key_path)
+    except Exception as e:  # pylint: disable=broad-except
+        raise RuntimeError(f'Could not create Slurm SSH key cache file: '
+                           f'{common_utils.format_exception(e)}') from e
+
+@annotations.lru_cache(scope='request')
 def get_slurm_ssh_config_dict(cluster_name: str) -> Dict[str, Any]:
     """Get SSH config dict for a Slurm cluster with credential overlay.
 
@@ -85,44 +167,25 @@ def get_slurm_ssh_config_dict(cluster_name: str) -> Dict[str, Any]:
     ssh_config = get_slurm_ssh_config()
     ssh_config_dict = ssh_config.lookup(cluster_name)
 
-    # Check for credentials in the current execution context
-    # This works for both multiprocess workers and coroutines
+    # Check for credentials in the current execution context.
     slurm_ssh_credentials = _get_client_ssh_credentials()
+
+    user_hash = common_utils.get_user_hash()
+    key_path = _ssh_key_cache_path(user_hash, cluster_name)
     if (slurm_ssh_credentials is not None and
             cluster_name in slurm_ssh_credentials):
         cred = slurm_ssh_credentials[cluster_name]
         ssh_config_dict['user'] = cred.ssh_user
 
-        # Hash the base64 key content to get a stable cache key.
-        # Avoids creating a new temp file for every request.
-        key_hash = hashlib.sha256(
-            cred.ssh_private_key_base64.encode()).hexdigest()
-
-        cache_dir = os.path.expanduser(SLURM_SSH_KEY_CACHE_DIR)
-        os.makedirs(cache_dir, mode=0o700, exist_ok=True)
-        key_path = os.path.join(cache_dir, key_hash)
-
-        if not os.path.isfile(key_path):
-            key_bytes = base64.b64decode(cred.ssh_private_key_base64)
-            # Write to temp file first, then atomic rename to avoid race
-            # conditions when multiple concurrent requests write the same key.
-            with tempfile.NamedTemporaryFile(mode='wb',
-                                             dir=cache_dir,
-                                             delete=False) as tmp_file:
-                tmp_file.write(key_bytes)
-                tmp_path = tmp_file.name
-            try:
-                # SSH requires private keys to have restricted permissions
-                os.chmod(tmp_path, 0o600)
-                os.rename(tmp_path, key_path)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Failed to chmod/rename {tmp_path}: '
-                             f'{common_utils.format_exception(e)}')
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
-                raise
+        key_bytes = base64.b64decode(cred.ssh_private_key_base64)
+        try:
+            with locks.get_lock(_ssh_key_lock_id(user_hash, cluster_name)):
+                global_user_state.set_slurm_ssh_private_key(
+                    user_hash, cluster_name, key_bytes.decode('utf-8'))
+                _write_key_to_file(key_bytes, key_path)
+        except Exception as e:  # pylint: disable=broad-except
+            raise RuntimeError(f'Failed to write key to {key_path}: '
+                                f'{common_utils.format_exception(e)}') from e
 
         ssh_config_dict['identityfile'] = [key_path]  # type: ignore[assignment]
     else:
@@ -309,11 +372,13 @@ def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
             f'Failed to load SSH configuration from {DEFAULT_SLURM_PATH}: '
             f'{common_utils.format_exception(e)}') from e
 
+    ssh_key = ssh_config_dict['identityfile'][0]
+    maybe_recreate_ssh_key_cache(ssh_key)
     client = slurm.SlurmClient(
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
         ssh_config_dict['user'],
-        ssh_config_dict['identityfile'][0],
+        ssh_key,
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
     )
@@ -401,11 +466,13 @@ def check_instance_fits(
                 f'because Slurm SSH configuration at {DEFAULT_SLURM_PATH} '
                 f'could not be loaded: {common_utils.format_exception(e)}.')
 
+    ssh_key = ssh_config_dict['identityfile'][0]
+    maybe_recreate_ssh_key_cache(ssh_key)
     client = slurm.SlurmClient(
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
         ssh_config_dict['user'],
-        ssh_config_dict['identityfile'][0],
+        ssh_key,
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
     )
@@ -514,11 +581,14 @@ def _get_slurm_node_info_list(
     # can raise FileNotFoundError if config file does not exist.
     slurm_config_dict = get_slurm_ssh_config_dict(slurm_cluster_name)
     logger.debug(f'Slurm config dict: {slurm_config_dict}')
+
+    ssh_key = slurm_config_dict['identityfile'][0]
+    maybe_recreate_ssh_key_cache(ssh_key)
     slurm_client = slurm.SlurmClient(
         slurm_config_dict['hostname'],
         int(slurm_config_dict.get('port', 22)),
         slurm_config_dict['user'],
-        slurm_config_dict['identityfile'][0],
+        ssh_key,
         ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
         ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
     )
@@ -657,12 +727,13 @@ def get_partitions(cluster_name: str) -> List[str]:
         slurm_config = SSHConfig.from_path(
             os.path.expanduser(DEFAULT_SLURM_PATH))
         slurm_config_dict = slurm_config.lookup(cluster_name)
-
+        ssh_key = slurm_config_dict['identityfile'][0]
+        maybe_recreate_ssh_key_cache(ssh_key)
         client = slurm.SlurmClient(
             slurm_config_dict['hostname'],
             int(slurm_config_dict.get('port', 22)),
             slurm_config_dict['user'],
-            slurm_config_dict['identityfile'][0],
+            ssh_key,
             ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
             ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
         )

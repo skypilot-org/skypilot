@@ -85,6 +85,14 @@ user_table = sqlalchemy.Table(
     sqlalchemy.Column('created_at', sqlalchemy.Integer),
 )
 
+slurm_user_ssh_keys_table = sqlalchemy.Table(
+    'slurm_user_ssh_keys',
+    Base.metadata,
+    sqlalchemy.Column('user_hash', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('cluster_name', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('private_key', sqlalchemy.Text),
+)
+
 cluster_table = sqlalchemy.Table(
     'clusters',
     Base.metadata,
@@ -2392,6 +2400,47 @@ def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
                 ssh_key_table.c.ssh_private_key: ssh_private_key
             })
         session.execute(do_update_stmt)
+        session.commit()
+
+
+@_init_db
+@metrics_lib.time_me
+def get_slurm_ssh_private_key(user_hash: str,
+                              cluster_name: str) -> Optional[str]:
+    """Get Slurm SSH private key for a user and cluster."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(slurm_user_ssh_keys_table).filter_by(
+            user_hash=user_hash, cluster_name=cluster_name).first()
+    if row and row.private_key:
+        return row.private_key
+    return None
+
+
+@_init_db
+@metrics_lib.time_me
+def set_slurm_ssh_private_key(user_hash: str, cluster_name: str,
+                              private_key: str) -> None:
+    """Set Slurm SSH private key for a user and cluster."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+
+        insert_stmnt = insert_func(slurm_user_ssh_keys_table).values(
+            user_hash=user_hash, cluster_name=cluster_name,
+            private_key=private_key)
+        upsert_stmnt = insert_stmnt.on_conflict_do_update(
+            index_elements=[slurm_user_ssh_keys_table.c.user_hash,
+                            slurm_user_ssh_keys_table.c.cluster_name],
+            set_={slurm_user_ssh_keys_table.c.private_key: private_key})
+        session.execute(upsert_stmnt)
         session.commit()
 
 

@@ -375,7 +375,6 @@ def override_request_env_and_config(
             user=user,
             request_id=request_id)
         if request_body.slurm_ssh_credentials:
-            logger.debug('Setting slurm ssh credentials from client')
             slurm_utils.set_client_ssh_credentials(
                 request_body.slurm_ssh_credentials)
         logger.debug(
