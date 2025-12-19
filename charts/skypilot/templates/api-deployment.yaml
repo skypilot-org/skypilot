@@ -375,6 +375,9 @@ spec:
           mountPath: /root/.sky
           subPath: .sky
       {{- end }}
+      {{- with .Values.apiService.sidecarContainers }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
       initContainers:
       {{- if and .Values.awsCredentials.enabled (not .Values.awsCredentials.useCredentialsFile) }}
       - name: create-aws-credentials
