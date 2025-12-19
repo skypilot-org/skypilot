@@ -294,11 +294,11 @@ class Backoff:
         return self._backoff
 
 
-_current_command: Optional[str] = None
-_current_client_entrypoint: Optional[str] = None
-_using_remote_api_server: Optional[bool] = None
-_current_user: Optional['models.User'] = None
-_current_request_id: Optional[str] = None
+_CLIENT_COMMAND_KEY = 'client_command'
+_CLIENT_ENTRYPOINT_KEY = 'client_entrypoint'
+_USING_REMOTE_API_SERVER_KEY = 'using_remote_api_server'
+_USER_KEY = 'user'
+_REQUEST_ID_KEY = 'request_id'
 
 
 def set_request_context(client_entrypoint: Optional[str],
@@ -312,11 +312,12 @@ def set_request_context(client_entrypoint: Optional[str],
     """
     # This function will be called in process executor and coroutine executor.
     # context.set_context_var ensures the context is safe in both cases.
-    context.set_context_var('client_entrypoint', client_entrypoint)
-    context.set_context_var('client_command', client_command)
-    context.set_context_var('using_remote_api_server', using_remote_api_server)
-    context.set_context_var('user', user)
-    context.set_context_var('request_id', request_id)
+    context.set_context_var(_CLIENT_ENTRYPOINT_KEY, client_entrypoint)
+    context.set_context_var(_CLIENT_COMMAND_KEY, client_command)
+    context.set_context_var(_USING_REMOTE_API_SERVER_KEY,
+                            using_remote_api_server)
+    context.set_context_var(_USER_KEY, user)
+    context.set_context_var(_REQUEST_ID_KEY, request_id)
 
 
 def get_current_request_id() -> str:
@@ -333,7 +334,7 @@ def get_current_command() -> str:
     Normally uses get_pretty_entry_point(), but will use the client command on
     the server side.
     """
-    value = context.get_context_var('client_command')
+    value = context.get_context_var(_CLIENT_COMMAND_KEY)
     if value is not None:
         return value
     return get_pretty_entrypoint_cmd()
@@ -341,7 +342,7 @@ def get_current_command() -> str:
 
 def get_current_user() -> 'models.User':
     """Returns the user in current server session."""
-    value = context.get_context_var('user')
+    value = context.get_context_var(_USER_KEY)
     if value is not None:
         return value
     return models.User.get_current_user()
@@ -349,9 +350,6 @@ def get_current_user() -> 'models.User':
 
 def get_current_user_name() -> str:
     """Returns the user name in current server session."""
-    value = context.get_context_var('user_name')
-    if value is not None:
-        return value
     name = get_current_user().name
     assert name is not None
     return name
@@ -381,7 +379,7 @@ def get_current_client_entrypoint(server_entrypoint: str) -> str:
     Gets the client entrypoint from the context, if it is not set, returns the
     server entrypoint.
     """
-    value = context.get_context_var('client_entrypoint')
+    value = context.get_context_var(_CLIENT_ENTRYPOINT_KEY)
     if value is not None:
         return value
     return server_entrypoint
@@ -392,7 +390,7 @@ def get_using_remote_api_server() -> bool:
     if os.getenv(constants.USING_REMOTE_API_SERVER_ENV_VAR) is not None:
         return os.getenv(constants.USING_REMOTE_API_SERVER_ENV_VAR,
                          '').lower() in ('true', '1')
-    value = context.get_context_var('using_remote_api_server')
+    value = context.get_context_var(_USING_REMOTE_API_SERVER_KEY)
     if value is not None:
         return value
     # This gets the right status for the local client.
