@@ -481,5 +481,5 @@ async def test_set_request_context_coroutine_is_context_safe():
     assert user.id == 'request-user'
     assert user.name == 'request-user'
     # Process-scope var should not be unchanged
-    assert common_utils.get_current_user().name == orginial_user.name
-    assert common_utils.get_current_user().id == orginial_user.id
+    assert common_utils.get_current_user().name == original_user.name
+    assert common_utils.get_current_user().id == original_user.id
