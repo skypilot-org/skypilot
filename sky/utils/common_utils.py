@@ -333,7 +333,7 @@ def get_current_command() -> str:
     Normally uses get_pretty_entry_point(), but will use the client command on
     the server side.
     """
-    value = context.get_context_var('command')
+    value = context.get_context_var('client_command')
     if value is not None:
         return value
     return get_pretty_entrypoint_cmd()
