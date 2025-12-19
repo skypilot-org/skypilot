@@ -176,7 +176,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
         # PPIO uses underscores instead of hyphens
         instance_type = instance_type.replace('-', '_')
-
+        # remove the 'B' suffix if it exists by default
         if instance_type.endswith('B'):
             instance_type = instance_type[:-1]
 
