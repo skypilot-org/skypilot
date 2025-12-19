@@ -1020,16 +1020,30 @@ function JobDetailsContent({
           {links && Object.keys(links).length > 0 ? (
             <div className="space-y-3">
               {Object.entries(links).map(([label, url]) => {
+                // Normalize URL - add https:// if no protocol specified
+                const normalizedUrl =
+                  url.startsWith('http://') || url.startsWith('https://')
+                    ? url
+                    : `https://${url}`;
+
                 // Check if URL points to an image
-                const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'];
-                const isImage = imageExtensions.some(ext => 
+                const imageExtensions = [
+                  '.png',
+                  '.jpg',
+                  '.jpeg',
+                  '.gif',
+                  '.webp',
+                  '.svg',
+                  '.bmp',
+                ];
+                const isImage = imageExtensions.some((ext) =>
                   url.toLowerCase().includes(ext)
                 );
-                
+
                 return (
                   <div key={label} className="flex flex-col">
                     <a
-                      href={url}
+                      href={normalizedUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-blue-600 hover:text-blue-800 hover:underline"
@@ -1038,13 +1052,13 @@ function JobDetailsContent({
                     </a>
                     {isImage && (
                       <a
-                        href={url}
+                        href={normalizedUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="mt-2"
                       >
                         <img
-                          src={url}
+                          src={normalizedUrl}
                           alt={label}
                           className="max-w-full max-h-48 rounded-md border border-gray-200 shadow-sm hover:shadow-md transition-shadow"
                           onError={(e) => {

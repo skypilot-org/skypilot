@@ -1295,6 +1295,87 @@ def test_managed_jobs_inline_env(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Uses unsatisfiable machines
+@pytest.mark.no_hyperbolic  # Uses unsatisfiable machines
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+@pytest.mark.managed_jobs
+def test_managed_jobs_runtime_links(generic_cloud: str):
+    """Test that runtime links added via $SKYPILOT_LINKS are synced to the job record."""
+    with smoke_tests_utils.override_sky_config():
+        with skypilot_config.override_skypilot_config(
+                smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG):
+            name = smoke_tests_utils.get_cluster_name()
+            # Create a task that adds runtime links
+            task = sky.Task(
+                run='echo "Adding runtime links..."; '
+                'echo "TestLink:https://example.com/test" >> $SKYPILOT_LINKS; '
+                'echo "Dashboard:https://dashboard.example.com" >> $SKYPILOT_LINKS; '
+                'cat $SKYPILOT_LINKS; '
+                'echo "Done adding links"')
+            task.set_resources(
+                sky.Resources(infra=generic_cloud,
+                              **smoke_tests_utils.LOW_RESOURCE_PARAM))
+
+            # Launch the job
+            job_id, handle = sky.stream_and_get(sky.jobs.launch(task,
+                                                                name=name))
+            assert handle is not None
+            assert job_id is not None
+
+            try:
+                # Wait for the job to succeed
+                start_time = time.time()
+                timeout = 300  # 5 minutes
+                job_succeeded = False
+                while time.time() - start_time < timeout:
+                    jobs_list = sky.stream_and_get(
+                        sky.jobs.queue(refresh=True, job_ids=[job_id]))
+                    if jobs_list:
+                        job_record = jobs_list[0]
+                        if job_record.status == sky.ManagedJobStatus.SUCCEEDED:
+                            job_succeeded = True
+                            break
+                        elif job_record.status in [
+                                sky.ManagedJobStatus.FAILED,
+                                sky.ManagedJobStatus.FAILED_SETUP,
+                                sky.ManagedJobStatus.CANCELLED
+                        ]:
+                            raise AssertionError(
+                                f'Job {job_id} failed with status: '
+                                f'{job_record.status}')
+                    time.sleep(10)
+
+                assert job_succeeded, f'Job {job_id} did not succeed within timeout'
+
+                # Fetch the job record and check links
+                jobs_list = sky.stream_and_get(
+                    sky.jobs.queue(refresh=True, job_ids=[job_id]))
+                assert len(
+                    jobs_list) == 1, f'Expected 1 job, got {len(jobs_list)}'
+                job_record = jobs_list[0]
+
+                # Check that the links were synced
+                assert job_record.links is not None, (
+                    f'Expected links to be set, got None. Job record: {job_record}'
+                )
+                assert 'TestLink' in job_record.links, (
+                    f'Expected "TestLink" in links, got: {job_record.links}')
+                assert job_record.links[
+                    'TestLink'] == 'https://example.com/test', (
+                        f'Expected TestLink URL to be "https://example.com/test", '
+                        f'got: {job_record.links["TestLink"]}')
+                assert 'Dashboard' in job_record.links, (
+                    f'Expected "Dashboard" in links, got: {job_record.links}')
+                assert job_record.links[
+                    'Dashboard'] == 'https://dashboard.example.com', (
+                        f'Expected Dashboard URL to be '
+                        f'"https://dashboard.example.com", '
+                        f'got: {job_record.links["Dashboard"]}')
+
+            finally:
+                sky.jobs.cancel(job_ids=[job_id])
+
+
 @pytest.mark.no_vast  # The test uses other clouds
 @pytest.mark.no_hyperbolic  # The test uses other clouds
 @pytest.mark.no_shadeform  # The test uses other clouds
