@@ -335,7 +335,7 @@ Launch a SkyPilot task with S3 mount:
     file_mounts:
       /s3/data:
         source: s3://my-bucket/
-        mode: MOUNT
+        mode: MOUNT_CACHED
 
     run: |
       ls -la /s3/data
