@@ -173,13 +173,13 @@ def set_context_var(key: str, value: Any):
 
 def get_context_var(key: str) -> Any:
     ctx = get()
-    value = None
     if ctx is not None:
-        value = ctx.get_var(key)
-    if value is None:
-        # Fallback to the variable set in process-scope
-        value = _PROCESS_GLOBAL_VARS.get(key)
-    return value
+        # Use `in` to check for key existence to distinguish
+        # "key not found" from "key's value is None".
+        if key in ctx.vars:
+            return ctx.get_var(key)
+    # Fallback to the variable set in process-scope
+    return _PROCESS_GLOBAL_VARS.get(key)
 
 
 class ContextualEnviron(MutableMapping[str, str]):
