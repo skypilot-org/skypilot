@@ -335,6 +335,8 @@ async def get_job_status_with_retries(
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_DRIVER,
     FAILED_SETUP or CANCELLED.
     """
+    # TODO(zhwu, cooperc): Make this get job status aware of cluster status, so
+    # that it can exit retry early if the cluster is down.
     # TODO(luca) make this async
     handle = await context_utils.to_thread(
         global_user_state.get_handle_from_cluster_name, cluster_name)
