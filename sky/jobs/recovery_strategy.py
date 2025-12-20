@@ -278,7 +278,7 @@ class StrategyExecutor:
                 break
 
             try:
-                status = await managed_job_utils.get_job_status(
+                status = await managed_job_utils.get_job_status_with_retries(
                     self.backend,
                     self.cluster_name,
                     job_id=self.job_id_on_pool_cluster)

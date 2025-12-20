@@ -327,7 +327,7 @@ def ha_recovery_for_consolidation_mode() -> None:
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
 
-async def get_job_status(
+async def get_job_status_with_retries(
         backend: 'backends.CloudVmRayBackend', cluster_name: str,
         job_id: Optional[int]) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on a managed job cluster.
