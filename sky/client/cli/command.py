@@ -3946,29 +3946,23 @@ def show_gpus(
             'UTILIZATION',
         ])
 
-        def get_nodes_info(cluster_name: str):
-            return sdk.stream_and_get(
-                sdk.slurm_node_info(slurm_cluster_name=cluster_name))
+        request_ids = [(cluster_name,
+                        sdk.slurm_node_info(slurm_cluster_name=cluster_name))
+                       for cluster_name in slurm_cluster_names]
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            futures = [
-                executor.submit(get_nodes_info, cluster_name)
-                for cluster_name in slurm_cluster_names
-            ]
+        for cluster_name, request_id in request_ids:
+            nodes_info = sdk.stream_and_get(request_id)
 
-            for cluster_name, future in zip(slurm_cluster_names, futures):
-                nodes_info = future.result()
-
-                for node_info in nodes_info:
-                    node_table.add_row([
-                        cluster_name,
-                        node_info.get('node_name'),
-                        node_info.get('partition', '-'),
-                        node_info.get('node_state'),
-                        node_info.get('gpu_type') or '',
-                        (f'{node_info.get("free_gpus", 0)} of '
-                         f'{node_info.get("total_gpus", 0)} free'),
-                    ])
+            for node_info in nodes_info:
+                node_table.add_row([
+                    cluster_name,
+                    node_info.get('node_name'),
+                    node_info.get('partition', '-'),
+                    node_info.get('node_state'),
+                    node_info.get('gpu_type') or '',
+                    (f'{node_info.get("free_gpus", 0)} of '
+                     f'{node_info.get("total_gpus", 0)} free'),
+                ])
 
         slurm_per_node_msg = 'Slurm per node accelerator availability'
         # Optional: Add hint message if needed, similar to k8s
