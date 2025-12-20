@@ -81,7 +81,6 @@ JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
 _JOB_STATUS_FETCH_MAX_RETRIES = 3
-_JOB_K8S_TRANSIENT_NW_MSG = 'Unable to connect to the server: dial tcp'
 _JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
 
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
@@ -366,22 +365,11 @@ async def get_job_status(
                 ValueError, TypeError, asyncio.TimeoutError) as e:
             # Note: Each of these exceptions has some additional conditions to
             # limit how we handle it and whether or not we catch it.
-            # Retry on k8s transient network errors. This is useful when using
-            # coreweave which may have transient network issue sometimes.
-            is_transient_error = False
             detailed_reason = None
             if isinstance(e, exceptions.CommandError):
                 detailed_reason = e.detailed_reason
-                if (detailed_reason is not None and
-                        _JOB_K8S_TRANSIENT_NW_MSG in detailed_reason):
-                    is_transient_error = True
             elif isinstance(e, grpc.RpcError):
                 detailed_reason = e.details()
-                if e.code() in [
-                        grpc.StatusCode.UNAVAILABLE,
-                        grpc.StatusCode.DEADLINE_EXCEEDED
-                ]:
-                    is_transient_error = True
             elif isinstance(e, grpc.FutureTimeoutError):
                 detailed_reason = 'Timeout'
             elif isinstance(e, asyncio.TimeoutError):
@@ -412,8 +400,9 @@ async def get_job_status(
                     detailed_reason = 'SSH credentials were already cleaned up'
                 else:
                     raise
-            if is_transient_error:
-                logger.info('Failed to connect to the cluster. Retrying '
+            if i < _JOB_STATUS_FETCH_MAX_RETRIES - 1:
+                logger.info('Failed to connect to the cluster to get the job '
+                            f'status: {detailed_reason}. Retrying '
                             f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
                 logger.info('=' * 34)
                 await asyncio.sleep(1)

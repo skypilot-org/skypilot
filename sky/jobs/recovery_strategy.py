@@ -123,6 +123,9 @@ class StrategyExecutor:
     ) -> 'StrategyExecutor':
         """Create a strategy from a task."""
 
+        # TODO(cooperc): Consider defaulting to FAILOVER if using k8s with a
+        # single context, since there are not multiple clouds/regions to
+        # failover through.
         resource_list = list(task.resources)
         job_recovery = resource_list[0].job_recovery
         for resource in resource_list:
