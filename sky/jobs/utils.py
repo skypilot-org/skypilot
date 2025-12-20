@@ -80,8 +80,8 @@ JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
-_JOB_STATUS_FETCH_MAX_RETRIES = 3
 _JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
+_JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = 60
 
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
@@ -345,7 +345,10 @@ async def get_job_status(
         return None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     job_ids = None if job_id is None else [job_id]
-    for i in range(_JOB_STATUS_FETCH_MAX_RETRIES):
+    start_time = time.time()
+    backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=5)
+    attempt = 0
+    while True:
         try:
             logger.info('=== Checking the job status... ===')
             statuses = await asyncio.wait_for(
@@ -400,17 +403,22 @@ async def get_job_status(
                     detailed_reason = 'SSH credentials were already cleaned up'
                 else:
                     raise
-            if i < _JOB_STATUS_FETCH_MAX_RETRIES - 1:
+            attempt += 1
+            elapsed = time.time() - start_time
+            remaining = _JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS - elapsed
+            if remaining > 0:
+                backoff_time = min(backoff.current_backoff(), remaining)
                 logger.info('Failed to connect to the cluster to get the job '
-                            f'status: {detailed_reason}. Retrying '
-                            f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
+                            f'status: {detailed_reason}. Retrying in '
+                            f'{backoff_time:.1f}s (attempt {attempt}, '
+                            f'elapsed {elapsed:.1f}s)...')
                 logger.info('=' * 34)
-                await asyncio.sleep(1)
+                await asyncio.sleep(backoff_time)
             else:
-                logger.info(f'Failed to get job status: {detailed_reason}')
+                logger.info(f'Failed to get job status after {elapsed:.1f}s: '
+                            f'{detailed_reason}')
                 logger.info('=' * 34)
                 return None
-    return None
 
 
 def controller_process_alive(record: managed_job_state.ControllerPidRecord,
