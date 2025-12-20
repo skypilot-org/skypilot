@@ -930,29 +930,6 @@ class Storage(object):
     def _validate_storage_spec(self, name: Optional[str]) -> None:
         """Validates the storage spec and updates local fields if necessary."""
 
-        def validate_s3_mount_mode_credentials():
-            """Check S3 MOUNT mode is not used with non-static credentials.
-
-            goofys (used for MOUNT mode) does not support SSO, IAM roles, or
-            container credentials. Users must use MOUNT_CACHED mode instead.
-            """
-            if self.mode != StorageMode.MOUNT:
-                return
-
-            # Check if this storage uses S3
-            is_s3_storage = False
-            if isinstance(self.source, str) and self.source.startswith('s3://'):
-                is_s3_storage = True
-            elif StoreType.S3 in self.stores:
-                is_s3_storage = True
-
-            if is_s3_storage and clouds.AWS.should_use_env_auth_for_s3():
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
-                        'mode: MOUNT is not supported when using AWS SSO or '
-                        'IAM role credentials to access S3. Please use '
-                        'mode: MOUNT_CACHED instead.')
-
         def validate_name(name):
             """ Checks for validating the storage name.
 
@@ -981,9 +958,6 @@ class Storage(object):
                         '`source: s3://mybucket/`). If you are trying to '
                         'create a new bucket, please use the `store` field to '
                         'specify the store type (e.g. `store: s3`).')
-
-        # MOUNT mode does not work on S3 with SSO credentials - check early
-        validate_s3_mount_mode_credentials()
 
         if self.source is None:
             # If the mode is COPY, the source must be specified
