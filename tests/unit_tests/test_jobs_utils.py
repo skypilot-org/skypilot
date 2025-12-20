@@ -92,8 +92,7 @@ async def test_get_job_status_timeout(mock_get_handle, mock_logger):
     elapsed_time = time.time() - start_time
     assert per_attempt_timeout <= elapsed_time < per_attempt_timeout + 1.0, (
         f'Expected timeout around {per_attempt_timeout}s, '
-        f'but took {elapsed_time}s'
-    )
+        f'but took {elapsed_time}s')
 
     # === Checking the job status... ===
     # Failed to get job status after X.Xs: Job status check timed out after 0.5s
