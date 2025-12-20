@@ -370,7 +370,9 @@ async def get_job_status_with_retries(
             # limit how we handle it and whether or not we catch it.
             detailed_reason = None
             if isinstance(e, exceptions.CommandError):
-                detailed_reason = e.detailed_reason
+                returncode = e.returncode
+                detailed_reason = (f'Returncode: {returncode}. '
+                                   f'{e.detailed_reason}')
             elif isinstance(e, grpc.RpcError):
                 detailed_reason = e.details()
             elif isinstance(e, grpc.FutureTimeoutError):
