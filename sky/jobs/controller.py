@@ -475,11 +475,12 @@ class JobController:
             job_status = None
             if not force_transit_to_recovering:
                 try:
-                    job_status = await managed_job_utils.get_job_status_with_retries(
-                        self._backend,
-                        cluster_name,
-                        job_id=job_id_on_pool_cluster,
-                    )
+                    job_status = await (
+                        managed_job_utils.get_job_status_with_retries(
+                            self._backend,
+                            cluster_name,
+                            job_id=job_id_on_pool_cluster,
+                        ))
                 except exceptions.FetchClusterInfoError as fetch_e:
                     logger.info(
                         'Failed to fetch the job status. Start recovery.\n'

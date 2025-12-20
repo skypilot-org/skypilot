@@ -1,4 +1,4 @@
-import logging
+import asyncio
 import pathlib
 import tempfile
 import time
@@ -101,6 +101,60 @@ async def test_get_job_status_timeout(mock_get_handle, mock_logger):
     error_log_line = mock_logger.info.call_args_list[1][0][0]
     assert 'Failed to get job status after' in error_log_line
     assert f'timed out after {per_attempt_timeout}s' in error_log_line
+
+
+@pytest.mark.asyncio
+@mock.patch('sky.jobs.utils.logger')
+@mock.patch('sky.global_user_state.get_handle_from_cluster_name')
+async def test_get_job_status_retries_with_backoff(mock_get_handle,
+                                                   mock_logger):
+    """Test that get_job_status retries with exponential backoff."""
+    mock_handle = mock.MagicMock(
+        spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
+    mock_get_handle.return_value = mock_handle
+
+    mock_backend = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayBackend)
+
+    # Track the number of calls
+    call_count = 0
+
+    def failing_get_job_status(*args, **kwargs):
+        """Simulates get_job_status that always fails quickly."""
+        nonlocal call_count
+        call_count += 1
+        # Use asyncio.TimeoutError which is caught and triggers retry
+        raise asyncio.TimeoutError('Connection failed')
+
+    mock_backend.get_job_status = failing_get_job_status
+
+    per_attempt_timeout = 1.0  # seconds
+    total_timeout = 3.0  # Allow multiple retries
+
+    start_time = time.time()
+
+    # Patch timeouts and use a fast backoff for testing
+    with mock.patch.object(utils, '_JOB_STATUS_FETCH_TIMEOUT_SECONDS',
+                           per_attempt_timeout), \
+         mock.patch.object(utils, '_JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS',
+                           total_timeout):
+        result = await utils.get_job_status_with_retries(
+            backend=mock_backend, cluster_name='test-cluster', job_id=1)
+
+    elapsed_time = time.time() - start_time
+
+    assert result is None, 'Expected None after all retries exhausted'
+    # Should have multiple attempts due to retries
+    assert call_count >= 2, f'Expected at least 2 attempts, got {call_count}'
+    # Should not exceed total timeout by much
+    assert elapsed_time < total_timeout + 2.0, (
+        f'Expected to finish around {total_timeout}s, took {elapsed_time}s')
+
+    # Verify retry log messages were printed
+    retry_logs = [
+        call for call in mock_logger.info.call_args_list
+        if 'Retrying in' in str(call)
+    ]
+    assert len(retry_logs) >= 1, 'Expected at least one retry log message'
 
 
 @mock.patch('sky.jobs.utils.logger')
