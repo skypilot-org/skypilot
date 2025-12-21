@@ -49,12 +49,20 @@ export function Volumes() {
   const [volumeToDelete, setVolumeToDelete] = useState(null);
   const [deleteError, setDeleteError] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [preloadingComplete, setPreloadingComplete] = useState(false);
 
   const handleRefresh = () => {
     dashboardCache.invalidate(getVolumes);
-    if (refreshDataRef.current) {
-      refreshDataRef.current();
-    }
+    // Reset preloading state so VolumesTable can fetch fresh data immediately
+    setPreloadingComplete(false);
+    // Trigger a new preload cycle
+    cachePreloader.preloadForPage('volumes', { force: true }).then(() => {
+      setPreloadingComplete(true);
+      // Call refresh after preloading is complete
+      if (refreshDataRef.current) {
+        refreshDataRef.current();
+      }
+    });
   };
 
   const handleDeleteVolumeClick = (volume) => {
@@ -91,7 +99,18 @@ export function Volumes() {
   };
 
   useEffect(() => {
-    cachePreloader.preloadForPage('volumes');
+    const preloadData = async () => {
+      try {
+        // Await cache preloading for volumes page
+        await cachePreloader.preloadForPage('volumes');
+        setPreloadingComplete(true);
+      } catch (error) {
+        console.error('Error preloading volumes data:', error);
+        // Still signal completion even on error so the table can load
+        setPreloadingComplete(true);
+      }
+    };
+    preloadData();
   }, []);
 
   return (
@@ -129,6 +148,7 @@ export function Volumes() {
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
         onDeleteVolume={handleDeleteVolumeClick}
+        preloadingComplete={preloadingComplete}
       />
 
       {/* Delete Confirmation Dialog */}
@@ -176,6 +196,7 @@ function VolumesTable({
   setLoading,
   refreshDataRef,
   onDeleteVolume,
+  preloadingComplete,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -219,19 +240,26 @@ function VolumesTable({
     setData([]);
     let isCurrent = true;
 
-    fetchData();
+    // Only start fetching data after preloading is complete
+    if (preloadingComplete) {
+      fetchData();
 
-    const interval = setInterval(() => {
-      if (isCurrent && window.document.visibilityState === 'visible') {
-        fetchData();
-      }
-    }, refreshInterval);
+      const interval = setInterval(() => {
+        if (isCurrent && window.document.visibilityState === 'visible') {
+          fetchData();
+        }
+      }, refreshInterval);
+
+      return () => {
+        isCurrent = false;
+        clearInterval(interval);
+      };
+    }
 
     return () => {
       isCurrent = false;
-      clearInterval(interval);
     };
-  }, [refreshInterval, fetchData]);
+  }, [refreshInterval, fetchData, preloadingComplete]);
 
   // Reset to first page when data changes
   useEffect(() => {
@@ -348,7 +376,7 @@ function VolumesTable({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading && isInitialLoad ? (
+              {loading || !preloadingComplete ? (
                 <TableRow>
                   <TableCell
                     colSpan={11}
@@ -589,4 +617,5 @@ VolumesTable.propTypes = {
     current: PropTypes.func,
   }).isRequired,
   onDeleteVolume: PropTypes.func.isRequired,
+  preloadingComplete: PropTypes.bool.isRequired,
 };
