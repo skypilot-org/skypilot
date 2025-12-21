@@ -422,6 +422,8 @@ class JobController:
             except KeyError:
                 pass
 
+        transient_job_check_error_start_time = None
+        job_check_backoff = None
         while True:
             status_check_count += 1
 
@@ -473,10 +475,11 @@ class JobController:
             # recovering, we will set the job status to None, which will force
             # enter the recovering logic.
             job_status = None
+            transient_job_check_error_reason = None
             if not force_transit_to_recovering:
                 try:
-                    job_status = await (
-                        managed_job_utils.get_job_status_with_retries(
+                    job_status, transient_job_check_error_reason = await (
+                        managed_job_utils.get_job_status(
                             self._backend,
                             cluster_name,
                             job_id=job_id_on_pool_cluster,
@@ -486,6 +489,23 @@ class JobController:
                         'Failed to fetch the job status. Start recovery.\n'
                         f'Exception: {common_utils.format_exception(fetch_e)}\n'
                         f'Traceback: {traceback.format_exc()}')
+
+            # When job status check fails, we need to retry to avoid false alarm
+            # for job failure, as it could be a transient error for
+            # communication issue.
+            if transient_job_check_error_reason is not None:
+                logger.info(
+                    'Potential transient error when fetching the job '
+                    f'status. Reason: {transient_job_check_error_reason}.\n'
+                    'Check cluster status to determine if the job is '
+                    'preempted or failed.')
+                if transient_job_check_error_start_time is None:
+                    transient_job_check_error_start_time = time.time()
+                    job_check_backoff = common_utils.Backoff(
+                        initial_backoff=1, max_backoff_factor=5)
+            else:
+                transient_job_check_error_start_time = None
+                job_check_backoff = None
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 logger.info(f'Task {task_id} succeeded! '
@@ -566,6 +586,7 @@ class JobController:
             # be reflected in the cluster status, depending on the cloud, which
             # can also cause failure of the job, and we need to recover it
             # rather than fail immediately.
+            # TODO(cooperc): do we need to add this to asyncio thread?
             (cluster_status,
              handle) = backend_utils.refresh_cluster_status_handle(
                  cluster_name,
@@ -667,9 +688,36 @@ class JobController:
                     # job status. Try to recover the job (will not restart the
                     # cluster, if the cluster is healthy).
                     assert job_status is None, job_status
-                    logger.info('Failed to fetch the job status while the '
-                                'cluster is healthy. Try to recover the job '
-                                '(the cluster will not be restarted).')
+                    if transient_job_check_error_reason is not None:
+                        assert (transient_job_check_error_start_time
+                                is not None), (
+                                    transient_job_check_error_start_time,
+                                    transient_job_check_error_reason)
+                        assert job_check_backoff is not None, (
+                            job_check_backoff, transient_job_check_error_reason)
+                        elapsed = time.time(
+                        ) - transient_job_check_error_start_time
+                        if (elapsed < managed_job_utils.
+                                JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS):
+                            remaining_timeout = (
+                                managed_job_utils.
+                                JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS -
+                                elapsed)
+                            backoff_time = min(
+                                job_check_backoff.current_backoff(),
+                                remaining_timeout)
+                            logger.info(
+                                'Failed to fetch the job status while the '
+                                'cluster is healthy. Retrying to avoid false'
+                                'alarm for job failure. Retrying in '
+                                f'{backoff_time:.1f} seconds...')
+                            await asyncio.sleep(backoff_time)
+                            continue
+                    logger.info(
+                        'Failed to fetch the job status after retrying '
+                        f'for {elapsed:.1f} seconds. Try to recover the '
+                        'job.')
+
             # When the handle is None, the cluster should be cleaned up already.
             if handle is not None:
                 resources = handle.launched_resources

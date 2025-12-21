@@ -81,7 +81,7 @@ JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
 _JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
-_JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = 40
+JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = 60
 
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
@@ -327,13 +327,19 @@ def ha_recovery_for_consolidation_mode() -> None:
         f.write(f'Total recovery time: {time.time() - start} seconds\n')
 
 
-async def get_job_status_with_retries(
-        backend: 'backends.CloudVmRayBackend', cluster_name: str,
-        job_id: Optional[int]) -> Optional['job_lib.JobStatus']:
+async def get_job_status(
+    backend: 'backends.CloudVmRayBackend', cluster_name: str,
+    job_id: Optional[int]
+) -> Tuple[Optional['job_lib.JobStatus'], Optional[str]]:
     """Check the status of the job running on a managed job cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_DRIVER,
     FAILED_SETUP or CANCELLED.
+
+    Returns:
+        job_status: The status of the job.
+        transient_error_reason: None if successful or fatal error; otherwise,
+            the detailed reason for the transient error.
     """
     # TODO(zhwu, cooperc): Make this get job status aware of cluster status, so
     # that it can exit retry early if the cluster is down.
@@ -344,85 +350,68 @@ async def get_job_status_with_retries(
         # This can happen if the cluster was preempted and background status
         # refresh already noticed and cleaned it up.
         logger.info(f'Cluster {cluster_name} not found.')
-        return None
+        return None, None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     job_ids = None if job_id is None else [job_id]
-    start_time = time.time()
-    backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=5)
-    attempt = 0
-    while True:
-        try:
-            logger.info('=== Checking the job status... ===')
-            statuses = await asyncio.wait_for(
-                context_utils.to_thread(backend.get_job_status,
-                                        handle,
-                                        job_ids=job_ids,
-                                        stream_logs=False),
-                timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
-            status = list(statuses.values())[0]
-            if status is None:
-                logger.info('No job found.')
+    try:
+        logger.info('=== Checking the job status... ===')
+        statuses = await asyncio.wait_for(
+            context_utils.to_thread(backend.get_job_status,
+                                    handle,
+                                    job_ids=job_ids,
+                                    stream_logs=False),
+            timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
+        status = list(statuses.values())[0]
+        if status is None:
+            logger.info('No job found.')
+        else:
+            logger.info(f'Job status: {status}')
+        logger.info('=' * 34)
+        return status, None
+    except (exceptions.CommandError, grpc.RpcError, grpc.FutureTimeoutError,
+            ValueError, TypeError, asyncio.TimeoutError) as e:
+        # Note: Each of these exceptions has some additional conditions to
+        # limit how we handle it and whether or not we catch it.
+        potential_transient_error_reason = None
+        if isinstance(e, exceptions.CommandError):
+            returncode = e.returncode
+            potential_transient_error_reason = (f'Returncode: {returncode}. '
+                                                f'{e.detailed_reason}')
+        elif isinstance(e, grpc.RpcError):
+            potential_transient_error_reason = e.details()
+        elif isinstance(e, grpc.FutureTimeoutError):
+            potential_transient_error_reason = 'grpc timeout'
+        elif isinstance(e, asyncio.TimeoutError):
+            potential_transient_error_reason = (
+                'Job status check timed out after '
+                f'{_JOB_STATUS_FETCH_TIMEOUT_SECONDS}s')
+        # TODO(cooperc): Gracefully handle these exceptions in the backend.
+        elif isinstance(e, ValueError):
+            # If the cluster yaml is deleted in the middle of getting the
+            # SSH credentials, we could see this. See
+            # sky/global_user_state.py get_cluster_yaml_dict.
+            if re.search(r'Cluster yaml .* not found', str(e)):
+                potential_transient_error_reason = 'Cluster yaml was deleted'
             else:
-                logger.info(f'Job status: {status}')
-            logger.info('=' * 34)
-            return status
-        except (exceptions.CommandError, grpc.RpcError, grpc.FutureTimeoutError,
-                ValueError, TypeError, asyncio.TimeoutError) as e:
-            # Note: Each of these exceptions has some additional conditions to
-            # limit how we handle it and whether or not we catch it.
-            detailed_reason = None
-            if isinstance(e, exceptions.CommandError):
-                returncode = e.returncode
-                detailed_reason = (f'Returncode: {returncode}. '
-                                   f'{e.detailed_reason}')
-            elif isinstance(e, grpc.RpcError):
-                detailed_reason = e.details()
-            elif isinstance(e, grpc.FutureTimeoutError):
-                detailed_reason = 'Timeout'
-            elif isinstance(e, asyncio.TimeoutError):
-                detailed_reason = ('Job status check timed out after '
-                                   f'{_JOB_STATUS_FETCH_TIMEOUT_SECONDS}s')
-            # TODO(cooperc): Gracefully handle these exceptions in the backend.
-            elif isinstance(e, ValueError):
-                # If the cluster yaml is deleted in the middle of getting the
-                # SSH credentials, we could see this. See
-                # sky/global_user_state.py get_cluster_yaml_dict.
-                if re.search(r'Cluster yaml .* not found', str(e)):
-                    detailed_reason = 'Cluster yaml was deleted'
-                else:
-                    raise
-            elif isinstance(e, TypeError):
-                # We will grab the SSH credentials from the cluster yaml, but if
-                # handle.cluster_yaml is None, we will just return an empty dict
-                # for the credentials. See
-                # backend_utils.ssh_credential_from_yaml. Then, the credentials
-                # are passed as kwargs to SSHCommandRunner.__init__ - see
-                # cloud_vm_ray_backend.get_command_runners. So we can hit this
-                # TypeError if the cluster yaml is removed from the handle right
-                # when we pull it before the cluster is fully deleted.
-                error_msg_to_check = (
-                    'SSHCommandRunner.__init__() missing 2 required positional '
-                    'arguments: \'ssh_user\' and \'ssh_private_key\'')
-                if str(e) == error_msg_to_check:
-                    detailed_reason = 'SSH credentials were already cleaned up'
-                else:
-                    raise
-            attempt += 1
-            elapsed = time.time() - start_time
-            remaining = _JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS - elapsed
-            if remaining > 0:
-                backoff_time = min(backoff.current_backoff(), remaining)
-                logger.info('Failed to connect to the cluster to get the job '
-                            f'status: {detailed_reason}. Retrying in '
-                            f'{backoff_time:.1f}s (attempt {attempt}, '
-                            f'elapsed {elapsed:.1f}s)...')
-                logger.info('=' * 34)
-                await asyncio.sleep(backoff_time)
+                raise
+        elif isinstance(e, TypeError):
+            # We will grab the SSH credentials from the cluster yaml, but if
+            # handle.cluster_yaml is None, we will just return an empty dict
+            # for the credentials. See
+            # backend_utils.ssh_credential_from_yaml. Then, the credentials
+            # are passed as kwargs to SSHCommandRunner.__init__ - see
+            # cloud_vm_ray_backend.get_command_runners. So we can hit this
+            # TypeError if the cluster yaml is removed from the handle right
+            # when we pull it before the cluster is fully deleted.
+            error_msg_to_check = (
+                'SSHCommandRunner.__init__() missing 2 required positional '
+                'arguments: \'ssh_user\' and \'ssh_private_key\'')
+            if str(e) == error_msg_to_check:
+                potential_transient_error_reason = ('SSH credentials were '
+                                                    'already cleaned up')
             else:
-                logger.info(f'Failed to get job status after {elapsed:.1f}s: '
-                            f'{detailed_reason}')
-                logger.info('=' * 34)
-                return None
+                raise
+        return None, potential_transient_error_reason
 
 
 def controller_process_alive(record: managed_job_state.ControllerPidRecord,

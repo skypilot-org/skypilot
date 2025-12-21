@@ -278,19 +278,24 @@ class StrategyExecutor:
                 break
 
             try:
-                status = await managed_job_utils.get_job_status_with_retries(
-                    self.backend,
-                    self.cluster_name,
-                    job_id=self.job_id_on_pool_cluster)
+                status, transient_error_reason = (
+                    await managed_job_utils.get_job_status(
+                        self.backend,
+                        self.cluster_name,
+                        job_id=self.job_id_on_pool_cluster))
             except Exception as e:  # pylint: disable=broad-except
+                transient_error_reason = common_utils.format_exception(e)
                 # If any unexpected error happens, retry the job checking
                 # loop.
                 # Note: the CommandError is already handled in the
                 # get_job_status, so it should not happen here.
                 # TODO(zhwu): log the unexpected error to usage collection
                 # for future debugging.
-                logger.info(f'Unexpected exception: {e}\nFailed to get the '
-                            'job status. Retrying.')
+                logger.info('Unexpected exception during fetching job status: '
+                            f'{common_utils.format_exception(e)}')
+            if transient_error_reason is not None:
+                logger.info('Transient error when fetching the job status: '
+                            f'{transient_error_reason}')
                 continue
 
             # Check the job status until it is not in initialized status
