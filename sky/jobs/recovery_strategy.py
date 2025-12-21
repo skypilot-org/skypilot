@@ -293,6 +293,7 @@ class StrategyExecutor:
                 # for future debugging.
                 logger.info('Unexpected exception during fetching job status: '
                             f'{common_utils.format_exception(e)}')
+                continue
             if transient_error_reason is not None:
                 logger.info('Transient error when fetching the job status: '
                             f'{transient_error_reason}')
