@@ -525,9 +525,10 @@ def slurm_node_info(
 
 
 def is_inside_slurm_cluster() -> bool:
-    # Check for the marker file in the home directory, which is
-    # created by the sbatch provision script.
-    marker_file = os.path.expanduser(f'~/{SLURM_MARKER_FILE}')
+    # Check for the marker file in the current home directory. When run by
+    # the skylet on a compute node, the HOME environment variable is set to
+    # the cluster's sky home directory by the SlurmCommandRunner.
+    marker_file = os.path.join(os.path.expanduser('~'), SLURM_MARKER_FILE)
     return os.path.exists(marker_file)
 
 
