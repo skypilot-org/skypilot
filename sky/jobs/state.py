@@ -2656,7 +2656,7 @@ def add_job_event(job_id: int,
         timestamp: The timestamp of the event. If None, uses current time.
     """
     if timestamp is None:
-        timestamp = datetime.datetime.now()
+        timestamp = datetime.datetime.now(datetime.timezone.utc)
 
     status_value = new_status.value
 
@@ -2715,7 +2715,7 @@ async def add_job_event_async(
         timestamp: The timestamp of the event. If None, uses current time.
     """
     if timestamp is None:
-        timestamp = datetime.datetime.now()
+        timestamp = datetime.datetime.now(datetime.timezone.utc)
 
     status_value = new_status.value
 
