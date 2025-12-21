@@ -713,10 +713,16 @@ class JobController:
                                 f'{backoff_time:.1f} seconds...')
                             await asyncio.sleep(backoff_time)
                             continue
-                    logger.info(
-                        'Failed to fetch the job status after retrying '
-                        f'for {elapsed:.1f} seconds. Try to recover the '
-                        'job.')
+                        else:
+                            logger.info(
+                                'Failed to fetch the job status after retrying '
+                                f'for {elapsed:.1f} seconds. Try to recover '
+                                'the job by restarting the job/cluster.')
+                    else:
+                        logger.info(
+                            'Failed to fetch the job status due to '
+                            'unrecoverable error. Try to recover the job by'
+                            ' restarting the job/cluster.')
 
             # When the handle is None, the cluster should be cleaned up already.
             if handle is not None:

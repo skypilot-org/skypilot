@@ -381,8 +381,10 @@ def test_managed_jobs_recovery_kubernetes_multinode():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
-    terminate_head_cmd = (f'kubectl delete pods -l component={name_on_cloud}-head')
-    terminate_worker_cmd = (f'kubectl delete pods -l component={name_on_cloud}-worker1')
+    terminate_head_cmd = (
+        f'kubectl delete pods -l component={name_on_cloud}-head')
+    terminate_worker_cmd = (
+        f'kubectl delete pods -l component={name_on_cloud}-worker1')
     test = smoke_tests_utils.Test(
         'managed_jobs_recovery_kubernetes',
         [
@@ -395,7 +397,8 @@ def test_managed_jobs_recovery_kubernetes_multinode():
                 timeout=300),
             f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
-            smoke_tests_utils.run_cloud_cmd_on_cluster(name, cmd=terminate_head_cmd),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(name,
+                                                       cmd=terminate_head_cmd),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -411,7 +414,8 @@ def test_managed_jobs_recovery_kubernetes_multinode():
                 job_status=[sky.ManagedJobStatus.RUNNING],
                 timeout=200),
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
-            smoke_tests_utils.run_cloud_cmd_on_cluster(name, cmd=terminate_worker_cmd),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, cmd=terminate_worker_cmd),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
