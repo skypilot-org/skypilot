@@ -34,7 +34,7 @@ import {
 } from '@/components/ui/dialog';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import Link from 'next/link';
-import { TimestampWithTooltip } from '@/components/utils';
+import { TimestampWithTooltip, LastUpdatedTimestamp } from '@/components/utils';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
@@ -50,6 +50,7 @@ export function Volumes() {
   const [deleteError, setDeleteError] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [preloadingComplete, setPreloadingComplete] = useState(false);
+  const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
   const handleRefresh = () => {
     dashboardCache.invalidate(getVolumes);
@@ -58,6 +59,7 @@ export function Volumes() {
     // Trigger a new preload cycle
     cachePreloader.preloadForPage('volumes', { force: true }).then(() => {
       setPreloadingComplete(true);
+      setLastFetchedTime(new Date());
       // Call refresh after preloading is complete
       if (refreshDataRef.current) {
         refreshDataRef.current();
@@ -104,10 +106,12 @@ export function Volumes() {
         // Await cache preloading for volumes page
         await cachePreloader.preloadForPage('volumes');
         setPreloadingComplete(true);
+        setLastFetchedTime(new Date());
       } catch (error) {
         console.error('Error preloading volumes data:', error);
         // Still signal completion even on error so the table can load
         setPreloadingComplete(true);
+        setLastFetchedTime(new Date());
       }
     };
     preloadData();
@@ -124,12 +128,15 @@ export function Volumes() {
             Volumes
           </Link>
         </div>
-        <div className="flex items-center">
+        <div className="flex items-center gap-3">
           {loading && (
-            <div className="flex items-center mr-2">
+            <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
               <span className="ml-2 text-gray-500 text-sm">Loading...</span>
             </div>
+          )}
+          {!loading && lastFetchedTime && (
+            <LastUpdatedTimestamp timestamp={lastFetchedTime} />
           )}
           <button
             onClick={handleRefresh}

@@ -198,6 +198,61 @@ export const NonCapitalizedTooltip = ({ children, ...props }) => {
   );
 };
 
+/**
+ * Component to display "Updated X ago" with auto-refresh
+ * Shows the time since last data fetch with a tooltip showing exact time
+ */
+export const LastUpdatedTimestamp = ({ timestamp, className = '' }) => {
+  const [, setTick] = useState(0);
+
+  // Auto-update every 10 seconds to keep the relative time current
+  useEffect(() => {
+    if (!timestamp) return;
+
+    const interval = setInterval(() => {
+      setTick((t) => t + 1);
+    }, 10000); // Update every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [timestamp]);
+
+  if (!timestamp) {
+    return null;
+  }
+
+  const now = new Date();
+  const diff = now - timestamp;
+
+  // Format relative time
+  let relativeText;
+  if (diff < 5000) {
+    relativeText = 'just now';
+  } else if (diff < 60000) {
+    const seconds = Math.floor(diff / 1000);
+    relativeText = `${seconds}s ago`;
+  } else if (diff < 3600000) {
+    const minutes = Math.floor(diff / 60000);
+    relativeText = `${minutes}m ago`;
+  } else if (diff < 86400000) {
+    const hours = Math.floor(diff / 3600000);
+    relativeText = `${hours}h ago`;
+  } else {
+    const days = Math.floor(diff / 86400000);
+    relativeText = `${days}d ago`;
+  }
+
+  return (
+    <NonCapitalizedTooltip
+      content={`Last updated: ${formatDateTime(timestamp)}`}
+      className="text-sm text-muted-foreground"
+    >
+      <span className={`text-xs text-gray-500 ${className}`}>
+        Updated {relativeText}
+      </span>
+    </NonCapitalizedTooltip>
+  );
+};
+
 // Format duration from seconds to a readable format
 export function formatDuration(durationInSeconds) {
   if (!durationInSeconds && durationInSeconds !== 0) return '-';
