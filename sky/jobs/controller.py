@@ -587,10 +587,10 @@ class JobController:
             # can also cause failure of the job, and we need to recover it
             # rather than fail immediately.
             # TODO(cooperc): do we need to add this to asyncio thread?
-            (cluster_status,
-             handle) = backend_utils.refresh_cluster_status_handle(
-                 cluster_name,
-                 force_refresh_statuses=set(status_lib.ClusterStatus))
+            (cluster_status, handle) = await context_utils.to_thread(
+                backend_utils.refresh_cluster_status_handle,
+                cluster_name,
+                force_refresh_statuses=set(status_lib.ClusterStatus))
 
             if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster is (partially) preempted or failed. It can be
