@@ -38,6 +38,7 @@ from sky import jobs
 from sky import skypilot_config
 from sky.clouds import gcp
 from sky.data import storage as storage_lib
+from sky.jobs import utils as managed_jobs_utils
 from sky.jobs.client import sdk as jobs_sdk
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -359,6 +360,71 @@ def test_managed_jobs_recovery_gcp():
             smoke_tests_utils.run_cloud_cmd_on_cluster(name, cmd=terminate_cmd),
             smoke_tests_utils.JOB_WAIT_NOT_RUNNING.format(job_name=name),
             f'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=200),
+            f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
+        ],
+        f'sky jobs cancel -y -n {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=25 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.managed_jobs
+def test_managed_jobs_recovery_kubernetes_multinode():
+    """Test managed job recovery."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    terminate_head_cmd = (
+        f'kubectl get pods --no-headers -o custom-columns=":metadata.name" | '
+        f'grep -- "{name_on_cloud}-[0-9]*-{common_utils.get_user_hash()}-head" | '
+        f'xargs kubectl delete pod')
+    terminate_worker_cmd = (
+        f'kubectl get pods --no-headers -o custom-columns=":metadata.name" | '
+        f'grep -- "{name_on_cloud}-[0-9]*-{common_utils.get_user_hash()}-worker" | '
+        f'xargs kubectl delete pod')
+    test = smoke_tests_utils.Test(
+        'managed_jobs_recovery_kubernetes',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            rf'sky jobs launch --infra kubernetes -n {name} --num-nodes 2 {smoke_tests_utils.LOW_RESOURCE_ARG} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=300),
+            f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
+            # Terminate the cluster manually.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(name,
+                                                       cmd=terminate_head_cmd),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RECOVERING],
+                # This involves interval, job status check and cluster status
+                # check, but should be significantly shorter than the timeout of
+                # a transient error retries, as the controller should discover
+                # the cluster termination immediately.
+                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=200),
+            f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, cmd=terminate_worker_cmd),
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RECOVERING],
+                timeout=managed_jobs_utils.JOB_STATUS_CHECK_GAP_SECONDS * 3),
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
