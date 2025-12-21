@@ -380,7 +380,7 @@ def test_managed_jobs_recovery_kubernetes_multinode():
     """Test managed job recovery."""
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=True)
     terminate_head_cmd = (
         f'kubectl delete pods -l component={name_on_cloud}-head')
     terminate_worker_cmd = (
