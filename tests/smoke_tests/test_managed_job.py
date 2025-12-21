@@ -382,9 +382,13 @@ def test_managed_jobs_recovery_kubernetes_multinode():
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     terminate_head_cmd = (
-        f'kubectl delete pods -l component={name_on_cloud}-{common_utils.get_user_hash()}-head')
+        f'kubectl get pods --no-headers -o custom-columns=":metadata.name" | '
+        f'grep -- "{name_on_cloud}-.*-{common_utils.get_user_hash()}-head" | '
+        f'xargs kubectl delete pod')
     terminate_worker_cmd = (
-        f'kubectl delete pods -l component={name_on_cloud}-{common_utils.get_user_hash()}-worker1')
+        f'kubectl get pods --no-headers -o custom-columns=":metadata.name" | '
+        f'grep -- "{name_on_cloud}-.*-{common_utils.get_user_hash()}-worker" | '
+        f'xargs kubectl delete pod')
     test = smoke_tests_utils.Test(
         'managed_jobs_recovery_kubernetes',
         [
