@@ -490,33 +490,31 @@ def terminate_instances(
             'worker_only=True is not supported for Slurm, this is a no-op.')
         return
 
-    ssh_config_dict = provider_config['ssh']
-    ssh_host = ssh_config_dict['hostname']
-    ssh_port = int(ssh_config_dict['port'])
-    ssh_user = ssh_config_dict['user']
-    ssh_private_key = ssh_config_dict['private_key']
-    # Check if we are running inside a Slurm job (Only happens with autodown,
-    # where the Skylet will invoke terminate_instances on the remote cluster),
-    # where we assume SSH between nodes have been set up on each node's
-    # ssh config.
-    # TODO(kevin): Validate this assumption. Another way would be to
-    # mount the private key to the remote cluster, like we do with
-    # other clouds' API keys.
+    # Check if we are running inside a Slurm cluster (only happens with
+    # autodown, where the Skylet invokes terminate_instances on the remote
+    # cluster). In this case, use local execution instead of SSH.
+    # This assumes that the compute node is able to run scancel.
+    # TODO(kevin): Validate this assumption.
     if slurm_utils.is_inside_slurm_cluster():
-        logger.debug(
-            'Running inside a Slurm cluster, using machine\'s ssh config')
-        ssh_private_key = None
-    ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
-    ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
+        logger.debug('Running inside a Slurm cluster, using local execution')
+        client = slurm.SlurmClient()
+    else:
+        ssh_config_dict = provider_config['ssh']
+        ssh_host = ssh_config_dict['hostname']
+        ssh_port = int(ssh_config_dict['port'])
+        ssh_user = ssh_config_dict['user']
+        ssh_private_key = ssh_config_dict['private_key']
+        ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
+        ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
-    client = slurm.SlurmClient(
-        ssh_host,
-        ssh_port,
-        ssh_user,
-        ssh_private_key,
-        ssh_proxy_command=ssh_proxy_command,
-        ssh_proxy_jump=ssh_proxy_jump,
-    )
+        client = slurm.SlurmClient(
+            ssh_host,
+            ssh_port,
+            ssh_user,
+            ssh_private_key,
+            ssh_proxy_command=ssh_proxy_command,
+            ssh_proxy_jump=ssh_proxy_jump,
+        )
     jobs_state = client.get_jobs_state_by_name(cluster_name_on_cloud)
     if not jobs_state:
         logger.debug(f'Job for cluster {cluster_name_on_cloud} not found, '
