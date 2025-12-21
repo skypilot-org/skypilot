@@ -223,21 +223,27 @@ export const LastUpdatedTimestamp = ({ timestamp, className = '' }) => {
   const now = new Date();
   const diff = now - timestamp;
 
+  // Time constants for readability
+  const ONE_SECOND_MS = 1000;
+  const ONE_MINUTE_MS = 60 * ONE_SECOND_MS;
+  const ONE_HOUR_MS = 60 * ONE_MINUTE_MS;
+  const ONE_DAY_MS = 24 * ONE_HOUR_MS;
+
   // Format relative time
   let relativeText;
-  if (diff < 5000) {
+  if (diff < 5 * ONE_SECOND_MS) {
     relativeText = 'just now';
-  } else if (diff < 60000) {
-    const seconds = Math.floor(diff / 1000);
+  } else if (diff < ONE_MINUTE_MS) {
+    const seconds = Math.floor(diff / ONE_SECOND_MS);
     relativeText = `${seconds}s ago`;
-  } else if (diff < 3600000) {
-    const minutes = Math.floor(diff / 60000);
+  } else if (diff < ONE_HOUR_MS) {
+    const minutes = Math.floor(diff / ONE_MINUTE_MS);
     relativeText = `${minutes}m ago`;
-  } else if (diff < 86400000) {
-    const hours = Math.floor(diff / 3600000);
+  } else if (diff < ONE_DAY_MS) {
+    const hours = Math.floor(diff / ONE_HOUR_MS);
     relativeText = `${hours}h ago`;
   } else {
-    const days = Math.floor(diff / 86400000);
+    const days = Math.floor(diff / ONE_DAY_MS);
     relativeText = `${days}d ago`;
   }
 

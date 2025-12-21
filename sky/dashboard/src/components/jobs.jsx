@@ -219,12 +219,10 @@ export function ManagedJobs() {
       try {
         // Await cache preloading for jobs page
         await cachePreloader.preloadForPage('jobs');
-        setPreloadingComplete(true);
-        setLastFetchedTime(new Date());
-        fetchData();
       } catch (error) {
         console.error('Error preloading jobs data:', error);
-        // Still signal completion even on error so the table can load
+      } finally {
+        // Signal completion even on error so the table can load
         setPreloadingComplete(true);
         setLastFetchedTime(new Date());
         fetchData();

@@ -54,7 +54,10 @@ import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
-import { NonCapitalizedTooltip, LastUpdatedTimestamp } from '@/components/utils';
+import {
+  NonCapitalizedTooltip,
+  LastUpdatedTimestamp,
+} from '@/components/utils';
 import { Card } from '@/components/ui/card';
 import {
   Select,
@@ -2637,7 +2640,10 @@ export function GPUs() {
             </div>
           )}
           {!isAnyLoading && lastFetchedTime && (
-            <LastUpdatedTimestamp timestamp={lastFetchedTime} className="mr-2" />
+            <LastUpdatedTimestamp
+              timestamp={lastFetchedTime}
+              className="mr-2"
+            />
           )}
           <button
             onClick={handleRefresh}

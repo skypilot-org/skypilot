@@ -732,7 +732,10 @@ export function Users() {
             )}
 
           {!loading && lastFetchedTime && (
-            <LastUpdatedTimestamp timestamp={lastFetchedTime} className="mr-2" />
+            <LastUpdatedTimestamp
+              timestamp={lastFetchedTime}
+              className="mr-2"
+            />
           )}
           <button
             onClick={handleRefresh}
@@ -1629,13 +1632,13 @@ function UsersTable({
         });
 
         setUsersWithCounts(finalProcessedUsers);
-        if (setLastFetchedTime) setLastFetchedTime(new Date());
       } catch (error) {
         console.error('Failed to fetch or process user data:', error);
         setUsersWithCounts([]);
         setHasInitiallyLoaded(true);
         if (setLoading && showLoading) setLoading(false);
         if (showLoading) setIsLoading(false);
+      } finally {
         if (setLastFetchedTime) setLastFetchedTime(new Date());
       }
     },

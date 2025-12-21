@@ -105,11 +105,10 @@ export function Volumes() {
       try {
         // Await cache preloading for volumes page
         await cachePreloader.preloadForPage('volumes');
-        setPreloadingComplete(true);
-        setLastFetchedTime(new Date());
       } catch (error) {
         console.error('Error preloading volumes data:', error);
-        // Still signal completion even on error so the table can load
+      } finally {
+        // Signal completion even on error so the table can load
         setPreloadingComplete(true);
         setLastFetchedTime(new Date());
       }
