@@ -1871,7 +1871,10 @@ def test_aws_custom_image():
         # Update this image periodically, nemo does not support :latest tag.
         'docker:nvcr.io/nvidia/nemo:25.09',
         # Test image with site-packages as workdir, which could cause issue
-        # if CWD is not well handled, when installing SkyPilot runtime.
+        # if CWD is not well handled, when installing SkyPilot runtime. Created
+        # with the following:
+        # FROM python:3.12-slim
+        # WORKDIR /usr/local/lib/python3.12/site-packages
         'docker:michaelvll/skypilot-custom-image-test-cases:site-packages-as-workdir'
     ])
 def test_kubernetes_custom_image(image_id):
