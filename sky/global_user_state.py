@@ -2875,40 +2875,67 @@ def get_cluster_failures(
 
 @_init_db
 @metrics_lib.time_me
-def clear_cluster_failures(failures: List[Dict[str, Any]]) -> None:
-    """Clear (mark as cleared) a list of cluster failures.
+def clear_cluster_failures(
+        cluster_hash: Optional[str] = None,
+        cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Clear (mark as cleared) all active cluster failures for a given cluster.
+
+    This function atomically queries and clears failures in a single database
+    transaction.
 
     Args:
-        failures: List of failure dictionaries as returned by
-        get_cluster_failures(). Each dict should contain:
-        cluster_hash, failure_mode, failure_reason, cleared_at.
+        cluster_hash: Hash of the cluster to clear failures for. Cannot be
+            specified if cluster_name is specified.
+        cluster_name: Name of the cluster to clear failures for. Cannot be
+            specified if cluster_hash is specified.
+
+    Returns:
+        List of dictionaries containing the failure records that were cleared.
+        Each dict contains: cluster_hash, failure_mode, failure_reason,
+        cleared_at.
     """
-    if not failures:
-        return
+    if cluster_hash is not None and cluster_name is not None:
+        raise ValueError('Cannot specify both cluster_hash and cluster_name')
+
+    if cluster_hash is None and cluster_name is None:
+        raise ValueError('Must specify either cluster_hash or cluster_name')
+
+    # Handle cluster_name to cluster_hash conversion
+    if cluster_name is not None:
+        cluster_hash = _get_hash_for_existing_cluster(cluster_name)
+        if cluster_hash is None:
+            # Cluster doesn't exist, return empty list
+            return []
 
     assert _SQLALCHEMY_ENGINE is not None
     current_time = int(time.time())
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        # Build a list of conditions to match the failures we want to update
-        conditions = []
-        for failure in failures:
-            condition = sqlalchemy.and_(
-                cluster_failures_table.c.cluster_hash ==
-                failure['cluster_hash'], cluster_failures_table.c.failure_mode
-                == failure['failure_mode'])
-            conditions.append(condition)
+        # First, query for active failures
+        failures_query = session.query(cluster_failures_table).filter(
+            sqlalchemy.and_(
+                cluster_failures_table.c.cluster_hash == cluster_hash,
+                cluster_failures_table.c.cleared_at.is_(None))).all()
 
-        if conditions:
-            # Use OR to combine all conditions and update in a single query
-            combined_condition = sqlalchemy.or_(*conditions)
+        if not failures_query:
+            return []
 
-            update_stmt = sqlalchemy.update(cluster_failures_table).where(
-                sqlalchemy.and_(
-                    combined_condition,
-                    cluster_failures_table.c.cleared_at.is_(
-                        None)  # Only update active failures
-                )).values(cleared_at=current_time)
+        # Build the result list before updating
+        cleared_failures = [{
+            'cluster_hash': row.cluster_hash,
+            'failure_mode': row.failure_mode,
+            'failure_reason': row.failure_reason,
+            'cleared_at': current_time  # Will be set in the update
+        } for row in failures_query]
 
-            session.execute(update_stmt)
-            session.commit()
+        # Now update them atomically
+        update_stmt = sqlalchemy.update(cluster_failures_table).where(
+            sqlalchemy.and_(
+                cluster_failures_table.c.cluster_hash == cluster_hash,
+                cluster_failures_table.c.cleared_at.is_(None))).values(
+                    cleared_at=current_time)
+
+        session.execute(update_stmt)
+        session.commit()
+
+        return cleared_failures

@@ -843,10 +843,9 @@ class RetryingVmProvisioner(object):
                 # Clear any existing cluster failures when reusing a cluster
                 # This resets the failure state when going through the
                 # provisioning flow
-                failures = global_user_state.get_cluster_failures(
+                failures = global_user_state.clear_cluster_failures(
                     cluster_name=cluster_name)
                 if failures:
-                    global_user_state.clear_cluster_failures(failures)
                     failure_details = [
                         f'"{f["failure_mode"]}"' for f in failures
                     ]
