@@ -116,7 +116,25 @@ Private registries
     These instructions do not apply if you use SkyPilot to launch on Kubernetes clusters. Instead, see :ref:`Using Images from Private Repositories in Kubernetes<kubernetes-custom-images-private-repos>` for more.
 
 When using this mode, to access Docker images hosted on private registries,
-you can provide the registry authentication details using :ref:`task environment variables <env-vars>`:
+you can provide the registry authentication details using the following methods:
+
+On Kubernetes clusters, you can use task-level Kubernetes config overrides to set the imagePullSecrets field:
+
+.. code-block:: yaml
+
+  resources:
+    image_id: docker:<user>/<your-docker-hub-repo>:<tag>
+
+  config:
+    kubernetes:
+      pod_config:
+        spec:
+          imagePullSecrets:
+            # The name of the secret to access your private registry
+            - name: <secret-name>
+
+
+On other clouds, you can use :ref:`task environment variables <env-vars>`:
 
 .. tab-set::
 
