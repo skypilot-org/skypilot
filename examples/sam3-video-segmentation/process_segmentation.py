@@ -121,8 +121,8 @@ def process_video(model,
             frame_masks = {}
             for i, obj_id in enumerate(processed["object_ids"]):
                 mask = processed["masks"][i].float().cpu().numpy()
-                frame_masks[int(obj_id.item())] = (np.squeeze(mask)
-                                                   > 0).astype(np.float32)
+                frame_masks[int(obj_id.item())] = (np.squeeze(mask) > 0).astype(
+                    np.float32)
             masks_by_frame[frame_idx] = frame_masks
 
     colors = {}
