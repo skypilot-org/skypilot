@@ -1180,7 +1180,7 @@ def test_launch_and_exec_async(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'launch_and_exec_async',
         [
-            f'sky launch -c {name} -y --async',
+            f'sky launch -c {name} --infra {generic_cloud} -y --async',
             # Async exec.
             f'sky exec {name} echo --async',
             # Async exec and cancel immediately.
@@ -1190,6 +1190,11 @@ def test_launch_and_exec_async(generic_cloud: str):
              'sed -E "s/.*run: (sky api cancel .*).*/\\1/") && '
              'echo "Extracted cancel command: $cancel_cmd" && '
              '$cancel_cmd'),
+            # Wait for cluster to be UP before sync exec.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=300),
             # Sync exec must succeed after command end.
             (
                 f's=$(sky exec {name} echo) && echo "$s" && '

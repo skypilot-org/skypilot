@@ -3940,7 +3940,7 @@ def show_gpus(
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
 
-    def _format_slurm_node_info() -> str:
+    def _format_slurm_node_info(slurm_cluster_names: List[str]) -> str:
         node_table = log_utils.create_table([
             'CLUSTER',
             'NODE',
@@ -3950,13 +3950,12 @@ def show_gpus(
             'UTILIZATION',
         ])
 
-        # Get all cluster names
-        slurm_cluster_names = clouds.Slurm.existing_allowed_clusters()
+        request_ids = [(cluster_name,
+                        sdk.slurm_node_info(slurm_cluster_name=cluster_name))
+                       for cluster_name in slurm_cluster_names]
 
-        # Query each cluster
-        for cluster_name in slurm_cluster_names:
-            nodes_info = sdk.stream_and_get(
-                sdk.slurm_node_info(slurm_cluster_name=cluster_name))
+        for cluster_name, request_id in request_ids:
+            nodes_info = sdk.stream_and_get(request_id)
 
             for node_info in nodes_info:
                 node_table.add_row([
@@ -4126,7 +4125,8 @@ def show_gpus(
             yield from slurm_realtime_table.get_string()
             yield '\n'
         if show_node_info:
-            yield _format_slurm_node_info()
+            cluster_names = [cluster for cluster, _ in slurm_realtime_infos]
+            yield _format_slurm_node_info(cluster_names)
 
     def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(

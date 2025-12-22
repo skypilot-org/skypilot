@@ -609,6 +609,7 @@ def get_command_runners(
             job_id=instance_info.tags['job_id'],
             slurm_node=instance_info.tags['node'],
             ssh_proxy_jump=ssh_proxy_jump,
+            enable_interactive_auth=True,
             **credentials) for instance_info in instances
     ]
 
