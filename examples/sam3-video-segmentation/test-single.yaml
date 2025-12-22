@@ -36,4 +36,3 @@ run: |
     python process_segmentation.py "$video" --max-frames 50 || echo "Failed: $video"
   done
   echo "All videos processed!"
-  
