@@ -102,6 +102,7 @@ class CommandRunner:
               target: str,
               *,
               up: bool,
+              should_delete: bool = ...,
               log_path: str = ...,
               stream_logs: bool = ...,
               max_retry: int = ...) -> None:
@@ -218,6 +219,7 @@ class SSHCommandRunner(CommandRunner):
               target: str,
               *,
               up: bool,
+              should_delete: bool = ...,
               log_path: str = ...,
               stream_logs: bool = ...,
               max_retry: int = ...,
@@ -298,6 +300,7 @@ class KubernetesCommandRunner(CommandRunner):
               target: str,
               *,
               up: bool,
+              should_delete: bool = ...,
               log_path: str = ...,
               stream_logs: bool = ...,
               max_retry: int = ...) -> None:
