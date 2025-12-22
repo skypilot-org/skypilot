@@ -2921,12 +2921,14 @@ def clear_cluster_failures(
             return []
 
         # Build the result list before updating
-        cleared_failures = [{
-            'cluster_hash': row.cluster_hash,
-            'failure_mode': row.failure_mode,
-            'failure_reason': row.failure_reason,
-            'cleared_at': current_time  # Will be set in the update
-        } for row in failures_query]
+        cleared_failures = [
+            {
+                'cluster_hash': row.cluster_hash,
+                'failure_mode': row.failure_mode,
+                'failure_reason': row.failure_reason,
+                'cleared_at': current_time  # Will be set in the update
+            } for row in failures_query
+        ]
 
         # Now update them atomically
         update_stmt = sqlalchemy.update(cluster_failures_table).where(
