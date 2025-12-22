@@ -29,6 +29,8 @@ SLURM_SSH_KEY_CACHE_DIR = '~/.sky/generated/slurm_ssh_keys'
 # The global loaded client SSH credentials.
 _global_client_ssh_credentials: Optional[Dict[str, Any]] = None
 
+_SLURM_SSH_KEY_LOCK_TIMEOUT_SECONDS = 20
+
 
 def get_slurm_ssh_config() -> SSHConfig:
     """Get the Slurm SSH config."""
@@ -74,6 +76,7 @@ def set_client_ssh_credentials(credentials: Optional[Dict[str, Any]]) -> None:
         # Running in coroutine - set in context
         ctx.slurm_client_ssh_credentials = credentials
 
+
 def _ssh_key_cache_path(user_hash: str, cluster_name: str) -> str:
     """Get the path to the Slurm SSH key cache file
     for a given user and cluster.
@@ -81,9 +84,11 @@ def _ssh_key_cache_path(user_hash: str, cluster_name: str) -> str:
     cache_dir = os.path.expanduser(SLURM_SSH_KEY_CACHE_DIR)
     return os.path.join(cache_dir, user_hash, cluster_name)
 
+
 def _ssh_key_lock_id(user_hash: str, cluster_name: str) -> str:
     """Get the lock ID for Slurm SSH key operations."""
     return f'slurm_ssh_key_{user_hash}_{cluster_name}'
+
 
 def _write_key_to_file(key_bytes: bytes, key_path: str) -> None:
     """Writes the SSH private key to a file.
@@ -98,8 +103,7 @@ def _write_key_to_file(key_bytes: bytes, key_path: str) -> None:
 
         # Write to temp file first, then atomic rename to avoid race
         # conditions when multiple concurrent requests write the same key.
-        with tempfile.NamedTemporaryFile(mode='wb',
-                                         dir=key_dir,
+        with tempfile.NamedTemporaryFile(mode='wb', dir=key_dir,
                                          delete=False) as tmp_file:
             tmp_file.write(key_bytes)
             tmp_file.flush()
@@ -108,7 +112,7 @@ def _write_key_to_file(key_bytes: bytes, key_path: str) -> None:
         # SSH requires private keys to have restricted permissions
         os.chmod(tmp_path, 0o600)
         os.rename(tmp_path, key_path)
-    except Exception: # pylint: disable=broad-except
+    except Exception:  # pylint: disable=broad-except
         if tmp_path is not None:
             try:
                 os.remove(tmp_path)
@@ -134,7 +138,8 @@ def maybe_recreate_ssh_key_cache(key_path: str) -> None:
     user_hash = os.path.basename(user_cache_dir)
 
     try:
-        with locks.get_lock(_ssh_key_lock_id(user_hash, cluster_name)):
+        with locks.get_lock(_ssh_key_lock_id(user_hash, cluster_name),
+                            timeout=_SLURM_SSH_KEY_LOCK_TIMEOUT_SECONDS):
             # Double-check if the file was created while waiting for the lock.
             if os.path.isfile(expanded_key_path):
                 return
@@ -152,24 +157,44 @@ def maybe_recreate_ssh_key_cache(key_path: str) -> None:
             # client. See get_slurm_ssh_config_dict for more.
             if not os.path.isfile(expanded_key_path):
                 _write_key_to_file(key_bytes, expanded_key_path)
+    except locks.LockTimeout as e:
+        raise RuntimeError(
+            f'Failed to acquire lock for Slurm SSH key cache for cluster '
+            f'{cluster_name} within {_SLURM_SSH_KEY_LOCK_TIMEOUT_SECONDS} '
+            'seconds. This might happen if another process is currently '
+            'updating the key.') from e
     except Exception as e:  # pylint: disable=broad-except
         raise RuntimeError(f'Could not create Slurm SSH key cache file: '
                            f'{common_utils.format_exception(e)}') from e
 
+
 @annotations.lru_cache(scope='request')
-def get_slurm_ssh_config_dict(cluster_name: str) -> Dict[str, Any]:
+def get_slurm_ssh_config_dict(cluster_name: str,
+                              is_read_only: bool = False) -> Dict[str, Any]:
     """Get SSH config dict for a Slurm cluster with credential overlay.
 
     Loads the SSH configuration from ~/.slurm/config for the given cluster.
     If client_ssh_credentials is set, the user and private key from those
     credentials will override the local config values.
+
+    Args:
+        cluster_name: The name of the Slurm cluster.
+        is_read_only: If True, skips user credential enforcement for read-only
+            operations (sinfo, squeue, scontrol). This allows read-only
+            operations to use default admin credentials instead of requiring
+            user credentials that may need manual auth (password, 2FA).
+            For write operations (provisioning, deployment), this MUST be
+            False to enforce user credential requirements.
     """
     ssh_config = get_slurm_ssh_config()
     ssh_config_dict = ssh_config.lookup(cluster_name)
 
-    # Check for credentials in the current execution context.
-    slurm_ssh_credentials = _get_client_ssh_credentials()
+    # For read-only operations, use default credentials.
+    if is_read_only:
+        return ssh_config_dict
 
+    # Apply credential overlay and enforce user credentials.
+    slurm_ssh_credentials = _get_client_ssh_credentials()
     user_hash = common_utils.get_user_hash()
     key_path = _ssh_key_cache_path(user_hash, cluster_name)
     if (slurm_ssh_credentials is not None and
@@ -179,13 +204,19 @@ def get_slurm_ssh_config_dict(cluster_name: str) -> Dict[str, Any]:
 
         key_bytes = base64.b64decode(cred.ssh_private_key_base64)
         try:
-            with locks.get_lock(_ssh_key_lock_id(user_hash, cluster_name)):
+            with locks.get_lock(_ssh_key_lock_id(user_hash, cluster_name),
+                                timeout=_SLURM_SSH_KEY_LOCK_TIMEOUT_SECONDS):
                 global_user_state.set_slurm_ssh_private_key(
                     user_hash, cluster_name, key_bytes.decode('utf-8'))
                 _write_key_to_file(key_bytes, key_path)
+        except locks.LockTimeout as e:
+            raise RuntimeError(
+                f'Failed to acquire lock for Slurm SSH key cache for cluster '
+                f'{cluster_name} within {_SLURM_SSH_KEY_LOCK_TIMEOUT_SECONDS} '
+                'seconds.') from e
         except Exception as e:  # pylint: disable=broad-except
             raise RuntimeError(f'Failed to write key to {key_path}: '
-                                f'{common_utils.format_exception(e)}') from e
+                               f'{common_utils.format_exception(e)}') from e
 
         ssh_config_dict['identityfile'] = [key_path]  # type: ignore[assignment]
     else:
@@ -366,7 +397,8 @@ def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
     in sinfo output. If no default partition is marked, returns None.
     """
     try:
-        ssh_config_dict = get_slurm_ssh_config_dict(cluster_name)
+        ssh_config_dict = get_slurm_ssh_config_dict(cluster_name,
+                                                    is_read_only=True)
     except Exception as e:
         raise ValueError(
             f'Failed to load SSH configuration from {DEFAULT_SLURM_PATH}: '
@@ -456,7 +488,7 @@ def check_instance_fits(
     """
     # Get Slurm node list in the given cluster (region).
     try:
-        ssh_config_dict = get_slurm_ssh_config_dict(cluster)
+        ssh_config_dict = get_slurm_ssh_config_dict(cluster, is_read_only=True)
     except FileNotFoundError:
         return (False, f'Could not query Slurm cluster {cluster} '
                 f'because the Slurm configuration file '
@@ -579,7 +611,8 @@ def _get_slurm_node_info_list(
             f'No Slurm cluster name found in the {DEFAULT_SLURM_PATH} '
             f'configuration.')
     # can raise FileNotFoundError if config file does not exist.
-    slurm_config_dict = get_slurm_ssh_config_dict(slurm_cluster_name)
+    slurm_config_dict = get_slurm_ssh_config_dict(slurm_cluster_name,
+                                                  is_read_only=True)
     logger.debug(f'Slurm config dict: {slurm_config_dict}')
 
     ssh_key = slurm_config_dict['identityfile'][0]

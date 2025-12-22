@@ -95,6 +95,7 @@ class SlurmClient:
         self,
         job_name: Optional[str] = None,
         state_filters: Optional[List[str]] = None,
+        user: Optional[str] = None,
     ) -> List[str]:
         """Query Slurm jobs by state and optional name.
 
@@ -102,11 +103,14 @@ class SlurmClient:
             job_name: Optional job name to filter by.
             state_filters: List of job states to filter by
                 (e.g., ['running', 'pending']). If None, returns all jobs.
+            user: Optional user to filter by. If None, uses the SSH user.
 
         Returns:
             List of job IDs matching the filters.
         """
-        cmd = 'squeue --me -h -o "%i"'
+        cmd = 'squeue -h -o "%i"'
+        user = user if user is not None else self.ssh_user
+        cmd += f' --user {user}'
         if state_filters is not None:
             state_filters_str = ','.join(state_filters)
             cmd += f' --states {state_filters_str}'
