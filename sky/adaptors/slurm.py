@@ -649,15 +649,23 @@ class SlurmClient:
         rc, _, _ = self._run_slurm_cmd(cmd)
         return rc == 0
 
-    def check_homedir_shared_fs(self) -> Optional[str]:
-        """Check the filesystem type of the home directory.
+    def check_dir_shared_fs(self, path: str = '~') -> Optional[str]:
+        """Check the filesystem type of a directory.
+
+        Args:
+            path: The directory path to check. Defaults to '~' (home
+                directory). Shell expansion is supported.
 
         Returns:
             The filesystem type string (e.g., 'nfs', 'ext2/ext3'),
             or None if the check could not be performed.
         """
-        cmd = 'stat -f -c %T ~'
+        cmd = f'stat -f -c %T {path}'
         rc, stdout, _ = self._run_slurm_cmd(cmd)
         if rc != 0:
             return None
         return stdout.strip().lower()
+
+    def check_homedir_shared_fs(self) -> Optional[str]:
+        """Check the filesystem type of the home directory."""
+        return self.check_dir_shared_fs('~')

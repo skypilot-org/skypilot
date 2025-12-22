@@ -1,5 +1,6 @@
 """Slurm instance provisioning."""
 
+import os
 import shlex
 import tempfile
 import threading
@@ -8,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.provision import common
 from sky.provision import constants
@@ -25,7 +27,6 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 PROVISION_SCRIPTS_DIRECTORY_NAME = '.sky_provision'
-PROVISION_SCRIPTS_DIRECTORY = f'~/{PROVISION_SCRIPTS_DIRECTORY_NAME}'
 
 
 def _sbatch_log_path(job_id: str) -> str:
@@ -98,25 +99,49 @@ def _wait_for_job_nodes(
                        f'{timeout} seconds. Last state: {last_state}')
 
 
-def _sky_cluster_home_dir(home_dir: str, cluster_name_on_cloud: str) -> str:
+def _sky_cluster_home_dir(home_dir: str,
+                          cluster_name_on_cloud: str,
+                          workdir: Optional[str] = None) -> str:
     """Returns the SkyPilot cluster's home directory path on the Slurm cluster.
 
     This path is assumed to be on a shared NFS mount accessible by all nodes.
+    If workdir is specified via config, it overrides the default home_dir.
     """
-    return f'{home_dir}/.sky_clusters/{cluster_name_on_cloud}'
+    base = workdir if workdir is not None else home_dir
+    return f'{base}/.sky_clusters/{cluster_name_on_cloud}'
 
 
-def _sbatch_provision_script_path(filename: str) -> str:
+def _resolve_remote_path(runner: 'command_runner.SSHCommandRunner',
+                         path: str) -> str:
+    """Resolve a path with shell variable expansion on the remote host.
+
+    Expands shell variables like $USER or $HOME by running echo on the
+    remote side. Returns the original path if expansion fails.
+    """
+    rc, stdout, _ = runner.run(f'echo {path}',
+                               require_outputs=True,
+                               stream_logs=False)
+    if rc == 0 and stdout.strip():
+        return stdout.strip()
+    return path
+
+
+def _sbatch_provision_script_path(workdir: Optional[str],
+                                  cluster_name_on_cloud: str) -> str:
     """Returns the path to the sbatch provision script on the login node."""
     # Put sbatch script in $HOME instead of /tmp as there can be
     # multiple login nodes, and different SSH connections
     # can land on different login nodes.
-    return f'{PROVISION_SCRIPTS_DIRECTORY}/{filename}'
+    wd = workdir if workdir is not None else '~'
+    return os.path.join(wd, PROVISION_SCRIPTS_DIRECTORY_NAME,
+                        f'{cluster_name_on_cloud}.sh')
 
 
-def _skypilot_runtime_dir(cluster_name_on_cloud: str) -> str:
+def _skypilot_runtime_dir(tmpdir: Optional[str],
+                          cluster_name_on_cloud: str) -> str:
     """Returns the SkyPilot runtime directory path on the Slurm cluster."""
-    return f'/tmp/{cluster_name_on_cloud}'
+    tmp = tmpdir if tmpdir is not None else '/tmp'
+    return os.path.join(tmp, cluster_name_on_cloud)
 
 
 def _enroot_container_name_global_scope(cluster_name_on_cloud: str) -> str:
@@ -274,6 +299,14 @@ def _create_virtual_instance(
             rich_utils.force_update_status(status_msg)
             last_status_msg = status_msg
 
+    workdir = skypilot_config.get_effective_region_config(cloud='slurm',
+                                                          region=region,
+                                                          keys=('workdir',),
+                                                          default_value=None)
+    tmpdir = skypilot_config.get_effective_region_config(cloud='slurm',
+                                                         region=region,
+                                                         keys=('tmpdir',),
+                                                         default_value=None)
     if existing_jobs:
         assert len(existing_jobs) == 1, (
             f'Multiple jobs found with name {cluster_name_on_cloud}: '
@@ -287,6 +320,10 @@ def _create_virtual_instance(
         _wait_for_job_nodes(client, job_id, provision_timeout, partition,
                             _on_pending)
         nodes, _ = client.get_job_nodes(job_id)
+        # Reset spinner since nodes are now allocated
+        rich_utils.force_update_status(
+            ux_utils.spinner_message('Launching',
+                                     cluster_name=cluster_name))
         return common.ProvisionRecord(provider_name='slurm',
                                       region=region,
                                       zone=partition,
@@ -325,12 +362,24 @@ def _create_virtual_instance(
         enable_interactive_auth=True,
         disable_identities_only=not identities_only,
     )
-
     remote_home_dir = login_node_runner.get_remote_home_dir()
 
-    skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
+    # Resolve shell variables (e.g. $USER) in workdir/tmpdir on the remote.
+    if workdir is not None:
+        workdir = _resolve_remote_path(login_node_runner, workdir)
+    if tmpdir is not None:
+        tmpdir = _resolve_remote_path(login_node_runner, tmpdir)
+    if workdir is not None or tmpdir is not None:
+        logger.debug(f'Resolved workdir: {workdir}, tmpdir: {tmpdir}')
+
+    provision_script_path = _sbatch_provision_script_path(
+        workdir, cluster_name_on_cloud)
+    provision_scripts_dir = os.path.dirname(provision_script_path)
+
+    skypilot_runtime_dir = _skypilot_runtime_dir(tmpdir, cluster_name_on_cloud)
     sky_cluster_home_dir = _sky_cluster_home_dir(remote_home_dir,
-                                                 cluster_name_on_cloud)
+                                                 cluster_name_on_cloud,
+                                                 workdir=workdir)
     ready_signal = f'{sky_cluster_home_dir}/.sky_sbatch_ready'
     slurm_marker_file = (
         f'{sky_cluster_home_dir}/{slurm_utils.SLURM_MARKER_FILE}')
@@ -500,7 +549,7 @@ touch {sky_cluster_home_dir}/.hushlogin
     # fmt: on
     # pylint: enable=line-too-long
 
-    cmd = f'mkdir -p {PROVISION_SCRIPTS_DIRECTORY}'
+    cmd = f'mkdir -p {provision_scripts_dir}'
     rc, stdout, stderr = login_node_runner.run(cmd,
                                                require_outputs=True,
                                                stream_logs=False)
@@ -514,7 +563,7 @@ touch {sky_cluster_home_dir}/.hushlogin
         f.write(provision_script)
         f.flush()
         src_path = f.name
-        tgt_path = _sbatch_provision_script_path(f'{cluster_name_on_cloud}.sh')
+        tgt_path = provision_script_path
         login_node_runner.rsync(src_path, tgt_path, up=True, stream_logs=False)
 
     job_id = client.submit_job(partition, cluster_name_on_cloud, tgt_path)
@@ -528,6 +577,9 @@ touch {sky_cluster_home_dir}/.hushlogin
     _wait_for_job_nodes(client, job_id, provision_timeout, partition,
                         _on_pending)
     nodes, _ = client.get_job_nodes(job_id)
+    # Reset spinner since nodes are now allocated
+    rich_utils.force_update_status(
+        ux_utils.spinner_message('Launching', cluster_name=cluster_name))
     created_instance_ids = [
         slurm_utils.instance_id(job_id, node) for node in nodes
     ]
@@ -935,8 +987,25 @@ def get_command_runners(
     )
     remote_home_dir = login_node_runner.get_remote_home_dir()
 
+    slurm_cluster_name = provider_config.get('cluster')
+    workdir = skypilot_config.get_effective_region_config(
+        cloud='slurm',
+        region=slurm_cluster_name,
+        keys=('workdir',),
+        default_value=None)
+    tmpdir = skypilot_config.get_effective_region_config(
+        cloud='slurm',
+        region=slurm_cluster_name,
+        keys=('tmpdir',),
+        default_value=None)
+    if workdir is not None:
+        workdir = _resolve_remote_path(login_node_runner, workdir)
+    if tmpdir is not None:
+        tmpdir = _resolve_remote_path(login_node_runner, tmpdir)
+
     sky_cluster_home_dir = _sky_cluster_home_dir(remote_home_dir,
-                                                 cluster_name_on_cloud)
+                                                 cluster_name_on_cloud,
+                                                 workdir=workdir)
     container_marker = (
         f'{sky_cluster_home_dir}/{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
     rc, stdout, stderr = login_node_runner.run(f'test -f {container_marker}',
@@ -959,7 +1028,8 @@ def get_command_runners(
             login_node_ssh_user,
             login_node_ssh_private_key,
             sky_dir=sky_cluster_home_dir,
-            skypilot_runtime_dir=_skypilot_runtime_dir(cluster_name_on_cloud),
+            skypilot_runtime_dir=_skypilot_runtime_dir(tmpdir,
+                                                       cluster_name_on_cloud),
             job_id=instance_info.tags['job_id'],
             slurm_node=instance_info.tags['node'],
             ssh_proxy_jump=login_node_ssh_proxy_jump,

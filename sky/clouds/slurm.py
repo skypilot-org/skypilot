@@ -598,22 +598,37 @@ class Slurm(clouds.Cloud):
                 )
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
-                fs_type = client.check_homedir_shared_fs()
+                # Check if the working directory is on a shared filesystem.
+                # If workdir is configured, check that path; otherwise
+                # fall back to checking the home directory.
+                workdir = skypilot_config.get_effective_region_config(
+                    cloud='slurm',
+                    region=cluster,
+                    keys=('workdir',),
+                    default_value=None)
+                check_path = workdir if workdir is not None else '~'
+                fs_type = client.check_dir_shared_fs(check_path)
                 if fs_type is not None and fs_type not in cls._SHARED_FS_TYPES:
+                    path_label = (f'workdir ({workdir})' if workdir is not None
+                                  else 'Home directory (~)')
+                    hint = (' Set slurm.cluster_configs.'
+                            f'{cluster}.workdir in '
+                            '~/.sky/config.yaml to a shared '
+                            'filesystem path.')
                     ctx2text[cluster] = (
                         f'{colorama.Fore.GREEN}enabled.'
                         f'{colorama.Style.RESET_ALL} '
                         f'{colorama.Fore.LIGHTYELLOW_EX}'
-                        'Warning: Home directory (~) filesystem '
+                        f'Warning: {path_label} filesystem '
                         f'type is {fs_type!r}, not a shared '
-                        'filesystem. SkyPilot requires ~ to be '
-                        'on a shared filesystem (e.g., NFS) '
-                        'visible to all nodes. Customizing the '
-                        'home directory will be supported in a '
-                        'future release.'
+                        'filesystem. SkyPilot requires the working '
+                        'directory to be on a shared filesystem '
+                        '(e.g., NFS) visible to all nodes.'
+                        f'{hint}'
                         f'{colorama.Style.RESET_ALL}')
                 else:
-                    ctx2text[cluster] = 'enabled'
+                    ctx2text[cluster] = (f'{colorama.Fore.GREEN}enabled'
+                                         f'{colorama.Style.RESET_ALL}')
                 success = True
             except KeyError as e:
                 key = e.args[0]
