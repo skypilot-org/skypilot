@@ -2,6 +2,7 @@
 """
 import asyncio
 import io
+import json
 import os
 import pathlib
 import resource
@@ -46,8 +47,11 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import psutil
+
+    from sky.schemas.generated import jobsv1_pb2
 else:
     psutil = adaptors_common.LazyImport('psutil')
+    jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
 
 logger = sky_logging.init_logger('sky.jobs.controller')
 
@@ -236,6 +240,64 @@ class JobController:
             await context_utils.to_thread(managed_job_utils.terminate_cluster,
                                           cluster_name)
 
+    async def _get_job_exit_codes(
+        self, job_id: Optional[int],
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
+    ) -> Optional[list]:
+        """Retrieve exit codes from the remote cluster.
+
+        Args:
+            job_id: The job ID on the remote cluster.
+            handle: The handle to the cluster.
+
+        Returns:
+            List of exit codes, or None if not available.
+        """
+        try:
+            use_legacy = not handle.is_grpc_enabled_with_flag
+
+            if not use_legacy:
+                try:
+                    request = jobsv1_pb2.GetJobExitCodesRequest()
+                    if job_id is not None:
+                        request.job_id = job_id
+
+                    response = await context_utils.to_thread(
+                        backend_utils.invoke_skylet_with_retries,
+                        lambda: cloud_vm_ray_backend.SkyletClient(
+                            handle.get_grpc_channel()).get_job_exit_codes(
+                                request))
+
+                    exit_codes = list(
+                        response.exit_codes) if response.exit_codes else None
+                    return exit_codes
+                except exceptions.SkyletMethodNotImplementedError:
+                    # Fall back to legacy if RPC not implemented
+                    use_legacy = True
+
+            if use_legacy:
+                # Use existing SSH-based code generation
+                code = job_lib.JobLibCodeGen.get_job_exit_codes(job_id)
+
+                returncode, stdout, stderr = await context_utils.to_thread(
+                    self._backend.run_on_head,
+                    handle,
+                    code,
+                    stream_logs=False,
+                    require_outputs=True,
+                    separate_stderr=True)
+
+                if returncode != 0:
+                    logger.debug(f'Failed to retrieve exit codes: {stderr}')
+                    return None
+
+                exit_codes = json.loads(stdout.strip())
+                return exit_codes
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to retrieve job exit codes: {e}')
+            return None
+        return None
+
     async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
 
@@ -352,7 +414,9 @@ class JobController:
                 resources_str=resources_str,
                 specs={
                     'max_restarts_on_errors':
-                        self._strategy_executor.max_restarts_on_errors
+                        self._strategy_executor.max_restarts_on_errors,
+                    'recover_on_exit_codes':
+                        self._strategy_executor.recover_on_exit_codes
                 },
                 callback_func=callback_func,
                 full_resources_json=full_resources_json)
@@ -376,9 +440,8 @@ class JobController:
             launch_time = time.time() - launch_start
             logger.info(f'Cluster launch completed in {launch_time:.2f}s')
             assert remote_job_submitted_at is not None, remote_job_submitted_at
-        if self._pool is None:
-            job_id_on_pool_cluster = None
-        else:
+        job_id_on_pool_cluster: Optional[int] = None
+        if self._pool:
             # Update the cluster name when using pool.
             cluster_name, job_id_on_pool_cluster = (
                 await
@@ -645,18 +708,37 @@ class JobController:
                             'can be caused by the job taking too much memory '
                             'or other resources. Try adding more memory, CPU, '
                             f'or disk in your job definition. {failure_reason}')
+
+                    # Retrieve exit codes from the failed job
+                    exit_codes = await self._get_job_exit_codes(
+                        job_id_on_pool_cluster, handle)
+
                     should_restart_on_failure = (
-                        self._strategy_executor.should_restart_on_failure())
+                        self._strategy_executor.should_restart_on_failure(
+                            exit_codes=exit_codes))
                     if should_restart_on_failure:
                         max_restarts = (
                             self._strategy_executor.max_restarts_on_errors)
-                        logger.info(
-                            f'User program crashed '
-                            f'({managed_job_status.value}). '
-                            f'Retry the job as max_restarts_on_errors is '
-                            f'set to {max_restarts}. '
+                        exit_code_msg = (
+                            '(Retry the job as '
+                            f'max_restarts_on_errors is set to {max_restarts}. '
                             f'[{self._strategy_executor.restart_cnt_on_failure}'
-                            f'/{max_restarts}]')
+                            f'/{max_restarts}])')
+                        if (exit_codes and
+                                self._strategy_executor.recover_on_exit_codes):
+                            recover_codes = (
+                                self._strategy_executor.recover_on_exit_codes)
+                            matching_codes = [
+                                c for c in exit_codes if c in recover_codes
+                            ]
+                            if matching_codes:
+                                exit_code_msg = (
+                                    f'(Exit code(s) {matching_codes} matched '
+                                    'recover_on_exit_codes '
+                                    f'[{recover_codes}])')
+                        logger.info(
+                            'User program crashed '
+                            f'({managed_job_status.value}). {exit_code_msg}')
                     else:
                         logger.info(
                             f'Task {task_id} failed and will not be retried')
