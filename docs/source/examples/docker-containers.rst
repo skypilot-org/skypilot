@@ -116,32 +116,7 @@ Private registries
     These instructions do not apply if you use SkyPilot to launch on Kubernetes clusters. Instead, see :ref:`Using Images from Private Repositories in Kubernetes<kubernetes-custom-images-private-repos>` for more.
 
 When using this mode, to access Docker images hosted on private registries,
-you can provide the registry authentication details using the following methods:
-
-
-On Kubernetes
-~~~~~~~~~~~~~
-
-On Kubernetes clusters, you can use task-level Kubernetes config overrides to set the imagePullSecrets field:
-
-.. code-block:: yaml
-
-  resources:
-    image_id: docker:<user>/<your-docker-hub-repo>:<tag>
-
-  config:
-    kubernetes:
-      pod_config:
-        spec:
-          imagePullSecrets:
-            # The name of the secret to access your private registry
-            - name: <secret-name>
-
-
-On other clouds
-~~~~~~~~~~~~~~~
-
-You can use :ref:`task environment variables <env-vars>`:
+you can use :ref:`task environment variables <env-vars>`:
 
 .. tab-set::
 
@@ -200,10 +175,10 @@ You can use :ref:`task environment variables <env-vars>`:
 
             **Important**: Ensure that the EC2 instance's IAM role has the necessary ECR permissions (``AmazonEC2ContainerRegistryReadOnly`` or appropriate custom policies).
 
-    .. tab-item:: GCP GCR
+    .. tab-item:: GCP Artifact Registry
         :sync: gcp-artifact-registry-tab
 
-        We support private GCP Artifact Registry (GCR) with a service account key.
+        We support private GCP Artifact Registry with a service account key.
         See `GCP Artifact Registry authentication <https://cloud.google.com/artifact-registry/docs/docker/authentication?authuser=1#json-key>`_. Note that the ``SKYPILOT_DOCKER_USERNAME`` needs to be set to ``_json_key``.
 
 
@@ -226,7 +201,7 @@ You can use :ref:`task environment variables <env-vars>`:
 
         .. note::
 
-            If your cluster is on GCP, SkyPilot will automatically use the IAM permissions of the instance to authenticate with GCR, if the ``SKYPILOT_DOCKER_USERNAME`` and ``SKYPILOT_DOCKER_PASSWORD`` are set to empty strings:
+            If your cluster is on GCP, SkyPilot will automatically use the IAM permissions of the instance to authenticate with Artifact Registry, if the ``SKYPILOT_DOCKER_USERNAME`` and ``SKYPILOT_DOCKER_PASSWORD`` are set to empty strings:
 
             .. code-block:: yaml
 
