@@ -13,6 +13,7 @@ from sky import skypilot_config
 
 
 @pytest.mark.no_vast  # Requires AWS
+@pytest.mark.no_novita  # Requires AWS
 @pytest.mark.no_shadeform  # Requires AWS
 @pytest.mark.no_fluidstack  # Requires AWS to be enabled
 @pytest.mark.no_nebius  # Requires AWS to be enabled
