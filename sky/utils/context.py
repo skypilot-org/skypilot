@@ -17,6 +17,8 @@ from typing_extensions import ParamSpec
 if TYPE_CHECKING:
     from sky.skypilot_config import ConfigContext
 
+_PROCESS_GLOBAL_VARS = {}
+
 
 class SkyPilotContext(object):
     """SkyPilot typed context vars for threads and coroutines.
@@ -66,6 +68,8 @@ class SkyPilotContext(object):
         self.env_overrides = {}
         self.config_context = None
         self.slurm_client_ssh_credentials = None
+        self.request_context = None
+        self.vars = {}
 
     def cancel(self):
         """Cancel the context."""
@@ -114,6 +118,12 @@ class SkyPilotContext(object):
             self._log_file_handle.close()
             self._log_file_handle = None
 
+    def set_var(self, key: str, value: Any):
+        self.vars[key] = value
+
+    def get_var(self, key: str) -> Optional[Any]:
+        return self.vars.get(key)
+
     def __enter__(self):
         return self
 
@@ -152,6 +162,28 @@ def get() -> Optional[SkyPilotContext]:
     polling the cancellation event if it is not.
     """
     return _CONTEXT.get()
+
+
+def set_context_var(key: str, value: Any):
+    ctx = get()
+    if ctx is not None:
+        # Set the var in context
+        ctx.set_var(key, value)
+    else:
+        # Fallback to process-isolated assumption, where we thought
+        # modifying process-scope vars is safe.
+        _PROCESS_GLOBAL_VARS[key] = value
+
+
+def get_context_var(key: str) -> Any:
+    ctx = get()
+    if ctx is not None:
+        # Use `in` to check for key existence to distinguish
+        # "key not found" from "key's value is None".
+        if key in ctx.vars:
+            return ctx.get_var(key)
+    # Fallback to the variable set in process-scope
+    return _PROCESS_GLOBAL_VARS.get(key)
 
 
 class ContextualEnviron(MutableMapping[str, str]):
