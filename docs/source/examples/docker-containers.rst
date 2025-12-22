@@ -118,6 +118,10 @@ Private registries
 When using this mode, to access Docker images hosted on private registries,
 you can provide the registry authentication details using the following methods:
 
+
+On Kubernetes
+~~~~~~~~~~~~~
+
 On Kubernetes clusters, you can use task-level Kubernetes config overrides to set the imagePullSecrets field:
 
 .. code-block:: yaml
@@ -134,7 +138,10 @@ On Kubernetes clusters, you can use task-level Kubernetes config overrides to se
             - name: <secret-name>
 
 
-On other clouds, you can use :ref:`task environment variables <env-vars>`:
+On other clouds
+~~~~~~~~~~~~~~~
+
+You can use :ref:`task environment variables <env-vars>`:
 
 .. tab-set::
 
