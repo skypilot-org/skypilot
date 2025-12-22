@@ -230,7 +230,8 @@ def pytest_addoption(parser):
         '--plugin-yaml',
         type=str,
         default=None,
-        help='Plugin YAML file (configured in Buildkite pipeline; has no effect when running locally)'
+        help=('Plugin YAML file (configured in Buildkite pipeline; '
+              'has no effect when running locally)'),
     )
     parser.addoption(
         '--backend-test-cluster',
