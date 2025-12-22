@@ -1,6 +1,6 @@
 # Scaling Video Segmentation with SAM3 and SkyPilot Pools
 
-This example demonstrates how to use [SAM3 (Segment Anything 3)](https://huggingface.co/facebook/sam3) with SkyPilot's pools feature to process large volumes of soccer videos in parallel.
+This example demonstrates how to use [SAM3 (Segment Anything 3)](https://huggingface.co/facebook/sam3) with SkyPilot's pools feature to process large volumes of videos in parallel.
 
 ## Use case
 
@@ -9,7 +9,7 @@ SAM3 is Meta's unified foundation model for promptable segmentation in images an
 - Handle open-vocabulary concepts specified by text phrases
 - Process videos with state-of-the-art accuracy
 
-This example shows how to scale SAM3 video segmentation across multiple GPU workers using SkyPilot pools to process a soccer video dataset.
+This example shows how to scale SAM3 video segmentation across multiple GPU workers using SkyPilot pools to process a [soccer video dataset](https://www.kaggle.com/datasets/shreyamainkar/football-soccer-videos-dataset).
 
 ## Prerequisites
 
@@ -60,14 +60,29 @@ View the dashboard:
 sky dashboard
 ```
 
+The dashboard shows pool workers and their status:
+
+![SkyPilot Dashboard Pool Workers](https://raw.githubusercontent.com/skypilot-org/skypilot/master/examples/sam3-video-segmentation/images/sky_dashboard_pool_workers.png)
+
 Check job queue:
 ```bash
 sky jobs queue
 ```
 
+The jobs queue shows completed, running, and pending jobs:
+
+![SkyPilot Dashboard Jobs Queue](https://raw.githubusercontent.com/skypilot-org/skypilot/master/examples/sam3-video-segmentation/images/sky_dashboard_jobs_queue.png)
+
 View logs:
 ```bash
 sky jobs logs <job-id>
+...
+(sam3-segmentation-job, pid=3213) Model loaded!
+(sam3-segmentation-job, pid=3213) Processing: 87
+(sam3-segmentation-job, pid=3213)   50 frames (sampled at 1 fps from 25.0 fps)
+(sam3-segmentation-job, pid=3213)   0%|          | 0/50 [00:00<?, ?it/s]kernels library is not installed. NMS post-processing, hole filling, and sprinkle removal will be skipped. Install it with `pip install kernels` for better mask quality.
+100%|██████████| 50/50 [00:48<00:00,  1.03it/s]█▊| 49/50 [00:46<00:01,  1.09s/it]
+...
 ```
 
 ### Step 5: Scale as needed
@@ -91,14 +106,14 @@ sky jobs pool down sam3-pool
 
 The pool YAML defines the worker infrastructure:
 - **Workers**: Number of GPU instances
-- **Resources**: H100 GPU per worker
+- **Resources**: L40S GPU per worker
 - **File mounts**: Kaggle credentials and S3 output bucket
 - **Setup**: Runs once per worker to install dependencies and download the dataset
 
 ### Job configuration (`job.yaml`)
 
 The job YAML defines the workload:
-- **Resources**: Must match pool resources (H100 GPU)
+- **Resources**: Must match pool resources (L40S GPU)
 - **Run**: Processes assigned chunk of videos on each job
 
 ### Work distribution
@@ -122,14 +137,18 @@ The `process_segmentation.py` script:
 
 Results are synced to the S3 bucket specified in `file_mounts`:
 ```
-s3://my-skypilot-bucket/segmentation_results/
-├── video_001/
-│   ├── video_001_segmented.mp4
-│   └── video_001_metadata.json
-├── video_002/
-│   ├── video_002_segmented.mp4
-│   └── video_002_metadata.json
-└── ...
+$ aws s3 ls s3://my-skypilot-bucket/segmentation_results/ --recursive
+2025-12-22 08:53:37          0 segmentation_results/
+2025-12-22 08:54:22          0 segmentation_results/1/
+2025-12-22 08:54:23        231 segmentation_results/1/1_metadata.json
+2025-12-22 08:54:23    3041504 segmentation_results/1/1_segmented.mp4
+2025-12-22 08:55:13          0 segmentation_results/10/
+2025-12-22 08:55:13        234 segmentation_results/10/10_metadata.json
+2025-12-22 08:55:13    4291581 segmentation_results/10/10_segmented.mp4
+2025-12-22 08:56:12          0 segmentation_results/100/
+2025-12-22 08:56:13        237 segmentation_results/100/100_metadata.json
+2025-12-22 08:56:13    4232746 segmentation_results/100/100_segmented.mp4
+...
 ```
 
 Each metadata JSON contains:
@@ -158,13 +177,6 @@ By default, all sampled frames are processed. To limit this (useful for long vid
 python process_segmentation.py video.mp4 --max-frames 200
 ```
 
-### Custom output directory
-
-By default, outputs are saved to `/outputs/segmentation_results`. To change this:
-```bash
-python process_segmentation.py video.mp4 --output-dir ./my-results
-```
-
 ### Change text prompts
 
 Edit the `PROMPTS` list in `process_segmentation.py`:
@@ -177,7 +189,7 @@ PROMPTS = ["person", "ball", "goal", "referee"]
 Update `pool.yaml` and `job.yaml` to use a different accelerator:
 ```yaml
 resources:
-  accelerators: A100:1
+  accelerators: H100:1
 ```
 
 ## References

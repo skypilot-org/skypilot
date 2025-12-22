@@ -1,5 +1,5 @@
 resources:
-  accelerators: H100:1
+  accelerators: L40S:1
 
 file_mounts:
   ~/.kaggle/kaggle.json: ~/.kaggle/kaggle.json
@@ -33,6 +33,6 @@ run: |
   # Process all videos on a single node
   for video in /outputs/datasets/soccer-videos/*.mp4; do
     echo "Processing: $video"
-    python process_segmentation.py "$video" || echo "Failed: $video"
+    python process_segmentation.py "$video" --max-frames 50 || echo "Failed: $video"
   done
   echo "All videos processed!"

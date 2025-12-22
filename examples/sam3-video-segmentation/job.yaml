@@ -1,7 +1,7 @@
 name: sam3-segmentation-job
 
 resources:
-  accelerators: H100:1
+  accelerators: L40S:1
 
 secrets:
   HF_TOKEN: null
@@ -35,7 +35,7 @@ run: |
   for ((i=START_IDX; i<END_IDX; i++)); do
     video="${VIDEOS[$i]}"
     echo "Processing: $video"
-    python process_segmentation.py "$video" || echo "Failed: $video"
+    python process_segmentation.py "$video" --max-frames 50 || echo "Failed: $video"
   done
 
   echo "Job complete! Results saved to S3 bucket."

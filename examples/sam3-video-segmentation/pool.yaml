@@ -2,7 +2,7 @@ pool:
   workers: 3
 
 resources:
-  accelerators: H100:1
+  accelerators: L40S:1
 
 file_mounts:
   ~/.kaggle/kaggle.json: ~/.kaggle/kaggle.json
