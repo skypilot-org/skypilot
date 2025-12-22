@@ -167,7 +167,9 @@ job_events_table = sqlalchemy.Table(
     sqlalchemy.Column('new_status', sqlalchemy.Text),
     sqlalchemy.Column('code', sqlalchemy.Text),
     sqlalchemy.Column('reason', sqlalchemy.Text),
-    sqlalchemy.Column('timestamp', sqlalchemy.DateTime, index=True),
+    sqlalchemy.Column('timestamp',
+                      sqlalchemy.DateTime(timezone=True),
+                      index=True),
 )
 
 
