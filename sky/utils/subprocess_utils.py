@@ -22,6 +22,7 @@ from sky.adaptors import common as adaptors_common
 from sky.skylet import log_lib
 from sky.skylet import subprocess_daemon
 from sky.utils import common_utils
+from sky.utils import context
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -136,8 +137,13 @@ def run_in_parallel(func: Callable,
     processes = (num_threads
                  if num_threads is not None else get_parallel_threads())
 
+    # Wrap func to propagate the current SkyPilotContext to worker threads.
+    # This ensures thread workers can access context variables like
+    # slurm_client_ssh_credentials.
+    contextual_func = context.contextual(func)
+
     with pool.ThreadPool(processes=processes) as p:
-        ordered_iterators = p.imap(func, args)
+        ordered_iterators = p.imap(contextual_func, args)
         return list(ordered_iterators)
 
 

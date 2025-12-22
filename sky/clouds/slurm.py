@@ -1,5 +1,6 @@
 """Slurm."""
 
+import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
@@ -338,8 +339,7 @@ class Slurm(clouds.Cloud):
             partition = partitions[0]
 
         # cluster is our target slurmctld host.
-        ssh_config = slurm_utils.get_slurm_ssh_config()
-        ssh_config_dict = ssh_config.lookup(cluster)
+        ssh_config_dict = slurm_utils.get_slurm_ssh_config_dict(cluster)
 
         resources = resources.assert_launchable()
         acc_dict = self.get_accelerators_from_instance_type(
@@ -466,9 +466,8 @@ class Slurm(clouds.Cloud):
     def _check_compute_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to the Slurm cluster."""
-        try:
-            ssh_config = slurm_utils.get_slurm_ssh_config()
-        except FileNotFoundError:
+        if not os.path.exists(os.path.expanduser(
+                slurm_utils.DEFAULT_SLURM_PATH)):
             return (
                 False,
                 f'Slurm configuration file {slurm_utils.DEFAULT_SLURM_PATH} '
@@ -476,10 +475,6 @@ class Slurm(clouds.Cloud):
                 f'{cls._INDENT_PREFIX}For more info: '
                 'https://docs.skypilot.co/en/latest/getting-started/'
                 'installation.html#slurm-installation')
-        except Exception as e:  # pylint: disable=broad-except
-            return (False, 'Failed to load SSH configuration from '
-                    f'{slurm_utils.DEFAULT_SLURM_PATH}: '
-                    f'{common_utils.format_exception(e)}.')
         existing_allowed_clusters = cls.existing_allowed_clusters()
 
         if not existing_allowed_clusters:
@@ -490,9 +485,9 @@ class Slurm(clouds.Cloud):
         ctx2text = {}
         success = False
         for cluster in existing_allowed_clusters:
-            # Retrieve the config options for a given SlurmctldHost name alias.
-            ssh_config_dict = ssh_config.lookup(cluster)
             try:
+                # Retrieve the config options for a given SlurmctldHost name.
+                ssh_config_dict = slurm_utils.get_slurm_ssh_config_dict(cluster)
                 client = slurm.SlurmClient(
                     ssh_config_dict['hostname'],
                     int(ssh_config_dict.get('port', 22)),
@@ -502,7 +497,7 @@ class Slurm(clouds.Cloud):
                     ssh_proxy_jump=ssh_config_dict.get('proxyjump', None))
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
-                ctx2text[cluster] = 'enabled'
+                ctx2text[cluster] = f'enabled (user: {ssh_config_dict["user"]})'
                 success = True
             except KeyError as e:
                 key = e.args[0]
