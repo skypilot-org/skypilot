@@ -882,9 +882,74 @@ function JobDetailsContent({
         </div>
       </div>
 
-      {/* Entrypoint section */}
+      {/* Custom Links section - full width row */}
+      <div className="col-span-2">
+        <div className="text-gray-600 font-medium text-base">Custom Links</div>
+        <div className="text-base mt-1">
+          {links && Object.keys(links).length > 0 ? (
+            <div className="flex flex-wrap gap-4">
+              {Object.entries(links).map(([label, url]) => {
+                // Normalize URL - add https:// if no protocol specified
+                const normalizedUrl =
+                  url.startsWith('http://') || url.startsWith('https://')
+                    ? url
+                    : `https://${url}`;
+
+                // Check if URL points to an image
+                const imageExtensions = [
+                  '.png',
+                  '.jpg',
+                  '.jpeg',
+                  '.gif',
+                  '.webp',
+                  '.svg',
+                  '.bmp',
+                ];
+                const isImage = imageExtensions.some((ext) =>
+                  url.toLowerCase().includes(ext)
+                );
+
+                return (
+                  <div key={label} className="flex flex-col">
+                    <a
+                      href={normalizedUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800 hover:underline"
+                    >
+                      {label}
+                    </a>
+                    {isImage && (
+                      <a
+                        href={normalizedUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2"
+                      >
+                        <img
+                          src={normalizedUrl}
+                          alt={label}
+                          className="max-w-full max-h-48 rounded-md border border-gray-200 shadow-sm hover:shadow-md transition-shadow"
+                          onError={(e) => {
+                            // Hide the image if it fails to load
+                            e.target.style.display = 'none';
+                          }}
+                        />
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <span className="text-gray-400">-</span>
+          )}
+        </div>
+      </div>
+
+      {/* Entrypoint section - full width row */}
       {(jobData.entrypoint || jobData.dag_yaml) && (
-        <div>
+        <div className="col-span-2">
           <div className="flex items-center">
             <div className="text-gray-600 font-medium text-base">
               Entrypoint
@@ -1012,71 +1077,6 @@ function JobDetailsContent({
           </div>
         </div>
       )}
-
-      {/* Links section */}
-      <div>
-        <div className="text-gray-600 font-medium text-base">Links</div>
-        <div className="text-base mt-1">
-          {links && Object.keys(links).length > 0 ? (
-            <div className="space-y-3">
-              {Object.entries(links).map(([label, url]) => {
-                // Normalize URL - add https:// if no protocol specified
-                const normalizedUrl =
-                  url.startsWith('http://') || url.startsWith('https://')
-                    ? url
-                    : `https://${url}`;
-
-                // Check if URL points to an image
-                const imageExtensions = [
-                  '.png',
-                  '.jpg',
-                  '.jpeg',
-                  '.gif',
-                  '.webp',
-                  '.svg',
-                  '.bmp',
-                ];
-                const isImage = imageExtensions.some((ext) =>
-                  url.toLowerCase().includes(ext)
-                );
-
-                return (
-                  <div key={label} className="flex flex-col">
-                    <a
-                      href={normalizedUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-800 hover:underline"
-                    >
-                      {label}
-                    </a>
-                    {isImage && (
-                      <a
-                        href={normalizedUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-2"
-                      >
-                        <img
-                          src={normalizedUrl}
-                          alt={label}
-                          className="max-w-full max-h-48 rounded-md border border-gray-200 shadow-sm hover:shadow-md transition-shadow"
-                          onError={(e) => {
-                            // Hide the image if it fails to load
-                            e.target.style.display = 'none';
-                          }}
-                        />
-                      </a>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <span className="text-gray-400">-</span>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

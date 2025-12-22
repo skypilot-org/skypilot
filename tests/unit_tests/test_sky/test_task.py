@@ -1372,3 +1372,25 @@ def test_links_roundtrip():
     new_config = task_obj.to_yaml_config()
 
     assert new_config['links'] == original_links
+
+
+def test_task_links_update():
+    """Test that links can be updated/merged on a task."""
+    task_obj = task.Task(run='echo hello',
+                         links={'Original': 'https://original.com'})
+
+    # Add new links
+    task_obj.links.update({
+        'New1': 'https://new1.com',
+        'New2': 'https://new2.com'
+    })
+
+    assert task_obj.links == {
+        'Original': 'https://original.com',
+        'New1': 'https://new1.com',
+        'New2': 'https://new2.com'
+    }
+
+    # Override existing link
+    task_obj.links.update({'Original': 'https://updated.com'})
+    assert task_obj.links['Original'] == 'https://updated.com'
