@@ -5,11 +5,12 @@
 
 # First, display the full sky jobs queue -a output
 echo "=== Job Queue ==="
-sky jobs queue -a
+job_queue_output=$(sky jobs queue -a)
+echo "$job_queue_output"
 echo ""
 
 # Now process the output to find failed jobs
-sky jobs queue -a | awk '
+echo "$job_queue_output" | awk '
 BEGIN {
     # Skip lines until we find the header
     header_found = 0
