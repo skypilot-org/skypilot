@@ -1869,7 +1869,10 @@ def test_aws_custom_image():
         'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
         # Test image with PYTHONPATH set and with pyproject.toml.
         # Update this image periodically, nemo does not support :latest tag.
-        'docker:nvcr.io/nvidia/nemo:25.09'
+        'docker:nvcr.io/nvidia/nemo:25.09',
+        # Test image with site-packages as workdir, which could cause issue
+        # if CWD is not well handled, when installing SkyPilot runtime.
+        'docker:michaelvll/skypilot-custom-image-test-cases:site-packages-as-workdir'
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
