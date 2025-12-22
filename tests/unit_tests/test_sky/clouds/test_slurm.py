@@ -262,7 +262,8 @@ class TestGetSlurmSshConfigDict:
 
                         key_path = result['identityfile'][0]
                         assert os.path.exists(key_path)
-                        assert os.path.dirname(os.path.dirname(key_path)) == tmpdir
+                        assert os.path.dirname(
+                            os.path.dirname(key_path)) == tmpdir
 
                         with open(key_path, 'rb') as f:
                             assert f.read() == test_key_content

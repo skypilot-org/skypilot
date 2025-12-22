@@ -2434,11 +2434,14 @@ def set_slurm_ssh_private_key(user_hash: str, cluster_name: str,
             raise ValueError('Unsupported database dialect')
 
         insert_stmnt = insert_func(slurm_user_ssh_keys_table).values(
-            user_hash=user_hash, cluster_name=cluster_name,
+            user_hash=user_hash,
+            cluster_name=cluster_name,
             private_key=private_key)
         upsert_stmnt = insert_stmnt.on_conflict_do_update(
-            index_elements=[slurm_user_ssh_keys_table.c.user_hash,
-                            slurm_user_ssh_keys_table.c.cluster_name],
+            index_elements=[
+                slurm_user_ssh_keys_table.c.user_hash,
+                slurm_user_ssh_keys_table.c.cluster_name
+            ],
             set_={slurm_user_ssh_keys_table.c.private_key: private_key})
         session.execute(upsert_stmnt)
         session.commit()
