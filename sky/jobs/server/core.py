@@ -5,6 +5,7 @@ import ipaddress
 import os
 import pathlib
 import tempfile
+import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib import parse as urlparse
@@ -883,16 +884,22 @@ def queue_v2(
             pass
 
     with metrics_lib.time_it('jobs.queue.generate_code', group='jobs'):
+        start = time.time()
         code = managed_job_utils.ManagedJobCodeGen.get_job_table(
             skip_finished, accessible_workspaces, job_ids, workspace_match,
             name_match, pool_match, page, limit, user_hashes, statuses, fields)
+        end = time.time()
+        logger.info(f'Generated code in {end - start} seconds')
     with metrics_lib.time_it('jobs.queue.run_on_head', group='jobs'):
+        start = time.time()
         returncode, job_table_payload, stderr = backend.run_on_head(
             handle,
             code,
             require_outputs=True,
             stream_logs=False,
             separate_stderr=True)
+        end = time.time()
+        logger.info(f'Ran code on head in {end - start} seconds')
 
     if returncode != 0:
         logger.error(job_table_payload + stderr)
@@ -909,6 +916,7 @@ def queue_v2(
     # Backward compatibility for old jobs controller without filtering
     # TODO(hailong): remove this after 0.12.0
     with metrics_lib.time_it('jobs.queue.filter_and_process', group='jobs'):
+        start = time.time()
         if not all_users:
 
             def user_hash_matches_or_missing(job: Dict[str, Any]) -> bool:
@@ -950,6 +958,8 @@ def queue_v2(
             enable_user_match=True,
             statuses=statuses,
         )
+        end = time.time()
+        logger.info(f'Filtered jobs in {end - start} seconds')
     return filtered_jobs, total, status_counts, total_no_filter
 
 
