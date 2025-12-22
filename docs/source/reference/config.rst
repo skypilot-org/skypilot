@@ -3,7 +3,7 @@
 Advanced Configuration
 ======================
 
-You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file.
+You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file (local config) or on your API server dashboard (remote config) at http://<api-server-url>/dashboard/config.
 
 Configuration sources and overrides
 -----------------------------------
