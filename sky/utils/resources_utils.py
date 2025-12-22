@@ -209,7 +209,8 @@ def format_resource(resource: 'resources_lib.Resources',
         if mem is not None:
             elements_full.append(f'mem={int(mem)}')
 
-    if not is_k8s:
+    is_slurm = str(resource.cloud).lower() == 'slurm'
+    if not is_k8s and not is_slurm:
         instance_type_full = resource.instance_type
         instance_type_simple = common_utils.truncate_long_string(
             instance_type_full, 15)
