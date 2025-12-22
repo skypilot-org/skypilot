@@ -230,7 +230,7 @@ To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Go
             - name: your-secret-here
 
 
-.. dropdown:: Creating private registry secrets (Docker Hub, AWS ECR, GCP Artifact Registry, NVIDIA NGC)
+.. dropdown:: Creating private registry secrets (Docker Hub, AWS ECR, GCP, NVIDIA NGC)
 
     To create these private registry secrets on Kubernetes cluster, run the following commands:
 
@@ -260,8 +260,10 @@ To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Go
 
                 ECR secret credentials expire every 12 hours. Consider using `k8s-ecr-login-renew <https://github.com/nabsul/k8s-ecr-login-renew>`_ to automatically refresh your secrets.
 
-        .. tab-item:: GCP Artifact Registry
-            :sync: gcp-artifact-registry-tab
+        .. tab-item:: GCP
+            :sync: gcp-tab
+
+            For **Artifact Registry** (recommended):
 
             .. code-block:: bash
 
@@ -269,6 +271,15 @@ To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Go
                 --docker-username=_json_key \
                 --docker-password="$(cat ~/gcp-key.json)" \
                 --docker-server=<location>-docker.pkg.dev
+
+            For **Container Registry (GCR)** (deprecated):
+
+            .. code-block:: bash
+
+              kubectl create secret docker-registry <secret-name> \
+                --docker-username=_json_key \
+                --docker-password="$(cat ~/gcp-key.json)" \
+                --docker-server=gcr.io
 
         .. tab-item:: NVIDIA NGC
             :sync: nvidia-container-registry-tab
