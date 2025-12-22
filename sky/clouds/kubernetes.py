@@ -772,6 +772,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_enable_flex_start': enable_flex_start,
             'k8s_max_run_duration_seconds': max_run_duration_seconds,
             'k8s_network_type': network_type.value,
+            'docker_login_config': resources.docker_login_config,
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running

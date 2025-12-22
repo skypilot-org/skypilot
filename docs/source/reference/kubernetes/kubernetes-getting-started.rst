@@ -233,6 +233,10 @@ To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Go
 
     If you use Amazon ECR, your secret credentials may expire every 12 hours. Consider using `k8s-ecr-login-renew <https://github.com/nabsul/k8s-ecr-login-renew>`_ to automatically refresh your secrets.
 
+**Alternative: Using environment variables**
+
+You can also specify Docker credentials using environment variables (``SKYPILOT_DOCKER_USERNAME``, ``SKYPILOT_DOCKER_PASSWORD``, ``SKYPILOT_DOCKER_SERVER``), which is the same workflow as for VMs. SkyPilot will automatically create the necessary Kubernetes secret for you. See :ref:`Using Private Registries <docker-containers-private-registries>` for details.
+
 
 Opening ports
 -------------
