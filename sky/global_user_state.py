@@ -272,8 +272,17 @@ cluster_failures_table = sqlalchemy.Table(
                       primary_key=True,
                       autoincrement=True),
     sqlalchemy.Column('cluster_hash', sqlalchemy.Text, index=True),
+    # failure_mode is a machine readable code for the failure mode.
+    # For example, "GPU_APPLICATION_ERROR_XID_CODE_31" or
+    # "GPU_HARDWARE_FAILURE_XID_CODE_32".
     sqlalchemy.Column('failure_mode', sqlalchemy.Text, index=True),
+    # failure_reason is a human readable reason for the failure.
+    # It contains the information from the failure mode with some
+    # additional details.
     sqlalchemy.Column('failure_reason', sqlalchemy.Text),
+    # cleared_at is the soft deletion timestamp indicating
+    # when the failure was cleared. This happens when a
+    # cluster with an existing failure is restarted.
     sqlalchemy.Column('cleared_at',
                       sqlalchemy.Integer,
                       server_default=None,
