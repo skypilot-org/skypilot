@@ -13,7 +13,7 @@ from alembic import op
 from sky.global_user_state import Base
 from sky.utils.db import db_utils
 
-# revision identifiers, used by Alembic.π
+# revision identifiers, used by Alembic.
 revision: str = '012'
 down_revision: Union[str, Sequence[str], None] = '011'
 branch_labels: Union[str, Sequence[str], None] = None
