@@ -750,10 +750,17 @@ async def sync_links_from_cluster(
 ) -> None:
     """Sync runtime links from the cluster's links file to the database.
 
-    Reads the ~/.sky/links file from the cluster, parses lines in key:value
-    format, and updates the database with new links. This function handles
-    errors gracefully - if the file doesn't exist or can't be read, it simply
+    Reads the ~/.sky/links file from the cluster, parses it as TOML format,
+    and updates the database with new links. This function handles errors
+    gracefully - if the file doesn't exist or can't be read, it simply
     returns without error.
+
+    The expected TOML format is:
+        LinkName = "https://example.com"
+        Dashboard = "https://dashboard.example.com"
+
+    Users can append links using:
+        echo 'LinkName = "https://example.com"' >> $SKYPILOT_LINKS
 
     Args:
         backend: The backend instance to use for SSH.
@@ -761,6 +768,13 @@ async def sync_links_from_cluster(
         job_id: The managed job ID.
         task_id: The task ID within the job.
     """
+    # Import TOML parser - prefer stdlib tomllib (py>=3.11); otherwise use
+    # tomli which is a dependency.
+    try:
+        import tomllib as toml  # pylint: disable=import-outside-toplevel
+    except ModuleNotFoundError:  # py<3.11
+        import tomli as toml  # pylint: disable=import-outside-toplevel
+
     logger.info(f'Syncing links from cluster {cluster_name} for job {job_id}')
     try:
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
@@ -785,22 +799,24 @@ async def sync_links_from_cluster(
                         f'{stderr}')
             return
 
-        # Parse the links file - each line is "key:value"
-        links: Dict[str, str] = {}
-
         logger.debug(f'Link file contents: {stdout}')
-        for line in stdout.strip().split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-            # Split on first colon only (URLs contain colons)
-            parts = line.split(':', 1)
-            if len(parts) == 2:
-                key, value = parts[0].strip(), parts[1].strip()
-                if key and value:
-                    links[key] = value
-            else:
-                logger.debug(f'Skipping malformed link line: {line}')
+
+        # Parse the links file as TOML
+        links: Dict[str, str] = {}
+        content = stdout.strip()
+        if content:
+            try:
+                parsed = toml.loads(content)
+                # Only accept string values at the top level
+                for key, value in parsed.items():
+                    if isinstance(value, str):
+                        links[key] = value
+                    else:
+                        logger.debug(f'Skipping non-string link value for '
+                                     f'key {key}: {value}')
+            except toml.TOMLDecodeError as e:
+                logger.debug(f'Failed to parse links file as TOML: {e}')
+                return
 
         if links:
             logger.debug(f'Syncing {len(links)} links from cluster '

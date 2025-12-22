@@ -715,3 +715,112 @@ For absolute maximum parallelism, the following per-cloud configurations are rec
   Remember to tear down your controller to apply these changes, as described above.
 
 With this configuration, you can launch up to 512 jobs at once. Once the jobs are launched, up to 2000 jobs can be running in parallel.
+
+.. _custom-links:
+
+Custom links
+------------
+
+Custom links allow you to associate URLs with your managed jobs that will be displayed in the SkyPilot dashboard. This is useful for linking to external dashboards, experiment trackers, or any other relevant resources. By default, SkyPilot will add custom links to the instance associated with the job if it's running on AWS, GCP, or Azure.
+
+There are three ways to add custom links:
+
+1. **In YAML**: Define links directly in your task YAML
+2. **Via CLI**: Use the ``--custom-links`` flag when launching a job
+3. **At runtime**: Append links to the ``$SKYPILOT_LINKS`` file during job execution
+
+These links show up in the detailed job page in the dashboard as shown below:
+
+.. image:: ../images/examples/custom-links/job-page.png
+  :width: 800
+  :alt: Managed jobs custom links
+
+Adding links in YAML
+~~~~~~~~~~~~~~~~~~~~
+
+You can define links directly in your task YAML:
+
+.. code-block:: yaml
+
+  name: my-job
+
+  links:
+    Documentation: https://docs.example.com
+    Team Wiki: https://wiki.example.com/team
+
+  run: echo "Hello, world!"
+
+Adding links via CLI
+~~~~~~~~~~~~~~~~~~~~
+
+You can also add custom links directly from the command line using the ``--custom-links`` flag with TOML format:
+
+.. code-block:: console
+
+  # Single link
+  $ sky jobs launch --custom-links 'Docs="https://docs.example.com"' task.yaml
+
+  # Multiple links (comma-separated)
+  $ sky jobs launch --custom-links 'Dashboard="https://grafana.example.com",Logs="https://logs.example.com"' task.yaml
+
+Links specified via CLI are merged with any links defined in the YAML file.
+
+Runtime link format
+~~~~~~~~~~~~~~~~~~~
+
+When adding links at runtime via ``$SKYPILOT_LINKS``, use TOML format:
+
+.. code-block:: bash
+
+  # In your job's run script
+  echo 'LinkName = "https://example.com"' >> $SKYPILOT_LINKS
+
+  # For link names with spaces, quote the key
+  echo '"My Dashboard" = "https://dashboard.example.com"' >> $SKYPILOT_LINKS
+
+SkyPilot periodically syncs this file, so links will appear in the dashboard shortly after being added.
+
+Example: Integrating with Weights & Biases
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A common use case is linking to experiment tracking dashboards like Weights & Biases (W&B). Here's an example that creates a W&B run and adds its URL as a custom link:
+
+.. code-block:: yaml
+
+  # wandb_training.yaml
+  name: wandb-training
+
+  secrets:
+    WANDB_API_KEY: null # Set via --secrets
+
+  setup: |
+    pip install wandb torch
+
+  run: |
+    # Initialize W&B and capture the run URL
+    python -c "
+    import wandb
+    import os
+
+    # Initialize the run
+    run = wandb.init(project='my-project', name='skypilot-job')
+
+    # Add the W&B run URL as a custom link (TOML format)
+    with open(os.environ['SKYPILOT_LINKS'], 'a') as f:
+        f.write(f'\"W&B Run\" = \"{run.get_url()}\"\n')
+
+    # Your training code here
+    for epoch in range(10):
+        wandb.log({'loss': 1.0 / (epoch + 1)})
+
+    wandb.finish()
+    "
+
+Launch the job:
+
+.. code-block:: console
+
+  $ sky jobs launch -n wandb-job --secret WANDB_API_KEY=$WANDB_API_KEY wandb_training.yaml
+
+The W&B run URL will appear in the dashboard under "Custom Links".
+

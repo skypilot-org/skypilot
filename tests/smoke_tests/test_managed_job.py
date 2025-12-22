@@ -1196,11 +1196,12 @@ def test_managed_jobs_runtime_links(generic_cloud: str):
         with skypilot_config.override_skypilot_config(
                 smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG):
             name = smoke_tests_utils.get_cluster_name()
-            # Create a task that adds runtime links
+            # Create a task that adds runtime links in TOML format
             task = sky.Task(
                 run='echo "Adding runtime links..."; '
-                'echo "TestLink:https://example.com/test" >> $SKYPILOT_LINKS; '
-                'echo "Dashboard:https://dashboard.example.com" >> $SKYPILOT_LINKS; '
+                # TOML format: key = "value"
+                'echo \'TestLink = "https://example.com/test"\' >> $SKYPILOT_LINKS; '
+                'echo \'Dashboard = "https://dashboard.example.com"\' >> $SKYPILOT_LINKS; '
                 'cat $SKYPILOT_LINKS; '
                 'echo "Done adding links"')
             task.set_resources(
@@ -1265,6 +1266,50 @@ def test_managed_jobs_runtime_links(generic_cloud: str):
 
             finally:
                 sky.jobs.cancel(job_ids=[job_id])
+
+
+@pytest.mark.no_vast  # Uses unsatisfiable machines
+@pytest.mark.no_hyperbolic  # Uses unsatisfiable machines
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+@pytest.mark.managed_jobs
+def test_managed_jobs_cli_custom_links(generic_cloud: str):
+    """Test that --custom-links flag properly sets links on the job record."""
+    name = smoke_tests_utils.get_cluster_name()
+    # Test using CLI with --custom-links flag
+    # TOML format: key="value"
+    test = smoke_tests_utils.Test(
+        'test-managed-jobs-cli-custom-links',
+        [
+            # Launch job with --custom-links
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y '
+            f'--custom-links \'CLILink="https://cli-example.com",'
+            f'Docs="https://docs.example.com"\' '
+            f'"echo Job with CLI links; sleep 5"',
+            # Wait for the job to succeed
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=300),
+            # Verify the links are in the job record via Python
+            f'python3 -c "'
+            f'import sky; '
+            f'jobs = sky.stream_and_get(sky.jobs.queue(refresh=True)); '
+            f'job = next((j for j in jobs if j.job_name == \\\"{name}\\\"), None); '
+            f'assert job is not None, \\\"Job not found\\\"; '
+            f'assert job.links is not None, f\\\"Links not set: {{job}}\\\"; '
+            f'assert \\\"CLILink\\\" in job.links, f\\\"CLILink not in links: {{job.links}}\\\"; '
+            f'assert job.links[\\\"CLILink\\\"] == \\\"https://cli-example.com\\\", f\\\"Wrong CLILink URL: {{job.links}}\\\"; '
+            f'assert \\\"Docs\\\" in job.links, f\\\"Docs not in links: {{job.links}}\\\"; '
+            f'print(\\\"CLI custom links test passed!\\\")'
+            f'"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_vast  # The test uses other clouds
