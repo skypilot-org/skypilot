@@ -3,15 +3,16 @@
 import argparse
 import gc
 import json
+from pathlib import Path
 import shutil
 import tempfile
-from pathlib import Path
 
 import cv2
 import numpy as np
-import torch
 from PIL import Image
-from transformers import Sam3VideoModel, Sam3VideoProcessor
+import torch
+from transformers import Sam3VideoModel
+from transformers import Sam3VideoProcessor
 
 PROMPTS = ["soccer player", "ball"]
 PLAYER_COLOR = (255, 100, 100)
