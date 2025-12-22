@@ -16,6 +16,8 @@ This example shows how to scale SAM3 video segmentation across multiple GPU work
 1. [Kaggle API credentials](https://www.kaggle.com/docs/api) (`~/.kaggle/kaggle.json`)
 2. S3 bucket for output storage
 
+> **Note**: Remember to replace `s3://my-skypilot-bucket` in `pool.yaml` and `test-single.yaml` with your actual S3 bucket URI.
+
 ## Quick start: Single-node testing
 
 For quick testing on a single node without pools, use `test-single.yaml` which combines setup and run in a single task:
