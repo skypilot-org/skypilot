@@ -1,4 +1,5 @@
 """Kubernetes utilities for SkyPilot."""
+import base64
 import collections
 import copy
 import dataclasses
@@ -3818,7 +3819,6 @@ def create_docker_registry_secret(
     Returns:
         The name of the created secret.
     """
-    import base64
 
     secret_name = get_docker_registry_secret_name(cluster_name_on_cloud)
     server = docker_login_config.server
