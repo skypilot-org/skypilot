@@ -62,7 +62,7 @@ sky dashboard
 
 The dashboard shows pool workers and their status:
 
-![SkyPilot Dashboard Pool Workers](https://raw.githubusercontent.com/skypilot-org/skypilot/master/examples/sam3-video-segmentation/images/sky_dashboard_pool_workers.png)
+![SkyPilot Dashboard Pool Workers](https://i.imgur.com/lRW35zh.png)
 
 Check job queue:
 ```bash
@@ -71,7 +71,7 @@ sky jobs queue
 
 The jobs queue shows completed, running, and pending jobs:
 
-![SkyPilot Dashboard Jobs Queue](https://raw.githubusercontent.com/skypilot-org/skypilot/master/examples/sam3-video-segmentation/images/sky_dashboard_jobs_queue.png)
+![SkyPilot Dashboard Jobs Queue](https://i.imgur.com/HrWU0g6.png)
 
 View logs:
 ```bash
@@ -133,6 +133,8 @@ The `process_segmentation.py` script:
 4. Overlays colored masks on video frames
 5. Saves segmented videos and metadata to S3
 
+![Example Segmentation Output](https://i.imgur.com/9FHO8B3.png)
+![Example Segmentation Output 2](https://i.imgur.com/5y5iSP1.png)
 ### Output
 
 Results are synced to the S3 bucket specified in `file_mounts`:
