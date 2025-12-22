@@ -642,7 +642,6 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             script_path = os.path.join(os.path.dirname(__file__), 'scripts',
                                        'fetch_failed_job_logs.sh')
             if os.path.exists(script_path):
-                test.echo('=== Fetching Failed Job Logs ===')
                 write('=== Fetching Failed Job Logs ===\n')
                 flush()
                 write(f'+ bash {script_path}\n')
@@ -658,21 +657,18 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                 try:
                     script_proc.wait(timeout=300)  # 5 minutes timeout
                 except subprocess.TimeoutExpired:
-                    test.echo(
-                        'Timeout after 300 seconds fetching failed job logs.')
+                    write('Timeout after 300 seconds fetching failed job logs.')
                     script_proc.terminate()
-                test.echo('=== End of Failed Job Logs ===')
                 write('=== End of Failed Job Logs ===\n')
                 flush()
             else:
                 error_msg = (f'Script not found: {script_path}, '
                              f'skipping failed job log fetch')
-                test.echo(error_msg)
                 write(error_msg + '\n')
                 flush()
 
             if not is_remote_server_test():
-                test.echo('=== Sky API Server Log (last 100 lines) ===')
+                write('=== Sky API Server Log (last 100 lines) ===')
                 # Read the log file directly and echo it
                 log_path = os.path.expanduser('~/.sky/api_server/server.log')
                 if os.path.exists(log_path):
@@ -681,10 +677,10 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                         # Get last 100 lines
                         last_lines = lines[-100:] if len(lines) > 100 else lines
                         for line in last_lines:
-                            test.echo(line.rstrip())
+                            write(line.rstrip())
                 else:
-                    test.echo(f'Server log file not found: {log_path}')
-                test.echo('=== End of Sky API Server Log ===')
+                    write(f'Server log file not found: {log_path}')
+                write('=== End of Sky API Server Log ===')
 
         if (proc.returncode == 0 or
                 pytest.terminate_on_failure) and test.teardown is not None:
