@@ -280,6 +280,12 @@ To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Go
                 --docker-username=_json_key \
                 --docker-password="$(cat ~/gcp-key.json)" \
                 --docker-server=gcr.io
+            
+            .. hint::
+              If you are not sure which registry to use, check the base of your
+              image URL. For example, if your image URL looks like ``gcr.io/my-gcp-project-id/my-registry-repository/my-image-name:latest``,
+              you should use ``gcr.io`` as the registry server. If your image URL looks like ``us-docker.pkg.dev/my-gcp-project-id/my-registry-repository/my-image-name:latest``,
+              you should use ``us-docker.pkg.dev`` as the registry server.
 
         .. tab-item:: NVIDIA NGC
             :sync: nvidia-container-registry-tab
