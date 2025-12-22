@@ -230,7 +230,7 @@ To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Go
             - name: your-secret-here
 
 
-.. dropdown:: Creating private registry secrets
+.. dropdown:: Creating private registry secrets (Docker Hub, AWS ECR, GCP Artifact Registry, NVIDIA NGC)
 
     To create these private registry secrets on your Kubernetes cluster, you can use the following commands:
 
