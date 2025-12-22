@@ -38,7 +38,8 @@ def load_video_frames(video_path, sample_fps=1, max_frames=0):
         if not ret:
             break
         if frame_count % frame_interval == 0:
-            frames.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+            frames.append(
+                Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
             if max_frames > 0 and len(frames) >= max_frames:
                 break
         frame_count += 1
@@ -56,7 +57,8 @@ def overlay_masks(frame, masks, colors, alpha=0.5):
         if mask is None:
             continue
         mask = np.squeeze(mask).clip(0, 1).astype(np.float32)
-        color = np.array(colors.get(obj_id, (255, 0, 0)), dtype=np.float32) / 255.0
+        color = np.array(colors.get(obj_id,
+                                    (255, 0, 0)), dtype=np.float32) / 255.0
         m = mask[..., None]
         overlay = overlay * (1 - alpha * m) + color * (alpha * m)
 
@@ -68,22 +70,31 @@ def save_video(frames, output_path, fps):
     if not frames:
         return
     h, w = np.array(frames[0]).shape[:2]
-    out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+    out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps,
+                          (w, h))
     for frame in frames:
         out.write(cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR))
     out.release()
 
 
-def process_video(model, processor, video_path, output_dir, sample_fps=1, max_frames=0):
+def process_video(model,
+                  processor,
+                  video_path,
+                  output_dir,
+                  sample_fps=1,
+                  max_frames=0):
     """Run SAM3 segmentation on video and save results."""
     video_name = Path(video_path).stem
     print(f"Processing: {video_name}")
 
-    frames, original_fps, output_fps = load_video_frames(video_path, sample_fps, max_frames)
+    frames, original_fps, output_fps = load_video_frames(
+        video_path, sample_fps, max_frames)
     if not frames:
         return {"video": video_name, "error": "Could not load video frames"}
 
-    print(f"  {len(frames)} frames (sampled at {output_fps} fps from {original_fps} fps)")
+    print(
+        f"  {len(frames)} frames (sampled at {output_fps} fps from {original_fps} fps)"
+    )
 
     session = processor.init_video_session(
         video=frames,
@@ -99,8 +110,7 @@ def process_video(model, processor, video_path, output_dir, sample_fps=1, max_fr
 
     with torch.no_grad():
         for out in model.propagate_in_video_iterator(
-            inference_session=session, max_frame_num_to_track=len(frames)
-        ):
+                inference_session=session, max_frame_num_to_track=len(frames)):
             processed = processor.postprocess_outputs(session, out)
             frame_idx = out.frame_idx
 
@@ -111,7 +121,8 @@ def process_video(model, processor, video_path, output_dir, sample_fps=1, max_fr
             frame_masks = {}
             for i, obj_id in enumerate(processed["object_ids"]):
                 mask = processed["masks"][i].float().cpu().numpy()
-                frame_masks[int(obj_id.item())] = (np.squeeze(mask) > 0).astype(np.float32)
+                frame_masks[int(obj_id.item())] = (np.squeeze(mask)
+                                                   > 0).astype(np.float32)
             masks_by_frame[frame_idx] = frame_masks
 
     colors = {}
@@ -124,7 +135,8 @@ def process_video(model, processor, video_path, output_dir, sample_fps=1, max_fr
     output_frames = []
     for i, frame in enumerate(frames):
         masks = masks_by_frame.get(i, {})
-        output_frames.append(overlay_masks(frame, masks, colors) if masks else frame)
+        output_frames.append(
+            overlay_masks(frame, masks, colors) if masks else frame)
 
     # Write to temp file first (cv2.VideoWriter doesn't work well with FUSE mounts)
     video_output_dir = output_dir / video_name
@@ -166,8 +178,14 @@ def main():
     parser = argparse.ArgumentParser(description='SAM3 video segmentation')
     parser.add_argument('video_path', help='Input video file')
     parser.add_argument('--output-dir', default='/outputs/segmentation_results')
-    parser.add_argument('--sample-fps', type=float, default=1, help='Sample rate (0=all frames)')
-    parser.add_argument('--max-frames', type=int, default=0, help='Max frames (0=unlimited)')
+    parser.add_argument('--sample-fps',
+                        type=float,
+                        default=1,
+                        help='Sample rate (0=all frames)')
+    parser.add_argument('--max-frames',
+                        type=int,
+                        default=0,
+                        help='Max frames (0=unlimited)')
     args = parser.parse_args()
 
     video_path = Path(args.video_path)
@@ -180,10 +198,13 @@ def main():
 
     print(f"Video: {video_path}")
     print(f"Output: {output_dir}")
-    print(f"Sample FPS: {args.sample_fps}, Max frames: {args.max_frames or 'unlimited'}")
+    print(
+        f"Sample FPS: {args.sample_fps}, Max frames: {args.max_frames or 'unlimited'}"
+    )
 
     print("\nLoading SAM3 model...")
-    model = Sam3VideoModel.from_pretrained("facebook/sam3").to("cuda", dtype=torch.bfloat16).eval()
+    model = Sam3VideoModel.from_pretrained("facebook/sam3").to(
+        "cuda", dtype=torch.bfloat16).eval()
     processor = Sam3VideoProcessor.from_pretrained("facebook/sam3")
     print("Model loaded!")
 
