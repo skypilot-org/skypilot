@@ -2511,15 +2511,15 @@ def _update_cluster_status(
     #  (2) Otherwise, we will reset the autostop setting, unless the cluster is
     #      autostopping/autodowning.
     some_nodes_terminated = 0 < len(node_statuses) < handle.launched_nodes
-    # If all nodes are up and ray cluster is health, we would have returned
-    # earlier. So if all_nodes_up is True and we are here, it means the ray
-    # cluster must have been unhealthy.
-    ray_cluster_unhealthy = all_nodes_up
     some_nodes_not_stopped = any(status[0] != status_lib.ClusterStatus.STOPPED
                                  for status in node_statuses)
     is_abnormal = (some_nodes_terminated or some_nodes_not_stopped)
 
     if is_abnormal and not cluster_failures:
+        # If all nodes are up and ray cluster is healthy, we would have returned
+        # earlier. So if all_nodes_up is True and we are here, it means the ray
+        # cluster must have been unhealthy.
+        ray_cluster_unhealthy = all_nodes_up
         status_reason = ', '.join(
             [status[1] for status in node_statuses if status[1] is not None])
 
@@ -2650,13 +2650,13 @@ def _update_cluster_status(
     # Now is_abnormal is False: either node_statuses is empty, all nodes are
     # STOPPED, or there are cluster failures.
 
-    # If there are cluster failures and we do not need to terminate the cluster
+    # If there are cluster failures and the cluster isn't terminated/stopped
     # then we can return the cluster record as is.
-    if cluster_failures and not to_terminate:
-        return global_user_state.get_cluster_from_name(
-            cluster_name,
-            include_user_info=include_user_info,
-            summary_response=summary_response)
+    # `not some_nodes_not_stopped` will be true if all nodes are terminated or
+    # all nodes are stopped.
+    if not some_nodes_not_stopped:
+        assert cluster_failures, (cluster_failures, node_statuses,
+                                  some_nodes_not_stopped, to_terminate)
 
     verb = 'terminated' if to_terminate else 'stopped'
     backend = backends.CloudVmRayBackend()
