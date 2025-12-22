@@ -1,7 +1,0 @@
-name: my-job
-
-links:
-  Documentation: https://docs.example.com
-  Team Wiki: https://wiki.example.com/team
-
-run: echo "Hello, world!"
