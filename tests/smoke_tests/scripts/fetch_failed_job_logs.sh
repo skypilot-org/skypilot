@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# Script to fetch logs for all failed jobs in the queue
+# Usage: ./fetch_failed_job_logs.sh
+
+# First, display the full sky jobs queue -a output
+echo "=== Job Queue ==="
+sky jobs queue -a
+echo ""
+
+# Now process the output to find failed jobs
+sky jobs queue -a | awk '
+BEGIN {
+    # Skip lines until we find the header
+    header_found = 0
+}
+/^ID[[:space:]]+TASK/ {
+    # Found the header line
+    header_found = 1
+    next
+}
+header_found && /^[0-9]+/ {
+    # This is a job line (starts with a number)
+    job_id = $1
+    # Find the STATUS field (starts with FAILED, SUCCEEDED, CANCELLED, etc.)
+    status = ""
+    for (i = 1; i <= NF; i++) {
+        if ($i ~ /^(FAILED|SUCCEEDED|CANCELLED|RUNNING|PENDING|STARTING|CANCELLING)/) {
+            status = $i
+            break
+        }
+    }
+
+    # Only process jobs with status starting with FAILED
+    if (status ~ /^FAILED/) {
+        print job_id " " status
+    }
+}
+' | while read -r job_id status; do
+    if [ -n "$job_id" ] && [ -n "$status" ]; then
+        echo "Fetching job id $job_id controller logs, status: $status"
+        sky jobs logs --controller "$job_id"
+        echo "---"
+    fi
+done
