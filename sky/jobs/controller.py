@@ -31,6 +31,7 @@ from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
+from sky.server import plugins
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -1266,6 +1267,9 @@ async def main(controller_uuid: str):
     logger.info(f'Starting controller {controller_uuid}')
 
     context_utils.hijack_sys_attrs()
+
+    # Load plugins to register external failure sources (e.g., GPU Healer)
+    plugins.load_plugins(plugins.ExtensionContext())
 
     controller = ControllerManager(controller_uuid)
 

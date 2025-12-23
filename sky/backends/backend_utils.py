@@ -2265,8 +2265,9 @@ def _update_cluster_status(
 
     external_cluster_failures = ExternalFailureSource.get(
         cluster_hash=record['cluster_hash'])
-
-    logger.debug(f'external cluster failures: {external_cluster_failures}')
+    logger.debug(f'Cluster {cluster_name} with cluster_hash '
+                 f'{record["cluster_hash"]} has external cluster failures: '
+                 f'{external_cluster_failures}')
 
     def get_node_counts_from_ray_status(
             runner: command_runner.CommandRunner) -> Tuple[int, int, str, str]:

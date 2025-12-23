@@ -95,6 +95,7 @@ class ExternalFailureSource:
         if cls._get_func is None:
             return []
         try:
+            # pylint: disable=not-callable
             return cls._get_func(cluster_hash, cluster_name)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get cluster failures: {e}')
@@ -117,6 +118,7 @@ class ExternalFailureSource:
         if cls._clear_func is None:
             return []
         try:
+            # pylint: disable=not-callable
             return cls._clear_func(cluster_hash, cluster_name)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to clear cluster failures: {e}')

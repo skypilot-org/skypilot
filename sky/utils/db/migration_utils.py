@@ -92,7 +92,8 @@ def needs_upgrade(engine: sqlalchemy.engine.Engine,
 
     Args:
         engine: SQLAlchemy engine for the database.
-        section: Alembic section to upgrade (e.g., 'state_db' or 'spot_jobs_db').
+        section: Alembic section to upgrade (e.g., 'state_db' or
+        'spot_jobs_db').
         target_revision: Target revision to upgrade to (e.g., '001').
         alembic_ini_path: Optional path to a custom alembic.ini file.
     """
@@ -135,7 +136,8 @@ def safe_alembic_upgrade(engine: sqlalchemy.engine.Engine,
 
     Args:
         engine: SQLAlchemy engine for the database.
-        section: Alembic section to upgrade (e.g., 'state_db' or 'spot_jobs_db').
+        section: Alembic section to upgrade (e.g., 'state_db' or
+        'spot_jobs_db').
         target_revision: Target revision to upgrade to (e.g., '001').
         alembic_ini_path: Optional path to a custom alembic.ini file.
     """
