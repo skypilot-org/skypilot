@@ -139,7 +139,8 @@ if __name__ == '__main__':
         maxBid = max([x.get('SpotPrice') for x in toList])
         for instance in toList:
             hosting_type = instance.get('HostingType', 0)
-            stub = f'{instance["InstanceType"]} {instance["Region"][-2:]} {hosting_type}'
+            stub = (f'{instance["InstanceType"]} '
+                    f'{instance["Region"][-2:]} {hosting_type}')
             if stub in seen:
                 printstub = f'{stub}#print'
                 if printstub not in seen:

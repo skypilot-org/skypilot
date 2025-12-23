@@ -156,7 +156,7 @@ class Vast(clouds.Cloud):
             zone: Optional[str] = None,
             datacenter_only: bool = False) -> Optional[str]:
         """Returns the default instance type for Vast."""
-        # Import here to avoid circular import during module loading.
+        # pylint: disable=import-outside-toplevel
         from sky.catalog import vast_catalog
         return vast_catalog.get_default_instance_type(
             cpus=cpus,
@@ -230,7 +230,7 @@ class Vast(clouds.Cloud):
         self, resources: 'resources_lib.Resources'
     ) -> 'resources_utils.FeasibleResources':
         """Returns a list of feasible resources for the given resources."""
-        # Import here to avoid circular import during module loading.
+        # pylint: disable=import-outside-toplevel
         from sky.catalog import vast_catalog
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
