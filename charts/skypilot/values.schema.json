@@ -128,6 +128,15 @@
                 "resources": {
                     "type": "object"
                 },
+                "sidecarContainers": {
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "items": {
+                        "type": "object"
+                    }
+                },
                 "skipResourceCheck": {
                     "type": "boolean"
                 },

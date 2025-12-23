@@ -1,11 +1,14 @@
 """Slurm adaptor for SkyPilot."""
 
+import ipaddress
 import logging
 import re
+import socket
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
 from sky.utils import command_runner
+from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
@@ -79,6 +82,7 @@ class SlurmClient:
             ssh_key,
             ssh_proxy_command=ssh_proxy_command,
             ssh_proxy_jump=ssh_proxy_jump,
+            enable_interactive_auth=True,
         )
 
     def _run_slurm_cmd(self, cmd: str) -> Tuple[int, str, str]:
@@ -235,7 +239,7 @@ class SlurmClient:
             A list of GRES specs (e.g., 'gres/gpu:h100:4')
             for jobs on the node.
         """
-        cmd = f'squeue --me -h --nodelist {node_name} -o "%b"'
+        cmd = f'squeue -h --nodelist {node_name} -o "%b"'
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
@@ -379,13 +383,11 @@ class SlurmClient:
             f'squeue -h --jobs {job_id} -o "%N" | tr \',\' \'\\n\' | '
             f'while read node; do '
             # TODO(kevin): Use json output for more robust parsing.
-            f'ip=$(scontrol show node=$node | grep NodeAddr= | '
+            f'node_addr=$(scontrol show node=$node | grep NodeAddr= | '
             f'awk -F= \'{{print $2}}\' | awk \'{{print $1}}\'); '
-            f'echo "$node $ip"; '
+            f'echo "$node $node_addr"; '
             f'done')
-        rc, stdout, stderr = self._runner.run(cmd,
-                                              require_outputs=True,
-                                              stream_logs=False)
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
             cmd,
@@ -400,7 +402,23 @@ class SlurmClient:
                 parts = line.split()
                 if len(parts) >= 2:
                     node_name = parts[0]
-                    node_ip = parts[1]
+                    node_addr = parts[1]
+                    # Resolve hostname to IP if node_addr is not already
+                    # an IP address.
+                    try:
+                        ipaddress.ip_address(node_addr)
+                        # Already an IP address
+                        node_ip = node_addr
+                    except ValueError:
+                        # It's a hostname, resolve it to an IP
+                        try:
+                            node_ip = socket.gethostbyname(node_addr)
+                        except socket.gaierror as e:
+                            raise RuntimeError(
+                                f'Failed to resolve hostname {node_addr} to IP '
+                                f'for node {node_name}: '
+                                f'{common_utils.format_exception(e)}') from e
+
                     node_info[node_name] = node_ip
 
         nodes = list(node_info.keys())

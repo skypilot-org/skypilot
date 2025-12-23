@@ -16,6 +16,15 @@ export const apiClient = {
       const baseUrl = window.location.origin;
       const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
 
+      if (body !== undefined) {
+        body.env_vars = {
+          ...(body.env_vars || {}),
+          SKYPILOT_IS_FROM_DASHBOARD: 'true',
+          SKYPILOT_USER_ID: 'dashboard',
+          SKYPILOT_USER: 'dashboard',
+        };
+      }
+
       const response = await fetch(fullUrl, {
         method,
         headers,
