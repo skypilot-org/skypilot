@@ -391,28 +391,33 @@ def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
     """
     try:
         ssh_config = get_slurm_ssh_config()
-    except FileNotFoundError:
-        return requested_gpu_type
+        ssh_config_dict = ssh_config.lookup(cluster)
+        client = slurm.SlurmClient(
+            ssh_config_dict['hostname'],
+            int(ssh_config_dict.get('port', 22)),
+            ssh_config_dict['user'],
+            ssh_config_dict['identityfile'][0],
+            ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+            ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        )
 
-    ssh_config_dict = ssh_config.lookup(cluster)
-    client = slurm.SlurmClient(
-        ssh_config_dict['hostname'],
-        int(ssh_config_dict.get('port', 22)),
-        ssh_config_dict['user'],
-        ssh_config_dict['identityfile'][0],
-        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
-        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
-    )
+        nodes = client.info_nodes()
 
-    nodes = client.info_nodes()
-    for node_info in nodes:
-        match = _GRES_GPU_PATTERN.match(node_info.gres)
-        if match:
-            node_gpu_type = match.group(1)
-            if node_gpu_type.lower() == requested_gpu_type.lower():
-                return node_gpu_type
+        for node_info in nodes:
+            match = _GRES_GPU_PATTERN.match(node_info.gres)
+            if match:
+                node_gpu_type = match.group(1)
+                if node_gpu_type.lower() == requested_gpu_type.lower():
+                    return node_gpu_type
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(
+            'Failed to determine the exact GPU GRES type from the Slurm '
+            f'cluster {cluster!r}. Falling back to '
+            f'{requested_gpu_type.lower()!r}. This may cause issues if the '
+            f'casing is incorrect. Error: {common_utils.format_exception(e)}')
 
-    return requested_gpu_type
+    # GRES names are more commonly in lowercase from what we've seen so far.
+    return requested_gpu_type.lower()
 
 
 def _get_slurm_node_info_list(
