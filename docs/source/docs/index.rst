@@ -303,6 +303,7 @@ Read the research:
    ../examples/managed-jobs
    Multi-Node Jobs <../running-jobs/distributed-jobs>
    Many Parallel Jobs <../running-jobs/many-jobs>
+   Custom Links <../running-jobs/custom-links>
    Model Training Guide <../reference/training-guide>
    Using a Pool of Workers <../examples/pools>
 
