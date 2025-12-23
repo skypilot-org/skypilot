@@ -1870,12 +1870,15 @@ def test_aws_custom_image():
         # Test image with PYTHONPATH set and with pyproject.toml.
         # Update this image periodically, nemo does not support :latest tag.
         'docker:nvcr.io/nvidia/nemo:25.09',
-        # Test image with site-packages as workdir, which could cause issue
-        # if CWD is not well handled, when installing SkyPilot runtime. Created
-        # with the following:
+        # Test image with Python 3.12 site-packages as WORKDIR, which causes
+        # import failures if CWD is not handled properly. When SkyPilot's Python
+        # 3.10 venv runs, it finds Python 3.12 compiled packages (like rpds) in
+        # CWD first, causing "ModuleNotFoundError: No module named 'rpds.rpds'".
+        # Created with:
         # FROM python:3.12-slim
+        # RUN pip install jsonschema
         # WORKDIR /usr/local/lib/python3.12/site-packages
-        'docker:michaelvll/skypilot-custom-image-test-cases:site-packages-as-workdir'
+        'docker:michaelvll/skypilot-custom-image-test-cases:py312-site-packages-workdir'
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
