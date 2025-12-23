@@ -79,7 +79,7 @@ class SSHConfigHelper(object):
               UserKnownHostsFile=/dev/null
               GlobalKnownHostsFile=/dev/null
               Port {port}
-              SetEnv {constants.SKY_CLUSTER_NAME_ENV_VAR}={cluster_name}
+              SetEnv {constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}={cluster_name}
               {proxy}
             """.rstrip())
         codegen = codegen + '\n'

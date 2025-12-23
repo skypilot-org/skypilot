@@ -620,5 +620,5 @@ def srun_sshd_command(
         '-o',
         'UsePAM=no',
         '-o',
-        f'AcceptEnv={constants.SKY_CLUSTER_NAME_ENV_VAR}',
+        f'AcceptEnv={constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}',
     ]

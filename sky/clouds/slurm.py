@@ -382,7 +382,8 @@ class Slurm(clouds.Cloud):
             'slurm_private_key': ssh_config_dict['identityfile'][0],
             'slurm_sshd_host_key_filename':
                 (slurm_utils.SLURM_SSHD_HOST_KEY_FILENAME),
-            'slurm_cluster_name_env_var': (constants.SKY_CLUSTER_NAME_ENV_VAR),
+            'slurm_cluster_name_env_var':
+                (constants.SKY_CLUSTER_NAME_ENV_VAR_KEY),
         }
 
         return deploy_vars
