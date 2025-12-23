@@ -2783,25 +2783,27 @@ def get_job_events(job_id: int,
     } for row in rows]
 
 
-@_init_db
-def cleanup_job_events_with_retention(retention_hours: float) -> None:
+@_init_db_async
+async def cleanup_job_events_with_retention_async(
+        retention_hours: float) -> None:
     """Delete job events older than the retention period.
 
     Args:
         retention_hours: Number of hours to retain job events.
     """
-    assert _SQLALCHEMY_ENGINE is not None
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
     cutoff_time = datetime.datetime.now() - datetime.timedelta(
         hours=retention_hours)
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        query = session.query(job_events_table).filter(
-            job_events_table.c.timestamp < cutoff_time)
-        count = query.count()
+
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        result = await session.execute(
+            sqlalchemy.delete(job_events_table).where(
+                job_events_table.c.timestamp < cutoff_time))
+        count = result.rowcount
         if count > 0:
-            logger.debug(f'Deleting {count} job events older than '
+            logger.debug(f'Deleted {count} job events older than '
                          f'{retention_hours} hours.')
-            query.delete()
-            session.commit()
+        await session.commit()
 
 
 async def job_event_retention_daemon():
@@ -2809,7 +2811,8 @@ async def job_event_retention_daemon():
     while True:
         logger.info('Running job event retention daemon...')
         try:
-            cleanup_job_events_with_retention(DEFAULT_JOB_EVENT_RETENTION_HOURS)
+            await cleanup_job_events_with_retention_async(
+                DEFAULT_JOB_EVENT_RETENTION_HOURS)
         except asyncio.CancelledError:
             logger.info('Job event retention daemon cancelled')
             break
