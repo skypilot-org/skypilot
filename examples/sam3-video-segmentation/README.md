@@ -2,6 +2,8 @@
 
 This example demonstrates how to use [SAM3 (Segment Anything 3)](https://huggingface.co/facebook/sam3) with SkyPilot's pools feature to process large volumes of videos in parallel.
 
+<video src="https://i.imgur.com/xw1koxh.mp4" controls="controls"></video>
+
 ## Use case
 
 SAM3 is Meta's unified foundation model for promptable segmentation in images and videos. It can:
@@ -30,6 +32,18 @@ sky launch -c sam3-test test-single.yaml --secret HF_TOKEN
 Note: Processing the entire dataset on a single node will be slow. Use pools (below) for production workloads.
 
 ## Scaling with pools
+
+A **pool** is a collection of GPU instances that share an identical setup—dependencies, models, and datasets are installed once and reused across all jobs. Instead of provisioning new machines for each job (with cold-start delays for downloading models and datasets), pools keep workers warm and ready to execute immediately.
+
+Why use pools for video segmentation?
+- **Eliminate cold starts**: SAM3 model loading and dataset downloads happen once during pool creation, not per job
+- **Parallel processing**: Submit dozens of jobs at once; SkyPilot automatically distributes them across available workers
+- **Dynamic scaling**: Scale workers up or down with a single command based on your throughput needs
+- **Efficient resource use**: Workers are reused across jobs, avoiding repeated setup overhead
+
+For more details, see the [SkyPilot Pools documentation](https://docs.skypilot.co/en/latest/examples/pools.html).
+
+![SkyPilot Pools with SAM3 Video Segmentation](https://i.imgur.com/2RWomcO.png)
 
 ### Step 1: Create the pool
 
