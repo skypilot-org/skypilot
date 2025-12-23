@@ -44,6 +44,7 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.data import storage_utils
+from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
@@ -2390,6 +2391,9 @@ if __name__ == '__main__':
         global_tasks.append(
             background.create_task(
                 global_user_state.cluster_event_retention_daemon()))
+        global_tasks.append(
+            background.create_task(
+                managed_job_state.job_event_retention_daemon()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)
