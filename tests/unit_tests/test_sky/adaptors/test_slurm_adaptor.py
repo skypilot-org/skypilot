@@ -225,6 +225,27 @@ class TestGetJobsStateByName:
             assert result == ['RUNNING', 'PENDING', 'RUNNING']
 
 
+class TestSlurmClientInit:
+    """Test SlurmClient.__init__()."""
+
+    def test_init_local_execution_mode(self):
+        """Test that is_inside_slurm_cluster=True uses LocalProcessCommandRunner."""
+        from sky.utils import command_runner
+        client = slurm.SlurmClient(is_inside_slurm_cluster=True)
+        assert isinstance(client._runner,
+                          command_runner.LocalProcessCommandRunner)
+
+    def test_init_remote_execution_mode(self):
+        """Test that default init uses SSHCommandRunner."""
+        from sky.utils import command_runner
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+        )
+        assert isinstance(client._runner, command_runner.SSHCommandRunner)
+
+
 class TestGetJobNodes:
     """Test SlurmClient.get_job_nodes()."""
 

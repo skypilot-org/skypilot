@@ -15,6 +15,7 @@ from sky.utils import common_utils
 logger = sky_logging.init_logger(__name__)
 
 DEFAULT_SLURM_PATH = '~/.slurm/config'
+SLURM_MARKER_FILE = '.sky_slurm_cluster'
 
 
 def get_slurm_ssh_config() -> SSHConfig:
@@ -523,8 +524,12 @@ def slurm_node_info(
     return node_list
 
 
-def is_inside_slurm_job() -> bool:
-    return os.environ.get('SLURM_JOB_ID') is not None
+def is_inside_slurm_cluster() -> bool:
+    # Check for the marker file in the current home directory. When run by
+    # the skylet on a compute node, the HOME environment variable is set to
+    # the cluster's sky home directory by the SlurmCommandRunner.
+    marker_file = os.path.join(os.path.expanduser('~'), SLURM_MARKER_FILE)
+    return os.path.exists(marker_file)
 
 
 @annotations.lru_cache(scope='request')
