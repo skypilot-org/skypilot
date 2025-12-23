@@ -696,9 +696,6 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                   <thead className="bg-gray-100">
                     <tr>
                       <th className="p-3 text-left font-medium text-gray-600">
-                        {displayTitle}
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
                         Node
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600">
@@ -767,9 +764,6 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                           key={`${node.node_name}-${index}`}
                           className="hover:bg-gray-50"
                         >
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {contextName}
-                          </td>
                           <td className="p-3 whitespace-nowrap text-gray-700">
                             {node.node_name}
                           </td>
