@@ -158,12 +158,13 @@ class Vast(clouds.Cloud):
         """Returns the default instance type for Vast."""
         # Import here to avoid circular import during module loading.
         from sky.catalog import vast_catalog
-        return vast_catalog.get_default_instance_type(cpus=cpus,
-                                                      memory=memory,
-                                                      disk_tier=disk_tier,
-                                                      region=region,
-                                                      zone=zone,
-                                                      datacenter_only=datacenter_only)
+        return vast_catalog.get_default_instance_type(
+            cpus=cpus,
+            memory=memory,
+            disk_tier=disk_tier,
+            region=region,
+            zone=zone,
+            datacenter_only=datacenter_only)
 
     @classmethod
     def get_accelerators_from_instance_type(
