@@ -283,8 +283,8 @@ To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Go
             
             .. hint::
               If you are not sure which registry to use, check the base of your
-              image URL. For example, if your image URL looks like ``gcr.io/my-gcp-project-id/my-registry-repository/my-image-name:latest``,
-              you should use ``gcr.io`` as the registry server. If your image URL looks like ``us-docker.pkg.dev/my-gcp-project-id/my-registry-repository/my-image-name:latest``,
+              image URL. For example, if your image URL looks like ``gcr.io/project-id/repo/image-name:latest``,
+              you should use ``gcr.io`` as the registry server. If your image URL looks like ``us-docker.pkg.dev/project-id/registry-repo/image-name:latest``,
               you should use ``us-docker.pkg.dev`` as the registry server.
 
         .. tab-item:: NVIDIA NGC
