@@ -134,9 +134,9 @@ def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
     logger.warning(
         f'{colorama.Fore.YELLOW}WARNING: Local file mounts or workdir detected '
         'with rolling update enabled for API server. '
-        'To persist files across API server restarts/update, configure a cloud '
-        f'bucket in your SkyPilot config under `jobs.bucket`.'
-        f'{colorama.Style.RESET_ALL}')
+        'To persist files across API server restarts/update, use buckets, volumes, or git '
+        'for your file mounts; or, configure a bucket in your SkyPilot config under '
+        f'`jobs.bucket`. {colorama.Style.RESET_ALL}')
 
 
 def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
