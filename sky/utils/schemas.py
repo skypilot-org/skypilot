@@ -1464,6 +1464,9 @@ def get_config_schema():
                 'secure_only': {
                     'type': 'boolean',
                 },
+                'datacenter_only': {
+                    'type': 'boolean',
+                },
             }
         },
         'nebius': {
