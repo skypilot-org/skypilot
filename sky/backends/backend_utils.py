@@ -2650,13 +2650,13 @@ def _update_cluster_status(
     # Now is_abnormal is False: either node_statuses is empty, all nodes are
     # STOPPED, or there are cluster failures.
 
-    # If there are cluster failures and the cluster isn't terminated/stopped
+    # If there are cluster failures and the cluster isn't terminated
     # then we can return the cluster record as is.
-    # `not some_nodes_not_stopped` will be true if all nodes are terminated or
-    # all nodes are stopped.
-    if not some_nodes_not_stopped:
-        assert cluster_failures, (cluster_failures, node_statuses,
-                                  some_nodes_not_stopped, to_terminate)
+    if cluster_failures and not to_terminate:
+        return global_user_state.get_cluster_from_name(
+            cluster_name,
+            include_user_info=include_user_info,
+            summary_response=summary_response)
 
     verb = 'terminated' if to_terminate else 'stopped'
     backend = backends.CloudVmRayBackend()
