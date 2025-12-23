@@ -9,6 +9,7 @@ from paramiko.config import SSHConfig
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import slurm
+from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 
@@ -616,4 +617,8 @@ def srun_sshd_command(
         'PubkeyAuthentication=yes',
         '-o',
         'StrictModes=no',
+        '-o',
+        'UsePAM=no',
+        '-o',
+        f'AcceptEnv={constants.SKY_CLUSTER_NAME_ENV_VAR}',
     ]

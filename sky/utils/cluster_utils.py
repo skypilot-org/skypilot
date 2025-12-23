@@ -46,10 +46,10 @@ class SSHConfigHelper(object):
     ssh_cluster_key_path = constants.SKY_USER_FILE_PATH + '/ssh-keys/{}.key'
 
     @classmethod
-    def _get_generated_config(cls, autogen_comment: str, host_name: str,
-                              ip: str, username: str, ssh_key_path: str,
-                              proxy_command: Optional[str], port: int,
-                              docker_proxy_command: Optional[str]):
+    def _get_generated_config(cls, autogen_comment: str, cluster_name: str,
+                              host_name: str, ip: str, username: str,
+                              ssh_key_path: str, proxy_command: Optional[str],
+                              port: int, docker_proxy_command: Optional[str]):
         if proxy_command is not None:
             # Already checked in resources
             assert docker_proxy_command is None, (
@@ -79,6 +79,7 @@ class SSHConfigHelper(object):
               UserKnownHostsFile=/dev/null
               GlobalKnownHostsFile=/dev/null
               Port {port}
+              SetEnv {constants.SKY_CLUSTER_NAME_ENV_VAR}={cluster_name}
               {proxy}
             """.rstrip())
         codegen = codegen + '\n'
@@ -232,7 +233,7 @@ class SSHConfigHelper(object):
                 node_proxy_command = node_proxy_command.replace('%w', str(i))
             # TODO(romilb): Update port number when k8s supports multinode
             codegen += cls._get_generated_config(
-                sky_autogen_comment, node_name, ip, username,
+                sky_autogen_comment, cluster_name, node_name, ip, username,
                 key_path_for_config, node_proxy_command, port,
                 docker_proxy_command) + '\n'
 
