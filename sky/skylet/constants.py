@@ -190,10 +190,9 @@ DISABLE_GPU_ECC_COMMAND = (
     '{ sudo reboot || echo "Failed to reboot. ECC mode may not be disabled"; } '
     '|| true; ')
 
-SETUP_SKY_DIRS_COMMANDS = (
-    f'mkdir -p ~/sky_workdir && '
-    f'mkdir -p ~/.sky/sky_app && '
-    f'mkdir -p {SKY_RUNTIME_DIR}/.sky;')
+SETUP_SKY_DIRS_COMMANDS = (f'mkdir -p ~/sky_workdir && '
+                           f'mkdir -p ~/.sky/sky_app && '
+                           f'mkdir -p {SKY_RUNTIME_DIR}/.sky;')
 
 # Install conda on the remote cluster if it is not already installed.
 # We use conda with python 3.10 to be consistent across multiple clouds with

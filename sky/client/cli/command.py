@@ -4915,7 +4915,6 @@ def jobs_launch(
     env = _merge_env_vars(env_file, env)
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
-
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
