@@ -1521,20 +1521,6 @@ async def cluster_events(
     )
 
 
-@app.post('/cluster_failures')
-async def cluster_failures_endpoint(
-        request: fastapi.Request,
-        cluster_failures_body: payloads.ClusterFailuresBody) -> None:
-    """Gets cluster failures."""
-    await executor.schedule_request_async(
-        request_id=request.state.request_id,
-        request_name=request_names.RequestName.CLUSTER_FAILURES,
-        request_body=cluster_failures_body,
-        func=core.get_cluster_failures,
-        schedule_type=requests_lib.ScheduleType.SHORT,
-    )
-
-
 @app.get('/storage/ls')
 async def storage_ls(request: fastapi.Request) -> None:
     """Gets the storages."""

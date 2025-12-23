@@ -340,28 +340,6 @@ def get_cluster_events(cluster_name: Optional[str] = None,
         limit=limit)
 
 
-def get_cluster_failures(
-        cluster_name: Optional[str] = None,
-        cluster_hash: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Get active cluster failures for a given cluster or all clusters.
-
-    Args:
-        cluster_name: Name of the cluster to query failures for. Cannot be
-            specified if cluster_hash is specified. If both are None, returns
-            failures for all clusters.
-        cluster_hash: Hash of the cluster to query failures for. Cannot be
-            specified if cluster_name is specified. If both are None, returns
-            failures for all clusters.
-
-    Returns:
-        List of dictionaries containing failure records that match the
-        cluster(s) and don't have deleted_at set (i.e., active failures).
-        Each dict contains: cluster_hash, failure_mode, deleted_at.
-    """
-    return global_user_state.get_cluster_failures(cluster_name=cluster_name,
-                                                  cluster_hash=cluster_hash)
-
-
 def endpoints(cluster: str,
               port: Optional[Union[int, str]] = None) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).

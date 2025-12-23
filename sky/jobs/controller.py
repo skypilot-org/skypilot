@@ -18,7 +18,6 @@ import dotenv
 import sky
 from sky import core
 from sky import exceptions
-from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -44,6 +43,7 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.utils.plugin_extensions import ExternalFailureSource
 
 if typing.TYPE_CHECKING:
     import psutil
@@ -583,10 +583,9 @@ class JobController:
 
             # Pull the actual cluster status from the cloud provider to
             # determine whether the cluster is preempted or failed.
-            # TODO(zhwu): For hardware failure, such as GPU failure, it may not
-            # be reflected in the cluster status, depending on the cloud, which
-            # can also cause failure of the job, and we need to recover it
-            # rather than fail immediately.
+            # NOTE: Some failures may not be reflected in the cluster status
+            # depending on the cloud, which can also cause failure of the job.
+            # Plugins can report such failures via ExternalFailureSource.
             # TODO(cooperc): do we need to add this to asyncio thread?
             (cluster_status, handle) = await context_utils.to_thread(
                 backend_utils.refresh_cluster_status_handle,
@@ -606,10 +605,10 @@ class JobController:
                     f'Cluster is preempted or failed{cluster_status_str}. '
                     'Recovering...')
                 cluster_failures = await context_utils.to_thread(
-                    global_user_state.get_cluster_failures,
-                    cluster_name=cluster_name)
-                logger.info(f'Cluster failures: {cluster_failures}')
+                    ExternalFailureSource.get, cluster_name=cluster_name)
                 if cluster_failures:
+                    logger.info(
+                        f'Detected cluster failures: {cluster_failures}')
                     failure_modes = []
                     failure_reasons = []
                     for failure in cluster_failures:

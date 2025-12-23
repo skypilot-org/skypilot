@@ -877,12 +877,6 @@ class ClusterEventsBody(RequestBody):
         int] = None  # If specified, returns at most this many events
 
 
-class ClusterFailuresBody(RequestBody):
-    """The request body for the cluster failures endpoint."""
-    cluster_name: Optional[str] = None
-    cluster_hash: Optional[str] = None
-
-
 class GetJobEventsBody(RequestBody):
     """The request body for the get job task events endpoint."""
     job_id: int
