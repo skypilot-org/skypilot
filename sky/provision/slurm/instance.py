@@ -176,7 +176,7 @@ def _create_virtual_instance(
     gpu_directive = ''
     if (accelerator_type is not None and accelerator_type.upper() != 'NONE' and
             accelerator_count > 0):
-        gpu_directive = (f'#SBATCH --gres=gpu:{accelerator_type.lower()}:'
+        gpu_directive = (f'#SBATCH --gres=gpu:{accelerator_type}:'
                          f'{accelerator_count}')
 
     # By default stdout and stderr will be written to $HOME/slurm-%j.out
