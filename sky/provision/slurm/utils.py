@@ -16,6 +16,11 @@ logger = sky_logging.init_logger(__name__)
 
 DEFAULT_SLURM_PATH = '~/.slurm/config'
 
+# Regex pattern for parsing GPU GRES strings.
+# Format: 'gpu:acc_type:acc_count(optional_extra_info)'
+# Examples: 'gpu:H100:8', 'gpu:nvidia_h100_80gb_hbm3:8(S:0-1)', 'gpu:a10g:8'
+_GRES_GPU_PATTERN = re.compile(r'^gpu:([^:]+):(\d+)')
+
 
 def get_slurm_ssh_config() -> SSHConfig:
     """Get the Slurm SSH config."""
@@ -335,16 +340,10 @@ def check_instance_fits(
         assert acc_count is not None, (acc_type, acc_count)
 
         gpu_nodes = []
-        # GRES string format: 'gpu:acc_type:acc_count(optional_extra_info)'
-        # Examples:
-        # - gpu:nvidia_h100_80gb_hbm3:8(S:0-1)
-        # - gpu:a10g:8
-        # - gpu:l4:1
-        gres_pattern = re.compile(r'^gpu:([^:]+):(\d+)')
         for node_info in nodes:
             gres_str = node_info.gres
             # Extract the GPU type and count from the GRES string
-            match = gres_pattern.match(gres_str)
+            match = _GRES_GPU_PATTERN.match(gres_str)
             if not match:
                 continue
 
@@ -375,6 +374,48 @@ def check_instance_fits(
     if not fits and reason is not None:
         reason = not_fit_reason_prefix + reason
     return fits, reason
+
+
+def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
+    """Get the actual GPU type as it appears in the cluster's GRES.
+
+    Slurm GRES GPU types are case-sensitive in sbatch directives. This function
+    queries the cluster to find the exact format used (e.g., 'H100', 'h100',
+    'nvidia_h100_80gb_hbm3') and returns it for use in sbatch.
+
+    Args:
+        cluster: Name of the Slurm cluster.
+        requested_gpu_type: The GPU type requested by the user.
+
+    Returns:
+        The actual GPU type as it appears in the cluster's GRES string.
+        Falls back to the requested type if not found.
+    """
+    try:
+        ssh_config = get_slurm_ssh_config()
+    except FileNotFoundError:
+        return requested_gpu_type
+
+    ssh_config_dict = ssh_config.lookup(cluster)
+    client = slurm.SlurmClient(
+        ssh_config_dict['hostname'],
+        int(ssh_config_dict.get('port', 22)),
+        ssh_config_dict['user'],
+        ssh_config_dict['identityfile'][0],
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+    )
+
+    nodes = client.info_nodes()
+
+    for node_info in nodes:
+        match = _GRES_GPU_PATTERN.match(node_info.gres)
+        if match:
+            node_gpu_type = match.group(1)
+            if node_gpu_type.lower() == requested_gpu_type.lower():
+                return node_gpu_type
+
+    return requested_gpu_type
 
 
 def _get_slurm_node_info_list(
