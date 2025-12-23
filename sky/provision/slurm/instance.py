@@ -175,11 +175,7 @@ def _create_virtual_instance(
     gpu_directive = ''
     if (accelerator_type is not None and accelerator_type.upper() != 'NONE' and
             accelerator_count > 0):
-        # Look up the actual GPU type as it appears in the cluster's GRES.
-        # Slurm GRES types are case-sensitive.
-        actual_gpu_type = slurm_utils.get_gres_gpu_type(region,
-                                                        accelerator_type)
-        gpu_directive = (f'#SBATCH --gres=gpu:{actual_gpu_type}:'
+        gpu_directive = (f'#SBATCH --gres=gpu:{accelerator_type}:'
                          f'{accelerator_count}')
 
     # By default stdout and stderr will be written to $HOME/slurm-%j.out

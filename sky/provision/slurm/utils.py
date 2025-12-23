@@ -381,10 +381,6 @@ def check_instance_fits(
 def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
     """Get the actual GPU type as it appears in the cluster's GRES.
 
-    Slurm GRES GPU types are case-sensitive in sbatch directives. This function
-    queries the cluster to find the exact format used (e.g., 'H100', 'h100',
-    'nvidia_h100_80gb_hbm3') and returns it for use in sbatch.
-
     Args:
         cluster: Name of the Slurm cluster.
         requested_gpu_type: The GPU type requested by the user.
@@ -409,7 +405,6 @@ def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
     )
 
     nodes = client.info_nodes()
-
     for node_info in nodes:
         match = _GRES_GPU_PATTERN.match(node_info.gres)
         if match:
