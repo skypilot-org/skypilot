@@ -294,22 +294,24 @@ def test_kubeconfig_upload_with_kubernetes_exclusion():
     happened because `SSH` inherits from `Kubernetes` and was not being
     explicitly excluded, causing it to upload the kubeconfig.
     """
+    # Mock get_credential_file_mounts on Kubernetes to return kubeconfig.
+    # SSH inherits from Kubernetes, so it will also return kubeconfig.
+    kubeconfig_mounts = {'~/.kube/config': '~/.kube/config'}
 
-    # Mock os.path.exists to return True only for kubeconfig, and other
-    # functions to act as identity functions.
-    def mock_exists(path):
-        return path == '~/.kube/config'
-
-    with mock.patch('os.path.exists', side_effect=mock_exists), \
-         mock.patch('os.path.expanduser', side_effect=lambda x: x), \
-         mock.patch('os.path.realpath', side_effect=lambda x: x):
-
+    with mock.patch.object(clouds.Kubernetes, 'get_credential_file_mounts',
+                           return_value=kubeconfig_mounts):
         # 1. Test the buggy behavior: only Kubernetes is excluded.
         # SSH is not excluded, and since it inherits from Kubernetes, it will
-        # upload the kubeconfig.
+        # upload the kubeconfig via the (mocked) inherited method.
         excluded_clouds_buggy = {clouds.Kubernetes()}
-        credentials_buggy = sky_check.get_cloud_credential_file_mounts(
-            excluded_clouds_buggy)
+
+        # Mock os.path functions for the credential collection loop
+        with mock.patch('os.path.exists', return_value=True), \
+             mock.patch('os.path.expanduser', side_effect=lambda x: x), \
+             mock.patch('os.path.realpath', side_effect=lambda x: x):
+            credentials_buggy = sky_check.get_cloud_credential_file_mounts(
+                excluded_clouds_buggy)
+
         assert '~/.kube/config' in credentials_buggy, (
             'Kubeconfig should be uploaded when only Kubernetes is excluded. '
             'This demonstrates the buggy behavior that the fix in '
@@ -318,8 +320,13 @@ def test_kubeconfig_upload_with_kubernetes_exclusion():
         # 2. Test the correct behavior: both Kubernetes and SSH are excluded.
         # Kubeconfig should not be in the returned credentials.
         excluded_clouds_fixed = {clouds.Kubernetes(), clouds.SSH()}
-        credentials_fixed = sky_check.get_cloud_credential_file_mounts(
-            excluded_clouds_fixed)
+
+        with mock.patch('os.path.exists', return_value=True), \
+             mock.patch('os.path.expanduser', side_effect=lambda x: x), \
+             mock.patch('os.path.realpath', side_effect=lambda x: x):
+            credentials_fixed = sky_check.get_cloud_credential_file_mounts(
+                excluded_clouds_fixed)
+
         assert '~/.kube/config' not in credentials_fixed, (
             'Kubeconfig should not be uploaded when both Kubernetes and SSH '
             'are excluded.')
