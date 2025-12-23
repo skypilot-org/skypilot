@@ -584,12 +584,12 @@ class StrategyExecutor:
                                               if hasattr(
                                                   handle.launched_resources,
                                                   'region') else None)
-                                    instance_links = (instance_links_utils.
-                                                      generate_instance_links(
-                                                          cluster_info,
-                                                          region=region,
-                                                          cluster_name=self.
-                                                          cluster_name))
+                                    instance_links = (
+                                        instance_links_utils.
+                                        generate_instance_links(
+                                            cluster_info,
+                                            region=region,
+                                            cluster_name=self.cluster_name))
                                     if instance_links:
                                         # Store instance links directly in
                                         # database
