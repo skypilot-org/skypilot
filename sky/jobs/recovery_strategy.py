@@ -512,14 +512,6 @@ class StrategyExecutor:
                             self.job_id_on_pool_cluster = job_id_on_pool_cluster
                             await state.set_job_id_on_pool_cluster_async(
                                 self.job_id, job_id_on_pool_cluster)
-                        # Save user-defined links to database at the start of
-                        # launch.
-                        task = self.dag.tasks[0]
-                        if task.links:
-                            await state.update_links_async(
-                                self.job_id, self.task_id, task.links)
-                            logger.debug(
-                                f'Saved user-defined links: {task.links}')
                         logger.info('Managed job cluster launched.')
                     except (exceptions.InvalidClusterNameError,
                             exceptions.NoCloudAccessError,
