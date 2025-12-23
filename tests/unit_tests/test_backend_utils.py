@@ -294,6 +294,7 @@ def test_kubeconfig_upload_with_kubernetes_exclusion():
     happened because `SSH` inherits from `Kubernetes` and was not being
     explicitly excluded, causing it to upload the kubeconfig.
     """
+
     # Mock os.path.exists to return True only for kubeconfig, and other
     # functions to act as identity functions.
     def mock_exists(path):
