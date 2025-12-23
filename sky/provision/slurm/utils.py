@@ -377,6 +377,7 @@ def check_instance_fits(
 
 
 # GRES names are highly unlikely to change within a cluster.
+# TODO(kevin): Cache using sky/utils/db/kv_cache.py too.
 @annotations.lru_cache(scope='global', maxsize=10)
 def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
     """Get the actual GPU type as it appears in the cluster's GRES.
