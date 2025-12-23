@@ -3,9 +3,9 @@
 # Script to fetch logs for all failed jobs in the queue
 # Usage: ./fetch_failed_job_logs.sh
 
-# First, display the full sky jobs queue -a output
+# First, display the full sky jobs queue -a -u output
 echo "=== Job Queue ==="
-job_queue_output=$(sky jobs queue -a)
+job_queue_output=$(sky jobs queue -a -u)
 echo "$job_queue_output"
 echo ""
 
