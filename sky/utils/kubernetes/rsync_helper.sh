@@ -60,4 +60,5 @@ fi
 # We wrap the command in a bash script that waits for rsync, then execs the original command.
 # Timeout after MAX_WAIT_TIME_SECONDS seconds.
 MAX_WAIT_TIME_SECONDS=300
-eval "${kubectl_cmd_base% --} -i -- bash -c 'count=0; max_count=$MAX_WAIT_TIME_SECONDS*2; until which rsync >/dev/null 2>&1; do if [ \$count -ge \$max_count ]; then echo \"Error when trying to rsync files to kubernetes cluster. Package installation may have failed.\" >&2; exit 1; fi; sleep 0.5; count=\$((count+1)); done; exec \"\$@\"' -- \"\$@\""
+MAX_WAIT_COUNT=$((MAX_WAIT_TIME_SECONDS * 2))
+eval "${kubectl_cmd_base% --} -i -- bash -c 'count=0; until which rsync >/dev/null 2>&1; do if [ \$count -ge $MAX_WAIT_COUNT ]; then echo \"Error when trying to rsync files to kubernetes cluster. Package installation may have failed.\" >&2; exit 1; fi; sleep 0.5; count=\$((count+1)); done; exec \"\$@\"' -- \"\$@\""
