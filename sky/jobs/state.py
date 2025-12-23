@@ -2347,36 +2347,6 @@ async def set_failed_async(
 
 
 @_init_db_async
-async def update_metadata_async(job_id: int, task_id: int,
-                                metadata: Dict[str, Any]) -> None:
-    """Update the metadata for a managed job task."""
-    assert _SQLALCHEMY_ENGINE_ASYNC is not None
-    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        # Get existing metadata and merge with new metadata
-        result = await session.execute(
-            sqlalchemy.select(spot_table.c.metadata).where(
-                sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
-                                spot_table.c.task_id == task_id)))
-        existing_metadata_row = result.fetchone()
-        existing_metadata = {}
-        if existing_metadata_row and existing_metadata_row[0]:
-            existing_metadata = json.loads(existing_metadata_row[0])
-
-        # Merge new metadata into existing
-        existing_metadata.update(metadata)
-
-        # Update the database
-        await session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id)).values({
-                        spot_table.c.metadata: json.dumps(existing_metadata),
-                    }))
-        await session.commit()
-
-
-@_init_db_async
 async def update_links_async(job_id: int, task_id: int,
                              links: Dict[str, str]) -> None:
     """Update the links for a managed job task.
