@@ -23,17 +23,30 @@ Example usage in core SkyPilot:
     # Clear failures for a cluster
     cleared = ExternalFailureSource.clear(cluster_name='my-cluster')
 """
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Protocol
 
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
-# Type aliases for the failure source functions
-GetClusterFailuresFunc = Callable[[Optional[str], Optional[str]],
-                                  List[Dict[str, Any]]]
-ClearClusterFailuresFunc = Callable[[Optional[str], Optional[str]],
-                                    List[Dict[str, Any]]]
+
+# Protocol definitions for the failure source functions
+class GetClusterFailuresFunc(Protocol):
+    """Protocol for get_cluster_failures function."""
+
+    def __call__(self,
+                 cluster_hash: Optional[str] = None,
+                 cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        ...
+
+
+class ClearClusterFailuresFunc(Protocol):
+    """Protocol for clear_cluster_failures function."""
+
+    def __call__(self,
+                 cluster_hash: Optional[str] = None,
+                 cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        ...
 
 
 class ExternalFailureSource:
@@ -96,7 +109,8 @@ class ExternalFailureSource:
             return []
         try:
             # pylint: disable=not-callable
-            return cls._get_func(cluster_hash, cluster_name)
+            return cls._get_func(cluster_name=cluster_name,
+                                 cluster_hash=cluster_hash)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get cluster failures: {e}')
             return []
@@ -119,7 +133,8 @@ class ExternalFailureSource:
             return []
         try:
             # pylint: disable=not-callable
-            return cls._clear_func(cluster_hash, cluster_name)
+            return cls._clear_func(cluster_name=cluster_name,
+                                   cluster_hash=cluster_hash)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to clear cluster failures: {e}')
             return []
