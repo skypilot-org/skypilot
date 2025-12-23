@@ -2070,3 +2070,102 @@ def test_large_production_performance(request):
         timeout=30 * 60,  # 30 minutes for data injection and testing
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_kubernetes  # Instance links only supported on cloud VMs
+@pytest.mark.no_nebius  # Instance links only for AWS, GCP, Azure
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_paperspace
+@pytest.mark.no_fluidstack
+@pytest.mark.no_cudo
+@pytest.mark.no_ibm
+@pytest.mark.no_scp
+@pytest.mark.no_oci
+@pytest.mark.no_do
+@pytest.mark.no_runpod
+@pytest.mark.no_vast
+@pytest.mark.no_shadeform
+@pytest.mark.no_hyperbolic
+def test_managed_jobs_instance_links(generic_cloud: str):
+    """Test that instance links are auto-generated for managed jobs.
+
+    This test verifies that when a managed job runs on AWS, GCP, or Azure,
+    the instance links are automatically populated in the job record.
+    """
+    # Only run on clouds that support instance links
+    if generic_cloud not in ('aws', 'gcp', 'azure'):
+        pytest.skip(f'Instance links not supported on {generic_cloud}')
+
+    name = smoke_tests_utils.get_cluster_name()
+
+    # Simple job that runs for a bit
+    yaml_content = textwrap.dedent("""\
+        resources:
+          cpus: 2+
+
+        run: |
+          echo "Job started"
+          sleep 60
+          echo "Job finished"
+        """)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_path = f.name
+
+        # Command to poll for instance links using Python
+        check_links_cmd = textwrap.dedent(f"""\
+            python3 -c "
+import time
+import sky
+from sky import jobs
+
+name = '{name}'
+generic_cloud = '{generic_cloud}'
+
+for attempt in range(30):
+    req_id = jobs.queue_v2(refresh=True, fields=['links', 'job_name'])
+    job_records, _, _, _ = sky.stream_and_get(req_id)
+
+    for record in job_records:
+        if record.get('job_name') == name:
+            links = record.get('links')
+            print(f'Attempt {{attempt + 1}}: links = {{links}}')
+            if links:
+                if generic_cloud == 'aws' and 'AWS Instances' in links:
+                    print('Found AWS Instances link!')
+                    exit(0)
+                elif generic_cloud == 'gcp' and 'GCP Instances' in links:
+                    print('Found GCP Instances link!')
+                    exit(0)
+                elif generic_cloud == 'azure' and 'Azure Resource Group' in links:
+                    print('Found Azure Resource Group link!')
+                    exit(0)
+            break
+    time.sleep(10)
+
+print('Instance links not found after 5 minutes')
+exit(1)
+"
+            """)
+
+        test = smoke_tests_utils.Test(
+            'managed_jobs_instance_links',
+            [
+                f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} {yaml_path} -y -d',
+                # Wait for job to start running
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.RUNNING],
+                    timeout=300),
+                # Check for instance links
+                check_links_cmd,
+            ],
+            f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
