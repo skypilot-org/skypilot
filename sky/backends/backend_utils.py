@@ -69,6 +69,7 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
+from sky.utils.plugin_extensions import ExternalFailureSource
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -2262,10 +2263,11 @@ def _update_cluster_status(
                         for status in node_statuses) and
                     len(node_statuses) == handle.launched_nodes)
 
-    cluster_hardware_failures = global_user_state.get_cluster_failures(
-        record['cluster_hash'])
-
-    logger.debug(f'cluster hardware failures: {cluster_hardware_failures}')
+    external_cluster_failures = ExternalFailureSource.get(
+        cluster_hash=record['cluster_hash'])
+    logger.debug(f'Cluster {cluster_name} with cluster_hash '
+                 f'{record["cluster_hash"]} has external cluster failures: '
+                 f'{external_cluster_failures}')
 
     def get_node_counts_from_ray_status(
             runner: command_runner.CommandRunner) -> Tuple[int, int, str, str]:
@@ -2408,7 +2410,7 @@ def _update_cluster_status(
     should_check_ray = cloud is not None and cloud.uses_ray()
     if (all_nodes_up and (not should_check_ray or
                           run_ray_status_to_check_ray_cluster_healthy()) and
-            not cluster_hardware_failures):
+            not external_cluster_failures):
         # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.
@@ -2515,7 +2517,7 @@ def _update_cluster_status(
                                  for status in node_statuses)
     is_abnormal = (some_nodes_terminated or some_nodes_not_stopped)
 
-    if is_abnormal and not cluster_hardware_failures:
+    if is_abnormal and not external_cluster_failures:
         # If all nodes are up and ray cluster is healthy, we would have returned
         # earlier. So if all_nodes_up is True and we are here, it means the ray
         # cluster must have been unhealthy.
@@ -2651,16 +2653,16 @@ def _update_cluster_status(
     # (1) is_abnormal is False: either node_statuses is empty or all nodes are
     #                           STOPPED
     # or
-    # (2) there are cluster hardware failures.
+    # (2) there are external cluster failures reported by a plugin.
 
-    # If there are cluster hardware failures and the cluster has not been
+    # If there are external cluster failures and the cluster has not been
     # terminated on cloud (to_terminate), we can return the cluster record as is.
-    # This is because when a cluster hardware failure is detected, the cluster
-    # will be marked as INIT with a reason indicating the details of the
-    # hardware failure. So, we do not want to modify the cluster status in this
-    # function except for in the case where the cluster has been terminated on cloud,
-    # in which case we should clean up the cluster from SkyPilot's global state.
-    if cluster_hardware_failures and not to_terminate:
+    # This is because when an external failure is detected, the cluster will be
+    # marked as INIT with a reason indicating the details of the failure. So, we
+    # do not want to modify the cluster status in this function except for in the
+    # case where the cluster has been terminated on cloud, in which case we should
+    # clean up the cluster from SkyPilot's global state.
+    if external_cluster_failures and not to_terminate:
         return global_user_state.get_cluster_from_name(
             cluster_name,
             include_user_info=include_user_info,

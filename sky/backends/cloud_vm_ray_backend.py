@@ -81,6 +81,7 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
 from sky.utils import yaml_utils
+from sky.utils.plugin_extensions import ExternalFailureSource
 
 if typing.TYPE_CHECKING:
     import grpc
@@ -845,7 +846,7 @@ class RetryingVmProvisioner(object):
                 # causing the cluster to be marked as INIT, the
                 # user has a way to explicitly recover the cluster and
                 # remove the failure from the cluster record.
-                failures = global_user_state.clear_cluster_failures(
+                failures = ExternalFailureSource.clear(
                     cluster_name=cluster_name)
                 if failures:
                     failure_details = [
