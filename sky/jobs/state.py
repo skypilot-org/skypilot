@@ -162,6 +162,8 @@ job_events_table = sqlalchemy.Table(
                       sqlalchemy.Integer,
                       primary_key=True,
                       autoincrement=True),
+    # See comment above for explanation of the legacy spot_job_id and
+    # task_id columns.
     sqlalchemy.Column('spot_job_id', sqlalchemy.Integer, index=True),
     sqlalchemy.Column('task_id', sqlalchemy.Integer, index=True),
     sqlalchemy.Column('new_status', sqlalchemy.Text),

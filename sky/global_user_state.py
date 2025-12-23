@@ -283,6 +283,9 @@ cluster_failures_table = sqlalchemy.Table(
     # cleared_at is the soft deletion timestamp indicating
     # when the failure was cleared. This happens when a
     # cluster with an existing failure is restarted.
+    # Soft deletion is used here, because being able to see
+    # historical failure records over time can provide
+    # valuable insights to the user.
     sqlalchemy.Column('cleared_at',
                       sqlalchemy.Integer,
                       server_default=None,

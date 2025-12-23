@@ -279,7 +279,7 @@ all_clusters, unmanaged_clusters, all_jobs, context
     return all_clusters, unmanaged_clusters, all_jobs, context
 
 
-def cluster_events(cluster_name: Optional[str] = None,
+def get_cluster_events(cluster_name: Optional[str] = None,
                    cluster_hash: Optional[str] = None,
                    event_type: str = 'STATUS_CHANGE',
                    include_timestamps: bool = False,
@@ -312,7 +312,7 @@ def cluster_events(cluster_name: Optional[str] = None,
         limit=limit)
 
 
-def cluster_failures(
+def get_cluster_failures(
         cluster_name: Optional[str] = None,
         cluster_hash: Optional[str] = None) -> List[Dict[str, Any]]:
     """Get active cluster failures for a given cluster or all clusters.

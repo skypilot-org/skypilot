@@ -1514,7 +1514,7 @@ async def cluster_events(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_EVENTS,
         request_body=cluster_events_body,
-        func=core.cluster_events,
+        func=core.get_cluster_events,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=cluster_events_body.cluster_name or '',
     )
@@ -1529,7 +1529,7 @@ async def cluster_failures_endpoint(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.CLUSTER_FAILURES,
         request_body=cluster_failures_body,
-        func=core.cluster_failures,
+        func=core.get_cluster_failures,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
