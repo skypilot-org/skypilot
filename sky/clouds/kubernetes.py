@@ -766,6 +766,7 @@ class Kubernetes(clouds.Cloud):
             'ha_recovery_log_path':
                 constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format(''),
             'sky_python_cmd': constants.SKY_PYTHON_CMD,
+            'sky_unset_pythonpath_and_set_cwd': constants.SKY_UNSET_PYTHONPATH_AND_SET_CWD,
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),
             'avoid_label_keys': avoid_label_keys,

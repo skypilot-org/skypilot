@@ -1878,7 +1878,7 @@ def test_aws_custom_image():
         # FROM python:3.12-slim
         # RUN pip install jsonschema
         # WORKDIR /usr/local/lib/python3.12/site-packages
-        'docker:michaelvll/skypilot-custom-image-test-cases:py312-site-packages-workdir'
+        'docker:michaelvll/skypilot-custom-image-test-cases:py312-site-packages-workdir-v1'
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
