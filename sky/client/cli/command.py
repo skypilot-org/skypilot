@@ -5427,10 +5427,14 @@ def jobs_pool_apply(
 @flags.config_option(expose_value=False)
 @flags.verbose_option()
 @click.argument('pool_names', required=False, type=str, nargs=-1)
-@flags.all_option('Show all workers.')
+@click.option('--all',
+              '-a',
+              'show_all',
+              is_flag=True,
+              default=False,
+              help='Show all workers.')
 @usage_lib.entrypoint
-# pylint: disable=redefined-builtin
-def jobs_pool_status(verbose: bool, pool_names: List[str], all: bool):
+def jobs_pool_status(verbose: bool, pool_names: List[str], show_all: bool):
     """Show statuses of pools.
 
     Show detailed statuses of one or more pools. If POOL_NAME is not
@@ -5443,7 +5447,7 @@ def jobs_pool_status(verbose: bool, pool_names: List[str], all: bool):
         pool_status_request_id = managed_jobs.pool_status(pool_names_to_query)
         _, msg = _handle_services_request(pool_status_request_id,
                                           service_names=pool_names_to_query,
-                                          show_all=verbose or all,
+                                          show_all=verbose or show_all,
                                           show_endpoint=False,
                                           pool=True,
                                           is_called_by_user=True)
