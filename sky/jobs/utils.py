@@ -909,7 +909,7 @@ def cancel_jobs_by_pool(pool_name: str,
     return cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
 
 
-def controller_log_file_for_job(job_id: int,
+def controller_log_file_for_job(job_id: Union[int, str],
                                 create_if_not_exists: bool = False) -> str:
     log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     if create_if_not_exists:
@@ -1205,8 +1205,104 @@ def stream_logs_by_id(job_id: int,
         managed_job_status)
 
 
+def find_controller_pid_by_uuid(uuid: str) -> Optional[int]:
+    """Find the PID of a controller process with the given UUID.
+    This is equivalent to: ps -ax | grep controller | grep <uuid>
+    Args:
+        uuid: The UUID of the controller process to find.
+    Returns:
+        The PID of the controller process if found, None otherwise.
+    """
+    try:
+        for proc in psutil.process_iter(['pid', 'cmdline']):
+            try:
+                cmdline = proc.cmdline()
+                if not cmdline:
+                    continue
+                cmd_str = ' '.join(cmdline)
+                # Check if this is a controller process with the given UUID
+                if ('controller' in cmd_str.lower() and uuid in cmd_str):
+                    return proc.pid
+            except (psutil.NoSuchProcess, psutil.AccessDenied,
+                    psutil.ZombieProcess):
+                # Process may have terminated or we don't have access
+                continue
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+    return None
+
+
+def get_all_active_systems() -> List[str]:
+    pids = scheduler.get_alive_controllers_pids()
+    if pids is None:
+        return []
+    cmdlines = [psutil.Process(pid).cmdline() for pid in pids]
+
+    # we use the following command to start the controller
+    # run_controller_cmd = (f'{sys.executable} -u -m'
+    #                       f'sky.jobs.controller {controller_uuid}')
+
+    # we extract the controller_uuid from the cmdline
+    uuids = [cmdline[3] for cmdline in cmdlines if len(cmdline) == 4]
+
+    return uuids
+
+
+def stream_controller_logs(controller_uuid: Union[str, bool],
+                           follow: bool = True) -> Tuple[str, int]:
+    """Stream controller logs by job id."""
+    if controller_uuid is True:
+        controller_uuids = get_all_active_systems()
+        for controller_uuid in controller_uuids:
+            print(controller_uuid, flush=True)
+        return '', exceptions.JobExitCode.SUCCEEDED
+    if controller_uuid is False:
+        # should not happen, but lets not error
+        return '', exceptions.JobExitCode.SUCCEEDED
+
+    controller_uuid: str = controller_uuid  # type: ignore
+    assert controller_uuid.startswith('controller_')
+
+    controller_log_path = controller_log_file_for_job(controller_uuid)
+    if not os.path.exists(controller_log_path):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Controller log file {controller_log_path} not found.')
+
+    # command was started with this pid
+    pid = find_controller_pid_by_uuid(controller_uuid)
+
+    with open(controller_log_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            print(line, end='', flush=True)
+
+        if follow:
+            while True:
+                # Print all new lines, if there are any.
+                line = f.readline()
+                while line is not None and line != '':
+                    print(line, end='')
+                    line = f.readline()
+
+                # Flush.
+                print(end='', flush=True)
+
+                # Check if the controller process is still running.
+                if pid is None or not psutil.pid_exists(pid):
+                    break
+
+                time.sleep(log_lib.SKY_LOG_TAILING_GAP_SECONDS)
+
+            # Wait for final logs to be written.
+            time.sleep(1 + log_lib.SKY_LOG_TAILING_GAP_SECONDS)
+
+    return '', exceptions.JobExitCode.SUCCEEDED
+
+
 def stream_logs(job_id: Optional[int],
                 job_name: Optional[str],
+                system: Optional[str] = None,
                 controller: bool = False,
                 follow: bool = True,
                 tail: Optional[int] = None) -> Tuple[str, int]:
@@ -1217,10 +1313,14 @@ def stream_logs(job_id: Optional[int],
         or failure of the job. 0 if success, 100 if the job failed.
         See exceptions.JobExitCode for possible exit codes.
     """
-    if job_id is None and job_name is None:
+    if job_id is None and job_name is None and system is None:
         job_id = managed_job_state.get_latest_job_id()
         if job_id is None:
             return 'No managed job found.', exceptions.JobExitCode.NOT_FOUND
+
+    if system is not None:
+        assert job_id is None and job_name is None, (job_id, job_name, system)
+        return stream_controller_logs(system, follow)
 
     if controller:
         if job_id is None:
@@ -2312,9 +2412,19 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
+    def get_all_active_systems(cls) -> str:
+        code = textwrap.dedent("""\
+        from sky.utils import message_utils
+        system = utils.get_all_active_systems()
+        print(message_utils.encode_payload(system), end="", flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
     def stream_logs(cls,
                     job_name: Optional[str],
                     job_id: Optional[int],
+                    system: Optional[str],
                     follow: bool = True,
                     controller: bool = False,
                     tail: Optional[int] = None) -> str:
@@ -2323,9 +2433,14 @@ class ManagedJobCodeGen:
             # Versions before 5 did not support tail parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller})
-        else:
+        elif managed_job_version < 13:
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r})
+        else:
+            result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
+                                    follow={follow}, controller={controller},
+                                    system={system!r}, tail={tail!r})
+
         if managed_job_version < 3:
             # Versions 2 and older did not return a retcode, so we just print
             # the result.

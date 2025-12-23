@@ -570,6 +570,7 @@ class JobsLogsBody(RequestBody):
     """The request body for the jobs logs endpoint."""
     name: Optional[str] = None
     job_id: Optional[int] = None
+    system: Optional[Union[str, bool]] = None
     follow: bool = True
     controller: bool = False
     refresh: bool = False
@@ -738,6 +739,7 @@ class JobsDownloadLogsBody(RequestBody):
     """The request body for the jobs download logs endpoint."""
     name: Optional[str]
     job_id: Optional[int]
+    system: Optional[Union[str, bool]] = None
     refresh: bool = False
     controller: bool = False
     local_dir: str = constants.SKY_LOGS_DIRECTORY
