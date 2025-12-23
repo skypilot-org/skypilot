@@ -31,11 +31,8 @@ Example: :doc:`Batch Text Classification with Pools </examples/applications/pool
 .. warning::
 
   Pools is a beta feature. Some features are not yet supported, but are on the roadmap:
-
   - Heterogeneous clusters (e.g., mixed H100 and H200 workers)
-  - Fractional GPUs (e.g. a job requesting 0.5 GPUs)
-  - Multiple jobs running concurrently on the same worker
-
+  - Autoscaling the pool based on the queue of jobs.
 
 Creating a pool
 ---------------
@@ -126,7 +123,7 @@ To submit jobs to the pool, create a job YAML file:
   # Always specify the resources requirements for the job. Without this 
   # specification this job will not be able to use a GPU.
   resources:
-    accelerators: {H100:1, H200:1}
+    accelerators: H100:1
 
   run: |
     nvidia-smi
@@ -144,7 +141,7 @@ This yaml file indicates that the job (1) requires the specified :code:`resource
   YAML to run: job.yaml
   Submitting to pool 'gpu-pool' with 1 job.
   Managed job 'simple-workload' will be launched on (estimated):
-  Use resources from pool 'gpu-pool': 1x[H200:1, H100:1].
+  Use resources from pool 'gpu-pool': 1x H100:1.
   Launching a managed job 'simple-workload'. Proceed? [Y/n]: Y
   Launching managed job 'simple-workload' (rank: 0) from jobs controller...
   ...
@@ -176,9 +173,84 @@ This yaml file indicates that the job (1) requires the specified :code:`resource
 
 The job will be launched on one of the available workers in the pool.
 
+Multiple jobs per worker
+-------------------------
+
+SkyPilot pools support running **multiple jobs concurrently on the same worker** through resource-aware scheduling. The scheduler automatically tracks GPU and resource usage, allowing multiple jobs to share a worker's resources efficiently.
+
+Resource-Aware scheduling
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When you submit a job to a pool, SkyPilot's scheduler:
+
+1. **Examines the job's GPU requirements** specified in the job YAML
+2. **Checks available GPUs** on each worker in the pool
+3. **Schedules the job** on a worker that has sufficient free GPUs
+4. **Tracks GPU usage** as jobs start and complete
+
+For example, if you have a worker with 4 GPUs and submit jobs that each request 1 GPU, up to 4 jobs can run concurrently on that worker.
+
 .. note::
 
-  Currently, each worker is **exclusively occupied** by a single job at a time, so the :code:`resources` specified in the job YAML should match those used in the pool YAML. Support for running multiple jobs concurrently on the same worker will be added in the future.
+  Currently, resource-aware scheduling only considers **GPU and CPU resources**. Memory requirements are not yet used for scheduling decisions. Jobs should be sized appropriately to avoid resource contention on workers.
+
+.. code-block:: yaml
+
+  # worker-pool.yaml - Pool with multi-GPU workers
+  pool:
+    workers: 2
+  
+  resources:
+    accelerators: T4:4  # Each worker has 4 T4 GPUs
+
+.. code-block:: yaml
+
+  # single-gpu-job.yaml - Job requesting 1 GPU
+  name: inference-job
+  
+  resources:
+    accelerators: T4:1  # Request 1 GPU
+  
+  run: |
+    python inference.py
+
+.. code-block:: console
+
+  # Submit 8 jobs - 4 will run on each worker concurrently
+  $ sky jobs launch -p my-pool --num-jobs 8 single-gpu-job.yaml
+
+In this example, each worker can run 4 jobs concurrently (one per GPU), so all 8 jobs will start immediately across the 2 workers.
+
+Job queueing behavior
+~~~~~~~~~~~~~~~~~~~~~~
+
+When all workers are at capacity, new jobs will wait in the **PENDING** state until resources become available:
+
+- As soon as a running job completes and frees up resources, the next pending job that fits will be scheduled
+- You can check job status using :code:`sky jobs queue --pool <pool-name>`
+
+.. code-block:: console
+
+  $ sky jobs queue --pool my-pool
+  Fetching managed job statuses...
+  Managed jobs:
+  ID  NAME            RESOURCES  SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
+  5   inference-job   1x T4      2 mins ago   1m 23s         1m 20s        0            RUNNING
+  6   inference-job   1x T4      2 mins ago   1m 18s         1m 15s        0            RUNNING  
+  7   inference-job   1x T4      1 min ago    53s            50s           0            RUNNING
+  8   inference-job   1x T4      1 min ago    48s            45s           0            RUNNING
+  9   inference-job   1x T4      30s ago      -              -             0            PENDING  # Waiting for free GPU
+
+Resource specification best practices
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When using multiple jobs per worker, keep these guidelines in mind:
+
+1. **Always specify GPU requirements**: Jobs without GPU specifications may not be scheduled correctly.
+
+2. **Consider resource fragmentation**: If you have a worker with 8 GPUs and jobs requesting 5 GPUs each, only one job can run at a time, leaving 3 GPUs idle.
+
+4. **Be mindful of CPU and memory**: While scheduling only considers GPUs, ensure your jobs don't overwhelm the worker's CPU or memory capacity when running concurrently.
 
 Scale out with multiple jobs
 ----------------------------
@@ -199,7 +271,7 @@ Here is a simple example:
   name: batch-workload
 
   resources:
-    accelerators: {H100:1, H200:1}
+    accelerators: H100:1
 
   run: |
     echo "Job rank: $SKYPILOT_JOB_RANK out of $SKYPILOT_NUM_JOBS"
@@ -215,7 +287,7 @@ Use the following command to submit them to the pool:
   YAML to run: batch-job.yaml
   Submitting to pool 'gpu-pool' with 10 jobs.
   Managed job 'batch-workload' will be launched on (estimated):
-  Use resources from pool 'gpu-pool': 1x[H200:1, H100:1].
+  Use resources from pool 'gpu-pool': 1x H100:1.
   Launching 10 managed jobs 'batch-workload'. Proceed? [Y/n]: Y
   Launching managed job 'batch-workload' (rank: 0) from jobs controller...
   ...
@@ -246,9 +318,9 @@ You can use the job page in the dashboard to monitor the job status.
 In this example, we submit 10 jobs with IDs from 3 to 12.
 Only one worker is currently ready due to a resource availability issue, but the pool continues to request additional workers in the background.
 
-Since each job requires **the entire worker cluster**, the number of concurrent jobs is limited to the number of workers. Additional jobs will remain in the **PENDING** state until a worker becomes available.
+The number of concurrent jobs depends on the **available resources** on each worker. If jobs request resources that can fit multiple times on a single worker (e.g., 1 GPU jobs on a 4-GPU worker), multiple jobs can run concurrently. Jobs will remain in the **PENDING** state until sufficient resources become available.
 
-As a result, except for the 5 completed jobs, 1 job is running on the available worker, while the remaining 4 are in the PENDING state, waiting for the previous job to finish.
+As a result, except for the 5 completed jobs, some jobs may be running on the available worker(s), while others are in the PENDING state, waiting for resources to free up.
 
 Clicking on the pool name will show detailed information about the pool, including its resource specification, status of each worker node, and any job currently running on it:
 
@@ -278,7 +350,7 @@ You can update the pool configuration with the following command:
     workers: 10
 
   resources:
-    accelerators: {H100:1, H200:1}
+    accelerators: H100:1
 
   file_mounts:
     /my-data-2:
@@ -328,6 +400,5 @@ The pool will be torn down in the background, and any remaining resources will b
   Some improved features are under development and will be available soon:
 
   - **Autoscaling**: Automatically scale down to 0 workers when idle, and scale up when new jobs are submitted.
-  - **Multi-job per worker**: Support for running multiple jobs concurrently on the same worker.
   - **Fractional GPU support**: Allow jobs to request and share fractional GPU resources.
 
