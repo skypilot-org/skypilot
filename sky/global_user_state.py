@@ -16,7 +16,8 @@ import re
 import threading
 import time
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import (Any, Dict, List, Literal, Optional, overload, Set, Tuple,
+                    Union)
 import uuid
 
 import sqlalchemy
@@ -1046,6 +1047,34 @@ async def cluster_event_retention_daemon():
             min(retention_hours * 3600, debug_retention_hours * 3600),
             MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS)
         await asyncio.sleep(sleep_amount)
+
+
+@overload
+def get_cluster_events(cluster_name: Optional[str],
+                       cluster_hash: Optional[str],
+                       event_type: ClusterEventType,
+                       include_timestamps: Literal[False] = ...,
+                       limit: Optional[int] = ...) -> List[str]:
+    ...
+
+
+@overload
+def get_cluster_events(
+        cluster_name: Optional[str],
+        cluster_hash: Optional[str],
+        event_type: ClusterEventType,
+        include_timestamps: Literal[True] = ...,
+        limit: Optional[int] = ...) -> List[Dict[str, Union[str, int]]]:
+    ...
+
+
+@overload
+def get_cluster_events(cluster_name: Optional[str],
+                       cluster_hash: Optional[str],
+                       event_type: ClusterEventType,
+                       include_timestamps: bool = ...,
+                       limit: Optional[int] = ...) -> List[Any]:
+    ...
 
 
 def get_cluster_events(cluster_name: Optional[str],

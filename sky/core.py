@@ -1,6 +1,6 @@
 """SDK functions for cluster/job management."""
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, overload, Tuple, Union
 
 import colorama
 
@@ -277,6 +277,34 @@ all_clusters, unmanaged_clusters, all_jobs, context
     ]
     all_jobs = [responses.ManagedJobRecord(**job) for job in all_jobs]
     return all_clusters, unmanaged_clusters, all_jobs, context
+
+
+@overload
+def get_cluster_events(cluster_name: Optional[str] = ...,
+                       cluster_hash: Optional[str] = ...,
+                       event_type: str = ...,
+                       include_timestamps: Literal[False] = ...,
+                       limit: Optional[int] = ...) -> List[str]:
+    ...
+
+
+@overload
+def get_cluster_events(
+        cluster_name: Optional[str] = ...,
+        cluster_hash: Optional[str] = ...,
+        event_type: str = ...,
+        include_timestamps: Literal[True] = ...,
+        limit: Optional[int] = ...) -> List[Dict[str, Union[str, int]]]:
+    ...
+
+
+@overload
+def get_cluster_events(cluster_name: Optional[str] = ...,
+                       cluster_hash: Optional[str] = ...,
+                       event_type: str = ...,
+                       include_timestamps: bool = ...,
+                       limit: Optional[int] = ...) -> List[Any]:
+    ...
 
 
 def get_cluster_events(cluster_name: Optional[str] = None,
