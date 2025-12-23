@@ -1268,7 +1268,6 @@ async def main(controller_uuid: str):
 
     context_utils.hijack_sys_attrs()
 
-    # Load plugins to register external failure sources (e.g., GPU Healer)
     plugins.load_plugins(plugins.ExtensionContext())
 
     controller = ControllerManager(controller_uuid)
