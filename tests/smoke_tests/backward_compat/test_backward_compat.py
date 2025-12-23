@@ -756,31 +756,26 @@ class TestBackwardCompatibility:
         # Check skylet version compatibility
         # PR 8324 introduced a breaking change in skylet version 28 that adds
         # user-specific exit codes. If one version is >= 28 and the other is
-        # not, the downgrade portion of the test should be skipped as they are
-        # incompatible.
+        # not, the test should be skipped as they are incompatible.
         base_skylet_version = int(self._get_base_skylet_version())
         current_skylet_version = int(skylet_constants.SKYLET_VERSION)
-        should_skip_downgrade = ((base_skylet_version >= 28) !=
-                                 (current_skylet_version >= 28))
+        if (base_skylet_version >= 28) != (current_skylet_version >= 28):
+            pytest.skip(
+                f'Skipping test due to incompatible skylet versions: '
+                f'base={base_skylet_version}, current={current_skylet_version}. '
+                f'Skylet version 28 introduced breaking changes for '
+                f'user-specific exit codes.')
+
         cluster_name = smoke_tests_utils.get_cluster_name()
 
-        if should_skip_downgrade:
-            commands = [
-                # Launch cluster with base (older) server version
-                f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
-                f'sky launch --infra {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -c {cluster_name} examples/minimal.yaml',
-            ]
-        else:
-            commands = [
-                # Launch cluster with current (newer) server version
-                f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
-                f'sky launch --infra {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -c {cluster_name} examples/minimal.yaml',
-                f'{self.ACTIVATE_CURRENT} && sky stop -y {cluster_name}',
+        commands = [
+            # Launch cluster with current (newer) server version
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'sky launch --infra {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -c {cluster_name} examples/minimal.yaml',
+            f'{self.ACTIVATE_CURRENT} && sky stop -y {cluster_name}',
 
-                # Switch to base (older) server and try to start the cluster
-                f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && sky start -y {cluster_name}',
-            ]
-        commands.extend([
+            # Switch to base (older) server and try to start the cluster
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && sky start -y {cluster_name}',
             f'{self.ACTIVATE_BASE} && sky status {cluster_name} | grep UP',
             f'{self.ACTIVATE_BASE} && sky exec {cluster_name} "echo server-downgrade-test"',
             f'{self.ACTIVATE_BASE} && sky logs {cluster_name} | grep "server-downgrade-test"',
@@ -789,7 +784,7 @@ class TestBackwardCompatibility:
             # Switch back to current (newer) server and try to start the cluster
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && sky start -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky status {cluster_name} | grep UP',
-        ])
+        ]
 
         teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name} -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
