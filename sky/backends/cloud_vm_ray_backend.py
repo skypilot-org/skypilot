@@ -4441,7 +4441,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def sync_down_managed_job_logs(
             self,
             handle: CloudVmRayResourceHandle,
-            job_id: Optional[int] = None,
+            job_id: Optional[Union[int, str]] = None,
             job_name: Optional[str] = None,
             controller: bool = False,
             local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
@@ -4516,7 +4516,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             run_timestamps = {
                 job_id: f'managed-jobs-consolidation-mode-{job_id}'
             }
-        else:
+        elif isinstance(job_id, int):
             # get the run_timestamp
             # the function takes in [job_id]
             use_legacy = not handle.is_grpc_enabled_with_flag
@@ -4552,6 +4552,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # returns with a dict of {job_id: run_timestamp}
                 run_timestamps = message_utils.decode_payload(
                     run_timestamps_payload)
+        else:
+            run_timestamps = {job_id: f'process-{job_id}'}
+
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'

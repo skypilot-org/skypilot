@@ -37,6 +37,7 @@ import traceback
 import typing
 from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
                     TypeVar, Union)
+import uuid
 
 import click
 import colorama
@@ -5240,11 +5241,35 @@ def jobs_cancel(
               is_flag=True,
               required=False,
               help='Download logs for all jobs shown in the queue.')
-@click.argument('job_id', required=False, type=int)
+@click.argument('job_id', required=False, type=str)
 @usage_lib.entrypoint
-def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
+def jobs_logs(name: Optional[str], job_id: Optional[str], follow: bool,
               controller: bool, refresh: bool, sync_down: bool):
     """Tail or sync down the log of a managed job."""
+    job_id: Optional[Union[int, str]] = job_id  # keep mypy happy
+
+    if controller and job_id is not None:
+        try:
+            if isinstance(job_id, str) and job_id.isdigit():
+                job_id = int(job_id)
+            elif isinstance(job_id, str):
+                parsed_uuid = uuid.UUID(job_id)
+                job_id = f'controller_{parsed_uuid}'
+        except (ValueError, TypeError):
+            # keep same typeerror message as before - just adds "or UUID" to
+            # the error message
+            raise click.UsageError(  # pylint: disable=raise-missing-from
+                f'Error: Invalid value for \'[JOB_ID]\': \'{job_id}\' is not '
+                'a valid integer or UUID.')
+    elif job_id is not None:
+        try:
+            job_id = int(job_id)
+        except (ValueError, TypeError):
+            # same error message as before in the non controller case
+            raise click.UsageError(  # pylint: disable=raise-missing-from
+                f'Error: Invalid value for \'[JOB_ID]\': \'{job_id}\' is not '
+                'a valid integer.')
+
     try:
         if sync_down:
             with rich_utils.client_status(

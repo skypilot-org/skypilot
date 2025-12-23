@@ -1110,7 +1110,7 @@ def tail_logs(name: Optional[str],
 @usage_lib.entrypoint
 def download_logs(
         name: Optional[str],
-        job_id: Optional[int],
+        job_id: Optional[Union[int, str]],
         refresh: bool,
         controller: bool,
         local_dir: str = skylet_constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:

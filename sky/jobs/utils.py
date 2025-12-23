@@ -909,12 +909,84 @@ def cancel_jobs_by_pool(pool_name: str,
     return cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
 
 
-def controller_log_file_for_job(job_id: int,
+def controller_log_file_for_job(job_id: Union[int, str],
                                 create_if_not_exists: bool = False) -> str:
     log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     if create_if_not_exists:
         os.makedirs(log_dir, exist_ok=True)
     return os.path.join(log_dir, f'{job_id}.log')
+
+
+def find_controller_pid_by_uuid(uuid: str) -> Optional[int]:
+    """Find the PID of a controller process with the given UUID.
+
+    This is equivalent to: ps -ax | grep controller | grep <uuid>
+
+    Args:
+        uuid: The UUID of the controller process to find.
+
+    Returns:
+        The PID of the controller process if found, None otherwise.
+    """
+    try:
+        for proc in psutil.process_iter(['pid', 'cmdline']):
+            try:
+                cmdline = proc.cmdline()
+                if not cmdline:
+                    continue
+                cmd_str = ' '.join(cmdline)
+                # Check if this is a controller process with the given UUID
+                if ('controller' in cmd_str.lower() and uuid in cmd_str):
+                    return proc.pid
+            except (psutil.NoSuchProcess, psutil.AccessDenied,
+                    psutil.ZombieProcess):
+                # Process may have terminated or we don't have access
+                continue
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+    return None
+
+
+def stream_controller_logs(controller_uuid: str,
+                           follow: bool = True) -> Tuple[str, int]:
+    """Stream controller logs by job id."""
+    assert controller_uuid.startswith('controller_')
+
+    controller_log_path = controller_log_file_for_job(controller_uuid)
+    if not os.path.exists(controller_log_path):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Controller log file {controller_log_path} not found.')
+
+    # command was started with this pid
+    pid = find_controller_pid_by_uuid(controller_uuid)
+
+    with open(controller_log_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            print(line, end='', flush=True)
+
+        if follow:
+            while True:
+                # Print all new lines, if there are any.
+                line = f.readline()
+                while line is not None and line != '':
+                    print(line, end='')
+                    line = f.readline()
+
+                # Flush.
+                print(end='', flush=True)
+
+                # Check if the controller process is still running.
+                if not psutil.pid_exists(pid):
+                    break
+
+                time.sleep(log_lib.SKY_LOG_TAILING_GAP_SECONDS)
+
+            # Wait for final logs to be written.
+            time.sleep(1 + log_lib.SKY_LOG_TAILING_GAP_SECONDS)
+
+    return '', exceptions.JobExitCode.SUCCEEDED
 
 
 def stream_logs_by_id(job_id: int,
@@ -1205,7 +1277,7 @@ def stream_logs_by_id(job_id: int,
         managed_job_status)
 
 
-def stream_logs(job_id: Optional[int],
+def stream_logs(job_id: Optional[Union[int, str]],
                 job_name: Optional[str],
                 controller: bool = False,
                 follow: bool = True,
@@ -1217,11 +1289,23 @@ def stream_logs(job_id: Optional[int],
         or failure of the job. 0 if success, 100 if the job failed.
         See exceptions.JobExitCode for possible exit codes.
     """
+
+    if isinstance(job_id, str):
+        assert controller
+
+        if job_id.startswith('controller_'):
+            return stream_controller_logs(job_id, follow)
+        else:
+            return '', exceptions.JobExitCode.NOT_FOUND
+
     if job_id is None and job_name is None:
         job_id = managed_job_state.get_latest_job_id()
         if job_id is None:
             return 'No managed job found.', exceptions.JobExitCode.NOT_FOUND
 
+    # due to checking if job_id is a string, we can safely assume its an
+    # optional int
+    job_id: Optional[int] = job_id  # type: ignore
     if controller:
         if job_id is None:
             assert job_name is not None

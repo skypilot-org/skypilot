@@ -326,7 +326,7 @@ def cancel(
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
 def tail_logs(name: Optional[str] = None,
-              job_id: Optional[int] = None,
+              job_id: Optional[Union[int, str]] = None,
               follow: bool = True,
               controller: bool = False,
               refresh: bool = False,
@@ -386,11 +386,12 @@ def tail_logs(name: Optional[str] = None,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def download_logs(
-        name: Optional[str],
-        job_id: Optional[int],
-        refresh: bool,
-        controller: bool,
-        local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[int, str]:
+    name: Optional[str],
+    job_id: Optional[Union[int, str]],
+    refresh: bool,
+    controller: bool,
+    local_dir: str = constants.SKY_LOGS_DIRECTORY
+) -> Dict[Union[int, str], str]:
     """Sync down logs of managed jobs.
 
     Please refer to sky.cli.job_logs for documentation.
@@ -428,7 +429,8 @@ def download_logs(
     remote2local_path_dict = client_common.download_logs_from_api_server(
         job_id_remote_path_dict.values())
     return {
-        int(job_id): remote2local_path_dict[remote_path]
+        int(job_id) if job_id.isdigit() else job_id:
+        remote2local_path_dict[remote_path]
         for job_id, remote_path in job_id_remote_path_dict.items()
     }
 
