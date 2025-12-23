@@ -61,4 +61,7 @@ fi
 # Timeout after MAX_WAIT_TIME_SECONDS seconds.
 MAX_WAIT_TIME_SECONDS=300
 MAX_WAIT_COUNT=$((MAX_WAIT_TIME_SECONDS * 2))
-eval "${kubectl_cmd_base% --} -i -- bash -c 'count=0; until which rsync >/dev/null 2>&1; do if [ \$count -ge $MAX_WAIT_COUNT ]; then echo \"Error when trying to rsync files to kubernetes cluster. Package installation may have failed.\" >&2; exit 1; fi; sleep 0.5; count=\$((count+1)); echo \"Waiting for rsync to be available... \$count seconds elapsed\"; done; exec \"\$@\"' -- \"\$@\""
+# Use --norc --noprofile to prevent bash from sourcing startup files that might
+# output to stdout and corrupt the rsync protocol. All debug output must go to
+# stderr (>&2) to keep stdout clean for rsync communication.
+eval "${kubectl_cmd_base% --} -i -- bash --norc --noprofile -c 'count=0; until which rsync >/dev/null 2>&1; do if [ \$count -ge $MAX_WAIT_COUNT ]; then echo \"Error when trying to rsync files to kubernetes cluster. Package installation may have failed.\" >&2; exit 1; fi; sleep 0.5; count=\$((count+1)); done; exec \"\$@\"' -- \"\$@\""
