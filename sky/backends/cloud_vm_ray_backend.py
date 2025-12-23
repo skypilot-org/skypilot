@@ -840,24 +840,6 @@ class RetryingVmProvisioner(object):
                     f'{prev_cluster_status.value}) was previously in '
                     f'{cloud} ({region.name}). Restarting.'
                     f'{colorama.Style.RESET_ALL}')
-
-                # Clear any existing cluster failures when reusing a cluster.
-                # This ensures that when a cluster failure is detected,
-                # causing the cluster to be marked as INIT, the
-                # user has a way to explicitly recover the cluster and
-                # remove the failure from the cluster record.
-                failures = ExternalFailureSource.clear(
-                    cluster_name=cluster_name)
-                if failures:
-                    failure_details = [
-                        f'"{f["failure_mode"]}"' for f in failures
-                    ]
-                    plural = 's' if len(failures) > 1 else ''
-                    logger.info(
-                        f'{colorama.Style.DIM}Cleared {len(failures)} '
-                        f'existing cluster failure{plural} for cluster '
-                        f'{cluster_name!r}: "{", ".join(failure_details)}"'
-                        f'{colorama.Style.RESET_ALL}')
             yield zones
 
             # If it reaches here: the cluster status in the database gets
@@ -5350,6 +5332,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             assert handle is not None
             # Cluster already exists.
             self.check_resources_fit_cluster(handle, task)
+
+            # Clear any existing cluster failures when reusing a cluster.
+            # This ensures that when a cluster failure is detected (causing
+            # the cluster to be marked as INIT), the user can recover the
+            # cluster via `sky start` or `sky launch` and clear the failure.
+            failures = ExternalFailureSource.clear(cluster_name=cluster_name)
+            if failures:
+                failure_details = [f'"{f["failure_mode"]}"' for f in failures]
+                plural = 's' if len(failures) > 1 else ''
+                logger.info(f'{colorama.Style.DIM}Cleared {len(failures)} '
+                            f'existing cluster failure{plural} for cluster '
+                            f'{cluster_name!r}: {", ".join(failure_details)}'
+                            f'{colorama.Style.RESET_ALL}')
+
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
             # Take a random resource in order to get resource info that applies
