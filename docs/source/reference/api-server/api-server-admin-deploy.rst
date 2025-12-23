@@ -213,16 +213,20 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. tip::
 
-            If you are using a kubeconfig file that contains `exec-based authentication <https://kubernetes.io/docs/reference/access-authn-authz/authentication/#configuration>`_ (e.g., GKE's default ``gke-gcloud-auth-plugin`` based authentication), you will need to strip the path information from the ``command`` field in the exec configuration.
-            You can use the ``exec_kubeconfig_converter.py`` script to do this.
+            If you are using a kubeconfig file that contains `exec-based authentication <https://kubernetes.io/docs/reference/access-authn-authz/authentication/#configuration>`_ (e.g., GKE's default ``gke-gcloud-auth-plugin``, Nebius Managed Kubernetes, OCI, etc.), you will need to generate a kubeconfig with static authentication instead.
+            You can use the ``generate_kubeconfig.sh`` script to do this.
 
             .. code-block:: bash
 
-                python -m sky.utils.kubernetes.exec_kubeconfig_converter --input ~/.kube/config --output ~/.kube/config.converted
+                # Download the script
+                curl -O https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/sky/utils/kubernetes/generate_kubeconfig.sh && chmod +x generate_kubeconfig.sh
 
-            Then create the Kubernetes secret with the converted kubeconfig file ``~/.kube/config.converted``.
+                # Generate the kubeconfig
+                export KUBECONFIG=$HOME/.kube/config # or the path to your kubeconfig file
+                ./generate_kubeconfig.sh
 
-            The specific cloud's credential for the exec-based authentication also needs to be configured. For example, to enable exec-based authentication for GKE, you also need to setup GCP credentials (see the GCP tab above).
+            Then create the Kubernetes secret with the generated kubeconfig file ``./kubeconfig``.
+
 
         .. dropdown:: Update Kubernetes credentials
 

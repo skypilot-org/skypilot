@@ -59,7 +59,10 @@ import cachePreloader from '@/lib/cache-preloader';
 import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
-import { NonCapitalizedTooltip } from '@/components/utils';
+import {
+  NonCapitalizedTooltip,
+  LastUpdatedTimestamp,
+} from '@/components/utils';
 import { Card } from '@/components/ui/card';
 import {
   Select,
@@ -1764,6 +1767,7 @@ export function GPUs() {
   const [sshAndKubeJobsDataLoading, setSshAndKubeJobsDataLoading] =
     useState(true);
   const [sshAndKubeJobsData, setSshAndKubeJobsData] = useState({});
+  const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
   // Selected context for subpage view
   const [selectedContext, setSelectedContext] = useState(null);
@@ -2042,7 +2046,8 @@ export function GPUs() {
       // Trigger cache preloading for infra page and background preload other pages
       await cachePreloader.preloadForPage('infra');
 
-      fetchData({ showLoadingIndicators: true });
+      await fetchData({ showLoadingIndicators: true });
+      setLastFetchedTime(new Date());
     };
 
     initializeData();
@@ -2082,7 +2087,7 @@ export function GPUs() {
     };
   }, []);
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getManagedJobs, [
@@ -2093,10 +2098,11 @@ export function GPUs() {
     dashboardCache.invalidate(getSSHNodePools);
 
     if (refreshDataRef.current) {
-      refreshDataRef.current({
+      await refreshDataRef.current({
         showLoadingIndicators: true,
         forceRefresh: true, // Force refresh to run sky check
       });
+      setLastFetchedTime(new Date());
     }
   };
 
@@ -2157,6 +2163,12 @@ export function GPUs() {
 
   // Get enabled clouds for the selected workspace
   const workspaceEnabledClouds = React.useMemo(() => {
+    // If Kubernetes data is still loading and workspaceInfrastructure is empty,
+    // return null to indicate we should show all enabled clouds without filtering
+    if (kubeLoading && Object.keys(workspaceInfrastructure).length === 0) {
+      return null;
+    }
+
     if (selectedWorkspace === 'all') {
       // Return all unique clouds across all workspaces
       const allCloudsSet = new Set();
@@ -2183,12 +2195,17 @@ export function GPUs() {
       });
       return Array.from(cloudsSet);
     }
-  }, [selectedWorkspace, workspaceInfrastructure]);
+  }, [selectedWorkspace, workspaceInfrastructure, kubeLoading]);
 
   // Filter cloud infrastructure data based on selected workspace
   const filteredCloudInfraData = React.useMemo(() => {
     if (!cloudInfraData || cloudInfraData.length === 0) {
       return [];
+    }
+    // If workspaceEnabledClouds is null (Kubernetes still loading),
+    // show all enabled clouds without filtering by workspace
+    if (workspaceEnabledClouds === null) {
+      return cloudInfraData;
     }
     return cloudInfraData.filter((cloud) => {
       return workspaceEnabledClouds.includes(cloud.name.toLowerCase());
@@ -2716,6 +2733,12 @@ export function GPUs() {
               <CircularProgress size={15} className="mt-0" />
               <span className="ml-2 text-gray-500">Loading...</span>
             </div>
+          )}
+          {!isAnyLoading && lastFetchedTime && (
+            <LastUpdatedTimestamp
+              timestamp={lastFetchedTime}
+              className="mr-2"
+            />
           )}
           <button
             onClick={handleRefresh}

@@ -252,3 +252,15 @@ class GetLogDirsForJobsResponse(_message.Message):
     JOB_LOG_DIRS_FIELD_NUMBER: _ClassVar[int]
     job_log_dirs: _containers.ScalarMap[int, str]
     def __init__(self, job_log_dirs: _Optional[_Mapping[int, str]] = ...) -> None: ...
+
+class GetJobExitCodesRequest(_message.Message):
+    __slots__ = ("job_id",)
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    job_id: int
+    def __init__(self, job_id: _Optional[int] = ...) -> None: ...
+
+class GetJobExitCodesResponse(_message.Message):
+    __slots__ = ("exit_codes",)
+    EXIT_CODES_FIELD_NUMBER: _ClassVar[int]
+    exit_codes: _containers.RepeatedScalarFieldContainer[int]
+    def __init__(self, exit_codes: _Optional[_Iterable[int]] = ...) -> None: ...

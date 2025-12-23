@@ -103,14 +103,21 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     """
     local_to_controller_file_mounts: Dict[str, str] = {}
 
-    # For consolidation mode, we don't need to use cloud storage,
-    # as uploading to the controller is only a local copy.
+    # Check if user has explicitly configured a bucket for jobs.
+    # If so, we should use cloud storage even in consolidation mode to persist
+    # files across rolling updates and pod restarts.
+    has_explicit_bucket = skypilot_config.get_nested(('jobs', 'bucket'),
+                                                     None) is not None
     storage_clouds = (
         storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
     force_disable_cloud_bucket = skypilot_config.get_nested(
         ('jobs', 'force_disable_cloud_bucket'), False)
-    if (not managed_job_utils.is_consolidation_mode() and storage_clouds and
-            not force_disable_cloud_bucket):
+    # Use cloud storage if:
+    # 1. Not in consolidation mode, OR
+    # 2. In consolidation mode BUT user has explicit bucket configured
+    # AND storage clouds are available AND cloud bucket is not force-disabled
+    if ((not managed_job_utils.is_consolidation_mode() or has_explicit_bucket)
+            and storage_clouds and not force_disable_cloud_bucket):
         for task_ in dag.tasks:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                 task_, task_type='jobs')

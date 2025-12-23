@@ -19,6 +19,7 @@ import {
   NonCapitalizedTooltip,
   REFRESH_INTERVAL,
   TimestampWithTooltip,
+  LastUpdatedTimestamp,
 } from '@/components/utils';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -211,6 +212,7 @@ export function Clusters() {
     infra: [],
   }); /// Option values for properties
   const [preloadingComplete, setPreloadingComplete] = useState(false);
+  const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
   // Handle URL query parameters for workspace and user filtering and show history
   useEffect(() => {
@@ -302,10 +304,12 @@ export function Clusters() {
 
         // Signal that preloading is complete
         setPreloadingComplete(true);
+        setLastFetchedTime(new Date());
       } catch (error) {
         console.error('Error fetching data for filters:', error);
         // Still signal completion even on error so the table can load
         setPreloadingComplete(true);
+        setLastFetchedTime(new Date());
       }
     };
 
@@ -430,6 +434,7 @@ export function Clusters() {
     // Trigger a new preload cycle
     cachePreloader.preloadForPage('clusters', { force: true }).then(() => {
       setPreloadingComplete(true);
+      setLastFetchedTime(new Date());
       // Call refresh after preloading is complete
       if (refreshDataRef.current) {
         refreshDataRef.current();
@@ -510,6 +515,9 @@ export function Clusters() {
               <CircularProgress size={15} className="mt-0" />
               <span className="ml-2 text-gray-500 text-sm">Loading...</span>
             </div>
+          )}
+          {!loading && lastFetchedTime && (
+            <LastUpdatedTimestamp timestamp={lastFetchedTime} />
           )}
           <button
             onClick={handleRefresh}
