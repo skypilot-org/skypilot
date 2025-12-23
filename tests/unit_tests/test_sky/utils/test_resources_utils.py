@@ -1,6 +1,10 @@
 """Tests for resources_utils.py."""
 import unittest
 
+import pytest
+
+from sky import clouds
+from sky import resources as resources_lib
 from sky.utils import resources_utils
 
 
@@ -85,3 +89,32 @@ class TestParseTimeMinutes(unittest.TestCase):
         for input_str, expected in test_cases:
             self.assertEqual(resources_utils.parse_time_minutes(input_str),
                              expected, f'Failed for input: {input_str}')
+
+
+@pytest.mark.parametrize('cloud', [clouds.Slurm(), clouds.Kubernetes()])
+def test_no_instance_type_shown_slurm_kubernetes(cloud):
+    """Test that Slurm/Kubernetes resources don't show instance type name."""
+    resource = resources_lib.Resources(cloud=cloud,
+                                       instance_type='2CPU--4GB',
+                                       cpus=2,
+                                       memory=4)
+    simple, full = resources_utils.format_resource(resource,
+                                                   simplified_only=False)
+
+    # Instance type should NOT appear in output
+    assert '2CPU--4GB' not in simple
+    assert '2CPU--4GB' not in full
+    # But CPUs and memory should be shown
+    assert 'cpus=2' in simple
+    assert 'mem=4' in simple
+
+
+def test_aws_instance_type_shown():
+    """Test that AWS resources do show instance type name."""
+    resource = resources_lib.Resources(cloud=clouds.AWS(),
+                                       instance_type='m5.large',
+                                       cpus=2,
+                                       memory=8)
+    simple, _ = resources_utils.format_resource(resource, simplified_only=False)
+
+    assert 'm5.large' in simple

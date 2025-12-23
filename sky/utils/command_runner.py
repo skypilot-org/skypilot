@@ -105,6 +105,7 @@ def ssh_options_list(
     connect_timeout: Optional[int] = None,
     port: int = 22,
     disable_control_master: Optional[bool] = False,
+    escape_percent_expand: bool = False,
 ) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     if connect_timeout is None:
@@ -159,11 +160,14 @@ def ssh_options_list(
     # 'ControlPersist' number of seconds delay per ssh commands ran.
     if (ssh_control_name is not None and docker_ssh_proxy_command is None and
             ssh_proxy_command is None and not disable_control_master):
+        control_path = f'{_ssh_control_path(ssh_control_name)}/%C'
+        if escape_percent_expand:
+            control_path = control_path.replace('%', '%%')
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
             'ControlMaster': 'auto',
-            'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
+            'ControlPath': control_path,
             'ControlPersist': '300s',
         })
     ssh_key_option = [
@@ -1510,12 +1514,17 @@ class SlurmCommandRunner(SSHCommandRunner):
         # First, build SSH options to reach the login node, using the user's
         # existing proxy command or proxy jump if provided.
         proxy_ssh_options = ' '.join(
-            ssh_options_list(self.ssh_private_key,
-                             None,
-                             ssh_proxy_command=self._ssh_proxy_command,
-                             ssh_proxy_jump=self._ssh_proxy_jump,
-                             port=self.port,
-                             disable_control_master=True))
+            ssh_options_list(
+                self.ssh_private_key,
+                self.ssh_control_name,
+                ssh_proxy_command=self._ssh_proxy_command,
+                ssh_proxy_jump=self._ssh_proxy_jump,
+                port=self.port,
+                disable_control_master=self.disable_control_master,
+                # We need to escape the %C on the ControlPath,
+                # since this is going to be embedded in a
+                # ProxyCommand.
+                escape_percent_expand=True))
         login_node_proxy_command = (f'ssh {proxy_ssh_options} '
                                     f'-W %h:%p {self.ssh_user}@{self.ip}')
 

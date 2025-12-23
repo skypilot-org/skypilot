@@ -145,6 +145,7 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--jobs-consolidation', action="store_true")
     parser.add_argument('--grpc', action="store_true")
     parser.add_argument('--env-file')
+    parser.add_argument('--plugin-yaml')
     parser.add_argument('--dependency', nargs='?', const='', default='all')
 
     parsed_args, _ = parser.parse_known_args(args_list)

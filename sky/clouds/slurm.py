@@ -55,6 +55,10 @@ class Slurm(clouds.Cloud):
     _regions: List[clouds.Region] = []
     _INDENT_PREFIX = '    '
 
+    # Same as Kubernetes.
+    _DEFAULT_NUM_VCPUS_WITH_GPU = 4
+    _DEFAULT_MEMORY_CPU_RATIO_WITH_GPU = 4
+
     # Using the latest SkyPilot provisioner API to provision and check status.
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
@@ -436,13 +440,12 @@ class Slurm(clouds.Cloud):
                                    from_instance_type(default_instance_type))
 
             gpu_task_cpus = slurm_instance_type.cpus
-            gpu_task_memory = slurm_instance_type.memory
-            # if resources.cpus is None:
-            #     gpu_task_cpus = self._DEFAULT_NUM_VCPUS_WITH_GPU * acc_count
-            # gpu_task_memory = (float(resources.memory.strip('+')) if
-            #                    resources.memory is not None else
-            #                    gpu_task_cpus *
-            #                    self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU)
+            if resources.cpus is None:
+                gpu_task_cpus = self._DEFAULT_NUM_VCPUS_WITH_GPU * acc_count
+            # Special handling to bump up memory multiplier for GPU instances
+            gpu_task_memory = (float(resources.memory.strip('+')) if
+                               resources.memory is not None else gpu_task_cpus *
+                               self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU)
 
             chosen_instance_type = (
                 slurm_utils.SlurmInstanceType.from_resources(
