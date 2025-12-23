@@ -64,7 +64,8 @@ SKY_GET_PYTHON_PATH_CMD = (f'[ -s {SKY_PYTHON_PATH_FILE} ] && '
                            f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
                            'which python3')
 # Python executable, e.g., /opt/conda/bin/python3
-SKY_PYTHON_CMD = f'{SKY_UNSET_PYTHONPATH_AND_SET_CWD} $({SKY_GET_PYTHON_PATH_CMD})'
+SKY_PYTHON_CMD = (f'{SKY_UNSET_PYTHONPATH_AND_SET_CWD} '
+                  f'$({SKY_GET_PYTHON_PATH_CMD})')
 # Prefer SKY_UV_PIP_CMD, which is faster.
 # TODO(cooperc): remove remaining usage (GCP TPU setup).
 SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
