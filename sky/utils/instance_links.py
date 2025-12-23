@@ -59,8 +59,9 @@ def generate_instance_links(
         if project_id:
             # Build the filter JSON with GCP's specific encoding:
             # - Square/curly brackets are double URL-encoded (%255B = %5B = [)
-            # - Other special chars use underscore notation (_22 = %22 = ", _3A = :)
-            # The colon between tag key and value must also be encoded as _3A
+            # - Other special chars use underscore notation (_22 = %22 =
+            # ", _3A = :) . The colon between tag key and value must also be
+            # encoded as _3A
             filter_encoded = (
                 f'%255B%257B_22k_22_3A_22_22_2C_22t_22_3A10_2C_22v_22_3A_22'
                 f'_5C_22{tag_key}_3A{cluster_name}_5C_22_22_2C_22s_22_3Atrue'
