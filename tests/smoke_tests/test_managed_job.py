@@ -82,7 +82,6 @@ def test_managed_jobs_basic(generic_cloud: str):
                 job_name=f'{name}-1',
                 job_status=[sky.ManagedJobStatus.CANCELLED],
                 timeout=230),
-            f'exit 1',
             # Test the functionality for logging.
             f's=$(sky jobs logs -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "start counting"',
             f's=$(sky jobs logs --controller -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "Cluster launched:"',
