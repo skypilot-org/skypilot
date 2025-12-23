@@ -123,8 +123,7 @@ cluster_table = sqlalchemy.Table(
                       server_default=None),
     sqlalchemy.Column('skylet_ssh_tunnel_metadata',
                       sqlalchemy.LargeBinary,
-                      server_default=None),
-    sqlalchemy.Column('links', sqlalchemy.JSON, server_default=None),
+                      server_default=None)
 )
 
 storage_table = sqlalchemy.Table(
