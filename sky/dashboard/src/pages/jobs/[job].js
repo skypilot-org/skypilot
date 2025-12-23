@@ -985,7 +985,7 @@ function JobDetailsContent({
                   '.bmp',
                 ];
                 const isImage = imageExtensions.some((ext) =>
-                  url.toLowerCase().includes(ext)
+                  url.toLowerCase().endsWith(ext)
                 );
 
                 return (
