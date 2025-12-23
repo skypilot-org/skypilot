@@ -606,13 +606,8 @@ class RayCodeGen(TaskCodeGen):
 
         if env_vars is not None:
             for k, v in env_vars.items():
-                # Expand paths with ~ or $HOME for env vars that are file paths
-                if k == constants.SKYPILOT_LINKS_ENV_VAR:
-                    sky_env_vars_dict_str.append(
-                        f'sky_env_vars_dict[{k!r}] = os.path.expanduser({v!r})')
-                else:
-                    sky_env_vars_dict_str.append(
-                        f'sky_env_vars_dict[{k!r}] = {v!r}')
+                sky_env_vars_dict_str.append(
+                    f'sky_env_vars_dict[{k!r}] = {v!r}')
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
         options_str = ', '.join(options)
@@ -808,13 +803,8 @@ class SlurmCodeGen(TaskCodeGen):
 
         if env_vars:
             for k, v in env_vars.items():
-                # Expand paths with ~ or $HOME for env vars that are file paths
-                if k == constants.SKYPILOT_LINKS_ENV_VAR:
-                    sky_env_vars_dict_str.append(
-                        f'sky_env_vars_dict[{k!r}] = os.path.expanduser({v!r})')
-                else:
-                    sky_env_vars_dict_str.append(
-                        f'sky_env_vars_dict[{k!r}] = {v!r}')
+                sky_env_vars_dict_str.append(
+                    f'sky_env_vars_dict[{k!r}] = {v!r}')
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
         rclone_flush_script = self._get_rclone_flush_script()

@@ -755,7 +755,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
     git_ref: Optional[str] = None,
-    custom_links: Optional[Dict[str, str]] = None,
 ) -> Union['task_lib.Task', 'dag_lib.Dag']:
     """Creates a task or a dag from an entrypoint with overrides.
 
@@ -840,9 +839,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.num_nodes = num_nodes
     if name is not None:
         task.name = name
-    if custom_links is not None:
-        # Merge custom links with any existing links from YAML
-        task.links.update(custom_links)
     return task
 
 
@@ -4858,13 +4854,6 @@ def jobs():
 @click.option('--git-ref',
               type=str,
               help='Git reference (branch, tag, or commit hash) to use.')
-@click.option(
-    '--custom-links',
-    type=str,
-    default=None,
-    help=('Comma-separated custom links in TOML format to display in the '
-          'dashboard. Example: --custom-links \'Link1="https://example.com",'
-          'Link2="https://other.com"\''))
 @flags.yes_option()
 @timeline.event
 @usage_lib.entrypoint
@@ -4900,7 +4889,6 @@ def jobs_launch(
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
     git_ref: Optional[str] = None,
-    custom_links: Optional[str] = None,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -4928,34 +4916,6 @@ def jobs_launch(
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
 
-    # Parse custom links from TOML format
-    parsed_custom_links: Optional[Dict[str, str]] = None
-    if custom_links is not None:
-        try:
-            # Import TOML parser - prefer stdlib tomllib (py>=3.11);
-            # otherwise use tomli which is a dependency.
-            try:
-                import tomllib as toml  # pylint: disable=import-outside-toplevel
-            except ModuleNotFoundError:  # py<3.11
-                import tomli as toml  # pylint: disable=import-outside-toplevel
-            # Parse as TOML - wrap in newlines for multi-entry parsing
-            toml_content = custom_links.replace(',', '\n')
-            parsed = toml.loads(toml_content)
-            parsed_custom_links = {}
-            for key, value in parsed.items():
-                if isinstance(value, str):
-                    parsed_custom_links[key] = value
-                else:
-                    raise click.UsageError(
-                        f'Invalid custom link value for "{key}": '
-                        f'expected string, got {type(value).__name__}')
-        except Exception as e:  # pylint: disable=broad-except
-            raise click.UsageError(
-                f'Failed to parse --custom-links: {e}\n'
-                'Expected TOML format, e.g.: '
-                '--custom-links \'Link1="https://example.com",'
-                'Link2="https://other.com"\'') from e
-
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
@@ -4980,7 +4940,6 @@ def jobs_launch(
         config_override=config_override,
         git_url=git_url,
         git_ref=git_ref,
-        custom_links=parsed_custom_links,
     )
 
     if not isinstance(task_or_dag, dag_lib.Dag):

@@ -261,7 +261,6 @@ class Task:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
-        links: Optional[Dict[str, str]] = None,
         # Internal use only.
         _file_mounts_mapping: Optional[Dict[str, str]] = None,
         _volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
@@ -346,10 +345,6 @@ class Task:
           event_callback: A bash script that will be executed when the task
             changes state.
           blocked_resources: A set of resources that this task cannot run on.
-          links: A dictionary of links where keys are descriptive strings and
-            values are URLs. These links will be displayed in the dashboard.
-            Instance links are automatically populated when running on real
-            clouds.
           _file_mounts_mapping: (Internal use only) A dictionary of file mounts
             mapping.
           _volume_mounts: (Internal use only) A list of volume mounts.
@@ -367,7 +362,6 @@ class Task:
         if secrets is not None:
             self._secrets = {k: SecretStr(v) for k, v in secrets.items()}
         self._volumes = volumes or {}
-        self.links: Dict[str, str] = links or {}
 
         # concatenate commands if given as list
         def _concat(commands: Optional[Union[str, List[str]]]) -> Optional[str]:
@@ -651,7 +645,6 @@ class Task:
             secrets=config.pop('secrets', None),
             volumes=config.pop('volumes', None),
             event_callback=config.pop('event_callback', None),
-            links=config.pop('links', None),
             _file_mounts_mapping=config.pop('file_mounts_mapping', None),
             _metadata=config.pop('_metadata', None),
             _user_specified_yaml=user_specified_yaml,
@@ -1754,7 +1747,6 @@ class Task:
                 volume_mount.to_yaml_config()
                 for volume_mount in self.volume_mounts
             ]
-        add_if_not_none('links', self.links, no_empty=True)
         # we manually check if its empty to not clog up the generated yaml
         add_if_not_none('_metadata', self._metadata if self._metadata else None)
         add_if_not_none('_user_specified_yaml', self._user_specified_yaml)
