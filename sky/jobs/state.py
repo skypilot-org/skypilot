@@ -2650,38 +2650,27 @@ def add_job_event(job_id: int,
 
     Args:
         job_id: The spot_job_id of the managed job.
-        task_id: The task_id within the managed job. If None, adds an
-            event record for all tasks in the job.
+        task_id: The task_id within the managed job. If None, adds a
+            job-level event that applies to all tasks.
         new_status: The new status being transitioned to. Can be a
             ManagedJobStatus enum.
         reason: A description of why the event occurred.
         timestamp: The timestamp of the event. If None, uses current time.
     """
     if timestamp is None:
-        timestamp = datetime.datetime.now(datetime.timezone.utc)
+        timestamp = datetime.datetime.now()
 
     status_value = new_status.value
 
-    # If task_id is None, get all task IDs for this job
-    if task_id is None:
-        task_ids = [tid for tid, _ in _get_all_task_ids_statuses(job_id)]
-        if not task_ids:
-            logger.warning(f'No tasks found for job {job_id}, '
-                           'skipping job event record')
-            return
-    else:
-        task_ids = [task_id]
-
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        for tid in task_ids:
-            session.execute(job_events_table.insert().values(
-                spot_job_id=job_id,
-                task_id=tid,
-                new_status=status_value,
-                reason=reason,
-                timestamp=timestamp,
-            ))
+        session.execute(job_events_table.insert().values(
+            spot_job_id=job_id,
+            task_id=task_id,  # Can be None for job-level events
+            new_status=status_value,
+            reason=reason,
+            timestamp=timestamp,
+        ))
         session.commit()
 
 
@@ -2708,8 +2697,8 @@ async def add_job_event_async(
 
     Args:
         job_id: The spot_job_id of the managed job.
-        task_id: The task_id within the managed job. If None, adds an
-            event record for all tasks in the job.
+        task_id: The task_id within the managed job. If None, adds a
+            job-level event that applies to all tasks.
         new_status: The new status being transitioned to. Can be a
             ManagedJobStatus enum.
         reason: A description of why the event occurred.
@@ -2717,31 +2706,20 @@ async def add_job_event_async(
         timestamp: The timestamp of the event. If None, uses current time.
     """
     if timestamp is None:
-        timestamp = datetime.datetime.now(datetime.timezone.utc)
+        timestamp = datetime.datetime.now()
 
     status_value = new_status.value
 
-    # If task_id is None, get all task IDs for this job
-    if task_id is None:
-        task_ids = await _get_all_task_ids_async(job_id)
-        if not task_ids:
-            logger.warning(f'No tasks found for job {job_id}, '
-                           'skipping job event record')
-            return
-    else:
-        task_ids = [task_id]
-
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        for tid in task_ids:
-            await session.execute(job_events_table.insert().values(
-                spot_job_id=job_id,
-                task_id=tid,
-                new_status=status_value,
-                code=code,
-                reason=reason,
-                timestamp=timestamp,
-            ))
+        await session.execute(job_events_table.insert().values(
+            spot_job_id=job_id,
+            task_id=task_id,  # Can be None for job-level events
+            new_status=status_value,
+            code=code,
+            reason=reason,
+            timestamp=timestamp,
+        ))
         await session.commit()
 
 
@@ -2754,7 +2732,8 @@ def get_job_events(job_id: int,
     Args:
         job_id: The spot_job_id of the managed job.
         task_id: Optional task_id to filter by. If None, returns events
-            for all tasks.
+            for all tasks. If specified, returns events for that task plus
+            job-level events (where task_id is None).
         limit: Optional limit on number of events to return. If specified,
             returns the most recent N events.
 
@@ -2774,7 +2753,11 @@ def get_job_events(job_id: int,
         ).where(job_events_table.c.spot_job_id == job_id)
 
         if task_id is not None:
-            query = query.where(job_events_table.c.task_id == task_id)
+            # Include events for the specific task AND job-level events
+            # (task_id is None)
+            query = query.where(
+                sqlalchemy.or_(job_events_table.c.task_id == task_id,
+                               job_events_table.c.task_id.is_(None)))
 
         # Order by timestamp descending to get most recent first
         query = query.order_by(job_events_table.c.timestamp.desc())
