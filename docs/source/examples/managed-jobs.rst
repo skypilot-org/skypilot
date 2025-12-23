@@ -765,7 +765,7 @@ To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml
 
 .. warning::
 
-  When using consolidation mode with a remote  :ref:`SkyPilot API server with RollingUpdate upgrade strategy <sky-api-server-upgrade-strategy>`, any file mounts or workdirs that upload local files/folders of the managed jobs will be lost during a rolling update. To address that, use :ref:`bucket <sky-storage>`, :ref:`volume <volumes>`, or :ref:`git <sync-code-and-project-files-git>`; or, configure a cloud bucket for all local files via :ref:`config-yaml-jobs-bucket` in your :ref:`SkyPilot config <config-yaml>` to persist them.
+  When using consolidation mode with a remote  :ref:`SkyPilot API server with RollingUpdate upgrade strategy <sky-api-server-upgrade-strategy>`, any file mounts or workdirs that upload local files/folders of the managed jobs will be lost during a rolling update. To address that, use :ref:`bucket <sky-storage>`, :ref:`volume <volumes-on-kubernetes>`, or :ref:`git <sync-code-and-project-files-git>`; or, configure a cloud bucket for all local files via :ref:`config-yaml-jobs-bucket` in your :ref:`SkyPilot config <config-yaml>` to persist them.
 
   .. code-block::
     
