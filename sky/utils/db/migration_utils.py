@@ -15,7 +15,9 @@ from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
 
-DB_INIT_LOCK_TIMEOUT_SECONDS = 10
+# We have seen migration take 16ish seconds on Nebius. Set a timeout of 20
+# seconds to make sure we don't unnecessarily fail.
+DB_INIT_LOCK_TIMEOUT_SECONDS = 20
 
 GLOBAL_USER_STATE_DB_NAME = 'state_db'
 GLOBAL_USER_STATE_VERSION = '011'
