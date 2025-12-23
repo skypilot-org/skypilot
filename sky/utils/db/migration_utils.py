@@ -150,5 +150,6 @@ def safe_alembic_upgrade(engine: sqlalchemy.engine.Engine,
         with db_lock(section):
             # check again if db needs upgrade in case another
             # process upgraded it while we were waiting for the lock
-            if needs_upgrade(engine, section, target_revision, alembic_ini_path):
+            if needs_upgrade(engine, section, target_revision,
+                             alembic_ini_path):
                 alembic_command.upgrade(alembic_config, target_revision)
