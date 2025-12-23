@@ -219,6 +219,9 @@ class Resources:
             - strategy: the recovery strategy to use.
             - max_restarts_on_errors: the max number of restarts on user code
               errors.
+            - recover_on_exit_codes: a list of exit codes that should trigger
+              job recovery. If any task exits with a code in this list, the job
+              will be recovered regardless of max_restarts_on_errors limit.
 
           region: the region to use. Deprecated. Use `infra` instead.
           zone: the zone to use. Deprecated. Use `infra` instead.
