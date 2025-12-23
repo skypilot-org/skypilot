@@ -514,6 +514,90 @@ class TestVolumeCore:
                            match='Volume test-volume has no handle.'):
             core.volume_delete(['test-volume'])
 
+    def test_volume_delete_with_purge(self, monkeypatch):
+        """Test volume_delete with purge=True when deletion fails."""
+        # Mock volume data
+        mock_volume = {
+            'name': 'test-volume',
+            'status': status_lib.VolumeStatus.READY,
+            'handle': mock.MagicMock(cloud='aws', spec=models.VolumeConfig)
+        }
+
+        # Mock global_user_state
+        mock_get_volume_by_name = mock.MagicMock(return_value=mock_volume)
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock_get_volume_by_name)
+
+        mock_delete_volume = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'delete_volume',
+                            mock_delete_volume)
+
+        # Mock provision.delete_volume to raise an exception
+        mock_provision_delete = mock.MagicMock(
+            side_effect=Exception('Deletion failed'))
+        monkeypatch.setattr(provision, 'delete_volume', mock_provision_delete)
+
+        # Mock provision.get_volume_usedby
+        mock_get_usedby = mock.MagicMock(return_value=([], []))
+        monkeypatch.setattr(provision, 'get_volume_usedby', mock_get_usedby)
+
+        # Mock filelock
+        mock_filelock = mock.MagicMock()
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock_filelock)
+
+        # Call the function with purge=True
+        core.volume_delete(['test-volume'], purge=True)
+
+        # Verify calls
+        mock_get_volume_by_name.assert_called_with('test-volume')
+        mock_provision_delete.assert_called_once()
+        # Even though provision.delete_volume failed, global_user_state.delete_volume
+        # should still be called because purge=True
+        mock_delete_volume.assert_called_once_with('test-volume')
+
+    def test_volume_delete_without_purge_fails(self, monkeypatch):
+        """Test volume_delete without purge=True when deletion fails."""
+        # Mock volume data
+        mock_volume = {
+            'name': 'test-volume',
+            'status': status_lib.VolumeStatus.READY,
+            'handle': mock.MagicMock(cloud='aws', spec=models.VolumeConfig)
+        }
+
+        # Mock global_user_state
+        mock_get_volume_by_name = mock.MagicMock(return_value=mock_volume)
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock_get_volume_by_name)
+
+        mock_delete_volume = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'delete_volume',
+                            mock_delete_volume)
+
+        # Mock provision.delete_volume to raise an exception
+        mock_provision_delete = mock.MagicMock(
+            side_effect=Exception('Deletion failed'))
+        monkeypatch.setattr(provision, 'delete_volume', mock_provision_delete)
+
+        # Mock provision.get_volume_usedby
+        mock_get_usedby = mock.MagicMock(return_value=([], []))
+        monkeypatch.setattr(provision, 'get_volume_usedby', mock_get_usedby)
+
+        # Mock filelock
+        mock_filelock = mock.MagicMock()
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock_filelock)
+
+        # Call the function with purge=False (default) and expect Exception
+        with pytest.raises(Exception, match='Deletion failed'):
+            core.volume_delete(['test-volume'])
+
+        # Verify calls
+        mock_get_volume_by_name.assert_called_with('test-volume')
+        mock_provision_delete.assert_called_once()
+        # global_user_state.delete_volume should NOT be called because purge=False
+        mock_delete_volume.assert_not_called()
+
     def test_volume_delete_multiple_volumes(self, monkeypatch):
         """Test volume_delete with multiple volumes."""
         # Mock volume data for multiple volumes

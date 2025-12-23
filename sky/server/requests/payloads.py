@@ -482,6 +482,7 @@ class VolumeApplyBody(RequestBody):
 class VolumeDeleteBody(RequestBody):
     """The request body for the volume delete endpoint."""
     names: List[str]
+    purge: bool = False
 
 
 class VolumeListBody(RequestBody):

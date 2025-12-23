@@ -1,5 +1,5 @@
 """RunPod network volume provisioning."""
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sky import global_user_state
 from sky import models
@@ -194,15 +194,31 @@ def get_volume_usedby(
 
 def get_all_volumes_usedby(
     configs: List[models.VolumeConfig],
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Gets the usedby resources of all volumes."""
-    used_by_results = [get_volume_usedby(config) for config in configs]
+) -> Tuple[Dict[str, Any], Dict[str, Any], Set[str]]:
+    """Gets the usedby resources of all volumes.
+
+    Args:
+        configs: List of VolumeConfig objects.
+
+    Returns:
+        usedby_pods: Dictionary of volume name to pods using the volume.
+        usedby_clusters: Dictionary of volume name to clusters using the volume.
+        failed_volume_names: Set of volume names whose usedby info failed to
+          fetch.
+    """
     used_by_pods, used_by_clusters = {}, {}
-    for i in range(len(configs)):
-        config = configs[i]
-        used_by_pods[config.name_on_cloud] = used_by_results[i][0]
-        used_by_clusters[config.name_on_cloud] = used_by_results[i][1]
-    return used_by_pods, used_by_clusters
+    failed_volume_names = set()
+    for config in configs:
+        try:
+            usedby_pods, usedby_clusters = get_volume_usedby(config)
+            used_by_pods[config.name_on_cloud] = usedby_pods
+            used_by_clusters[config.name_on_cloud] = usedby_clusters
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to get usedby info for RunPod volume '
+                         f'{config.name}: {e}')
+            failed_volume_names.add(config.name)
+            continue
+    return used_by_pods, used_by_clusters, failed_volume_names
 
 
 def map_all_volumes_usedby(
