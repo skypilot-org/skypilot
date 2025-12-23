@@ -201,22 +201,13 @@ class Vast(clouds.Cloud):
         else:
             image_id = resources.image_id[resources.region]
 
-        # Check for datacenter_only first, then fall back to secure_only
         secure_only = skypilot_config.get_effective_region_config(
             cloud='vast',
             region=region.name,
             keys=('datacenter_only',),
-            default_value=None,
+            default_value=False,
             override_configs=resources.cluster_config_overrides,
         )
-        if secure_only is None:
-            secure_only = skypilot_config.get_effective_region_config(
-                cloud='vast',
-                region=region.name,
-                keys=('secure_only',),
-                default_value=False,
-                override_configs=resources.cluster_config_overrides,
-            )
 
         return {
             'instance_type': resources.instance_type,
@@ -252,13 +243,8 @@ class Vast(clouds.Cloud):
         # Resolve datacenter_only config first (used for all instance filtering)
         datacenter_only = skypilot_config.get_nested(
             ('vast', 'datacenter_only'),
-            None,
+            False,
             override_configs=resources.cluster_config_overrides)
-        if datacenter_only is None:
-            datacenter_only = skypilot_config.get_nested(
-                ('vast', 'secure_only'),
-                False,
-                override_configs=resources.cluster_config_overrides)
 
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators

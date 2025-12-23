@@ -1461,9 +1461,6 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
-                'secure_only': {
-                    'type': 'boolean',
-                },
                 'datacenter_only': {
                     'type': 'boolean',
                 },
