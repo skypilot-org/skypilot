@@ -2532,8 +2532,8 @@ def cancel(
                                     fields=['job_id', 'job_name'])
             job_records, _, _, _ = sdk.get(req)
             names = [
-                f'{r.get("job_name")!r} [{r.get("job_id")}]'
-                for r in job_records
+                f'{r.get("job_id")} (name: {r.get("job_name")})'
+                if r.get('job_name') else r.get('job_id') for r in job_records
             ]
             if names:
                 jobs_str = ', '.join(map(str, names))
