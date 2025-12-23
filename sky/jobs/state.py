@@ -2768,11 +2768,11 @@ def get_job_events(job_id: int,
             query = query.limit(limit)
 
         rows = session.execute(query).fetchall()
-        return [{
-            'spot_job_id': row[0],
-            'task_id': row[1],
-            'new_status': ManagedJobStatus(row[2]),
-            'code': row[3],
-            'reason': row[4],
-            'timestamp': row[5],
-        } for row in rows]
+    return [{
+        'spot_job_id': row[0],
+        'task_id': row[1],
+        'new_status': ManagedJobStatus(row[2]),
+        'code': row[3],
+        'reason': row[4],
+        'timestamp': row[5],
+    } for row in rows]
