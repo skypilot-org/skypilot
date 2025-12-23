@@ -3,12 +3,12 @@
 Advanced Configuration
 ======================
 
-You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file (local config) or on your SkyPilot API server dashboard (remote config) at ``http://<api-server-url>/dashboard/config``.
+You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file (for :ref:`local API server <sky-api-server-local>`) or on your SkyPilot API server dashboard (for :ref:`remote API server <sky-api-server-remote>`) at ``http://<api-server-url>/dashboard/config``.
 
 Configuration sources and overrides
 -----------------------------------
 
-SkyPilot allows you to set configuration globally in ``~/.sky/config.yaml`` (local config) or on the API server dashboard (remote config) at ``http://<api-server-url>/dashboard/config``, in your project, or for specific jobs, providing flexibility in how you manage your configurations.
+SkyPilot allows you to set configuration globally in ``~/.sky/config.yaml`` (for :ref:`local API server <sky-api-server-local>`) or on the API server dashboard (for :ref:`remote API server <sky-api-server-remote>`) at ``http://<api-server-url>/dashboard/config``, in your project, or for specific jobs, providing flexibility in how you manage your configurations.
 
 For example, you can have a :ref:`user configuration<config-client-user-config>` to apply globally to all projects, a :ref:`project configuration<config-client-project-config>` storing default values for all jobs in a project, and :ref:`Task YAML overrides<config-client-cli-flag>` for specific jobs.
 
