@@ -604,6 +604,8 @@ def srun_sshd_command(
         '/usr/sbin/sshd',
         '-i',  # Uses stdin/stdout
         '-e',  # Writes errors to stderr
+        '-f',  # Use /dev/null to avoid reading system sshd_config
+        '/dev/null',
         '-h',
         f'{user_home_ssh_dir}/{SLURM_SSHD_HOST_KEY_FILENAME}',
         '-o',
