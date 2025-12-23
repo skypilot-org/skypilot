@@ -1,4 +1,4 @@
-"""Table for tracking cluster hardware failures.
+"""Table for tracking cluster failures.
 
 Revision ID: 012
 Revises: 011
@@ -21,11 +21,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    """Add new table for tracking cluster hardware failures."""
+    """Add new table for tracking cluster failures."""
     with op.get_context().autocommit_block():
-        # Add new table for cluster hardware failures.
+        # Add new table for cluster failures.
         db_utils.add_table_to_db_sqlalchemy(Base.metadata, op.get_bind(),
-                                            'cluster_hardware_failures')
+                                            'cluster_failures')
 
 
 def downgrade():
