@@ -56,17 +56,19 @@ class SlurmClient:
         ssh_key: Optional[str] = None,
         ssh_proxy_command: Optional[str] = None,
         ssh_proxy_jump: Optional[str] = None,
+        is_inside_slurm_cluster: bool = False,
     ):
         """Initialize SlurmClient.
 
         Args:
-            ssh_host: Hostname of the Slurm controller. If None, uses local
-                execution mode (for when running on the Slurm cluster itself).
+            ssh_host: Hostname of the Slurm controller.
             ssh_port: SSH port on the controller.
             ssh_user: SSH username.
             ssh_key: Path to SSH private key, or None for keyless SSH.
             ssh_proxy_command: Optional SSH proxy command.
             ssh_proxy_jump: Optional SSH proxy jump destination.
+            is_inside_slurm_cluster: If True, uses local execution mode (for
+            when running on the Slurm cluster itself). Defaults to False.
         """
         self.ssh_host = ssh_host
         self.ssh_port = ssh_port
@@ -77,12 +79,13 @@ class SlurmClient:
 
         self._runner: command_runner.CommandRunner
 
-        if ssh_host is None:
+        if is_inside_slurm_cluster:
             # Local execution mode - for running on the Slurm cluster itself
             # (e.g., autodown from skylet).
             self._runner = command_runner.LocalProcessCommandRunner()
         else:
             # Remote execution via SSH
+            assert ssh_host is not None
             assert ssh_port is not None
             assert ssh_user is not None
             self._runner = command_runner.SSHCommandRunner(

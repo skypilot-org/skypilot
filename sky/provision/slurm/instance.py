@@ -497,7 +497,7 @@ def terminate_instances(
     # TODO(kevin): Validate this assumption.
     if slurm_utils.is_inside_slurm_cluster():
         logger.debug('Running inside a Slurm cluster, using local execution')
-        client = slurm.SlurmClient()
+        client = slurm.SlurmClient(is_inside_slurm_cluster=True)
     else:
         ssh_config_dict = provider_config['ssh']
         ssh_host = ssh_config_dict['hostname']
