@@ -978,7 +978,7 @@ def stream_controller_logs(controller_uuid: str,
                 print(end='', flush=True)
 
                 # Check if the controller process is still running.
-                if not psutil.pid_exists(pid):
+                if pid is None or not psutil.pid_exists(pid):
                     break
 
                 time.sleep(log_lib.SKY_LOG_TAILING_GAP_SECONDS)
