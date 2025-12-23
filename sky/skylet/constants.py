@@ -51,7 +51,10 @@ SKY_REMOTE_RAY_VERSION = '2.9.3'
 # 1. env -u PYTHONPATH: unset PYTHONPATH to avoid any package specified in
 # PYTHONPATH interfering with the SkyPilot runtime.
 # 2. env -C $HOME: set the execution directory to $HOME to avoid the case when
-# a user's WORKDIR in DOCKERFILE is a python site-packages directory.
+# a user's WORKDIR in Dockerfile is a Python site-packages directory. Python
+# adds CWD to the beginning of sys.path, so if WORKDIR contains packages (e.g.,
+# compiled for a different Python version), imports will fail with errors like
+# "ModuleNotFoundError: No module named 'rpds.rpds'".
 SKY_UNSET_PYTHONPATH_AND_SET_CWD = 'env -u PYTHONPATH env -C $HOME'
 # We store the absolute path of the python executable (/opt/conda/bin/python3)
 # in this file, so that any future internal commands that need to use python
