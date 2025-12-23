@@ -1074,14 +1074,9 @@ def get_cluster_events(cluster_name: Optional[str],
     """
     assert _SQLALCHEMY_ENGINE is not None
 
-    if cluster_name is not None and cluster_hash is not None:
-        raise ValueError('Cannot specify both cluster_name and cluster_hash')
-    if cluster_name is None and cluster_hash is None:
-        raise ValueError('Must specify either cluster_name or cluster_hash')
-    if cluster_name is not None:
-        cluster_hash = _get_hash_for_existing_cluster(cluster_name)
-        if cluster_hash is None:
-            raise ValueError(f'Hash for cluster {cluster_name} not found.')
+    cluster_hash = _resolve_cluster_hash(cluster_hash, cluster_name)
+    if cluster_hash is None:
+        raise ValueError(f'Hash for cluster {cluster_name} not found.')
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if limit is not None:
@@ -1593,6 +1588,38 @@ def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
     if row is None or row.cluster_hash is None:
         return None
     return row.cluster_hash
+
+
+def _resolve_cluster_hash(cluster_hash: Optional[str] = None,
+                          cluster_name: Optional[str] = None) -> Optional[str]:
+    """Resolve cluster_hash from either cluster_hash or cluster_name.
+
+    Validates that exactly one of cluster_hash or cluster_name is provided,
+    then resolves cluster_name to cluster_hash if needed.
+
+    Args:
+        cluster_hash: Direct cluster hash, if known.
+        cluster_name: Cluster name to resolve to hash.
+
+    Returns:
+        The cluster_hash string, or None if cluster_name was provided but
+        the cluster doesn't exist.
+
+    Raises:
+        ValueError: If both or neither of cluster_hash/cluster_name are
+        provided.
+    """
+    if cluster_hash is not None and cluster_name is not None:
+        raise ValueError(f'Cannot specify both cluster_hash ({cluster_hash}) '
+                         f'and cluster_name ({cluster_name})')
+
+    if cluster_hash is None and cluster_name is None:
+        raise ValueError('Must specify either cluster_hash or cluster_name')
+
+    if cluster_name is not None:
+        return _get_hash_for_existing_cluster(cluster_name)
+
+    return cluster_hash
 
 
 @_init_db
@@ -2857,14 +2884,9 @@ def get_cluster_failures(
         cluster(s) and don't have deleted_at set (i.e., active failures).
         Each dict contains: cluster_hash, failure_mode, deleted_at.
     """
-    if cluster_hash is not None and cluster_name is not None:
-        raise ValueError('Cannot specify both cluster_hash and cluster_name')
-    # Handle cluster_name to cluster_hash conversion
-    if cluster_name is not None:
-        cluster_hash = _get_hash_for_existing_cluster(cluster_name)
-        if cluster_hash is None:
-            # Cluster doesn't exist, return empty list
-            return []
+    cluster_hash = _resolve_cluster_hash(cluster_hash, cluster_name)
+    if cluster_hash is None:
+        return []
 
     assert _SQLALCHEMY_ENGINE is not None
 
@@ -2906,18 +2928,9 @@ def clear_cluster_failures(
         Each dict contains: cluster_hash, failure_mode, failure_reason,
         cleared_at.
     """
-    if cluster_hash is not None and cluster_name is not None:
-        raise ValueError('Cannot specify both cluster_hash and cluster_name')
-
-    if cluster_hash is None and cluster_name is None:
-        raise ValueError('Must specify either cluster_hash or cluster_name')
-
-    # Handle cluster_name to cluster_hash conversion
-    if cluster_name is not None:
-        cluster_hash = _get_hash_for_existing_cluster(cluster_name)
-        if cluster_hash is None:
-            # Cluster doesn't exist, return empty list
-            return []
+    cluster_hash = _resolve_cluster_hash(cluster_hash, cluster_name)
+    if cluster_hash is None:
+        return []
 
     assert _SQLALCHEMY_ENGINE is not None
     current_time = int(time.time())
