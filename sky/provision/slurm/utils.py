@@ -376,6 +376,8 @@ def check_instance_fits(
     return fits, reason
 
 
+# GRES names are highly unlikely to change within a cluster.
+@annotations.lru_cache(scope='global', maxsize=10)
 def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
     """Get the actual GPU type as it appears in the cluster's GRES.
 
