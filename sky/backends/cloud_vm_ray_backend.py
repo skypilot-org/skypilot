@@ -792,12 +792,11 @@ class RetryingVmProvisioner(object):
               - Nothing yielded means the region does not offer the requested
                 resources.
         """
-        assert (to_provision.cloud is not None
-                and to_provision.region is not None
-                and to_provision.instance_type is not None), (
-                    to_provision,
-                    'cloud, region and instance_type must have been '
-                    'set by optimizer')
+        assert (to_provision.cloud is not None and
+                to_provision.region is not None and to_provision.instance_type
+                is not None), (to_provision,
+                               'cloud, region and instance_type must have been '
+                               'set by optimizer')
         cloud = to_provision.cloud
         region = clouds.Region(to_provision.region)
         zones = None
@@ -871,11 +870,11 @@ class RetryingVmProvisioner(object):
                            'To retry launching the cluster, run: '
                            f'sky start {cluster_name}')
                 with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ResourcesUnavailableError(
-                        message, no_failover=True)
+                    raise exceptions.ResourcesUnavailableError(message,
+                                                               no_failover=True)
 
             assert (prev_cluster_status == status_lib.ClusterStatus.INIT
-                    ), prev_cluster_status
+                   ), prev_cluster_status
             message = (f'Failed to launch cluster {cluster_name!r} '
                        f'(previous status: {prev_cluster_status.value}) '
                        f'with the original resources: {to_provision}.')
@@ -1006,10 +1005,9 @@ class RetryingVmProvisioner(object):
 
         except Exception as e:  # pylint: disable=broad-except
             need_provision = True
-            logger.info(
-                f'Error occurred when trying to check quota. '
-                f'Proceeding assuming quotas are available. Error: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+            logger.info(f'Error occurred when trying to check quota. '
+                        f'Proceeding assuming quotas are available. Error: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
 
         if not need_provision:
             # if quota is found to be zero, raise exception and skip to
@@ -1102,11 +1100,10 @@ class RetryingVmProvisioner(object):
                     to_provision.copy(region=None, zone=None))
                 raise exceptions.ResourcesUnavailableError(
                     f'Failed to provision on cloud {to_provision.cloud} due to '
-                    f'invalid cloud config: {common_utils.format_exception(e)}'
-                )
+                    f'invalid cloud config: {common_utils.format_exception(e)}')
 
-            if ('config_hash' in config_dict and skip_if_config_hash_matches
-                    == config_dict['config_hash']):
+            if ('config_hash' in config_dict and
+                    skip_if_config_hash_matches == config_dict['config_hash']):
                 logger.debug('Skipping provisioning of cluster with matching '
                              'config hash.')
                 config_dict['provisioning_skipped'] = True
@@ -1120,8 +1117,7 @@ class RetryingVmProvisioner(object):
 
             launched_resources = to_provision.copy(region=region.name)
             if zones and len(zones) == 1:
-                launched_resources = launched_resources.copy(
-                    zone=zones[0].name)
+                launched_resources = launched_resources.copy(zone=zones[0].name)
 
             prev_cluster_ips, prev_ssh_ports, prev_cluster_info = (None, None,
                                                                    None)
@@ -1187,10 +1183,9 @@ class RetryingVmProvisioner(object):
                 # it should be ignored by the underlying provisioner impl
                 # as it will only apply to newly-created instances.
                 ports_to_open_on_launch = (
-                    list(resources_utils.port_ranges_to_set(
-                        to_provision.ports))
-                    if to_provision.cloud.OPEN_PORTS_VERSION
-                    <= clouds.OpenPortsVersion.LAUNCH_ONLY else None)
+                    list(resources_utils.port_ranges_to_set(to_provision.ports))
+                    if to_provision.cloud.OPEN_PORTS_VERSION <=
+                    clouds.OpenPortsVersion.LAUNCH_ONLY else None)
                 try:
                     controller = controller_utils.Controllers.from_name(
                         cluster_name)
@@ -1259,8 +1254,7 @@ class RetryingVmProvisioner(object):
                     #  blocking strategy. See '_update_blocklist_on_error'
                     #  for details.
                     FailoverCloudErrorHandlerV2.update_blocklist_on_error(
-                        self._blocked_resources, to_provision, region, zones,
-                        e)
+                        self._blocked_resources, to_provision, region, zones, e)
                     continue
                 except Exception as e:  # pylint: disable=broad-except
                     # NOTE: We try to cleanup the cluster even if the previous
@@ -1275,8 +1269,7 @@ class RetryingVmProvisioner(object):
                     #  blocking strategy. See '_update_blocklist_on_error'
                     #  for details.
                     FailoverCloudErrorHandlerV2.update_blocklist_on_error(
-                        self._blocked_resources, to_provision, region, zones,
-                        e)
+                        self._blocked_resources, to_provision, region, zones, e)
                     continue
                 # NOTE: The code below in the loop should not be reachable
                 # with the new provisioner.
@@ -1291,8 +1284,7 @@ class RetryingVmProvisioner(object):
                 self._gang_schedule_ray_up(to_provision.cloud,
                                            cluster_config_file, handle,
                                            log_abs_path, stream_logs,
-                                           logging_info,
-                                           to_provision.use_spot))
+                                           logging_info, to_provision.use_spot))
 
             if status == GangSchedulingStatus.CLUSTER_READY:
                 # We must query the IPs from the cloud provider, when the
@@ -1511,9 +1503,9 @@ class RetryingVmProvisioner(object):
                             'the specified image.')
                 return False
 
-            if ('Processing file mounts' in stdout
-                    and 'Running setup commands' not in stdout
-                    and 'Failed to setup head node.' in stderr):
+            if ('Processing file mounts' in stdout and
+                    'Running setup commands' not in stdout and
+                    'Failed to setup head node.' in stderr):
                 logger.info(
                     'Retrying runtime setup due to ssh connection issue.')
                 return True
@@ -1530,8 +1522,8 @@ class RetryingVmProvisioner(object):
         # minute errors.
         backoff = common_utils.Backoff(initial_backoff=5,
                                        max_backoff_factor=180 // 5)
-        while (retry_cnt < _MAX_RAY_UP_RETRY
-               and need_ray_up(ray_up_return_value)):
+        while (retry_cnt < _MAX_RAY_UP_RETRY and
+               need_ray_up(ray_up_return_value)):
             retry_cnt += 1
             if retry_cnt > 1:
                 sleep = backoff.current_backoff()
@@ -1571,9 +1563,8 @@ class RetryingVmProvisioner(object):
             if len(internal_ip_list) == 1:
                 head_internal_ip = internal_ip_list[0]
 
-            logger.debug(
-                f'Get head ips from ray up stdout: {head_internal_ip} '
-                f'{head_external_ip}')
+            logger.debug(f'Get head ips from ray up stdout: {head_internal_ip} '
+                         f'{head_external_ip}')
             return (GangSchedulingStatus.CLUSTER_READY, stdout, stderr,
                     head_internal_ip, head_external_ip)
 
@@ -1680,8 +1671,8 @@ class RetryingVmProvisioner(object):
         prev_cluster_status = to_provision_config.prev_cluster_status
         prev_handle = to_provision_config.prev_handle
         prev_cluster_ever_up = to_provision_config.prev_cluster_ever_up
-        launchable_retries_disabled = (self._dag is None
-                                       or self._optimize_target is None)
+        launchable_retries_disabled = (self._dag is None or
+                                       self._optimize_target is None)
         skip_if_config_hash_matches = (to_provision_config.prev_config_hash if
                                        skip_unnecessary_provisioning else None)
 
@@ -1698,12 +1689,11 @@ class RetryingVmProvisioner(object):
                 enabled_clouds)
 
             if len(expirable_clouds) > 0:
-                warnings = (
-                    f'\033[93mWarning: Credentials used for '
-                    f'{expirable_clouds} may expire. Clusters may be '
-                    f'leaked if the credentials expire while jobs '
-                    f'are running. It is recommended to use credentials'
-                    f' that never expire or a service account.\033[0m')
+                warnings = (f'\033[93mWarning: Credentials used for '
+                            f'{expirable_clouds} may expire. Clusters may be '
+                            f'leaked if the credentials expire while jobs '
+                            f'are running. It is recommended to use credentials'
+                            f' that never expire or a service account.\033[0m')
                 logger.warning(warnings)
 
         to_provision = to_provision.assert_launchable()
@@ -1783,8 +1773,7 @@ class RetryingVmProvisioner(object):
             if prev_cluster_status is None:
                 # Add failed resources to the blocklist, only when it
                 # is in fallback mode.
-                _add_to_blocked_resources(self._blocked_resources,
-                                          to_provision)
+                _add_to_blocked_resources(self._blocked_resources, to_provision)
                 assert len(failover_history) > 0
                 resource_exceptions[to_provision] = failover_history[-1]
             else:
@@ -1794,7 +1783,7 @@ class RetryingVmProvisioner(object):
                 # flag; see _yield_zones(). Also, the cluster should have been
                 # terminated by _retry_zones().
                 assert (prev_cluster_status == status_lib.ClusterStatus.INIT
-                        ), prev_cluster_status
+                       ), prev_cluster_status
                 logger.info(
                     ux_utils.retry_message(
                         f'Retrying provisioning with requested resources: '
@@ -1829,8 +1818,7 @@ class RetryingVmProvisioner(object):
                 # possible resources or the requested resources is too
                 # restrictive. If we reach here, our failover logic finally
                 # ends here.
-                table = log_utils.create_table(
-                    ['INFRA', 'RESOURCES', 'REASON'])
+                table = log_utils.create_table(['INFRA', 'RESOURCES', 'REASON'])
                 for (resource, exception) in resource_exceptions.items():
                     table.add_row([
                         resource.infra.formatted_str(),

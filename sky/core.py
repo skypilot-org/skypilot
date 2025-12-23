@@ -280,10 +280,10 @@ all_clusters, unmanaged_clusters, all_jobs, context
 
 
 def get_cluster_events(cluster_name: Optional[str] = None,
-                   cluster_hash: Optional[str] = None,
-                   event_type: str = 'STATUS_CHANGE',
-                   include_timestamps: bool = False,
-                   limit: Optional[int] = None) -> List[Any]:
+                       cluster_hash: Optional[str] = None,
+                       event_type: str = 'STATUS_CHANGE',
+                       include_timestamps: bool = False,
+                       limit: Optional[int] = None) -> List[Any]:
     """Get events for a cluster.
 
     Args:
