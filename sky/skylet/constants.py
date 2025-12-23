@@ -55,7 +55,7 @@ SKY_REMOTE_RAY_VERSION = '2.9.3'
 # adds CWD to the beginning of sys.path, so if WORKDIR contains packages (e.g.,
 # compiled for a different Python version), imports will fail with errors like
 # "ModuleNotFoundError: No module named 'rpds.rpds'".
-SKY_UNSET_PYTHONPATH_AND_SET_CWD = 'env -u PYTHONPATH env -C $HOME'
+SKY_UNSET_PYTHONPATH_AND_SET_CWD = 'env -u PYTHONPATH -C $HOME'
 # We store the absolute path of the python executable (/opt/conda/bin/python3)
 # in this file, so that any future internal commands that need to use python
 # can use this path. This is useful for the case where the user has a custom
