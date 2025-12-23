@@ -132,6 +132,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.uid
+        - name: SKYPILOT_ROLLING_UPDATE_ENABLED
+          value: "true"
         {{- end }}
         {{- if .Values.apiService.metrics.enabled }}
         - name: SKY_API_SERVER_METRICS_ENABLED
