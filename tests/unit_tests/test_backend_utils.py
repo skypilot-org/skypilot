@@ -298,7 +298,8 @@ def test_kubeconfig_upload_with_kubernetes_exclusion():
     # SSH inherits from Kubernetes, so it will also return kubeconfig.
     kubeconfig_mounts = {'~/.kube/config': '~/.kube/config'}
 
-    with mock.patch.object(clouds.Kubernetes, 'get_credential_file_mounts',
+    with mock.patch.object(clouds.Kubernetes,
+                           'get_credential_file_mounts',
                            return_value=kubeconfig_mounts):
         # 1. Test the buggy behavior: only Kubernetes is excluded.
         # SSH is not excluded, and since it inherits from Kubernetes, it will
