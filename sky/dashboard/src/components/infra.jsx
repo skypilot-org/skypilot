@@ -235,17 +235,17 @@ export function InfrastructureSection({
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
                         Nodes
                       </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/4">
-                        GPU Types
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
-                        GPUs
-                      </th>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
                         CPU
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
                         Memory
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/4">
+                        GPU Types
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                        GPUs
                       </th>
                     </tr>
                   </thead>
@@ -400,24 +400,6 @@ export function InfrastructureSection({
                             )}
                           </td>
                           <td className="p-3">
-                            {!hasGpuData ? (
-                              <div className="flex items-center justify-center">
-                                <CircularProgress size={16} />
-                              </div>
-                            ) : (
-                              gpuTypes || '-'
-                            )}
-                          </td>
-                          <td className="p-3">
-                            {!hasGpuData ? (
-                              <div className="flex items-center justify-center">
-                                <CircularProgress size={16} />
-                              </div>
-                            ) : (
-                              totalGpus
-                            )}
-                          </td>
-                          <td className="p-3">
                             {!hasNodeData ? (
                               <div className="flex items-center justify-center">
                                 <CircularProgress size={16} />
@@ -433,6 +415,24 @@ export function InfrastructureSection({
                               </div>
                             ) : (
                               formatMemory(aggregatedMemory)
+                            )}
+                          </td>
+                          <td className="p-3">
+                            {!hasGpuData ? (
+                              <div className="flex items-center justify-center">
+                                <CircularProgress size={16} />
+                              </div>
+                            ) : (
+                              gpuTypes || '-'
+                            )}
+                          </td>
+                          <td className="p-3">
+                            {!hasGpuData ? (
+                              <div className="flex items-center justify-center">
+                                <CircularProgress size={16} />
+                              </div>
+                            ) : (
+                              totalGpus
                             )}
                           </td>
                         </tr>
@@ -702,6 +702,9 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         Node
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600">
+                        IP Address
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600">
                         vCPU
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600">
@@ -769,6 +772,9 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                           </td>
                           <td className="p-3 whitespace-nowrap text-gray-700">
                             {node.node_name}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {node.ip_address || '-'}
                           </td>
                           <td className="p-3 whitespace-nowrap text-gray-700">
                             {cpuDisplay}
