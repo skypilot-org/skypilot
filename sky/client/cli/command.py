@@ -1557,7 +1557,11 @@ def _handle_services_request(
         service_records = sdk.get(request_id)
         num_services = len(service_records)
     except exceptions.ClusterNotUpError as e:
+        controller_status = e.cluster_status
         msg = str(e)
+        if controller_status is None:
+            msg += (f' (See: {colorama.Style.BRIGHT}sky serve -h'
+                    f'{colorama.Style.RESET_ALL})')
     except RuntimeError as e:
         msg = ''
         try:
@@ -2065,7 +2069,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     num_services = -1
                     msg = 'KeyboardInterrupt'
         click.echo(msg)
-        if num_services is not None and num_services > 0:
+        if num_services is not None:
             hints.append(
                 controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.
                 in_progress_hint(False))
