@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import {
-  ENDPOINT,
   CLUSTER_NOT_UP_ERROR,
   CLUSTER_DOES_NOT_EXIST,
   NOT_SUPPORTED_ERROR,
@@ -506,8 +505,6 @@ export async function streamManagedJobLogs({
   };
 
   const timeoutPromise = createTimeoutPromise();
-  const baseUrl = window.location.origin;
-  const fullEndpoint = `${baseUrl}${ENDPOINT}`;
 
   // Create the fetch promise
   const fetchPromise = (async () => {
@@ -519,15 +516,12 @@ export async function streamManagedJobLogs({
         tail: DEFAULT_TAIL_LINES,
       };
 
-      const response = await fetch(`${fullEndpoint}/jobs/logs`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-        // Only use the signal if it's provided
-        ...(signal ? { signal } : {}),
-      });
+      const response = await apiClient.fetchImmediate(
+        '/jobs/logs',
+        requestBody,
+        'POST',
+        { signal }
+      );
 
       // Stream the logs
       const reader = response.body.getReader();
@@ -619,18 +613,12 @@ export async function handleJobAction(action, jobId, cluster) {
   // Show initial notification
   showToast(`${logStarter} job ${jobId}...`, 'info');
 
-  const baseUrl = window.location.origin;
-  const fullEndpoint = `${baseUrl}${ENDPOINT}`;
-
   try {
     try {
-      const response = await fetch(`${fullEndpoint}/${apiPath}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
+      const response = await apiClient.fetchImmediate(
+        `/${apiPath}`,
+        requestBody
+      );
       if (!response.ok) {
         console.error(
           `Initial API request ${apiPath} failed with status ${response.status}`
@@ -651,8 +639,10 @@ export async function handleJobAction(action, jobId, cluster) {
         );
         return;
       }
-      const finalResponse = await fetch(
-        `${fullEndpoint}/api/get?request_id=${id}`
+      const finalResponse = await apiClient.fetchImmediate(
+        `/api/get?request_id=${id}`,
+        undefined,
+        'GET'
       );
 
       // Check the status code of the final response
@@ -755,12 +745,8 @@ export async function downloadManagedJobLogs({
     }
 
     // Step 2: request the zip and trigger browser download
-    const baseUrl = window.location.origin;
-    const fullUrl = `${baseUrl}${ENDPOINT}/download`;
-    const resp = await fetch(`${fullUrl}?relative=items`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ folder_paths: folderPaths }),
+    const resp = await apiClient.fetchImmediate('/download?relative=items', {
+      folder_paths: folderPaths,
     });
     if (!resp.ok) {
       const text = await resp.text();

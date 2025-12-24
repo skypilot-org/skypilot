@@ -4,32 +4,40 @@ import { getErrorMessageFromResponse } from '@/data/utils';
 import { ENDPOINT } from './constants';
 
 export const apiClient = {
+  fetchImmediate: async (path, body, method = 'POST', options = {}) => {
+    // Call a skypilot API and get the result
+    const headers =
+      method === 'POST'
+        ? {
+            'Content-Type': 'application/json',
+            ...(options.headers || {}),
+          }
+        : { ...(options.headers || {}) };
+
+    const baseUrl = window.location.origin;
+    const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
+
+    if (body !== undefined) {
+      body.env_vars = {
+        ...(body.env_vars || {}),
+        SKYPILOT_IS_FROM_DASHBOARD: 'true',
+        SKYPILOT_USER_ID: 'dashboard',
+        SKYPILOT_USER: 'dashboard',
+      };
+    }
+
+    return await fetch(fullUrl, {
+      method,
+      headers,
+      body: method === 'POST' ? JSON.stringify(body) : undefined,
+      signal: options.signal,
+    });
+  },
   fetch: async (path, body, method = 'POST') => {
+    // Call the server API and get the result via /api/get, the API must return a request ID
     try {
-      const headers =
-        method === 'POST'
-          ? {
-              'Content-Type': 'application/json',
-            }
-          : {};
-
       const baseUrl = window.location.origin;
-      const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
-
-      if (body !== undefined) {
-        body.env_vars = {
-          ...(body.env_vars || {}),
-          SKYPILOT_IS_FROM_DASHBOARD: 'true',
-          SKYPILOT_USER_ID: 'dashboard',
-          SKYPILOT_USER: 'dashboard',
-        };
-      }
-
-      const response = await fetch(fullUrl, {
-        method,
-        headers,
-        body: method === 'POST' ? JSON.stringify(body) : undefined,
-      });
+      const response = await apiClient.fetchImmediate(path, body, method);
 
       // Check if initial request succeeded
       if (!response.ok) {
