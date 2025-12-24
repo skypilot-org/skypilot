@@ -4710,8 +4710,8 @@ def volumes_ls(verbose: bool):
               default=False,
               is_flag=True,
               required=False,
-              help=('Forcibly delete the volume from the database even if '
-                    'the deletion API fails.'))
+              help=('Forcibly delete the volume from the volumes table even '
+                    'if the deletion API fails.'))
 @click.option('--yes',
               '-y',
               default=False,
@@ -4741,7 +4741,7 @@ def volumes_delete(
         # Delete all volumes.
         sky volumes delete -a
         \b
-        # Forcibly delete a volume from the database.
+        # Forcibly delete a volume.
         sky volumes delete pvc1 -p
     """
     if sum([bool(names), all]) != 1:

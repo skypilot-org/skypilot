@@ -194,14 +194,10 @@ def get_all_volumes_usedby(
     original_volume_names: Dict[str, Dict[str, List[str]]] = {}
     for config in configs:
         context, namespace = _get_context_namespace(config)
-        if context not in context_to_namespaces:
-            context_to_namespaces[context] = set()
-        context_to_namespaces[context].add(namespace)
-        if context not in original_volume_names:
-            original_volume_names[context] = {}
-        if namespace not in original_volume_names[context]:
-            original_volume_names[context][namespace] = []
-        original_volume_names[context][namespace].append(config.name)
+        context_to_namespaces.setdefault(context, set()).add(namespace)
+        original_volume_names.setdefault(context,
+                                         {}).setdefault(namespace,
+                                                        []).append(config.name)
         pvc_names.add(config.name_on_cloud)
     cloud_to_name_map = _get_cluster_name_on_cloud_to_cluster_name_map()
     # Get all pods in the namespace
