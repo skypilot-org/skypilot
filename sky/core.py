@@ -1,6 +1,6 @@
 """SDK functions for cluster/job management."""
 import typing
-from typing import Any, Dict, List, Literal, Optional, overload, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
@@ -279,39 +279,13 @@ all_clusters, unmanaged_clusters, all_jobs, context
     return all_clusters, unmanaged_clusters, all_jobs, context
 
 
-@overload
-def get_cluster_events(cluster_name: Optional[str] = ...,
-                       cluster_hash: Optional[str] = ...,
-                       event_type: str = ...,
-                       include_timestamps: Literal[False] = ...,
-                       limit: Optional[int] = ...) -> List[str]:
-    ...
-
-
-@overload
 def get_cluster_events(
-        cluster_name: Optional[str] = ...,
-        cluster_hash: Optional[str] = ...,
-        event_type: str = ...,
-        include_timestamps: Literal[True] = ...,
-        limit: Optional[int] = ...) -> List[Dict[str, Union[str, int]]]:
-    ...
-
-
-@overload
-def get_cluster_events(cluster_name: Optional[str] = ...,
-                       cluster_hash: Optional[str] = ...,
-                       event_type: str = ...,
-                       include_timestamps: bool = ...,
-                       limit: Optional[int] = ...) -> List[Any]:
-    ...
-
-
-def get_cluster_events(cluster_name: Optional[str] = None,
-                       cluster_hash: Optional[str] = None,
-                       event_type: str = 'STATUS_CHANGE',
-                       include_timestamps: bool = False,
-                       limit: Optional[int] = None) -> List[Any]:
+    cluster_name: Optional[str] = None,
+    cluster_hash: Optional[str] = None,
+    event_type: str = 'STATUS_CHANGE',
+    include_timestamps: bool = False,
+    limit: Optional[int] = None
+) -> List[Union[str, Dict[str, Union[str, int]]]]:
     """Get events for a cluster.
 
     Args:
