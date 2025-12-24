@@ -1,6 +1,6 @@
 """SDK functions for cluster/job management."""
 import typing
-from typing import Any, Dict, List, Literal, Optional, overload, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import colorama
 
@@ -279,7 +279,7 @@ all_clusters, unmanaged_clusters, all_jobs, context
     return all_clusters, unmanaged_clusters, all_jobs, context
 
 
-@overload
+@typing.overload
 def get_cluster_events(
     cluster_name: Optional[str] = ...,
     cluster_hash: Optional[str] = ...,
@@ -290,7 +290,7 @@ def get_cluster_events(
     ...
 
 
-@overload
+@typing.overload
 def get_cluster_events(
     cluster_name: Optional[str] = ...,
     cluster_hash: Optional[str] = ...,
@@ -301,18 +301,18 @@ def get_cluster_events(
     ...
 
 
-@overload
+@typing.overload
 def get_cluster_events(
     cluster_name: Optional[str] = ...,
     cluster_hash: Optional[str] = ...,
     event_type: str = ...,
     include_timestamps: bool = ...,
     limit: Optional[int] = ...,
-) -> List[Union[str, Dict[str, Union[str, int]]]]:
+) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
     ...
 
 
-def get_cluster_events(  # type: ignore[misc]
+def get_cluster_events(
     cluster_name: Optional[str] = None,
     cluster_hash: Optional[str] = None,
     event_type: str = 'STATUS_CHANGE',
