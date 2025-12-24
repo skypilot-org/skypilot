@@ -1,4 +1,4 @@
-.. _volumes:
+.. _volumes-all:
 
 Volumes
 =======
@@ -338,43 +338,22 @@ When you terminate the cluster, the ephemeral volumes are automatically deleted:
   $ sky down my-cluster
   # Cluster and its ephemeral volumes are deleted
 
-Mount PVCs
-~~~~~~~~~~
+Advanced: Mount PVCs with Kubernetes configs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-In addition to creating and mounting volumes via SkyPilot's volume management, you can also mount existing PersistentVolumeClaims (PVCs) directly to SkyPilot clusters and managed jobs.
+Using SkyPilot volumes allows you to mount different volumes to different tasks. SkyPilot also offers an advanced way to mount a Kubernetes PVC with the detailed Kubernetes configs. This allows you to:
 
-Mount PVCs for single context
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1. Mount a PVC with additional configurations that is not supported by SkyPilot volumes.
 
-**Per-task configuration:**
+2. Specify a global (per Kubernetes context) PVC to be mounted on all SkyPilot clusters.
 
-.. code-block:: yaml
+Mount a PVC with additional configuration
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-    # task.yaml
-    run: |
-      echo "Hello, world!" > /mnt/data/hello.txt
-      ls -la /mnt/data
-    config:
-      kubernetes:
-        pod_config:
-          spec:
-            securityContext:
-              fsGroup: 1000
-              fsGroupChangePolicy: OnRootMismatch
-            containers:
-              - volumeMounts:
-                - mountPath: /mnt/data
-                  name: my-pvc
-            volumes:
-              - name: my-pvc
-                persistentVolumeClaim:
-                  claimName: my-pvc
-
-**Global configuration:**
+To mount a PVC with additional configuration, you can set the ``kubernetes.pod_config`` in the :ref:`advanced config <config-yaml-kubernetes-pod-config>`:
 
 .. code-block:: yaml
 
-    # ~/.sky/config.yaml
     kubernetes:
       pod_config:
         spec:
@@ -392,16 +371,15 @@ Mount PVCs for single context
 
 .. note::
 
-   The ``kubernetes`` section in ``~/.sky/config.yaml`` applies to every cluster launched on Kubernetes. To mount different PVCs per cluster, set the ``kubernetes`` config in the task YAML file as described in the per-task configuration section.
+   The ``kubernetes.pod_config`` in the advanced config applies to every cluster launched on Kubernetes. To mount different PVCs per cluster, set the ``kubernetes.pod_config`` in the task YAML file as described in the :ref:`per-task configuration <yaml-spec-config>`. Refer to Kubernetes `volume mounts <https://kubernetes.io/docs/reference/generated/kubernetes-api/latest/#volumemount-v1-core>`_ and `volumes <https://kubernetes.io/docs/reference/generated/kubernetes-api/latest/#volume-v1-core>`_ documentation for more details.
 
-Mount PVCs for multiple contexts
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Mount a PVC to all clusters in each context
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If you want to mount different PVCs for different Kubernetes contexts, you can set the ``allowed_contexts`` and ``context_configs`` in ``~/.sky/config.yaml``.
+If you want to mount different PVCs for different Kubernetes contexts, you can set the ``allowed_contexts`` and ``context_configs`` in the :ref:`advanced config <config-yaml-kubernetes-pod-config>`.
 
 .. code-block:: yaml
 
-    # ~/.sky/config.yaml
     kubernetes:
       allowed_contexts:
         - context1

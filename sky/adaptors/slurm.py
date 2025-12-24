@@ -50,12 +50,13 @@ class SlurmClient:
 
     def __init__(
         self,
-        ssh_host: str,
-        ssh_port: int,
-        ssh_user: str,
-        ssh_key: Optional[str],
+        ssh_host: Optional[str] = None,
+        ssh_port: Optional[int] = None,
+        ssh_user: Optional[str] = None,
+        ssh_key: Optional[str] = None,
         ssh_proxy_command: Optional[str] = None,
         ssh_proxy_jump: Optional[str] = None,
+        is_inside_slurm_cluster: bool = False,
     ):
         """Initialize SlurmClient.
 
@@ -66,6 +67,8 @@ class SlurmClient:
             ssh_key: Path to SSH private key, or None for keyless SSH.
             ssh_proxy_command: Optional SSH proxy command.
             ssh_proxy_jump: Optional SSH proxy jump destination.
+            is_inside_slurm_cluster: If True, uses local execution mode (for
+            when running on the Slurm cluster itself). Defaults to False.
         """
         self.ssh_host = ssh_host
         self.ssh_port = ssh_port
@@ -74,16 +77,25 @@ class SlurmClient:
         self.ssh_proxy_command = ssh_proxy_command
         self.ssh_proxy_jump = ssh_proxy_jump
 
-        # Internal runner for executing Slurm CLI commands
-        # on the controller node.
-        self._runner = command_runner.SSHCommandRunner(
-            (ssh_host, ssh_port),
-            ssh_user,
-            ssh_key,
-            ssh_proxy_command=ssh_proxy_command,
-            ssh_proxy_jump=ssh_proxy_jump,
-            enable_interactive_auth=True,
-        )
+        self._runner: command_runner.CommandRunner
+
+        if is_inside_slurm_cluster:
+            # Local execution mode - for running on the Slurm cluster itself
+            # (e.g., autodown from skylet).
+            self._runner = command_runner.LocalProcessCommandRunner()
+        else:
+            # Remote execution via SSH
+            assert ssh_host is not None
+            assert ssh_port is not None
+            assert ssh_user is not None
+            self._runner = command_runner.SSHCommandRunner(
+                (ssh_host, ssh_port),
+                ssh_user,
+                ssh_key,
+                ssh_proxy_command=ssh_proxy_command,
+                ssh_proxy_jump=ssh_proxy_jump,
+                enable_interactive_auth=True,
+            )
 
     def _run_slurm_cmd(self, cmd: str) -> Tuple[int, str, str]:
         return self._runner.run(cmd,

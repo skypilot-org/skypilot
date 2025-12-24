@@ -5,7 +5,9 @@ import unittest.mock as mock
 
 import pytest
 
+from sky import resources as resources_lib
 from sky.adaptors import slurm
+from sky.clouds import slurm as slurm_cloud
 from sky.provision.slurm import instance as slurm_instance
 from sky.provision.slurm import utils as slurm_utils
 
@@ -117,15 +119,13 @@ class TestTerminateInstances:
             ('SUSPENDED', True, True),
             ('STAGING_OUT', True, True),
         ])
-    @patch('sky.provision.slurm.instance.slurm_utils.is_inside_slurm_job')
+    @patch('sky.provision.slurm.instance.slurm_utils.is_inside_slurm_cluster')
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
-    def test_terminate_instances_handles_job_states(self,
-                                                    mock_slurm_client_class,
-                                                    mock_is_inside_job,
-                                                    job_state, should_cancel,
-                                                    should_signal):
+    def test_terminate_instances_handles_job_states(
+            self, mock_slurm_client_class, mock_is_inside_slurm_cluster,
+            job_state, should_cancel, should_signal):
         """Test terminate_instances handles different job states correctly."""
-        mock_is_inside_job.return_value = False
+        mock_is_inside_slurm_cluster.return_value = False
 
         mock_client = mock.MagicMock()
         mock_slurm_client_class.return_value = mock_client
@@ -163,12 +163,12 @@ class TestTerminateInstances:
         else:
             mock_client.cancel_jobs_by_name.assert_not_called()
 
-    @patch('sky.provision.slurm.instance.slurm_utils.is_inside_slurm_job')
+    @patch('sky.provision.slurm.instance.slurm_utils.is_inside_slurm_cluster')
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
     def test_terminate_instances_no_jobs_found(self, mock_slurm_client_class,
-                                               mock_is_inside_job):
+                                               mock_is_inside_slurm_cluster):
         """Test terminate_instances when no jobs are found."""
-        mock_is_inside_job.return_value = False
+        mock_is_inside_slurm_cluster.return_value = False
 
         mock_client = mock.MagicMock()
         mock_slurm_client_class.return_value = mock_client
@@ -193,3 +193,112 @@ class TestTerminateInstances:
 
         # Should return early without canceling
         mock_client.cancel_jobs_by_name.assert_not_called()
+
+
+class TestSlurmGPUDefaults:
+    """Test Slurm GPU default CPU and memory allocation.
+
+    These tests verify that when GPU instances are requested without explicit
+    CPU/memory specifications, Slurm allocates reasonable defaults matching
+    Kubernetes behavior (4 CPUs and 16GB memory per GPU).
+    """
+
+    @pytest.mark.parametrize(
+        'gpu_count,expected_cpus,expected_memory',
+        [
+            (1, 4, 16.0),  # 1 GPU: 4 CPUs, 16GB
+            (2, 8, 32.0),  # 2 GPUs: 8 CPUs, 32GB
+            (4, 16, 64.0),  # 4 GPUs: 16 CPUs, 64GB
+            (8, 32, 128.0),  # 8 GPUs: 32 CPUs, 128GB
+        ])
+    @patch('sky.clouds.slurm.Slurm.regions_with_offering')
+    def test_gpu_defaults_without_explicit_cpu_memory(self, mock_regions,
+                                                      gpu_count, expected_cpus,
+                                                      expected_memory):
+        """Test GPU instances get correct default CPU and memory allocation."""
+        mock_region = mock.MagicMock()
+        mock_region.name = 'test-cluster'
+        mock_regions.return_value = [mock_region]
+
+        # Create resources with GPU but no explicit CPU/memory
+        resources = resources_lib.Resources(
+            cloud=slurm_cloud.Slurm(),
+            accelerators={f'H200': gpu_count},
+            # No cpus or memory specified - should use defaults
+        )
+
+        cloud = slurm_cloud.Slurm()
+        feasible = cloud._get_feasible_launchable_resources(resources)
+
+        assert len(feasible.resources_list) == 1
+        resource = feasible.resources_list[0]
+
+        instance_type = slurm_utils.SlurmInstanceType.from_instance_type(
+            resource.instance_type)
+        assert instance_type.cpus == expected_cpus
+        assert instance_type.memory == expected_memory
+        assert instance_type.accelerator_count == gpu_count
+        assert instance_type.accelerator_type == 'H200'
+
+    @pytest.mark.parametrize(
+        'accelerators,cpus,memory,expected_cpus,expected_memory',
+        [
+            # Various GPU types with defaults
+            ({
+                'H200': 2
+            }, None, None, 8, 32.0),
+            ({
+                'A100': 2
+            }, None, None, 8, 32.0),
+            ({
+                'H100': 2
+            }, None, None, 8, 32.0),
+            ({
+                'A10G': 2
+            }, None, None, 8, 32.0),
+            # Explicit CPU override (memory scales)
+            ({
+                'H200': 2
+            }, '16', None, 16, 64.0),
+            # Explicit memory override (CPU uses default)
+            ({
+                'H200': 1
+            }, None, '32', 4, 32.0),
+            # Both CPU and memory override
+            ({
+                'H200': 2
+            }, '32', '64', 32, 64.0),
+            # Memory with '+' suffix
+            ({
+                'H200': 1
+            }, None, '32+', 4, 32.0),
+            # CPU-only instance (basic defaults)
+            (None, None, None, 2, 2.0),
+        ])
+    @patch('sky.clouds.slurm.Slurm.regions_with_offering')
+    def test_resource_allocation_scenarios(self, mock_regions, accelerators,
+                                           cpus, memory, expected_cpus,
+                                           expected_memory):
+        """Test various resource allocation scenarios including GPU types and overrides."""
+        mock_region = mock.MagicMock()
+        mock_region.name = 'test-cluster'
+        mock_regions.return_value = [mock_region]
+
+        kwargs = {'cloud': slurm_cloud.Slurm()}
+        if accelerators:
+            kwargs['accelerators'] = accelerators
+        if cpus:
+            kwargs['cpus'] = cpus
+        if memory:
+            kwargs['memory'] = memory
+
+        resources = resources_lib.Resources(**kwargs)
+        cloud = slurm_cloud.Slurm()
+        feasible = cloud._get_feasible_launchable_resources(resources)
+
+        resource = feasible.resources_list[0]
+        instance_type = slurm_utils.SlurmInstanceType.from_instance_type(
+            resource.instance_type)
+
+        assert instance_type.cpus == expected_cpus
+        assert instance_type.memory == expected_memory

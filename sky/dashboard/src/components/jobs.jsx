@@ -53,6 +53,7 @@ import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
+import { PluginSlot } from '@/plugins/PluginSlot';
 import {
   FilterDropdown,
   Filters,
@@ -572,14 +573,15 @@ export function ManagedJobsTable({
   // only trigger on actual user interactions (page change, filter change, etc.)
   const isInitialFetch = React.useRef(true);
 
-  // Initial load - only runs once after preloading is complete
+  // Initial load - runs immediately on mount, don't wait for full preloading
+  // The preloader will warm the cache in background, but we fetch jobs data
+  // right away so the table displays as fast as possible
   React.useEffect(() => {
-    if (preloadingComplete) {
-      fetchData({ includeStatus: true });
-      // Mark that initial fetch is complete so other effects can run
-      isInitialFetch.current = false;
-    }
-  }, [fetchData, preloadingComplete]);
+    fetchData({ includeStatus: true });
+    // Mark that initial fetch is complete so other effects can run
+    isInitialFetch.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch on pagination (page) changes without status request
   // Skip on initial fetch (page defaults to 1)
@@ -1058,7 +1060,7 @@ export function ManagedJobsTable({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading || !preloadingComplete ? (
+              {loading && isInitialLoad ? (
                 <TableRow>
                   <TableCell
                     colSpan={
@@ -1118,7 +1120,16 @@ export function ManagedJobsTable({
                           {formatDuration(item.job_duration)}
                         </TableCell>
                         <TableCell>
-                          <StatusBadge status={item.status} />
+                          <PluginSlot
+                            name="jobs.table.status.badge"
+                            context={item}
+                            fallback={
+                              <StatusBadge
+                                status={item.status}
+                                statusTooltip={item.statusTooltip}
+                              />
+                            }
+                          />
                         </TableCell>
                         <TableCell>
                           {item.infra && item.infra !== '-' ? (
