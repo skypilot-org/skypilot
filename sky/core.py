@@ -317,8 +317,8 @@ def get_cluster_events(  # type: ignore[misc]
     cluster_hash: Optional[str] = None,
     event_type: str = 'STATUS_CHANGE',
     include_timestamps: bool = False,
-    limit: Optional[int] = None) -> List[Union[str, Dict[str, Union[str,
-                                                                    int]]]]:
+    limit: Optional[int] = None
+) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
     """Get events for a cluster.
 
     Args:

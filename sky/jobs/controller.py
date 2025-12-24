@@ -611,8 +611,9 @@ class JobController:
                     if cluster_failures:
                         logger.info(
                             f'Detected cluster failures: {cluster_failures}')
-                        external_failures = (ExternalClusterFailure.
-                                            from_failure_list(cluster_failures))
+                        external_failures = (
+                            ExternalClusterFailure.from_failure_list(
+                                cluster_failures))
             else:
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.

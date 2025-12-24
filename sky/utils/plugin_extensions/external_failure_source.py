@@ -120,7 +120,7 @@ class ExternalFailureSource:
         cls._get_func = get_failures
         cls._clear_func = clear_failures
         logger.info('Registered external failure source')
-    
+
     @classmethod
     def is_registered(cls) -> bool:
         """Check if an external failure source is registered."""
