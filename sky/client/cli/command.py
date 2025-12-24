@@ -141,10 +141,6 @@ _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
                               '`sky jobs launch`. `{command}` supports a '
                               'single task only.')
 
-_NO_ACTIVE_CONTROLLER_SERVE_STATUS_HINT = (
-    f' (See: {colorama.Style.BRIGHT}sky serve -h'
-    f'{colorama.Style.RESET_ALL})')
-
 T = TypeVar('T')
 
 
@@ -1564,7 +1560,12 @@ def _handle_services_request(
         controller_status = e.cluster_status
         msg = str(e)
         if controller_status is None:
-            msg += _NO_ACTIVE_CONTROLLER_SERVE_STATUS_HINT
+            # This is "no controller" case - treat as empty result, not error
+            num_services = 0
+        elif controller_status == status_lib.ClusterStatus.STOPPED:
+            # This is "stopped controller" case - treat as empty result,
+            # not error
+            num_services = 0
     except RuntimeError as e:
         msg = ''
         try:
@@ -1583,6 +1584,8 @@ def _handle_services_request(
                 controller = (
                     controller_utils.Controllers.SKY_SERVE_CONTROLLER.value)
                 msg = controller.default_hint_if_non_existent
+                # This is "stopped controller" case - treat as empty result
+                num_services = 0
         except Exception:  # pylint: disable=broad-except
             # This is to an best effort to find the latest controller status to
             # print more helpful message, so we can ignore any exception to
@@ -6312,12 +6315,9 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Services{colorama.Style.RESET_ALL}')
     click.echo(msg)
-    # Exit with nonzero if num_services is None (error), except when
-    # _NO_ACTIVE_CONTROLLER_SERVE_STATUS_HINT is in msg, which means no
-    # active controller and is treated as a normal empty query (success).
-    sys.exit(
-        int(num_services is None and
-            _NO_ACTIVE_CONTROLLER_SERVE_STATUS_HINT not in msg))
+    # Only exit with error code for actual errors, not "no controller"
+    if num_services is None:
+        sys.exit(1)
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
