@@ -91,7 +91,7 @@ setup_commands:
         fi
     fi
     SKYPILOT_SSH_RC
-    grep -q "source ~/.sky_ssh_rc" ~{{ssh_user}}/.bashrc 2>/dev/null || echo "source ~/.sky_ssh_rc" >> ~{{ssh_user}}/.bashrc
+    grep -q "source ~/.sky_ssh_rc" ~{{ssh_user}}/.bashrc 2>/dev/null || (echo "" >> ~{{ssh_user}}/.bashrc && echo "source ~/.sky_ssh_rc" >> ~{{ssh_user}}/.bashrc)
     {{ setup_sky_dirs_commands }}
     {{ conda_installation_commands }}
     {{ skypilot_wheel_installation_commands }}
