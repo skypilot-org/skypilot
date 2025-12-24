@@ -53,6 +53,7 @@ from sky.utils import yaml_utils
 # step.
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_ppio  # PPIO does not support host controllers
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
 def test_managed_jobs_basic(generic_cloud: str):
     """Test the managed jobs yaml."""
@@ -100,6 +101,7 @@ def test_managed_jobs_basic(generic_cloud: str):
 
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_ppio  # PPIO does not support host controllers
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers
 def test_managed_jobs_cli_exit_codes(generic_cloud: str):
     """Test that managed jobs CLI commands properly return exit codes based on job success/failure."""
@@ -865,6 +867,7 @@ def test_managed_jobs_cancellation_gcp():
 
 @pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.no_hyperbolic  # Uses other clouds
+@pytest.mark.no_ppio  # Uses other clouds
 @pytest.mark.no_shadeform  # Uses other clouds
 @pytest.mark.managed_jobs
 def test_managed_jobs_retry_logs(generic_cloud: str):
@@ -1255,6 +1258,7 @@ def test_managed_jobs_inline_env(generic_cloud: str):
 
 @pytest.mark.no_vast  # The test uses other clouds
 @pytest.mark.no_hyperbolic  # The test uses other clouds
+@pytest.mark.no_ppio  # The test uses other clouds
 @pytest.mark.no_shadeform  # The test uses other clouds
 @pytest.mark.managed_jobs
 def test_managed_jobs_logs_sync_down(generic_cloud: str):

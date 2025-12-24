@@ -475,6 +475,16 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('gcp', 'enable_gvnic'),
     ('gcp', 'enable_gpu_direct'),
     ('gcp', 'placement_policy'),
+    ('ppio', 'imageUrl'),
+    ('ppio', 'imageAuth'),
+    ('ppio', 'imageAuthId'),
+    ('ppio', 'ports'),
+    ('ppio', 'envs'),
+    ('ppio', 'tools'),
+    ('ppio', 'command'),
+    ('ppio', 'networkStorages'),
+    ('ppio', 'networkId'),
+    ('ppio', 'rootfsSize'),
     ('vast', 'secure_only'),
     ('active_workspace',),
 ]
@@ -571,10 +581,10 @@ HOSTED_CATALOG_DIR_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilo
 HOSTED_CATALOG_DIR_URL_S3_MIRROR = 'https://skypilot-catalog.s3.us-east-1.amazonaws.com/catalogs'  # pylint: disable=line-too-long
 CATALOG_SCHEMA_VERSION = 'v8'
 CATALOG_DIR = '~/.sky/catalogs'
-ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
-              'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
-              'paperspace', 'primeintellect', 'do', 'nebius', 'ssh', 'slurm',
-              'hyperbolic', 'seeweb', 'shadeform')
+ALL_CLOUDS = ('aws', 'azure', 'cudo', 'do', 'fluidstack', 'gcp', 'hyperbolic',
+              'ibm', 'kubernetes', 'lambda', 'nebius', 'oci', 'paperspace', 
+              'ppio', 'primeintellect', 'runpod', 'scp', 'seeweb',
+              'shadeform', 'slurm', 'ssh', 'vast', 'vsphere')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.

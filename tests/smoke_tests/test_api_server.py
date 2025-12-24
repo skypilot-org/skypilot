@@ -33,6 +33,7 @@ def set_user(user_id: str, user_name: str, commands: List[str]) -> List[str]:
 
 # ---------- Test multi-tenant ----------
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
+@pytest.mark.no_ppio  # PPIO does not support multi-tenant jobs
 @pytest.mark.no_shadeform  # Shadeform does not support multi-tenant jobs
 @pytest.mark.no_seeweb  # Seeweb does not support multi-tenant jobs
 # Note: we should skip or fix on shared remote cluster because two copies of
@@ -135,6 +136,7 @@ def test_multi_tenant(generic_cloud: str):
 
 
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
+@pytest.mark.no_ppio  # PPIO does not support multi-tenant jobs
 @pytest.mark.no_shadeform  # Shadeform does not support multi-tenant jobs
 @pytest.mark.no_seeweb  # Seeweb does not support multi-tenant jobs
 def test_multi_tenant_managed_jobs(generic_cloud: str):
@@ -340,6 +342,7 @@ def test_recent_request_tracking(generic_cloud: str):
 
 
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support managed jobs
+@pytest.mark.no_ppio  # PPIO does not support managed jobs
 @pytest.mark.no_seeweb  # Seeweb does not support managed jobs
 def test_managed_jobs_force_disable_cloud_bucket(generic_cloud: str):
     """Test jobs with force_disable_cloud_bucket config.
