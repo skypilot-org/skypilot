@@ -360,6 +360,10 @@ class Slurm(clouds.Cloud):
         # Optionally populate accelerator information.
         acc_count = s.accelerator_count if s.accelerator_count else 0
         acc_type = s.accelerator_type if s.accelerator_type else None
+        # Resolve the actual GPU type as it appears in the cluster's GRES.
+        # Slurm GRES types are case-sensitive.
+        if acc_type:
+            acc_type = slurm_utils.get_gres_gpu_type(cluster, acc_type)
 
         deploy_vars = {
             'instance_type': resources.instance_type,
