@@ -4685,16 +4685,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
                 signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
-                # We redirect the output to the log file
-                # and disable the STDOUT and STDERR
-                self.run_on_head(
-                    handle,
-                    code,
-                    log_path=os.path.expanduser(log_file),
-                    stream_logs=False,
-                    process_stream=False,
-                    ssh_mode=command_runner.SshMode.INTERACTIVE,
-                )
+            # We redirect the output to the log file
+            # and disable the STDOUT and STDERR
+            self.run_on_head(
+                handle,
+                code,
+                log_path=os.path.expanduser(log_file),
+                stream_logs=False,
+                process_stream=False,
+                ssh_mode=command_runner.SshMode.INTERACTIVE,
+            )
 
         logger.debug(f'{colorama.Fore.CYAN}'
                      f'Job {job_id} logs: {local_log_dir}'
