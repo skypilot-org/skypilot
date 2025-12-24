@@ -1271,7 +1271,9 @@ def stream_controller_logs(controller_uuid: Union[str, bool],
                 f'Controller log file {controller_log_path} not found.')
 
     # command was started with this pid
-    pid = find_controller_pid_by_uuid(controller_uuid.removeprefix('controller_'))
+    pid = find_controller_pid_by_uuid(
+        controller_uuid[len('controller_'):] if controller_uuid.
+        startswith('controller_') else controller_uuid)
 
     with open(controller_log_path, 'r', encoding='utf-8') as f:
         for line in f:
