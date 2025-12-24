@@ -10,6 +10,7 @@ provider:
   module: sky.provision.nebius
   region: "{{region}}"
   use_internal_ips: {{use_internal_ips}}
+  use_static_ip_address: {{ use_static_ip_address }}
 
 {%- if docker_image is not none %}
 docker:
@@ -56,15 +57,11 @@ available_node_types:
           filesystem_mount_path: {{ fs.filesystem_mount_path }}
         {%- endfor %}
       UserData: |
-        runcmd:
-          - sudo sed -i 's/^#\?AllowTcpForwarding.*/AllowTcpForwarding yes/' /etc/ssh/sshd_config
-          - systemctl restart sshd
-
         {# Two available OS images:
-               1. ubuntu22.04-driverless - requires Docker installation
-               2. ubuntu22.04-cuda12 - comes with Docker pre-installed
-            To optimize deployment speed, Docker is only installed when using ubuntu22.04-driverless #}
-        {%- if docker_image is not none and image_id == 'ubuntu22.04-driverless' %}
+               1. ubuntu24.04-driverless - requires Docker installation
+               2. ubuntu24.04-cuda12 - comes with Docker pre-installed
+            To optimize deployment speed, Docker is only installed when using ubuntu24.04-driverless #}
+        {%- if docker_image is not none and image_id.endswith('-driverless') %}
         apt:
           sources:
             docker.list:
@@ -154,11 +151,13 @@ setup_commands:
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}
+    {{ copy_skypilot_templates_commands }}
   {%- if env_vars is defined %}
     {%- for env_var, env_value in env_vars.items() %}
     echo '{{env_var}}={{env_value}}' | sudo tee -a /etc/environment;
     {%- endfor %}
   {%- endif %}
+    IP=$(hostname -I | awk '{print $1}'); echo "$IP $(hostname)" | sudo tee -a /etc/hosts;
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa\n" >> ~/.ssh/config;

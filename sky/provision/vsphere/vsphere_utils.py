@@ -3,12 +3,10 @@
 import http.cookies as http_cookies
 import os
 import ssl
-import typing
 from typing import Any, Dict, List, Optional
 
 from sky import exceptions
 from sky import sky_logging
-from sky.adaptors import common as adaptors_common
 from sky.adaptors import vsphere as vsphere_adaptor
 from sky.catalog import vsphere_catalog
 from sky.catalog.common import get_catalog_path
@@ -28,11 +26,7 @@ from sky.provision.vsphere.common.vim_utils import create_spec_with_script
 from sky.provision.vsphere.common.vim_utils import poweron_vm
 from sky.provision.vsphere.common.vim_utils import wait_for_tasks
 from sky.provision.vsphere.common.vim_utils import wait_internal_ip_ready
-
-if typing.TYPE_CHECKING:
-    import yaml
-else:
-    yaml = adaptors_common.LazyImport('yaml')
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -268,6 +262,10 @@ class VsphereClient:
 
     def get_pbm_manager(self):
         self.connect()
+        if self.servicemanager is None:
+            raise VsphereError('Failed to connect to vSphere.')
+        if self.servicemanager.si is None:
+            raise VsphereError('Failed to connect to vSphere.')
         pbm_si, pm_content = self._create_pbm_connection(  # pylint: disable=unused-variable
             self.servicemanager.si._stub)  # pylint: disable=protected-access
         pm = pm_content.profileManager
@@ -323,7 +321,7 @@ def get_vsphere_credentials(name=None):
     assert os.path.exists(
         credential_path), f'Missing credential file at {credential_path}.'
     with open(credential_path, 'r', encoding='utf-8') as file:
-        credential = yaml.safe_load(file)
+        credential = yaml_utils.safe_load(file)
         vcenters = credential['vcenters']
         if name is None:
             return vcenters
@@ -366,6 +364,8 @@ def initialize_vsphere_data():
         vcenter_name = vcenter['name']
         vc_object.connect()
         vc_servicemanager = vc_object.servicemanager
+        if vc_servicemanager is None or vc_servicemanager.content is None:
+            raise VsphereError('Failed to connect to vSphere.')
         vc_content = vc_servicemanager.content
 
         cluster_name_dicts = vc_object.clusters
@@ -376,4 +376,5 @@ def initialize_vsphere_data():
         initialize_images_csv(images_csv_path, vc_object, vcenter_name)
         initialize_instance_image_mapping_csv(vms_csv_path, images_csv_path,
                                               instance_image_mapping_csv_path)
-        vc_object.servicemanager.disconnect()
+        if vc_object.servicemanager is not None:
+            vc_object.servicemanager.disconnect()

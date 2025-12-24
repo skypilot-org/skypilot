@@ -180,6 +180,18 @@ class KubeAPIUnreachableError(ResourcesUnavailableError):
     pass
 
 
+class KubernetesValidationError(Exception):
+    """Raised when the Kubernetes validation fails.
+
+    It stores a list of strings that represent the path to the field which
+    caused the validation error.
+    """
+
+    def __init__(self, path: List[str], message: str):
+        super().__init__(message)
+        self.path = path
+
+
 class InvalidCloudConfigs(Exception):
     """Raised when invalid configurations are provided for a given cloud."""
     pass
@@ -192,12 +204,6 @@ class InvalidCloudCredentials(Exception):
 
 class InconsistentHighAvailabilityError(Exception):
     """Raised when the high availability property in the user config
-    is inconsistent with the actual cluster."""
-    pass
-
-
-class InconsistentConsolidationModeError(Exception):
-    """Raised when the consolidation mode property in the user config
     is inconsistent with the actual cluster."""
     pass
 
@@ -637,7 +643,14 @@ class VolumeTopologyConflictError(Exception):
 
 class ServerTemporarilyUnavailableError(Exception):
     """Raised when the server is temporarily unavailable."""
-    pass
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+    def __str__(self):
+        return ('SkyPilot API server is temporarily unavailable: '
+                f'{self.message}. Please try again later.')
 
 
 class RestfulPolicyError(Exception):
@@ -660,4 +673,22 @@ class RequestInterruptedError(Exception):
 
 class SkyletInternalError(Exception):
     """Raised when a Skylet internal error occurs."""
+    pass
+
+
+class SkyletMethodNotImplementedError(Exception):
+    """Raised when a Skylet gRPC method is not implemented on the server."""
+    pass
+
+
+class ClientError(Exception):
+    """Raised when a there is a client error occurs.
+
+    If a request encounters a ClientError, it will not be retried to the server.
+    """
+    pass
+
+
+class ConcurrentWorkerExhaustedError(Exception):
+    """Raised when the concurrent worker is exhausted."""
     pass

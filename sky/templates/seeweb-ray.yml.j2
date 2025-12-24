@@ -1,0 +1,171 @@
+cluster_name: {{ cluster_name_on_cloud }}
+
+max_workers: {{ num_nodes - 1 }}
+upscaling_speed: {{ num_nodes - 1 }}
+idle_timeout_minutes: 5
+
+{%- if docker_image is not none %}
+docker:
+  image: {{docker_image}}
+  container_name: {{docker_container_name}}
+  run_options:
+    - --ulimit nofile=1048576:1048576
+    {%- for run_option in docker_run_options %}
+    - {{run_option}}
+    {%- endfor %}
+  {%- if docker_login_config is not none %}
+  docker_login_config:
+    username: |-
+      {{docker_login_config.username}}
+    password: |-
+      {{docker_login_config.password | indent(6) }}
+    server: |-
+      {{docker_login_config.server}}
+  {%- endif %}
+{%- endif %}
+
+provider:
+  type: external
+  module: sky.provision.seeweb
+  region: "{{ region }}"
+
+auth:
+  ssh_user: ecuser
+  ssh_private_key: {{ ssh_private_key }}
+
+available_node_types:
+  ray_head_default:
+    resources: {}
+    node_config:
+      plan: {{ instance_type }}
+      image: {{ image_id }}
+      location: {{ region }}
+      {% if seeweb_gpu_config is not none %}
+      gpu: {{ seeweb_gpu_config.gpu }}
+      gpu_label: "{{ seeweb_gpu_config.gpu_label }}"
+      {% endif %}
+      disk: {{ disk_size }}
+      {% if docker_image is not none %}
+      user_customize: |
+        #!/bin/bash
+        # Auto-generated Docker installation script for Seeweb
+        LOG_FILE=/var/log/user_customize.log
+        sudo mkdir -p "$(dirname "$LOG_FILE")"
+        {
+          echo "[$(date -Is)] Cloud script: start"
+          sudo apt-get update
+          sudo apt-get install -y \
+            apt-transport-https \
+            ca-certificates \
+            curl \
+            gnupg-agent \
+            lsb-release \
+            software-properties-common
+          sudo mkdir -p /usr/share/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+            sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+          UBU_CODENAME="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu ${UBU_CODENAME} stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+          echo "[$(date -Is)] Cloud script: docker installed"
+          sudo usermod -aG docker ecuser || true
+          sudo systemctl enable docker || true
+          sudo systemctl start docker || true
+          command -v docker && docker --version || echo "[$(date -Is)] docker still missing"
+          echo "[$(date -Is)] Cloud script: complete"
+        } | sudo tee -a "$LOG_FILE"
+        sudo touch /var/log/docker_install_done
+      {% endif %}
+
+head_node_type: ray_head_default
+
+# Format: `REMOTE_PATH : LOCAL_PATH`
+file_mounts: {
+  "~/.seeweb_cloud/seeweb_keys": "~/.seeweb_cloud/seeweb_keys",
+  "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
+  "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
+{%- for remote_path, local_path in credentials.items() %}
+  "{{remote_path}}": "{{local_path}}",
+{%- endfor %}
+  "~/.ssh/sky-cluster-key": "{{ssh_private_key}}",
+}
+
+rsync_exclude: []
+
+setup_commands:
+  - |
+    {%- for initial_setup_command in initial_setup_commands %}
+    {{ initial_setup_command }}
+    {%- endfor %}
+    touch ~/.bashrc;
+    echo "127.0.0.1 $(hostname)" | sudo tee -a /etc/hosts || true;
+    echo "127.0.0.1 localhost" | sudo tee -a /etc/hosts || true;
+    sudo systemctl stop unattended-upgrades || true;
+    sudo systemctl disable unattended-upgrades || true;
+    sudo apt update && sudo apt install -y patch || sudo yum install -y patch || true;
+
+    {%- if docker_image is not none %}
+    # Docker installed via cloud-init; ensure service will be started by cloud-init
+    {%- endif %}
+
+    {{ conda_installation_commands }}
+    {{ ray_skypilot_installation_commands }}
+    {{ copy_skypilot_templates_commands }}
+
+head_start_ray_commands:
+  - |
+    retry_ray() {
+      local n=0; local max=30
+      until [ $n -ge $max ]; do
+        export SKYPILOT_NUM_GPUS=0
+        command -v nvidia-smi >/dev/null 2>&1 && \
+          SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
+
+        ray stop || true
+        RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 \
+        ray start --disable-usage-stats --head \
+          --port={{ ray_port }} --dashboard-port={{ ray_dashboard_port }} \
+          --object-manager-port=8076 \
+          --autoscaling-config=~/ray_bootstrap_config.yaml \
+          --num-gpus=$SKYPILOT_NUM_GPUS --temp-dir {{ ray_temp_dir }} && break
+
+        echo "[head] Ray failed to start ($((++n))/$max), retrying in 5s..."
+        sleep 5
+      done
+      [ $n -eq $max ] && { echo "Ray head failed"; exit 1; }
+    }
+    retry_ray
+
+worker_start_ray_commands:
+  - |
+    retry_ray() {
+      local n=0; local max=30
+      until [ $n -ge $max ]; do
+        SKYPILOT_NUM_GPUS=0
+        command -v nvidia-smi >/dev/null 2>&1 && \
+          SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
+
+        ray stop || true
+        RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 \
+        ray start --disable-usage-stats \
+          --address=$RAY_HEAD_IP:{{ ray_port }} \
+          --object-manager-port=8076 \
+          --num-gpus=$SKYPILOT_NUM_GPUS --temp-dir {{ ray_temp_dir }} && break
+
+        echo "[worker] Ray failed to start ($((++n))/$max), retrying in 5s..."
+        sleep 5
+      done
+      [ $n -eq $max ] && { echo "Ray worker failed"; exit 1; }
+    }
+    retry_ray
+
+head_node: {}
+worker_nodes: {}
+
+head_setup_commands: []
+worker_setup_commands: []
+
+cluster_synced_files: []
+file_mounts_sync_continuously: False

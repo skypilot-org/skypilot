@@ -1,16 +1,21 @@
 """ Vast Cloud. """
 
+import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky import skypilot_config
+from sky.adaptors import common
 from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky.utils import volume as volume_lib
+
+_CREDENTIAL_PATH = '~/.config/vastai/vast_api_key'
 
 
 @registry.CLOUD_REGISTRY.register
@@ -51,7 +56,9 @@ class Vast(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         """The features not supported based on the resources provided.
 
@@ -70,10 +77,15 @@ class Vast(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
         assert zone is None, 'Vast does not support zones.'
         del accelerators, zone  # unused
         regions = catalog.get_region_zones_for_instance_type(
@@ -185,11 +197,20 @@ class Vast(clouds.Cloud):
         else:
             image_id = resources.image_id[resources.region]
 
+        secure_only = skypilot_config.get_effective_region_config(
+            cloud='vast',
+            region=region.name,
+            keys=('secure_only',),
+            default_value=False,
+            override_configs=resources.cluster_config_overrides,
+        )
+
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
             'image_id': image_id,
+            'secure_only': secure_only,
         }
 
     def _get_feasible_launchable_resources(
@@ -253,32 +274,27 @@ class Vast(clouds.Cloud):
     def _check_compute_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has valid credentials for
-        Vast's compute service. """
-        try:
-            import vastai_sdk as _vast  # pylint: disable=import-outside-toplevel
-            vast = _vast.VastAI()
+        Vast's compute service."""
 
-            # We only support file pased credential passing
-            if vast.creds_source != 'FILE':
-                return False, (
-                    'error \n'  # First line is indented by 4 spaces
-                    '    Credentials can be set up by running: \n'
-                    '        $ pip install vastai\n'
-                    '        $ mkdir -p ~/.config/vastai\n'
-                    '        $ echo [key] > ~/.config/vastai/vast_api_key\n'
-                    '    For more information, see https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#vast'  # pylint: disable=line-too-long
-                )
+        dependency_error_msg = ('Failed to import vast. '
+                                'To install, run: pip install skypilot[vast]')
+        if not common.can_import_modules(['vastai_sdk']):
+            return False, dependency_error_msg
 
-            return True, None
+        if not os.path.exists(os.path.expanduser(_CREDENTIAL_PATH)):
+            return False, (
+                'error \n'  # First line is indented by 4 spaces
+                '    Credentials can be set up by running: \n'
+                '        $ pip install vastai\n'
+                '        $ mkdir -p ~/.config/vastai\n'
+                f'        $ echo [key] > {_CREDENTIAL_PATH}\n'
+                '    For more information, see https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#vast'  # pylint: disable=line-too-long
+            )
 
-        except ImportError:
-            return False, ('Failed to import vast. '
-                           'To install, run: pip install skypilot[vast]')
+        return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {
-            '~/.config/vastai/vast_api_key': '~/.config/vastai/vast_api_key'
-        }
+        return {f'{_CREDENTIAL_PATH}': f'{_CREDENTIAL_PATH}'}
 
     @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:

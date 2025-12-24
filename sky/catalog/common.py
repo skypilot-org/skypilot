@@ -385,7 +385,7 @@ def get_hourly_cost_impl(
                              f'{instance_type!r}.')
     cheapest_idx = df[price_str].idxmin()
     cheapest = df.loc[cheapest_idx]
-    return cheapest[price_str]
+    return float(cheapest[price_str])
 
 
 def _get_value(value):
@@ -525,6 +525,24 @@ def get_accelerators_from_instance_type_impl(
         return float(value)
 
     return {acc_name: _convert(acc_count)}
+
+
+def get_arch_from_instance_type_impl(
+    df: 'pd.DataFrame',
+    instance_type: str,
+) -> Optional[str]:
+    df = _get_instance_type(df, instance_type, None)
+    if df.empty:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No instance type {instance_type} found.')
+    row = df.iloc[0]
+    if 'Arch' not in row:
+        return None
+    arch = row['Arch']
+    if pd.isnull(arch):
+        return None
+
+    return arch
 
 
 def get_instance_type_for_accelerator_impl(

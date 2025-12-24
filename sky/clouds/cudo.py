@@ -5,6 +5,7 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky.adaptors import common
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -86,7 +87,9 @@ class Cudo(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         """The features not supported based on the resources provided.
 
@@ -105,10 +108,15 @@ class Cudo(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions_with_offering(cls, instance_type,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
         assert zone is None, 'Cudo does not support zones.'
         del accelerators, zone  # unused
         if use_spot:
@@ -287,14 +295,9 @@ class Cudo(clouds.Cloud):
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Cudo's compute service."""
-        try:
-            # pylint: disable=import-outside-toplevel,unused-import
-            from cudo_compute import cudo_api
-        except (ImportError, subprocess.CalledProcessError) as e:
-            return False, (
-                f'{cls._DEPENDENCY_HINT}\n'
-                f'{cls._INDENT_PREFIX}'
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+        if not common.can_import_modules(['cudo_compute']):
+            return False, (f'{cls._DEPENDENCY_HINT}\n'
+                           f'{cls._INDENT_PREFIX}')
 
         try:
             _run_output('cudoctl --version')

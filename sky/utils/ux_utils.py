@@ -1,11 +1,12 @@
 """Utility functions for UX."""
 import contextlib
 import enum
+import fnmatch
 import os
 import sys
 import traceback
 import typing
-from typing import Callable, Optional, Union
+from typing import Callable, Iterable, List, Optional, Union
 
 import colorama
 
@@ -288,3 +289,36 @@ def command_hint_messages(hint_type: CommandHintType,
                 f'{BOLD}sky jobs queue{RESET_BOLD}')
     else:
         raise ValueError(f'Invalid hint type: {hint_type}')
+
+
+def is_glob_pattern(pattern: str) -> bool:
+    """Checks if a string contains common glob pattern wildcards."""
+    glob_chars = {'*', '?', '[', ']'}
+    # Also check for '**' as a specific globstar pattern
+    if '**' in pattern:
+        return True
+    for char in pattern:
+        if char in glob_chars:
+            return True
+    return False
+
+
+def get_non_matched_query(query_clusters: Iterable[str],
+                          cluster_names: Iterable[str]) -> List[str]:
+    """Gets the non-matched query clusters."""
+    glob_query_clusters = []
+    non_glob_query_clusters = []
+    for cluster_name in query_clusters:
+        if is_glob_pattern(cluster_name):
+            glob_query_clusters.append(cluster_name)
+        else:
+            non_glob_query_clusters.append(cluster_name)
+    not_found_clusters = [
+        query_cluster for query_cluster in non_glob_query_clusters
+        if query_cluster not in cluster_names
+    ]
+    not_found_clusters.extend([
+        query_cluster for query_cluster in glob_query_clusters
+        if not fnmatch.filter(cluster_names, query_cluster)
+    ])
+    return not_found_clusters

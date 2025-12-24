@@ -2,8 +2,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import { getClusters } from '@/data/connectors/clusters';
-import { getManagedJobs } from '@/data/connectors/jobs';
 import {
   getWorkspaces,
   getEnabledClouds,
@@ -43,6 +41,7 @@ import {
 } from '@/components/elements/icons';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { RotateCwIcon, PlusIcon, Trash2Icon, EditIcon } from 'lucide-react';
+import { LastUpdatedTimestamp } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import { statusGroups } from './jobs';
 import dashboardCache from '@/lib/cache';
@@ -50,8 +49,139 @@ import { REFRESH_INTERVALS } from '@/lib/config';
 import cachePreloader from '@/lib/cache-preloader';
 import { apiClient } from '@/data/connectors/client';
 import { sortData } from '@/data/utils';
-import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
+import {
+  CLOUD_CANONICALIZATIONS,
+  CLUSTER_NOT_UP_ERROR,
+} from '@/data/connectors/constants';
 import Link from 'next/link';
+
+// Workspace-aware API functions (cacheable)
+export async function getWorkspaceClusters(workspaceName) {
+  try {
+    const clusters = await apiClient.fetch('/status', {
+      cluster_names: null,
+      all_users: true,
+      include_credentials: false,
+      include_handle: false,
+      override_skypilot_config: { active_workspace: workspaceName },
+    });
+
+    const mappedClusters = clusters.map((cluster) => ({
+      status:
+        cluster.status === 'UP'
+          ? 'RUNNING'
+          : cluster.status === 'STOPPED'
+            ? 'STOPPED'
+            : cluster.status === 'INIT'
+              ? 'LAUNCHING'
+              : 'TERMINATED',
+      cluster: cluster.name,
+      user: cluster.user_name,
+      user_hash: cluster.user_hash,
+      cluster_hash: cluster.cluster_hash,
+      cloud: cluster.cloud,
+      region: cluster.region,
+      zone: cluster.zone,
+      launched_at: cluster.launched_at,
+      handle: cluster.handle,
+      last_use: cluster.last_use,
+      autostop: cluster.autostop,
+      to_down: cluster.to_down,
+      resources_str: cluster.resources_str,
+      workspace: cluster.workspace || 'default', // Preserve workspace info
+    }));
+
+    // Filter clusters to only include those that belong to the requested workspace
+    const filteredClusters = mappedClusters.filter(
+      (cluster) => cluster.workspace === workspaceName
+    );
+    return filteredClusters;
+  } catch (error) {
+    const msg = `Error fetching clusters for workspace ${workspaceName}: ${error}`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+}
+
+export async function getWorkspaceManagedJobs(workspaceName) {
+  try {
+    const response = await apiClient.post('/jobs/queue/v2', {
+      all_users: true,
+      verbose: true,
+      skip_finished: true,
+      workspace_match: workspaceName,
+      fields: ['workspace', 'status'],
+      override_skypilot_config: { active_workspace: workspaceName },
+    });
+
+    // Check if initial request succeeded
+    if (!response.ok) {
+      const msg = `Initial API request to get managed jobs failed with status ${response.status} for workspace ${workspaceName}`;
+      throw new Error(msg);
+    }
+
+    const id = response.headers.get('X-Skypilot-Request-ID');
+    // Handle empty request ID
+    if (!id) {
+      const msg = `No request ID received from server for getting managed jobs for workspace ${workspaceName}`;
+      throw new Error(msg);
+    }
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    let errorMessage = fetchedData.statusText;
+    if (fetchedData.status === 500) {
+      try {
+        const data = await fetchedData.json();
+        if (data.detail && data.detail.error) {
+          try {
+            const error = JSON.parse(data.detail.error);
+            // Handle specific error types
+            if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
+              return { jobs: [] };
+            } else {
+              errorMessage = error.message || String(data.detail.error);
+            }
+          } catch (jsonError) {
+            console.error(
+              'Error parsing JSON from data.detail.error:',
+              jsonError
+            );
+            errorMessage = String(data.detail.error);
+          }
+        }
+      } catch (parseError) {
+        console.error('Error parsing response JSON:', parseError);
+        errorMessage = String(parseError);
+      }
+    }
+    if (!fetchedData.ok) {
+      const msg = `API request to get managed jobs result failed with status ${fetchedData.status}, error: ${errorMessage} for workspace ${workspaceName}`;
+      throw new Error(msg);
+    }
+    const data = await fetchedData.json();
+    const jobsData = data.return_value
+      ? JSON.parse(data.return_value)
+      : { jobs: [] };
+
+    // Ensure workspace information is preserved and filter by workspace
+    if (jobsData.jobs) {
+      jobsData.jobs = jobsData.jobs.map((job) => ({
+        ...job,
+        workspace: job.workspace || 'default',
+      }));
+
+      // Filter jobs to only include those that belong to the requested workspace
+      jobsData.jobs = jobsData.jobs.filter(
+        (job) => job.workspace === workspaceName
+      );
+    }
+
+    return jobsData;
+  } catch (error) {
+    const msg = `Error fetching managed jobs for workspace ${workspaceName}: ${error}`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+}
 
 // Workspace configuration description component
 const WorkspaceConfigDescription = ({ workspaceName, config }) => {
@@ -209,6 +339,7 @@ export function Workspaces() {
   });
   const [loading, setLoading] = useState(true);
   const [rawWorkspacesData, setRawWorkspacesData] = useState(null);
+  const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
   // Sorting state
   const [sortConfig, setSortConfig] = useState({
@@ -310,28 +441,62 @@ export function Workspaces() {
       setLoading(true);
     }
     try {
-      const [fetchedWorkspacesConfig, clustersResponse, managedJobsResponse] =
-        await Promise.all([
-          dashboardCache.get(getWorkspaces),
-          dashboardCache.get(getClusters),
-          dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
-        ]);
-
+      // First, get the list of workspaces the user has access to
+      const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
       setRawWorkspacesData(fetchedWorkspacesConfig);
       const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
-      // Fetch enabled clouds for all workspaces using cache
-      const enabledCloudsArray = await Promise.all(
-        configuredWorkspaceNames.map((wsName) =>
-          dashboardCache.get(getEnabledClouds, [wsName])
-        )
+      // Fetch data for each workspace in parallel using workspace-aware API calls
+      const workspaceDataPromises = configuredWorkspaceNames.map(
+        async (wsName) => {
+          try {
+            const [enabledClouds, clusters, managedJobs] = await Promise.all([
+              dashboardCache.get(getEnabledClouds, [wsName]),
+              dashboardCache.get(getWorkspaceClusters, [wsName]),
+              dashboardCache.get(getWorkspaceManagedJobs, [wsName]),
+            ]);
+
+            return {
+              workspaceName: wsName,
+              enabledClouds,
+              clusters: clusters || [],
+              managedJobs: managedJobs || { jobs: [] },
+            };
+          } catch (error) {
+            console.error('Error fetching workspace data:', error);
+            return {
+              workspaceName: wsName,
+              enabledClouds: [],
+              clusters: [],
+              managedJobs: { jobs: [] },
+            };
+          }
+        }
       );
-      const enabledCloudsMap = Object.fromEntries(
-        configuredWorkspaceNames.map((wsName, index) => [
-          wsName,
-          enabledCloudsArray[index],
-        ])
+
+      const workspaceDataArray = await Promise.all(workspaceDataPromises);
+
+      // Aggregate all clusters and jobs with workspace information
+      const clustersResponse = [];
+      const allJobs = [];
+      const enabledCloudsMap = {};
+
+      workspaceDataArray.forEach(
+        ({ workspaceName, enabledClouds, clusters, managedJobs }) => {
+          // Clusters and jobs already have workspace info from API calls
+          clusters.forEach((cluster) => {
+            clustersResponse.push(cluster);
+          });
+
+          managedJobs.jobs.forEach((job) => {
+            allJobs.push(job);
+          });
+
+          enabledCloudsMap[workspaceName] = enabledClouds;
+        }
       );
+
+      const managedJobsResponse = { jobs: allJobs };
 
       // Build cluster to workspace mapping
       const clusterNameToWorkspace = Object.fromEntries(
@@ -354,6 +519,7 @@ export function Workspaces() {
       let totalRunningClusters = 0;
       clustersResponse.forEach((cluster) => {
         const wsName = cluster.workspace || 'default';
+
         if (!workspaceStatsAggregator[wsName]) {
           workspaceStatsAggregator[wsName] = {
             name: wsName,
@@ -396,12 +562,16 @@ export function Workspaces() {
       // Finalize workspace details
       const finalWorkspaceDetails = Object.values(workspaceStatsAggregator)
         .filter((ws) => configuredWorkspaceNames.includes(ws.name))
-        .map((ws) => ({
-          ...ws,
-          clouds: Array.isArray(enabledCloudsMap[ws.name])
+        .map((ws) => {
+          const enabledClouds = Array.isArray(enabledCloudsMap[ws.name])
             ? enabledCloudsMap[ws.name]
-            : [],
-        }))
+            : [];
+
+          return {
+            ...ws,
+            clouds: enabledClouds,
+          };
+        })
         .sort((a, b) => a.name.localeCompare(b.name));
 
       setWorkspaceDetails(finalWorkspaceDetails);
@@ -425,15 +595,18 @@ export function Workspaces() {
       // Trigger cache preloading for workspaces page and background preload other pages
       await cachePreloader.preloadForPage('workspaces');
 
-      fetchData(true); // Show loading on initial load
+      await fetchData(true); // Show loading on initial load
+      setLastFetchedTime(new Date());
     };
 
     initializeData();
 
     // Set up refresh interval
     const interval = setInterval(() => {
-      fetchData(false); // Don't show loading on background refresh
-    }, REFRESH_INTERVAL);
+      if (window.document.visibilityState === 'visible') {
+        fetchData(false); // Don't show loading on background refresh
+      }
+    }, REFRESH_INTERVALS.REFRESH_INTERVAL);
 
     return () => clearInterval(interval);
   }, []);
@@ -529,6 +702,8 @@ export function Workspaces() {
 
       // Invalidate cache to ensure fresh data is fetched (same as manual refresh)
       dashboardCache.invalidate(getWorkspaces);
+      dashboardCache.invalidateFunction(getWorkspaceClusters); // Invalidate all workspace clusters
+      dashboardCache.invalidateFunction(getWorkspaceManagedJobs); // Invalidate all workspace jobs
 
       await fetchData(true); // Show loading during refresh
     } catch (error) {
@@ -544,14 +719,17 @@ export function Workspaces() {
     }
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getWorkspaces);
-    dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
     dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
 
-    fetchData(true); // Show loading on manual refresh
+    // Invalidate workspace-specific caches
+    dashboardCache.invalidateFunction(getWorkspaceClusters); // Invalidate all workspace clusters
+    dashboardCache.invalidateFunction(getWorkspaceManagedJobs); // Invalidate all workspace jobs
+
+    await fetchData(true); // Show loading on manual refresh
+    setLastFetchedTime(new Date());
   };
 
   const handleCancelDelete = () => {
@@ -661,6 +839,12 @@ export function Workspaces() {
               <CircularProgress size={15} className="mt-0" />
               <span className="ml-2 text-gray-500 text-xs">Refreshing...</span>
             </div>
+          )}
+          {!loading && lastFetchedTime && (
+            <LastUpdatedTimestamp
+              timestamp={lastFetchedTime}
+              className="mr-2"
+            />
           )}
           <button
             onClick={handleRefresh}

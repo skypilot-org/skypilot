@@ -31,6 +31,7 @@ import time
 import typing
 from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 
+import psutil
 import setproctitle
 
 from sky import exceptions
@@ -38,13 +39,18 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.metrics import utils as metrics_utils
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import metrics as metrics_lib
+from sky.server import plugins
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
+from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
+from sky.server.requests import threads
 from sky.server.requests.queues import local_queue
 from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
@@ -55,6 +61,8 @@ from sky.utils import context_utils
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
 from sky.utils import timeline
+from sky.utils import yaml_utils
+from sky.utils.db import db_utils
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -75,6 +83,31 @@ logger = sky_logging.init_logger(__name__)
 # The 'spawn' start method is generally more compatible across different
 # platforms, including macOS.
 multiprocessing.set_start_method('spawn', force=True)
+
+# An upper limit of max threads for request execution per server process that
+# unlikely to be reached to allow higher concurrency while still prevent the
+# server process become overloaded.
+_REQUEST_THREADS_LIMIT = 128
+
+_REQUEST_THREAD_EXECUTOR_LOCK = threading.Lock()
+# A dedicated thread pool executor for synced requests execution in coroutine to
+# avoid:
+# 1. blocking the event loop;
+# 2. exhausting the default thread pool executor of event loop;
+_REQUEST_THREAD_EXECUTOR: Optional[threads.OnDemandThreadExecutor] = None
+
+
+def get_request_thread_executor() -> threads.OnDemandThreadExecutor:
+    """Lazy init and return the request thread executor for current process."""
+    global _REQUEST_THREAD_EXECUTOR
+    if _REQUEST_THREAD_EXECUTOR is not None:
+        return _REQUEST_THREAD_EXECUTOR
+    with _REQUEST_THREAD_EXECUTOR_LOCK:
+        if _REQUEST_THREAD_EXECUTOR is None:
+            _REQUEST_THREAD_EXECUTOR = threads.OnDemandThreadExecutor(
+                name='request_thread_executor',
+                max_workers=_REQUEST_THREADS_LIMIT)
+        return _REQUEST_THREAD_EXECUTOR
 
 
 class RequestQueue:
@@ -127,6 +160,12 @@ queue_backend = server_config.QueueBackend.MULTIPROCESSING
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    # Load plugins for executor process.
+    plugins.load_plugins(plugins.ExtensionContext())
+    # Executor never stops, unless the whole process is killed.
+    threading.Thread(target=metrics_lib.process_monitor,
+                     args=(f'worker:{proc_group}', threading.Event()),
+                     daemon=True).start()
 
 
 class RequestWorker:
@@ -150,6 +189,8 @@ class RequestWorker:
         self.schedule_type = schedule_type
         self.garanteed_parallelism = config.garanteed_parallelism
         self.burstable_parallelism = config.burstable_parallelism
+        self.num_db_connections_per_worker = (
+            config.num_db_connections_per_worker)
         self._thread: Optional[threading.Thread] = None
         self._cancel_event = threading.Event()
 
@@ -177,10 +218,11 @@ class RequestWorker:
                 time.sleep(0.1)
                 return
             request_id, ignore_return_value, _ = request_element
-            request = api_requests.get_request(request_id)
+            request = api_requests.get_request(request_id, fields=['status'])
             assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
                 return
+            del request
             logger.info(f'[{self}] Submitting request: {request_id}')
             # Start additional process to run the request, so that it can be
             # cancelled when requested by a user.
@@ -188,8 +230,15 @@ class RequestWorker:
             # multiple requests can share the same process pid, which may cause
             # issues with SkyPilot core functions if they rely on the exit of
             # the process, such as subprocess_daemon.py.
-            fut = executor.submit_until_success(_request_execution_wrapper,
-                                                request_id, ignore_return_value)
+            fut = executor.submit_until_success(
+                _request_execution_wrapper, request_id, ignore_return_value,
+                self.num_db_connections_per_worker)
+            # Decrement the free executor count when a request starts
+            if metrics_utils.METRICS_ENABLED:
+                if self.schedule_type == api_requests.ScheduleType.LONG:
+                    metrics_utils.SKY_APISERVER_LONG_EXECUTORS.dec()
+                elif self.schedule_type == api_requests.ScheduleType.SHORT:
+                    metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.dec()
             # Monitor the result of the request execution.
             threading.Thread(target=self.handle_task_result,
                              args=(fut, request_element),
@@ -224,9 +273,23 @@ class RequestWorker:
                 queue.put(request_element)
         except exceptions.ExecutionRetryableError as e:
             time.sleep(e.retry_wait_seconds)
+            # Reset the request status to PENDING so it can be picked up again.
+            # Assume retryable since the error is ExecutionRetryableError.
+            request_id, _, _ = request_element
+            with api_requests.update_request(request_id) as request_task:
+                assert request_task is not None, request_id
+                request_task.status = api_requests.RequestStatus.PENDING
             # Reschedule the request.
             queue = _get_queue(self.schedule_type)
             queue.put(request_element)
+            logger.info(f'Rescheduled request {request_id} for retry')
+        finally:
+            # Increment the free executor count when a request finishes
+            if metrics_utils.METRICS_ENABLED:
+                if self.schedule_type == api_requests.ScheduleType.LONG:
+                    metrics_utils.SKY_APISERVER_LONG_EXECUTORS.inc()
+                elif self.schedule_type == api_requests.ScheduleType.SHORT:
+                    metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.inc()
 
     def run(self) -> None:
         # Handle the SIGTERM signal to abort the executor process gracefully.
@@ -248,6 +311,16 @@ class RequestWorker:
                 burst_workers=self.burstable_parallelism,
                 initializer=executor_initializer,
                 initargs=(proc_group,))
+            # Initialize the appropriate gauge for the number of free executors
+            total_executors = (self.garanteed_parallelism +
+                               self.burstable_parallelism)
+            if metrics_utils.METRICS_ENABLED:
+                if self.schedule_type == api_requests.ScheduleType.LONG:
+                    metrics_utils.SKY_APISERVER_LONG_EXECUTORS.set(
+                        total_executors)
+                elif self.schedule_type == api_requests.ScheduleType.SHORT:
+                    metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.set(
+                        total_executors)
             while not self._cancel_event.is_set():
                 self.process_request(executor, queue)
         # TODO(aylei): better to distinct between KeyboardInterrupt and SIGTERM.
@@ -271,39 +344,56 @@ def _get_queue(schedule_type: api_requests.ScheduleType) -> RequestQueue:
 
 @contextlib.contextmanager
 def override_request_env_and_config(
-        request_body: payloads.RequestBody,
-        request_id: str) -> Generator[None, None, None]:
+        request_body: payloads.RequestBody, request_id: str,
+        request_name: str) -> Generator[None, None, None]:
     """Override the environment and SkyPilot config for a request."""
     original_env = os.environ.copy()
-    os.environ.update(request_body.env_vars)
-    # Note: may be overridden by AuthProxyMiddleware.
-    # TODO(zhwu): we need to make the entire request a context available to the
-    # entire request execution, so that we can access info like user through
-    # the execution.
-    user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
-                       name=request_body.env_vars[constants.USER_ENV_VAR])
-    global_user_state.add_or_update_user(user)
-    # Refetch the user to get the latest user info, including the created_at
-    # field.
-    user = global_user_state.get_user(user.id)
-
-    # Force color to be enabled.
-    os.environ['CLICOLOR_FORCE'] = '1'
-    server_common.reload_for_new_request(
-        client_entrypoint=request_body.entrypoint,
-        client_command=request_body.entrypoint_command,
-        using_remote_api_server=request_body.using_remote_api_server,
-        user=user,
-        request_id=request_id)
     try:
+        # Unset SKYPILOT_DEBUG by default, to avoid the value set on the API
+        # server affecting client requests. If set on the client side, it will
+        # be overridden by the request body.
+        os.environ.pop('SKYPILOT_DEBUG', None)
+        # Remove the db connection uri from client supplied env vars, as the
+        # client should not set the db string on server side.
+        request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+        os.environ.update(request_body.env_vars)
+        # Note: may be overridden by AuthProxyMiddleware.
+        # TODO(zhwu): we need to make the entire request a context available to
+        # the entire request execution, so that we can access info like user
+        # through the execution.
+        user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
+                           name=request_body.env_vars[constants.USER_ENV_VAR])
+        _, user = global_user_state.add_or_update_user(user, return_user=True)
+
+        # Force color to be enabled.
+        os.environ['CLICOLOR_FORCE'] = '1'
+        server_common.reload_for_new_request(
+            client_entrypoint=request_body.entrypoint,
+            client_command=request_body.entrypoint_command,
+            using_remote_api_server=request_body.using_remote_api_server,
+            user=user,
+            request_id=request_id)
         logger.debug(
             f'override path: {request_body.override_skypilot_config_path}')
         with skypilot_config.override_skypilot_config(
                 request_body.override_skypilot_config,
                 request_body.override_skypilot_config_path):
-            # Rejecting requests to workspaces that the user does not have
-            # permission to access.
-            workspaces_core.reject_request_for_unauthorized_workspace(user)
+            # Skip permission check for sky.workspaces.get request
+            # as it is used to determine which workspaces the user
+            # has access to.
+            if request_name != 'sky.workspaces.get':
+                try:
+                    # Reject requests that the user does not have permission
+                    # to access.
+                    workspaces_core.reject_request_for_unauthorized_workspace(
+                        user)
+                except exceptions.PermissionDeniedError as e:
+                    logger.debug(
+                        f'{request_id} permission denied to workspace: '
+                        f'{skypilot_config.get_active_workspace()}: {e}')
+                    raise e
+            logger.debug(
+                f'{request_id} permission granted to {request_name} request')
             yield
     finally:
         # We need to call the save_timeline() since atexit will not be
@@ -317,35 +407,13 @@ def override_request_env_and_config(
         os.environ.update(original_env)
 
 
-def _redirect_output(file: TextIO) -> Tuple[int, int]:
-    """Redirect stdout and stderr to the log file."""
-    fd = file.fileno()  # Get the file descriptor from the file object
-    # Store copies of the original stdout and stderr file descriptors
-    original_stdout = os.dup(sys.stdout.fileno())
-    original_stderr = os.dup(sys.stderr.fileno())
-
-    # Copy this fd to stdout and stderr
-    os.dup2(fd, sys.stdout.fileno())
-    os.dup2(fd, sys.stderr.fileno())
-    return original_stdout, original_stderr
-
-
-def _restore_output(original_stdout: int, original_stderr: int) -> None:
-    """Restore stdout and stderr to their original file descriptors."""
-    os.dup2(original_stdout, sys.stdout.fileno())
-    os.dup2(original_stderr, sys.stderr.fileno())
-
-    # Close the duplicate file descriptors
-    os.close(original_stdout)
-    os.close(original_stderr)
-
-
 def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
     raise KeyboardInterrupt
 
 
 def _request_execution_wrapper(request_id: str,
-                               ignore_return_value: bool) -> None:
+                               ignore_return_value: bool,
+                               num_db_connections_per_worker: int = 0) -> None:
     """Wrapper for a request execution.
 
     It wraps the execution of a request to:
@@ -356,116 +424,275 @@ def _request_execution_wrapper(request_id: str,
     4. Handle the SIGTERM signal to abort the request gracefully.
     5. Maintain the lifecycle of the temp dir used by the request.
     """
-    # Handle the SIGTERM signal to abort the request processing gracefully.
-    signal.signal(signal.SIGTERM, _sigterm_handler)
-
     pid = multiprocessing.current_process().pid
-    logger.info(f'Running request {request_id} with pid {pid}')
-    with api_requests.update_request(request_id) as request_task:
-        assert request_task is not None, request_id
-        log_path = request_task.log_path
-        request_task.pid = pid
-        request_task.status = api_requests.RequestStatus.RUNNING
-        func = request_task.entrypoint
-        request_body = request_task.request_body
+    proc = psutil.Process(pid)
+    rss_begin = proc.memory_info().rss
+    db_utils.set_max_connections(num_db_connections_per_worker)
+    # Handle the SIGTERM signal to abort the request processing gracefully.
+    # Only set up signal handlers in the main thread, as signal.signal() raises
+    # ValueError if called from a non-main thread (e.g., in tests).
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, _sigterm_handler)
 
-    # Append to the log file instead of overwriting it since there might be
-    # logs from previous retries.
-    with log_path.open('a', encoding='utf-8') as f:
+    logger.info(f'Running request {request_id} with pid {pid}')
+
+    original_stdout = original_stderr = None
+
+    def _save_current_output() -> None:
+        """Save the current stdout and stderr file descriptors."""
+        nonlocal original_stdout, original_stderr
+        original_stdout = os.dup(sys.stdout.fileno())
+        original_stderr = os.dup(sys.stderr.fileno())
+
+    def _redirect_output(file: TextIO) -> None:
+        """Redirect stdout and stderr to the log file."""
+        # Get the file descriptor from the file object
+        fd = file.fileno()
+        # Copy this fd to stdout and stderr
+        os.dup2(fd, sys.stdout.fileno())
+        os.dup2(fd, sys.stderr.fileno())
+
+    def _restore_output() -> None:
+        """Restore stdout and stderr to their original file descriptors."""
+        nonlocal original_stdout, original_stderr
+        if original_stdout is not None:
+            os.dup2(original_stdout, sys.stdout.fileno())
+            os.close(original_stdout)
+            original_stdout = None
+
+        if original_stderr is not None:
+            os.dup2(original_stderr, sys.stderr.fileno())
+            os.close(original_stderr)
+            original_stderr = None
+
+    request_name = None
+    try:
+        # As soon as the request is updated with the executor PID, we can
+        # receive SIGTERM from cancellation. So, we update the request inside
+        # the try block to ensure we have the KeyboardInterrupt handling.
+        with api_requests.update_request(request_id) as request_task:
+            assert request_task is not None, request_id
+            if request_task.status != api_requests.RequestStatus.PENDING:
+                logger.debug(f'Request is already {request_task.status.value}, '
+                             f'skipping execution')
+                return
+            log_path = request_task.log_path
+            request_task.pid = pid
+            request_task.status = api_requests.RequestStatus.RUNNING
+            func = request_task.entrypoint
+            request_body = request_task.request_body
+            request_name = request_task.name
+
         # Store copies of the original stdout and stderr file descriptors
-        original_stdout, original_stderr = _redirect_output(f)
-        # Redirect the stdout/stderr before overriding the environment and
-        # config, as there can be some logs during override that needs to be
-        # captured in the log file.
-        try:
-            with override_request_env_and_config(request_body, request_id), \
+        # We do this in two steps because we should make sure to restore the
+        # original values even if we are cancelled or fail during the redirect.
+        _save_current_output()
+
+        # Append to the log file instead of overwriting it since there might be
+        # logs from previous retries.
+        with log_path.open('a', encoding='utf-8') as f:
+            # Redirect the stdout/stderr before overriding the environment and
+            # config, as there can be some logs during override that needs to be
+            # captured in the log file.
+            _redirect_output(f)
+
+            with sky_logging.add_debug_log_handler(request_id), \
+                override_request_env_and_config(
+                    request_body, request_id, request_name), \
                 tempstore.tempdir():
                 if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
-                                 f'{common_utils.dump_yaml_str(dict(config))}')
-                return_value = func(**request_body.to_kwargs())
+                                 f'{yaml_utils.dump_yaml_str(dict(config))}')
+                (metrics_utils.SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL.
+                 labels(request=request_name, pid=pid).inc())
+                with metrics_utils.time_it(name=request_name,
+                                           group='request_execution'):
+                    return_value = func(**request_body.to_kwargs())
                 f.flush()
-        except KeyboardInterrupt:
-            logger.info(f'Request {request_id} cancelled by user')
-            # Kill all children processes related to this request.
-            # Each executor handles a single request, so we can safely kill all
-            # children processes related to this request.
-            # This is required as python does not pass the KeyboardInterrupt
-            # to the threads that are not main thread.
-            subprocess_utils.kill_children_processes()
-            _restore_output(original_stdout, original_stderr)
-            return
-        except exceptions.ExecutionRetryableError as e:
-            logger.error(e)
-            logger.info(e.hint)
-            with api_requests.update_request(request_id) as request_task:
-                assert request_task is not None, request_id
-                # Retried request will undergo rescheduling and a new execution,
-                # clear the pid of the request.
-                request_task.pid = None
-            # Yield control to the scheduler for uniform handling of retries.
-            _restore_output(original_stdout, original_stderr)
-            raise
-        except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            api_requests.set_request_failed(request_id, e)
-            _restore_output(original_stdout, original_stderr)
-            logger.info(f'Request {request_id} failed due to '
-                        f'{common_utils.format_exception(e)}')
-            return
-        else:
-            api_requests.set_request_succeeded(
-                request_id, return_value if not ignore_return_value else None)
-            _restore_output(original_stdout, original_stderr)
-            logger.info(f'Request {request_id} finished')
+    except KeyboardInterrupt:
+        logger.info(f'Request {request_id} cancelled by user')
+        # Kill all children processes related to this request.
+        # Each executor handles a single request, so we can safely kill all
+        # children processes related to this request.
+        # This is required as python does not pass the KeyboardInterrupt to the
+        # threads that are not main thread.
+        subprocess_utils.kill_children_processes()
+        return
+    except exceptions.ExecutionRetryableError as e:
+        logger.error(e)
+        logger.info(e.hint)
+        with api_requests.update_request(request_id) as request_task:
+            assert request_task is not None, request_id
+            # Retried request will undergo rescheduling and a new execution,
+            # clear the pid of the request.
+            request_task.pid = None
+        # Yield control to the scheduler for uniform handling of retries.
+        _restore_output()
+        raise
+    except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+        api_requests.set_request_failed(request_id, e)
+        # Manually reset the original stdout and stderr file descriptors early
+        # so that the "Request xxxx failed due to ..." log message will be
+        # written to the original stdout and stderr file descriptors.
+        _restore_output()
+        logger.error(f'Request {request_id} failed due to '
+                     f'{common_utils.format_exception(e)}')
+        return
+    else:
+        api_requests.set_request_succeeded(
+            request_id, return_value if not ignore_return_value else None)
+        # Manually reset the original stdout and stderr file descriptors early
+        # so that the "Request xxxx failed due to ..." log message will be
+        # written to the original stdout and stderr file descriptors.
+        _restore_output()
+        logger.info(f'Request {request_id} finished')
+    finally:
+        _restore_output()
+        try:
+            # Capture the peak RSS before GC.
+            peak_rss = max(proc.memory_info().rss, metrics_lib.peak_rss_bytes)
+            # Clear request level cache to release all memory used by the
+            # request.
+            annotations.clear_request_level_cache()
+            with metrics_utils.time_it(name='release_memory', group='internal'):
+                common_utils.release_memory()
+            if request_name is not None:
+                _record_memory_metrics(request_name, proc, rss_begin, peak_rss)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Failed to record memory metrics: '
+                         f'{common_utils.format_exception(e)}')
 
 
-async def execute_request_coroutine(request: api_requests.Request):
+_first_request = True
+
+
+def _record_memory_metrics(request_name: str, proc: psutil.Process,
+                           rss_begin: int, peak_rss: int) -> None:
+    """Record the memory metrics for a request."""
+    # Do not record full memory delta for the first request as it
+    # will loads the sky core modules and make the memory usage
+    # estimation inaccurate.
+    global _first_request
+    if _first_request:
+        _first_request = False
+        return
+    rss_end = proc.memory_info().rss
+
+    # Answer "how much RSS this request contributed?"
+    metrics_utils.SKY_APISERVER_REQUEST_RSS_INCR_BYTES.labels(
+        name=request_name).observe(max(rss_end - rss_begin, 0))
+    # Estimate the memory usage by the request by capturing the
+    # peak memory delta during the request execution.
+    metrics_utils.SKY_APISERVER_REQUEST_MEMORY_USAGE_BYTES.labels(
+        name=request_name).observe(max(peak_rss - rss_begin, 0))
+
+
+class CoroutineTask:
+    """Wrapper of a background task runs in coroutine"""
+
+    def __init__(self, task: asyncio.Task):
+        self.task = task
+
+    async def cancel(self):
+        try:
+            self.task.cancel()
+            await self.task
+        except asyncio.CancelledError:
+            pass
+
+
+def check_request_thread_executor_available() -> None:
+    """Check if the request thread executor is available.
+
+    This is a best effort check to hint the client to retry other server
+    processes when there is no avaiable thread worker in current one. But
+    a request may pass this check and still cannot get worker on execution
+    time due to race condition. In this case, the client will see a failed
+    request instead of retry.
+
+    TODO(aylei): this can be refined with a refactor of our coroutine
+    execution flow.
+    """
+    get_request_thread_executor().check_available()
+
+
+def execute_request_in_coroutine(
+        request: api_requests.Request) -> CoroutineTask:
+    """Execute a request in current event loop.
+
+    Args:
+        request: The request to execute.
+
+    Returns:
+        A CoroutineTask handle to operate the background task.
+    """
+    task = asyncio.create_task(_execute_request_coroutine(request))
+    return CoroutineTask(task)
+
+
+def _execute_with_config_override(func: Callable,
+                                  request_body: payloads.RequestBody,
+                                  request_id: str, request_name: str,
+                                  **kwargs) -> Any:
+    """Execute a function with env and config override inside a thread."""
+    # Override the environment and config within this thread's context,
+    # which gets copied when we call to_thread.
+    with override_request_env_and_config(request_body, request_id,
+                                         request_name):
+        return func(**kwargs)
+
+
+async def _execute_request_coroutine(request: api_requests.Request):
     """Execute a request in current event loop.
 
     Similar to _request_execution_wrapper, but executed as coroutine in current
     event loop. This is designed for executing tasks that are not CPU
     intensive, e.g. sky logs.
     """
+    context.initialize()
     ctx = context.get()
-    if ctx is None:
-        raise ValueError('Context is not initialized')
+    assert ctx is not None, 'Context is not initialized'
     logger.info(f'Executing request {request.request_id} in coroutine')
     func = request.entrypoint
     request_body = request.request_body
-    with api_requests.update_request(request.request_id) as request_task:
-        request_task.status = api_requests.RequestStatus.RUNNING
+    await api_requests.update_status_async(request.request_id,
+                                           api_requests.RequestStatus.RUNNING)
     # Redirect stdout and stderr to the request log path.
     original_output = ctx.redirect_log(request.log_path)
-    # Override environment variables that backs env_options.Options
-    # TODO(aylei): compared to process executor, running task in coroutine has
-    # two issues to fix:
-    # 1. skypilot config is not contextual
-    # 2. envs that read directly from os.environ are not contextual
-    ctx.override_envs(request_body.env_vars)
-    fut: asyncio.Future = context_utils.to_thread(func,
-                                                  **request_body.to_kwargs())
+    try:
+        fut: asyncio.Future = context_utils.to_thread_with_executor(
+            get_request_thread_executor(), _execute_with_config_override, func,
+            request_body, request.request_id, request.name,
+            **request_body.to_kwargs())
+    except Exception as e:  # pylint: disable=broad-except
+        ctx.redirect_log(original_output)
+        await api_requests.set_request_failed_async(request.request_id, e)
+        logger.error(f'Failed to run request {request.request_id} due to '
+                     f'{common_utils.format_exception(e)}')
+        return
 
     async def poll_task(request_id: str) -> bool:
-        request = api_requests.get_request(request_id)
-        if request is None:
+        req_status = await api_requests.get_request_status_async(request_id)
+        if req_status is None:
             raise RuntimeError('Request not found')
 
-        if request.status == api_requests.RequestStatus.CANCELLED:
+        if req_status.status == api_requests.RequestStatus.CANCELLED:
             ctx.cancel()
             return True
 
         if fut.done():
             try:
                 result = await fut
-                api_requests.set_request_succeeded(request_id, result)
+                await api_requests.set_request_succeeded_async(
+                    request_id, result)
             except asyncio.CancelledError:
                 # The task is cancelled by ctx.cancel(), where the status
                 # should already be set to CANCELLED.
                 pass
             except Exception as e:  # pylint: disable=broad-except
                 ctx.redirect_log(original_output)
-                api_requests.set_request_failed(request_id, e)
+                await api_requests.set_request_failed_async(request_id, e)
                 logger.error(f'Request {request_id} failed due to '
                              f'{common_utils.format_exception(e)}')
             return True
@@ -480,22 +707,25 @@ async def execute_request_coroutine(request: api_requests.Request):
     except asyncio.CancelledError:
         # Current coroutine is cancelled due to client disconnect, set the
         # request status for consistency.
-        api_requests.set_request_cancelled(request.request_id)
+        await api_requests.set_request_cancelled_async(request.request_id)
         pass
     # pylint: disable=broad-except
     except (Exception, KeyboardInterrupt, SystemExit) as e:
         # Handle any other error
         ctx.redirect_log(original_output)
-        ctx.cancel()
-        api_requests.set_request_failed(request.request_id, e)
+        await api_requests.set_request_failed_async(request.request_id, e)
         logger.error(f'Request {request.request_id} interrupted due to '
                      f'unhandled exception: {common_utils.format_exception(e)}')
         raise
+    finally:
+        # Always cancel the context to kill potentially running background
+        # routine.
+        ctx.cancel()
 
 
-def prepare_request(
+async def prepare_request_async(
     request_id: str,
-    request_name: str,
+    request_name: request_names.RequestName,
     request_body: payloads.RequestBody,
     func: Callable[P, Any],
     request_cluster_name: Optional[str] = None,
@@ -519,7 +749,7 @@ def prepare_request(
                                    user_id=user_id,
                                    cluster_name=request_cluster_name)
 
-    if not api_requests.create_if_not_exists(request):
+    if not await api_requests.create_if_not_exists_async(request):
         raise exceptions.RequestAlreadyExistsError(
             f'Request {request_id} already exists.')
 
@@ -527,17 +757,18 @@ def prepare_request(
     return request
 
 
-def schedule_request(request_id: str,
-                     request_name: str,
-                     request_body: payloads.RequestBody,
-                     func: Callable[P, Any],
-                     request_cluster_name: Optional[str] = None,
-                     ignore_return_value: bool = False,
-                     schedule_type: api_requests.ScheduleType = (
-                         api_requests.ScheduleType.LONG),
-                     is_skypilot_system: bool = False,
-                     precondition: Optional[preconditions.Precondition] = None,
-                     retryable: bool = False) -> None:
+async def schedule_request_async(request_id: str,
+                                 request_name: request_names.RequestName,
+                                 request_body: payloads.RequestBody,
+                                 func: Callable[P, Any],
+                                 request_cluster_name: Optional[str] = None,
+                                 ignore_return_value: bool = False,
+                                 schedule_type: api_requests.ScheduleType = (
+                                     api_requests.ScheduleType.LONG),
+                                 is_skypilot_system: bool = False,
+                                 precondition: Optional[
+                                     preconditions.Precondition] = None,
+                                 retryable: bool = False) -> None:
     """Enqueue a request to the request queue.
 
     Args:
@@ -558,13 +789,37 @@ def schedule_request(request_id: str,
             The precondition is waited asynchronously and does not block the
             caller.
     """
-    prepare_request(request_id, request_name, request_body, func,
-                    request_cluster_name, schedule_type, is_skypilot_system)
+    request_task = await prepare_request_async(request_id, request_name,
+                                               request_body, func,
+                                               request_cluster_name,
+                                               schedule_type,
+                                               is_skypilot_system)
+    schedule_prepared_request(request_task, ignore_return_value, precondition,
+                              retryable)
+
+
+def schedule_prepared_request(request_task: api_requests.Request,
+                              ignore_return_value: bool = False,
+                              precondition: Optional[
+                                  preconditions.Precondition] = None,
+                              retryable: bool = False) -> None:
+    """Enqueue a request to the request queue
+
+    Args:
+        request_task: The prepared request task to schedule.
+        ignore_return_value: If True, the return value of the function will be
+            ignored.
+        precondition: If a precondition is provided, the request will only be
+            scheduled for execution when the precondition is met (returns True).
+            The precondition is waited asynchronously and does not block the
+            caller.
+        retryable: Whether the request should be retried if it fails.
+    """
 
     def enqueue():
-        input_tuple = (request_id, ignore_return_value, retryable)
-        logger.info(f'Queuing request: {request_id}')
-        _get_queue(schedule_type).put(input_tuple)
+        input_tuple = (request_task.request_id, ignore_return_value, retryable)
+        logger.info(f'Queuing request: {request_task.request_id}')
+        _get_queue(request_task.schedule_type).put(input_tuple)
 
     if precondition is not None:
         # Wait async to avoid blocking caller.

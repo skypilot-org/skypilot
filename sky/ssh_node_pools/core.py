@@ -1,17 +1,24 @@
 """SSH Node Pool management core functionality."""
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
+
+from sky import clouds
+from sky.ssh_node_pools import constants
+from sky.ssh_node_pools import deploy
+from sky.usage import usage_lib
+from sky.utils import common_utils
+from sky.utils import yaml_utils
 
 
 class SSHNodePoolManager:
     """Manager for SSH Node Pool configurations."""
 
     def __init__(self):
-        self.config_path = Path.home() / '.sky' / 'ssh_node_pools.yaml'
-        self.keys_dir = Path.home() / '.sky' / 'ssh_keys'
+        self.config_path = Path(constants.DEFAULT_SSH_NODE_POOLS_PATH)
+        self.keys_dir = Path(constants.NODE_POOLS_KEY_DIR)
         self.keys_dir.mkdir(parents=True, exist_ok=True)
 
     def get_all_pools(self) -> Dict[str, Any]:
@@ -21,7 +28,7 @@ class SSHNodePoolManager:
 
         try:
             with open(self.config_path, 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f) or {}
+                return yaml_utils.safe_load(f) or {}
         except Exception as e:
             raise RuntimeError(
                 f'Failed to read SSH Node Pool config: {e}') from e
@@ -131,3 +138,35 @@ def list_ssh_keys() -> List[str]:
     """List available SSH keys."""
     manager = SSHNodePoolManager()
     return manager.list_ssh_keys()
+
+
+@usage_lib.entrypoint
+def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
+    """Deploys or tears down a Kubernetes cluster on SSH targets.
+
+    Args:
+        infra: Name of the cluster configuration in ssh_node_pools.yaml.
+            If None, the first cluster in the file is used.
+        cleanup: If True, clean up the cluster instead of deploying.
+    """
+    deploy.run(cleanup=cleanup, infra=infra)
+
+
+@usage_lib.entrypoint
+def ssh_status(context_name: str) -> Tuple[bool, str]:
+    """Check the status of an SSH Node Pool context.
+
+    Args:
+        context_name: The SSH context name (e.g., 'ssh-my-cluster')
+
+    Returns:
+        Tuple[bool, str]: (is_ready, reason)
+            - is_ready: True if the SSH Node Pool is ready, False otherwise
+            - reason: Explanation of the status
+    """
+    try:
+        is_ready, reason = clouds.SSH.check_single_context(context_name)
+        return is_ready, reason
+    except Exception as e:  # pylint: disable=broad-except
+        return False, ('Failed to check SSH context: '
+                       f'{common_utils.format_exception(e)}')

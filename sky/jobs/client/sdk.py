@@ -9,11 +9,13 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import sdk
+from sky.schemas.api import responses
 from sky.serve.client import impl
 from sky.server import common as server_common
 from sky.server import rest
 from sky.server import versions
 from sky.server.requests import payloads
+from sky.server.requests import request_names
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -82,8 +84,11 @@ def launch(
         raise click.UsageError('Cannot specify num_jobs without pool.')
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
+
     with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, at_client_side=True) as dag:
+            dag,
+            request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH,
+            at_client_side=True) as dag:
         sdk.validate(dag)
         if _need_confirmation:
             job_identity = 'a managed job'
@@ -125,13 +130,96 @@ def launch(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(18)
+def queue_v2(
+    refresh: bool,
+    skip_finished: bool = False,
+    all_users: bool = False,
+    job_ids: Optional[List[int]] = None,
+    limit: Optional[int] = None,
+    fields: Optional[List[str]] = None,
+) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
+        str, int], int]]:
+    """Gets statuses of managed jobs.
+
+    Please refer to sky.cli.job_queue for documentation.
+
+    Args:
+        refresh: Whether to restart the jobs controller if it is stopped.
+        skip_finished: Whether to skip finished jobs.
+        all_users: Whether to show all users' jobs.
+        job_ids: IDs of the managed jobs to show.
+        limit: Number of jobs to show.
+        fields: Fields to get for the managed jobs.
+
+    Returns:
+        The request ID of the queue request.
+
+    Request Returns:
+        job_records (List[responses.ManagedJobRecord]): A list of dicts, with each dict
+          containing the information of a job.
+
+          .. code-block:: python
+
+            [
+              {
+                'job_id': (int) job id,
+                'job_name': (str) job name,
+                'resources': (str) resources of the job,
+                'submitted_at': (float) timestamp of submission,
+                'end_at': (float) timestamp of end,
+                'job_duration': (float) duration in seconds,
+                'recovery_count': (int) Number of retries,
+                'status': (sky.jobs.ManagedJobStatus) of the job,
+                'cluster_resources': (str) resources of the cluster,
+                'region': (str) region of the cluster,
+                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+              }
+            ]
+        total (int): Total number of jobs after filter,
+        status_counts (Dict[str, int]): Status counts after filter,
+        total_no_filter (int): Total number of jobs before filter,
+
+    Request Raises:
+        sky.exceptions.ClusterNotUpError: the jobs controller is not up or
+          does not exist.
+        RuntimeError: if failed to get the managed jobs with ssh.
+    """
+    body = payloads.JobsQueueV2Body(
+        refresh=refresh,
+        skip_finished=skip_finished,
+        all_users=all_users,
+        job_ids=job_ids,
+        limit=limit,
+        fields=fields,
+    )
+    path = '/jobs/queue/v2'
+    response = server_common.make_authenticated_request(
+        'POST',
+        path,
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
+    return server_common.get_request_id(response=response)
+
+
+# Deprecated. Please use queue_v2 instead for better performance.
+# In https://github.com/skypilot-org/skypilot/pull/7695, the `queue` function
+# is updated to return new typed data for performance improvement if the API
+# server supports it, which breaks the backward compatibility.
+# In https://github.com/skypilot-org/skypilot/pull/8015, we revert the change
+# and add a new function `queue_v2` to return the new typed data.
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
 def queue(
     refresh: bool,
     skip_finished: bool = False,
     all_users: bool = False,
     job_ids: Optional[List[int]] = None
-) -> server_common.RequestId[List[Dict[str, Any]]]:
+) -> server_common.RequestId[List[responses.ManagedJobRecord]]:
     """Gets statuses of managed jobs.
+
+    Deprecated. Please use queue_v2 instead for better performance.
 
     Please refer to sky.cli.job_queue for documentation.
 
@@ -145,7 +233,7 @@ def queue(
         The request ID of the queue request.
 
     Request Returns:
-        job_records (List[Dict[str, Any]]): A list of dicts, with each dict
+        job_records (List[responses.ManagedJobRecord]): A list of dicts, with each dict
           containing the information of a job.
 
           .. code-block:: python
@@ -243,7 +331,7 @@ def tail_logs(name: Optional[str] = None,
               controller: bool = False,
               refresh: bool = False,
               tail: Optional[int] = None,
-              output_stream: Optional['io.TextIOBase'] = None) -> int:
+              output_stream: Optional['io.TextIOBase'] = None) -> Optional[int]:
     """Tails logs of managed jobs.
 
     You can provide either a job name or a job ID to tail logs. If both are not
@@ -263,6 +351,8 @@ def tail_logs(name: Optional[str] = None,
         Exit code based on success or failure of the job. 0 if success,
         100 if the job failed. See exceptions.JobExitCode for possible exit
         codes.
+        Will return None if follow is False
+        (see note in sky/client/sdk.py::stream_response)
 
     Request Raises:
         ValueError: invalid arguments.
@@ -289,7 +379,8 @@ def tail_logs(name: Optional[str] = None,
     return sdk.stream_response(request_id=request_id,
                                response=response,
                                output_stream=output_stream,
-                               resumable=(tail == 0))
+                               resumable=(tail == 0),
+                               get_result=follow)
 
 
 @usage_lib.entrypoint
@@ -380,15 +471,24 @@ def dashboard() -> None:
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(12)
 def pool_apply(
-    task: Union['sky.Task', 'sky.Dag'],
+    task: Optional[Union['sky.Task', 'sky.Dag']],
     pool_name: str,
     mode: 'serve_utils.UpdateMode',
+    workers: Optional[int] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False
 ) -> server_common.RequestId[None]:
     """Apply a config to a pool."""
+    remote_api_version = versions.get_remote_api_version()
+    if (workers is not None and
+        (remote_api_version is None or remote_api_version < 19)):
+        raise click.UsageError('Updating the number of workers in a pool is '
+                               'not supported in your API server. Please '
+                               'upgrade to a newer API server to use this '
+                               'feature.')
     return impl.apply(task,
+                      workers,
                       pool_name,
                       mode,
                       pool=True,

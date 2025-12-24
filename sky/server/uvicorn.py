@@ -4,8 +4,10 @@ This module is a wrapper around uvicorn to customize the behavior of the
 server.
 """
 import asyncio
+import logging
 import os
 import signal
+import sys
 import threading
 import time
 from types import FrameType
@@ -17,11 +19,16 @@ from uvicorn.supervisors import multiprocess
 
 from sky import sky_logging
 from sky.server import daemons
+from sky.server import metrics as metrics_lib
+from sky.server import plugins
 from sky.server import state
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.utils import context_utils
+from sky.utils import env_options
+from sky.utils import perf_utils
 from sky.utils import subprocess_utils
+from sky.utils.db import db_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -40,11 +47,40 @@ except ValueError:
 
 # TODO(aylei): use decorator to register requests that need to be proactively
 # cancelled instead of hardcoding here.
-_RETRIABLE_REQUEST_NAMES = [
+_RETRIABLE_REQUEST_NAMES = {
     'sky.logs',
     'sky.jobs.logs',
     'sky.serve.logs',
-]
+}
+
+
+def add_timestamp_prefix_for_server_logs() -> None:
+    """Configure logging for API server.
+
+    Note: we only do this in the main API server process and uvicorn processes,
+    to avoid affecting executor logs (including in modules like
+    sky.server.requests) that may get sent to the client.
+    """
+    server_logger = sky_logging.init_logger('sky.server')
+    # Clear existing handlers first to prevent duplicates
+    server_logger.handlers.clear()
+    # Disable propagation to avoid the root logger of SkyPilot being affected
+    server_logger.propagate = False
+    # Add date prefix to the log message printed by loggers under
+    # server.
+    stream_handler = logging.StreamHandler(sys.stdout)
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        stream_handler.setLevel(logging.DEBUG)
+    else:
+        stream_handler.setLevel(logging.INFO)
+    stream_handler.flush = sys.stdout.flush  # type: ignore
+    stream_handler.setFormatter(sky_logging.FORMATTER)
+    server_logger.addHandler(stream_handler)
+    # Add date prefix to the log message printed by uvicorn.
+    for name in ['uvicorn', 'uvicorn.access']:
+        uvicorn_logger = logging.getLogger(name)
+        uvicorn_logger.handlers.clear()
+        uvicorn_logger.addHandler(stream_handler)
 
 
 class Server(uvicorn.Server):
@@ -55,9 +91,12 @@ class Server(uvicorn.Server):
     - Run the server process with contextually aware.
     """
 
-    def __init__(self, config: uvicorn.Config):
+    def __init__(self,
+                 config: uvicorn.Config,
+                 max_db_connections: Optional[int] = None):
         super().__init__(config=config)
         self.exiting: bool = False
+        self.max_db_connections = max_db_connections
 
     def handle_exit(self, sig: int, frame: Union[FrameType, None]) -> None:
         """Handle exit signal.
@@ -113,36 +152,38 @@ class Server(uvicorn.Server):
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
             ]
-            reqs = requests_lib.get_request_tasks(status=statuses)
-            if not reqs:
+            requests = [(request_task.request_id, request_task.name)
+                        for request_task in requests_lib.get_request_tasks(
+                            req_filter=requests_lib.RequestTaskFilter(
+                                status=statuses, fields=['request_id', 'name']))
+                       ]
+            if not requests:
                 break
-            logger.info(f'{len(reqs)} on-going requests '
+            logger.info(f'{len(requests)} on-going requests '
                         'found, waiting for them to finish...')
             # Proactively cancel internal requests and logs requests since
             # they can run for infinite time.
-            internal_request_ids = [
+            internal_request_ids = {
                 d.id for d in daemons.INTERNAL_REQUEST_DAEMONS
-            ]
+            }
             if time.time() - start_time > _WAIT_REQUESTS_TIMEOUT_SECONDS:
                 logger.warning('Timeout waiting for on-going requests to '
                                'finish, cancelling all on-going requests.')
-                for req in reqs:
-                    self.interrupt_request_for_retry(req.request_id)
+                for request_id, _ in requests:
+                    self.interrupt_request_for_retry(request_id)
                 break
             interrupted = 0
-            for req in reqs:
-                if req.request_id in internal_request_ids:
-                    self.interrupt_request_for_retry(req.request_id)
-                    interrupted += 1
-                elif req.name in _RETRIABLE_REQUEST_NAMES:
-                    self.interrupt_request_for_retry(req.request_id)
+            for request_id, name in requests:
+                if (name in _RETRIABLE_REQUEST_NAMES or
+                        request_id in internal_request_ids):
+                    self.interrupt_request_for_retry(request_id)
                     interrupted += 1
                 # TODO(aylei): interrupt pending requests to accelerate the
                 # shutdown.
             # If some requests are not interrupted, wait for them to finish,
             # otherwise we just check again immediately to accelerate the
             # shutdown process.
-            if interrupted < len(reqs):
+            if interrupted < len(requests):
                 time.sleep(_WAIT_REQUESTS_INTERVAL_SECONDS)
 
     def interrupt_request_for_retry(self, request_id: str) -> None:
@@ -162,23 +203,45 @@ class Server(uvicorn.Server):
 
     def run(self, *args, **kwargs):
         """Run the server process."""
+        if self.max_db_connections is not None:
+            db_utils.set_max_connections(self.max_db_connections)
+        add_timestamp_prefix_for_server_logs()
         context_utils.hijack_sys_attrs()
         # Use default loop policy of uvicorn (use uvloop if available).
         self.config.setup_event_loop()
-        with self.capture_signals():
-            asyncio.run(self.serve(*args, **kwargs))
+        lag_threshold = perf_utils.get_loop_lag_threshold()
+        if lag_threshold is not None:
+            event_loop = asyncio.get_event_loop()
+            # Same as set PYTHONASYNCIODEBUG=1, but with custom threshold.
+            event_loop.set_debug(True)
+            event_loop.slow_callback_duration = lag_threshold
+        stop_monitor = threading.Event()
+        monitor = threading.Thread(target=metrics_lib.process_monitor,
+                                   args=('server', stop_monitor),
+                                   daemon=True)
+        monitor.start()
+        try:
+            with self.capture_signals():
+                asyncio.run(self.serve(*args, **kwargs))
+        finally:
+            stop_monitor.set()
+            monitor.join()
 
 
-def run(config: uvicorn.Config):
+def run(config: uvicorn.Config, max_db_connections: Optional[int] = None):
     """Run unvicorn server."""
     if config.reload:
         # Reload and multi-workers are mutually exclusive
         # in uvicorn. Since we do not use reload now, simply
         # guard by an exception.
         raise ValueError('Reload is not supported yet.')
-    server = Server(config=config)
+    server = Server(config=config, max_db_connections=max_db_connections)
     try:
         if config.workers is not None and config.workers > 1:
+            # When workers > 1, uvicorn does not run server app in the main
+            # process. In this case, plugins are not loaded at this point, so
+            # load plugins here without uvicorn app.
+            plugins.load_plugins(plugins.ExtensionContext())
             sock = config.bind_socket()
             SlowStartMultiprocess(config, target=server.run,
                                   sockets=[sock]).run()

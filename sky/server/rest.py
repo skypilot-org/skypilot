@@ -4,11 +4,14 @@ import asyncio
 import contextlib
 import contextvars
 import functools
+import html
+import re
 import time
 import typing
 from typing import Any, Callable, cast, Optional, TypeVar
 
 import colorama
+import urllib3.exceptions
 
 from sky import exceptions
 from sky import sky_logging
@@ -31,13 +34,6 @@ else:
 
 F = TypeVar('F', bound=Callable[..., Any])
 
-_RETRY_CONTEXT = contextvars.ContextVar('retry_context', default=None)
-
-_session = requests.Session()
-_session.headers[constants.API_VERSION_HEADER] = str(constants.API_VERSION)
-_session.headers[constants.VERSION_HEADER] = (
-    versions.get_local_readable_version())
-
 
 class RetryContext:
 
@@ -45,11 +41,42 @@ class RetryContext:
         self.line_processed = 0
 
 
+_RETRY_CONTEXT: contextvars.ContextVar[Optional[RetryContext]] = (
+    contextvars.ContextVar('retry_context', default=None))
+
+_session = requests.Session()
+# Tune connection pool size, otherwise the default max is just 10.
+adapter = requests.adapters.HTTPAdapter(
+    pool_connections=50,
+    pool_maxsize=200,
+    # We handle retries by ourselves in SDK.
+    max_retries=0,
+)
+_session.mount('http://', adapter)
+_session.mount('https://', adapter)
+
+_session.headers[constants.API_VERSION_HEADER] = str(constants.API_VERSION)
+_session.headers[constants.VERSION_HEADER] = (
+    versions.get_local_readable_version())
+
+# Enumerate error types that might be transient and can be addressed by
+# retrying.
+_transient_errors = [
+    requests.exceptions.RequestException,
+    ConnectionError,
+    urllib3.exceptions.HTTPError,
+]
+
+_HTML_TITLE_RE = re.compile(r'<title[^>]*>(.*?)</title>',
+                            re.IGNORECASE | re.DOTALL)
+
+
 @contextlib.contextmanager
 def _retry_in_context():
-    token = _RETRY_CONTEXT.set(RetryContext())
+    context = RetryContext()
+    token = _RETRY_CONTEXT.set(context)
     try:
-        yield
+        yield context
     finally:
         _RETRY_CONTEXT.reset(token)
 
@@ -76,38 +103,63 @@ def retry_transient_errors(max_retries: int = 3,
         if isinstance(e, requests.exceptions.HTTPError):
             # Only server error is considered as transient.
             return e.response.status_code >= 500
-        # It is hard to enumerate all other errors that are transient, e.g.
-        # broken pipe, connection refused, etc. Instead, it is safer to assume
-        # all other errors might be transient since we only retry for 3 times
-        # by default. For permanent errors that we do not know now, we can
-        # exclude them here in the future.
-        return True
+        for error in _transient_errors:
+            if isinstance(e, error):
+                return True
+        return False
 
     def decorator(func: F) -> F:
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             backoff = common_utils.Backoff(initial_backoff, max_backoff_factor)
-            with _retry_in_context():
-                for retry_cnt in range(max_retries):
+            consecutive_failed_count = 0
+
+            with _retry_in_context() as context:
+                previous_line_processed = context.line_processed  # should be 0
+
+                def _handle_exception():
+                    # If the function made progress on a retry,
+                    # clears the backoff and resets the failed retry count.
+                    # Otherwise, increments the failed retry count.
+                    nonlocal backoff
+                    nonlocal consecutive_failed_count
+                    nonlocal previous_line_processed
+                    if context.line_processed > previous_line_processed:
+                        backoff = common_utils.Backoff(initial_backoff,
+                                                       max_backoff_factor)
+                        previous_line_processed = context.line_processed
+                        consecutive_failed_count = 0
+                    else:
+                        consecutive_failed_count += 1
+
+                while consecutive_failed_count < max_retries:
                     try:
                         return func(*args, **kwargs)
                     # Occurs when the server proactively interrupts the request
                     # during rolling update, we can retry immediately on the
                     # new replica.
                     except exceptions.RequestInterruptedError:
+                        _handle_exception()
                         logger.debug('Request interrupted. Retry immediately.')
                         continue
                     except Exception as e:  # pylint: disable=broad-except
-                        if retry_cnt >= max_retries - 1:
+                        _handle_exception()
+                        if consecutive_failed_count >= max_retries:
                             # Retries exhausted.
                             raise
                         if not is_transient_error(e):
                             # Permanent error, no need to retry.
                             raise
-                        logger.debug(f'Retry {func.__name__} due to {e}, '
-                                     f'attempt {retry_cnt + 1}/{max_retries}')
-                        time.sleep(backoff.current_backoff())
+                        logger.debug(
+                            f'Retry {func.__name__} due to {e}, '
+                            f'attempt {consecutive_failed_count}/{max_retries}')
+                        # Only sleep if this is not the first retry.
+                        # The idea is that if the function made progress on a
+                        # retry, we should try again immediately to reduce the
+                        # waiting time.
+                        if consecutive_failed_count > 0:
+                            time.sleep(backoff.current_backoff())
 
         return cast(F, wrapper)
 
@@ -133,14 +185,16 @@ def _retry_on_server_unavailable(max_wait_seconds: int = 600,
     Notes(dev):
     """
 
+    def _readable_error_msg(message: str) -> str:
+        return (f'{colorama.Fore.YELLOW}API server is temporarily '
+                f'unavailable: {message}.\nRetrying...'
+                f'{colorama.Style.RESET_ALL}')
+
     def decorator(func: F) -> F:
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> Any:
-            msg = (
-                f'{colorama.Fore.YELLOW}API server is temporarily unavailable: '
-                'upgrade in progress. Waiting to resume...'
-                f'{colorama.Style.RESET_ALL}')
+
             backoff = common_utils.Backoff(
                 initial_backoff=initial_backoff,
                 max_backoff_factor=max_backoff_factor)
@@ -158,7 +212,8 @@ def _retry_on_server_unavailable(max_wait_seconds: int = 600,
                         # stop the status spinner before retrying func() to
                         # avoid the status spinner get stuck if the func() runs
                         # for a long time without update status, e.g. sky logs.
-                        with rich_utils.client_status(msg):
+                        with rich_utils.client_status(
+                                _readable_error_msg(e.message)):
                             if time.time() - start_time > max_wait_seconds:
                                 # pylint: disable=line-too-long
                                 raise exceptions.ServerTemporarilyUnavailableError(
@@ -179,14 +234,98 @@ def _retry_on_server_unavailable(max_wait_seconds: int = 600,
 
 
 def handle_server_unavailable(response: 'requests.Response') -> None:
-    if response.status_code == 503:
-        # TODO(aylei): Hacky, depends on how nginx controller handles backends
-        # with no ready endpoints. Should use self-defined status code or header
-        # to distinguish retryable server error from general 503 errors.
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ServerTemporarilyUnavailableError(
-                'SkyPilot API server is temporarily unavailable. '
-                'Please try again later.')
+    """Handle 503 (Service Unavailable) error
+
+    The client get 503 error in the following cases:
+    1. The reverse proxy cannot find any ready backend endpoints to serve the
+       request, e.g. when there is and rolling-update.
+    2. The skypilot API server has temporary resource issue, e.g. when the
+       cucurrency of the handling process is exhausted.
+
+    We expect the caller (CLI or SDK) retry on these cases and show clear wait
+    message to the user to let user decide whether keep waiting or abort the
+    request.
+    """
+    if response.status_code != 503:
+        return
+
+    # error_msg = 'SkyPilot API server is temporarily unavailable. '
+    error_msg = ''
+    try:
+        response_data = response.json()
+        if 'detail' in response_data:
+            error_msg = response_data['detail']
+    except Exception:  # pylint: disable=broad-except
+        error_msg = handle_response_text(response)
+
+    with ux_utils.print_exception_no_traceback():
+        raise exceptions.ServerTemporarilyUnavailableError(error_msg)
+
+
+def handle_response_text(response: 'requests.Response') -> str:
+    """Handle the plaintext response to get the error message
+
+    There is a special handling for html content which might be returned
+    by the reverse proxy to make the error message more user-friendly.
+    """
+    error_msg = ''
+    if isinstance(response, str):
+        text, headers = response, {}
+    else:
+        text = getattr(response, 'text', '')
+        headers = getattr(response, 'headers', {}) or {}
+    if not isinstance(text, str):
+        text = str(text) if text is not None else ''
+    if not text:
+        return ''
+    content_type = headers.get('Content-Type', '')
+    is_html = isinstance(content_type, str) and 'html' in (content_type.lower())
+    if not is_html:
+        stripped = text.lstrip()
+        is_html = stripped.startswith('<') and '<title' in stripped.lower()
+    if is_html:
+        match = _HTML_TITLE_RE.search(text)
+        if match:
+            title = html.unescape(match.group(1)).strip()
+            if title:
+                error_msg = title
+    if not error_msg:
+        error_msg = text
+    return error_msg
+
+
+async def handle_server_unavailable_async(
+        response: 'aiohttp.ClientResponse') -> None:
+    """Async version: Handle 503 (Service Unavailable) error
+
+    The client get 503 error in the following cases:
+    1. The reverse proxy cannot find any ready backend endpoints to serve the
+       request, e.g. when there is and rolling-update.
+    2. The skypilot API server has temporary resource issue, e.g. when the
+       cucurrency of the handling process is exhausted.
+
+    We expect the caller (CLI or SDK) retry on these cases and show clear wait
+    message to the user to let user decide whether keep waiting or abort the
+    request.
+    """
+    if response.status != 503:
+        return
+
+    error_msg = ''
+    try:
+        response_data = await response.json()
+        if 'detail' in response_data:
+            error_msg = response_data['detail']
+    except Exception:  # pylint: disable=broad-except
+        try:
+            text = await response.text()
+            if text:
+                error_msg = text
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+    with ux_utils.print_exception_no_traceback():
+        raise exceptions.ServerTemporarilyUnavailableError(error_msg)
 
 
 @_retry_on_server_unavailable()
@@ -265,11 +404,7 @@ async def request_without_retry_async(session: 'aiohttp.ClientSession',
         response = await session.request(method, url, **kwargs)
 
         # Handle server unavailability (503 status) - same as sync version
-        if response.status == 503:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ServerTemporarilyUnavailableError(
-                    'SkyPilot API server is temporarily unavailable. '
-                    'Please try again later.')
+        await handle_server_unavailable_async(response)
 
         # Set remote API version and version from headers - same as sync version
         remote_api_version = response.headers.get(constants.API_VERSION_HEADER)

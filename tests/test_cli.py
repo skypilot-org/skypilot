@@ -1,12 +1,19 @@
+import re
 from unittest import mock
 
+import click
 from click import testing as cli_testing
+import pytest
 import requests
 
 from sky import clouds
+from sky import exceptions
+from sky import models
 from sky import server
 from sky.client.cli import command
+from sky.schemas.api import responses
 from sky.utils import status_lib
+from sky.utils import ux_utils
 
 CLOUDS_TO_TEST = [
     'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius'
@@ -35,8 +42,8 @@ def mock_server_api_version(monkeypatch, version):
 def mock_api_server_calls(monkeypatch):
     """Mock all API server related calls to prevent real network requests."""
     # Mock API server status checks
-    mock_api_info = mock.MagicMock()
-    mock_api_info.status = 'healthy'
+    mock_api_info = mock.MagicMock(spec=responses.APIHealthResponse)
+    mock_api_info.status = server.common.ApiServerStatus.HEALTHY
     mock_api_info.api_version = 1
     mock_api_info.version = '1.0.0'
     mock_api_info.commit = 'test_commit'
@@ -66,7 +73,7 @@ def mock_api_server_calls(monkeypatch):
         if '/api/health' in path:
             mock_response.json.return_value = {
                 'status': 'healthy',
-                'api_version': 1,
+                'api_version': "1",
                 'version': '1.0.0',
                 'version_on_disk': '1.0.0',
                 'commit': 'test_commit',
@@ -233,6 +240,8 @@ def mock_api_server_calls(monkeypatch):
     monkeypatch.setattr('sky.server.rest.request_without_retry',
                         mock_rest_request)
 
+    return mock_api_info
+
 
 class TestWithNoCloudEnabled:
 
@@ -318,6 +327,42 @@ class TestWithNoCloudEnabled:
         result = cli_runner.invoke(command.check, ['notarealcloud'])
         # In mocked environment, this should succeed rather than raise ValueError
         assert not result.exit_code
+
+    def test_cli_api_info(self, monkeypatch):
+        """Test that `sky api info` returns the expected output."""
+        mock_api_info = mock_api_server_calls(monkeypatch)
+
+        client_version = '1.0.0'
+        client_commit = '1234567890'
+
+        monkeypatch.setattr('sky.__version__', client_version)
+        monkeypatch.setattr('sky.__commit__', client_commit)
+
+        current_user = models.User(id='test_user_id', name='test_user')
+
+        mock_get_current_user = mock.MagicMock()
+        mock_get_current_user.return_value = current_user
+        monkeypatch.setattr(models.User, 'get_current_user',
+                            mock_get_current_user)
+
+        user = models.User.get_current_user()
+        server_url = 'http://localhost:8000'
+        monkeypatch.setattr('sky.server.common.get_server_url',
+                            lambda: server_url)
+
+        cli_runner = cli_testing.CliRunner()
+        result = cli_runner.invoke(command.api_info)
+        assert not result.exit_code
+        output = result.stdout.split('\n')
+        assert output[
+            0] == f'SkyPilot client version: {client_version}, commit: {client_commit}'
+        assert output[
+            1] == f'Using SkyPilot API server and dashboard: {server_url}'
+        assert output[
+            2] == f'├── Status: {mock_api_info.status}, commit: {mock_api_info.commit}, version: {mock_api_info.version}'
+        assert output[3] == f'├── User: {current_user.name} ({current_user.id})'
+        assert output[4] == f'└── Endpoint set to default local API server.'
+        assert len(output) == 6
 
 
 class TestHelperFunctions:
@@ -450,7 +495,7 @@ class TestHelperFunctions:
 
     def test_list_to_str_float_formatting(self):
         """Test that _list_to_str formats whole number floats as integers.
-        
+
         Regression test for GitHub issue #6484 where requestable quantities
         were shown as '1.0, 2.0, 4.0, 8.0' instead of '1, 2, 4, 8'.
         """
@@ -491,7 +536,7 @@ class TestHelperFunctions:
 
     def test_show_gpus_k8s_float_formatting(self, monkeypatch):
         """Integration test for sky show-gpus --infra k8s output formatting.
-        
+
         Regression test for GitHub issue #6484 to ensure that requestable quantities
         are displayed as integers (1, 2, 4, 8) instead of floats (1.0, 2.0, 4.0, 8.0).
         """
@@ -555,3 +600,105 @@ class TestHelperFunctions:
         assert '1, 2, 4, 8' in output, f"Expected '1, 2, 4, 8' in output, got: {output}"
         # Ensure it doesn't contain the problematic float format
         assert '1.0, 2.0, 4.0, 8.0' not in output, f"Found float format in output: {output}"
+
+
+def strip_ansi(s: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*m", "", s)
+
+
+class DummyCloudError(exceptions.CloudError):
+
+    def __init__(self):
+        super().__init__(
+            message="Request error UNAUTHENTICATED: Invalid token",
+            cloud_provider="nebius",
+            error_type="RequestError",
+        )
+
+
+@pytest.mark.parametrize("mode", ["down", "stop", "autostop"])
+def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
+    monkeypatch.setenv("RICH_FORCE_TERMINAL", "1")
+    monkeypatch.setenv("RICH_PROGRESS_NO_CLEAR", "1")
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("COLUMNS", "100")
+
+    names = ["sky-ok-1", "sky-nebius-fail", "sky-ok-2"]
+
+    def fake_down(name, purge=False):
+        if name == "sky-nebius-fail":
+            raise DummyCloudError()
+
+    def fake_stop(name, purge=False):
+        return fake_down(name, purge=purge)
+
+    def fake_autostop(name, idle_minutes, wait_for, down):
+        return fake_down(name)
+
+    monkeypatch.setattr(command, '_async_call_or_wait',
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(command.sdk, "down", fake_down)
+    monkeypatch.setattr(command.sdk, "stop", fake_stop)
+    monkeypatch.setattr(command.sdk, "autostop", fake_autostop)
+
+    monkeypatch.setattr(command,
+                        "_get_cluster_records_and_set_ssh_config",
+                        lambda clusters=None, all_users=False: [{
+                            "name": n,
+                            "status": None
+                        } for n in (clusters or names)])
+
+    class FakeControllers:
+
+        @staticmethod
+        def from_name(name, expect_exact_match):
+            return None
+
+    monkeypatch.setattr(command, "controller_utils",
+                        type("X", (), {"Controllers": FakeControllers}))
+
+    kwargs = dict(
+        names=names,
+        apply_to_all=False,
+        all_users=False,
+        down=(mode == "down"),
+        no_confirm=True,
+        purge=False,
+        idle_minutes_to_autostop=(10 if mode == "autostop" else None),
+        wait_for=None,
+        async_call=False,
+    )
+
+    monkeypatch.setattr(
+        command.sdk, "get", lambda *args, **kwargs: [{
+            "name": n,
+            "status": None
+        } for n in names])
+
+    command._down_or_stop_clusters(**kwargs)
+
+    captured = capsys.readouterr()
+
+    out_raw = (captured.out + captured.err).replace("\r", "\n")
+    out = strip_ansi(out_raw)
+
+    assert re.search(r"nebius.*UNAUTHENTICATED", out, re.I)
+    assert "Summary:" in out
+    assert "✗ Failed: sky-nebius-fail" in out
+    assert "Failed:" in out
+
+    if mode == "down":
+        assert "Terminating cluster sky-ok-1...done" in out
+        assert "Terminating cluster sky-ok-2...done" in out
+    elif mode == "stop":
+        assert "Stopping cluster sky-ok-1...done" in out
+        assert "Stopping cluster sky-ok-2...done" in out
+    else:  # autostop
+        assert "Scheduling autostop on cluster 'sky-ok-1'...done" in out
+        assert "Scheduling autostop on cluster 'sky-ok-2'...done" in out
+
+    assert "✓ Succeeded:" in out
+    summary_line = next(line for line in out.splitlines()
+                        if line.strip().startswith("✓ Succeeded:"))
+    succ_list = [n.strip() for n in summary_line.split(":", 1)[1].split(",")]
+    assert set(succ_list) == {"sky-ok-1", "sky-ok-2"}

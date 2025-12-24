@@ -108,7 +108,7 @@ function ClusterDetails() {
     try {
       const grafanaUrl = getGrafanaUrl();
       const endpoint =
-        '/api/datasources/proxy/1/api/v1/label/label_skypilot_cluster/values';
+        '/api/datasources/proxy/uid/prometheus/api/v1/label/label_skypilot_cluster_name/values';
 
       const response = await fetch(`${grafanaUrl}${endpoint}`, {
         method: 'GET',
@@ -123,7 +123,7 @@ function ClusterDetails() {
         if (data.data && data.data.length > 0) {
           // Find cluster that matches our current cluster name as prefix
           const matchingCluster = data.data.find((cluster) =>
-            cluster.startsWith(clusterData.cluster)
+            cluster.startsWith(clusterData.cluster_name_on_cloud)
           );
           if (matchingCluster) {
             setMatchedClusterName(matchingCluster);
@@ -147,8 +147,9 @@ function ClusterDetails() {
   // Function to build Grafana panel URL with filters
   const buildGrafanaMetricsUrl = (panelId) => {
     const grafanaUrl = getGrafanaUrl();
-    // Use the matched cluster name if available, otherwise fall back to the display name
-    const clusterParam = matchedClusterName || clusterData?.cluster || '$__all';
+    // Use the matched cluster name if available, otherwise fall back to the cluster name on cloud
+    const clusterParam =
+      matchedClusterName || clusterData?.cluster_name_on_cloud;
 
     return `${grafanaUrl}/d-solo/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics?orgId=1&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&timezone=browser&var-cluster=${encodeURIComponent(clusterParam)}&var-node=$__all&var-gpu=$__all&theme=light&panelId=${panelId}&__feature.dashboardSceneSolo`;
   };
@@ -167,7 +168,9 @@ function ClusterDetails() {
 
       setHistoryLoading(true);
       try {
-        const historyData = await dashboardCache.get(getClusterHistory);
+        const historyData = await dashboardCache.get(getClusterHistory, [
+          cluster,
+        ]);
         const foundHistoryCluster = historyData.find(
           (c) => c.cluster_hash === cluster || c.cluster === cluster
         );
@@ -461,7 +464,18 @@ function ActiveTab({
                   Cluster
                 </div>
                 <div className="text-base mt-1">
-                  {clusterData.cluster || clusterData.name}
+                  {clusterData.cluster_name_on_cloud ? (
+                    <NonCapitalizedTooltip
+                      content={`Name on ${clusterData.cloud || clusterData.infra?.split('(')[0]?.trim() || 'cloud'}: ${clusterData.cluster_name_on_cloud}`}
+                      className="text-sm text-muted-foreground"
+                    >
+                      <span className="border-b border-dotted border-gray-400 cursor-help">
+                        {clusterData.cluster || clusterData.name}
+                      </span>
+                    </NonCapitalizedTooltip>
+                  ) : (
+                    clusterData.cluster || clusterData.name
+                  )}
                 </div>
               </div>
               <div>
@@ -795,6 +809,7 @@ function ActiveTab({
             clusterJobData={clusterJobData}
             loading={clusterJobsLoading}
             refreshClusterJobsOnly={refreshClusterJobsOnly}
+            workspace={clusterData.workspace}
           />
         </div>
       )}

@@ -1,0 +1,215 @@
+# SkyPilot
+
+SkyPilot is a system for running, managing, and scaling AI workloads on any AI infrastructure.
+
+SkyPilot gives AI teams a simple interface to run jobs on any infra. Infra teams get a unified control plane to manage any AI compute — with advanced scheduling, scaling, and orchestration.
+
+## Why SkyPilot
+
+SkyPilot is easy to use for AI users:
+
+- Quickly spin up compute on your own infra
+- Environment and job as code — simple and portable
+- Easy job management: queue, run, and auto-recover many jobs
+
+SkyPilot makes Kubernetes easy for AI & Infra teams:
+
+- Slurm-like ease of use, cloud-native robustness
+- Local dev experience on K8s: SSH into pods, sync code, or connect IDE
+- Turbocharge your clusters: gang scheduling, multi-cluster, and scaling
+
+SkyPilot unifies multiple clusters, clouds, and hardware:
+
+- One interface to use reserved GPUs, Kubernetes clusters, or 16+ clouds
+- Flexible provisioning of GPUs, TPUs, CPUs, with smart failover
+- Team deployment and resource sharing
+
+SkyPilot cuts your cloud costs & maximizes GPU availability:
+
+- Autostop: automatic cleanup of idle resources
+- Spot instance support: 3-6x cost savings, with preemption auto-recovery
+- Intelligent scheduling: automatically run on the cheapest and most available infra
+
+## Getting Started
+
+- [Overview]({{BASE_URL}}/overview.html.md): SkyPilot architecture and core concepts
+- [Installation]({{BASE_URL}}/getting-started/installation.html.md): Install SkyPilot with pip for your cloud providers
+- [Quickstart]({{BASE_URL}}/getting-started/quickstart.html.md): Launch your first cluster and run a job
+- [Examples]({{BASE_URL}}/examples/index.html.md): Browse example use cases
+- [Sky Computing]({{BASE_URL}}/sky-computing.html.md): Learn about the Sky Computing paradigm
+
+## Team Deployment (API Server)
+
+- [API Server Deployment]({{BASE_URL}}/reference/api-server/api-server.html.md): Deploy SkyPilot as a service for teams
+- [Remote API Server Setup]({{BASE_URL}}/reference/api-server/api-server.html.md#sky-api-server-remote): Multi-user team deployment
+- [Admin Deployment Guide]({{BASE_URL}}/reference/api-server/api-server-admin-deploy.html.md): Production deployment instructions
+- [Multi-tenancy]({{BASE_URL}}/reference/api-server/api-server.html.md#multi-tenancy): Share clusters and jobs securely
+- [Authentication]({{BASE_URL}}/reference/auth.html.md): User authentication and authorization
+- [Workspaces]({{BASE_URL}}/admin/workspaces.html.md): Manage team workspaces
+
+## Clusters
+
+- [Interactive Development]({{BASE_URL}}/examples/interactive-development.html.md): SSH, sync code, and connect IDEs on cloud and Kubernetes
+- [Cluster Jobs]({{BASE_URL}}/reference/job-queue.html.md): Job queue and scheduling
+- [Auto-failover]({{BASE_URL}}/examples/auto-failover.html.md): Automatic failover across regions/clouds
+- [Auto-stop]({{BASE_URL}}/reference/auto-stop.html.md): Automatically stop idle clusters
+
+## Jobs
+
+- [Managed Jobs]({{BASE_URL}}/examples/managed-jobs.html.md): Auto-recover from job failure and preemptions.
+- [Multi-Node Jobs]({{BASE_URL}}/running-jobs/distributed-jobs.html.md): Run distributed training and inference
+- [Many Parallel Jobs]({{BASE_URL}}/running-jobs/many-jobs.html.md): Run many jobs efficiently
+- [Model Training Guide]({{BASE_URL}}/reference/training-guide.html.md): Best practices for training
+
+## Model Serving
+
+- [Getting Started]({{BASE_URL}}/serving/sky-serve.html.md): Production-ready model serving with SkyServe
+- [User Guides]({{BASE_URL}}/serving/user-guides.html.md): Comprehensive serving guides
+- [Autoscaling]({{BASE_URL}}/serving/autoscaling.html.md): Scale replicas based on load
+- [Authentication]({{BASE_URL}}/serving/auth.html.md): Secure your serving endpoints
+- [HTTPS Support]({{BASE_URL}}/serving/https.html.md): Enable HTTPS for serving
+- [Spot Instances]({{BASE_URL}}/serving/spot-policy.html.md): Use spot instances for cost savings
+- [Service Updates]({{BASE_URL}}/serving/update.html.md): Update running services
+
+## Infrastructure Choices
+
+- [Kubernetes]({{BASE_URL}}/reference/kubernetes/index.html.md): Deploy on any Kubernetes cluster
+- [Kubernetes Getting Started]({{BASE_URL}}/reference/kubernetes/kubernetes-getting-started.html.md): Quick start guide
+- [Multi-Kubernetes]({{BASE_URL}}/reference/kubernetes/multi-kubernetes.html.md): Deploy across multiple clusters
+- [Using Existing Machines]({{BASE_URL}}/reservations/existing-machines.html.md): Connect your own machines
+- [Reserved Instances]({{BASE_URL}}/reservations/reservations.html.md): Use cloud reserved instances
+- [Using Cloud VMs]({{BASE_URL}}/compute/cloud-vm.html.md): Launch cloud virtual machines
+- [GPU Support]({{BASE_URL}}/compute/gpus.html.md): GPU availability and pricing
+
+## Data
+
+- [Storage Overview]({{BASE_URL}}/reference/storage.html.md): Manage cloud storage and volumes
+- [Volumes]({{BASE_URL}}/reference/volumes.html.md): Attach persistent volumes
+- [Syncing Code]({{BASE_URL}}/examples/syncing-code-artifacts.html.md): Sync code and artifacts efficiently
+
+## User Guides
+
+- [Async API]({{BASE_URL}}/reference/async.html.md): Asynchronous operations
+- [Environment Variables]({{BASE_URL}}/running-jobs/environment-variables.html.md): Configure environments
+- [Docker Containers]({{BASE_URL}}/examples/docker-containers.html.md): Use custom Docker images
+- [Ports]({{BASE_URL}}/examples/ports.html.md): Expose and access ports
+- [Logging]({{BASE_URL}}/reference/logging.html.md): Logging configuration
+- [FAQ]({{BASE_URL}}/reference/faq.html.md): Frequently asked questions
+
+## Administrator Guides
+
+- [API Server Deployment]({{BASE_URL}}/reference/api-server/api-server.html.md): Deploy SkyPilot for teams
+- [Admin Deployment Guide]({{BASE_URL}}/reference/api-server/api-server-admin-deploy.html.md): Production deployment
+- [Authentication]({{BASE_URL}}/reference/auth.html.md): User authentication and authorization
+- [Workspaces]({{BASE_URL}}/admin/workspaces.html.md): Manage team workspaces
+- [Cloud Permissions]({{BASE_URL}}/cloud-setup/cloud-permissions/index.html.md): Required IAM permissions
+- [Admin Policies]({{BASE_URL}}/cloud-setup/policy.html.md): Configure cloud policies
+- [External Logging Storage]({{BASE_URL}}/cloud-setup/external-logging.html.md): Configure logging storage
+
+## References
+
+- [Task YAML]({{BASE_URL}}/reference/yaml-spec.html.md): Complete YAML specification
+- [CLI]({{BASE_URL}}/reference/cli.html.md): All CLI commands and options
+- [Python API]({{BASE_URL}}/reference/api.html.md): Complete Python API documentation
+- [Config]({{BASE_URL}}/reference/config.html.md): Configuration options
+- [SkyPilot State]({{BASE_URL}}/reference/architecture/state.html.md): System architecture
+- [Developer Guide]({{BASE_URL}}/developers/index.html.md): Contribute to SkyPilot
+
+## Serving Examples
+
+- [vLLM]({{BASE_URL}}/examples/serving/vllm.html.md): Serve LLMs with vLLM
+- [TGI]({{BASE_URL}}/examples/serving/tgi.html.md): Text Generation Inference
+- [SGLang]({{BASE_URL}}/examples/serving/sglang.html.md): SGLang serving
+- [Ollama]({{BASE_URL}}/examples/serving/ollama.html.md): Ollama integration
+- [LoRAX]({{BASE_URL}}/examples/serving/lorax.html.md): LoRA serving
+- [Cog]({{BASE_URL}}/examples/serving/cog.html.md): Cog containers
+
+## LLM Examples
+
+- [Llama 4]({{BASE_URL}}/examples/models/llama-4.html.md): Deploy and serve Llama 4 models
+- [Llama 3.2]({{BASE_URL}}/examples/models/llama-3_2.html.md): Run Llama 3.2 multimodal models
+- [Llama 3.1]({{BASE_URL}}/examples/models/llama-3_1.html.md): Deploy Llama 3.1 405B and smaller
+- [Llama 3]({{BASE_URL}}/examples/models/llama-3.html.md): Serve Llama 3 models
+- [Llama 2]({{BASE_URL}}/examples/models/llama-2.html.md): Run Llama 2 models
+- [DeepSeek R1]({{BASE_URL}}/examples/models/deepseek-r1.html.md): Deploy DeepSeek R1 reasoning models
+- [DeepSeek R1 Distilled]({{BASE_URL}}/examples/models/deepseek-r1-distilled.html.md): Run distilled R1 models
+- [DeepSeek Janus]({{BASE_URL}}/examples/models/deepseek-janus.html.md): Multimodal DeepSeek models
+- [Mixtral]({{BASE_URL}}/examples/models/mixtral.html.md): Serve Mixtral MoE models
+- [Pixtral]({{BASE_URL}}/examples/models/pixtral.html.md): Deploy Pixtral vision models
+- [Qwen]({{BASE_URL}}/examples/models/qwen.html.md): Run Qwen/Qwen2 models
+- [Kimi K2]({{BASE_URL}}/examples/models/kimi-k2.html.md): Deploy Kimi K2 models
+- [Yi]({{BASE_URL}}/examples/models/yi.html.md): Serve Yi models
+- [Gemma]({{BASE_URL}}/examples/models/gemma.html.md): Run Google Gemma models
+- [GPT-OSS]({{BASE_URL}}/examples/models/gpt-oss.html.md): Deploy OpenAI GPT-OSS models
+- [CodeLlama]({{BASE_URL}}/examples/models/codellama.html.md): Code generation with CodeLlama
+- [Vicuna]({{BASE_URL}}/examples/models/vicuna.html.md): Serve Vicuna models
+- [DBRX]({{BASE_URL}}/examples/models/dbrx.html.md): Deploy Databricks DBRX
+
+## Fine-tuning
+
+- [Llama 4 Fine-tuning]({{BASE_URL}}/examples/training/llama-4-finetuning.html.md): Fine-tune Llama 4 models
+- [Llama 3.1 Fine-tuning]({{BASE_URL}}/examples/training/llama-3_1-finetuning.html.md): LoRA and full fine-tuning
+- [Llama 2 Fine-tuning]({{BASE_URL}}/examples/training/llama-2-finetuning.html.md): Fine-tune Llama 2
+- [GPT-OSS Fine-tuning]({{BASE_URL}}/examples/training/gpt-oss-finetuning.html.md): Fine-tune GPT-OSS models
+- [Axolotl]({{BASE_URL}}/examples/training/axolotl.html.md): Use Axolotl for fine-tuning
+- [Unsloth]({{BASE_URL}}/examples/training/unsloth.html.md): Fast fine-tuning with Unsloth
+- [DeepSpeed]({{BASE_URL}}/examples/training/deepspeed.html.md): Distributed training with DeepSpeed
+- [VeRL]({{BASE_URL}}/examples/training/verl.html.md): RL training for LLMs with VeRL
+
+## Training Frameworks
+
+- [PyTorch Distributed]({{BASE_URL}}/examples/training/distributed-pytorch.html.md): Multi-node PyTorch training
+- [TensorFlow Distributed]({{BASE_URL}}/examples/training/distributed-tensorflow.html.md): Distributed TensorFlow
+- [Ray Train]({{BASE_URL}}/examples/training/ray.html.md): Distributed training with Ray
+- [NeMo]({{BASE_URL}}/examples/training/nemo.html.md): NVIDIA NeMo framework
+- [TPU Training]({{BASE_URL}}/examples/training/tpu.html.md): Train on Google Cloud TPUs
+- [GPT-2 Training]({{BASE_URL}}/examples/models/gpt-2.html.md): Train GPT-2 from scratch
+
+## Performance & Optimization
+
+- [AWS EFA]({{BASE_URL}}/examples/performance/aws_efa.html.md): High-performance networking on AWS
+- [GCP GPU Direct TCPx]({{BASE_URL}}/examples/performance/gcp_gpu_direct_tcpx.html.md): GPU Direct on GCP
+- [Nebius InfiniBand]({{BASE_URL}}/examples/performance/nebius_infiniband.html.md): InfiniBand on Nebius
+
+## Applications
+
+- [RAG Systems]({{BASE_URL}}/examples/applications/rag.html.md): Build retrieval-augmented generation
+- [Batch Inference]({{BASE_URL}}/examples/applications/batch_inference.html.md): Run batch inference jobs
+- [LocalGPT]({{BASE_URL}}/examples/applications/localgpt.html.md): Deploy LocalGPT
+- [Stable Diffusion]({{BASE_URL}}/examples/applications/stable_diffusion.html.md): Image generation
+- [Tabby]({{BASE_URL}}/examples/applications/tabby.html.md): Code completion service
+- [Vector Databases]({{BASE_URL}}/examples/applications/vector_database.html.md): Deploy vector DBs
+
+## Orchestration
+
+- [Airflow Integration]({{BASE_URL}}/examples/orchestrators/airflow.html.md): Use with Apache Airflow
+- [GitHub Actions]({{BASE_URL}}/examples/orchestrators/github_actions.html.md): CI/CD integration
+- [Cron Jobs]({{BASE_URL}}/examples/orchestrators/cron.html.md): Schedule recurring jobs
+- [Jupyter Notebooks]({{BASE_URL}}/examples/frameworks/jupyter.html.md): Run Jupyter on clusters
+- [DVC Integration]({{BASE_URL}}/examples/frameworks/dvc.html.md): Data version control
+- [MPI]({{BASE_URL}}/examples/frameworks/mpi.html.md): Run MPI applications
+
+## Cloud Providers
+
+- [AWS Setup]({{BASE_URL}}/cloud-setup/cloud-permissions/aws.html.md): Amazon Web Services configuration
+- [GCP Setup]({{BASE_URL}}/cloud-setup/cloud-permissions/gcp.html.md): Google Cloud Platform setup
+- [Kubernetes Setup]({{BASE_URL}}/cloud-setup/cloud-permissions/kubernetes.html.md): Kubernetes cluster configuration
+- [Nebius Setup]({{BASE_URL}}/cloud-setup/cloud-permissions/nebius.html.md): Nebius cloud configuration
+- [vSphere Setup]({{BASE_URL}}/cloud-setup/cloud-permissions/vsphere.html.md): VMware vSphere configuration
+
+## Advanced Topics
+
+- [Comparison]({{BASE_URL}}/reference/comparison.html.md): Compare with other tools
+- [Troubleshooting]({{BASE_URL}}/reference/kubernetes/kubernetes-troubleshooting.html.md): Common issues and solutions
+- [TPU Support]({{BASE_URL}}/reference/tpu.html.md): Using TPUs
+- [Quota Management]({{BASE_URL}}/cloud-setup/quota.html.md): Manage cloud quotas
+
+## Community & Resources
+
+- [Release Notes](https://github.com/skypilot-org/skypilot/releases): Version history
+- [Contributing](https://github.com/skypilot-org/skypilot/blob/master/CONTRIBUTING.md): Contribution guidelines
+- [Community Slack](https://slack.skypilot.co/): Join the community
+- [Blog](https://blog.skypilot.co/): News, tutorials, and announcements
+- [Community](https://blog.skypilot.co/community/): Community highlights
+- [Case Studies](https://blog.skypilot.co/case-studies/): Real-world usage
+- [GitHub Repository](https://github.com/skypilot-org/skypilot): Source code and issues

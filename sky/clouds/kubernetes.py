@@ -1,4 +1,5 @@
 """Kubernetes."""
+import concurrent.futures
 import os
 import re
 import subprocess
@@ -25,6 +26,7 @@ from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -47,9 +49,6 @@ _FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
-    SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
-    SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
-
     # Limit the length of the cluster name to avoid exceeding the limit of 63
     # characters for Kubernetes resources. We limit to 42 characters (63-21) to
     # allow additional characters for creating ingress services to expose ports.
@@ -57,9 +56,12 @@ class Kubernetes(clouds.Cloud):
     # where the suffix is 21 characters long.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
 
+    _MAX_VOLUME_NAME_LEN_LIMIT = 253
+
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
     _DEFAULT_NUM_VCPUS = 2
+    _DEFAULT_NUM_VCPUS_WITH_GPU = 4
     _DEFAULT_MEMORY_CPU_RATIO = 1
     _DEFAULT_MEMORY_CPU_RATIO_WITH_GPU = 4  # Allocate more memory for GPU tasks
     _REPR = 'Kubernetes'
@@ -95,44 +97,52 @@ class Kubernetes(clouds.Cloud):
     # Set of contexts that has logged as temporarily unreachable
     logged_unreachable_contexts: Set[str] = set()
 
-    @property
-    def ssh_key_secret_field_name(self):
-        # Use a fresh user hash to avoid conflicts in the secret object naming.
-        # This can happen when the controller is reusing the same user hash
-        # through USER_ID_ENV_VAR but has a different SSH key.
-        fresh_user_hash = common_utils.generate_user_hash()
-        return f'ssh-publickey-{fresh_user_hash}'
-
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         # TODO(aylei): features need to be regional (per context) to make
         # multi-kubernetes selection/failover work.
         unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
-        context = resources.region
+        context = region if region is not None else resources.region
         if context is None:
-            context = kubernetes_utils.get_current_kube_config_context_name()
+            contexts = cls.existing_allowed_contexts()
+        else:
+            contexts = [context]
         unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
             'Stopping clusters is not supported on Kubernetes.')
         unsupported_features[clouds.CloudImplementationFeatures.AUTOSTOP] = (
             'Auto-stop is not supported on Kubernetes.')
-        # Allow spot instances if supported by the cluster
-        try:
-            spot_label_key, _ = kubernetes_utils.get_spot_label(context)
-            if spot_label_key is not None:
-                unsupported_features.pop(
-                    clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
-            # Allow custom network tier if supported by the cluster
-            # (e.g., Nebius clusters with high performance networking)
-            network_type, _ = cls._detect_network_type(context,
-                                                       resources.network_tier)
-            if network_type.supports_high_performance_networking():
-                unsupported_features.pop(
-                    clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
-                    None)
-        except exceptions.KubeAPIUnreachableError as e:
-            cls._log_unreachable_context(context, str(e))
+        for context in contexts:
+            # Allow spot instances if supported by the cluster
+            try:
+                # Run spot label check and network type detection concurrently
+                # as they are independent operations
+                with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=2) as executor:
+                    spot_future = executor.submit(
+                        kubernetes_utils.get_spot_label, context)
+                    network_future = executor.submit(cls._detect_network_type,
+                                                     context,
+                                                     resources.network_tier)
+
+                    spot_label_key, _ = spot_future.result()
+                    if spot_label_key is not None:
+                        unsupported_features.pop(
+                            clouds.CloudImplementationFeatures.SPOT_INSTANCE,
+                            None)
+
+                    # Allow custom network tier if supported by the cluster
+                    # (e.g., Nebius clusters with high performance networking)
+                    network_type, _ = network_future.result()
+                    if network_type.supports_high_performance_networking():
+                        unsupported_features.pop(
+                            clouds.CloudImplementationFeatures.
+                            CUSTOM_NETWORK_TIER, None)
+            except exceptions.KubeAPIUnreachableError as e:
+                cls._log_unreachable_context(context, str(e))
         return unsupported_features
 
     @classmethod
@@ -184,6 +194,12 @@ class Kubernetes(clouds.Cloud):
         all_contexts = [
             ctx for ctx in all_contexts if not ctx.startswith('ssh-')
         ]
+
+        allow_all_contexts = allowed_contexts == 'all' or (
+            allowed_contexts is None and
+            env_options.Options.ALLOW_ALL_KUBERNETES_CONTEXTS.get())
+        if allow_all_contexts:
+            allowed_contexts = all_contexts
 
         if allowed_contexts is None:
             # Try kubeconfig if present
@@ -242,10 +258,15 @@ class Kubernetes(clouds.Cloud):
                 'refresh Kubernetes availability if permanent.')
 
     @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: Optional[str],
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
         del accelerators, zone, use_spot  # unused
         existing_contexts = cls.existing_allowed_contexts()
 
@@ -255,6 +276,19 @@ class Kubernetes(clouds.Cloud):
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
+        if resources is not None:
+            filtered_regions = []
+            resources_required_features = resources.get_required_cloud_features(
+            )
+            for r in regions:
+                try:
+                    cls.check_features_are_supported(
+                        resources, resources_required_features, r.name)
+                    filtered_regions.append(r)
+                except exceptions.NotSupportedError as e:
+                    logger.info(f'Filter out context: {r.name}, reason: {e}')
+                    continue
+            regions = filtered_regions
 
         # Check if requested instance type will fit in the cluster.
         # TODO(zhwu,romilb): autoscaler type needs to be regional (per
@@ -514,9 +548,6 @@ class Kubernetes(clouds.Cloud):
             return image_id
 
         image_id = _get_image_id(resources)
-        # TODO(romilb): Create a lightweight image for SSH jump host
-        ssh_jump_image = catalog.get_image_id_from_tag(self.IMAGE_CPU,
-                                                       clouds='kubernetes')
 
         # Set environment variables for the pod. Note that SkyPilot env vars
         # are set separately when the task is run. These env vars are
@@ -564,6 +595,7 @@ class Kubernetes(clouds.Cloud):
         port_mode = network_utils.get_port_mode(None, context)
 
         remote_identity = skypilot_config.get_effective_region_config(
+            # TODO(kyuds): Support SSH node pools as well.
             cloud='kubernetes',
             region=context,
             keys=('remote_identity',),
@@ -638,6 +670,7 @@ class Kubernetes(clouds.Cloud):
 
         k8s_kueue_local_queue_name = (
             skypilot_config.get_effective_region_config(
+                # TODO(kyuds): Support SSH node pools as well.
                 cloud='kubernetes',
                 region=context,
                 keys=('kueue', 'local_queue_name'),
@@ -652,6 +685,7 @@ class Kubernetes(clouds.Cloud):
         if enable_flex_start_queued_provisioning or enable_flex_start:
             # DWS is only supported in GKE, check the autoscaler type.
             autoscaler_type = skypilot_config.get_effective_region_config(
+                # TODO(kyuds): Support SSH node pools as well.
                 cloud='kubernetes',
                 region=context,
                 keys=('autoscaler',),
@@ -675,8 +709,12 @@ class Kubernetes(clouds.Cloud):
         timeout = self._calculate_provision_timeout(
             num_nodes, volume_mounts, enable_flex_start or
             enable_flex_start_queued_provisioning)
+
+        # Use _REPR, instead of directly using 'kubernetes' as the config key,
+        # because it could be SSH node pool as well.
+        cloud_config_str = self._REPR.lower()
         timeout = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
+            cloud=cloud_config_str,
             region=context,
             keys=('provision_timeout',),
             default_value=timeout,
@@ -690,13 +728,8 @@ class Kubernetes(clouds.Cloud):
             'accelerator_count': str(acc_count),
             'timeout': str(timeout),
             'k8s_port_mode': port_mode.value,
-            'k8s_networking_mode': network_utils.get_networking_mode(
-                None, context=context).value,
-            'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_values': k8s_acc_label_values,
-            'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
-            'k8s_ssh_jump_image': ssh_jump_image,
             'k8s_service_account_name': k8s_service_account_name,
             'k8s_automount_sa_token': 'true',
             'k8s_fuse_device_required': fuse_device_required,
@@ -733,6 +766,8 @@ class Kubernetes(clouds.Cloud):
             'ha_recovery_log_path':
                 constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format(''),
             'sky_python_cmd': constants.SKY_PYTHON_CMD,
+            'sky_unset_pythonpath_and_set_cwd':
+                constants.SKY_UNSET_PYTHONPATH_AND_SET_CWD,
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),
             'avoid_label_keys': avoid_label_keys,
@@ -794,7 +829,8 @@ class Kubernetes(clouds.Cloud):
                 accelerators=resources.accelerators,
                 use_spot=resources.use_spot,
                 region=resources.region,
-                zone=resources.zone)
+                zone=resources.zone,
+                resources=resources)
             if not regions:
                 return resources_utils.FeasibleResources([], [], None)
             resources = resources.copy(accelerators=None)
@@ -839,6 +875,8 @@ class Kubernetes(clouds.Cloud):
                                  from_instance_type(default_instance_type))
 
             gpu_task_cpus = k8s_instance_type.cpus
+            if resources.cpus is None:
+                gpu_task_cpus = self._DEFAULT_NUM_VCPUS_WITH_GPU * acc_count
             # Special handling to bump up memory multiplier for GPU instances
             gpu_task_memory = (float(resources.memory.strip('+')) if
                                resources.memory is not None else gpu_task_cpus *
@@ -852,7 +890,8 @@ class Kubernetes(clouds.Cloud):
             accelerators=None,
             use_spot=resources.use_spot,
             region=resources.region,
-            zone=resources.zone)
+            zone=resources.zone,
+            resources=resources)
         if not available_regions:
             return resources_utils.FeasibleResources([], [], None)
         # No fuzzy lists for Kubernetes
@@ -1003,7 +1042,7 @@ class Kubernetes(clouds.Cloud):
 
         all_contexts = kubernetes_utils.get_all_kube_context_names()
 
-        if region not in all_contexts:
+        if region and region not in all_contexts:
             raise ValueError(
                 f'Context {region} not found in kubeconfig. Kubernetes only '
                 'supports context names as regions. Available '
@@ -1040,6 +1079,31 @@ class Kubernetes(clouds.Cloud):
             identity = [cls.get_identity_from_context(context)]
             identities.append(identity)
         return identities
+
+    @classmethod
+    def is_volume_name_valid(cls,
+                             volume_name: str) -> Tuple[bool, Optional[str]]:
+        """Validates that the volume name is valid for this cloud.
+
+        Follows Kubernetes DNS-1123 subdomain rules:
+        - must be <= 253 characters
+        - must match: '[a-z0-9]([-a-z0-9]*[a-z0-9])?(.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*' # pylint: disable=line-too-long
+        """
+        # Max length per DNS-1123 subdomain
+        if len(volume_name) > cls._MAX_VOLUME_NAME_LEN_LIMIT:
+            return (False, f'Volume name exceeds the maximum length of '
+                    f'{cls._MAX_VOLUME_NAME_LEN_LIMIT} characters '
+                    '(DNS-1123 subdomain).')
+
+        # DNS-1123 label: [a-z0-9]([-a-z0-9]*[a-z0-9])?
+        label = r'[a-z0-9]([-a-z0-9]*[a-z0-9])?'
+        # DNS-1123 subdomain: label(\.-separated label)*
+        subdomain_pattern = rf'^{label}(\.{label})*$'
+        if re.fullmatch(subdomain_pattern, volume_name) is None:
+            return (False, 'Volume name must be a valid DNS-1123 subdomain: '
+                    'lowercase alphanumeric, "-", and "."; start/end with '
+                    'alphanumeric.')
+        return True, None
 
     @classmethod
     def is_label_valid(cls, label_key: str,

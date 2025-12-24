@@ -425,7 +425,7 @@ def test_invalid_image(enable_all_clouds):
 
     with pytest.raises(ValueError) as e:
         _test_resources(cloud=sky.Lambda(), image_id='some-image')
-    assert 'only supported for AWS/GCP/Azure/IBM/OCI/Kubernetes' in str(e.value)
+    assert 'Lambda cloud only supports Docker images' in str(e.value)
 
 
 def test_valid_image(enable_all_clouds):
@@ -613,7 +613,7 @@ def test_infer_cloud_from_region_or_zone(enable_all_clouds):
     # Typo, fuzzy hint.
     with pytest.raises(ValueError) as e:
         _test_resources_launch(zone='us-west-2-a', cloud=sky.AWS())
-    assert ('Did you mean one of these: \'us-west-2a\'?' in str(e))
+    assert ('Did you mean one of these: \'us-west-2a\'?' in str(e.value))
 
     # Detailed hints.
     # ValueError: Invalid (region None, zone 'us-west-2-a') for any cloud among
@@ -630,22 +630,24 @@ def test_infer_cloud_from_region_or_zone(enable_all_clouds):
     with pytest.raises(ValueError) as e:
         _test_resources_launch(zone='us-west-2-a')
     assert ('Invalid (region None, zone \'us-west-2-a\') for any cloud among'
-            in str(e))
+            in str(e.value))
 
     with pytest.raises(ValueError) as e:
         _test_resources_launch(zone='us-west-2z')
     assert ('Invalid (region None, zone \'us-west-2z\') for any cloud among'
-            in str(e))
+            in str(e.value))
 
     with pytest.raises(ValueError) as e:
         _test_resources_launch(region='us-east1', zone='us-west2-a')
     assert (
         'Invalid (region \'us-east1\', zone \'us-west2-a\') for any cloud among'
-        in str(e))
+        in str(e.value))
 
 
 def test_ordered_resources(enable_all_clouds):
     captured_output = io.StringIO()
+    # Add fileno() method to avoid issues with executor trying to duplicate fds
+    captured_output.fileno = lambda: 1
     original_stdout = sys.stdout
     try:
         sys.stdout = captured_output  # Redirect stdout to the StringIO object
@@ -694,11 +696,17 @@ def test_optimize_disk_tier(enable_all_clouds):
             task, blocked_resources=None)
         return set(per_cloud_candidates.keys())
 
+    all_clouds = set(registry.CLOUD_REGISTRY.values())
+    all_clouds_without_slurm = set()
+    for cloud in all_clouds:
+        if not isinstance(cloud, clouds.Slurm):
+            all_clouds_without_slurm.add(cloud)
+
     # All cloud supports BEST disk tier.
     best_tier_resources = sky.Resources(disk_tier=resources_utils.DiskTier.BEST)
     best_tier_candidates = _get_all_candidate_cloud(best_tier_resources)
-    assert best_tier_candidates == set(
-        registry.CLOUD_REGISTRY.values()), best_tier_candidates
+    assert (
+        best_tier_candidates == all_clouds_without_slurm), best_tier_candidates
 
     # Only AWS, GCP, Azure, OCI supports LOW disk tier.
     low_tier_resources = sky.Resources(disk_tier=resources_utils.DiskTier.LOW)

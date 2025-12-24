@@ -30,6 +30,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`service_account_token <config-yaml-api-server-service-account-token>`: sky_xxx
     :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
     :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 24
+    :ref:`cluster_debug_event_retention_hours <config-yaml-api-server-cluster-debug-event-retention-hours>`: 720
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
@@ -47,6 +48,8 @@ Below is the configuration syntax and some example values. See detailed explanat
       :ref:`autostop <config-yaml-jobs-controller-autostop>`:
         idle_minutes: 10
         down: false  # use with caution!
+      :ref:`controller_logs_gc_retention_hours <config-yaml-jobs-controller-controller-logs-gc-retention-hours>`: 24 * 7
+      :ref:`task_logs_gc_retention_hours <config-yaml-jobs-controller-task-logs-gc-retention-hours>`: 24 * 7
 
   :ref:`docker <config-yaml-docker>`:
     :ref:`run_options <config-yaml-docker-run-options>`:
@@ -85,6 +88,8 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`dws <config-yaml-kubernetes-dws>`:
       enabled: true
       max_run_duration: 10m
+    :ref:`post_provision_runcmd <config-yaml-kubernetes-post-provision-runcmd>`:
+      - echo "hello world!"
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
         pod_config:
@@ -95,6 +100,19 @@ Below is the configuration syntax and some example values. See detailed explanat
         remote_identity: my-k8s-service-account
 
   :ref:`ssh <config-yaml-ssh>`:
+    # See :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>` for more details.
+    pod_config: ...
+    # See :ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>` for more details.
+    provision_timeout: ...
+    # Specifying above fields but for a specific context.
+    context_configs:
+      node-pool-1:
+        pod_config:
+          metadata:
+            labels:
+              my-label: my-value
+      node-pool-2:
+        provision_timeout: 3600
     :ref:`allowed_node_pools <config-yaml-ssh-allowed-node-pools>`:
       - node-pool-1
       - node-pool-2
@@ -115,6 +133,8 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`remote_identity <config-yaml-aws-remote-identity>`: LOCAL_CREDENTIALS
     :ref:`post_provision_runcmd <config-yaml-aws-post-provision-runcmd>`:
       - echo "hello world!"
+    :ref:`capabilities <config-yaml-aws-capabilities>`:
+      - storage
 
   :ref:`gcp <config-yaml-gcp>`:
     :ref:`labels <config-yaml-gcp-labels>`:
@@ -134,6 +154,8 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`enable_gvnic <config-yaml-gcp-enable-gvnic>`: false
     :ref:`enable_gpu_direct <config-yaml-gcp-enable-gpu-direct>`: false
     :ref:`placement_policy <config-yaml-gcp-placement-policy>`: compact
+    :ref:`capabilities <config-yaml-gcp-capabilities>`:
+      - storage
 
   :ref:`azure <config-yaml-azure>`:
     :ref:`resource_group_vm <config-yaml-azure-resource-group-vm>`: user-resource-group-name
@@ -165,8 +187,14 @@ Below is the configuration syntax and some example values. See detailed explanat
       :ref:`eu-west1 <config-yaml-nebius>`:
         project_id: project-e01xxxxxxxxxxx
         fabric: fabric-5
-      :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
-      :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+    :ref:`use_internal_ips <config-yaml-nebius-use-internal-ips>`: true
+    :ref:`use_static_ip_address <config-yaml-nebius-use-static-ip-address>`: true
+    :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
+    :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
+    :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
+
+  :ref:`vast <config-yaml-vast>`:
+    :ref:`secure_only <config-yaml-vast-secure-only>`: true
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
@@ -252,7 +280,25 @@ Example:
 .. code-block:: yaml
 
   api_server:
-    cluster_event_retention_hours: -1 # Disable cluster event GC
+    cluster_event_retention_hours: -1 # Disable all cluster event GC
+
+.. _config-yaml-api-server-cluster-debug-event-retention-hours:
+
+``api_server.cluster_debug_event_retention_hours``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retention period for cluster events in hours (optional). Set to a negative value to disable cluster event GC.
+
+Cluster event GC will remove debug cluster event entries in `sky status -v`, i.e., the logs and status of the cluster events.
+
+Default: ``720.0`` (30 days).
+
+Example:
+
+.. code-block:: yaml
+
+  api_server:
+    cluster_debug_event_retention_hours: -1 # Disable all cluster event GC
 
 .. _config-yaml-jobs:
 
@@ -307,6 +353,24 @@ Example:
     force_disable_cloud_bucket: true
 
 .. _config-yaml-jobs-controller:
+.. _config-yaml-jobs-controller-consolidation-mode:
+
+``jobs.controller.consolidation_mode``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable :ref:`consolidation mode <jobs-consolidation-mode>`, which will run the jobs controller within the remote API server, rather than in a separate sky cluster. Don't enable unless you are using a remotely-deployed API server.
+
+Default: ``false``.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      consolidation_mode: true
+      # any specified resources will be ignored
+
 .. _config-yaml-jobs-controller-resources:
 
 ``jobs.controller.resources``
@@ -359,6 +423,66 @@ Example:
         # Default values:
         idle_minutes: 10  # Set time to idle autostop/autodown.
         down: false  # Terminate instead of stopping. Caution: setting this to true will cause logs to be lost and could lead to resource leaks if SkyPilot crashes.
+
+
+.. _config-yaml-jobs-controller-controller-logs-gc-retention-hours:
+
+``jobs.controller.controller_logs_gc_retention_hours``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retention period for controller logs in hours (optional). Set to a negative
+value to disable controller logs garbage collection.
+
+Controller logs GC will automatically delete old controller logs from the
+job controller to reclaim disk space.
+
+Default: ``168`` (7 days).
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      # Keep controller logs for 24 hours (1 day)
+      controller_logs_gc_retention_hours: 24
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      # Disable controller logs GC (keep all logs indefinitely)
+      controller_logs_gc_retention_hours: -1
+
+
+.. _config-yaml-jobs-controller-task-logs-gc-retention-hours:
+
+``jobs.controller.task_logs_gc_retention_hours``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Retention period for task logs in hours (optional). Set to a negative value
+to disable task logs garbage collection.
+
+Task logs GC will automatically delete old task logs from the job controller
+to reclaim disk space.
+
+Default: ``168`` (7 days).
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      # Keep task logs for 48 hours (2 days)
+      task_logs_gc_retention_hours: 48
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      # Disable task logs GC (keep all logs indefinitely)
+      task_logs_gc_retention_hours: -1
 
 
 .. _config-yaml-allowed-clouds:
@@ -789,6 +913,23 @@ Example:
       - echo "hello world!"
       - [ls, -l, /]
 
+.. _config-yaml-aws-capabilities:
+
+``aws.capabilities``
+~~~~~~~~~~~~~~~~~~~~
+
+Capabilities to enable for AWS. Used to enable specific features of AWS
+(e.g. only use AWS for S3 but not for launching VMs)
+
+Default: ``['compute', 'storage']``.
+
+Example:
+
+.. code-block:: yaml
+
+  aws:
+    capabilities:
+      - storage
 
 .. _config-yaml-gcp:
 
@@ -1036,6 +1177,26 @@ When `gcp.enable_gpu_direct` is enabled, the placement policy is automatically s
 
 Refer to the `GCP documentation <https://cloud.google.com/compute/docs/instances/placement-policies-overview>`_ for more information on placement policies.
 
+.. _config-yaml-gcp-capabilities:
+
+``gcp.capabilities``
+~~~~~~~~~~~~~~~~~~~~
+
+Capabilities to enable for the GCP.
+
+Used to enable specific features of GCP
+(e.g. only use GCP for GCS but not for launching VMs)
+
+Default: ``['compute', 'storage']``.
+
+Example:
+
+.. code-block:: yaml
+
+  gcp:
+    capabilities:
+      - storage
+
 .. _config-yaml-azure:
 
 ``azure``
@@ -1110,6 +1271,17 @@ List of allowed Kubernetes contexts (optional).
 
 List of context names that SkyPilot is allowed to use.
 
+If you want all available contexts to be allowed, set it to 'all' like this:
+
+.. code-block:: yaml
+
+  kubernetes:
+    allowed_contexts: all
+
+
+You can also set ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS`` environment variable to ``"true"``
+for the same effect. Configuration option overrides the environment variable if set.
+
 .. _config-yaml-kubernetes-custom-metadata:
 
 ``kubernetes.custom_metadata``
@@ -1126,7 +1298,7 @@ Custom labels and annotations to apply to all Kubernetes resources.
 
 Timeout for resource provisioning (optional).
 
-Timeout in minutes for resource provisioning.
+Timeout in seconds for resource provisioning.
 
 Default: ``10``.
 
@@ -1143,6 +1315,7 @@ Can be one of:
 
 - ``gke``: Google Kubernetes Engine
 - ``karpenter``: Karpenter
+- ``coreweave``: `CoreWeave autoscaler <https://docs.coreweave.com/docs/products/cks/nodes/autoscaling>`_
 - ``generic``: Generic autoscaler, assumes nodes are labelled with ``skypilot.co/accelerator``.
 
 .. _config-yaml-kubernetes-pod-config:
@@ -1198,6 +1371,17 @@ Example:
                 medium: Memory
                 sizeLimit: 3Gi
 
+By default, SkyPilot automatically creates a single container named ``ray-node`` in the Pod. While you typically don't need to explicitly set the container name, if you do specify ``pod_config.spec.containers[0].name``, it must be set to ``ray-node``:
+
+.. code-block:: yaml
+
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+          - name: ray-node
+            ...
+
 .. _config-yaml-kubernetes-kueue:
 
 ``kubernetes.kueue``
@@ -1245,6 +1429,28 @@ Example:
     dws:
       enabled: true
       max_run_duration: 10m
+
+.. _config-yaml-kubernetes-post-provision-runcmd:
+
+``kubernetes.post_provision_runcmd``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Run commands during the instance initialization phase (optional).
+
+This is executed before any of the SkyPilot runtime setup commands, which is useful for doing any setup that must happen right after the instance starts, such as:
+
+- Configuring system settings
+- Installing certificates
+
+Each item is a string.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    post_provision_runcmd:
+      - echo "hello world!"
 
 .. _config-yaml-kubernetes-context-configs:
 
@@ -1364,6 +1570,7 @@ Example:
 
     nebius:
         use_internal_ips: true
+        use_static_ip_address: true
         ssh_proxy_command:
           eu-north1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
           eu-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no nebiususer@<jump server public ip>
@@ -1400,6 +1607,17 @@ Set to ``true`` to use private IPs to communicate between the local client and
 any SkyPilot nodes. This requires the networking stack be properly set up.
 
 This flag is typically set together with ``ssh_proxy_command`` below.
+
+Default: ``false``.
+
+.. _config-yaml-nebius-use-static-ip-address:
+
+``nebius.use_static_ip_address``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Should instances be assigned static IPs? (optional).
+
+Set to ``true`` to use static IPs.
 
 Default: ``false``.
 
@@ -1446,6 +1664,38 @@ Example:
   nebius:
     tenant_id: tenant-1234567890
 
+.. _config-yaml-nebius-domain:
+
+``nebius.domain``
+~~~~~~~~~~~~~~~~~~~~
+
+Nebius API domain (optional).
+
+Example:
+
+.. code-block:: yaml
+
+  nebius:
+    domain: api.nebius.cloud:443
+
+.. _config-yaml-vast:
+
+``vast``
+~~~~~~~~
+
+Advanced Vast configuration (optional).
+
+.. _config-yaml-vast-secure-only:
+
+``vast.secure_only``
+~~~~~~~~~~~~~~~~~~~~
+
+Configure SkyPilot to only consider offers on Vast verified datacenters (optional).
+Internally, this will query Vast with the ``datacenters=true`` parameters. Note
+some GPUs may only be available on non-secure offers. This config can be
+overridden per task via :ref:`config flag <config-client-cli-flag>`.
+
+Default: ``false``
 
 .. _config-yaml-rbac:
 

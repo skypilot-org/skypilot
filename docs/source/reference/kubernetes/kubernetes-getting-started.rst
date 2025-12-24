@@ -193,8 +193,8 @@ Using custom images
 -------------------
 By default, we maintain and use two SkyPilot container images for use on Kubernetes clusters:
 
-1. ``us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot``: used for CPU-only clusters (`Dockerfile <https://github.com/skypilot-org/skypilot/blob/master/Dockerfile_k8s>`__).
-2. ``us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot-gpu``: used for GPU clusters (`Dockerfile <https://github.com/skypilot-org/skypilot/blob/master/Dockerfile_k8s_gpu>`__).
+1. ``us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot``: used for CPU-only clusters (`Dockerfile <https://github.com/skypilot-org/skypilot/blob/master/Dockerfile_k8s>`__).
+2. ``us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot-gpu``: used for GPU clusters (`Dockerfile <https://github.com/skypilot-org/skypilot/blob/master/Dockerfile_k8s_gpu>`__).
 
 These images are pre-installed with SkyPilot dependencies for fast startup.
 
@@ -219,7 +219,7 @@ Your image must satisfy the following requirements:
 
 Using images from private repositories
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Google Container Registry), create a `secret <https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line>`_ in your Kubernetes cluster and edit your :code:`~/.sky/config.yaml` to specify the secret like so:
+To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Google Artifact Registry), create a `secret <https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line>`_ in your Kubernetes cluster and edit your :code:`~/.sky/config.yaml` to specify the secret like so:
 
 .. code-block:: yaml
 
@@ -229,9 +229,73 @@ To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Go
           imagePullSecrets:
             - name: your-secret-here
 
-.. tip::
 
-    If you use Amazon ECR, your secret credentials may expire every 12 hours. Consider using `k8s-ecr-login-renew <https://github.com/nabsul/k8s-ecr-login-renew>`_ to automatically refresh your secrets.
+.. dropdown:: Creating private registry secrets (Docker Hub, AWS ECR, GCP, NVIDIA NGC)
+
+    To create these private registry secrets on Kubernetes cluster, run the following commands:
+
+    .. tab-set::
+
+        .. tab-item:: Docker Hub
+            :sync: docker-hub-tab
+
+            .. code-block:: bash
+
+              kubectl create secret docker-registry <secret-name> \
+                --docker-username=<docker-hub-username> \
+                --docker-password=<docker-hub-password> \
+                --docker-server=docker.io
+
+        .. tab-item:: AWS ECR
+            :sync: aws-ecr-tab
+
+            .. code-block:: bash
+
+              kubectl create secret docker-registry <secret-name> \
+                --docker-username=AWS \
+                --docker-password=<aws-ecr-password> \
+                --docker-server=<your-user-id>.dkr.ecr.<region>.amazonaws.com
+
+            .. tip::
+
+                ECR secret credentials expire every 12 hours. Consider using `k8s-ecr-login-renew <https://github.com/nabsul/k8s-ecr-login-renew>`_ to automatically refresh your secrets.
+
+        .. tab-item:: GCP
+            :sync: gcp-tab
+
+            For **Artifact Registry** (recommended):
+
+            .. code-block:: bash
+
+              kubectl create secret docker-registry <secret-name> \
+                --docker-username=_json_key \
+                --docker-password="$(cat ~/gcp-key.json)" \
+                --docker-server=<location>-docker.pkg.dev
+
+            For **Container Registry (GCR)** (deprecated):
+
+            .. code-block:: bash
+
+              kubectl create secret docker-registry <secret-name> \
+                --docker-username=_json_key \
+                --docker-password="$(cat ~/gcp-key.json)" \
+                --docker-server=gcr.io
+            
+            .. hint::
+              If you are not sure which registry to use, check the base of your
+              image URL. For example, if your image URL looks like ``gcr.io/project-id/repo/image-name:latest``,
+              you should use ``gcr.io`` as the registry server. If your image URL looks like ``us-docker.pkg.dev/project-id/registry-repo/image-name:latest``,
+              you should use ``us-docker.pkg.dev`` as the registry server.
+
+        .. tab-item:: NVIDIA NGC
+            :sync: nvidia-container-registry-tab
+
+            .. code-block:: bash
+
+              kubectl create secret docker-registry <secret-name> \
+                --docker-username=$oauthtoken \
+                --docker-password=<NGC_API_KEY> \
+                --docker-server=nvcr.io
 
 
 Opening ports
@@ -348,7 +412,7 @@ FAQs
       # ~/.sky/config.yaml
       kubernetes:
         provision_timeout: 900  # Wait 15 minutes for nodes to get provisioned before failover. Set to -1 to wait indefinitely.
-        autoscaler: gke  # [gke, karpenter, generic]; required if using GPUs/TPUs in scale-to-zero setting
+        autoscaler: gke  # [gke, karpenter, coreweave, generic]; required if using GPUs/TPUs in scale-to-zero setting
 
 * **Can SkyPilot provision a Kubernetes cluster for me? Will SkyPilot add more nodes to my Kubernetes clusters?**
 

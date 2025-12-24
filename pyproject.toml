@@ -9,7 +9,8 @@ allow_split_before_dict_value = false
 [tool.pytest.ini_options]
 required_plugins = [
     "pytest-xdist",
-    "pytest-env>=0.6"
+    "pytest-env>=0.6",
+    "buildkite-test-collector"
 ]
 env = [
     "SKYPILOT_DEBUG=1",
@@ -23,6 +24,7 @@ python_version = "3.8"
 follow_imports = "skip"
 ignore_missing_imports = true
 allow_redefinition = true
+check_untyped_defs = true
 
 [tool.isort]
 profile = "google"

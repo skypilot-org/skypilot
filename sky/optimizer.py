@@ -781,7 +781,7 @@ class Optimizer:
         def _instance_type_str(resources: 'resources_lib.Resources') -> str:
             instance_type = resources.instance_type
             assert instance_type is not None, 'Instance type must be specified'
-            if isinstance(resources.cloud, clouds.Kubernetes):
+            if isinstance(resources.cloud, (clouds.Kubernetes, clouds.Slurm)):
                 instance_type = '-'
                 if resources.use_spot:
                     instance_type = ''
@@ -865,11 +865,12 @@ class Optimizer:
                 'use_spot': resources.use_spot
             }
 
-            # Handle special case for Kubernetes and SSH clouds
-            if isinstance(resources.cloud, clouds.Kubernetes):
+            # Handle special case for Kubernetes, SSH, and SLURM clouds
+            if isinstance(resources.cloud, (clouds.Kubernetes, clouds.Slurm)):
                 # Region for Kubernetes-like clouds (SSH, Kubernetes) is the
-                # context name, i.e. different Kubernetes clusters. We add
-                # region to the key to show all the Kubernetes clusters in the
+                # context name, i.e. different Kubernetes clusters.
+                # Region for SLURM is the cluster name.
+                # We add region to the key to show all the clusters in the
                 # optimizer table for better UX.
 
                 if resources.cloud.__class__.__name__ == 'SSH':
@@ -1019,7 +1020,7 @@ class Optimizer:
                             if res.instance_type is not None
                         ])
                         candidate_str = resources_utils.format_resource(
-                            best_resources, simplify=True)
+                            best_resources, simplified_only=True)[0]
 
                         logger.info(
                             f'{colorama.Style.DIM}🔍 Multiple {cloud} instances '
@@ -1262,12 +1263,13 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
 
 
 def _check_specified_regions(task: task_lib.Task) -> None:
-    """Check if specified regions (Kubernetes contexts) are enabled.
+    """Check if specified regions (Kubernetes/SSH contexts) are enabled.
 
     Args:
         task: The task to check.
     """
-    # Only check for Kubernetes now
+    # Only check for Kubernetes/SSH for now
+    # Below check works because SSH inherits Kubernetes cloud.
     if not all(
             isinstance(resources.cloud, clouds.Kubernetes)
             for resources in task.resources):
@@ -1276,12 +1278,21 @@ def _check_specified_regions(task: task_lib.Task) -> None:
     for resources in task.resources:
         if resources.region is None:
             continue
-        existing_contexts = clouds.Kubernetes.existing_allowed_contexts()
+
+        is_ssh = isinstance(resources.cloud, clouds.SSH)
+        if is_ssh:
+            existing_contexts = clouds.SSH.existing_allowed_contexts()
+        else:
+            existing_contexts = clouds.Kubernetes.existing_allowed_contexts()
+
         region = resources.region
         task_name = f' {task.name!r}' if task.name is not None else ''
         msg = f'Task{task_name} requires '
         if region not in existing_contexts:
-            infra_str = f'Kubernetes/{region}'
+            if is_ssh:
+                infra_str = f'SSH/{region.lstrip("ssh-")}'
+            else:
+                infra_str = f'Kubernetes/{region}'
             logger.warning(f'{infra_str} is not enabled.')
             volume_mounts_str = ''
             if task.volume_mounts:

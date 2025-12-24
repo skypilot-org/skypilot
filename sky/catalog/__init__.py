@@ -127,12 +127,9 @@ def list_accelerator_realtime(
     case_sensitive: bool = True,
 ) -> Tuple[Dict[str, List[int]], Dict[str, int], Dict[str, int]]:
     """Lists all accelerators offered by Sky with their realtime availability.
-
     Realtime availability is the total number of accelerators in the cluster
     and number of accelerators available at the time of the call.
-
     Used for fixed size cluster settings, such as Kubernetes.
-
     Returns:
         A tuple of three dictionaries mapping canonical accelerator names to:
         - A list of available counts. (e.g., [1, 2, 4])
@@ -247,6 +244,13 @@ def get_accelerators_from_instance_type(
                                instance_type)
 
 
+def get_arch_from_instance_type(instance_type: str,
+                                clouds: CloudFilter = None) -> Optional[str]:
+    """Returns the arch from a instance type."""
+    return _map_clouds_catalog(clouds, 'get_arch_from_instance_type',
+                               instance_type)
+
+
 def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: Union[int, float],
@@ -326,6 +330,7 @@ def get_common_gpus() -> List[str]:
         'A10G',
         'A100',
         'A100-80GB',
+        'B200',
         'H100',
         'H200',
         'L4',

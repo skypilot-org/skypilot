@@ -7,12 +7,12 @@ import time
 import traceback
 
 import psutil
-import yaml
 
 from sky import clouds
 from sky import sky_logging
 from sky.backends import cloud_vm_ray_backend
-from sky.jobs import scheduler as managed_job_scheduler
+from sky.jobs import constants as managed_job_constants
+from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.serve import serve_utils
@@ -21,9 +21,10 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
-from sky.utils import common_utils
 from sky.utils import registry
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 # Seconds of sleep between the processing of skylet events.
 EVENT_CHECKING_INTERVAL_SECONDS = 20
@@ -45,6 +46,9 @@ class SkyletEvent:
             math.ceil(self.EVENT_INTERVAL_SECONDS /
                       EVENT_CHECKING_INTERVAL_SECONDS))
         self._n = 0
+
+    def start(self):
+        pass
 
     def run(self):
         self._n = (self._n + 1) % self._event_interval
@@ -74,18 +78,60 @@ class ManagedJobEvent(SkyletEvent):
     """Skylet event for updating and scheduling managed jobs."""
     EVENT_INTERVAL_SECONDS = 300
 
+    def start(self):
+        cpus_env_var = os.environ.get('SKYPILOT_POD_CPU_CORE_LIMIT')
+        if cpus_env_var is not None:
+            with open(os.path.expanduser(constants.CONTROLLER_K8S_CPU_FILE),
+                      'w',
+                      encoding='utf-8') as f:
+                f.write(cpus_env_var)
+        memory_env_var = os.environ.get('SKYPILOT_POD_MEMORY_GB_LIMIT')
+        if memory_env_var is not None:
+            with open(os.path.expanduser(constants.CONTROLLER_K8S_MEMORY_FILE),
+                      'w',
+                      encoding='utf-8') as f:
+                f.write(memory_env_var)
+
     def _run(self):
+        if not os.path.exists(
+                os.path.expanduser(
+                    managed_job_constants.JOB_CONTROLLER_INDICATOR_FILE)
+        ) and not managed_job_utils.is_consolidation_mode():
+            # Note: since the skylet is started before the user setup (in
+            # jobs-controller.yaml.j2) runs, it's possible that we hit this
+            # before the indicator file is written. However, since we will wait
+            # EVENT_INTERVAL_SECONDS before the first run, this should be very
+            # unlikely.
+            logger.info('No jobs controller indicator file found.')
+            all_job_ids = managed_job_state.get_all_job_ids_by_name(None)
+            if not all_job_ids:
+                logger.info('No jobs running. Stopping controllers.')
+                # TODO(cooperc): Move this to a shared function also called by
+                # sdk.api_stop(). (#7229)
+                try:
+                    records = scheduler.get_controller_process_records()
+                    if records is not None:
+                        for record in records:
+                            if managed_job_utils.controller_process_alive(
+                                    record, quiet=False):
+                                subprocess_utils.kill_children_processes(
+                                    parent_pids=[record.pid], force=True)
+                        os.remove(
+                            os.path.expanduser(
+                                scheduler.JOB_CONTROLLER_PID_PATH))
+                except Exception as e:  # pylint: disable=broad-except
+                    # in case we get perm issues or something is messed up, just
+                    # ignore it and assume the process is dead
+                    logger.error(
+                        f'Error looking at job controller pid file: {e}')
+                    pass
+            logger.info(f'{len(all_job_ids)} jobs running. Assuming the '
+                        'indicator file hasn\'t been written yet.')
+            return
+
         logger.info('=== Updating managed job status ===')
         managed_job_utils.update_managed_jobs_statuses()
-
-
-class ManagedJobSchedulingEvent(SkyletEvent):
-    """Skylet event for scheduling managed jobs."""
-    EVENT_INTERVAL_SECONDS = 20
-
-    def _run(self):
-        logger.info('=== Scheduling next jobs ===')
-        managed_job_scheduler.maybe_schedule_next_jobs()
+        scheduler.maybe_start_controllers()
 
 
 class ServiceUpdateEvent(SkyletEvent):
@@ -181,7 +227,7 @@ class AutostopEvent(SkyletEvent):
 
             config_path = os.path.abspath(
                 os.path.expanduser(cluster_utils.SKY_CLUSTER_YAML_REMOTE_PATH))
-            config = common_utils.read_yaml(config_path)
+            config = yaml_utils.read_yaml(config_path)
             provider_name = cluster_utils.get_provider_name(config)
             cloud = registry.CLOUD_REGISTRY.from_str(provider_name)
             assert cloud is not None, f'Unknown cloud: {provider_name}'
@@ -190,7 +236,7 @@ class AutostopEvent(SkyletEvent):
                     RAY_PROVISIONER_SKYPILOT_TERMINATOR):
                 logger.info('Using new provisioner to stop the cluster.')
                 self._stop_cluster_with_new_provisioner(autostop_config, config,
-                                                        provider_name)
+                                                        provider_name, cloud)
                 return
             logger.info('Not using new provisioner to stop the cluster. '
                         f'Cloud of this cluster: {provider_name}')
@@ -268,7 +314,8 @@ class AutostopEvent(SkyletEvent):
             raise NotImplementedError
 
     def _stop_cluster_with_new_provisioner(self, autostop_config,
-                                           cluster_config, provider_name):
+                                           cluster_config, provider_name,
+                                           cloud):
         # pylint: disable=import-outside-toplevel
         from sky import provision as provision_lib
         autostop_lib.set_autostopping_started()
@@ -276,13 +323,25 @@ class AutostopEvent(SkyletEvent):
         cluster_name_on_cloud = cluster_config['cluster_name']
         is_cluster_multinode = cluster_config['max_workers'] > 0
 
+        # Clear AWS credentials from environment to force boto3 to use IAM
+        # role attached to the instance (lowest priority in credential chain).
+        # This allows the cluster to stop/terminate itself using its IAM role.
         os.environ.pop('AWS_ACCESS_KEY_ID', None)
         os.environ.pop('AWS_SECRET_ACCESS_KEY', None)
+        os.environ.pop('AWS_SESSION_TOKEN', None)
+        # Point boto3 to /dev/null to skip reading credentials from files.
+        os.environ['AWS_SHARED_CREDENTIALS_FILE'] = '/dev/null'
+        os.environ['AWS_CONFIG_FILE'] = '/dev/null'
 
         # Stop the ray autoscaler to avoid scaling up, during
         # stopping/terminating of the cluster.
-        logger.info('Stopping the ray cluster.')
-        subprocess.run(f'{constants.SKY_RAY_CMD} stop', shell=True, check=True)
+        if not cloud.uses_ray():
+            logger.info('Skipping ray stop as cloud does not use Ray.')
+        else:
+            logger.info('Stopping the ray cluster.')
+            subprocess.run(f'{constants.SKY_RAY_CMD} stop',
+                           shell=True,
+                           check=True)
 
         operation_fn = provision_lib.stop_instances
         if autostop_config.down:
@@ -309,7 +368,7 @@ class AutostopEvent(SkyletEvent):
         else:
             yaml_str = self._CATCH_NODES.sub(r'cache_stopped_nodes: true',
                                              yaml_str)
-        config = yaml.safe_load(yaml_str)
+        config = yaml_utils.safe_load(yaml_str)
         # Set the private key with the existed key on the remote instance.
         config['auth']['ssh_private_key'] = '~/ray_bootstrap_key.pem'
         # NOTE: We must do this, otherwise with ssh_proxy_command still under
@@ -326,5 +385,5 @@ class AutostopEvent(SkyletEvent):
         config['auth'].pop('ssh_proxy_command', None)
         # Empty the file_mounts.
         config['file_mounts'] = {}
-        common_utils.dump_yaml(yaml_path, config)
+        yaml_utils.dump_yaml(yaml_path, config)
         logger.debug('Replaced upscaling speed to 0.')

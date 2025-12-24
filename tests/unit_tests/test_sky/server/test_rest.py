@@ -3,9 +3,34 @@ import time
 from unittest import mock
 
 import pytest
+import requests
 
 from sky import exceptions
 from sky.server import rest
+
+request_err = requests.exceptions.ChunkedEncodingError("Test error")
+
+
+class TestHandleResponseText:
+    """Test cases for handle_response_text helper."""
+
+    def test_plain_text_response_returns_text(self):
+        mock_response = mock.Mock()
+        mock_response.text = 'Plain error message'
+        mock_response.headers = {'Content-Type': 'text/plain'}
+
+        assert rest.handle_response_text(mock_response) == 'Plain error message'
+
+    def test_html_response_extracts_title(self):
+        mock_response = mock.Mock()
+        mock_response.text = (
+            '<head><title>503 Service Temporarily Unavailable</title></head>\n'
+            '<body>\n'
+            '<center><h1>503 Service Temporarily Unavailable</h1></center>')
+        mock_response.headers = {'Content-Type': 'text/html; charset=UTF-8'}
+
+        assert rest.handle_response_text(
+            mock_response) == '503 Service Temporarily Unavailable'
 
 
 class TestHandleServerUnavailable:
@@ -31,6 +56,66 @@ class TestHandleServerUnavailable:
 
             # Should not raise any exception
             rest.handle_server_unavailable(mock_response)
+
+
+class TestHandleServerUnavailableAsync:
+    """Test cases for handle_server_unavailable_async function."""
+
+    @pytest.mark.asyncio
+    async def test_handle_server_unavailable_async_with_503_status(self):
+        """Test that 503 status code raises ServerTemporarilyUnavailableError."""
+        mock_response = mock.Mock()
+        mock_response.status = 503
+        mock_response.json = mock.AsyncMock(
+            return_value={'detail': 'Service unavailable'})
+        mock_response.text = mock.AsyncMock(return_value='Service unavailable')
+
+        with pytest.raises(
+                exceptions.ServerTemporarilyUnavailableError) as exc_info:
+            await rest.handle_server_unavailable_async(mock_response)
+
+        assert 'Service unavailable' in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_handle_server_unavailable_async_with_503_and_text_fallback(
+            self):
+        """Test that 503 status with text fallback raises ServerTemporarilyUnavailableError."""
+        mock_response = mock.Mock()
+        mock_response.status = 503
+        # Simulate json() failing and falling back to text()
+        mock_response.json = mock.AsyncMock(
+            side_effect=Exception("JSON parse error"))
+        mock_response.text = mock.AsyncMock(return_value='Server error text')
+
+        with pytest.raises(
+                exceptions.ServerTemporarilyUnavailableError) as exc_info:
+            await rest.handle_server_unavailable_async(mock_response)
+
+        assert 'Server error text' in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_handle_server_unavailable_async_with_503_and_both_fail(self):
+        """Test that 503 status with both json and text failing raises ServerTemporarilyUnavailableError with empty message."""
+        mock_response = mock.Mock()
+        mock_response.status = 503
+        # Simulate both json() and text() failing
+        mock_response.json = mock.AsyncMock(
+            side_effect=Exception("JSON parse error"))
+        mock_response.text = mock.AsyncMock(
+            side_effect=Exception("Text parse error"))
+
+        with pytest.raises(exceptions.ServerTemporarilyUnavailableError):
+            await rest.handle_server_unavailable_async(mock_response)
+
+    @pytest.mark.asyncio
+    async def test_handle_server_unavailable_async_with_non_503_status(self):
+        """Test that non-503 status codes do not raise exception."""
+        for status_code in [200, 400, 404, 500, 502, 504]:
+            mock_response = mock.Mock()
+            mock_response.status = status_code
+
+            # Should not raise any exception
+            await rest.handle_server_unavailable_async(mock_response)
 
 
 class TestRetryTransientErrorsDecorator:
@@ -143,7 +228,7 @@ class TestRetryTransientErrorsDecorator:
             nonlocal call_count
             call_count += 1
             if call_count < 3:
-                raise ValueError("Test error")
+                raise request_err
             return "success"
 
         with mock.patch('time.sleep'):
@@ -155,6 +240,59 @@ class TestRetryTransientErrorsDecorator:
         debug_calls = mock_logger.debug.call_args_list
         for call in debug_calls:
             assert 'Retry failing_then_succeeding_function due to' in call[0][0]
+
+    @mock.patch('sky.server.rest.logger')
+    def test_retry_context_is_reset_when_progress_is_made(self, mock_logger):
+        """Test that retry context is reset when progress is made."""
+        call_count = 0
+
+        @rest.retry_transient_errors(max_retries=3, initial_backoff=0.1)
+        def function_making_progress():
+            nonlocal call_count
+            retry_context = rest.get_retry_context()
+            call_count += 1
+            if call_count < 10:
+                retry_context.line_processed += 1
+                raise request_err
+            return "success"
+
+        with mock.patch('time.sleep'):
+            result = function_making_progress()
+            assert result == "success"
+
+        # Check that debug logging was called
+        assert mock_logger.debug.call_count == 9  # 9 retries
+        debug_calls = mock_logger.debug.call_args_list
+        for call in debug_calls:
+            assert 'Retry function_making_progress due to' in call[0][0]
+
+    @mock.patch('sky.server.rest.logger')
+    def test_repeated_failure_after_progress(self, mock_logger):
+        """Test that retry_transient_errors fails if function fails after making progress."""
+        call_count = 0
+
+        @rest.retry_transient_errors(max_retries=3, initial_backoff=0.1)
+        def function_failing_after_making_progress():
+            nonlocal call_count
+            retry_context = rest.get_retry_context()
+            call_count += 1
+            if call_count < 10:
+                retry_context.line_processed += 1
+                raise request_err
+
+            raise request_err
+
+        with mock.patch('time.sleep'):
+            with pytest.raises(request_err.__class__):
+                function_failing_after_making_progress()
+
+        # Check that debug logging was called
+        # 11 retries, 9 retries after progress, 2 retries after failure
+        assert mock_logger.debug.call_count == 11
+        debug_calls = mock_logger.debug.call_args_list
+        for call in debug_calls:
+            assert 'Retry function_failing_after_making_progress due to' in call[
+                0][0]
 
     def test_different_http_error_status_codes(self):
         """Test behavior with different HTTP error status codes."""

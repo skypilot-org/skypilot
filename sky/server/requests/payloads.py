@@ -60,6 +60,11 @@ EXTERNAL_LOCAL_ENV_VARS = [
     'AWS_ACCESS_KEY_ID',
     'AWS_SECRET_ACCESS_KEY',
     'AWS_SESSION_TOKEN',
+    # Allow overriding the Azure authentication.
+    'AZURE_CLIENT_ID',
+    'AZURE_CLIENT_SECRET',
+    'AZURE_TENANT_ID',
+    'AZURE_SUBSCRIPTION_ID',
     # Allow overriding the GCP authentication.
     'GOOGLE_APPLICATION_CREDENTIALS',
     # Allow overriding the kubeconfig.
@@ -67,23 +72,32 @@ EXTERNAL_LOCAL_ENV_VARS = [
 ]
 
 
-@annotations.lru_cache(scope='global')
 def request_body_env_vars() -> dict:
     env_vars = {}
     for env_var in os.environ:
-        if env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX):
+        if (env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX) and
+                not env_var.startswith(
+                    constants.SKYPILOT_SERVER_ENV_VAR_PREFIX)):
             env_vars[env_var] = os.environ[env_var]
         if common.is_api_server_local() and env_var in EXTERNAL_LOCAL_ENV_VARS:
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
-    env_vars[constants.USER_ENV_VAR] = common_utils.get_current_user_name()
+    env_vars[constants.USER_ENV_VAR] = common_utils.get_local_user_name()
     env_vars[
         usage_constants.USAGE_RUN_ID_ENV_VAR] = usage_lib.messages.usage.run_id
+    if not common.is_api_server_local():
+        # Used in job controller, for local API server, keep the
+        # SKYPILOT_CONFIG env var to use the config for the managed job.
+        env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
     # Remove the path to config file, as the config content is included in the
     # request body and will be merged with the config on the server side.
-    env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
     env_vars.pop(skypilot_config.ENV_VAR_GLOBAL_CONFIG, None)
     env_vars.pop(skypilot_config.ENV_VAR_PROJECT_CONFIG, None)
+    # Remove the config related env vars, as the client config override
+    # should be passed in the request body.
+    # Any new environment variables that are server-specific should
+    # use SKYPILOT_SERVER_ENV_VAR_PREFIX.
+    env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
     return env_vars
 
 
@@ -307,6 +321,13 @@ class StatusBody(RequestBody):
     cluster_names: Optional[List[str]] = None
     refresh: common_lib.StatusRefreshMode = common_lib.StatusRefreshMode.NONE
     all_users: bool = True
+    # TODO (kyuds): default to False post 0.12.0
+    include_credentials: bool = True
+    # Only return fields that are needed for the
+    # dashboard / CLI summary response
+    summary_response: bool = False
+    # Include the cluster handle in the response
+    include_handle: bool = True
 
 
 class StartBody(RequestBody):
@@ -351,9 +372,10 @@ class CancelBody(RequestBody):
         return kwargs
 
 
-class ClusterNameBody(RequestBody):
+class ProvisionLogsBody(RequestBody):
     """Cluster node."""
     cluster_name: str
+    worker: Optional[int] = None
 
 
 class ClusterJobBody(RequestBody):
@@ -454,11 +476,28 @@ class VolumeApplyBody(RequestBody):
     size: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
     labels: Optional[Dict[str, str]] = None
+    use_existing: Optional[bool] = None
 
 
 class VolumeDeleteBody(RequestBody):
     """The request body for the volume delete endpoint."""
     names: List[str]
+
+
+class VolumeListBody(RequestBody):
+    """The request body for the volume list endpoint."""
+    pass
+
+
+class VolumeValidateBody(RequestBody):
+    """The request body for the volume validate endpoint."""
+    name: Optional[str] = None
+    volume_type: Optional[str] = None
+    infra: Optional[str] = None
+    size: Optional[str] = None
+    labels: Optional[Dict[str, str]] = None
+    config: Optional[Dict[str, Any]] = None
+    use_existing: Optional[bool] = None
 
 
 class EndpointsBody(RequestBody):
@@ -498,6 +537,14 @@ class JobsQueueBody(RequestBody):
     skip_finished: bool = False
     all_users: bool = False
     job_ids: Optional[List[int]] = None
+
+
+class JobsQueueV2Body(RequestBody):
+    """The request body for the jobs queue endpoint."""
+    refresh: bool = False
+    skip_finished: bool = False
+    all_users: bool = False
+    job_ids: Optional[List[int]] = None
     user_match: Optional[str] = None
     workspace_match: Optional[str] = None
     name_match: Optional[str] = None
@@ -505,6 +552,9 @@ class JobsQueueBody(RequestBody):
     page: Optional[int] = None
     limit: Optional[int] = None
     statuses: Optional[List[str]] = None
+    # The fields to return in the response.
+    # Refer to the fields in the `class ManagedJobRecord` in `response.py`
+    fields: Optional[List[str]] = None
 
 
 class JobsCancelBody(RequestBody):
@@ -537,6 +587,8 @@ class RequestStatusBody(pydantic.BaseModel):
     """The request body for the API request status endpoint."""
     request_ids: Optional[List[str]] = None
     all_status: bool = False
+    limit: Optional[int] = None
+    fields: Optional[List[str]] = None
 
 
 class ServeUpBody(RequestBody):
@@ -618,6 +670,11 @@ class KubernetesNodeInfoRequestBody(RequestBody):
     context: Optional[str] = None
 
 
+class SlurmNodeInfoRequestBody(RequestBody):
+    """The request body for the slurm node info endpoint."""
+    slurm_cluster_name: Optional[str] = None
+
+
 class ListAcceleratorsBody(RequestBody):
     """The request body for the list accelerators endpoint."""
     gpus_only: bool = True
@@ -642,12 +699,13 @@ class ListAcceleratorCountsBody(RequestBody):
 class LocalUpBody(RequestBody):
     """The request body for the local up endpoint."""
     gpus: bool = True
-    ips: Optional[List[str]] = None
-    ssh_user: Optional[str] = None
-    ssh_key: Optional[str] = None
-    cleanup: bool = False
-    context_name: Optional[str] = None
-    password: Optional[str] = None
+    name: Optional[str] = None
+    port_start: Optional[int] = None
+
+
+class LocalDownBody(RequestBody):
+    """The request body for the local down endpoint."""
+    name: Optional[str] = None
 
 
 class SSHUpBody(RequestBody):
@@ -687,19 +745,22 @@ class JobsDownloadLogsBody(RequestBody):
 
 class JobsPoolApplyBody(RequestBody):
     """The request body for the jobs pool apply endpoint."""
-    task: str
+    task: Optional[str] = None
+    workers: Optional[int] = None
     pool_name: str
     mode: serve.UpdateMode
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
-        assert len(
-            dag.tasks) == 1, ('Must only specify one task in the DAG for '
-                              'a pool.', dag)
-        kwargs['task'] = dag.tasks[0]
+        if self.task is not None:
+            dag = common.process_mounts_in_task_on_api_server(
+                self.task, self.env_vars, workdir_only=False)
+            assert len(
+                dag.tasks) == 1, ('Must only specify one task in the DAG for '
+                                  'a pool.', dag)
+            kwargs['task'] = dag.tasks[0]
+        else:
+            kwargs['task'] = None
         return kwargs
 
 
@@ -770,6 +831,12 @@ class GetConfigBody(RequestBody):
 class CostReportBody(RequestBody):
     """The request body for the cost report endpoint."""
     days: Optional[int] = 30
+    # we use hashes instead of names to avoid the case where
+    # the name is not unique
+    cluster_hashes: Optional[List[str]] = None
+    # Only return fields that are needed for the dashboard
+    # summary page
+    dashboard_summary_response: bool = False
 
 
 class RequestPayload(BasePayload):
@@ -792,3 +859,9 @@ class RequestPayload(BasePayload):
     status_msg: Optional[str] = None
     should_retry: bool = False
     finished_at: Optional[float] = None
+
+
+class SlurmGpuAvailabilityRequestBody(RequestBody):
+    """Request body for getting Slurm real-time GPU availability."""
+    name_filter: Optional[str] = None
+    quantity_filter: Optional[int] = None

@@ -182,13 +182,25 @@ class Cloud:
         """
         return cls._SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE
 
+    @classmethod
+    def uses_ray(cls) -> bool:
+        """Returns whether this cloud uses Ray as the distributed
+        execution framework.
+        """
+        return True
+
     #### Regions/Zones ####
 
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[Region]:
         """Returns the regions that offer the specified resources.
 
         The order of the regions follow the order of the regions returned by
@@ -341,6 +353,14 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
+    def get_arch_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Optional[str]:
+        """Returns the arch of the instance type, if any."""
+        raise NotImplementedError
+
+    @classmethod
     def get_default_instance_type(cls,
                                   cpus: Optional[str] = None,
                                   memory: Optional[str] = None,
@@ -394,6 +414,21 @@ class Cloud:
         # If a cloud does not support labels, they are ignored. Only clouds
         # that support labels implement this method.
         del label_key, label_value
+        return True, None
+
+    @classmethod
+    def is_volume_name_valid(cls,
+                             volume_name: str) -> Tuple[bool, Optional[str]]:
+        """Validates that the volume name is valid for this cloud.
+
+        Returns:
+            A tuple of a boolean indicating whether the volume name is valid
+            and an optional string describing the reason if the volume name
+            is invalid.
+        """
+        # If a cloud does not support volume, they are ignored. Only clouds
+        # that support volume implement this method.
+        del volume_name
         return True, None
 
     @timeline.event
@@ -651,8 +686,11 @@ class Cloud:
 
     @classmethod
     def check_features_are_supported(
-            cls, resources: 'resources_lib.Resources',
-            requested_features: Set[CloudImplementationFeatures]) -> None:
+        cls,
+        resources: 'resources_lib.Resources',
+        requested_features: Set[CloudImplementationFeatures],
+        region: Optional[str] = None,
+    ) -> None:
         """Errors out if the cloud does not support all requested features.
 
         For instance, Lambda Cloud does not support stop, so
@@ -670,7 +708,7 @@ class Cloud:
             requested features.
         """
         unsupported_features2reason = cls._unsupported_features_for_resources(
-            resources)
+            resources, region)
 
         # Docker image is not compatible with ssh proxy command.
         if skypilot_config.get_effective_region_config(
@@ -700,7 +738,9 @@ class Cloud:
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[CloudImplementationFeatures, str]:
         """The features not supported based on the resources provided.
 
@@ -711,7 +751,7 @@ class Cloud:
             A dict of {feature: reason} for the features not supported by the
             cloud implementation.
         """
-        del resources
+        del resources, region
         raise NotImplementedError
 
     @classmethod
@@ -785,12 +825,21 @@ class Cloud:
             if acc_from_instance_type is None:
                 return False
 
-            for acc in acc_requested:
-                if acc not in acc_from_instance_type:
+            for requested_acc in acc_requested:
+                for instance_acc in acc_from_instance_type:
+                    # The requested accelerator can be canonicalized based on
+                    # the accelerator registry, which may not has the same case
+                    # as the cloud's catalog, e.g., 'RTXPro6000' in Shadeform
+                    # catalog, and 'RTXPRO6000' in RunPod catalog.
+                    if requested_acc.lower() == instance_acc.lower():
+                        # Found the requested accelerator in the instance type.
+                        break
+                else:
+                    # Requested accelerator not found in instance type.
                     return False
                 # Avoid float point precision issue.
-                if not math.isclose(acc_requested[acc],
-                                    acc_from_instance_type[acc]):
+                if not math.isclose(acc_requested[requested_acc],
+                                    acc_from_instance_type[instance_acc]):
                     return False
             return True
 

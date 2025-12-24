@@ -2,7 +2,7 @@ name: minGPT-ddp-rdzv
 
 resources:
     cpus: 4+
-    accelerators: L4
+    accelerators: L4:2
 
 num_nodes: 2
 
@@ -13,7 +13,7 @@ setup: |
     # SkyPilot's default image on AWS/GCP has CUDA 11.6 (Azure 11.5).
     uv venv --python 3.10
     source .venv/bin/activate
-    uv pip install -r requirements.txt "numpy<2" "torch==1.12.1+cu113" --extra-index-url https://download.pytorch.org/whl/cu113
+    uv pip install -r requirements.txt "numpy<2" "torch==2.7.1+cu118" --extra-index-url https://download.pytorch.org/whl/cu118
 
 run: |
     cd examples
@@ -22,6 +22,14 @@ run: |
     export LOGLEVEL=INFO
 
     MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+    # torchrun attempts to autodetect if the current node is the head node based
+    # on the hostname, but this depends on network configuration and doesn't
+    # work on some clouds, e.g. Nebius VMs. Force to "localhost" to work around.
+    # This is only needed for c10d rdzv backend, not static rendezvous.
+    # See https://github.com/pytorch/pytorch/issues/79388.
+    if [ $SKYPILOT_NODE_RANK -eq 0 ]; then
+        MASTER_ADDR=localhost
+    fi
     echo "Starting distributed training, head node: $MASTER_ADDR"
 
     torchrun \

@@ -16,23 +16,29 @@ Git and GitHub
 How to clone private GitHub repositories in a job?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Currently, SkyPilot does not support secret management or SSH agent forwarding to your sky clusters.
-You will need to use `file_mounts` to sync your Github SSH private key to your sky cluster.
+Use ``workdir`` to clone private GitHub repositories in a job.
 
 .. code-block:: yaml
 
   # your_task.yaml
-  file_mounts:
-    ~/.ssh/id_rsa: ~/.ssh/your-ssh-private-key
-
-  setup: |
-    chmod 600 ~/.ssh/id_rsa
-    git clone git@github.com:your-proj/your-repo.git
+  workdir:
+    url: git@github.com:your-proj/your-repo.git
+    ref: main
 
   run: |
     cd your-repo
     git pull
 
+**Authentication**:
+
+*For HTTPS URLs*: Set the ``GIT_TOKEN`` environment variable. SkyPilot will automatically use this token for authentication.
+
+*For SSH/SCP URLs*: SkyPilot will attempt to authenticate using SSH keys in the following order:
+
+1. SSH key specified by the ``GIT_SSH_KEY_PATH`` environment variable
+2. SSH key configured in ``~/.ssh/config`` for the git host
+3. Default SSH key at ``~/.ssh/id_rsa``
+4. Default SSH key at ``~/.ssh/id_ed25519`` (if ``~/.ssh/id_rsa`` does not exist)
 
 How to ensure my workdir's ``.git`` is synced up for managed spot jobs?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -145,33 +151,33 @@ By default, SkyPilot supports most global regions on AWS and only supports the U
 
 .. code-block:: bash
 
-  version=$(python -c 'import sky; print(sky.clouds.service_catalog.constants.CATALOG_SCHEMA_VERSION)')
+  version=$(python -c 'import sky; print( sky.skylet.constants.CATALOG_SCHEMA_VERSION)')
   mkdir -p ~/.sky/catalogs/${version}
   cd ~/.sky/catalogs/${version}
   # GCP
   pip install lxml
   # Fetch U.S. regions for GCP
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp
+  python -m sky.catalog.data_fetchers.fetch_gcp
   # Fetch the specified zones for GCP
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --zones northamerica-northeast1-a us-east1-b us-east1-c
+  python -m sky.catalog.data_fetchers.fetch_gcp --zones northamerica-northeast1-a us-east1-b us-east1-c
   # Fetch U.S. zones for GCP, excluding the specified zones
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --exclude us-east1-a us-east1-b
+  python -m sky.catalog.data_fetchers.fetch_gcp --exclude us-east1-a us-east1-b
   # Fetch all regions for GCP
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --all-regions
+  python -m sky.catalog.data_fetchers.fetch_gcp --all-regions
   # Run in single-threaded mode. This is useful when multiple processes don't work well with the GCP client due to SSL issues.
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --single-threaded
+  python -m sky.catalog.data_fetchers.fetch_gcp --single-threaded
 
   # Azure
   # Fetch U.S. regions for Azure
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure
+  python -m sky.catalog.data_fetchers.fetch_azure
   # Fetch all regions for Azure
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --all-regions
+  python -m sky.catalog.data_fetchers.fetch_azure --all-regions
   # Run in single-threaded mode. This is useful when multiple processes don't work well with the Azure client due to SSL issues.
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --single-threaded
+  python -m sky.catalog.data_fetchers.fetch_azure --single-threaded
   # Fetch the specified regions for Azure
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --regions japaneast australiaeast uksouth
+  python -m sky.catalog.data_fetchers.fetch_azure --regions japaneast australiaeast uksouth
   # Fetch U.S. regions for Azure, excluding the specified regions
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --exclude centralus eastus
+  python -m sky.catalog.data_fetchers.fetch_azure --exclude centralus eastus
 
 To make your managed spot jobs potentially use all global regions, please log into the spot controller with ``ssh sky-spot-controller-<hash>``
 (the full name can be found in ``sky status``), and run the commands above.
@@ -187,7 +193,7 @@ Check out your schema version by running the following command:
 
 .. code-block:: bash
 
-  python -c "from sky.clouds import service_catalog; print(service_catalog.CATALOG_SCHEMA_VERSION)"
+  python -c "from sky.skylet import constants; print(constants.CATALOG_SCHEMA_VERSION)"
 
 You can customize the catalog files to your needs.
 For example, if you have access to special regions of GCP, add the data to ``~/.sky/catalogs/<schema-version>/gcp.csv``.
@@ -212,6 +218,24 @@ You will need to install a PyTorch version that is compatible with your NVIDIA d
 
 Miscellaneous
 -------------
+
+Why can't I use ``ray.init(address="auto")`` directly in my SkyPilot job?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SkyPilot uses Ray internally on port 6380 for cluster management. When you use ``ray.init(address="auto")``, Ray connects to SkyPilot's internal cluster, causing resource bundling conflicts where user workloads interfere with SkyPilot's resource management.
+
+**Always start your own Ray cluster** on a different port (e.g., 6379). See the :ref:`distributed Ray example <dist-jobs>` for the correct pattern:
+
+.. code-block:: yaml
+
+  run: |
+    head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+    if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+      ray start --head
+      python your_script.py
+    else
+      ray start --address $head_ip:6379
+    fi
 
 How can I launch a VS Code tunnel using a SkyPilot task definition?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

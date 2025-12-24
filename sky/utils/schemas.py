@@ -208,26 +208,49 @@ def _get_single_resources_schema():
             },
             'job_recovery': {
                 # Either a string or a dict.
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'object',
-                    'required': [],
-                    'additionalProperties': False,
-                    'properties': {
-                        'strategy': {
-                            'anyOf': [{
-                                'type': 'string',
-                            }, {
-                                'type': 'null',
-                            }],
-                        },
-                        'max_restarts_on_errors': {
-                            'type': 'integer',
-                            'minimum': 0,
-                        },
+                'anyOf': [
+                    {
+                        'type': 'string',
+                    },
+                    {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'strategy': {
+                                'anyOf': [{
+                                    'type': 'string',
+                                }, {
+                                    'type': 'null',
+                                }],
+                            },
+                            'max_restarts_on_errors': {
+                                'type': 'integer',
+                                'minimum': 0,
+                            },
+                            'recover_on_exit_codes': {
+                                'anyOf': [
+                                    {
+                                        # Single exit code
+                                        'type': 'integer',
+                                        'minimum': 0,
+                                        'maximum': 255,
+                                    },
+                                    {
+                                        # List of exit codes
+                                        'type': 'array',
+                                        'items': {
+                                            'type': 'integer',
+                                            'minimum': 0,
+                                            'maximum': 255,
+                                        },
+                                        'uniqueItems': True,
+                                    },
+                                ],
+                            },
+                        }
                     }
-                }],
+                ],
             },
             'volumes': {
                 'type': 'array',
@@ -432,7 +455,7 @@ def get_volume_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
-        'required': ['name', 'type', 'infra'],
+        'required': ['name', 'type'],
         'additionalProperties': False,
         'properties': {
             'name': {
@@ -460,8 +483,8 @@ def get_volume_schema():
                 'type': 'string',
                 'pattern': constants.MEMORY_SIZE_PATTERN,
             },
-            'resource_name': {
-                'type': 'string',
+            'use_existing': {
+                'type': 'boolean',
             },
             'config': {
                 'type': 'object',
@@ -574,6 +597,9 @@ def get_volume_mount_schema():
             'volume_name': {
                 'type': 'string',
             },
+            'is_ephemeral': {
+                'type': 'boolean',
+            },
             'volume_config': {
                 'type': 'object',
                 'required': [],
@@ -668,8 +694,24 @@ def get_service_schema():
                         'minimum': 0,
                     },
                     'target_qps_per_replica': {
-                        'type': 'number',
-                        'minimum': 0,
+                        'anyOf': [
+                            {
+                                'type': 'number',
+                                'minimum': 0,
+                            },
+                            {
+                                'type': 'object',
+                                'patternProperties': {
+                                    # Pattern for accelerator types like
+                                    # "H100:1", "A100:1", "H100", "A100"
+                                    '^[A-Z0-9]+(?::[0-9]+)?$': {
+                                        'type': 'number',
+                                        'minimum': 0,
+                                    }
+                                },
+                                'additionalProperties': False,
+                            }
+                        ]
                     },
                     'dynamic_ondemand_fallback': {
                         'type': 'boolean',
@@ -773,23 +815,6 @@ def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
     new_schema = keep_keys(schema, paths_dict, {})
     assert not paths_dict, f'Unprocessed keys: {paths_dict}'
     return new_schema
-
-
-def _experimental_task_schema() -> dict:
-    # TODO: experimental.config_overrides has been deprecated in favor of the
-    # top-level `config` field. Remove in v0.11.0.
-    config_override_schema = _filter_schema(
-        get_config_schema(), constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)
-    return {
-        'experimental': {
-            'type': 'object',
-            'required': [],
-            'additionalProperties': False,
-            'properties': {
-                'config_overrides': config_override_schema,
-            }
-        }
-    }
 
 
 def get_task_schema():
@@ -902,7 +927,6 @@ def get_task_schema():
             '_metadata': {
                 'type': 'object',
             },
-            **_experimental_task_schema(),
         }
     }
 
@@ -1027,10 +1051,20 @@ class RemoteIdentityOptions(enum.Enum):
 
 def get_default_remote_identity(cloud: str) -> str:
     """Get the default remote identity for the specified cloud."""
-    if cloud == 'kubernetes':
+    if cloud in ('kubernetes', 'ssh'):
         return RemoteIdentityOptions.SERVICE_ACCOUNT.value
     return RemoteIdentityOptions.LOCAL_CREDENTIALS.value
 
+
+_CAPABILITIES_SCHEMA = {
+    'capabilities': {
+        'type': 'array',
+        'items': {
+            'type': 'string',
+            'case_insensitive_enum': ['compute', 'storage']
+        },
+    }
+}
 
 _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
@@ -1054,24 +1088,15 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     },
 }
 
-_CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
-    'networking': {
-        'type': 'string',
-        'case_insensitive_enum': [
-            type.value for type in kubernetes_enums.KubernetesNetworkingMode
-        ],
-    },
-    'ports': {
-        'type': 'string',
-        'case_insensitive_enum': [
-            type.value for type in kubernetes_enums.KubernetesPortMode
-        ],
-    },
+_CONTEXT_CONFIG_SCHEMA_MINIMAL = {
     'pod_config': {
         'type': 'object',
         'required': [],
         # Allow arbitrary keys since validating pod spec is hard
         'additionalProperties': True,
+    },
+    'provision_timeout': {
+        'type': 'integer',
     },
     'custom_metadata': {
         'type': 'object',
@@ -1087,9 +1112,23 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             }]
         },
     },
-    'provision_timeout': {
-        'type': 'integer',
+}
+
+_CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    # TODO(kevin): Remove 'networking' in v0.13.0.
+    'networking': {
+        'type': 'string',
+        'case_insensitive_enum': [
+            type.value for type in kubernetes_enums.KubernetesNetworkingMode
+        ],
     },
+    'ports': {
+        'type': 'string',
+        'case_insensitive_enum': [
+            type.value for type in kubernetes_enums.KubernetesPortMode
+        ],
+    },
+    **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
     'autoscaler': {
         'type': 'string',
         'case_insensitive_enum': [
@@ -1137,6 +1176,12 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
     },
     'remote_identity': {
         'type': 'string',
+    },
+    'post_provision_runcmd': {
+        'type': 'array',
+        'items': {
+            'type': 'string'
+        },
     }
 }
 
@@ -1173,7 +1218,13 @@ def get_config_schema():
                         'consolidation_mode': {
                             'type': 'boolean',
                             'default': False,
-                        }
+                        },
+                        'controller_logs_gc_retention_hours': {
+                            'type': 'integer',
+                        },
+                        'task_logs_gc_retention_hours': {
+                            'type': 'integer',
+                        },
                     },
                 },
                 'bucket': {
@@ -1218,6 +1269,9 @@ def get_config_schema():
                         'type': 'null',
                     }],
                 },
+                'use_ssm': {
+                    'type': 'boolean',
+                },
                 'post_provision_runcmd': {
                     'type': 'array',
                     'items': {
@@ -1231,6 +1285,7 @@ def get_config_schema():
                         }]
                     },
                 },
+                **_CAPABILITIES_SCHEMA,
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -1288,6 +1343,7 @@ def get_config_schema():
                         }
                     ],
                 },
+                **_CAPABILITIES_SCHEMA,
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -1312,10 +1368,15 @@ def get_config_schema():
             'additionalProperties': False,
             'properties': {
                 'allowed_contexts': {
-                    'type': 'array',
-                    'items': {
+                    'oneOf': [{
+                        'type': 'array',
+                        'items': {
+                            'type': 'string',
+                        },
+                    }, {
                         'type': 'string',
-                    },
+                        'pattern': '^all$'
+                    }]
                 },
                 'context_configs': {
                     'type': 'object',
@@ -1345,11 +1406,42 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                'pod_config': {
+                'context_configs': {
                     'type': 'object',
                     'required': [],
-                    # Allow arbitrary keys since validating pod spec is hard
-                    'additionalProperties': True,
+                    'properties': {},
+                    # Properties are ssh cluster names, which are the
+                    # kubernetes context names without `ssh-` prefix.
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
+                        },
+                    },
+                },
+                **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
+            }
+        },
+        'slurm': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'allowed_clusters': {
+                    'oneOf': [{
+                        'type': 'array',
+                        'items': {
+                            'type': 'string',
+                        },
+                    }, {
+                        'type': 'string',
+                        'pattern': '^all$'
+                    }]
+                },
+                'provision_timeout': {
+                    'type': 'integer',
                 },
             }
         },
@@ -1387,11 +1479,27 @@ def get_config_schema():
                 }
             },
         },
+        'vast': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'secure_only': {
+                    'type': 'boolean',
+                },
+            }
+        },
         'nebius': {
             'type': 'object',
             'required': [],
             'properties': {
-                **_NETWORK_CONFIG_SCHEMA, 'tenant_id': {
+                **_NETWORK_CONFIG_SCHEMA, 'use_static_ip_address': {
+                    'type': 'boolean',
+                },
+                'tenant_id': {
+                    'type': 'string',
+                },
+                'domain': {
                     'type': 'string',
                 },
                 'region_configs': {
@@ -1501,7 +1609,7 @@ def get_config_schema():
         }
     }
 
-    daemon_schema = {
+    daemon_schema: Dict[str, Any] = {
         'type': 'object',
         'required': [],
         'additionalProperties': False,
@@ -1539,6 +1647,9 @@ def get_config_schema():
             'cluster_event_retention_hours': {
                 'type': 'number',
             },
+            'cluster_debug_event_retention_hours': {
+                'type': 'number',
+            },
         }
     }
 
@@ -1558,10 +1669,10 @@ def get_config_schema():
 
     allowed_workspace_cloud_names = list(constants.ALL_CLOUDS) + ['cloudflare']
     # Create pattern for not supported clouds, i.e.
-    # all clouds except gcp, kubernetes, ssh
+    # all clouds except aws, gcp, kubernetes, ssh, nebius
     not_supported_clouds = [
         cloud for cloud in allowed_workspace_cloud_names
-        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh', 'nebius']
+        if cloud.lower() not in ['aws', 'gcp', 'kubernetes', 'ssh', 'nebius']
     ]
     not_supported_cloud_regex = '|'.join(not_supported_clouds)
     workspaces_schema = {
@@ -1572,7 +1683,8 @@ def get_config_schema():
             'type': 'object',
             'additionalProperties': False,
             'patternProperties': {
-                # Pattern for non-GCP clouds - only allows 'disabled' property
+                # Pattern for clouds with no workspace-specific config -
+                # only allow 'disabled' property.
                 f'^({not_supported_cloud_regex})$': {
                     'type': 'object',
                     'additionalProperties': False,
@@ -1603,7 +1715,21 @@ def get_config_schema():
                         },
                         'disabled': {
                             'type': 'boolean'
-                        }
+                        },
+                        **_CAPABILITIES_SCHEMA,
+                    },
+                    'additionalProperties': False,
+                },
+                'aws': {
+                    'type': 'object',
+                    'properties': {
+                        'profile': {
+                            'type': 'string'
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                        **_CAPABILITIES_SCHEMA,
                     },
                     'additionalProperties': False,
                 },
@@ -1628,10 +1754,15 @@ def get_config_schema():
                     'required': [],
                     'properties': {
                         'allowed_contexts': {
-                            'type': 'array',
-                            'items': {
+                            'oneOf': [{
+                                'type': 'array',
+                                'items': {
+                                    'type': 'string',
+                                },
+                            }, {
                                 'type': 'string',
-                            },
+                                'pattern': '^all$'
+                            }]
                         },
                         'disabled': {
                             'type': 'boolean'
@@ -1647,6 +1778,9 @@ def get_config_schema():
                             'type': 'string',
                         },
                         'tenant_id': {
+                            'type': 'string',
+                        },
+                        'domain': {
                             'type': 'string',
                         },
                         'disabled': {

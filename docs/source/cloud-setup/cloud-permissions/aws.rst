@@ -59,7 +59,7 @@ Using AWS Systems Manager (SSM)
 
 `AWS Systems Manager Session Manager <https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html>`_ provides secure shell access to EC2 instances without requiring direct network access through SSH ports or bastion hosts.
 
-SkyPilot can be configured to use SSM for SSH connections by setting the ``ssh_proxy_command`` in your :ref:`config.yaml <config-yaml>` file.
+SkyPilot can be configured to use SSM for SSH connections by setting ``use_ssm`` to true in your :ref:`config.yaml <config-yaml>` file under the ``aws`` section. One use case for SSM is to enable running SkyPilot for AWS instances that do not have public IPs. By also setting ``use_internal_ips`` to true in your :ref:`config.yaml <config-yaml>` file under the ``aws`` section SkyPilot will use private IPs to connect to the instances and will have access via SSM.
 
 Prerequisites
 ~~~~~~~~~~~~~
@@ -92,15 +92,7 @@ Add the following to your ``~/.sky/config.yaml`` file:
 .. code-block:: yaml
 
     aws:
-      ssh_proxy_command:
-        us-east-1: aws ssm start-session --target "$(aws ec2 describe-instances --filter Name=ip-address,Values=%h --region us-east-1 --profile sky | jq -r '.Reservations[].Instances[]|.InstanceId')" --region us-east-1 --profile sky --document-name AWS-StartSSHSession --parameters portNumber=%p
-        us-east-2: aws ssm start-session --target "$(aws ec2 describe-instances --filter Name=ip-address,Values=%h --region us-east-2 --profile sky | jq -r '.Reservations[].Instances[]|.InstanceId')" --region us-east-2 --profile sky --document-name AWS-StartSSHSession --parameters portNumber=%p
-
-.. note::
-
-    - Replace ``sky`` with your actual AWS profile name if different.
-    - Add additional regions as needed following the same pattern.
-    - The ``jq`` command-line JSON processor must be installed on your system.
+        use_ssm: true
 
 Once configured, SkyPilot will automatically use SSM for all SSH connections to your AWS instances in the specified regions.
 
@@ -111,6 +103,10 @@ Multi-cloud access with SSO login
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 SSO login has limited functionality *across multiple clouds*. If you use multiple clouds, you can :ref:`set up a dedicated IAM user and access key <dedicated-aws-user>` so that instances launched on other clouds can use AWS resources.
+
+.. tip::
+
+    If you are running SkyPilot on an EKS cluster and need S3 access without static credentials, see :ref:`aws-eks-iam-roles` for setting up IAM roles for EKS pods.
 
 .. list-table::
    :header-rows: 1
@@ -208,6 +204,10 @@ Follow these steps to create a new AWS user:
        .. tab-item:: Simplified permissions
 
            Search for the **AdministratorAccess** policy, and check the box to add it. Click **Next** to proceed.
+
+           .. tip::
+
+            To use AWS for S3 but not for launching VMs, add **AmazonS3FullAccess** policy instead.
 
        .. tab-item:: Minimal permissions
 
@@ -613,3 +613,9 @@ Common issues
       # .bashrc / .zshrc
       # Enable AWS profile named "AWSPowerUserAccess-123456789012"
       export AWS_PROFILE='AWSPowerUserAccess-123456789012'
+
+
+.. toctree::
+   :hidden:
+
+   aws-eks-iam-roles

@@ -65,9 +65,10 @@ def _wait_until_no_pending(region: str, cluster_name_on_cloud: str) -> None:
                            f' to be ready.')
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
+    del cluster_name  # unused
     _wait_until_no_pending(region, cluster_name_on_cloud)
     running_instances = _filter_instances(region, cluster_name_on_cloud,
                                           ['RUNNING'])
@@ -137,6 +138,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 use_spot=config.node_config['use_spot'],
                 associate_public_ip_address=(
                     not config.provider_config['use_internal_ips']),
+                use_static_ip_address=config.provider_config.get(
+                    'use_static_ip_address', False),
                 filesystems=config.node_config.get('filesystems', []),
                 network_tier=config.node_config.get('network_tier'))
         except Exception as e:  # pylint: disable=broad-except
@@ -251,9 +254,10 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
+    retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
-    del cluster_name  # unused
+    del cluster_name, retry_if_missing  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(provider_config['region'],
                                   cluster_name_on_cloud, None)

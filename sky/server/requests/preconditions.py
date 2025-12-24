@@ -90,7 +90,7 @@ class Precondition(abc.ABC):
         while True:
             if self.timeout > 0 and time.time() - start_time > self.timeout:
                 # Cancel the request on timeout.
-                api_requests.set_request_failed(
+                await api_requests.set_request_failed_async(
                     self.request_id,
                     exceptions.RequestCancelled(
                         f'Request {self.request_id} precondition wait timed '
@@ -98,13 +98,15 @@ class Precondition(abc.ABC):
                 return False
 
             # Check if the request has been cancelled
-            request = api_requests.get_request(self.request_id)
+            request = await api_requests.get_request_async(self.request_id,
+                                                           fields=['status'])
             if request is None:
                 logger.error(f'Request {self.request_id} not found')
                 return False
             if request.status == api_requests.RequestStatus.CANCELLED:
                 logger.debug(f'Request {self.request_id} cancelled')
                 return False
+            del request
 
             try:
                 met, status_msg = await self.check()
@@ -112,12 +114,11 @@ class Precondition(abc.ABC):
                     return True
                 if status_msg is not None and status_msg != last_status_msg:
                     # Update the status message if it has changed.
-                    with api_requests.update_request(self.request_id) as req:
-                        assert req is not None, self.request_id
-                        req.status_msg = status_msg
+                    await api_requests.update_status_msg_async(
+                        self.request_id, status_msg)
                     last_status_msg = status_msg
             except (Exception, SystemExit, KeyboardInterrupt) as e:  # pylint: disable=broad-except
-                api_requests.set_request_failed(self.request_id, e)
+                await api_requests.set_request_failed_async(self.request_id, e)
                 logger.info(f'Request {self.request_id} failed due to '
                             f'{common_utils.format_exception(e)}')
                 return False
@@ -145,10 +146,9 @@ class ClusterStartCompletePrecondition(Precondition):
         self.cluster_name = cluster_name
 
     async def check(self) -> Tuple[bool, Optional[str]]:
-        cluster_record = global_user_state.get_cluster_from_name(
+        cluster_status = global_user_state.get_status_from_cluster_name(
             self.cluster_name)
-        if (cluster_record and
-                cluster_record['status'] is status_lib.ClusterStatus.UP):
+        if cluster_status is status_lib.ClusterStatus.UP:
             # Shortcut for started clusters, ignore cluster not found
             # since the cluster record might not yet be created by the
             # launch task.
@@ -161,13 +161,17 @@ class ClusterStartCompletePrecondition(Precondition):
         # We unify these situations into a single state: the process of starting
         # the cluster is done (either normally or abnormally) but cluster is not
         # in UP status.
-        requests = api_requests.get_request_tasks(
-            status=[
-                api_requests.RequestStatus.RUNNING,
-                api_requests.RequestStatus.PENDING
-            ],
-            include_request_names=['sky.launch', 'sky.start'],
-            cluster_names=[self.cluster_name])
+        requests = await api_requests.get_request_tasks_async(
+            req_filter=api_requests.RequestTaskFilter(
+                status=[
+                    api_requests.RequestStatus.PENDING,
+                    api_requests.RequestStatus.RUNNING
+                ],
+                include_request_names=['sky.launch', 'sky.start'],
+                cluster_names=[self.cluster_name],
+                # Only get the request ID to avoid fetching the whole request.
+                # We're only interested in the count, not the whole request.
+                fields=['request_id']))
         if len(requests) == 0:
             # No running or pending tasks, the start process is done.
             return True, None

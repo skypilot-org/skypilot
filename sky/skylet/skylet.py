@@ -1,5 +1,6 @@
 """skylet: a daemon running on the head node of a cluster."""
 
+import argparse
 import concurrent.futures
 import os
 import time
@@ -9,6 +10,9 @@ import grpc
 import sky
 from sky import sky_logging
 from sky.schemas.generated import autostopv1_pb2_grpc
+from sky.schemas.generated import jobsv1_pb2_grpc
+from sky.schemas.generated import managed_jobsv1_pb2_grpc
+from sky.schemas.generated import servev1_pb2_grpc
 from sky.skylet import constants
 from sky.skylet import events
 from sky.skylet import services
@@ -44,11 +48,21 @@ def start_grpc_server(port: int = constants.SKYLET_GRPC_PORT) -> grpc.Server:
     # putting it here for visibility.
     # TODO(kevin): Determine the optimal max number of threads.
     max_workers = min(32, (os.cpu_count() or 1) + 4)
+    # There's only a single skylet process per cluster, so disable
+    # SO_REUSEPORT to raise an error if the port is already in use.
+    options = (('grpc.so_reuseport', 0),)
     server = grpc.server(
-        concurrent.futures.ThreadPoolExecutor(max_workers=max_workers))
+        concurrent.futures.ThreadPoolExecutor(max_workers=max_workers),
+        options=options)
 
     autostopv1_pb2_grpc.add_AutostopServiceServicer_to_server(
         services.AutostopServiceImpl(), server)
+    jobsv1_pb2_grpc.add_JobsServiceServicer_to_server(
+        services.JobsServiceImpl(), server)
+    servev1_pb2_grpc.add_ServeServiceServicer_to_server(
+        services.ServeServiceImpl(), server)
+    managed_jobsv1_pb2_grpc.add_ManagedJobsServiceServicer_to_server(
+        services.ManagedJobsServiceImpl(), server)
 
     listen_addr = f'127.0.0.1:{port}'
     server.add_insecure_port(listen_addr)
@@ -62,6 +76,9 @@ def start_grpc_server(port: int = constants.SKYLET_GRPC_PORT) -> grpc.Server:
 def run_event_loop():
     """Run the existing event loop."""
 
+    for event in EVENTS:
+        event.start()
+
     while True:
         time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
         for event in EVENTS:
@@ -69,7 +86,15 @@ def run_event_loop():
 
 
 def main():
-    grpc_server = start_grpc_server()
+    parser = argparse.ArgumentParser(description='Start skylet daemon')
+    parser.add_argument('--port',
+                        type=int,
+                        default=constants.SKYLET_GRPC_PORT,
+                        help=f'gRPC port to listen on (default: '
+                        f'{constants.SKYLET_GRPC_PORT})')
+    args = parser.parse_args()
+
+    grpc_server = start_grpc_server(port=args.port)
     try:
         run_event_loop()
     except KeyboardInterrupt:

@@ -73,6 +73,8 @@ Below is the configuration syntax and some example values.  See details under ea
 
   :ref:`volumes <yaml-spec-new-volumes>`:
     /mnt/data: volume-name
+    /mnt/cache:
+      size: 100Gi
 
   :ref:`file_mounts <yaml-spec-file-mounts>`:
     # Sync a local directory to a remote directory
@@ -82,26 +84,6 @@ Below is the configuration syntax and some example values.  See details under ea
       source: s3://existing-bucket
       mode: MOUNT
     /datasets-s3: s3://my-awesome-dataset
-    # Mount an existing volume to a remote directory,
-    # and sync the local directory to the volume.
-    /mnt/path1:
-      name: volume-name1
-      source: /local/path1
-      store: volume
-      persistent: True
-    # Create a new network volume with name "volume-name2"
-    # and mount it to a remote directory
-    /mnt/path2:
-      name: volume-name2
-      store: volume
-      config:
-        disk_size: 10
-        disk_tier: high
-    # Create a new instance volume and mount it to a remote directory
-    /mnt/path3:
-      store: volume
-      config:
-        storage_type: instance
 
   :ref:`setup <yaml-spec-setup>`: |
     echo "Begin setup."
@@ -597,8 +579,9 @@ Could be one of ``'standard'`` or ``'best'`` (default: ``'standard'``).
 If ``'best'`` is specified, use the best network tier available on the specified infra. This currently supports:
 
 - ``infra: gcp``: Enable GPUDirect-TCPX for high-performance node-to-node GPU communication
-- ``infra: nebius``: Enable Infiniband for high-performance GPU communication across Nebius VMs
-- ``infra: k8s/my-nebius-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes
+- ``infra: nebius``: Enable Infiniband for high-performance GPU communication across Nebius VMs. Currently only supported for H100:8 and H200:8 nodes.
+- ``infra: k8s/my-coreweave-cluster``: Enable InfiniBand for high-performance GPU communication across pods on CoreWeave CKS clusters.
+- ``infra: k8s/my-nebius-cluster``: Enable InfiniBand for high-performance GPU communication across pods on Nebius managed Kubernetes.
 - ``infra: k8s/my-gke-cluster``: Enable GPUDirect-TCPX/TCPXO/RDMA for high-performance GPU communication across pods on Google Kubernetes Engine (GKE).
 
 .. code-block:: yaml
@@ -893,7 +876,7 @@ Example:
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 The recovery strategy for managed jobs (optional).
 
-In effect for managed jobs. Possible values are ``FAILOVER`` and ``EAGER_NEXT_REGION``.
+We can specify the strategy for which region to recover the job to when it fails. Possible values are ``FAILOVER`` and ``EAGER_NEXT_REGION``.
 
 If ``FAILOVER`` is specified, the job will be restarted in the same region if the node fails, and go to the next region if no available resources are found in the same region.
 
@@ -916,7 +899,40 @@ OR
   resources:
     job_recovery:
       strategy: EAGER_NEXT_REGION
+
+We can also specify the maximum number of times to restart the job on user code errors (non-zero exit codes).
+
+.. code-block:: yaml
+
+  resources:
+    job_recovery:
       max_restarts_on_errors: 3
+
+We can also specify the exit codes that should always trigger recovery, regardless of the :code:`max_restarts_on_errors` limit. This is useful when certain exit codes indicate transient errors that should always be retried (e.g., NCCL timeouts, specific GPU driver issues).
+
+We can specify multiple exit codes:
+
+.. code-block:: yaml  
+
+  resources:
+    job_recovery:
+      # Always recover on these exit codes
+      recover_on_exit_codes: [33, 34]
+
+Or a single exit code:
+
+.. code-block:: yaml
+
+  resources:
+    job_recovery:
+      # Always recover on these exit codes
+      recover_on_exit_codes: 33
+
+Available fields:
+
+- :code:`strategy`: The recovery strategy to use (:code:`FAILOVER` or :code:`EAGER_NEXT_REGION`)
+- :code:`max_restarts_on_errors`: Maximum number of times to restart the job on user code errors (non-zero exit codes)
+- :code:`recover_on_exit_codes`: Exit code(s) (0-255) that should always trigger recovery. Can be a single integer (e.g., :code:`33`) or a list (e.g., :code:`[33, 34]`). Restarts triggered by these exit codes do not count towards the :code:`max_restarts_on_errors` limit. Useful for specific transient errors like NCCL timeouts.
 
 
 .. _yaml-spec-envs:
@@ -989,14 +1005,18 @@ Example:
 ``volumes``
 ~~~~~~~~~~~
 
-SkyPilot supports managing volumes resource for tasks or jobs on Kubernetes clusters. Refer to :ref:`volumes on Kubernetes <volumes-on-kubernetes>` for more details.
+SkyPilot supports managing persistent and ephemeral volumes for tasks or jobs on Kubernetes clusters. Refer to :ref:`volumes on Kubernetes <volumes-on-kubernetes>` for more details.
 
 Example:
 
 .. code-block:: yaml
 
   volumes:
+    # Persistent volume
     /mnt/data: volume-name
+    # Ephemeral volume
+    /mnt/cache:
+      size: 100Gi
 
 
 .. _yaml-spec-file-mounts:
@@ -1055,105 +1075,6 @@ OR
       source: ~/local_models
       store: gcs
       mode: MOUNT
-
-
-.. _yaml-spec-volumes:
-
-Volumes
-+++++++
-
-SkyPilot also supports mounting network volumes (e.g. GCP persistent disks, etc.) or instance volumes (e.g. local SSD) to the instances in the cluster.
-
-To mount an existing volume:
-
-* Ensure the volume exists
-* Specify the volume name using ``name: volume-name``
-* You must specify the ``region`` or ``zone`` in the ``resources`` section to match the volume's location
-
-To create and mount a new network volume:
-
-* Specify the volume name using ``name: volume-name``
-* Specify the desired volume configuration (disk_size, disk_tier, etc.)
-* SkyPilot will automatically create and mount the volume to the specified path
-
-To create and mount a new instance volume:
-
-* Omit the ``name`` field, which will be ignored even if specified
-* Specify the desired volume configuration (storage_type, etc.)
-* SkyPilot will automatically create and mount the volume to the specified path
-
-.. code-block:: yaml
-
-  file_mounts:
-    # Path to mount the volume on the instance
-    /mnt/path1:
-      # Name of the volume to mount
-      # It's required for the network volume,
-      # and will be ignored for the instance volume.
-      # If the volume does not exist in the specified region,
-      # it will be created in the region.
-      # optional
-      name: volume-name
-      # Source local path
-      # Do not set it if no need to sync data from local
-      # to volume, if specified, the data will be synced
-      # to the /mnt/path1/data directory.
-      # optional
-      source: /local/path1
-      # For volume mount
-      store: volume
-      # If set to False, the volume will be deleted after cluster is downed.
-      # optional, default: False
-      persistent: True
-      config:
-        # Size of the volume in GB
-        disk_size: 100
-        # Type of the volume, either 'network' or 'instance', optional, default: network
-        storage_type: network
-        # Tier of the volume, same as `resources.disk_tier`, optional, default: best
-        disk_tier: best
-        # Attach mode, either 'read_write' or 'read_only', optional, default: read_write
-        attach_mode: read_write
-
-- Mount with existing volume:
-
-.. code-block:: yaml
-
-  file_mounts:
-    /mnt/path1:
-      name: volume-name
-      store: volume
-      persistent: true
-
-- Mount with a new network volume:
-
-.. code-block:: yaml
-
-  file_mounts:
-    /mnt/path2:
-      name: new-volume
-      store: volume
-      config:
-        disk_size: 100
-
-- Mount with a new instance volume:
-
-.. code-block:: yaml
-
-  file_mounts:
-    /mnt/path3:
-      store: volume
-      config:
-        storage_type: instance
-
-.. note::
-
-  * If :ref:`GCP TPU <tpu>` is used, creating and mounting a new volume is not supported, please use the existing volume instead.
-  * If :ref:`GCP MIG <config-yaml-gcp-managed-instance-group>` is used:
-
-    * For the existing volume, the `attach_mode` needs to be `read_only`.
-    * For the new volume, the `name` field is ignored.
-  * When :ref:`GCP GPUDirect TCPX <config-yaml-gcp-enable-gpu-direct>` is enabled, the mount path is suggested to be under the `/mnt/disks` directory (e.g., `/mnt/disks/data`). This is because Container-Optimized OS (COS) used for the instances with GPUDirect TCPX enabled has some limitations for the file system. Refer to `GCP documentation <https://cloud.google.com/container-optimized-os/docs/concepts/disks-and-filesystem#working_with_the_file_system>`_ for more details about the filesystem properties of COS.
 
 .. _yaml-spec-setup:
 

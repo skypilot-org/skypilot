@@ -24,6 +24,15 @@ app
       })
     );
 
+    // Proxy Grafana requests
+    server.use(
+      '/grafana',
+      createProxyMiddleware({
+        target: `${process.env.SKYPILOT_API_SERVER_ENDPOINT || 'http://localhost:46580'}/grafana`,
+        changeOrigin: true,
+      })
+    );
+
     server.all('*', (req, res) => {
       return handle(req, res);
     });

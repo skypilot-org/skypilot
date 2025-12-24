@@ -9,7 +9,7 @@ provisioning and distributed execution on many nodes.
 For example, here is a simple example to train a GPT-like model (inspired by Karpathy's `minGPT <https://github.com/karpathy/minGPT>`_) across 2 nodes with Distributed Data Parallel (DDP) in PyTorch.
 
 .. code-block:: yaml
-  :emphasize-lines: 6,19,23-24,26
+  :emphasize-lines: 6,22,26-28
 
   name: minGPT-ddp
 
@@ -22,10 +22,9 @@ For example, here is a simple example to train a GPT-like model (inspired by Kar
       git clone --depth 1 https://github.com/pytorch/examples || true
       cd examples
       git filter-branch --prune-empty --subdirectory-filter distributed/minGPT-ddp
-      # SkyPilot's default image on AWS/GCP has CUDA 11.6 (Azure 11.5).
       uv venv --python 3.10
       source .venv/bin/activate
-      uv pip install -r requirements.txt "numpy<2" "torch==1.12.1+cu113" --extra-index-url https://download.pytorch.org/whl/cu113
+      uv pip install -r requirements.txt "numpy<2" "torch==2.7.1+cu118" --extra-index-url https://download.pytorch.org/whl/cu118
 
   run: |
       cd examples
@@ -39,8 +38,8 @@ For example, here is a simple example to train a GPT-like model (inspired by Kar
       torchrun \
       --nnodes=$SKYPILOT_NUM_NODES \
       --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
-      --master_addr=$MASTER_ADDR \
       --node_rank=${SKYPILOT_NODE_RANK} \
+      --master_addr=$MASTER_ADDR \
       --master_port=8008 \
       main.py
 
@@ -146,7 +145,18 @@ SSH access is only available for :ref:`clusters <dev-cluster>` (designed for int
 
 Executing a distributed Ray program
 ------------------------------------
-To execute a distributed Ray program on many nodes, you can download the `training script <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/train.py>`_ and launch the `job yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/ray_train.yaml>`_:
+
+**Best practices for Ray on SkyPilot:**
+
+- **Do:** Use SkyPilot's ``~/sky_templates/ray/start_cluster`` script to automatically set up your Ray cluster
+- **Do:** Use ``ray.init()`` or ``ray.init(address="localhost:6379")`` for explicit connection
+- **Avoid:** ``ray.init(address="auto")`` - While it typically connects to your user cluster when available, the behavior can be unpredictable
+- **Never:** Call ``ray stop`` - It may interfere with SkyPilot operations
+- **Do:** Instead, to stop your Ray cluster, use ``~/sky_templates/ray/stop_cluster`` or kill the Ray processes directly
+
+See :doc:`Ray training example </examples/training/ray>` for more details.
+
+To execute a distributed Ray program on many nodes, download the `training script <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/train.py>`_ and launch the `job yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/ray_train.yaml>`_:
 
 .. code-block:: console
 
@@ -159,6 +169,7 @@ To execute a distributed Ray program on many nodes, you can download the `traini
   $ sky jobs launch ray_train.yaml
 
 .. code-block:: yaml
+   :emphasize-lines: 24
 
     resources:
       accelerators: L4:2
@@ -169,31 +180,32 @@ To execute a distributed Ray program on many nodes, you can download the `traini
     workdir: .
 
     setup: |
-      conda activate ray
-      if [ $? -ne 0 ]; then
-        conda create -n ray python=3.10 -y
-        conda activate ray
-      fi
+      uv venv --python 3.10 --seed
+      source .venv/bin/activate
 
-      pip install "ray[train]"
-      pip install tqdm
-      pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+      uv pip install "ray[train]" "click<8.2.0"
+      uv pip install tqdm
+      uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
     run: |
       sudo chmod 777 -R /var/tmp
-      HEAD_IP=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+      source .venv/bin/activate
+
+      # This script is only available on skypilot-nightly>=1.0.0.dev20251114
+      # If you are using an older version, you can copy and paste the script from:
+      # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster
+      ~/sky_templates/ray/start_cluster
+
+      num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
       if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
-        ps aux | grep ray | grep 6379 &> /dev/null || ray start --head  --disable-usage-stats --port 6379
-        sleep 5
-        python train.py --num-workers $SKYPILOT_NUM_NODES
-      else
-        sleep 5
-        ps aux | grep ray | grep 6379 &> /dev/null || ray start --address $HEAD_IP:6379 --disable-usage-stats
-        # Add sleep to after `ray start` to give ray enough time to daemonize
-        sleep 5
+        python train.py --num-workers $num_nodes
       fi
 
-.. warning::
+SkyPilot provides templates for common workloads. The following scripts are available for Ray:
 
-  When using Ray, avoid calling ``ray stop`` as that will also cause the SkyPilot runtime to be stopped.
+- ``~/sky_templates/ray/start_cluster``: starts a Ray cluster on your SkyPilot cluster
+- ``~/sky_templates/ray/stop_cluster``: shuts down the Ray cluster; prefer this to calling ``ray stop``
 
+.. note::
+
+   **Important**: Always start your own Ray cluster for user workloads. SkyPilot uses Ray internally on port 6380 for cluster management. The example above starts a separate Ray cluster on port 6379.

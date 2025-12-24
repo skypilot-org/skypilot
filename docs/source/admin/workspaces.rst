@@ -36,11 +36,15 @@ The above is achieved by configuring the following section in the config file:
        # Use both AWS and GCP.
        gcp:
          project_id: project-id-for-team-a
+       aws:
+         profile: team-a-profile
 
      team-b:
        # Use GCP only with a different project ID.
        gcp:
          project_id: project-id-for-team-b
+         capabilities:
+           - storage
        aws:
          disabled: true
 
@@ -80,11 +84,22 @@ The above is achieved by configuring the following section in the config file:
            gcp:
              disabled: false
              project_id: GCP project ID
+             capabilities:
+               - compute
+               - storage
+
+           aws:
+             disabled: false
+             profile: aws-profile-name
+             capabilities:
+               - compute
+               - storage
 
            nebius:
              disabled: false
              tenant_id: Nebius tenant ID (tenant-xxxxxxxx)
              credentials_file_path: ~/.nebius/credentials-file-name.json
+             domain: api.nebius.cloud:443
 
 To apply the configuration, follow the following steps:
 

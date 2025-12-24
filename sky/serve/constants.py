@@ -65,7 +65,8 @@ AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 # TODO(tian): We might need to be careful that service logs can take a lot of
 # disk space. Maybe we could use a larger disk size, migrate to cloud storage or
 # do some log rotation.
-CONTROLLER_RESOURCES = {'cpus': '4+', 'disk_size': 200}
+# Set default minimal memory to 8GB to allow at least one service to run.
+CONTROLLER_RESOURCES = {'cpus': '4+', 'memory': '8+', 'disk_size': 200}
 # Autostop config for the jobs controller. These are the default values for
 # serve.controller.autostop in ~/.sky/config.yaml.
 CONTROLLER_AUTOSTOP = {
@@ -97,7 +98,7 @@ REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
 # Changelog:
 # v1.0 - Introduce rolling update.
 # v2.0 - Added template-replica feature.
-# v3.0 - Added cluster pool.
+# v3.0 - Added pool.
 # v4.0 - Added pool argument to wait_service_registration.
 # v5.0 - Added pool argument to stream_serve_process_logs & stream_replica_logs.
 SERVE_VERSION = 5
@@ -106,7 +107,7 @@ TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
     'The version of service is outdated and does not support manually '
     'terminating replicas. Please terminate the service and spin up again.')
 
-# Dummy run command for cluster pool.
+# Dummy run command for pool.
 POOL_DUMMY_RUN_COMMAND = 'echo "setup done"'
 
 # Error message for max number of services reached.

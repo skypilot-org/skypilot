@@ -6,7 +6,7 @@ import { apiClient } from '@/data/connectors/client';
 import { ENDPOINT } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
 
-const DEFAULT_TAIL_LINES = 10000;
+const DEFAULT_TAIL_LINES = 5000;
 
 /**
  * Truncates a string in the middle, preserving parts from beginning and end.
@@ -52,6 +52,9 @@ export async function getClusters({ clusterNames = null } = {}) {
     const clusters = await apiClient.fetch('/status', {
       cluster_names: clusterNames,
       all_users: true,
+      include_credentials: false,
+      include_handle: false,
+      summary_response: clusterNames == null,
     });
 
     const clusterData = clusters.map((cluster) => {
@@ -93,6 +96,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         autostop: cluster.autostop,
         last_event: cluster.last_event,
         to_down: cluster.to_down,
+        cluster_name_on_cloud: cluster.cluster_name_on_cloud,
         jobs: [],
         command: cluster.last_creation_command || cluster.last_use,
         task_yaml: cluster.last_creation_yaml || '{}',
@@ -107,15 +111,23 @@ export async function getClusters({ clusterNames = null } = {}) {
     return clusterData;
   } catch (error) {
     console.error('Error fetching clusters:', error);
-    return [];
+    throw error;
   }
 }
 
-export async function getClusterHistory() {
+export async function getClusterHistory(clusterHash = null, days = 30) {
   try {
-    const history = await apiClient.fetch('/cost_report', {
-      days: 30,
-    });
+    const requestBody = {
+      days: days,
+      dashboard_summary_response: true,
+    };
+
+    // If a specific cluster hash is provided, include it in the request
+    if (clusterHash) {
+      requestBody.cluster_hashes = [clusterHash];
+    }
+
+    const history = await apiClient.fetch('/cost_report', requestBody);
 
     console.log('Raw cluster history data:', history); // Debug log
 
@@ -155,6 +167,7 @@ export async function getClusterHistory() {
         autostop: -1,
         last_event: cluster.last_event,
         to_down: false,
+        cluster_name_on_cloud: null,
         usage_intervals: cluster.usage_intervals,
         command: cluster.last_creation_command || '',
         task_yaml: cluster.last_creation_yaml || '{}',
@@ -173,7 +186,7 @@ export async function getClusterHistory() {
     return historyData;
   } catch (error) {
     console.error('Error fetching cluster history:', error);
-    return [];
+    throw error;
   }
 }
 
@@ -182,6 +195,7 @@ export async function streamClusterJobLogs({
   jobId,
   onNewLog,
   workspace,
+  signal,
 }) {
   try {
     await apiClient.stream(
@@ -195,9 +209,14 @@ export async function streamClusterJobLogs({
           active_workspace: workspace || 'default',
         },
       },
-      onNewLog
+      onNewLog,
+      { signal }
     );
   } catch (error) {
+    // Abort is an expected control path (e.g., user refresh/navigation).
+    if (error?.name === 'AbortError') {
+      return;
+    }
     console.error('Error in streamClusterJobLogs:', error);
     showToast(`Error in streamClusterJobLogs: ${error.message}`, 'error');
   }
@@ -218,7 +237,7 @@ export async function downloadJobLogs({
     // Step 1: schedule server-side download; result is a mapping job_id -> folder path on API server
     const mapping = await apiClient.fetch('/download_logs', {
       cluster_name: clusterName,
-      job_ids: jobIds,
+      job_ids: jobIds ? jobIds.map(String) : null, // Convert to strings as expected by server
       override_skypilot_config: {
         active_workspace: workspace || 'default',
       },
@@ -304,7 +323,7 @@ export async function getClusterJobs({ clusterName, workspace }) {
     return jobData;
   } catch (error) {
     console.error('Error fetching cluster jobs:', error);
-    return [];
+    throw error;
   }
 }
 
@@ -326,8 +345,13 @@ export function useClusterDetails({ cluster, job = null }) {
         const data = await dashboardCache.get(getClusters, [
           { clusterNames: [cluster] },
         ]);
-        setClusterData(data[0]); // Assuming getClusters returns an array
-        return data[0]; // Return the data for use in fetchClusterJobData
+        if (data.length > 0) {
+          setClusterData(data[0]); // Assuming getClusters returns an array
+          return data[0]; // Return the data for use in fetchClusterJobData
+        } else {
+          console.error('No cluster data found for cluster:', cluster);
+          return null;
+        }
       } catch (error) {
         console.error('Error fetching cluster data:', error);
         return null;
