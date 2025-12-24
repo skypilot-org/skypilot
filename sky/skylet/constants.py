@@ -475,7 +475,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('gcp', 'enable_gvnic'),
     ('gcp', 'enable_gpu_direct'),
     ('gcp', 'placement_policy'),
-    ('vast', 'secure_only'),
+    ('vast', 'datacenter_only'),
     ('active_workspace',),
 ]
 # When overriding the SkyPilot configs on the API server with the client one,
