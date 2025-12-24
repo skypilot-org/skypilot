@@ -5246,6 +5246,7 @@ def jobs_cancel(
     is_flag=True,
     default=None,
     required=False,
+    hidden=True,
     help=('Show the system logs of the job. Can be used as --system (flag)'
           ' or --system <UUID>. Should rarely be used as the controller'
           'processes manage multiple jobs.'))
@@ -5308,6 +5309,11 @@ def jobs_logs(name: Optional[str], job_id: Optional[Union[str, int]],
                                                 follow=follow,
                                                 controller=controller,
                                                 refresh=refresh)
+            if system is True:
+                logger.info(f'{colorama.Fore.YELLOW}'
+                            'To stream all controller logs, run: '
+                            f'{colorama.Style.BRIGHT}sky jobs logs --system'
+                            f'{colorama.Style.RESET_ALL}')
             sys.exit(returncode)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
