@@ -4464,23 +4464,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # if job_name and job_id should not both be specified
         assert job_name is None or job_id is None, (job_name, job_id)
 
-        if system is not None:
-            if system is True:
-                code = managed_jobs.ManagedJobCodeGen.get_all_active_systems()
-                returncode, job_ids_payload, stderr = self.run_on_head(
-                    handle,
-                    code,
-                    stream_logs=False,
-                    require_outputs=True,
-                    separate_stderr=True)
-                subprocess_utils.handle_returncode(returncode, code,
-                                                   'Failed to sync down logs.',
-                                                   stderr)
-                job_ids = message_utils.decode_payload(job_ids_payload)
-
-                logger.info(job_ids)
-            else:
-                job_id = system  # type: ignore
+        if system is True:
+            code = managed_jobs.ManagedJobCodeGen.get_all_active_systems()
+            returncode, job_ids_payload, stderr = self.run_on_head(
+                handle,
+                code,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
+            subprocess_utils.handle_returncode(returncode, code,
+                                               'Failed to sync down logs.',
+                                               stderr)
+            system = message_utils.decode_payload(job_ids_payload)
+            system = ['controller_' + s for s in system]  # type: ignore
+        elif system is not None:
+            system = [system]  # type: ignore
 
         if job_id is None and system is None:
             # get the job_id
@@ -4578,13 +4576,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 run_timestamps = message_utils.decode_payload(
                     run_timestamps_payload)
         elif system is not None:
-            if job_id is not None:
-                run_timestamps = {job_id: str(job_id)}
-            else:
-                run_timestamps = {}
-                for job_id in job_ids:
-                    run_timestamps['controller_' +
-                                   str(job_id)] = job_id  # type: ignore
+            run_timestamps = {}
+            for job_id in system:  # type: ignore
+                run_timestamps[job_id] = job_id  # type: ignore
         else:
             assert False, 'Should not reach here'
 
@@ -4628,7 +4622,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 else:
                     raise
 
-        if system is True:
+        if system is not None:
             for job_id in run_timestamps.keys():
                 remote_log = os.path.join(managed_jobs.JOBS_CONTROLLER_LOGS_DIR,
                                           f'{job_id}.log')
