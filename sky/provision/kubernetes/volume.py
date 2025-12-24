@@ -85,7 +85,7 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
             context).delete_namespaced_persistent_volume_claim(
                 name=pvc_name,
                 namespace=namespace,
-                _request_timeout=config_lib.DELETION_TIMEOUT),
+                _request_timeout=kubernetes.API_TIMEOUT),
         resource_type='pvc',
         resource_name=pvc_name)
     logger.info(f'Deleted PVC {pvc_name} in namespace {namespace}')
