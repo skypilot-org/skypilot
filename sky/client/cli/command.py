@@ -4705,6 +4705,13 @@ def volumes_ls(verbose: bool):
               is_flag=True,
               required=False,
               help='Delete all volumes.')
+@click.option('--purge',
+              '-p',
+              default=False,
+              is_flag=True,
+              required=False,
+              help=('Forcibly delete the volume from the volumes table even '
+                    'if the deletion API fails.'))
 @click.option('--yes',
               '-y',
               default=False,
@@ -4713,7 +4720,12 @@ def volumes_ls(verbose: bool):
               help='Skip confirmation prompt.')
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
-def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  # pylint: disable=redefined-builtin
+def volumes_delete(
+        names: List[str],
+        all: bool,  # pylint: disable=redefined-builtin
+        purge: bool,
+        yes: bool,
+        async_call: bool):
     """Delete volumes.
 
     Examples:
@@ -4728,6 +4740,9 @@ def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
         \b
         # Delete all volumes.
         sky volumes delete -a
+        \b
+        # Forcibly delete a volume.
+        sky volumes delete pvc1 -p
     """
     if sum([bool(names), all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
@@ -4754,8 +4769,8 @@ def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
                 show_default=True)
 
         try:
-            _async_call_or_wait(volumes_sdk.delete(names), async_call,
-                                'sky.volumes.delete')
+            _async_call_or_wait(volumes_sdk.delete(names, purge=purge),
+                                async_call, 'sky.volumes.delete')
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'{colorama.Fore.RED}Error deleting volumes {names}: '
                          f'{str(e)}{colorama.Style.RESET_ALL}')
