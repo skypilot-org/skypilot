@@ -236,6 +236,7 @@ def _get_cluster_records_and_set_ssh_config(
 
         cluster_utils.SSHConfigHelper.add_cluster(
             handle.cluster_name,
+            handle.cluster_name_on_cloud,
             ips,
             credentials,
             handle.cached_external_ssh_ports,

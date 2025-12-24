@@ -46,10 +46,11 @@ class SSHConfigHelper(object):
     ssh_cluster_key_path = constants.SKY_USER_FILE_PATH + '/ssh-keys/{}.key'
 
     @classmethod
-    def _get_generated_config(cls, autogen_comment: str, cluster_name: str,
-                              host_name: str, ip: str, username: str,
-                              ssh_key_path: str, proxy_command: Optional[str],
-                              port: int, docker_proxy_command: Optional[str]):
+    def _get_generated_config(cls, autogen_comment: str,
+                              cluster_name_on_cloud: str, host_name: str,
+                              ip: str, username: str, ssh_key_path: str,
+                              proxy_command: Optional[str], port: int,
+                              docker_proxy_command: Optional[str]):
         if proxy_command is not None:
             # Already checked in resources
             assert docker_proxy_command is None, (
@@ -79,7 +80,7 @@ class SSHConfigHelper(object):
               UserKnownHostsFile=/dev/null
               GlobalKnownHostsFile=/dev/null
               Port {port}
-              SetEnv {constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}={cluster_name}
+              SetEnv {constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}={cluster_name_on_cloud}
               {proxy}
             """.rstrip())
         codegen = codegen + '\n'
@@ -112,6 +113,7 @@ class SSHConfigHelper(object):
     def add_cluster(
         cls,
         cluster_name: str,
+        cluster_name_on_cloud: str,
         ips: List[str],
         auth_config: Dict[str, str],
         ports: List[int],
@@ -136,6 +138,7 @@ class SSHConfigHelper(object):
             ports: List of port numbers for SSH corresponding to ips
             docker_user: If not None, use this user to ssh into the docker
             ssh_user: Override the ssh_user in auth_config
+            cluster_name_on_cloud: The cluster name as it appears in the cloud.
         """
         if ssh_user is None:
             username = auth_config['ssh_user']
@@ -233,8 +236,8 @@ class SSHConfigHelper(object):
                 node_proxy_command = node_proxy_command.replace('%w', str(i))
             # TODO(romilb): Update port number when k8s supports multinode
             codegen += cls._get_generated_config(
-                sky_autogen_comment, cluster_name, node_name, ip, username,
-                key_path_for_config, node_proxy_command, port,
+                sky_autogen_comment, cluster_name_on_cloud, node_name, ip,
+                username, key_path_for_config, node_proxy_command, port,
                 docker_proxy_command) + '\n'
 
         cluster_config_path = os.path.expanduser(

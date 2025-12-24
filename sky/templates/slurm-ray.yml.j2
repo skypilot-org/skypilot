@@ -79,17 +79,19 @@ setup_commands:
     skypilot:ssh_public_key_content
     SKYPILOT_SSH_KEY_EOF
     chmod 600 ~{{ssh_user}}/.ssh/authorized_keys
-    grep -q "{{slurm_cluster_name_env_var}}" ~{{ssh_user}}/.bashrc 2>/dev/null || cat >> ~{{ssh_user}}/.bashrc <<'SKYPILOT_BASHRC'
 
+    mkdir -p ~{{ssh_user}}/.sky
+    cat > ~{{ssh_user}}/.sky_ssh_rc <<'SKYPILOT_SSH_RC'
     # Added by SkyPilot: override HOME for Slurm interactive sessions
     if [ -n "${{slurm_cluster_name_env_var}}" ]; then
-        CLUSTER_DIR=$(ls -d ~/.sky_clusters/${{slurm_cluster_name_env_var}}-* 2>/dev/null | head -n 1)
-        if [ -n "$CLUSTER_DIR" ]; then
+        CLUSTER_DIR=~/.sky_clusters/${{slurm_cluster_name_env_var}}
+        if [ -d "$CLUSTER_DIR" ]; then
             cd "$CLUSTER_DIR"
             export HOME=$(pwd)
         fi
     fi
-    SKYPILOT_BASHRC
+    SKYPILOT_SSH_RC
+    grep -q "source ~/.sky_ssh_rc" ~{{ssh_user}}/.bashrc 2>/dev/null || echo "source ~/.sky_ssh_rc" >> ~{{ssh_user}}/.bashrc
     {{ setup_sky_dirs_commands }}
     {{ conda_installation_commands }}
     {{ skypilot_wheel_installation_commands }}
