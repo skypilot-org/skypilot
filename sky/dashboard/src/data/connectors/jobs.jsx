@@ -745,10 +745,9 @@ export async function downloadManagedJobLogs({
     }
 
     // Step 2: request the zip and trigger browser download
-    const resp = await apiClient.fetchImmediate(
-      '/download?relative=items',
-      { folder_paths: folderPaths }
-    );
+    const resp = await apiClient.fetchImmediate('/download?relative=items', {
+      folder_paths: folderPaths,
+    });
     if (!resp.ok) {
       const text = await resp.text();
       throw new Error(`Download failed: ${resp.status} ${text}`);
