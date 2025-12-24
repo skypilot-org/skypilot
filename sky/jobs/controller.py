@@ -11,7 +11,7 @@ import threading
 import time
 import traceback
 import typing
-from typing import Dict, Optional, Set
+from typing import Dict, List, Optional, Set
 
 import dotenv
 
@@ -44,7 +44,7 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
-from sky.utils.plugin_extensions import ExternalClusterFailures
+from sky.utils.plugin_extensions import ExternalClusterFailure
 from sky.utils.plugin_extensions import ExternalFailureSource
 
 if typing.TYPE_CHECKING:
@@ -594,7 +594,7 @@ class JobController:
                 cluster_name,
                 force_refresh_statuses=set(status_lib.ClusterStatus))
 
-            external_failures = ExternalClusterFailures()
+            external_failures: Optional[List[ExternalClusterFailure]] = None
             if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster is (partially) preempted or failed. It can be
                 # down, INIT or STOPPED, based on the interruption behavior of
@@ -610,7 +610,7 @@ class JobController:
                 if cluster_failures:
                     logger.info(
                         f'Detected cluster failures: {cluster_failures}')
-                    external_failures = (ExternalClusterFailures.
+                    external_failures = (ExternalClusterFailure.
                                          from_failure_list(cluster_failures))
             else:
                 if job_status is not None and not job_status.is_terminal():
@@ -765,8 +765,7 @@ class JobController:
                 task_id=task_id,
                 force_transit_to_recovering=force_transit_to_recovering,
                 callback_func=callback_func,
-                code=external_failures.code,
-                reason=external_failures.reason,
+                external_failures=external_failures,
             )
 
             recovered_time = await self._strategy_executor.recover()

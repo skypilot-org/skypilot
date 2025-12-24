@@ -32,34 +32,33 @@ logger = sky_logging.init_logger(__name__)
 
 
 @dataclasses.dataclass
-class ExternalClusterFailures:
-    """Represents a cluster failure from an external source (e.g., GPU Healer).
+class ExternalClusterFailure:
+    """Represents a single cluster failure from an external source.
 
     Attributes:
         code: Machine-readable failure code (e.g. 'GPU_HARDWARE_FAILURE_XID_79')
         reason: Human-readable description of the failure.
     """
-    code: Optional[str] = None
-    reason: Optional[str] = None
+    code: str
+    reason: str
 
     @classmethod
     def from_failure_list(
-            cls, failures: List[Dict[str, Any]]) -> 'ExternalClusterFailures':
-        """Create from a list of failure dicts returned by
-        ExternalFailureSource.
+            cls, failures: List[Dict[str,
+                                     Any]]) -> List['ExternalClusterFailure']:
+        """Create a list of ExternalClusterFailure from failure dicts.
 
         Args:
             failures: List of dicts with 'failure_mode' and 'failure_reason'
-            keys.
+                keys (as returned by ExternalFailureSource.get()).
 
         Returns:
-            ExternalClusterFailures with codes/reasons joined by '; '.
+            List of ExternalClusterFailure objects, one per failure.
         """
-        if not failures:
-            return cls()
-        codes = [f['failure_mode'] for f in failures]
-        reasons = [f['failure_reason'] for f in failures]
-        return cls(code='; '.join(codes), reason='; '.join(reasons))
+        return [
+            cls(code=f['failure_mode'], reason=f['failure_reason'])
+            for f in failures
+        ]
 
 
 # Protocol definitions for the failure source functions

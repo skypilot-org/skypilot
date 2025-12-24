@@ -35,6 +35,7 @@ from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
+from sky.utils.plugin_extensions import ExternalClusterFailure
 
 if typing.TYPE_CHECKING:
     from sqlalchemy.engine import row
@@ -2159,11 +2160,15 @@ async def set_recovering_async(
     task_id: int,
     force_transit_to_recovering: bool,
     callback_func: AsyncCallbackType,
-    code: Optional[str] = None,
-    reason: Optional[str] = None,
+    external_failures: Optional[List[ExternalClusterFailure]] = None,
 ):
     """Set the task to recovering state, and update the job duration."""
-    if reason is None:
+    # Build code and reason from external failures for the event log
+    if external_failures:
+        code = '; '.join(f.code for f in external_failures)
+        reason = '; '.join(f.reason for f in external_failures)
+    else:
+        code = None
         reason = 'Cluster preempted or failed, recovering'
     await add_job_event_async(job_id, task_id, ManagedJobStatus.RECOVERING,
                               reason, code)
