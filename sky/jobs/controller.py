@@ -605,13 +605,14 @@ class JobController:
                 logger.info(
                     f'Cluster is preempted or failed{cluster_status_str}. '
                     'Recovering...')
-                cluster_failures = await context_utils.to_thread(
-                    ExternalFailureSource.get, cluster_name=cluster_name)
-                if cluster_failures:
-                    logger.info(
-                        f'Detected cluster failures: {cluster_failures}')
-                    external_failures = (ExternalClusterFailure.
-                                         from_failure_list(cluster_failures))
+                if ExternalFailureSource.is_registered():
+                    cluster_failures = await context_utils.to_thread(
+                        ExternalFailureSource.get, cluster_name=cluster_name)
+                    if cluster_failures:
+                        logger.info(
+                            f'Detected cluster failures: {cluster_failures}')
+                        external_failures = (ExternalClusterFailure.
+                                            from_failure_list(cluster_failures))
             else:
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.
