@@ -128,6 +128,15 @@
                 "resources": {
                     "type": "object"
                 },
+                "sidecarContainers": {
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "items": {
+                        "type": "object"
+                    }
+                },
                 "skipResourceCheck": {
                     "type": "boolean"
                 },
@@ -262,6 +271,28 @@
                     "type": "string"
                 },
                 "useCredentialsFile": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "coreweaveCredentials": {
+            "type": "object",
+            "properties": {
+                "coreweaveSecretName": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "digitaloceanCredentials": {
+            "type": "object",
+            "properties": {
+                "digitaloceanSecretName": {
+                    "type": "string"
+                },
+                "enabled": {
                     "type": "boolean"
                 }
             }

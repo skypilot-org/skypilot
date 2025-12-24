@@ -77,14 +77,18 @@ if ! run_ray --version > /dev/null; then
 fi
 echo -e "${GREEN}Ray $(run_ray --version | cut -d' ' -f3) is installed.${NC}"
 
-RAY_ADDRESS="127.0.0.1:${RAY_HEAD_PORT}"
+LOCAL_RAY_ADDRESS="127.0.0.1:${RAY_HEAD_PORT}"
+RAY_ADDRESS=${LOCAL_RAY_ADDRESS}
 if [ "${SKYPILOT_NODE_RANK}" -ne 0 ]; then
     HEAD_IP=$(echo "${SKYPILOT_NODE_IPS}" | head -n1)
     RAY_ADDRESS="${HEAD_IP}:${RAY_HEAD_PORT}"
 fi
 
-# Check if user-space Ray is already running
-if run_ray status --address="${RAY_ADDRESS}" &> /dev/null; then
+# Check if user-space Ray is already running. Use local address to check, as
+# if we use the head node address, the check will succeed even if the Ray
+# cluster is started on the head node but not started on the current worker
+# node.
+if run_ray status --address="${LOCAL_RAY_ADDRESS}" &> /dev/null; then
     echo -e "${YELLOW}Ray cluster is already running.${NC}"
     run_ray status --address="${RAY_ADDRESS}"
     exit 0
@@ -140,7 +144,7 @@ if [ "${SKYPILOT_NODE_RANK}" -eq 0 ]; then
                 echo -e "${RED}Error: Timeout waiting for nodes.${NC}" >&2
                 exit 1
             fi
-            ready_nodes=$(run_ray list nodes --format=json | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
+            ready_nodes=$(run_ray list nodes --address="${RAY_ADDRESS}" --format=json | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
             if [ "${ready_nodes}" -ge "${SKYPILOT_NUM_NODES}" ]; then
                 break
             fi

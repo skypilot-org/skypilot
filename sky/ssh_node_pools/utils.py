@@ -5,13 +5,14 @@ import subprocess
 from typing import Any, Callable, Dict, List, Optional
 import uuid
 
+import colorama
 import yaml
 
+from sky import sky_logging
+from sky.ssh_node_pools import constants
 from sky.utils import ux_utils
 
-DEFAULT_SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
-RED = '\033[0;31m'
-NC = '\033[0m'  # No color
+logger = sky_logging.init_logger(__name__)
 
 
 def check_host_in_ssh_config(hostname: str) -> bool:
@@ -92,7 +93,8 @@ def load_ssh_targets(file_path: str) -> Dict[str, Any]:
 def get_cluster_config(
         targets: Dict[str, Any],
         cluster_name: Optional[str] = None,
-        file_path: str = DEFAULT_SSH_NODE_POOLS_PATH) -> Dict[str, Any]:
+        file_path: str = constants.DEFAULT_SSH_NODE_POOLS_PATH
+) -> Dict[str, Any]:
     """Get configuration for specific clusters or all clusters."""
     if not targets:
         with ux_utils.print_exception_no_traceback():
@@ -186,8 +188,9 @@ def prepare_hosts_info(
         else:
             # It's a dict with potential overrides
             if 'ip' not in host:
-                print(f'{RED}Warning: Host missing \'ip\' field, '
-                      f'skipping: {host}{NC}')
+                logger.warning(f'{colorama.Fore.RED}Warning: Host missing'
+                               f'\'ip\' field, skipping: {host}'
+                               f'{colorama.Style.RESET_ALL}')
                 continue
 
             # Check if this is an SSH config hostname

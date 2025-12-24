@@ -66,6 +66,7 @@ class JobInfoLoc(enum.IntEnum):
     PID = 9
     LOG_PATH = 10
     METADATA = 11
+    EXIT_CODES = 12
 
 
 def create_table(cursor, conn):
@@ -124,6 +125,8 @@ def create_table(cursor, conn):
                                  'metadata',
                                  'TEXT DEFAULT \'{}\'',
                                  value_to_replace_existing_entries='{}')
+    db_utils.add_column_to_table(cursor, conn, 'jobs', 'exit_codes',
+                                 'TEXT DEFAULT NULL')
     conn.commit()
 
 
@@ -388,10 +391,16 @@ def add_job(job_name: str,
     assert _DB is not None
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
-    _DB.cursor.execute(
-        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)',
-        (job_name, username, job_submitted_at, JobStatus.INIT.value,
-         run_timestamp, None, resources_str, metadata))
+    if int(constants.SKYLET_VERSION) >= 28:
+        _DB.cursor.execute(
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?, null)',  # pylint: disable=line-too-long
+            (job_name, username, job_submitted_at, JobStatus.INIT.value,
+             run_timestamp, None, resources_str, metadata))
+    else:
+        _DB.cursor.execute(
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)',  # pylint: disable=line-too-long
+            (job_name, username, job_submitted_at, JobStatus.INIT.value,
+             run_timestamp, None, resources_str, metadata))
     _DB.conn.commit()
     rows = _DB.cursor.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                               (run_timestamp,))
@@ -466,6 +475,41 @@ def set_status(job_id: int, status: JobStatus) -> None:
     # pylint: disable=abstract-class-instantiated
     with filelock.FileLock(_get_lock_path(job_id)):
         _set_status_no_lock(job_id, status)
+
+
+@init_db
+def set_exit_codes(job_id: int, exit_codes: List[int]) -> None:
+    """Set exit codes for a job as comma-separated string.
+
+    Args:
+        job_id: The job ID to update.
+        exit_codes: A list of exit codes to store.
+    """
+    assert _DB is not None
+    exit_codes_str = ','.join(str(code) for code in exit_codes)
+    with filelock.FileLock(_get_lock_path(job_id)):
+        _DB.cursor.execute('UPDATE jobs SET exit_codes=(?) WHERE job_id=(?)',
+                           (exit_codes_str, job_id))
+        _DB.conn.commit()
+
+
+@init_db
+def get_exit_codes(job_id: int) -> Optional[List[int]]:
+    """Get exit codes for a job from comma-separated string.
+
+    Args:
+        job_id: The job ID to retrieve exit codes for.
+
+    Returns:
+        A list of exit codes, or None if not found.
+    """
+    assert _DB is not None
+    rows = _DB.cursor.execute('SELECT exit_codes FROM jobs WHERE job_id=(?)',
+                              (job_id,))
+    row = rows.fetchone()
+    if row is None or row[0] is None:
+        return None
+    return [int(code) for code in row[0].split(',')]
 
 
 @init_db
@@ -674,6 +718,14 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
             'pid': row[JobInfoLoc.PID.value],
             'metadata': json.loads(row[JobInfoLoc.METADATA.value]),
         })
+        if int(constants.SKYLET_VERSION) >= 28:
+            exit_code_str = row[JobInfoLoc.EXIT_CODES.value]
+            if not isinstance(exit_code_str, str):
+                records[-1]['exit_codes'] = None
+            else:
+                records[-1]['exit_codes'] = ([
+                    int(code) for code in exit_code_str.split(',')
+                ])
     return records
 
 
@@ -1270,7 +1322,18 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
+    def get_job_exit_codes(cls, job_id: Optional[int] = None) -> str:
+        """Generate shell command to retrieve exit codes."""
+        code = [
+            f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',  # pylint: disable=line-too-long
+            'exit_codes = job_lib.get_exit_codes(job_id) if job_id is not None and int(constants.SKYLET_VERSION) >= 28 else {}',  # pylint: disable=line-too-long
+            'print(exit_codes, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         code = ';'.join(code)
-        return f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(code)}'
+        return (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
+                f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(code)}')

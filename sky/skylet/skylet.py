@@ -48,8 +48,12 @@ def start_grpc_server(port: int = constants.SKYLET_GRPC_PORT) -> grpc.Server:
     # putting it here for visibility.
     # TODO(kevin): Determine the optimal max number of threads.
     max_workers = min(32, (os.cpu_count() or 1) + 4)
+    # There's only a single skylet process per cluster, so disable
+    # SO_REUSEPORT to raise an error if the port is already in use.
+    options = (('grpc.so_reuseport', 0),)
     server = grpc.server(
-        concurrent.futures.ThreadPoolExecutor(max_workers=max_workers))
+        concurrent.futures.ThreadPoolExecutor(max_workers=max_workers),
+        options=options)
 
     autostopv1_pb2_grpc.add_AutostopServiceServicer_to_server(
         services.AutostopServiceImpl(), server)

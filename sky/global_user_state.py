@@ -2241,7 +2241,7 @@ def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
             rows = session.query(volume_table).all()
         else:
             rows = session.query(volume_table).filter_by(
-                is_ephemeral=is_ephemeral).all()
+                is_ephemeral=int(is_ephemeral)).all()
     records = []
     for row in rows:
         records.append({
@@ -2253,7 +2253,7 @@ def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
             'last_attached_at': row.last_attached_at,
             'last_use': row.last_use,
             'status': status_lib.VolumeStatus[row.status],
-            'is_ephemeral': row.is_ephemeral,
+            'is_ephemeral': bool(row.is_ephemeral),
         })
     return records
 
@@ -2316,7 +2316,7 @@ def add_volume(
             last_attached_at=last_attached_at,
             last_use=last_use,
             status=status.value,
-            is_ephemeral=is_ephemeral,
+            is_ephemeral=int(is_ephemeral),
         )
         do_update_stmt = insert_stmnt.on_conflict_do_nothing()
         session.execute(do_update_stmt)

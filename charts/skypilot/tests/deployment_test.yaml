@@ -490,3 +490,100 @@ tests:
           content:
             name: aws-config
             emptyDir: {}
+
+  # Test cases for coreweaveCredentials configuration
+  - it: should mount coreweave credentials correctly when coreweaveCredentials is enabled
+    set:
+      coreweaveCredentials.enabled: true
+      coreweaveCredentials.coreweaveSecretName: my-coreweave-secret
+    asserts:
+      # Should have coreweave-credentials secret volume
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: coreweave-credentials
+            secret:
+              secretName: my-coreweave-secret
+      # Should have coreweave-config emptyDir volume
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: coreweave-config
+            emptyDir: {}
+      # Should mount coreweave-config in container
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: coreweave-config
+            mountPath: /root/.coreweave
+            readOnly: true
+
+      # Should have init container
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            name: setup-coreweave-credentials
+      # Init container should have correct volume mounts
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            volumeMounts:
+              - name: coreweave-credentials
+                mountPath: /root/.coreweave_credentials
+              - name: coreweave-config
+                mountPath: /root/.coreweave
+
+  - it: should inject global extra envs into coreweave init container
+    set:
+      global.extraEnvs:
+        - name: GLOBAL_ENV
+          value: global
+      coreweaveCredentials.enabled: true
+      coreweaveCredentials.coreweaveSecretName: my-coreweave-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            name: setup-coreweave-credentials
+            env:
+              - name: GLOBAL_ENV
+                value: global
+
+  - it: should not mount coreweave credentials when coreweaveCredentials is disabled
+    set:
+      coreweaveCredentials.enabled: false
+    asserts:
+      # Should NOT have coreweave-credentials volume
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: coreweave-credentials
+      # Should NOT have coreweave-config volume
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: coreweave-config
+            emptyDir: {}
+      # Should NOT have volumeMount
+      - notMatchRegexRaw:
+          pattern: "mountPath: /root/.coreweave"
+      # Should NOT have init container
+      - notMatchRegexRaw:
+          pattern: "setup-coreweave-credentials"
+
+  - it: should prefix coreweave credentials init container image with the global registry override
+    set:
+      global.imageRegistry: registry.example.com/custom
+      coreweaveCredentials.enabled: true
+      coreweaveCredentials.coreweaveSecretName: my-coreweave-secret
+      apiService.image: berkeleyskypilot/skypilot-nightly:latest
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            name: setup-coreweave-credentials
+            image: registry.example.com/custom/berkeleyskypilot/skypilot-nightly:latest

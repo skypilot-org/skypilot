@@ -205,6 +205,9 @@ export async function getWorkspaceInfrastructure() {
         allGPUs: [],
         perContextGPUs: [],
         perNodeGPUs: [],
+        allSlurmGPUs: [],
+        perClusterSlurmGPUs: [],
+        perNodeSlurmGPUs: [],
         contextStats: {},
         contextWorkspaceMap: {},
         contextErrors: {},
@@ -334,12 +337,28 @@ export async function getWorkspaceInfrastructure() {
       console.error('Error fetching Kubernetes GPUs:', error);
     }
 
+    // Get Slurm GPU data
+    let slurmGpuData = {
+      allSlurmGPUs: [],
+      perClusterSlurmGPUs: [],
+      perNodeSlurmGPUs: [],
+    };
+    try {
+      slurmGpuData = await getSlurmServiceGPUs();
+      console.log('[DEBUG] Slurm GPU data in infra.jsx:', slurmGpuData);
+    } catch (error) {
+      console.error('Error fetching Slurm GPUs:', error);
+    }
+
     const finalResult = {
       workspaces: workspaceInfraData,
       allContextNames: [...new Set(allContextsAcrossWorkspaces)].sort(),
       allGPUs: gpuData.allGPUs || [],
       perContextGPUs: gpuData.perContextGPUs || [],
       perNodeGPUs: gpuData.perNodeGPUs || [],
+      allSlurmGPUs: slurmGpuData.allSlurmGPUs || [],
+      perClusterSlurmGPUs: slurmGpuData.perClusterSlurmGPUs || [],
+      perNodeSlurmGPUs: slurmGpuData.perNodeSlurmGPUs || [],
       contextStats: contextStats,
       contextWorkspaceMap: contextWorkspaceMap,
       contextErrors: gpuData.contextErrors || {},
@@ -422,6 +441,8 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           const gpuName = nodeData['accelerator_type'] || '-';
           const totalCount = nodeData['total']?.['accelerator_count'] || 0;
           const freeCount = nodeData['free']?.['accelerators_available'] || 0;
+          // Check if node is ready (defaults to true for backward compatibility)
+          const isReady = nodeData['is_ready'] !== false;
 
           if (totalCount > 0) {
             if (!gpuToData[gpuName]) {
@@ -430,11 +451,15 @@ async function getKubernetesGPUsFromContexts(contextNames) {
                 gpu_requestable_qty_per_node: 0,
                 gpu_total: 0,
                 gpu_free: 0,
+                gpu_not_ready: 0,
                 context: context,
               };
             }
             gpuToData[gpuName].gpu_total += totalCount;
             gpuToData[gpuName].gpu_free += freeCount;
+            if (isReady === false) {
+              gpuToData[gpuName].gpu_not_ready += totalCount;
+            }
             gpuToData[gpuName].gpu_requestable_qty_per_node = totalCount;
           }
         }
@@ -443,10 +468,13 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           if (gpuName in allGPUsSummary) {
             allGPUsSummary[gpuName].gpu_total += gpuToData[gpuName].gpu_total;
             allGPUsSummary[gpuName].gpu_free += gpuToData[gpuName].gpu_free;
+            allGPUsSummary[gpuName].gpu_not_ready +=
+              gpuToData[gpuName].gpu_not_ready;
           } else {
             allGPUsSummary[gpuName] = {
               gpu_total: gpuToData[gpuName].gpu_total,
               gpu_free: gpuToData[gpuName].gpu_free,
+              gpu_not_ready: gpuToData[gpuName].gpu_not_ready,
               gpu_name: gpuName,
             };
           }
@@ -476,6 +504,8 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             nodeData['total']?.['accelerator_count'] ?? 0;
           const freeAccelerators =
             nodeData['free']?.['accelerators_available'] ?? 0;
+          // Check if node is ready (defaults to true for backward compatibility)
+          const nodeIsReady = nodeData['is_ready'] !== false;
 
           perNodeGPUs_dict[`${context}/${nodeName}`] = {
             node_name: nodeData['name'] || nodeName,
@@ -484,6 +514,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             gpu_free: freeAccelerators,
             ip_address: nodeData['ip_address'] || null,
             context: context,
+            is_ready: nodeIsReady,
           };
 
           // If this node provides a GPU type not found via GPU availability,
@@ -499,6 +530,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
               allGPUsSummary[acceleratorType] = {
                 gpu_total: 0,
                 gpu_free: 0,
+                gpu_not_ready: 0,
                 gpu_name: acceleratorType,
               };
             }
@@ -508,6 +540,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             if (!existingGpuEntry) {
               perContextGPUsData[context].push({
                 gpu_name: acceleratorType,
+                gpu_not_ready: 0,
                 gpu_requestable_qty_per_node: '-',
                 gpu_total: 0,
                 gpu_free: 0,
@@ -919,5 +952,186 @@ export async function getDetailedGpuInfo(filter) {
   } catch (error) {
     console.error('Outer error in getDetailedGpuInfo:', error);
     throw error;
+  }
+}
+
+async function getSlurmClusterGPUs() {
+  try {
+    const response = await apiClient.post(`/slurm_gpu_availability`, {});
+    if (!response.ok) {
+      const msg = `Failed to get slurm cluster GPUs with status ${response.status}`;
+      throw new Error(msg);
+    }
+    const id =
+      response.headers.get('X-Skypilot-Request-ID') ||
+      response.headers.get('x-request-id');
+    if (!id) {
+      const msg = 'No request ID received from server for slurm cluster GPUs';
+      throw new Error(msg);
+    }
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    if (fetchedData.status === 500) {
+      try {
+        const data = await fetchedData.json();
+        if (data.detail && data.detail.error) {
+          try {
+            const error = JSON.parse(data.detail.error);
+            console.error('Error fetching Slurm cluster GPUs:', error.message);
+          } catch (jsonError) {
+            console.error('Error parsing JSON for Slurm error:', jsonError);
+          }
+        }
+      } catch (parseError) {
+        console.error('Error parsing JSON for Slurm 500 response:', parseError);
+      }
+      return [];
+    }
+    if (!fetchedData.ok) {
+      const msg = `Failed to get slurm cluster GPUs result with status ${fetchedData.status}`;
+      throw new Error(msg);
+    }
+    const data = await fetchedData.json();
+    const clusterGPUs = data.return_value ? JSON.parse(data.return_value) : [];
+    return clusterGPUs;
+  } catch (error) {
+    console.error('Error fetching Slurm cluster GPUs:', error);
+    return [];
+  }
+}
+
+async function getSlurmPerNodeGPUs() {
+  try {
+    const response = await apiClient.get(`/slurm_node_info`);
+    if (!response.ok) {
+      const msg = `Failed to get slurm node info with status ${response.status}`;
+      throw new Error(msg);
+    }
+    const id =
+      response.headers.get('X-Skypilot-Request-ID') ||
+      response.headers.get('x-request-id');
+    if (!id) {
+      const msg = 'No request ID received from server for slurm node info';
+      throw new Error(msg);
+    }
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    if (fetchedData.status === 500) {
+      try {
+        const data = await fetchedData.json();
+        if (data.detail && data.detail.error) {
+          try {
+            const error = JSON.parse(data.detail.error);
+            console.error('Error fetching Slurm per node GPUs:', error.message);
+          } catch (jsonError) {
+            console.error(
+              'Error parsing JSON for Slurm node error:',
+              jsonError
+            );
+          }
+        }
+      } catch (parseError) {
+        console.error(
+          'Error parsing JSON for Slurm node 500 response:',
+          parseError
+        );
+      }
+      return [];
+    }
+    if (!fetchedData.ok) {
+      const msg = `Failed to get slurm node info result with status ${fetchedData.status}`;
+      throw new Error(msg);
+    }
+    const data = await fetchedData.json();
+    const nodeInfo = data.return_value ? JSON.parse(data.return_value) : [];
+    return nodeInfo;
+  } catch (error) {
+    console.error('Error fetching Slurm per node GPUs:', error);
+    return [];
+  }
+}
+
+async function getSlurmServiceGPUs() {
+  try {
+    const clusterGPUsRaw = await getSlurmClusterGPUs();
+    const nodeGPUsRaw = await getSlurmPerNodeGPUs();
+
+    const allSlurmGPUs = {};
+    const perClusterSlurmGPUs = {}; // Similar to perContextGPUs for Kubernetes
+    const perNodeSlurmGPUs = {}; // { 'cluster/node_name': { ... } }
+
+    // Process cluster GPUs (similar to Kubernetes context GPUs)
+    // clusterGPUsRaw is expected to be like: [ [cluster_name, [ [gpu_name, counts, capacity, available], ... ] ], ... ]
+    for (const clusterData of clusterGPUsRaw) {
+      const clusterName = clusterData[0];
+      const gpusInCluster = clusterData[1];
+
+      for (const gpuRaw of gpusInCluster) {
+        const gpuName = gpuRaw[0];
+        // gpuRaw[1] is counts (list of requestable quantities), e.g., [1, 2, 4]
+        const gpuRequestableQtyPerNode = gpuRaw[1].join(', ');
+        const gpuTotal = gpuRaw[2]; // capacity
+        const gpuFree = gpuRaw[3]; // available
+
+        // Aggregate for allSlurmGPUs
+        if (gpuName in allSlurmGPUs) {
+          allSlurmGPUs[gpuName].gpu_total += gpuTotal;
+          allSlurmGPUs[gpuName].gpu_free += gpuFree;
+        } else {
+          allSlurmGPUs[gpuName] = {
+            gpu_total: gpuTotal,
+            gpu_free: gpuFree,
+            gpu_name: gpuName,
+          };
+        }
+
+        // Store for perClusterSlurmGPUs (similar to perContextGPUs)
+        const clusterGpuKey = `${clusterName}#${gpuName}`; // Unique key for cluster-gpu combo
+        perClusterSlurmGPUs[clusterGpuKey] = {
+          gpu_name: gpuName,
+          gpu_requestable_qty_per_node: gpuRequestableQtyPerNode,
+          gpu_total: gpuTotal,
+          gpu_free: gpuFree,
+          cluster: clusterName,
+        };
+      }
+    }
+
+    // Process node GPUs
+    // nodeGPUsRaw is expected to be like: [ {node_name, slurm_cluster_name, partition, gpu_type, total_gpus, free_gpus}, ... ]
+    for (const node of nodeGPUsRaw) {
+      const clusterName = node.slurm_cluster_name || 'default';
+      const key = `${clusterName}/${node.node_name}/${node.gpu_type || '-'}`;
+      perNodeSlurmGPUs[key] = {
+        node_name: node.node_name,
+        gpu_name: node.gpu_type || '-', // gpu_type might be null
+        gpu_total: node.total_gpus || 0,
+        gpu_free: node.free_gpus || 0,
+        cluster: clusterName,
+        partition: node.partition || 'default', // partition might be null
+      };
+    }
+
+    return {
+      allSlurmGPUs: Object.values(allSlurmGPUs).sort((a, b) =>
+        a.gpu_name.localeCompare(b.gpu_name)
+      ),
+      perClusterSlurmGPUs: Object.values(perClusterSlurmGPUs).sort(
+        (a, b) =>
+          a.cluster.localeCompare(b.cluster) ||
+          a.gpu_name.localeCompare(b.gpu_name)
+      ),
+      perNodeSlurmGPUs: Object.values(perNodeSlurmGPUs).sort(
+        (a, b) =>
+          (a.cluster || '').localeCompare(b.cluster || '') ||
+          (a.node_name || '').localeCompare(b.node_name || '') ||
+          (a.gpu_name || '').localeCompare(b.gpu_name || '')
+      ),
+    };
+  } catch (error) {
+    console.error('Error fetching Slurm GPUs:', error);
+    return {
+      allSlurmGPUs: [],
+      perClusterSlurmGPUs: [],
+      perNodeSlurmGPUs: [],
+    };
   }
 }

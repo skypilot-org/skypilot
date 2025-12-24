@@ -77,6 +77,7 @@ Below is the available helm value keys and the default value of each key:
     :ref:`extraEnvs <helm-values-apiService-extraEnvs>`: null
     :ref:`extraVolumes <helm-values-apiService-extraVolumes>`: null
     :ref:`extraVolumeMounts <helm-values-apiService-extraVolumeMounts>`: null
+    :ref:`sidecarContainers <helm-values-apiService-sidecarContainers>`: null
     :ref:`logs <helm-values-apiService-logs>`:
       :ref:`retention <helm-values-apiService-logs-retention>`:
         :ref:`enabled <helm-values-apiService-logs-retention-enabled>`: false
@@ -232,6 +233,14 @@ Below is the available helm value keys and the default value of each key:
     :ref:`enabled <helm-values-nebiusCredentials-enabled>`: false
     :ref:`tenantId <helm-values-nebiusCredentials-tenantId>`: null
     :ref:`nebiusSecretName <helm-values-nebiusCredentials-nebiusSecretName>`: nebius-credentials
+
+  :ref:`coreweaveCredentials <helm-values-coreweaveCredentials>`:
+    :ref:`enabled <helm-values-coreweaveCredentials-enabled>`: false
+    :ref:`coreweaveSecretName <helm-values-coreweaveCredentials-coreweaveSecretName>`: coreweave-credentials
+
+  :ref:`digitaloceanCredentials <helm-values-digitaloceanCredentials>`:
+    :ref:`enabled <helm-values-digitaloceanCredentials-enabled>`: false
+    :ref:`digitaloceanSecretName <helm-values-digitaloceanCredentials-digitaloceanSecretName>`: digitalocean-credentials
 
   :ref:`extraInitContainers <helm-values-extraInitContainers>`: null
 
@@ -783,6 +792,25 @@ Default: ``null``
       - name: my-volume
         mountPath: /my-path
         subPath: my-file
+
+.. _helm-values-apiService-sidecarContainers:
+
+``apiService.sidecarContainers``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Additional containers to run alongside the API server.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    sidecarContainers:
+      - name: my-sidecar
+        image: busybox
+        args:
+          - sleep
+          - "3600"
 
 .. _helm-values-apiService-logs:
 
@@ -2105,6 +2133,77 @@ Default: ``nebius-credentials``
 
   nebiusCredentials:
     nebiusSecretName: nebius-credentials
+
+.. _helm-values-coreweaveCredentials:
+
+``coreweaveCredentials``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. _helm-values-coreweaveCredentials-enabled:
+
+``coreweaveCredentials.enabled``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable CoreWeave CAIOS credentials for the API server.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  coreweaveCredentials:
+    enabled: false
+
+.. _helm-values-coreweaveCredentials-coreweaveSecretName:
+
+``coreweaveCredentials.coreweaveSecretName``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Name of the secret containing the CoreWeave CAIOS credentials. Only used if enabled is true. The secret should contain the following keys:
+
+- ``cw.config``: CoreWeave CAIOS config file
+- ``cw.credentials``: CoreWeave CAIOS credentials file
+
+Refer to :ref:`CoreWeave CAIOS installation <coreweave-caios-installation>` for more details.
+
+Default: ``coreweave-credentials``
+
+.. code-block:: yaml
+
+  coreweaveCredentials:
+    coreweaveSecretName: coreweave-credentials
+
+.. _helm-values-digitaloceanCredentials:
+
+``digitaloceanCredentials``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. _helm-values-digitaloceanCredentials-enabled:
+
+``digitaloceanCredentials.enabled``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enable DigitalOcean credentials for the API server.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  digitaloceanCredentials:
+    enabled: false
+
+.. _helm-values-digitaloceanCredentials-digitaloceanSecretName:
+
+``digitaloceanCredentials.digitaloceanSecretName``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Name of the secret containing the DigitalOcean credentials. Only used if enabled is true.
+
+Default: ``digitalocean-credentials``
+
+.. code-block:: yaml
+
+  digitaloceanCredentials:
+    digitaloceanSecretName: digitalocean-credentials
 
 .. _helm-values-extraInitContainers:
 
