@@ -2075,7 +2075,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     num_services = -1
                     msg = 'KeyboardInterrupt'
         click.echo(msg)
-        if num_services is not None:
+        if num_services is not None and num_services > 0:
             hints.append(
                 controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.
                 in_progress_hint(False))
