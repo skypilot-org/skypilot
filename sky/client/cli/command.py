@@ -1557,15 +1557,7 @@ def _handle_services_request(
         service_records = sdk.get(request_id)
         num_services = len(service_records)
     except exceptions.ClusterNotUpError as e:
-        controller_status = e.cluster_status
         msg = str(e)
-        if controller_status is None:
-            # This is "no controller" case - treat as empty result, not error
-            num_services = 0
-        elif controller_status == status_lib.ClusterStatus.STOPPED:
-            # This is "stopped controller" case - treat as empty result,
-            # not error
-            num_services = 0
     except RuntimeError as e:
         msg = ''
         try:
@@ -1584,8 +1576,6 @@ def _handle_services_request(
                 controller = (
                     controller_utils.Controllers.SKY_SERVE_CONTROLLER.value)
                 msg = controller.default_hint_if_non_existent
-                # This is "stopped controller" case - treat as empty result
-                num_services = 0
         except Exception:  # pylint: disable=broad-except
             # This is to an best effort to find the latest controller status to
             # print more helpful message, so we can ignore any exception to
@@ -6315,9 +6305,14 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Services{colorama.Style.RESET_ALL}')
     click.echo(msg)
-    # Only exit with error code for actual errors, not "no controller"
+    # Exit with error code only for actual errors, not "no controller" cases.
+    # Check message content to distinguish between actual errors and normal
+    # "no controller" state (controller doesn't exist or is STOPPED).
     if num_services is None:
-        sys.exit(1)
+        # "No live services." or "No live pools." indicates no controller,
+        # which is a normal empty state, not an error.
+        if 'No live services.' not in msg and 'No live pools.' not in msg:
+            sys.exit(1)
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
