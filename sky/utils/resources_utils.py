@@ -180,6 +180,17 @@ def simplify_ports(ports: List[str]) -> List[str]:
     return port_set_to_ranges(port_ranges_to_set(ports))
 
 
+def _format_numeric_value(value: float) -> str:
+    """Format a numeric value, showing decimals only when necessary.
+
+    Shows up to 1 decimal place for fractional values, integer for whole
+    numbers. This prevents rounding 0.5 to 0 while keeping 2.0 as "2".
+    """
+    if value == int(value):
+        return str(int(value))
+    return f'{value:.1f}'.rstrip('0').rstrip('.')
+
+
 def format_resource(resource: 'resources_lib.Resources',
                     simplified_only: bool = False) -> Tuple[str, Optional[str]]:
     resource = resource.assert_launchable()
@@ -197,28 +208,18 @@ def format_resource(resource: 'resources_lib.Resources',
         elements_simple.append(f'gpus={acc}:{count}')
         elements_full.append(f'gpus={acc}:{count}')
 
-    cpu_to_add = None
-    if vcpu is not None:
-        cpus_formatted = f'{vcpu:.1f}'.rstrip('0').rstrip('.')
-        cpu_to_add = f'cpus={cpus_formatted}'
-
-    mem_to_add = None
-    if mem is not None:
-        mem_formatted = f'{mem:.1f}'.rstrip('0').rstrip('.')
-        mem_to_add = f'mem={mem_formatted}'
-
-    if is_k8s or resource.accelerators is None:
-        if cpu_to_add:
-            elements_simple.append(cpu_to_add)
-            elements_full.append(cpu_to_add)
-        if mem_to_add:
-            elements_simple.append(mem_to_add)
-            elements_full.append(mem_to_add)
+    if (resource.accelerators is None or is_k8s):
+        if vcpu is not None:
+            elements_simple.append(f'cpus={_format_numeric_value(vcpu)}')
+            elements_full.append(f'cpus={_format_numeric_value(vcpu)}')
+        if mem is not None:
+            elements_simple.append(f'mem={_format_numeric_value(mem)}')
+            elements_full.append(f'mem={_format_numeric_value(mem)}')
     elif not simplified_only:
-        if cpu_to_add:
-            elements_full.append(cpu_to_add)
-        if mem_to_add:
-            elements_full.append(mem_to_add)
+        if vcpu is not None:
+            elements_full.append(f'cpus={_format_numeric_value(vcpu)}')
+        if mem is not None:
+            elements_full.append(f'mem={_format_numeric_value(mem)}')
 
     is_slurm = resource.cloud.canonical_name() == 'slurm'
     if not is_k8s and not is_slurm:
