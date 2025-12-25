@@ -566,7 +566,12 @@ def _start(
                 controller_autostop_config.enabled):
             idle_minutes_to_autostop = controller_autostop_config.idle_minutes
             down = controller_autostop_config.down
+            wait_for = controller_autostop_config.wait_for
+            hook = controller_autostop_config.hook
+        else:
+            hook = None
     else:
+        hook = None
         # For non-controller clusters, restore autostop configuration from
         # database if not explicitly provided.
         if idle_minutes_to_autostop is None:
@@ -611,7 +616,16 @@ def _start(
                              all_file_mounts=None,
                              storage_mounts=storage_mounts)
     if idle_minutes_to_autostop is not None:
-        backend.set_autostop(handle, idle_minutes_to_autostop, wait_for, down)
+        # For controller clusters, hook comes from controller_autostop_config.
+        # For regular clusters, hook is not restored from database (it persists
+        # on remote cluster if previously set). Passing None means we're not
+        # updating the hook, which is fine for the start() function.
+        hook_to_use = hook if 'hook' in locals() else None
+        backend.set_autostop(handle,
+                             idle_minutes_to_autostop,
+                             wait_for,
+                             down,
+                             hook=hook_to_use)
     return handle
 
 

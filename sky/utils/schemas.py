@@ -70,6 +70,9 @@ _AUTOSTOP_SCHEMA = {
                     'type': 'string',
                     'case_insensitive_enum':
                         autostop_lib.AutostopWaitFor.supported_modes(),
+                },
+                'hook': {
+                    'type': 'string',
                 }
             },
         },

@@ -70,6 +70,7 @@ class AutostopConfig:
     idle_minutes: int = 0
     down: bool = False
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None
+    hook: Optional[str] = None
 
     def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
         if not self.enabled:
@@ -80,6 +81,8 @@ class AutostopConfig:
         }
         if self.wait_for is not None:
             config['wait_for'] = self.wait_for.value
+        if self.hook is not None:
+            config['hook'] = self.hook
         return config
 
     @classmethod
@@ -111,6 +114,8 @@ class AutostopConfig:
             if 'wait_for' in config:
                 autostop_config.wait_for = (
                     autostop_lib.AutostopWaitFor.from_str(config['wait_for']))
+            if 'hook' in config:
+                autostop_config.hook = config['hook']
             return autostop_config
 
         return None

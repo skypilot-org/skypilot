@@ -328,12 +328,14 @@ def _execute_dag(
         idle_minutes_to_autostop: Optional[int] = None
         down = False
         wait_for: Optional[autostop_lib.AutostopWaitFor] = None
+        hook: Optional[str] = None
         if resource_autostop_config is not None:
             if resource_autostop_config.enabled:
                 idle_minutes_to_autostop = (
                     resource_autostop_config.idle_minutes)
                 down = resource_autostop_config.down
                 wait_for = resource_autostop_config.wait_for
+                hook = resource_autostop_config.hook
             else:
                 # Autostop is explicitly disabled, so cancel it if it's
                 # already set.
@@ -510,8 +512,11 @@ def _execute_dag(
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
-                backend.set_autostop(handle, idle_minutes_to_autostop, wait_for,
-                                     down)
+                backend.set_autostop(handle,
+                                     idle_minutes_to_autostop,
+                                     wait_for,
+                                     down,
+                                     hook=hook)
 
         if Stage.EXEC in stages:
             try:

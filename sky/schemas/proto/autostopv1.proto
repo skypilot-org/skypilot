@@ -21,6 +21,7 @@ message SetAutostopRequest {
   string backend = 2;
   AutostopWaitFor wait_for = 3;
   bool down = 4;
+  string hook = 5;
 }
 
 message SetAutostopResponse {}

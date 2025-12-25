@@ -56,10 +56,10 @@ pre-commit install
 Whenever any protobuf file is changed (in `sky/schemas/proto`), run this to regenerate the Python files:
 ```bash
 python -m grpc_tools.protoc \
-        --proto_path=sky/schemas/generated=sky/schemas/proto \
-        --python_out=. \
-        --grpc_python_out=. \
-        --pyi_out=. \
+        --proto_path=sky/schemas/proto \
+        --python_out=sky/schemas/generated \
+        --grpc_python_out=sky/schemas/generated \
+        --pyi_out=sky/schemas/generated \
         sky/schemas/proto/*.proto
 ```
 

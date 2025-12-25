@@ -225,6 +225,18 @@ class AutostopEvent(SkyletEvent):
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
             autostop_lib.set_autostopping_started()
 
+            # Execute autostop hook if provided
+            hook = getattr(autostop_config, 'hook', None)
+            if hook:
+                logger.info(
+                    'Executing autostop hook before stopping cluster...')
+                hook_success = autostop_lib.execute_autostop_hook(hook)
+                if not hook_success:
+                    logger.warning('Autostop hook failed, but continuing'
+                                   'with cluster stop. Check logs for details.')
+                else:
+                    logger.info('Autostop hook completed successfully.')
+
             config_path = os.path.abspath(
                 os.path.expanduser(cluster_utils.SKY_CLUSTER_YAML_REMOTE_PATH))
             config = yaml_utils.read_yaml(config_path)
@@ -319,6 +331,18 @@ class AutostopEvent(SkyletEvent):
         # pylint: disable=import-outside-toplevel
         from sky import provision as provision_lib
         autostop_lib.set_autostopping_started()
+
+        # Execute autostop hook if provided
+        hook = getattr(autostop_config, 'hook', None)
+        if hook:
+            logger.info('Executing autostop hook before stopping cluster...')
+            hook_success = autostop_lib.execute_autostop_hook(hook)
+            if not hook_success:
+                logger.warning(
+                    'Autostop hook failed, but continuing with cluster stop. '
+                    'Check logs for details.')
+            else:
+                logger.info('Autostop hook completed successfully.')
 
         cluster_name_on_cloud = cluster_config['cluster_name']
         is_cluster_multinode = cluster_config['max_workers'] > 0

@@ -139,3 +139,33 @@ Alternatively, pass the ``--wait-for`` flag to either ``sky autostop`` or ``sky 
 
    # Hard time limit: Stop after 10 minutes, regardless of running jobs or SSH sessions.
    sky autostop mycluster -i 10 --wait-for none
+
+Autostop Hooks
+~~~~~~~~~~~~~~
+
+To execute a script before autostopping, specify a hook in the autostop configuration.
+The hook script runs on the remote cluster before the cluster is stopped or torn down.
+This is useful for tasks like committing code, saving checkpoints, or performing cleanup operations.
+
+.. code-block:: yaml
+
+   resources:
+     autostop:
+       idle_minutes: 10
+       hook: |
+         cd my-code-base
+         git add .
+         git commit -m "Commit my code"
+         git push
+
+The hook script has access to the cluster's filesystem and environment variables.
+If the hook script fails (non-zero exit code), the autostop process will still continue,
+but a warning will be logged. The hook execution has a 5-minute timeout.
+
+Common use cases for autostop hooks include:
+
+- Committing and pushing code changes
+- Saving model checkpoints to persistent storage
+- Uploading logs or results to cloud storage
+- Cleaning up temporary files
+- Sending notifications about the cluster shutdown

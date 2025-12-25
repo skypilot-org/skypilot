@@ -43,12 +43,14 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
         try:
             wait_for = autostop_lib.AutostopWaitFor.from_protobuf(
                 request.wait_for)
+            hook = request.hook if request.hook else None
             autostop_lib.set_autostop(
                 idle_minutes=request.idle_minutes,
                 backend=request.backend,
                 wait_for=wait_for if wait_for is not None else
                 autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
-                down=request.down)
+                down=request.down,
+                hook=hook)
             return autostopv1_pb2.SetAutostopResponse()
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))

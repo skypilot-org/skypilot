@@ -270,6 +270,7 @@ Format:
     - ``jobs_and_ssh`` (default): Wait for in‑progress jobs and SSH connections to finish
     - ``jobs``: Only wait for in‑progress jobs
     - ``none``: Wait for nothing; autostop right after ``idle_minutes``
+  - ``hook``: Optional script to execute before autostop. The script runs on the remote cluster before stopping or tearing down. If the hook fails, autostop will still proceed but a warning will be logged.
 
 ``<unit>`` can be one of:
 - ``m``: minutes (default if not specified)
@@ -912,7 +913,7 @@ We can also specify the exit codes that should always trigger recovery, regardle
 
 We can specify multiple exit codes:
 
-.. code-block:: yaml  
+.. code-block:: yaml
 
   resources:
     job_recovery:
