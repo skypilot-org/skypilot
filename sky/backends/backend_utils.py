@@ -770,10 +770,10 @@ def write_cluster_config(
                 #    returns the kubeconfig. So if we don't exclude both, the
                 #    unexcluded one will upload the kubeconfig.
                 # TODO(romilb): This is a workaround. The right long-term fix
-                # is to have SSH Node Pools use its own kubeconfig instead of 
+                # is to have SSH Node Pools use its own kubeconfig instead of
                 # sharing the global kubeconfig at ~/.kube/config. In the
                 # interim, SSH Node Pools' get_credential_file_mounts can filter
-                # contexts starting with ssh- and create a temp kubeconfig 
+                # contexts starting with ssh- and create a temp kubeconfig
                 # to upload.
                 excluded_clouds.add(clouds.Kubernetes())
                 excluded_clouds.add(clouds.SSH())
