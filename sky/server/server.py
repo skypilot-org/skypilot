@@ -1812,18 +1812,10 @@ async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
         info = {
             'js_extension_path': plugin_info.js_extension_path,
         }
-        # Add name if available
-        name = plugin_info.name
-        if name is not None:
-            info['name'] = name
-        # Add version if available
-        version = plugin_info.version
-        if version is not None:
-            info['version'] = version
-        # Add commit if available
-        commit = plugin_info.commit
-        if commit is not None:
-            info['commit'] = commit
+        for attr in ('name', 'version', 'commit'):
+            value = getattr(plugin_info, attr, None)
+            if value is not None:
+                info[attr] = value
         plugin_infos.append(info)
     return {'plugins': plugin_infos}
 

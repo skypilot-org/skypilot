@@ -49,31 +49,24 @@ export function VersionDisplay() {
   if (!version) return null;
 
   // Create tooltip text (for commit information on hover)
-  let tooltipText = '';
-  if (plugins.length > 0) {
-    // Show plugin commit information
-    const pluginCommits = plugins
-      .filter((plugin) => plugin.commit)
-      .map((plugin) => {
-        const pluginName = plugin.name || 'Unknown Plugin';
-        return `${pluginName} commit: ${plugin.commit}`;
-      });
+  const pluginCommits = plugins
+    .filter((plugin) => plugin.commit)
+    .map((plugin) => {
+      const pluginName = plugin.name || 'Unknown Plugin';
+      return `${pluginName} commit: ${plugin.commit}`;
+    });
 
-    if (pluginCommits.length > 0) {
-      tooltipText = pluginCommits.join('\n');
-      // Add main commit if available
-      if (commit) {
-        tooltipText = `Core commit: ${commit}\n${tooltipText}`;
-      }
-    }
-  }
-  if (tooltipText === '') {
-    // No plugins, show only main commit
+  let tooltipText;
+  if (pluginCommits.length > 0) {
+    const lines = [...pluginCommits];
     if (commit) {
-      tooltipText = `Commit: ${commit}`;
-    } else {
-      tooltipText = 'Commit information not available';
+      lines.unshift(`Core commit: ${commit}`);
     }
+    tooltipText = lines.join('\n');
+  } else if (commit) {
+    tooltipText = `Commit: ${commit}`;
+  } else {
+    tooltipText = 'Commit information not available';
   }
 
   // Create display text (default: show version)
