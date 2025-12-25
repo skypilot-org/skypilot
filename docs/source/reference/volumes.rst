@@ -200,7 +200,7 @@ This section demonstrates how to configure and use distributed filesystems as Sk
                 .. code-block:: yaml
 
                   # juicefs-volume.yaml
-                  name: juicefs-pvc
+                  name: juicefs-volume
                   type: k8s-pvc
                   infra: k8s
                   size: 100Gi
@@ -222,6 +222,10 @@ This section demonstrates how to configure and use distributed filesystems as Sk
                   $ kubectl get pv juicefs-pv
                   NAME         CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                 STORAGECLASS   AGE
                   juicefs-pv   100Gi      RWX            Retain           Bound    default/juicefs-pvc                  10m
+
+                  $ kubectl get pvc juicefs-pvc
+                  NAME          STATUS   VOLUME       CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+                  juicefs-pvc   Bound    juicefs-pv   100Gi      RWX                           10m
 
                 Create a SkyPilot volume YAML with ``use_existing: true`` to reference the existing PVC:
 
@@ -248,7 +252,7 @@ This section demonstrates how to configure and use distributed filesystems as Sk
 
           volumes:
             # Mount the JuiceFS volume to /mnt/data across all nodes
-            /mnt/data: juicefs-pvc
+            /mnt/data: juicefs-volume
 
           run: |
             # Verify the volume is mounted and accessible
