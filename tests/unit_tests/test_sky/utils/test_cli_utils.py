@@ -381,6 +381,7 @@ def test_get_resources_kubernetes():
 def test_get_resources_fractional_cpu():
     from sky.utils import resources_utils
 
+    # Test fractional CPU (0.5)
     mock_resources_k8s_fractional = Resources(infra='k8s/my-cluster-ctx',
                                               cpus='0.5',
                                               memory=4,
@@ -389,31 +390,69 @@ def test_get_resources_fractional_cpu():
     simple, full = resources_utils.format_resource(
         mock_resources_k8s_fractional)
 
-    assert 'cpus=0.5' in simple or 'cpus=0.5' in (full or '')
+    assert 'cpus=0.5' in simple and 'cpus=0.5' in full
     assert not re.search(r'\bcpus=0(?![.\d])', simple)
-    if full:
-        assert not re.search(r'\bcpus=0(?![.\d])', full)
+    assert not re.search(r'\bcpus=0(?![.\d])', full)
 
+    # Test fractional CPU with plus sign (0.5+)
     mock_resources_k8s_fractional_plus = Resources(infra='k8s/my-cluster-ctx',
                                                    cpus='0.5+',
                                                    memory=4,
                                                    instance_type='0.5CPU--4GB')
     simple_plus, full_plus = resources_utils.format_resource(
         mock_resources_k8s_fractional_plus)
-    assert 'cpus=0.5' in simple_plus or 'cpus=0.5' in (full_plus or '')
+    assert 'cpus=0.5' in simple_plus and 'cpus=0.5' in full_plus
 
+    # Test decimal CPU (4.5)
     mock_resources_k8s_decimal = Resources(infra='k8s/my-cluster-ctx',
                                            cpus='4.5',
                                            memory=8,
                                            instance_type='4.5CPU--8GB')
     simple_decimal, full_decimal = resources_utils.format_resource(
         mock_resources_k8s_decimal)
-    assert 'cpus=4.5' in simple_decimal or 'cpus=4.5' in (full_decimal or '')
+    assert 'cpus=4.5' in simple_decimal and 'cpus=4.5' in full_decimal
 
+    # Test integer CPU (4)
     mock_resources_k8s_int = Resources(infra='k8s/my-cluster-ctx',
                                        cpus='4',
                                        memory=8,
                                        instance_type='4CPU--8GB')
     simple_int, full_int = resources_utils.format_resource(
         mock_resources_k8s_int)
-    assert 'cpus=4' in simple_int or 'cpus=4' in (full_int or '')
+    assert 'cpus=4' in simple_int and 'cpus=4' in full_int
+
+
+def test_get_resources_fractional_memory():
+    """Test resources display for fractional memory values."""
+    from sky.utils import resources_utils
+
+    # Test fractional memory (0.5GB)
+    mock_resources_k8s_fractional_mem = Resources(infra='k8s/my-cluster-ctx',
+                                                  cpus='1',
+                                                  memory=0.5,
+                                                  instance_type='1CPU--0.5GB')
+
+    simple, full = resources_utils.format_resource(
+        mock_resources_k8s_fractional_mem)
+
+    assert 'mem=0.5' in simple and 'mem=0.5' in full
+    assert not re.search(r'\bmem=0(?![.\d])', simple)
+    assert not re.search(r'\bmem=0(?![.\d])', full)
+
+    # Test decimal memory (4.5GB)
+    mock_resources_k8s_decimal_mem = Resources(infra='k8s/my-cluster-ctx',
+                                               cpus='2',
+                                               memory=4.5,
+                                               instance_type='2CPU--4.5GB')
+    simple_decimal, full_decimal = resources_utils.format_resource(
+        mock_resources_k8s_decimal_mem)
+    assert 'mem=4.5' in simple_decimal and 'mem=4.5' in full_decimal
+
+    # Test integer memory (8GB)
+    mock_resources_k8s_int_mem = Resources(infra='k8s/my-cluster-ctx',
+                                           cpus='2',
+                                           memory=8,
+                                           instance_type='2CPU--8GB')
+    simple_int, full_int = resources_utils.format_resource(
+        mock_resources_k8s_int_mem)
+    assert 'mem=8' in simple_int and 'mem=8' in full_int
