@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-import servev1_pb2 as servev1__pb2
+from sky.schemas.generated import servev1_pb2 as sky_dot_schemas_dot_generated_dot_servev1__pb2
 
 GRPC_GENERATED_VERSION = '1.63.0'
 GRPC_VERSION = grpc.__version__
@@ -20,7 +20,7 @@ except ImportError:
 if _version_not_supported:
     warnings.warn(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + f' but the generated code in servev1_pb2_grpc.py depends on'
+        + f' but the generated code in sky/schemas/generated/servev1_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -41,33 +41,33 @@ class ServeServiceStub(object):
         """
         self.GetServiceStatus = channel.unary_unary(
                 '/serve.v1.ServeService/GetServiceStatus',
-                request_serializer=servev1__pb2.GetServiceStatusRequest.SerializeToString,
-                response_deserializer=servev1__pb2.GetServiceStatusResponse.FromString,
+                request_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.GetServiceStatusRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.GetServiceStatusResponse.FromString,
                 _registered_method=True)
         self.AddVersion = channel.unary_unary(
                 '/serve.v1.ServeService/AddVersion',
-                request_serializer=servev1__pb2.AddVersionRequest.SerializeToString,
-                response_deserializer=servev1__pb2.AddVersionResponse.FromString,
+                request_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.AddVersionRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.AddVersionResponse.FromString,
                 _registered_method=True)
         self.TerminateServices = channel.unary_unary(
                 '/serve.v1.ServeService/TerminateServices',
-                request_serializer=servev1__pb2.TerminateServicesRequest.SerializeToString,
-                response_deserializer=servev1__pb2.TerminateServicesResponse.FromString,
+                request_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateServicesRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateServicesResponse.FromString,
                 _registered_method=True)
         self.TerminateReplica = channel.unary_unary(
                 '/serve.v1.ServeService/TerminateReplica',
-                request_serializer=servev1__pb2.TerminateReplicaRequest.SerializeToString,
-                response_deserializer=servev1__pb2.TerminateReplicaResponse.FromString,
+                request_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateReplicaRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateReplicaResponse.FromString,
                 _registered_method=True)
         self.WaitServiceRegistration = channel.unary_unary(
                 '/serve.v1.ServeService/WaitServiceRegistration',
-                request_serializer=servev1__pb2.WaitServiceRegistrationRequest.SerializeToString,
-                response_deserializer=servev1__pb2.WaitServiceRegistrationResponse.FromString,
+                request_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.WaitServiceRegistrationRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.WaitServiceRegistrationResponse.FromString,
                 _registered_method=True)
         self.UpdateService = channel.unary_unary(
                 '/serve.v1.ServeService/UpdateService',
-                request_serializer=servev1__pb2.UpdateServiceRequest.SerializeToString,
-                response_deserializer=servev1__pb2.UpdateServiceResponse.FromString,
+                request_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceResponse.FromString,
                 _registered_method=True)
 
 
@@ -121,33 +121,33 @@ def add_ServeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'GetServiceStatus': grpc.unary_unary_rpc_method_handler(
                     servicer.GetServiceStatus,
-                    request_deserializer=servev1__pb2.GetServiceStatusRequest.FromString,
-                    response_serializer=servev1__pb2.GetServiceStatusResponse.SerializeToString,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.GetServiceStatusRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.GetServiceStatusResponse.SerializeToString,
             ),
             'AddVersion': grpc.unary_unary_rpc_method_handler(
                     servicer.AddVersion,
-                    request_deserializer=servev1__pb2.AddVersionRequest.FromString,
-                    response_serializer=servev1__pb2.AddVersionResponse.SerializeToString,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.AddVersionRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.AddVersionResponse.SerializeToString,
             ),
             'TerminateServices': grpc.unary_unary_rpc_method_handler(
                     servicer.TerminateServices,
-                    request_deserializer=servev1__pb2.TerminateServicesRequest.FromString,
-                    response_serializer=servev1__pb2.TerminateServicesResponse.SerializeToString,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateServicesRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateServicesResponse.SerializeToString,
             ),
             'TerminateReplica': grpc.unary_unary_rpc_method_handler(
                     servicer.TerminateReplica,
-                    request_deserializer=servev1__pb2.TerminateReplicaRequest.FromString,
-                    response_serializer=servev1__pb2.TerminateReplicaResponse.SerializeToString,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateReplicaRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateReplicaResponse.SerializeToString,
             ),
             'WaitServiceRegistration': grpc.unary_unary_rpc_method_handler(
                     servicer.WaitServiceRegistration,
-                    request_deserializer=servev1__pb2.WaitServiceRegistrationRequest.FromString,
-                    response_serializer=servev1__pb2.WaitServiceRegistrationResponse.SerializeToString,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.WaitServiceRegistrationRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.WaitServiceRegistrationResponse.SerializeToString,
             ),
             'UpdateService': grpc.unary_unary_rpc_method_handler(
                     servicer.UpdateService,
-                    request_deserializer=servev1__pb2.UpdateServiceRequest.FromString,
-                    response_serializer=servev1__pb2.UpdateServiceResponse.SerializeToString,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -174,8 +174,8 @@ class ServeService(object):
             request,
             target,
             '/serve.v1.ServeService/GetServiceStatus',
-            servev1__pb2.GetServiceStatusRequest.SerializeToString,
-            servev1__pb2.GetServiceStatusResponse.FromString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.GetServiceStatusRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.GetServiceStatusResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -201,8 +201,8 @@ class ServeService(object):
             request,
             target,
             '/serve.v1.ServeService/AddVersion',
-            servev1__pb2.AddVersionRequest.SerializeToString,
-            servev1__pb2.AddVersionResponse.FromString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.AddVersionRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.AddVersionResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -228,8 +228,8 @@ class ServeService(object):
             request,
             target,
             '/serve.v1.ServeService/TerminateServices',
-            servev1__pb2.TerminateServicesRequest.SerializeToString,
-            servev1__pb2.TerminateServicesResponse.FromString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateServicesRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateServicesResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -255,8 +255,8 @@ class ServeService(object):
             request,
             target,
             '/serve.v1.ServeService/TerminateReplica',
-            servev1__pb2.TerminateReplicaRequest.SerializeToString,
-            servev1__pb2.TerminateReplicaResponse.FromString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateReplicaRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.TerminateReplicaResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -282,8 +282,8 @@ class ServeService(object):
             request,
             target,
             '/serve.v1.ServeService/WaitServiceRegistration',
-            servev1__pb2.WaitServiceRegistrationRequest.SerializeToString,
-            servev1__pb2.WaitServiceRegistrationResponse.FromString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.WaitServiceRegistrationRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.WaitServiceRegistrationResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -309,8 +309,8 @@ class ServeService(object):
             request,
             target,
             '/serve.v1.ServeService/UpdateService',
-            servev1__pb2.UpdateServiceRequest.SerializeToString,
-            servev1__pb2.UpdateServiceResponse.FromString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceResponse.FromString,
             options,
             channel_credentials,
             insecure,
