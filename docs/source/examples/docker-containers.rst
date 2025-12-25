@@ -111,12 +111,12 @@ Any GPUs assigned to the task will be automatically mapped to your Docker contai
 Private registries
 ^^^^^^^^^^^^^^^^^^
 
-.. note::
+To access Docker images hosted on private registries,
+you can provide the registry authentication details using :ref:`task environment variables <env-vars>`:
 
-    These instructions do not apply if you use SkyPilot to launch on Kubernetes clusters. Instead, see :ref:`Using Images from Private Repositories in Kubernetes<kubernetes-custom-images-private-repos>` for more.
+.. tip::
 
-When using this mode, to access Docker images hosted on private registries,
-you can use :ref:`task environment variables <env-vars>`:
+    This method works for both clouds and Kubernetes. If you want to use existing registry credentials in Kubernetes secrets, see :ref:`Using Images from Private Repositories <kubernetes-custom-images-private-repos>`.
 
 .. tab-set::
 
