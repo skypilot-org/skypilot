@@ -120,7 +120,24 @@ def deserialize_exception(serialized: Dict[str, Any]) -> Exception:
     if exception_class is None:
         # Unknown exception type.
         return Exception(f'{exception_type}: {serialized["message"]}')
-    e = exception_class(*serialized['args'], **serialized['attributes'])
+
+    # Try to construct the exception with both args and attributes.
+    # Built-in exceptions (like RuntimeError, ValueError) don't accept
+    # keyword arguments, so we fall back to constructing with args only
+    # and then setting attributes manually.
+    try:
+        e = exception_class(*serialized['args'], **serialized['attributes'])
+    except TypeError:
+        # Built-in exceptions don't accept keyword arguments.
+        # Construct with args only and set attributes manually.
+        e = exception_class(*serialized['args'])
+        for key, value in serialized['attributes'].items():
+            try:
+                setattr(e, key, value)
+            except AttributeError:
+                # Some attributes may be read-only, skip them.
+                pass
+
     if serialized['stacktrace'] is not None:
         setattr(e, 'stacktrace', serialized['stacktrace'])
     return e
