@@ -156,7 +156,23 @@ def set_autostop(idle_minutes: int,
                  wait_for: AutostopWaitFor,
                  down: bool,
                  hook: Optional[str] = None) -> None:
+    """Set autostop configuration.
+
+    Args:
+        idle_minutes: Minutes of idleness before autostop.
+        backend: Backend name.
+        wait_for: Condition for resetting idleness timer.
+        down: Whether to tear down (autodown) instead of stop.
+        hook: Hook script to execute before autostop. If None, the existing
+            hook will be inherited from current config.
+    """
     boot_time = psutil.boot_time()
+
+    # If hook is None, inherit existing hook from current config
+    if hook is None:
+        existing_config = get_autostop_config()
+        hook = existing_config.hook
+
     autostop_config = AutostopConfig(idle_minutes, boot_time, backend, wait_for,
                                      down, hook)
     configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))

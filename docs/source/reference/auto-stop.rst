@@ -160,7 +160,7 @@ This is useful for tasks like committing code, saving checkpoints, or performing
 
 The hook script has access to the cluster's filesystem and environment variables.
 If the hook script fails (non-zero exit code), the autostop process will still continue,
-but a warning will be logged. The hook execution has a 5-minute timeout.
+but a warning will be logged. The hook execution has a 1-hour timeout.
 
 Common use cases for autostop hooks include:
 

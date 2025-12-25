@@ -220,22 +220,26 @@ class AutostopEvent(SkyletEvent):
                 f'Stopping.')
             self._stop_cluster(autostop_config)
 
+    def _execute_hook_if_present(self, autostop_config) -> None:
+        """Execute autostop hook if present in the config."""
+        hook = getattr(autostop_config, 'hook', None)
+        if hook:
+            logger.info('Executing autostop hook before stopping cluster...')
+            hook_success = autostop_lib.execute_autostop_hook(hook)
+            if not hook_success:
+                logger.warning(
+                    'Autostop hook failed, but continuing with cluster stop. '
+                    'Check logs for details.')
+            else:
+                logger.info('Autostop hook completed successfully.')
+
     def _stop_cluster(self, autostop_config):
         if (autostop_config.backend ==
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
             autostop_lib.set_autostopping_started()
 
             # Execute autostop hook if provided
-            hook = getattr(autostop_config, 'hook', None)
-            if hook:
-                logger.info(
-                    'Executing autostop hook before stopping cluster...')
-                hook_success = autostop_lib.execute_autostop_hook(hook)
-                if not hook_success:
-                    logger.warning('Autostop hook failed, but continuing'
-                                   'with cluster stop. Check logs for details.')
-                else:
-                    logger.info('Autostop hook completed successfully.')
+            self._execute_hook_if_present(autostop_config)
 
             config_path = os.path.abspath(
                 os.path.expanduser(cluster_utils.SKY_CLUSTER_YAML_REMOTE_PATH))
@@ -333,16 +337,7 @@ class AutostopEvent(SkyletEvent):
         autostop_lib.set_autostopping_started()
 
         # Execute autostop hook if provided
-        hook = getattr(autostop_config, 'hook', None)
-        if hook:
-            logger.info('Executing autostop hook before stopping cluster...')
-            hook_success = autostop_lib.execute_autostop_hook(hook)
-            if not hook_success:
-                logger.warning(
-                    'Autostop hook failed, but continuing with cluster stop. '
-                    'Check logs for details.')
-            else:
-                logger.info('Autostop hook completed successfully.')
+        self._execute_hook_if_present(autostop_config)
 
         cluster_name_on_cloud = cluster_config['cluster_name']
         is_cluster_multinode = cluster_config['max_workers'] > 0

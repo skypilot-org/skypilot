@@ -512,6 +512,7 @@ def _execute_dag(
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
+                # Hook is inherited from existing config when None
                 backend.set_autostop(handle,
                                      idle_minutes_to_autostop,
                                      wait_for,
