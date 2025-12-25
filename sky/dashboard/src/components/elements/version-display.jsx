@@ -48,55 +48,42 @@ export function VersionDisplay() {
 
   if (!version) return null;
 
-  // Create tooltip text (for commit information on hover)
-  const pluginCommits = plugins
-    .filter((plugin) => plugin.commit)
-    .map((plugin) => {
-      const pluginName = plugin.name || 'Unknown Plugin';
-      return `${pluginName} commit: ${plugin.commit}`;
-    });
-
-  let tooltipText;
-  if (pluginCommits.length > 0) {
-    const lines = [...pluginCommits];
-    if (commit) {
-      lines.unshift(`Core commit: ${commit}`);
+  // Create tooltip text
+  const tooltipLines = [];
+  if (commit) {
+    if (plugins.length > 0) {
+      tooltipLines.push(`Core commit: ${commit}`);
+    } else {
+      tooltipLines.push(`Commit: ${commit}`);
     }
-    tooltipText = lines.join('\n');
-  } else if (commit) {
-    tooltipText = `Commit: ${commit}`;
-  } else {
-    tooltipText = 'Commit information not available';
   }
 
-  // Create display text (default: show version)
-  const versionItems = [];
+  plugins.forEach((plugin) => {
+    const pluginName = plugin.name || 'Unknown Plugin';
+    const parts = [];
+    if (plugin.version) {
+      parts.push(`${plugin.version}`);
+    }
+    if (plugin.commit) {
+      parts.push(plugin.commit);
+    }
+    if (parts.length > 0) {
+      tooltipLines.push(`${pluginName}: ${parts.join(' - ')}`);
+    }
+  });
 
-  // Add plugin versions
-  if (plugins.length > 0) {
-    // Add core version
-    versionItems.push(`Core version: ${version}`);
-    const pluginVersions = plugins
-      .filter((plugin) => plugin.version)
-      .map((plugin) => {
-        const pluginName = plugin.name || 'Unknown Plugin';
-        return `${pluginName} version: ${plugin.version}`;
-      });
-    versionItems.push(...pluginVersions);
-  } else {
-    // Add core version
-    versionItems.push(`Version: ${version}`);
-  }
-
-  const displayText = versionItems.join('\n');
+  const tooltipText =
+    tooltipLines.length > 0
+      ? tooltipLines.join('\n')
+      : 'Commit information not available';
 
   return (
     <NonCapitalizedTooltip
       content={tooltipText}
       className="text-sm text-muted-foreground"
     >
-      <div className="text-sm text-gray-500 cursor-help border-b border-dotted border-gray-400 inline-block whitespace-pre-line">
-        {displayText}
+      <div className="text-sm text-gray-500 cursor-help border-b border-dotted border-gray-400 inline-block">
+        Version: {version}
       </div>
     </NonCapitalizedTooltip>
   );
