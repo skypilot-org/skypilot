@@ -1921,6 +1921,18 @@ class Resources:
             current_autostop_config = self.autostop_config.to_yaml_config()
 
         override_configs = dict(override_configs) if override_configs else None
+
+        # Handle image_id dictionary key update when region is overridden.
+        # When image_id is a dict with None as key (meaning "any region") and
+        # region is being overridden, update the key to the new region so that
+        # extract_docker_image() can properly match the region.
+        image_id = override.pop('image_id', self.image_id)
+        new_region = override.get('region', self.region)
+        if (image_id is not None and isinstance(image_id, dict) and
+                new_region is not None and new_region != self.region):
+            if None in image_id and len(image_id) == 1:
+                image_id = {new_region: image_id[None]}
+
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
@@ -1934,7 +1946,7 @@ class Resources:
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
-            image_id=override.pop('image_id', self.image_id),
+            image_id=image_id,
             disk_tier=override.pop('disk_tier', self.disk_tier),
             network_tier=override.pop('network_tier', self.network_tier),
             ports=override.pop('ports', self.ports),
