@@ -140,7 +140,7 @@ Alternatively, pass the ``--wait-for`` flag to either ``sky autostop`` or ``sky 
    # Hard time limit: Stop after 10 minutes, regardless of running jobs or SSH sessions.
    sky autostop mycluster -i 10 --wait-for none
 
-Autostop Hooks
+Autostop hooks
 ~~~~~~~~~~~~~~
 
 To execute a script before autostopping, specify a hook in the autostop configuration.

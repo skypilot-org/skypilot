@@ -281,7 +281,7 @@ def execute_autostop_hook(hook: Optional[str]) -> bool:
             logger.debug(f'Hook stderr: {proc.stderr}')
         return True
     except subprocess.TimeoutExpired:
-        logger.error('Autostop hook execution timed out after 5 minutes.')
+        logger.error('Autostop hook execution timed out after 1 hour.')
         return False
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Error executing autostop hook: {e}.', exc_info=True)
@@ -308,9 +308,14 @@ class AutostopCodeGen:
             wait_for = DEFAULT_AUTOSTOP_WAIT_FOR
         hook_str = repr(hook) if hook is not None else 'None'
         code = [
-            f'\nif getattr(constants, "SKYLET_LIB_VERSION", 1) < 4: '
-            f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, {down})'
-            f'\nelse: '
+            '\nv = getattr(constants, "SKYLET_LIB_VERSION", 1)',
+            '\nif v < 4: ',
+            f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
+            f'{down})',
+            '\nelif v == 4: ',
+            f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
+            f'autostop_lib.{wait_for}, {down})',
+            '\nelse: ',
             f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
             f'autostop_lib.{wait_for}, {down}, hook={hook_str})',
         ]
