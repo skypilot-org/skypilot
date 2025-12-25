@@ -24,6 +24,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 from typing import Any, Dict
 import uuid
 
@@ -49,6 +50,11 @@ from sky.utils import ux_utils
 from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
+
+# Lock to prevent race condition when registering SSH keys with Lambda Cloud.
+# Multiple replica threads can overlap between get_unique_ssh_key_name and
+# register_ssh_key, causing duplicate keys to be created. See issue #8221.
+_lambda_ssh_key_lock = threading.Lock()
 
 # TODO: Should tolerate if gcloud is not installed. Also,
 # https://pypi.org/project/google-api-python-client/ recommends
@@ -228,9 +234,13 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
     prefix = f'sky-key-{common_utils.get_user_hash()}'
-    name, exists = lambda_client.get_unique_ssh_key_name(prefix, public_key)
-    if not exists:
-        lambda_client.register_ssh_key(name, public_key)
+    # Use lock to prevent race condition where multiple replica threads
+    # overlap between get_unique_ssh_key_name and register_ssh_key,
+    # causing duplicate keys to be created. See issue #8221.
+    with _lambda_ssh_key_lock:
+        name, exists = lambda_client.get_unique_ssh_key_name(prefix, public_key)
+        if not exists:
+            lambda_client.register_ssh_key(name, public_key)
 
     config['auth']['remote_key_name'] = name
     return config
