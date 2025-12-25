@@ -250,7 +250,7 @@ def execute_autostop_hook(hook: Optional[str]) -> bool:
             shell=True,
             capture_output=True,
             text=True,
-            timeout=300,  # 5 minute timeout for hook execution
+            timeout=3600,  # 1 hour timeout for hook execution
             check=False)
 
         if proc.returncode != 0:
