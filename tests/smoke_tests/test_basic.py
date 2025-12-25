@@ -319,6 +319,9 @@ def test_launch_fast_with_autostop_hook(generic_cloud: str):
         idle_minutes: 1
         hook: echo {special_str}
 
+    setup: |
+      echo "running setup"
+
     run: echo hi
     """)
 
