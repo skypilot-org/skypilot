@@ -79,7 +79,7 @@ def _test_autostop(
                 backend=cloud_vm_ray_backend.CloudVmRayBackend.NAME,
                 wait_for=autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS_AND_SSH,
                 down=True,
-                hook=hook if hook else '')
+                hook=hook if hook is not None else '')
             backend_utils.invoke_skylet_with_retries(
                 lambda: cloud_vm_ray_backend.SkyletClient(
                     handle.get_grpc_channel()).set_autostop(request))
@@ -129,7 +129,7 @@ def test_skylet_grpc_connectivity(test_cluster, parallelism: int,
                                      num_tests,
                                      thread_id,
                                      kill_prob,
-                                     hook="echo hello")
+                                     hook=f"echo thread {thread_id}")
             futures.append(future)
 
         for future in concurrent.futures.as_completed(futures):
