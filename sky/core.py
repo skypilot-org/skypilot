@@ -538,6 +538,7 @@ def _start(
             f'Starting cluster {cluster_name!r} with backend {backend.NAME} '
             'is not supported.')
 
+    hook: Optional[str] = None
     controller = controller_utils.Controllers.from_name(cluster_name)
     if controller is not None:
         if down or idle_minutes_to_autostop:
@@ -568,10 +569,7 @@ def _start(
             down = controller_autostop_config.down
             wait_for = controller_autostop_config.wait_for
             hook = controller_autostop_config.hook
-        else:
-            hook = None
     else:
-        hook = None
         # For non-controller clusters, restore autostop configuration from
         # database if not explicitly provided.
         if idle_minutes_to_autostop is None:

@@ -305,16 +305,17 @@ def test_launch_fast(generic_cloud: str):
 @pytest.mark.no_hyperbolic
 @pytest.mark.no_shadeform
 @pytest.mark.no_seeweb
-def test_launch_fast_with_autostop(generic_cloud: str):
+def test_launch_fast_with_autostop_hook(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
     # the VM is stopped.
     autostop_timeout = 600 if generic_cloud == 'azure' else 250
+    special_str = f'hook-executed-{time.time()}'
     test = smoke_tests_utils.Test(
-        'test_launch_fast_with_autostop',
+        'test_launch_fast_with_autostop_hook',
         [
-            # First launch to create the cluster with a short autostop
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} --fast -i 1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # First launch to create the cluster with a short autostop and a hook
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} --fast -i 1 {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi" --hook "echo {special_str}") && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 1 --status',
             f'sky status -r {name} | grep UP',
 
@@ -327,10 +328,18 @@ def test_launch_fast_with_autostop(generic_cloud: str):
             # delete the VM.
             # FIXME(aylei): this can be flaky, sleep longer for now.
             f'sleep 60',
+
             # Launch again. Do full output validation - we expect the cluster to re-launch
             f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
             f'sky status -r {name} | grep UP',
+
+            # Verify the hook was executed by checking the skylet logs
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                f'grep "{special_str}" {constants.SKYLET_LOG_FILE} && grep "Autostop hook executed successfully" {constants.SKYLET_LOG_FILE}'
+            ),
         ],
         f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud) + autostop_timeout,
