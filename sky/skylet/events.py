@@ -238,9 +238,6 @@ class AutostopEvent(SkyletEvent):
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
             autostop_lib.set_autostopping_started()
 
-            # Execute autostop hook if provided
-            self._execute_hook_if_present(autostop_config)
-
             config_path = os.path.abspath(
                 os.path.expanduser(cluster_utils.SKY_CLUSTER_YAML_REMOTE_PATH))
             config = yaml_utils.read_yaml(config_path)
@@ -256,6 +253,9 @@ class AutostopEvent(SkyletEvent):
                 return
             logger.info('Not using new provisioner to stop the cluster. '
                         f'Cloud of this cluster: {provider_name}')
+
+            # Execute autostop hook if provided (for old provisioner path)
+            self._execute_hook_if_present(autostop_config)
 
             is_cluster_multinode = config['max_workers'] > 0
 
