@@ -1823,10 +1823,17 @@ async def api_status(
 @app.get('/api/plugins', response_class=fastapi_responses.ORJSONResponse)
 async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
     """Return metadata about loaded backend plugins."""
-    plugin_info = [{
-        'js_extension_path': plugin.js_extension_path,
-    } for plugin in plugins.get_plugins()]
-    return {'plugins': plugin_info}
+    plugin_infos = []
+    for plugin_info in plugins.get_plugins():
+        info = {
+            'js_extension_path': plugin_info.js_extension_path,
+        }
+        for attr in ('name', 'version', 'commit'):
+            value = getattr(plugin_info, attr, None)
+            if value is not None:
+                info[attr] = value
+        plugin_infos.append(info)
+    return {'plugins': plugin_infos}
 
 
 @app.get(
