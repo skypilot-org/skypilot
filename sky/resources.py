@@ -2158,9 +2158,21 @@ class Resources:
             elif isinstance(accelerators, list) or isinstance(
                     accelerators, set):
                 accelerators_list = []
-                for accel_name in accelerators:
-                    parsed_accels = cls._parse_accelerators_from_str(accel_name)
-                    accelerators_list.extend(parsed_accels)
+                for accel_item in accelerators:
+                    if isinstance(accel_item, dict):
+                        # Handle dict items like {'T4': 1} in list
+                        accel_names = [
+                            f'{k}:{v}' if v is not None else f'{k}'
+                            for k, v in accel_item.items()
+                        ]
+                        for accel_name in accel_names:
+                            parsed_accels = cls._parse_accelerators_from_str(
+                                accel_name)
+                            accelerators_list.extend(parsed_accels)
+                    else:
+                        parsed_accels = cls._parse_accelerators_from_str(
+                            accel_item)
+                        accelerators_list.extend(parsed_accels)
             else:
                 assert False, ('Invalid accelerators type:'
                                f'{type(accelerators)}')
