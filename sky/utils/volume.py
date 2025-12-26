@@ -95,7 +95,7 @@ class VolumeMount:
                         f'{colorama.Style.RESET_ALL}')
             except Exception as e:  # pylint: disable=broad-except
                 # Don't fail if we can't check volume usage, just log debug
-                logger.debug(f'Failed to check volume usage for warning: {e}')
+                logger.debug(f'Failed to check volume usage for warning: {e}', exc_info=True)
 
         global_user_state.update_volume(self.volume_name,
                                         last_attached_at=int(time.time()),
