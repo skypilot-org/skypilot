@@ -2159,20 +2159,18 @@ class Resources:
                     accelerators, set):
                 accelerators_list = []
                 for accel_item in accelerators:
+                    items_to_parse = []
                     if isinstance(accel_item, dict):
                         # Handle dict items like {'T4': 1} in list
-                        accel_names = [
+                        items_to_parse.extend(
                             f'{k}:{v}' if v is not None else f'{k}'
-                            for k, v in accel_item.items()
-                        ]
-                        for accel_name in accel_names:
-                            parsed_accels = cls._parse_accelerators_from_str(
-                                accel_name)
-                            accelerators_list.extend(parsed_accels)
+                            for k, v in accel_item.items())
                     else:
-                        parsed_accels = cls._parse_accelerators_from_str(
-                            accel_item)
-                        accelerators_list.extend(parsed_accels)
+                        items_to_parse.append(accel_item)
+
+                    for accel_name in items_to_parse:
+                        accelerators_list.extend(
+                            cls._parse_accelerators_from_str(accel_name))
             else:
                 assert False, ('Invalid accelerators type:'
                                f'{type(accelerators)}')
