@@ -61,7 +61,7 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             # Log at debug level and don't treat it as an error.
             logger.debug(f'Executor [{self.name}] task {fn} was cancelled')
             fut.cancel()
-        except Exception as e:  # pylint: disable=broad-except
+        except BaseException as e:  # pylint: disable=broad-except
             logger.debug(f'Executor [{self.name}] error executing {fn}: {e}')
             fut.set_exception(e)
         finally:
