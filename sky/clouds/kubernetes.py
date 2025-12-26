@@ -828,7 +828,7 @@ class Kubernetes(clouds.Cloud):
         """
         # Check if accelerators are requested and num_nodes > 1
         accelerators = resources.accelerators
-        if accelerators is not None and num_nodes > 1:
+        if accelerators and num_nodes > 1:
             # Only check capacity if autoscaler is NOT configured
             context = resources.region
             autoscaler_type = kubernetes_utils.get_autoscaler_type(
@@ -837,7 +837,7 @@ class Kubernetes(clouds.Cloud):
                 # No autoscaler - check total cluster capacity
                 try:
                     acc_type, acc_count = list(accelerators.items())[0]
-                    total_requested = num_nodes * int(acc_count)
+                    total_requested = num_nodes * acc_count
 
                     # Get total cluster GPU capacity
                     node_info = kubernetes_utils.get_kubernetes_node_info(
@@ -858,9 +858,17 @@ class Kubernetes(clouds.Cloud):
                             resources_list=[],
                             fuzzy_candidate_list=[],
                             hint=hint)
+                except KeyboardInterrupt:
+                    raise
+                except exceptions.KubeAPIUnreachableError as e:
+                    # This can happen if the user has no permission to access
+                    # the cluster, or the cluster is not reachable.
+                    logger.warning('Could not check cluster capacity due to '
+                                   f'Kubernetes API error: {e}')
                 except Exception as e:  # pylint: disable=broad-except
-                    # If we can't determine capacity, fall through to parent
-                    logger.debug(f'Could not check cluster capacity: {e}')
+                    # If we can't determine capacity for other reasons,
+                    # fall through to parent
+                    logger.debug(f'Could not check cluster capacity: {e!r}')
 
         # Call parent implementation for standard feasibility checks
         return super().get_feasible_launchable_resources(resources, num_nodes)
