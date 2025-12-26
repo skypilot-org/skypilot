@@ -196,6 +196,8 @@ def test_job_pipeline(generic_cloud: str):
                 # Wait for tasks to transition to CANCELLING/CANCELLED with retry logic
                 # to avoid flakiness. Use a reasonable timeout (60s) to allow for
                 # cancellation to propagate, especially on slower clouds like Kubernetes.
+                # Note: task_line corresponds to the line number in grep -A 4 output:
+                # line 1 = job header, line 2 = task 0, line 3 = task 1, line 4 = task 2, line 5 = task 3
                 smoke_tests_utils.get_cmd_wait_until_pipeline_task_status(
                     job_name=name,
                     task_line=2,

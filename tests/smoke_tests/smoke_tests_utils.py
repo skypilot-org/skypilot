@@ -314,7 +314,7 @@ _WAIT_UNTIL_PIPELINE_TASK_STATUS = (
     'fi; '
     's=$(sky jobs queue); echo "$s"; '
     'task_status=$(echo "$s" | grep -A 4 {job_name} | sed -n {task_line}p); '
-    'if echo "$task_status" | grep -q "{expected_status}"; then '
+    'if echo "$task_status" | grep -E -q "{expected_status}"; then '
     '  echo "Task {task_line} reached status {expected_status}."; break; '
     'fi; '
     'echo "Waiting for task {task_line} to be {expected_status}, current: $task_status"; '
