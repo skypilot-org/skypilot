@@ -68,6 +68,15 @@ class KubernetesNodeInfo:
     free: Dict[str, int]
     # IP address of the node (external IP preferred, fallback to internal IP)
     ip_address: Optional[str] = None
+    # CPU count (total CPUs available on the node)
+    cpu_count: Optional[float] = None
+    # Memory in GB (total memory available on the node)
+    memory_gb: Optional[float] = None
+    # Free CPU count (free CPUs available on the node after pod allocations)
+    cpu_free: Optional[float] = None
+    # Free memory in GB (free memory available on the node after pod
+    # allocations)
+    memory_free_gb: Optional[float] = None
     # Whether the node is ready (all conditions are satisfied)
     is_ready: bool = True
 
