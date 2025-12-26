@@ -77,6 +77,7 @@ function ClusterDetails() {
   const {
     clusterData,
     clusterJobData,
+    clusterJobError,
     loading,
     clusterDetailsLoading,
     clusterJobsLoading,
@@ -853,6 +854,7 @@ function ActiveTab({
             loading={clusterJobsLoading}
             refreshClusterJobsOnly={refreshClusterJobsOnly}
             workspace={clusterData.workspace}
+            fetchError={clusterJobError}
           />
         </div>
       )}
