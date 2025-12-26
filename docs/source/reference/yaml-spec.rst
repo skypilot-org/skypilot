@@ -676,7 +676,7 @@ OR
 ~~~~~~~~~~~~~~~~~~~~~~
 Custom image id (optional, advanced).
 
-The image id used to boot the instances. Only supported for AWS, GCP, OCI and IBM (for non-docker image).
+The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM and Verda. IBM and Verda only support non-docker images.
 
 If not specified, SkyPilot will use the default debian-based image suitable for machine learning tasks.
 
