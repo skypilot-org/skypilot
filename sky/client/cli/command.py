@@ -6765,7 +6765,11 @@ def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
             if not verbose:
                 r_id = common_utils.truncate_long_string(r_id, 36)
             req_status = requests.RequestStatus(request.status)
-            row = [r_id, request.user_name, request.name]
+            # Display "(SA)" suffix for service accounts
+            user_display = request.user_name
+            if request.user_id and request.user_id.lower().startswith('sa-'):
+                user_display = f'{user_display} (SA)'
+            row = [r_id, user_display, request.name]
             if verbose:
                 row.append(request.cluster_name)
             row.extend([
