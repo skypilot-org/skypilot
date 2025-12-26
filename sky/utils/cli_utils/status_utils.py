@@ -225,8 +225,17 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
 # exist in those cases.
 _get_name = (lambda cluster_record, _: cluster_record['name'])
 _get_user_hash = (lambda cluster_record, _: cluster_record['user_hash'])
-_get_user_name = (
-    lambda cluster_record, _: cluster_record.get('user_name', '-'))
+
+
+def _get_user_name(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
+    """Get the user name, appending (SA) for service accounts."""
+    del truncate  # unused
+    user_name = cluster_record.get('user_name', '-')
+    user_hash = cluster_record.get('user_hash', '')
+    # Service accounts have user IDs (hashes) that start with 'sa-'
+    if user_hash.lower().startswith('sa-'):
+        return f'{user_name} (SA)'
+    return user_name
 _get_launched = (lambda cluster_record, _: log_utils.readable_time_duration(
     cluster_record['launched_at']))
 _get_duration = (lambda cluster_record, _: log_utils.readable_time_duration(
