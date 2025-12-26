@@ -572,7 +572,8 @@ class Resources:
         if self.cloud is not None and self._instance_type is not None:
             vcpus, _ = self.cloud.get_vcpus_mem_from_instance_type(
                 self._instance_type)
-            return str(vcpus)
+            if vcpus is not None:
+                return str(vcpus)
         return None
 
     @property
