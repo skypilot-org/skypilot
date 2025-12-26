@@ -570,7 +570,7 @@ class JobsCancelBody(RequestBody):
 class JobsLogsBody(RequestBody):
     """The request body for the jobs logs endpoint."""
     name: Optional[str] = None
-    job_id: Optional[int] = None
+    job_id: Optional[Union[int, str]] = None
     follow: bool = True
     controller: bool = False
     refresh: bool = False
@@ -738,7 +738,7 @@ class StreamBody(pydantic.BaseModel):
 class JobsDownloadLogsBody(RequestBody):
     """The request body for the jobs download logs endpoint."""
     name: Optional[str]
-    job_id: Optional[int]
+    job_id: Optional[Union[int, str]]
     refresh: bool = False
     controller: bool = False
     local_dir: str = constants.SKY_LOGS_DIRECTORY

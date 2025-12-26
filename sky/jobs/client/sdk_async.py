@@ -123,11 +123,12 @@ async def tail_logs(cluster_name: str,
 
 @usage_lib.entrypoint
 async def download_logs(
-        name: Optional[str],
-        job_id: Optional[int],
-        refresh: bool,
-        controller: bool,
-        local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[int, str]:
+    name: Optional[str],
+    job_id: Optional[Union[int, str]],
+    refresh: bool,
+    controller: bool,
+    local_dir: str = constants.SKY_LOGS_DIRECTORY
+) -> Dict[Union[int, str], str]:
     """Async version of download_logs() that syncs down logs of managed jobs."""
     return await context_utils.to_thread(sdk.download_logs, name, job_id,
                                          refresh, controller, local_dir)
