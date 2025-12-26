@@ -180,16 +180,6 @@ def simplify_ports(ports: List[str]) -> List[str]:
     return port_set_to_ranges(port_ranges_to_set(ports))
 
 
-def _format_numeric_value(value: float) -> str:
-    """Format a numeric value, showing decimals only when necessary.
-
-    Shows up to 1 decimal place for fractional values, integer for whole
-    numbers. This prevents rounding 0.5 to 0 while keeping 2.0 as "2".
-    """
-    if value == int(value):
-        return str(int(value))
-    return f'{value:.1f}'.rstrip('0').rstrip('.')
-
 
 def format_resource(resource: 'resources_lib.Resources',
                     simplified_only: bool = False) -> Tuple[str, Optional[str]]:
@@ -210,16 +200,16 @@ def format_resource(resource: 'resources_lib.Resources',
 
     if (resource.accelerators is None or is_k8s):
         if vcpu is not None:
-            elements_simple.append(f'cpus={_format_numeric_value(vcpu)}')
-            elements_full.append(f'cpus={_format_numeric_value(vcpu)}')
+            elements_simple.append(f'cpus={common_utils.format_float(vcpu)}')
+            elements_full.append(f'cpus={common_utils.format_float(vcpu)}')
         if mem is not None:
-            elements_simple.append(f'mem={_format_numeric_value(mem)}')
-            elements_full.append(f'mem={_format_numeric_value(mem)}')
+            elements_simple.append(f'mem={common_utils.format_float(mem)}')
+            elements_full.append(f'mem={common_utils.format_float(mem)}')
     elif not simplified_only:
         if vcpu is not None:
-            elements_full.append(f'cpus={_format_numeric_value(vcpu)}')
+            elements_full.append(f'cpus={common_utils.format_float(vcpu)}')
         if mem is not None:
-            elements_full.append(f'mem={_format_numeric_value(mem)}')
+            elements_full.append(f'mem={common_utils.format_float(mem)}')
 
     is_slurm = resource.cloud.canonical_name() == 'slurm'
     if not is_k8s and not is_slurm:
