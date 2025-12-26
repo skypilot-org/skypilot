@@ -5222,8 +5222,9 @@ def jobs_cancel(
                 }
                 # Format job IDs with names
                 job_strs = [
-                    f'{jid} ({jname})' if (jname := job_id_to_name.get(jid))
-                    else str(jid) for jid in job_ids
+                    f'{jid} ({jname})' if
+                    (jname := job_id_to_name.get(jid)) else str(jid)
+                    for jid in job_ids
                 ]
                 job_identity_str = f'managed job{plural}: {", ".join(job_strs)}'
             except Exception as e:  # pylint: disable=broad-except
