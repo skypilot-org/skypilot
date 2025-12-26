@@ -1928,6 +1928,16 @@ class Resources:
         # extract_docker_image() can properly match the region.
         image_id = override.pop('image_id', self.image_id)
         new_region = override.get('region', self.region)
+        if 'infra' in override and override['infra'] is not None:
+            try:
+                # This duplicates some logic from Resources.__init__, but is
+                # needed here to correctly handle the image_id update before
+                # calling __init__.
+                infra_info = infra_utils.InfraInfo.from_str(override['infra'])
+                new_region = infra_info.region
+            except ValueError:
+                # Let Resources.__init__ handle and raise the error.
+                pass
         if (image_id is not None and isinstance(image_id, dict) and
                 new_region is not None and new_region != self.region):
             if None in image_id and len(image_id) == 1:
