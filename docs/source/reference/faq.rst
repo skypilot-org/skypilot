@@ -190,7 +190,7 @@ By default, SkyPilot supports most global regions on AWS and only supports the U
 To make your managed spot jobs potentially use all global regions, please log into the spot controller with ``ssh sky-spot-controller-<hash>``
 (the full name can be found in ``sky status``), and run the commands above.
 
-Remember to run sky ``api stop`` and restart your server. 
+After fetching the latest catalogs, remember to run sky ``api stop`` and restart your SkyPilot API server. 
 
 (Advanced) How to edit or update the regions or pricing information used by SkyPilot?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
