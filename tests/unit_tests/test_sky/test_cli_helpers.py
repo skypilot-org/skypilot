@@ -742,8 +742,11 @@ class TestJobsCancelConfirmation:
             with mock.patch.object(client_sdk,
                                    'stream_and_get',
                                    return_value=mock_result):
-                with mock.patch.object(click, 'confirm', side_effect=capture_confirm):
-                    with mock.patch.object(managed_jobs, 'cancel',
+                with mock.patch.object(click,
+                                       'confirm',
+                                       side_effect=capture_confirm):
+                    with mock.patch.object(managed_jobs,
+                                           'cancel',
                                            return_value='cancel-request-id'):
                         # Invoke jobs_cancel with job_ids
                         runner = click.testing.CliRunner()
@@ -793,8 +796,11 @@ class TestJobsCancelConfirmation:
             with mock.patch.object(client_sdk,
                                    'stream_and_get',
                                    return_value=mock_result):
-                with mock.patch.object(click, 'confirm', side_effect=capture_confirm):
-                    with mock.patch.object(managed_jobs, 'cancel',
+                with mock.patch.object(click,
+                                       'confirm',
+                                       side_effect=capture_confirm):
+                    with mock.patch.object(managed_jobs,
+                                           'cancel',
                                            return_value='cancel-request-id'):
                         try:
                             command.jobs_cancel.callback(
@@ -826,11 +832,14 @@ class TestJobsCancelConfirmation:
         with mock.patch.object(cli_utils,
                                'get_managed_job_queue',
                                side_effect=Exception('Query failed')):
-            with mock.patch.object(click, 'confirm', side_effect=capture_confirm):
+            with mock.patch.object(click,
+                                   'confirm',
+                                   side_effect=capture_confirm):
                 with mock.patch.object(client_sdk,
                                        'stream_and_get',
                                        return_value=None):
-                    with mock.patch.object(managed_jobs, 'cancel',
+                    with mock.patch.object(managed_jobs,
+                                           'cancel',
                                            return_value='cancel-request-id'):
                         try:
                             command.jobs_cancel.callback(
