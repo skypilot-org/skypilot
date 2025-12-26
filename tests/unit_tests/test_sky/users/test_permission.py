@@ -183,11 +183,9 @@ class TestPermissionService:
                              ['user2', 'private-ws', '*']]
         mock_enforcer.get_policy.return_value = existing_policies
         # Users already have roles (returned as grouping policies)
-        mock_enforcer.get_grouping_policy.return_value = [
-            ['user1', 'user'],
-            ['user2', 'user'],
-            ['user3', 'user']
-        ]
+        mock_enforcer.get_grouping_policy.return_value = [['user1', 'user'],
+                                                          ['user2', 'user'],
+                                                          ['user3', 'user']]
         mock_enforcer.add_policy.return_value = True
         mock_enforcer.add_grouping_policy.return_value = True
 
@@ -477,10 +475,10 @@ class TestPermissionService:
     @mock.patch('sky.users.permission.db_utils.add_all_tables_to_db_sqlalchemy')
     @mock.patch('sky.global_user_state.initialize_and_get_db')
     def test_lazy_initialize_full_initialize_true(self, mock_init_db,
-                                                   mock_add_tables,
-                                                   mock_enforcer_class,
-                                                   mock_adapter_class,
-                                                   mock_policy_lock):
+                                                  mock_add_tables,
+                                                  mock_enforcer_class,
+                                                  mock_adapter_class,
+                                                  mock_policy_lock):
         """Test _lazy_initialize with full_initialize=True."""
         mock_engine = mock.Mock()
         mock_init_db.return_value = mock_engine
@@ -512,9 +510,9 @@ class TestPermissionService:
     @mock.patch('sky.users.permission.casbin.Enforcer')
     @mock.patch('sky.global_user_state.initialize_and_get_db')
     def test_lazy_initialize_full_initialize_false(self, mock_init_db,
-                                                    mock_enforcer_class,
-                                                    mock_adapter_class,
-                                                    mock_policy_lock):
+                                                   mock_enforcer_class,
+                                                   mock_adapter_class,
+                                                   mock_policy_lock):
         """Test _lazy_initialize with full_initialize=False (default)."""
         mock_engine = mock.Mock()
         mock_init_db.return_value = mock_engine
@@ -580,8 +578,8 @@ class TestPermissionService:
     @mock.patch('sky.global_user_state.add_or_update_user')
     @mock.patch('sky.global_user_state.get_user')
     def test_maybe_initialize_basic_auth_user_new_user(self, mock_get_user,
-                                                        mock_add_user,
-                                                        mock_policy_lock):
+                                                       mock_add_user,
+                                                       mock_policy_lock):
         """Test basic auth user initialization for a new user."""
         mock_policy_lock.return_value.__enter__ = mock.Mock()
         mock_policy_lock.return_value.__exit__ = mock.Mock()
@@ -613,9 +611,8 @@ class TestPermissionService:
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.global_user_state.get_user')
-    def test_maybe_initialize_basic_auth_user_existing_user(self,
-                                                             mock_get_user,
-                                                             mock_policy_lock):
+    def test_maybe_initialize_basic_auth_user_existing_user(
+            self, mock_get_user, mock_policy_lock):
         """Test basic auth user initialization when user already exists."""
         mock_policy_lock.return_value.__enter__ = mock.Mock()
         mock_policy_lock.return_value.__exit__ = mock.Mock()
@@ -624,7 +621,8 @@ class TestPermissionService:
         os.environ[constants.SKYPILOT_INITIAL_BASIC_AUTH] = 'admin:password123'
 
         # User already exists
-        existing_user = models.User(id='user_hash', name='admin',
+        existing_user = models.User(id='user_hash',
+                                    name='admin',
                                     password='password123')
         mock_get_user.return_value = existing_user
 
@@ -640,8 +638,8 @@ class TestPermissionService:
         mock_enforcer.save_policy.assert_not_called()
 
     @mock.patch('sky.users.permission._policy_lock')
-    def test_maybe_initialize_basic_auth_user_no_env_var(self,
-                                                          mock_policy_lock):
+    def test_maybe_initialize_basic_auth_user_no_env_var(
+            self, mock_policy_lock):
         """Test basic auth user initialization when env var is not set."""
         mock_policy_lock.return_value.__enter__ = mock.Mock()
         mock_policy_lock.return_value.__exit__ = mock.Mock()
@@ -682,29 +680,35 @@ class TestPermissionService:
 
         # Mock plugin RBAC rules
         mock_get_plugin_rules.return_value = {
-            'user': [
-                {'path': '/plugins/api/test', 'method': 'POST'},
-                {'path': '/plugins/api/test', 'method': 'DELETE'}
-            ]
+            'user': [{
+                'path': '/plugins/api/test',
+                'method': 'POST'
+            }, {
+                'path': '/plugins/api/test',
+                'method': 'DELETE'
+            }]
         }
 
         # Mock role permissions (should include plugin rules)
         mock_get_role_perms.return_value = {
             'user': {
                 'permissions': {
-                    'blocklist': [
-                        {'path': '/workspaces/config', 'method': 'POST'},
-                        {'path': '/plugins/api/test', 'method': 'POST'},
-                        {'path': '/plugins/api/test', 'method': 'DELETE'}
-                    ]
+                    'blocklist': [{
+                        'path': '/workspaces/config',
+                        'method': 'POST'
+                    }, {
+                        'path': '/plugins/api/test',
+                        'method': 'POST'
+                    }, {
+                        'path': '/plugins/api/test',
+                        'method': 'DELETE'
+                    }]
                 }
             }
         }
 
         # Mock workspace permissions
-        mock_get_workspace_perms.return_value = {
-            'default': ['*']
-        }
+        mock_get_workspace_perms.return_value = {'default': ['*']}
 
         # Mock users
         mock_get_users.return_value = mock_users
@@ -750,17 +754,16 @@ class TestPermissionService:
         mock_get_role_perms.return_value = {
             'user': {
                 'permissions': {
-                    'blocklist': [
-                        {'path': '/workspaces/config', 'method': 'POST'}
-                    ]
+                    'blocklist': [{
+                        'path': '/workspaces/config',
+                        'method': 'POST'
+                    }]
                 }
             }
         }
 
         # Mock workspace permissions
-        mock_get_workspace_perms.return_value = {
-            'default': ['*']
-        }
+        mock_get_workspace_perms.return_value = {'default': ['*']}
 
         # Mock users
         mock_get_users.return_value = mock_users
@@ -794,11 +797,9 @@ class TestPermissionService:
                              ['*', 'default', '*']]
         mock_enforcer = mock.Mock()
         mock_enforcer.get_policy.return_value = existing_policies
-        mock_enforcer.get_grouping_policy.return_value = [
-            ['user1', 'user'],
-            ['user2', 'user'],
-            ['user3', 'user']
-        ]
+        mock_enforcer.get_grouping_policy.return_value = [['user1', 'user'],
+                                                          ['user2', 'user'],
+                                                          ['user3', 'user']]
 
         # Mock plugin RBAC rules
         mock_get_plugin_rules.return_value = {}
@@ -807,17 +808,16 @@ class TestPermissionService:
         mock_get_role_perms.return_value = {
             'user': {
                 'permissions': {
-                    'blocklist': [
-                        {'path': '/workspaces/config', 'method': 'POST'}
-                    ]
+                    'blocklist': [{
+                        'path': '/workspaces/config',
+                        'method': 'POST'
+                    }]
                 }
             }
         }
 
         # Mock workspace permissions matching existing policies
-        mock_get_workspace_perms.return_value = {
-            'default': ['*']
-        }
+        mock_get_workspace_perms.return_value = {'default': ['*']}
 
         # Mock users
         mock_get_users.return_value = mock_users
@@ -853,11 +853,9 @@ class TestPermissionService:
             ['user-to-be-removed', 'some-workspace', '*']  # Redundant
         ]
         mock_enforcer.get_policy.return_value = existing_policies
-        mock_enforcer.get_grouping_policy.return_value = [
-            ['user1', 'user'],
-            ['user2', 'user'],
-            ['user3', 'user']
-        ]
+        mock_enforcer.get_grouping_policy.return_value = [['user1', 'user'],
+                                                          ['user2', 'user'],
+                                                          ['user3', 'user']]
         mock_enforcer.add_policy.return_value = True
         mock_enforcer.remove_policy.return_value = True
         mock_enforcer.add_grouping_policy.return_value = True
@@ -878,9 +876,7 @@ class TestPermissionService:
         }
 
         # Mock workspace permissions (only one policy expected)
-        mock_get_workspace_perms.return_value = {
-            'default': ['*']
-        }
+        mock_get_workspace_perms.return_value = {'default': ['*']}
 
         # Mock users
         mock_get_users.return_value = mock_users
@@ -894,6 +890,7 @@ class TestPermissionService:
             'user-to-be-removed', 'some-workspace', '*')
         # Verify save_policy was called
         mock_enforcer.save_policy.assert_called()
+
 
 @pytest.mark.usefixtures("reset_permission_singleton", "cleanup_env_vars")
 class TestPermissionServiceMultiProcess:
@@ -1013,8 +1010,8 @@ class TestPermissionServiceMultiProcess:
     @mock.patch('sky.global_user_state.get_all_users')
     def test_idempotent_user_addition(self, mock_get_users, mock_get_role_perms,
                                       mock_get_workspace_perms,
-                                      mock_get_plugin_rules,
-                                      mock_policy_lock, mock_users):
+                                      mock_get_plugin_rules, mock_policy_lock,
+                                      mock_users):
         """Test that adding the same user multiple times is idempotent."""
         mock_policy_lock.return_value.__enter__ = mock.Mock()
         mock_policy_lock.return_value.__exit__ = mock.Mock()
@@ -1042,7 +1039,9 @@ class TestPermissionServiceMultiProcess:
                 return []  # No roles initially
             else:
                 # Users have roles after first call
-                return [[user.id, rbac.get_default_role()] for user in mock_users]
+                return [
+                    [user.id, rbac.get_default_role()] for user in mock_users
+                ]
 
         def get_roles_for_user_side_effect(user_id):
             # This is called by _add_user_if_not_exists_no_lock
@@ -1140,7 +1139,7 @@ class TestPermissionServiceMultiProcess:
             self, mock_init_db, mock_add_tables, mock_adapter_class,
             mock_enforcer_class, mock_init_basic_auth, mock_init_policies,
             mock_policy_lock):
-        """Test that _lazy_initialize doesn't permanently set 
+        """Test that _lazy_initialize doesn't permanently set
         enforcer to None after DB failure on retry."""
         # Configure context manager to allow exceptions to propagate
         mock_context = mock.Mock()

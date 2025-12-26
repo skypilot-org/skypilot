@@ -54,7 +54,7 @@ class PermissionService:
                 adapter = sqlalchemy_adapter.Adapter(
                     engine, db_class=sqlalchemy_adapter.CasbinRule)
                 model_path = os.path.join(os.path.dirname(__file__),
-                                            'model.conf')
+                                          'model.conf')
                 enforcer = casbin.Enforcer(model_path, adapter)
                 self.enforcer = enforcer
                 # Only set the enforcer instance once the enforcer
@@ -136,8 +136,8 @@ class PermissionService:
         role_permissions = rbac.get_role_permissions(plugin_rules=plugin_rules)
         expected_policies = []
         for role, permissions in role_permissions.items():
-            if permissions.get('permissions') and 'blocklist' in permissions[
-                    'permissions']:
+            if permissions.get('permissions'
+                              ) and 'blocklist' in permissions['permissions']:
                 blocklist = permissions['permissions']['blocklist']
                 for item in blocklist:
                     expected_policies.append(
@@ -184,13 +184,12 @@ class PermissionService:
 
         # Always ensure users have default roles (this is idempotent)
         # Get users who already have roles (g policies) to avoid redundant calls
-        users_with_roles = {
-            tuple(g)[0] for g in enforcer.get_grouping_policy()
-        }
+        users_with_roles = {tuple(g)[0] for g in enforcer.get_grouping_policy()}
         all_users = global_user_state.get_all_users()
         for existing_user in all_users:
             if str(existing_user.id) not in users_with_roles:
-                logger.debug(f'Adding role for user: {existing_user.name}({existing_user.id})')
+                logger.debug(f'Adding role for user: {existing_user.name}'
+                             f'({existing_user.id})')
                 user_added = self._add_user_if_not_exists_no_lock(
                     existing_user.id)
                 policy_updated = policy_updated or user_added
