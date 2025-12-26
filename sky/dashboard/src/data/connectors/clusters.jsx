@@ -67,7 +67,7 @@ export async function getClusters({ clusterNames = null } = {}) {
       }
       // For SSH Node Pools, strip the 'ssh-' prefix from region display
       // to avoid redundant "SSH (ssh-poolname)" showing as "SSH (poolname)"
-      if (cluster.cloud === 'SSH' && region_or_zone.startsWith('ssh-')) {
+      if (cluster.cloud === 'SSH' && region_or_zone?.startsWith('ssh-')) {
         region_or_zone = region_or_zone.substring(4);
       }
       // Store the full value before truncation
