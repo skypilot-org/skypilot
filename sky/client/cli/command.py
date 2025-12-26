@@ -5221,16 +5221,14 @@ def jobs_cancel(
                     if r.job_id is not None
                 }
                 # Format job IDs with names
-                job_strs = []
-                for jid in job_ids:
-                    jname = job_id_to_name.get(jid)
-                    if jname:
-                        job_strs.append(f'{jid} ({jname})')
-                    else:
-                        job_strs.append(str(jid))
+                job_strs = [
+                    f'{jid} ({jname})' if (jname := job_id_to_name.get(jid))
+                    else str(jid) for jid in job_ids
+                ]
                 job_identity_str = f'managed job{plural}: {", ".join(job_strs)}'
-            except Exception:  # pylint: disable=broad-except
+            except Exception as e:  # pylint: disable=broad-except
                 # If querying fails, fall back to just showing IDs
+                logger.debug(f'Failed to query job names for confirmation: {e}')
                 job_identity_str = (
                     f'managed job{plural} with ID{plural} {job_id_str}')
         if job_identity_str is None:
