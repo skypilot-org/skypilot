@@ -156,8 +156,9 @@ class PermissionService:
             p for p in expected_policies if p not in existing_policies
         ]
         # Find policies to remove
+        expected_policies_set = set(expected_policies)
         redundant_policies = [
-            p for p in existing_policies if p not in expected_policies
+            p for p in existing_policies if p not in expected_policies_set
         ]
         if missing_policies:
             # Add missing policies
