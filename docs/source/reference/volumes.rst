@@ -232,7 +232,7 @@ This section demonstrates how to configure and use distributed filesystems as Sk
                 .. code-block:: yaml
 
                   # juicefs-volume.yaml
-                  name: juicefs-pvc
+                  name: juicefs-volume
                   type: k8s-pvc
                   infra: k8s
                   use_existing: true
