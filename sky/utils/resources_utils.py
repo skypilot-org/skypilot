@@ -198,15 +198,7 @@ def format_resource(resource: 'resources_lib.Resources',
         elements_full.append(f'gpus={acc}:{count}')
 
     cpu_to_add = None
-    if resource.cpus is not None and resource.cpus.strip():
-        cpus_str = resource.cpus.rstrip('+')
-        try:
-            cpus_float = float(cpus_str)
-            cpus_formatted = f'{cpus_float:.1f}'.rstrip('0').rstrip('.')
-            cpu_to_add = f'cpus={cpus_formatted}'
-        except ValueError:
-            cpu_to_add = f'cpus={resource.cpus}'
-    elif vcpu is not None:
+    if vcpu is not None:
         cpus_formatted = f'{vcpu:.1f}'.rstrip('0').rstrip('.')
         cpu_to_add = f'cpus={cpus_formatted}'
 
