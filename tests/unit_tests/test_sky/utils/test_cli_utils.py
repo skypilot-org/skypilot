@@ -387,7 +387,8 @@ def test_get_resources_fractional_values():
                                               cpus='0.5',
                                               memory=4,
                                               instance_type='0.5CPU--4GB')
-    simple, full = resources_utils.format_resource(mock_resources_fractional_cpu)
+    simple, full = resources_utils.format_resource(
+        mock_resources_fractional_cpu)
     assert 'cpus=0.5' in simple and 'cpus=0.5' in full
     assert 'mem=4' in simple and 'mem=4' in full
     # Ensure we don't have truncated values like 'cpus=0' or 'mem=0'
@@ -399,7 +400,8 @@ def test_get_resources_fractional_values():
                                               cpus='1',
                                               memory=0.5,
                                               instance_type='1CPU--0.5GB')
-    simple, full = resources_utils.format_resource(mock_resources_fractional_mem)
+    simple, full = resources_utils.format_resource(
+        mock_resources_fractional_mem)
     assert 'cpus=1' in simple and 'cpus=1' in full
     assert 'mem=0.5' in simple and 'mem=0.5' in full
     assert not re.search(r'\bmem=0(?![.\d])', simple)
