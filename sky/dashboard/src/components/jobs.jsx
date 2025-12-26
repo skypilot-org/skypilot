@@ -367,6 +367,7 @@ export function ManagedJobsTable({
   const [isRestarting, setIsRestarting] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
   const [showAllMode, setShowAllMode] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
     title: '',
@@ -425,6 +426,7 @@ export function ManagedJobsTable({
       requestSeqRef.current = version;
       setLocalLoading(true);
       setLoading(true); // Set parent loading state
+      setFetchError(null);
       try {
         // Build server-side filter params from UI filters
         const getFilterValue = (prop) => {
@@ -531,6 +533,7 @@ export function ManagedJobsTable({
         console.error('Error fetching data:', err);
         // Still set data to empty array on error to show proper UI
         if (version === requestSeqRef.current) {
+          setFetchError(err.message || 'Failed to fetch jobs data');
           setData([]);
           setControllerStopped(false);
           setIsInitialLoad(false);
@@ -1268,7 +1271,14 @@ export function ManagedJobsTable({
                         </div>
                       )}
                       {!controllerStopped && !controllerLaunching && (
-                        <p className="text-gray-500">No active jobs</p>
+                        fetchError ? (
+                          <div className="text-red-500">
+                            <span className="font-medium">Error: </span>
+                            {fetchError}
+                          </div>
+                        ) : (
+                          <p className="text-gray-500">No active jobs</p>
+                        )
                       )}
                       {/* Desktop controller stopped message stays in table */}
                       {!isMobile && controllerStopped && (
@@ -1748,7 +1758,14 @@ export function ClusterJobs({
                   colSpan={8}
                   className="text-center py-6 text-gray-500"
                 >
-                  No jobs found
+                  {fetchError ? (
+                    <div className="text-red-500">
+                      <span className="font-medium">Error: </span>
+                      {fetchError}
+                    </div>
+                  ) : (
+                    'No jobs found'
+                  )}
                 </TableCell>
               </TableRow>
             )}
