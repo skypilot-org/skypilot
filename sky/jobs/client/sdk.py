@@ -327,6 +327,7 @@ def cancel(
 @rest.retry_transient_errors()
 def tail_logs(name: Optional[str] = None,
               job_id: Optional[int] = None,
+              system: Optional[str] = None,
               follow: bool = True,
               controller: bool = False,
               refresh: bool = False,
@@ -334,14 +335,15 @@ def tail_logs(name: Optional[str] = None,
               output_stream: Optional['io.TextIOBase'] = None) -> Optional[int]:
     """Tails logs of managed jobs.
 
-    You can provide either a job name or a job ID to tail logs. If both are not
-    provided, the logs of the latest job will be shown.
+    You can provide either a job name or a job ID or a system UUID to tail
+    logs. If none are not provided, the logs of the latest job will be shown.
 
     Args:
         name: Name of the managed job to tail logs.
         job_id: ID of the managed job to tail logs.
         follow: Whether to follow the logs.
         controller: Whether to tail logs from the jobs controller.
+        system: UUID of the system to tail logs.
         refresh: Whether to restart the jobs controller if it is stopped.
         tail: Number of lines to tail from the end of the log file.
         output_stream: The stream to write the logs to. If None, print to the
@@ -361,6 +363,7 @@ def tail_logs(name: Optional[str] = None,
     body = payloads.JobsLogsBody(
         name=name,
         job_id=job_id,
+        system=system,
         follow=follow,
         controller=controller,
         refresh=refresh,
@@ -386,11 +389,13 @@ def tail_logs(name: Optional[str] = None,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def download_logs(
-        name: Optional[str],
-        job_id: Optional[int],
-        refresh: bool,
-        controller: bool,
-        local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[int, str]:
+    name: Optional[str],
+    job_id: Optional[int],
+    system: Optional[Union[str, bool]],
+    refresh: bool,
+    controller: bool,
+    local_dir: str = constants.SKY_LOGS_DIRECTORY
+) -> Union[Dict[int, str], Dict[str, str]]:
     """Sync down logs of managed jobs.
 
     Please refer to sky.cli.job_logs for documentation.
@@ -398,12 +403,14 @@ def download_logs(
     Args:
         name: Name of the managed job to sync down logs.
         job_id: ID of the managed job to sync down logs.
+        system: UUID of the system to sync down logs or True to sync all active
+                logs.
         refresh: Whether to restart the jobs controller if it is stopped.
         controller: Whether to sync down logs from the jobs controller.
         local_dir: Local directory to sync down logs.
 
     Returns:
-        A dictionary mapping job ID to the local path.
+        A dictionary mapping job ID or system UUID to the local path.
 
     Request Raises:
         ValueError: invalid arguments.
@@ -413,6 +420,7 @@ def download_logs(
     body = payloads.JobsDownloadLogsBody(
         name=name,
         job_id=job_id,
+        system=system,
         refresh=refresh,
         controller=controller,
         local_dir=local_dir,
@@ -427,10 +435,16 @@ def download_logs(
     job_id_remote_path_dict = sdk.stream_and_get(request_id)
     remote2local_path_dict = client_common.download_logs_from_api_server(
         job_id_remote_path_dict.values())
-    return {
-        int(job_id): remote2local_path_dict[remote_path]
-        for job_id, remote_path in job_id_remote_path_dict.items()
-    }
+    if system is not None:
+        return {
+            system_id: remote2local_path_dict[remote_path]
+            for system_id, remote_path in job_id_remote_path_dict.items()
+        }
+    else:
+        return {
+            int(job_id): remote2local_path_dict[remote_path]
+            for job_id, remote_path in job_id_remote_path_dict.items()
+        }
 
 
 spot_launch = common_utils.deprecated_function(

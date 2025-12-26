@@ -163,6 +163,9 @@ def start_controller() -> None:
     log_path = os.path.join(logs_dir, f'controller_{controller_uuid}.log')
 
     activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
+
+    # IMPORTANT: IF YOU CHANGE THE COMMAND HERE, CHANGE
+    # utils.get_all_active_systems() TOO CORRECTLY PARSE COMMAND LINE
     run_controller_cmd = (f'{sys.executable} -u -m'
                           f'sky.jobs.controller {controller_uuid}')
 
@@ -174,6 +177,17 @@ def start_controller() -> None:
     pid = subprocess_utils.launch_new_process_tree(run_cmd, log_output=log_path)
     pid_started_at = psutil.Process(pid).create_time()
     _append_controller_pid_record(pid, pid_started_at)
+
+
+def get_alive_controllers_pids() -> Optional[List[int]]:
+    records = get_controller_process_records()
+    if records is None:
+        return None
+    return [
+        record.pid
+        for record in records
+        if managed_job_utils.controller_process_alive(record, quiet=False)
+    ]
 
 
 def get_alive_controllers() -> Optional[int]:
