@@ -132,14 +132,16 @@ def deserialize_exception(serialized: Dict[str, Any]) -> Exception:
         # Construct with args only and set attributes manually.
         try:
             e = exception_class(*serialized['args'])
-        except Exception:  # pylint: disable=broad-except
+        except Exception as deserialize_err:  # pylint: disable=broad-except
             # If construction with positional args also fails, the serialized
             # data is likely incompatible. Fall back to a generic Exception
             # to prevent crashing the deserialization process, which could
             # mask the original error.
             return Exception(
-                f'Failed to deserialize exception '
-                f'{exception_type}: {serialized["message"]}')
+                f'Failed to deserialize exception {exception_type}: '
+                f'{serialized["message"]} (args={serialized["args"]}, '
+                f'attributes={serialized["attributes"]}, '
+                f'reason={deserialize_err})')
         for key, value in serialized['attributes'].items():
             try:
                 setattr(e, key, value)
