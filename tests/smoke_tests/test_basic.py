@@ -312,21 +312,18 @@ def test_launch_fast_with_autostop_hook(generic_cloud: str):
     autostop_timeout = 600 if generic_cloud == 'azure' else 250
     special_str = f'hook-executed-{time.time()}'
 
-    # Create a YAML file with the hook
-    yaml_content = textwrap.dedent(f"""
-    resources:
-      autostop:
-        idle_minutes: 1
-        hook: echo {special_str}
-
-    setup: |
-      echo "running setup"
-
-    run: echo hi
-    """)
+    # Load the existing minimal.yaml and add resources section with autostop hook
+    minimal_yaml_path = 'tests/test_yamls/minimal.yaml'
+    yaml_config = yaml_utils.read_yaml(minimal_yaml_path)
+    yaml_config['resources'] = {
+        'autostop': {
+            'idle_minutes': 1,
+            'hook': f'echo {special_str}'
+        }
+    }
 
     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
-        f.write(yaml_content)
+        yaml_utils.dump_yaml(f.name, yaml_config)
         f.flush()
 
         test = smoke_tests_utils.Test(
