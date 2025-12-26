@@ -353,7 +353,7 @@ def test_launch_fast_with_autostop_hook(generic_cloud: str):
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name,
                     cmd=
-                    f'grep "{special_str}" {constants.SKYLET_LOG_FILE} && grep "Autostop hook executed successfully" {constants.SKYLET_LOG_FILE}'
+                    f'grep "{special_str}" ~/{constants.SKYLET_LOG_FILE} && grep "Autostop hook executed successfully" ~/{constants.SKYLET_LOG_FILE}'
                 ),
             ],
             f'sky down -y {name}',
