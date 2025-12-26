@@ -350,11 +350,7 @@ def test_launch_fast_with_autostop_hook(generic_cloud: str):
                 f'sky status -r {name} | grep UP',
 
                 # Verify the hook was executed by checking the skylet logs
-                smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    cmd=
-                    f'grep "{special_str}" ~/{constants.SKYLET_LOG_FILE} && grep "Autostop hook executed successfully" ~/{constants.SKYLET_LOG_FILE}'
-                ),
+                f'log_output=$(sky exec {name} "cat ~/{constants.SKYLET_LOG_FILE}") && echo "$log_output" | grep "{special_str}" && echo "$log_output" | grep "Autostop hook executed successfully"',
             ],
             f'sky down -y {name}',
             timeout=smoke_tests_utils.get_timeout(generic_cloud) +
