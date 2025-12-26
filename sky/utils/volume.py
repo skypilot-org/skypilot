@@ -4,13 +4,19 @@ import enum
 import time
 from typing import Any, Dict, Optional
 
+import colorama
+
 from sky import exceptions
 from sky import global_user_state
 from sky import models
+from sky import provision
+from sky import sky_logging
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import status_lib
+
+logger = sky_logging.init_logger(__name__)
 
 MIN_RUNPOD_NETWORK_VOLUME_SIZE_GB = 10
 
@@ -59,14 +65,38 @@ class VolumeMount:
         self.volume_config: models.VolumeConfig = volume_config
         self.is_ephemeral: bool = is_ephemeral
 
-    def pre_mount(self) -> None:
-        """Update the volume status before actual mounting."""
+    def pre_mount(self, cluster_name: Optional[str] = None) -> None:
+        """Update the volume status before actual mounting.
+
+        Args:
+            cluster_name: Name of the cluster this volume is being mounted to.
+                         Used to show warnings about existing attachments.
+        """
         # Skip pre_mount for ephemeral volumes as they don't exist yet
         if self.is_ephemeral:
             return
         # TODO(aylei): for ReadWriteOnce volume, we also need to queue the
         # mount request if the target volume is already mounted to another
         # cluster. For now, we only support ReadWriteMany volume.
+
+        # Check if volume is already attached to a cluster and warn if
+        # relaunching
+        if cluster_name is not None:
+            try:
+                # Get the list of clusters currently using this volume
+                _, usedby_clusters = provision.get_volume_usedby(
+                    self.volume_config.cloud, self.volume_config)
+
+                if usedby_clusters and cluster_name in usedby_clusters:
+                    logger.info(
+                        f'{colorama.Fore.YELLOW}Volume {self.volume_name!r} is '
+                        f'already mounted to cluster {cluster_name!r}. '
+                        f'Relaunching with the same volume.'
+                        f'{colorama.Style.RESET_ALL}')
+            except Exception as e:  # pylint: disable=broad-except
+                # Don't fail if we can't check volume usage, just log debug
+                logger.debug(f'Failed to check volume usage for warning: {e}')
+
         global_user_state.update_volume(self.volume_name,
                                         last_attached_at=int(time.time()),
                                         status=status_lib.VolumeStatus.IN_USE)
