@@ -39,6 +39,9 @@ class PermissionService:
         self.enforcer: Optional[casbin.Enforcer] = None
         self._lock = threading.Lock()
 
+    def initialize(self):
+        self._lazy_initialize(full_initialize=True)
+
     def _lazy_initialize(self, full_initialize: bool = False):
         if self.enforcer is not None:
             return

@@ -2342,7 +2342,7 @@ if __name__ == '__main__':
     logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
     logger.info('Initializing permission service')
-    permission.permission_service._lazy_initialize(full_initialize=True)
+    permission.permission_service.initialize()
     logger.info('Permission service initialized')
 
     max_db_connections = global_user_state.get_max_db_connections()
