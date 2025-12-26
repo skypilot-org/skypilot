@@ -1184,6 +1184,10 @@ def test_volumes_on_kubernetes():
             f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "{name}"',
+            # Test volume mounting warning on relaunch with the same cluster
+            # The warning should appear when relaunching with volumes already mounted
+            f's=$(sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml 2>&1); echo "$s"; echo "$s" | grep -q "already mounted to cluster"',
+            f'sky logs {name} 2 --status',  # Ensure the second job succeeded.
             f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing0 -y',
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi',
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then echo "existing0 not deleted" && exit 1; else echo "existing0 deleted"; fi',

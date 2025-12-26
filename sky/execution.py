@@ -209,7 +209,7 @@ def _execute(
         if (not _is_launched_by_jobs_controller and
                 not _is_launched_by_sky_serve_controller):
             # Only process pre-mount operations on API server.
-            dag.pre_mount_volumes()
+            dag.pre_mount_volumes(cluster_name=cluster_name)
         for task in dag.tasks:
             if task.storage_mounts is not None:
                 for storage in task.storage_mounts.values():
