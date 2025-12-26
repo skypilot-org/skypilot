@@ -1804,6 +1804,17 @@ async def api_status(
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
             ]
+        # Convert user name to user hash for filtering
+        user_hash = None
+        if user_filter is not None:
+            users = await context_utils.to_thread(
+                global_user_state.get_user_by_name, user_filter)
+            if not users:
+                return []
+            # TODO(zhwu): User names are not guaranteed to be unique.
+            # For now, we just use the first one.
+            user_hash = users[0].id
+
         # Build include_request_names list if request_name_filter is provided
         include_request_names = None
         if request_name_filter is not None:
@@ -1814,7 +1825,7 @@ async def api_status(
                 limit=limit,
                 fields=fields,
                 sort=True,
-                user_id=user_filter,
+                user_id=user_hash,
                 include_request_names=include_request_names,
             ))
         return requests_lib.encode_requests(request_tasks)
