@@ -341,6 +341,7 @@ def test_kubernetes_runner_rsync_sets_exec_container_envvar() -> None:
         runner.rsync('/tmp/src', '/tmp/dst', up=True, stream_logs=False)
 
     assert 'SKYPILOT_K8S_EXEC_CONTAINER=sidecar0' in captured['command']
+    assert '--rsync-path=rsync' in captured['command']
     assert 'rsync' in captured['command']
 
 
@@ -359,6 +360,7 @@ def test_kubernetes_runner_rsync_does_not_set_exec_container_envvar_by_default(
         runner.rsync('/tmp/src', '/tmp/dst', up=True, stream_logs=False)
 
     assert 'SKYPILOT_K8S_EXEC_CONTAINER=' not in captured['command']
+    assert '--rsync-path=rsync' in captured['command']
 
 
 def test_get_pod_primary_container_prefers_ray_node() -> None:
