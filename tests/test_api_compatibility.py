@@ -462,8 +462,7 @@ class TestRequestStatusBodyBackwardCompatibility:
         # cluster_name should NOT be in params when it's None
         assert 'cluster_name' not in params, (
             "cluster_name should not be sent when None to ensure "
-            "backward compatibility with older API servers"
-        )
+            "backward compatibility with older API servers")
         # Other non-None fields should be present
         assert 'request_ids' in params
         assert 'all_status' in params
