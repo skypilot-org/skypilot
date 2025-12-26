@@ -84,8 +84,8 @@ def test_single_node_with_gpu():
         resources_dict=resources_dict,
         stable_cluster_internal_ips=['10.0.0.1'],
         env_vars=task_env_vars,
+        log_dir='/sky/logs',
         setup_cmd='pip install torch',
-        setup_log_path='/sky/logs/setup.log',
     )
 
     # Single node: no gang_scheduling_id passed
@@ -126,8 +126,8 @@ def test_multi_node_2nodes():
         resources_dict=resources_dict,
         stable_cluster_internal_ips=['10.0.0.1', '10.0.0.2'],
         env_vars=task_env_vars,
+        log_dir='/sky/logs',
         setup_cmd=None,
-        setup_log_path='/sky/logs/setup.log',
     )
 
     codegen.add_task(
@@ -164,8 +164,8 @@ def test_slurm_single_node_with_gpu():
         resources_dict=resources_dict,
         stable_cluster_internal_ips=['10.0.0.1'],
         env_vars=task_env_vars,
+        log_dir='/sky/logs',
         setup_cmd='pip install torch',
-        setup_log_path='/sky/logs/setup.log',
     )
 
     codegen.add_task(

@@ -556,7 +556,7 @@ def ensure_iterable_result(func):
 def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     # Fail fast if `sky` CLI somehow errors out.
     if check_sky_status:
-        test.commands.insert(0, 'sky status')
+        test.commands.insert(0, 'sky status -u')
 
     log_to_stdout = os.environ.get('LOG_TO_STDOUT', None)
     if log_to_stdout:
@@ -637,20 +637,50 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             test.echo(msg)
             write(msg)
 
-        if proc.returncode and not is_remote_server_test():
-            test.echo('=== Sky API Server Log (last 100 lines) ===')
-            # Read the log file directly and echo it
-            log_path = os.path.expanduser('~/.sky/api_server/server.log')
-            if os.path.exists(log_path):
-                with open(log_path, 'r') as f:
-                    lines = f.readlines()
-                    # Get last 100 lines
-                    last_lines = lines[-100:] if len(lines) > 100 else lines
-                    for line in last_lines:
-                        test.echo(line.rstrip())
+        if proc.returncode:
+            # Fetch controller logs for failed jobs
+            script_path = os.path.join(os.path.dirname(__file__), 'scripts',
+                                       'fetch_failed_job_logs.sh')
+            if os.path.exists(script_path):
+                write('=== Fetching Failed Job Logs ===\n')
+                flush()
+                write(f'+ bash {script_path}\n')
+                flush()
+                script_proc = subprocess.Popen(
+                    f'bash {script_path}',
+                    stdout=subprocess_out,
+                    stderr=subprocess.STDOUT,
+                    shell=True,
+                    executable='/bin/bash',
+                    env=env_dict,
+                )
+                try:
+                    script_proc.wait(timeout=300)  # 5 minutes timeout
+                except subprocess.TimeoutExpired:
+                    write('Timeout after 300 seconds fetching failed job logs.')
+                    script_proc.terminate()
+                write('=== End of Failed Job Logs ===\n')
+                flush()
             else:
-                test.echo(f'Server log file not found: {log_path}')
-            test.echo('=== End of Sky API Server Log ===')
+                error_msg = (f'Script not found: {script_path}, '
+                             f'skipping failed job log fetch')
+                write(error_msg + '\n')
+                flush()
+
+            if not is_remote_server_test():
+                write('=== Sky API Server Log (last 100 lines) ===')
+                # Read the log file directly and echo it
+                log_path = os.path.expanduser('~/.sky/api_server/server.log')
+                if os.path.exists(log_path):
+                    with open(log_path, 'r') as f:
+                        lines = f.readlines()
+                        # Get last 100 lines
+                        last_lines = lines[-100:] if len(lines) > 100 else lines
+                        for line in last_lines:
+                            write(line.rstrip())
+                else:
+                    write(f'Server log file not found: {log_path}')
+                write('=== End of Sky API Server Log ===')
 
         if (proc.returncode == 0 or
                 pytest.terminate_on_failure) and test.teardown is not None:

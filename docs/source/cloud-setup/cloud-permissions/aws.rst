@@ -104,6 +104,10 @@ Multi-cloud access with SSO login
 
 SSO login has limited functionality *across multiple clouds*. If you use multiple clouds, you can :ref:`set up a dedicated IAM user and access key <dedicated-aws-user>` so that instances launched on other clouds can use AWS resources.
 
+.. tip::
+
+    If you are running SkyPilot on an EKS cluster and need S3 access without static credentials, see :ref:`aws-eks-iam-roles` for setting up IAM roles for EKS pods.
+
 .. list-table::
    :header-rows: 1
 
@@ -609,3 +613,9 @@ Common issues
       # .bashrc / .zshrc
       # Enable AWS profile named "AWSPowerUserAccess-123456789012"
       export AWS_PROFILE='AWSPowerUserAccess-123456789012'
+
+
+.. toctree::
+   :hidden:
+
+   aws-eks-iam-roles

@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import colorama
 import copy
+import json
 import multiprocessing
 import signal
 import threading
@@ -368,7 +369,7 @@ def run_bash_command_with_log_and_return_pid(
                                             streaming_prefix=streaming_prefix)
     return {'return_code': return_code, 'pid': os.getpid()}
 
-def _slurm_cleanup_handler(signum, _frame):
+def _cancel_slurm_job_steps():
     slurm_job_id = '12345'
     assert slurm_job_id is not None, 'SLURM_JOB_ID is not set'
     try:
@@ -390,8 +391,11 @@ def _slurm_cleanup_handler(signum, _frame):
                 subprocess.run(['scancel', step_id],
                                 check=False, capture_output=True)
     except Exception as e:
-        print(f'Error in _slurm_cleanup_handler: {e}', flush=True)
+        print(f'Error in _cancel_slurm_job_steps: {e}', flush=True)
         pass
+
+def _slurm_cleanup_handler(signum, _frame):
+    _cancel_slurm_job_steps()
     # Re-raise to let default handler terminate.
     signal.signal(signum, signal.SIG_DFL)
     os.kill(os.getpid(), signum)
@@ -400,103 +404,110 @@ signal.signal(signal.SIGTERM, _slurm_cleanup_handler)
 
 autostop_lib.set_last_active_time_to_now()
 job_lib.set_status(2, job_lib.JobStatus.PENDING)
-has_setup_cmd = False
-setup_cmd = None
-setup_envs = None
-setup_log_path = None
-setup_num_nodes = None
 plural = 's' if 1 > 1 else ''
 node_str = f'1 node{plural}'
 message = ('[2m├── [0m[2m'
            'Waiting for task resources on '
            f'{node_str}.[0m')
 print(message, flush=True)
-has_setup_cmd = True
-setup_cmd = 'pip install torch'
-setup_envs = {'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'}
-setup_log_path = '/sky/logs/setup.log'
-setup_num_nodes = 1
-
-result = subprocess.run(
-    ['srun', '--overlap', '--jobid=12345', '--nodes=1', '--ntasks=1',
-     '--ntasks-per-node=1', 'bash', '-c',
-     'hostname -I | awk "{print \$1}"'],
-    capture_output=True,
-    text=True,
-    check=True
-)
-job_ips = result.stdout.strip().split('\n')
-cluster_ips_to_node_id = {ip: i for i, ip in enumerate(['10.0.0.1'])}
-job_ip_rank_list = sorted(job_ips, key=cluster_ips_to_node_id.get)
-# Note: job_ip_rank_map is not needed for Slurm, as
-# we will use $SLURM_PROCID to get the node rank.
-job_ip_list_str = '\n'.join(job_ip_rank_list)
-
 sky_env_vars_dict = {}
-sky_env_vars_dict['SKYPILOT_NODE_IPS'] = job_ip_list_str
 sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = 2
 
 sky_env_vars_dict['SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000001-cluster-2'
 sky_env_vars_dict['MODEL_NAME'] = 'resnet50'
 script = 'python train.py'
+if script is None:
+    script = ''
 rclone_flush_script = '\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                echo "skypilot: cached mount is still uploading to remote"\n                flushed=0\n                break\n            fi\n        done\n    done\n    echo "skypilot: cached mount uploaded complete"\nfi'
 
-if script is not None:
+if script or True:
     script += rclone_flush_script
     sky_env_vars_dict['SKYPILOT_NUM_GPUS_PER_NODE'] = 1
-    # TODO(kevin): Handle multi-node job log paths.
-    log_path = os.path.expanduser(os.path.join('/sky/logs/tasks', "run.log"))
 
-    # Signal files that signal:
-    # 1. srun has acquired allocation within its existing sbatch allocation.
-    alloc_signal_file = f'/tmp/sky_alloc_12345_2'
-    # 2. Driver script has finished `setup` and `run` is ready to proceed.
-    setup_done_signal_file = f'/tmp/sky_setup_done_12345_2'
+    # Signal files for setup/run synchronization:
+    # 1. alloc_signal_file: srun has acquired allocation
+    # 2. setup_done_signal_file: Driver has finished setup, run can proceed
+    #
+    # Signal files are stored in home directory, which is
+    # assumed to be on a shared NFS mount accessible by all nodes.
+    # To support clusters with non-NFS home directories, we would
+    # need to let users specify an NFS-backed "working directory"
+    # or use a different coordination mechanism.
+    alloc_signal_file = f'~/.sky_alloc_12345_2'
+    alloc_signal_file = os.path.expanduser(alloc_signal_file)
+    setup_done_signal_file = f'~/.sky_setup_done_12345_2'
+    setup_done_signal_file = os.path.expanduser(setup_done_signal_file)
 
-    # Add prolog to signal allocation and wait for setup to finish.
-    # We also need to source ~/.bashrc again to make it as if the
-    # run section is run in a new shell, after setup is finished.
-    # Also setup SKYPILOT env vars from SLURM env vars.
-    run_script = (
-        f"touch {alloc_signal_file} && "
-        f"while [ ! -f {setup_done_signal_file} ]; do sleep 0.05; done && "
-        f"rm -f {setup_done_signal_file} && "
-        f"export SKYPILOT_NUM_NODES=${{SLURM_NNODES:-$SLURM_JOB_NUM_NODES}} && "
-        f"export SKYPILOT_NODE_RANK=$SLURM_PROCID && "
-        "source ~/.bashrc && "
-        + script
-    )
     # Start exclusive srun in a thread to reserve allocation (similar to ray.get(pg.ready()))
     gpu_arg = f'--gpus-per-node=1' if 1 > 0 else ''
 
-    def build_srun_cmd(script, extra_flags):
+    def build_task_runner_cmd(user_script, extra_flags, log_dir, env_vars_dict,
+                              task_name=None, is_setup=False,
+                              alloc_signal=None, setup_done_signal=None):
+        env_vars_json = json.dumps(env_vars_dict)
+
+        log_dir = shlex.quote(log_dir)
+        env_vars = shlex.quote(env_vars_json)
+        cluster_ips = shlex.quote(",".join(['10.0.0.1']))
+
+        runner_args = f'--log-dir={log_dir} --env-vars={env_vars} --cluster-num-nodes=1 --cluster-ips={cluster_ips}'
+
+        if task_name is not None:
+            runner_args += f' --task-name={shlex.quote(task_name)}'
+
+        if is_setup:
+            runner_args += ' --is-setup'
+
+        if alloc_signal is not None:
+            runner_args += f' --alloc-signal-file={shlex.quote(alloc_signal)}'
+
+        if setup_done_signal is not None:
+            runner_args += f' --setup-done-signal-file={shlex.quote(setup_done_signal)}'
+
         script_path = None
-        srun_flags = f'srun --quiet --unbuffered --jobid=12345 --job-name=sky-2 --ntasks-per-node=1 {extra_flags}'
-        if backend_utils.is_command_length_over_limit(script):
-            with tempfile.NamedTemporaryFile('w', prefix='sky_srun_', suffix='.sh', delete=False) as f:
-                f.write(script)
+        prefix = 'sky_setup_' if is_setup else 'sky_task_'
+        if backend_utils.is_command_length_over_limit(user_script):
+            with tempfile.NamedTemporaryFile('w', prefix=prefix, suffix='.sh', delete=False) as f:
+                f.write(user_script)
                 script_path = f.name
-            srun_cmd = f'{srun_flags} bash {script_path}'
+            runner_args += f' --script-path={shlex.quote(script_path)}'
         else:
-            srun_cmd = f'{srun_flags} bash -c {shlex.quote(script)}'
+            runner_args += f' --script={shlex.quote(user_script)}'
+
+        # Use /usr/bin/env explicitly to work around a Slurm quirk where
+        # srun's execvp() doesn't check execute permissions, failing when
+        # $HOME/.local/bin/env (non-executable, from uv installation)
+        # shadows /usr/bin/env.
+        job_suffix = '-setup' if is_setup else ''
+        srun_cmd = (
+            f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid=12345 '
+            f'--job-name=sky-2{job_suffix} --ntasks-per-node=1 {extra_flags} '
+            f'{constants.SKY_SLURM_PYTHON_CMD} -m sky.skylet.executor.slurm {runner_args}'
+        )
         return srun_cmd, script_path
 
     def run_thread_func():
         # This blocks until Slurm allocates resources (--exclusive)
         # --mem=0 to match RayCodeGen's behavior where we don't explicitly request memory.
         run_flags = f'--nodes=1 --cpus-per-task=4 --mem=0 {gpu_arg} --exclusive'
-        srun_cmd, run_script_path = build_srun_cmd(run_script, run_flags)
-        result = run_bash_command_with_log_and_return_pid(
-            srun_cmd,
-            log_path,
-            env_vars=sky_env_vars_dict,
-            stream_logs=True,
-            with_ray=False,
-            streaming_prefix=f'{colorama.Fore.CYAN}(train_task, pid={{pid}}){colorama.Style.RESET_ALL} ',
+        srun_cmd, task_script_path = build_task_runner_cmd(
+            script, run_flags, '/sky/logs/tasks', sky_env_vars_dict,
+            task_name='train_task',
+            alloc_signal=alloc_signal_file,
+            setup_done_signal=setup_done_signal_file
         )
-        if run_script_path is not None:
-            os.remove(run_script_path)
-        return result
+
+        proc = subprocess.Popen(srun_cmd, shell=True,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT,
+                              text=True)
+        for line in proc.stdout:
+            print(line, end='', flush=True)
+        proc.wait()
+
+        if task_script_path is not None:
+            os.remove(task_script_path)
+        return {'return_code': proc.returncode, 'pid': proc.pid}
 
     run_thread_result = {'result': None}
     def run_thread_wrapper():
@@ -517,13 +528,15 @@ if script is not None:
             msg += f' See error logs above for more details.[0m'
             print(msg, flush=True)
             returncodes = [returncode]
+            if int(constants.SKYLET_VERSION) >= 28:
+                job_lib.set_exit_codes(2, returncodes)
             job_lib.set_status(2, job_lib.JobStatus.FAILED_SETUP)
             sys.exit(1)
         time.sleep(0.1)
 
     print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
 
-    if has_setup_cmd:
+    if True:
         job_lib.set_status(2, job_lib.JobStatus.SETTING_UP)
 
         # The schedule_step should be called after the job status is set to
@@ -533,32 +546,37 @@ if script is not None:
 
         # --overlap as we have already secured allocation with the srun for the run section,
         # and otherwise this srun would get blocked and deadlock.
-        setup_flags = f'--overlap --nodes={setup_num_nodes}'
-        setup_srun, setup_script_path = build_srun_cmd(setup_cmd, setup_flags)
-
-        setup_result = run_bash_command_with_log_and_return_pid(
-            setup_srun,
-            os.path.expanduser(setup_log_path),
-            env_vars=setup_envs,
-            stream_logs=True,
-            with_ray=False,
-            streaming_prefix=f'{colorama.Fore.CYAN}(setup pid={{pid}}){colorama.Style.RESET_ALL} ',
+        setup_flags = f'--overlap --nodes=1'
+        setup_srun, setup_script_path = build_task_runner_cmd(
+            'pip install torch', setup_flags, '/sky/logs', {'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'},
+            is_setup=True
         )
+
+        # Run setup srun directly, streaming output to driver stdout
+        setup_proc = subprocess.Popen(setup_srun, shell=True,
+                                     stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT,
+                                     text=True)
+        for line in setup_proc.stdout:
+            print(line, end='', flush=True)
+        setup_proc.wait()
 
         if setup_script_path is not None:
             os.remove(setup_script_path)
 
-        setup_returncode = int(setup_result.get('return_code', 1))
+        setup_returncode = setup_proc.returncode
         if setup_returncode != 0:
-            setup_pid = setup_result.get('pid', os.getpid())
+            setup_pid = setup_proc.pid
             msg = f'ERROR: [31mJob 2\'s setup failed with return code {setup_returncode} (pid={setup_pid}).'
             msg += f' See error logs above for more details.[0m'
             print(msg, flush=True)
             job_lib.set_status(2, job_lib.JobStatus.FAILED_SETUP)
+            # Cancel the srun spawned by run_thread_func.
+            _cancel_slurm_job_steps()
             sys.exit(1)
 
     job_lib.set_job_started(2)
-    if not has_setup_cmd:
+    if not True:
         # Need to call schedule_step() to make sure the scheduler
         # schedule the next pending job.
         job_lib.scheduler.schedule_step()
@@ -570,15 +588,20 @@ if script is not None:
     run_thread.join()
     result = run_thread_result['result']
 
-    # Cleanup signal file
+    # Cleanup signal files
     if os.path.exists(alloc_signal_file):
         os.remove(alloc_signal_file)
+    if os.path.exists(setup_done_signal_file):
+        os.remove(setup_done_signal_file)
 
     returncodes = [int(result.get('return_code', 1))]
 else:
     returncodes = [0]
 
 if sum(returncodes) != 0:
+    # Save exit codes to job metadata for potential recovery logic
+    if int(constants.SKYLET_VERSION) >= 28:
+        job_lib.set_exit_codes(2, returncodes)
     job_lib.set_status(2, job_lib.JobStatus.FAILED)
     # Schedule the next pending job immediately to make the job
     # scheduling more efficient.

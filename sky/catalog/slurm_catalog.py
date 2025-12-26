@@ -112,9 +112,6 @@ def list_accelerators_realtime(
     else:
         slurm_cluster = region_filter
 
-    partition_filter = slurm_utils.get_cluster_default_partition(slurm_cluster)
-
-    # Call the helper function to get node info
     slurm_nodes_info = slurm_utils.slurm_node_info(
         slurm_cluster_name=slurm_cluster)
 
@@ -126,8 +123,6 @@ def list_accelerators_realtime(
             filters_applied.append(f'gpu_name={name_filter!r}')
         if quantity_filter:
             filters_applied.append(f'quantity>={quantity_filter}')
-        if region_filter:
-            filters_applied.append(f'cluster={region_filter!r}')
         if filters_applied:
             err_msg += f' with filters ({", ".join(filters_applied)})'
         err_msg += '.'
@@ -214,8 +209,6 @@ def list_accelerators_realtime(
             filters_applied.append(f'gpu_name={name_filter!r}')
         if quantity_filter:
             filters_applied.append(f'quantity>={quantity_filter}')
-        if partition_filter:
-            filters_applied.append(f'partition={partition_filter!r}')
         if filters_applied:
             err_msg += f' with filters ({", ".join(filters_applied)})'
         err_msg += '.'

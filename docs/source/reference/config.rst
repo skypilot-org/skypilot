@@ -194,7 +194,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
 
   :ref:`vast <config-yaml-vast>`:
-    :ref:`secure_only <config-yaml-vast-secure-only>`: true
+    :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
@@ -353,6 +353,24 @@ Example:
     force_disable_cloud_bucket: true
 
 .. _config-yaml-jobs-controller:
+.. _config-yaml-jobs-controller-consolidation-mode:
+
+``jobs.controller.consolidation_mode``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable :ref:`consolidation mode <jobs-consolidation-mode>`, which will run the jobs controller within the remote API server, rather than in a separate sky cluster. Don't enable unless you are using a remotely-deployed API server.
+
+Default: ``false``.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      consolidation_mode: true
+      # any specified resources will be ignored
+
 .. _config-yaml-jobs-controller-resources:
 
 ``jobs.controller.resources``
@@ -1667,15 +1685,17 @@ Example:
 
 Advanced Vast configuration (optional).
 
-.. _config-yaml-vast-secure-only:
+.. _config-yaml-vast-datacenter-only:
 
-``vast.secure_only``
-~~~~~~~~~~~~~~~~~~~~
+``vast.datacenter_only``
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 Configure SkyPilot to only consider offers on Vast verified datacenters (optional).
-Internally, this will query Vast with the ``datacenters=true`` parameters. Note
-some GPUs may only be available on non-secure offers. This config can be
-overridden per task via :ref:`config flag <config-client-cli-flag>`.
+Internally, this will query Vast with the ``datacenter=true`` and ``hosting_type>=1``
+parameters to filter for professional datacenter-hosted machines. Note some GPUs
+may only be available on non-datacenter offers. This config filters both the catalog
+(during resource planning) and the launch query (during provisioning). This config
+can be overridden per task via :ref:`config flag <config-client-cli-flag>`.
 
 Default: ``false``
 

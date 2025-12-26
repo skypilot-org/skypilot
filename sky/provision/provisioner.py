@@ -157,9 +157,9 @@ def bulk_provision(
             logger.debug(f'SkyPilot version: {sky.__version__}; '
                          f'commit: {sky.__commit__}')
             logger.debug(_TITLE.format('Provisioning'))
-            logger.debug(
-                'Provision config:\n'
-                f'{json.dumps(dataclasses.asdict(bootstrap_config), indent=2)}')
+            redacted_config = bootstrap_config.get_redacted_config()
+            logger.debug('Provision config:\n'
+                         f'{json.dumps(redacted_config, indent=2)}')
             return _bulk_provision(cloud, region, cluster_name,
                                    bootstrap_config)
         except exceptions.NoClusterLaunchedError:
@@ -493,7 +493,8 @@ def _post_provision_setup(
         # commands and rsync on the pods. SSH will still be ready after a while
         # for the users to SSH into the pod.
         is_k8s_cloud = cloud_name.lower() in ['kubernetes', 'ssh']
-        if not is_k8s_cloud:
+        is_slurm_cloud = cloud_name.lower() == 'slurm'
+        if not is_k8s_cloud and not is_slurm_cloud:
             logger.debug(
                 f'\nWaiting for SSH to be available for {cluster_name!r} ...')
             wait_for_ssh(cluster_info, ssh_credentials)

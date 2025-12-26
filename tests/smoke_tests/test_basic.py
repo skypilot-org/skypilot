@@ -593,7 +593,6 @@ def test_gcp_stale_job_manual_restart():
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet.
-@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet.
 def test_env_check(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
@@ -621,9 +620,6 @@ def test_env_check(generic_cloud: str):
 def test_cli_logs(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
-    if generic_cloud == 'slurm':
-        # Slurm does not support multi-node
-        num_nodes = 1
     timestamp = time.time()
     test = smoke_tests_utils.Test('cli_logs', [
         f'sky launch -y -c {name} --infra {generic_cloud} --num-nodes {num_nodes} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo {timestamp} 1"',
@@ -1151,7 +1147,7 @@ def test_kubernetes_slurm_show_gpus(generic_cloud: str):
             # 2. The cluster has no GPUs, and the expected message is shown
             '(echo "$s" | grep -A 1 "REQUESTABLE_QTY_PER_NODE" | '
             'grep -E "^[A-Z0-9]+[[:space:]]+[0-9, ]+[[:space:]]+[0-9]+ of [0-9]+ free" || '
-            f'echo "$s" | grep "No GPUs found in any {generic_cloud} clusters")'
+            f'echo "$s" | grep "No GPUs found in any {generic_cloud.capitalize()} clusters")'
         )],
     )
     smoke_tests_utils.run_one_test(test)
@@ -1184,7 +1180,7 @@ def test_launch_and_exec_async(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'launch_and_exec_async',
         [
-            f'sky launch -c {name} -y --async',
+            f'sky launch -c {name} --infra {generic_cloud} -y --async',
             # Async exec.
             f'sky exec {name} echo --async',
             # Async exec and cancel immediately.
@@ -1194,6 +1190,11 @@ def test_launch_and_exec_async(generic_cloud: str):
              'sed -E "s/.*run: (sky api cancel .*).*/\\1/") && '
              'echo "Extracted cancel command: $cancel_cmd" && '
              '$cancel_cmd'),
+            # Wait for cluster to be UP before sync exec.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=300),
             # Sync exec must succeed after command end.
             (
                 f's=$(sky exec {name} echo) && echo "$s" && '
@@ -1592,7 +1593,6 @@ def test_sky_down_with_multiple_sgs():
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_slurm  # Slurm does not support multi-node yet
 def test_launch_with_failing_setup(generic_cloud: str):
     """Test that failing setup outputs the right error message."""
     name = smoke_tests_utils.get_cluster_name()
@@ -1885,11 +1885,11 @@ def test_cancel_job_reliability(generic_cloud: str):
     # Helper function to check process count with timeout
     def check_process_count(expected_lines: int, timeout: int = 30) -> str:
         """Check that ps aux | grep 'sleep 10000' shows expected number of lines.
-        
+
         Note: ps aux | grep includes the grep process itself, so:
         - 3 lines = sleep process + grep process + ssh process to check the process count
         - 2 line = grep process (sleep is gone) + ssh process to check the process count
-        
+
         Returns a command that will check the process count with retries.
         """
         return (
@@ -1945,5 +1945,41 @@ def test_cancel_job_reliability(generic_cloud: str):
             f'sky down -y {name}',
             timeout=smoke_tests_utils.get_timeout(generic_cloud) *
             2,  # Longer timeout for 10 iterations
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_docker_pass_redacted(generic_cloud: str):
+    fake_token = 'dckr_pat_fakefakefake'
+    cluster_yaml = textwrap.dedent(f"""
+    name: test_docker_pass
+
+    resources:
+      cloud: {generic_cloud}
+      region: us-west-1
+      image_id: docker:lab3522/ubuntu:latest
+      cpus: 2+
+      memory: 4GB+
+
+    secrets:
+      SKYPILOT_DOCKER_USERNAME: lab3522
+      SKYPILOT_DOCKER_PASSWORD: {fake_token}
+      SKYPILOT_DOCKER_SERVER: docker.io
+
+    run: echo "Test completed"
+    """)
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+        f.write(cluster_yaml.encode('utf-8'))
+        f.flush()
+        name = smoke_tests_utils.get_cluster_name()
+        test = smoke_tests_utils.Test(
+            'test_docker_pass_redacted',
+            [
+                # Make sure the docker password is not in the output.
+                f's=$(sky launch -y -c {name} {f.name} -y 2>&1); echo "$s"; ! echo "$s" | grep -q "{fake_token}"',
+            ],
+            timeout=smoke_tests_utils.get_timeout(generic_cloud),
+            teardown=f'sky down -y {name}',
         )
         smoke_tests_utils.run_one_test(test)
