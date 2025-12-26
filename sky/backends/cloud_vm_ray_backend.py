@@ -2142,7 +2142,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             ip_list = (self.cached_external_ips
                        if force_cached else self.external_ips())
             if ip_list is None:
-                return []
+                raise exceptions.FetchClusterInfoError(
+                    exceptions.FetchClusterInfoError.Reason.HEAD)
             # Potentially refresh the external SSH ports, in case the existing
             # cluster before #2491 was launched without external SSH ports
             # cached.
@@ -2397,9 +2398,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # attempt to open the same port at the same time.
         for attempt in range(max_attempts):
             runners = self.get_command_runners()
-            if not runners:
-                raise exceptions.FetchClusterInfoError(
-                    exceptions.FetchClusterInfoError.Reason.HEAD)
             head_runner = runners[0]
             local_port = random.randint(10000, 65535)
             try:
@@ -3762,9 +3760,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                        local_file_path: str, remote_file_path: str) -> None:
         """Syncs file from remote to local."""
         runners = handle.get_command_runners()
-        if not runners:
-            raise exceptions.FetchClusterInfoError(
-                exceptions.FetchClusterInfoError.Reason.HEAD)
         head_runner = runners[0]
         head_runner.rsync(
             source=local_file_path,
@@ -3793,9 +3788,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         def _dump_code_to_file(codegen: str,
                                target_dir: str = SKY_REMOTE_APP_DIR) -> None:
             runners = handle.get_command_runners()
-            if not runners:
-                raise exceptions.FetchClusterInfoError(
-                    exceptions.FetchClusterInfoError.Reason.HEAD)
             head_runner = runners[0]
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
                 fp.write(codegen)
@@ -5294,9 +5286,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # This will try to fetch the head node IP if it is not cached.
 
         runners = handle.get_command_runners()
-        if not runners:
-            raise exceptions.FetchClusterInfoError(
-                exceptions.FetchClusterInfoError.Reason.HEAD)
         head_runner = runners[0]
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
