@@ -1270,16 +1270,16 @@ export function ManagedJobsTable({
                           </div>
                         </div>
                       )}
-                      {!controllerStopped && !controllerLaunching && (
-                        fetchError ? (
+                      {!controllerStopped &&
+                        !controllerLaunching &&
+                        (fetchError ? (
                           <div className="text-red-500">
                             <span className="font-medium">Error: </span>
                             {fetchError}
                           </div>
                         ) : (
                           <p className="text-gray-500">No active jobs</p>
-                        )
-                      )}
+                        ))}
                       {/* Desktop controller stopped message stays in table */}
                       {!isMobile && controllerStopped && (
                         <div className="flex flex-col items-center space-y-3 px-4">

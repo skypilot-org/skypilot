@@ -1004,8 +1004,10 @@ export function ClusterTable({
                         <span className="font-medium">Error: </span>
                         {fetchError}
                       </div>
+                    ) : showHistory ? (
+                      'No clusters found'
                     ) : (
-                      showHistory ? 'No clusters found' : 'No active clusters'
+                      'No active clusters'
                     )}
                   </TableCell>
                 </TableRow>
