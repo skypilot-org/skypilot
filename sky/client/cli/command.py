@@ -6313,16 +6313,25 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
     # This won't pollute the output of --endpoint.
     with rich_utils.client_status('[cyan]Checking services[/]'):
         service_status_request_id = serve_lib.status(service_names_to_query)
-        _, msg = _handle_services_request(service_status_request_id,
-                                          service_names=service_names_to_query,
-                                          show_all=verbose,
-                                          show_endpoint=endpoint,
-                                          is_called_by_user=True)
+        num_services, msg = _handle_services_request(
+            service_status_request_id,
+            service_names=service_names_to_query,
+            show_all=verbose,
+            show_endpoint=endpoint,
+            is_called_by_user=True)
 
     if not endpoint:
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Services{colorama.Style.RESET_ALL}')
     click.echo(msg)
+    # Exit with error code only for actual errors, not "no controller" cases.
+    # Check message content to distinguish between actual errors and normal
+    # "no controller" state (controller doesn't exist or is STOPPED).
+    if num_services is None:
+        # "No live services." or "No live pools." indicates no controller,
+        # which is a normal empty state, not an error.
+        if 'No live services.' not in msg and 'No live pools.' not in msg:
+            sys.exit(1)
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
