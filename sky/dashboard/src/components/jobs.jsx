@@ -1513,6 +1513,7 @@ export function ClusterJobs({
   userFilter = null,
   nameFilter = null,
   workspace = 'default',
+  fetchError = null,
 }) {
   const [expandedRowId, setExpandedRowId] = useState(null);
   const [sortConfig, setSortConfig] = useState({
