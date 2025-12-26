@@ -474,7 +474,7 @@ class VerdaClient:
     """A client for the Verda Cloud API."""
 
     def __init__(self) -> None:
-        return None
+        self.http_client = None
 
     def instances_get(self) -> List[Instance]:
         """Get all instances."""

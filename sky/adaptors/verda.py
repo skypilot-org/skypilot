@@ -81,39 +81,36 @@ def get_verda_configuration():
         with open(config_file_path, 'r', encoding='utf-8') as f:
             config = json_load(f)
 
-        if 'client_id' not in config or not config.get('client_id'):
-            return (
-                False,
-                ('Verda Cloud Client ID is missing or empty in '
-                 f'{config_file_path}\n'
-                 '    Please ensure your config.json contains:\n'
-                 '        {\n'
-                 '          "client_id": "your-api-key",\n'
-                 '          "client_secret": "your-api-secret"\n'
-                 '        }'),
-                None,
-            )
-
-        if 'client_secret' not in config or not config.get('client_secret'):
-            return (
-                False,
-                ('Verda Cloud Client Secret is missing or empty in '
-                 f'{config_file_path}\n'
-                 '    Please ensure your config.json contains:\n'
-                 '        {\n'
-                 '          "client_id": "your-api-key",\n'
-                 '          "client_secret": "your-api-secret"\n'
-                 '        }'),
-                None,
-            )
-
-        return True, None, VerdaConfiguration(
-                    client_id=config.client_id,
-                    client_secret=config.client_secret,
-                    base_url=config.get('base_url',
-                                        'https://api.verda.com/v1'),
-                    default_region=config.get('default_region',
-                                              'FIN-03'),
+            if 'client_id' not in config or not config.get('client_id'):
+                return (
+                    False,
+                    ('Verda Cloud Client ID is missing or empty in '
+                    f'{config_file_path}\n'
+                    '    Please ensure your config.json contains:\n'
+                    '        {\n'
+                    '          "client_id": "your-api-key",\n'
+                    '          "client_secret": "your-api-secret"\n'
+                    '        }'),
+                    None,
+                )
+            elif 'client_secret' not in config or not config.get('client_secret'):
+                return (
+                    False,
+                    ('Verda Cloud Client Secret is missing or empty in '
+                    f'{config_file_path}\n'
+                    '    Please ensure your config.json contains:\n'
+                    '        {\n'
+                    '          "client_id": "your-api-key",\n'
+                    '          "client_secret": "your-api-secret"\n'
+                    '        }'),
+                    None,
+                )
+            else:
+                return True, None, VerdaConfiguration(
+                    client_id=config.get('client_id'),
+                    client_secret=config.get('client_secret'),
+                    base_url=config.get('base_url', 'https://api.verda.com/v1'),
+                    default_region=config.get('default_region', 'FIN-03'),
                 ),
 
     except (OSError, IOError) as e:
