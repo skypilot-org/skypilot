@@ -538,6 +538,7 @@ def _start(
             f'Starting cluster {cluster_name!r} with backend {backend.NAME} '
             'is not supported.')
 
+    hook: Optional[str] = None
     controller = controller_utils.Controllers.from_name(cluster_name)
     if controller is not None:
         if down or idle_minutes_to_autostop:
@@ -566,6 +567,8 @@ def _start(
                 controller_autostop_config.enabled):
             idle_minutes_to_autostop = controller_autostop_config.idle_minutes
             down = controller_autostop_config.down
+            wait_for = controller_autostop_config.wait_for
+            hook = controller_autostop_config.hook
     else:
         # For non-controller clusters, restore autostop configuration from
         # database if not explicitly provided.
@@ -611,7 +614,15 @@ def _start(
                              all_file_mounts=None,
                              storage_mounts=storage_mounts)
     if idle_minutes_to_autostop is not None:
-        backend.set_autostop(handle, idle_minutes_to_autostop, wait_for, down)
+        # For controller clusters, hook comes from controller_autostop_config.
+        # For regular clusters, hook is None so it will be inherited from the
+        # existing config on the remote cluster.
+        hook_to_use = hook
+        backend.set_autostop(handle,
+                             idle_minutes_to_autostop,
+                             wait_for,
+                             down,
+                             hook=hook_to_use)
     return handle
 
 
@@ -795,11 +806,12 @@ def stop(cluster_name: str, purge: bool = False) -> None:
 
 @usage_lib.entrypoint
 def autostop(
-        cluster_name: str,
-        idle_minutes: int,
-        wait_for: Optional[autostop_lib.AutostopWaitFor] = autostop_lib.
-    DEFAULT_AUTOSTOP_WAIT_FOR,
-        down: bool = False,  # pylint: disable=redefined-outer-name
+    cluster_name: str,
+    idle_minutes: int,
+    wait_for: Optional[
+        autostop_lib.AutostopWaitFor] = autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    hook: Optional[str] = None,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Schedules an autostop/autodown for a cluster.
@@ -833,6 +845,9 @@ def autostop(
           to a negative number cancels any autostop/autodown setting.
         down: if true, use autodown (tear down the cluster; non-restartable),
           rather than autostop (restartable).
+        hook: optional script to execute on the remote cluster before autostop.
+          The script runs before the cluster is stopped or torn down. If the
+          hook fails, autostop will still proceed but a warning will be logged.
 
     Raises:
         sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
@@ -888,7 +903,7 @@ def autostop(
                 f'see reason above.') from e
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend.set_autostop(handle, idle_minutes, wait_for, down)
+    backend.set_autostop(handle, idle_minutes, wait_for, down, hook=hook)
 
 
 # ==================

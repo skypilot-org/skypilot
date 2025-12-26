@@ -1243,10 +1243,11 @@ def stop(cluster_name: str,
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def autostop(
-        cluster_name: str,
-        idle_minutes: int,
-        wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
-        down: bool = False,  # pylint: disable=redefined-outer-name
+    cluster_name: str,
+    idle_minutes: int,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    hook: Optional[str] = None,
 ) -> server_common.RequestId[None]:
     """Schedules an autostop/autodown for a cluster.
 
@@ -1287,6 +1288,10 @@ def autostop(
             3. "none" - Wait for nothing; autostop right after ``idle_minutes``.
         down: if true, use autodown (tear down the cluster; non-restartable),
             rather than autostop (restartable).
+        hook: optional script to execute on the remote cluster before autostop.
+            The script runs before the cluster is stopped or torn down. If the
+            hook fails, autostop will still proceed but a warning will be
+            logged. Requires API server version 26 or higher.
 
     Returns:
         The request ID of the autostop request.
@@ -1310,11 +1315,18 @@ def autostop(
         logger.warning('wait_for is not supported in your API server. '
                        'Please upgrade to a newer API server to use it.')
 
+    # Hook support requires API version 26 or higher
+    if hook is not None and (remote_api_version is None or
+                             remote_api_version < 26):
+        logger.warning('Autostop hook is not supported in your API server. '
+                       'Please upgrade to a newer API server to use it.')
+
     body = payloads.AutostopBody(
         cluster_name=cluster_name,
         idle_minutes=idle_minutes,
         wait_for=wait_for,
         down=down,
+        hook=hook,
     )
     response = server_common.make_authenticated_request(
         'POST', '/autostop', json=json.loads(body.model_dump_json()), timeout=5)
