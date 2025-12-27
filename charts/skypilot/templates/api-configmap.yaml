@@ -3,6 +3,12 @@ kind: ConfigMap
 metadata:
   name: {{ .Release.Name }}-config
   namespace: {{ .Release.Namespace }}
+  labels:
+    tier: skypilot
+    component: skypilot-api-cm
+    {{- with .Values.global.labels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
 data:
   config.yaml: |-
     {{- if .Values.apiService.config }}

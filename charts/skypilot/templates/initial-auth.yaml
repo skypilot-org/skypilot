@@ -4,6 +4,12 @@ kind: Secret
 metadata:
   name: {{ .Release.Name }}-initial-basic-auth
   namespace: {{ .Release.Namespace }}
+  labels:
+    tier: skypilot
+    component: skypilot-initial-basic-auth
+    {{- with .Values.global.labels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
 type: Opaque
 stringData:
   auth: {{ .Values.apiService.initialBasicAuthCredentials | quote }}

@@ -4,6 +4,12 @@ kind: Ingress
 metadata:
   name: {{ .Release.Name }}-grafana-authed
   namespace: {{ .Release.Namespace }}
+  labels:
+    tier: skypilot
+    component: skypilot-grafana-ingress
+    {{- with .Values.global.labels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
   annotations:
     {{- if or .Values.auth.oauth.enabled (and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled")) }}
     # OAuth2 Proxy authentication for browser-based access
