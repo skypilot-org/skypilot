@@ -149,10 +149,9 @@ def docker_start_cmds(
 
     # Check if network option is already specified in user_options to avoid
     # "network host is specified multiple times" error.
-    has_network_option = any(opt.startswith('--net=') or
-                              opt.startswith('--network=') or
-                              opt == '--net' or opt == '--network'
-                              for opt in user_options)
+    has_network_option = any(
+        opt.startswith('--net=') or opt.startswith('--network=') or
+        opt == '--net' or opt == '--network' for opt in user_options)
     user_options_str = ' '.join(user_options)
     docker_run = [
         docker_cmd,
