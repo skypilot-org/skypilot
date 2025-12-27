@@ -2,6 +2,7 @@
 """
 import asyncio
 import io
+import json
 import os
 import pathlib
 import resource
@@ -11,7 +12,7 @@ import threading
 import time
 import traceback
 import typing
-from typing import Dict, Optional, Set
+from typing import Dict, List, Optional, Set
 
 import dotenv
 
@@ -31,6 +32,7 @@ from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
+from sky.server import plugins
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -43,11 +45,16 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.utils.plugin_extensions import ExternalClusterFailure
+from sky.utils.plugin_extensions import ExternalFailureSource
 
 if typing.TYPE_CHECKING:
     import psutil
+
+    from sky.schemas.generated import jobsv1_pb2
 else:
     psutil = adaptors_common.LazyImport('psutil')
+    jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
 
 logger = sky_logging.init_logger('sky.jobs.controller')
 
@@ -236,6 +243,64 @@ class JobController:
             await context_utils.to_thread(managed_job_utils.terminate_cluster,
                                           cluster_name)
 
+    async def _get_job_exit_codes(
+        self, job_id: Optional[int],
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
+    ) -> Optional[list]:
+        """Retrieve exit codes from the remote cluster.
+
+        Args:
+            job_id: The job ID on the remote cluster.
+            handle: The handle to the cluster.
+
+        Returns:
+            List of exit codes, or None if not available.
+        """
+        try:
+            use_legacy = not handle.is_grpc_enabled_with_flag
+
+            if not use_legacy:
+                try:
+                    request = jobsv1_pb2.GetJobExitCodesRequest()
+                    if job_id is not None:
+                        request.job_id = job_id
+
+                    response = await context_utils.to_thread(
+                        backend_utils.invoke_skylet_with_retries,
+                        lambda: cloud_vm_ray_backend.SkyletClient(
+                            handle.get_grpc_channel()).get_job_exit_codes(
+                                request))
+
+                    exit_codes = list(
+                        response.exit_codes) if response.exit_codes else None
+                    return exit_codes
+                except exceptions.SkyletMethodNotImplementedError:
+                    # Fall back to legacy if RPC not implemented
+                    use_legacy = True
+
+            if use_legacy:
+                # Use existing SSH-based code generation
+                code = job_lib.JobLibCodeGen.get_job_exit_codes(job_id)
+
+                returncode, stdout, stderr = await context_utils.to_thread(
+                    self._backend.run_on_head,
+                    handle,
+                    code,
+                    stream_logs=False,
+                    require_outputs=True,
+                    separate_stderr=True)
+
+                if returncode != 0:
+                    logger.debug(f'Failed to retrieve exit codes: {stderr}')
+                    return None
+
+                exit_codes = json.loads(stdout.strip())
+                return exit_codes
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to retrieve job exit codes: {e}')
+            return None
+        return None
+
     async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring cluster status and handling recovery.
 
@@ -352,7 +417,9 @@ class JobController:
                 resources_str=resources_str,
                 specs={
                     'max_restarts_on_errors':
-                        self._strategy_executor.max_restarts_on_errors
+                        self._strategy_executor.max_restarts_on_errors,
+                    'recover_on_exit_codes':
+                        self._strategy_executor.recover_on_exit_codes
                 },
                 callback_func=callback_func,
                 full_resources_json=full_resources_json)
@@ -376,9 +443,8 @@ class JobController:
             launch_time = time.time() - launch_start
             logger.info(f'Cluster launch completed in {launch_time:.2f}s')
             assert remote_job_submitted_at is not None, remote_job_submitted_at
-        if self._pool is None:
-            job_id_on_pool_cluster = None
-        else:
+        job_id_on_pool_cluster: Optional[int] = None
+        if self._pool:
             # Update the cluster name when using pool.
             cluster_name, job_id_on_pool_cluster = (
                 await
@@ -422,6 +488,8 @@ class JobController:
             except KeyError:
                 pass
 
+        transient_job_check_error_start_time = None
+        job_check_backoff = None
         while True:
             status_check_count += 1
 
@@ -473,18 +541,37 @@ class JobController:
             # recovering, we will set the job status to None, which will force
             # enter the recovering logic.
             job_status = None
+            transient_job_check_error_reason = None
             if not force_transit_to_recovering:
                 try:
-                    job_status = await managed_job_utils.get_job_status(
-                        self._backend,
-                        cluster_name,
-                        job_id=job_id_on_pool_cluster,
-                    )
+                    job_status, transient_job_check_error_reason = await (
+                        managed_job_utils.get_job_status(
+                            self._backend,
+                            cluster_name,
+                            job_id=job_id_on_pool_cluster,
+                        ))
                 except exceptions.FetchClusterInfoError as fetch_e:
                     logger.info(
                         'Failed to fetch the job status. Start recovery.\n'
                         f'Exception: {common_utils.format_exception(fetch_e)}\n'
                         f'Traceback: {traceback.format_exc()}')
+
+            # When job status check fails, we need to retry to avoid false alarm
+            # for job failure, as it could be a transient error for
+            # communication issue.
+            if transient_job_check_error_reason is not None:
+                logger.info(
+                    'Potential transient error when fetching the job '
+                    f'status. Reason: {transient_job_check_error_reason}.\n'
+                    'Check cluster status to determine if the job is '
+                    'preempted or failed.')
+                if transient_job_check_error_start_time is None:
+                    transient_job_check_error_start_time = time.time()
+                    job_check_backoff = common_utils.Backoff(
+                        initial_backoff=1, max_backoff_factor=5)
+            else:
+                transient_job_check_error_start_time = None
+                job_check_backoff = None
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 logger.info(f'Task {task_id} succeeded! '
@@ -561,15 +648,16 @@ class JobController:
 
             # Pull the actual cluster status from the cloud provider to
             # determine whether the cluster is preempted or failed.
-            # TODO(zhwu): For hardware failure, such as GPU failure, it may not
-            # be reflected in the cluster status, depending on the cloud, which
-            # can also cause failure of the job, and we need to recover it
-            # rather than fail immediately.
-            (cluster_status,
-             handle) = backend_utils.refresh_cluster_status_handle(
-                 cluster_name,
-                 force_refresh_statuses=set(status_lib.ClusterStatus))
+            # NOTE: Some failures may not be reflected in the cluster status
+            # depending on the cloud, which can also cause failure of the job.
+            # Plugins can report such failures via ExternalFailureSource.
+            # TODO(cooperc): do we need to add this to asyncio thread?
+            (cluster_status, handle) = await context_utils.to_thread(
+                backend_utils.refresh_cluster_status_handle,
+                cluster_name,
+                force_refresh_statuses=set(status_lib.ClusterStatus))
 
+            external_failures: Optional[List[ExternalClusterFailure]] = None
             if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster is (partially) preempted or failed. It can be
                 # down, INIT or STOPPED, based on the interruption behavior of
@@ -580,6 +668,15 @@ class JobController:
                 logger.info(
                     f'Cluster is preempted or failed{cluster_status_str}. '
                     'Recovering...')
+                if ExternalFailureSource.is_registered():
+                    cluster_failures = await context_utils.to_thread(
+                        ExternalFailureSource.get, cluster_name=cluster_name)
+                    if cluster_failures:
+                        logger.info(
+                            f'Detected cluster failures: {cluster_failures}')
+                        external_failures = (
+                            ExternalClusterFailure.from_failure_list(
+                                cluster_failures))
             else:
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.
@@ -623,18 +720,37 @@ class JobController:
                             'can be caused by the job taking too much memory '
                             'or other resources. Try adding more memory, CPU, '
                             f'or disk in your job definition. {failure_reason}')
+
+                    # Retrieve exit codes from the failed job
+                    exit_codes = await self._get_job_exit_codes(
+                        job_id_on_pool_cluster, handle)
+
                     should_restart_on_failure = (
-                        self._strategy_executor.should_restart_on_failure())
+                        self._strategy_executor.should_restart_on_failure(
+                            exit_codes=exit_codes))
                     if should_restart_on_failure:
                         max_restarts = (
                             self._strategy_executor.max_restarts_on_errors)
-                        logger.info(
-                            f'User program crashed '
-                            f'({managed_job_status.value}). '
-                            f'Retry the job as max_restarts_on_errors is '
-                            f'set to {max_restarts}. '
+                        exit_code_msg = (
+                            '(Retry the job as '
+                            f'max_restarts_on_errors is set to {max_restarts}. '
                             f'[{self._strategy_executor.restart_cnt_on_failure}'
-                            f'/{max_restarts}]')
+                            f'/{max_restarts}])')
+                        if (exit_codes and
+                                self._strategy_executor.recover_on_exit_codes):
+                            recover_codes = (
+                                self._strategy_executor.recover_on_exit_codes)
+                            matching_codes = [
+                                c for c in exit_codes if c in recover_codes
+                            ]
+                            if matching_codes:
+                                exit_code_msg = (
+                                    f'(Exit code(s) {matching_codes} matched '
+                                    'recover_on_exit_codes '
+                                    f'[{recover_codes}])')
+                        logger.info(
+                            'User program crashed '
+                            f'({managed_job_status.value}). {exit_code_msg}')
                     else:
                         logger.info(
                             f'Task {task_id} failed and will not be retried')
@@ -666,9 +782,42 @@ class JobController:
                     # job status. Try to recover the job (will not restart the
                     # cluster, if the cluster is healthy).
                     assert job_status is None, job_status
-                    logger.info('Failed to fetch the job status while the '
-                                'cluster is healthy. Try to recover the job '
-                                '(the cluster will not be restarted).')
+                    if transient_job_check_error_reason is not None:
+                        assert (transient_job_check_error_start_time
+                                is not None), (
+                                    transient_job_check_error_start_time,
+                                    transient_job_check_error_reason)
+                        assert job_check_backoff is not None, (
+                            job_check_backoff, transient_job_check_error_reason)
+                        elapsed = time.time(
+                        ) - transient_job_check_error_start_time
+                        if (elapsed < managed_job_utils.
+                                JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS):
+                            remaining_timeout = (
+                                managed_job_utils.
+                                JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS -
+                                elapsed)
+                            backoff_time = min(
+                                job_check_backoff.current_backoff(),
+                                remaining_timeout)
+                            logger.info(
+                                'Failed to fetch the job status while the '
+                                'cluster is healthy. Retrying to avoid false'
+                                'alarm for job failure. Retrying in '
+                                f'{backoff_time:.1f} seconds...')
+                            await asyncio.sleep(backoff_time)
+                            continue
+                        else:
+                            logger.info(
+                                'Failed to fetch the job status after retrying '
+                                f'for {elapsed:.1f} seconds. Try to recover '
+                                'the job by restarting the job/cluster.')
+                    else:
+                        logger.info(
+                            'Failed to fetch the job status due to '
+                            'unrecoverable error. Try to recover the job by'
+                            ' restarting the job/cluster.')
+
             # When the handle is None, the cluster should be cleaned up already.
             if handle is not None:
                 resources = handle.launched_resources
@@ -699,7 +848,9 @@ class JobController:
                 job_id=self._job_id,
                 task_id=task_id,
                 force_transit_to_recovering=force_transit_to_recovering,
-                callback_func=callback_func)
+                callback_func=callback_func,
+                external_failures=external_failures,
+            )
 
             recovered_time = await self._strategy_executor.recover()
 
@@ -1193,6 +1344,8 @@ async def main(controller_uuid: str):
     logger.info(f'Starting controller {controller_uuid}')
 
     context_utils.hijack_sys_attrs()
+
+    plugins.load_plugins(plugins.ExtensionContext())
 
     controller = ControllerManager(controller_uuid)
 

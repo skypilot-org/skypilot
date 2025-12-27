@@ -2189,6 +2189,13 @@ def get_current_kube_config_context_name() -> Optional[str]:
         _, current_context = kubernetes.list_kube_config_contexts()
         return current_context['name']
     except k8s.config.config_exception.ConfigException:
+        # If kubeconfig is not available, check if running in-cluster and
+        # return the in-cluster context name. This is needed when kubeconfig
+        # is not uploaded to the pod (e.g., remote_identity: SERVICE_ACCOUNT)
+        # but we still need to know the context name for operations like
+        # port mode detection.
+        if is_incluster_config_available():
+            return kubernetes.in_cluster_context_name()
         return None
 
 

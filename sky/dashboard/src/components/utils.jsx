@@ -188,13 +188,74 @@ export const NonCapitalizedTooltip = ({ children, ...props }) => {
       {...DEFAULT_TOOLTIP_PROPS}
       {...props}
       content={
-        <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 text-sm rounded">
+        <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 text-sm rounded whitespace-pre-line">
           {content}
         </span>
       }
     >
       {children}
     </Tooltip>
+  );
+};
+
+/**
+ * Component to display "Updated X ago" with auto-refresh
+ * Shows the time since last data fetch with a tooltip showing exact time
+ */
+export const LastUpdatedTimestamp = ({ timestamp, className = '' }) => {
+  const [, setTick] = useState(0);
+
+  // Auto-update every 10 seconds to keep the relative time current
+  useEffect(() => {
+    if (!timestamp) return;
+
+    const interval = setInterval(() => {
+      setTick((t) => t + 1);
+    }, 10000); // Update every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [timestamp]);
+
+  if (!timestamp) {
+    return null;
+  }
+
+  const now = new Date();
+  const diff = now - timestamp;
+
+  // Time constants for readability
+  const ONE_SECOND_MS = 1000;
+  const ONE_MINUTE_MS = 60 * ONE_SECOND_MS;
+  const ONE_HOUR_MS = 60 * ONE_MINUTE_MS;
+  const ONE_DAY_MS = 24 * ONE_HOUR_MS;
+
+  // Format relative time
+  let relativeText;
+  if (diff < 5 * ONE_SECOND_MS) {
+    relativeText = 'just now';
+  } else if (diff < ONE_MINUTE_MS) {
+    const seconds = Math.floor(diff / ONE_SECOND_MS);
+    relativeText = `${seconds}s ago`;
+  } else if (diff < ONE_HOUR_MS) {
+    const minutes = Math.floor(diff / ONE_MINUTE_MS);
+    relativeText = `${minutes}m ago`;
+  } else if (diff < ONE_DAY_MS) {
+    const hours = Math.floor(diff / ONE_HOUR_MS);
+    relativeText = `${hours}h ago`;
+  } else {
+    const days = Math.floor(diff / ONE_DAY_MS);
+    relativeText = `${days}d ago`;
+  }
+
+  return (
+    <NonCapitalizedTooltip
+      content={`Last updated: ${formatDateTime(timestamp)}`}
+      className="text-sm text-muted-foreground"
+    >
+      <span className={`text-xs text-gray-500 ${className}`}>
+        Updated {relativeText}
+      </span>
+    </NonCapitalizedTooltip>
   );
 };
 

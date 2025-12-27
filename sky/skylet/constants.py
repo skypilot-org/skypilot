@@ -46,7 +46,19 @@ SKY_REMOTE_RAY_PORT_FILE = '.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.9.3'
 
-SKY_UNSET_PYTHONPATH = 'env -u PYTHONPATH'
+# To avoid user image causing issue with the SkyPilot runtime, we run SkyPilot
+# commands the following prefix:
+# 1. env -u PYTHONPATH: unset PYTHONPATH to avoid any package specified in
+# PYTHONPATH interfering with the SkyPilot runtime.
+# 2. env -C $HOME: set the execution directory to $HOME to avoid the case when
+# a user's WORKDIR in Dockerfile is a Python site-packages directory. Python
+# adds CWD to the beginning of sys.path, so if WORKDIR contains packages (e.g.,
+# compiled for a different Python version), imports will fail with errors like
+# "ModuleNotFoundError: No module named 'rpds.rpds'".
+#
+# TODO(zhwu): Switch -C $HOME to PYTHONSAFEPATH=1, once we moved our runtime to
+# Python 3.11 for a more robust setup.
+SKY_UNSET_PYTHONPATH_AND_SET_CWD = 'env -u PYTHONPATH -C $HOME'
 # We store the absolute path of the python executable (/opt/conda/bin/python3)
 # in this file, so that any future internal commands that need to use python
 # can use this path. This is useful for the case where the user has a custom
@@ -58,7 +70,8 @@ SKY_GET_PYTHON_PATH_CMD = (f'[ -s {SKY_PYTHON_PATH_FILE} ] && '
                            f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
                            'which python3')
 # Python executable, e.g., /opt/conda/bin/python3
-SKY_PYTHON_CMD = f'{SKY_UNSET_PYTHONPATH} $({SKY_GET_PYTHON_PATH_CMD})'
+SKY_PYTHON_CMD = (f'{SKY_UNSET_PYTHONPATH_AND_SET_CWD} '
+                  f'$({SKY_GET_PYTHON_PATH_CMD})')
 # Prefer SKY_UV_PIP_CMD, which is faster.
 # TODO(cooperc): remove remaining usage (GCP TPU setup).
 SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
@@ -91,7 +104,7 @@ SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
 # user provided docker image set it to true.
 # unset PYTHONPATH in case the user provided docker image set it.
 SKY_UV_CMD = ('UV_SYSTEM_PYTHON=false '
-              f'{SKY_UNSET_PYTHONPATH} {SKY_UV_INSTALL_DIR}/uv')
+              f'{SKY_UNSET_PYTHONPATH_AND_SET_CWD} {SKY_UV_INSTALL_DIR}/uv')
 # This won't reinstall uv if it's already installed, so it's safe to re-run.
 SKY_UV_INSTALL_CMD = (f'{SKY_UV_CMD} -V >/dev/null 2>&1 || '
                       'curl -LsSf https://astral.sh/uv/install.sh '
@@ -130,7 +143,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '27'
+SKYLET_VERSION = '28'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -462,7 +475,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('gcp', 'enable_gvnic'),
     ('gcp', 'enable_gpu_direct'),
     ('gcp', 'placement_policy'),
-    ('vast', 'secure_only'),
+    ('vast', 'datacenter_only'),
     ('active_workspace',),
 ]
 # When overriding the SkyPilot configs on the API server with the client one,
@@ -523,6 +536,9 @@ SKY_USER_FILE_PATH = '~/.sky/generated'
 ENV_VAR_IS_SKYPILOT_SERVER = 'IS_SKYPILOT_SERVER'
 OVERRIDE_CONSOLIDATION_MODE = 'IS_SKYPILOT_JOB_CONTROLLER'
 IS_SKYPILOT_SERVE_CONTROLLER = 'IS_SKYPILOT_SERVE_CONTROLLER'
+# Environment variable that is set to 'true' if rolling update strategy is
+# enabled for the API server deployment.
+SKYPILOT_ROLLING_UPDATE_ENABLED = 'SKYPILOT_ROLLING_UPDATE_ENABLED'
 
 SERVE_OVERRIDE_CONCURRENT_LAUNCHES = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SERVE_OVERRIDE_CONCURRENT_LAUNCHES')
