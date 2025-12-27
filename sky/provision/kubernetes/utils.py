@@ -3474,7 +3474,11 @@ class KubernetesSkyPilotClusterInfoPayload:
         )
 
 
-def get_pod_primary_container(pod: Any, *, primary_name: str = 'ray-node'):
+def get_pod_primary_container(
+    pod: Any,
+    *,
+    primary_name: str = kubernetes_constants.RAY_NODE_CONTAINER_NAME,
+):
     """Return the primary workload container for a SkyPilot pod.
 
     Pods may include sidecars (e.g., log shippers). Kubernetes preserves the
