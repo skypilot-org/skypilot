@@ -355,6 +355,12 @@
                         "string",
                         "null"
                     ]
+                },
+                "labels": {
+                    "type": [
+                        "object",
+                        "null"
+                    ]
                 }
             }
         },

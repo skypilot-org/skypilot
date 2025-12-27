@@ -4,6 +4,12 @@ kind: PersistentVolumeClaim
 metadata:
   name: {{ .Release.Name }}-state
   namespace: {{ .Release.Namespace }}
+  labels:
+    tier: skypilot
+    component: skypilot-pvc
+    {{- with .Values.global.labels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
   {{- with .Values.storage.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}

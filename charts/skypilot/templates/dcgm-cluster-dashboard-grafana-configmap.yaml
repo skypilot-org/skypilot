@@ -7,6 +7,11 @@ metadata:
   labels:
     app: {{ .Release.Name }}-api
     grafana_dashboard: "true"
+    tier: skypilot
+    component: skypilot-dcgm-cluster-dashboard
+    {{- with .Values.global.labels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
 data:
   dcgm-cluster-dashboard.json: |
 {{ .Files.Get "manifests/dcgm-cluster-dashboard.json" | indent 4 }}

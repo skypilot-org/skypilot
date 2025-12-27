@@ -5,6 +5,12 @@ kind: ServiceAccount
 metadata:
   name: {{ include "skypilot.serviceAccountName" . }}
   namespace: {{ .Release.Namespace }}
+  labels:
+    tier: skypilot
+    component: skypilot
+    {{- with .Values.global.labels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
   {{- if .Values.rbac.serviceAccountAnnotations }}
   annotations:
     {{- toYaml .Values.rbac.serviceAccountAnnotations | nindent 4 }}
@@ -14,6 +20,12 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: {{ .Release.Name }}-api-role
+  labels:
+    tier: skypilot
+    component: skypilot
+    {{- with .Values.global.labels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
 rules:
 {{ toYaml .Values.rbac.clusterRules | indent 2 }}
 {{- if .Values.rbac.manageRbacPolicies }}
@@ -29,6 +41,12 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: {{ .Release.Name }}-api-role-binding
+  labels:
+    tier: skypilot
+    component: skypilot
+    {{- with .Values.global.labels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
 subjects:
 - kind: ServiceAccount
   name: {{ include "skypilot.serviceAccountName" . }}
@@ -48,6 +66,12 @@ kind: Role
 metadata:
   name: {{ .Release.Name }}-api-role
   namespace: {{ $namespace }}
+  labels:
+    tier: skypilot
+    component: skypilot
+    {{- with .Values.global.labels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
 rules:
 {{ toYaml .Values.rbac.namespaceRules | indent 2 }}
 {{- if .Values.rbac.manageRbacPolicies }}
@@ -64,6 +88,12 @@ kind: RoleBinding
 metadata:
   name: {{ .Release.Name }}-api-role-binding
   namespace: {{ $namespace }}
+  labels:
+    tier: skypilot
+    component: skypilot
+    {{- with .Values.global.labels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
 subjects:
 - kind: ServiceAccount
   name: {{ include "skypilot.serviceAccountName" . }}

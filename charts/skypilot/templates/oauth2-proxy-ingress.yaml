@@ -11,6 +11,11 @@ metadata:
   labels:
     app: {{ .Release.Name }}-oauth2-proxy
     skypilot.co/component: oauth2-proxy
+    tier: skypilot
+    component: skypilot-oauth2-proxy-ingress
+    {{- with .Values.global.labels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
   annotations:
     {{- if not $useNewIngressClass }}
     kubernetes.io/ingress.class: nginx
