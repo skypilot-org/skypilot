@@ -177,26 +177,68 @@ def test_job_pipeline(generic_cloud: str):
             'job_pipeline',
             [
                 f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} {file_path} -y -d',
-                # Need to wait for setup and job initialization.
-                'sleep 30',
-                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "STARTING\|RUNNING"',
+                # Wait for job to start (event-based instead of fixed sleep)
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[
+                        sky.ManagedJobStatus.STARTING,
+                        sky.ManagedJobStatus.RUNNING
+                    ],
+                    timeout=120),
                 # `grep -A 4 {name}` finds the job with {name} and the 4 lines
                 # after it, i.e. the 4 tasks within the job.
                 # `sed -n 2p` gets the second line of the 4 lines, i.e. the first
-                # task within the job.
+                # task within the job. Verify the first task is also STARTING or RUNNING.
                 rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "STARTING\|RUNNING"',
                 f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "PENDING"',
                 f'sky jobs cancel -y -n {name}',
-                'sleep 5',
-                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "CANCELLING\|CANCELLED"',
-                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "CANCELLING\|CANCELLED"',
-                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 4p | grep "CANCELLING\|CANCELLED"',
-                rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLING\|CANCELLED"',
-                'sleep 200',
-                f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "CANCELLED"',
-                f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "CANCELLED"',
-                f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 4p | grep "CANCELLED"',
-                f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLED"',
+                # Wait for tasks to transition to CANCELLING/CANCELLED with retry logic
+                # to avoid flakiness. Use a reasonable timeout (60s) to allow for
+                # cancellation to propagate, especially on slower clouds like Kubernetes.
+                # Note: task_line corresponds to the line number in grep -A 4 output:
+                # line 1 = job header, line 2 = task 0, line 3 = task 1, line 4 = task 2, line 5 = task 3
+                smoke_tests_utils.get_cmd_wait_until_pipeline_task_status(
+                    job_name=name,
+                    task_line=2,
+                    expected_status='CANCELLING|CANCELLED',
+                    timeout=60),
+                smoke_tests_utils.get_cmd_wait_until_pipeline_task_status(
+                    job_name=name,
+                    task_line=3,
+                    expected_status='CANCELLING|CANCELLED',
+                    timeout=60),
+                smoke_tests_utils.get_cmd_wait_until_pipeline_task_status(
+                    job_name=name,
+                    task_line=4,
+                    expected_status='CANCELLING|CANCELLED',
+                    timeout=60),
+                smoke_tests_utils.get_cmd_wait_until_pipeline_task_status(
+                    job_name=name,
+                    task_line=5,
+                    expected_status='CANCELLING|CANCELLED',
+                    timeout=60),
+                # Wait for tasks to fully transition to CANCELLED (event-based instead of fixed sleep)
+                smoke_tests_utils.get_cmd_wait_until_pipeline_task_status(
+                    job_name=name,
+                    task_line=2,
+                    expected_status='CANCELLED',
+                    timeout=240),
+                smoke_tests_utils.get_cmd_wait_until_pipeline_task_status(
+                    job_name=name,
+                    task_line=3,
+                    expected_status='CANCELLED',
+                    timeout=240),
+                smoke_tests_utils.get_cmd_wait_until_pipeline_task_status(
+                    job_name=name,
+                    task_line=4,
+                    expected_status='CANCELLED',
+                    timeout=240),
+                smoke_tests_utils.get_cmd_wait_until_pipeline_task_status(
+                    job_name=name,
+                    task_line=5,
+                    expected_status='CANCELLED',
+                    timeout=240),
             ],
             f'sky jobs cancel -y -n {name}',
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,

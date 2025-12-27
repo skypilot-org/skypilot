@@ -304,6 +304,41 @@ def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
         timeout=timeout)
 
 
+_WAIT_UNTIL_PIPELINE_TASK_STATUS = (
+    # A while loop to wait until a pipeline task (identified by line number)
+    # reaches a certain status, with timeout.
+    'start_time=$SECONDS; '
+    'while true; do '
+    'if (( $SECONDS - $start_time > {timeout} )); then '
+    '  echo "Timeout after {timeout} seconds waiting for task {task_line} to be {expected_status}"; exit 1; '
+    'fi; '
+    's=$(sky jobs queue); echo "$s"; '
+    'task_status=$(echo "$s" | grep -A 4 {job_name} | sed -n {task_line}p); '
+    'if echo "$task_status" | grep -E -q "{expected_status}"; then '
+    '  echo "Task {task_line} reached status {expected_status}."; break; '
+    'fi; '
+    'echo "Waiting for task {task_line} to be {expected_status}, current: $task_status"; '
+    'sleep 5; '
+    'done')
+
+
+def get_cmd_wait_until_pipeline_task_status(job_name: str, task_line: int,
+                                            expected_status: str, timeout: int):
+    """Get a command that waits until a pipeline task reaches a certain status.
+
+    Args:
+        job_name: The name of the job
+        task_line: The line number in the pipeline output (2 = first task, 3 = second, etc.)
+        expected_status: The expected status string (e.g., "CANCELLING|CANCELLED")
+        timeout: Timeout in seconds
+    """
+    return _WAIT_UNTIL_PIPELINE_TASK_STATUS.format(
+        job_name=job_name,
+        task_line=task_line,
+        expected_status=expected_status,
+        timeout=timeout)
+
+
 _WAIT_UNTIL_JOB_STATUS_SUCCEEDED = (
     'start_time=$SECONDS; '
     'while true; do '
