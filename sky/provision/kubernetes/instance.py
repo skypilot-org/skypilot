@@ -1473,14 +1473,11 @@ def get_cluster_info(
             assert head_spec is not None, pod
             primary_container = kubernetes_utils.get_pod_primary_container(pod)
             resources = getattr(primary_container, 'resources', None)
-            requests = getattr(resources, 'requests',
-                               None) if resources else None
-            limits = getattr(resources, 'limits', None) if resources else None
-            cpu_request = None
-            if requests is not None:
-                cpu_request = requests.get('cpu')
-            if cpu_request is None and limits is not None:
-                cpu_request = limits.get('cpu')
+            requests = (getattr(resources, 'requests', None)
+                        if resources else None)
+            limits = (getattr(resources, 'limits', None) if resources else None)
+            cpu_request = ((requests or {}).get('cpu') or
+                           (limits or {}).get('cpu'))
             if cpu_request is None:
                 container_name = getattr(primary_container, 'name', '<unknown>')
                 logger.warning(
