@@ -45,6 +45,7 @@ Install SkyPilot using pip:
           # Seeweb is only supported for Python >= 3.10
           pip install "skypilot[seeweb]"
           pip install "skypilot[primeintellect]"
+          pip install "skypilot[verda]"
 
           pip install "skypilot[all]"
 
@@ -122,6 +123,7 @@ Install SkyPilot using pip:
           # Seeweb is only supported for Python >= 3.10
           pip install -e ".[seeweb]"
           pip install -e ".[primeintellect]"
+          pip install -e ".[verda]"
 
           pip install -e ".[all]"
 
@@ -251,6 +253,7 @@ This will produce a summary like:
     SCP: enabled
     Seeweb: enabled
     vSphere: enabled
+    Verda: enabled
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled
     Slurm: enabled
@@ -824,6 +827,22 @@ Seeweb |community-badge|
     [DEFAULT]
     api_key = <your-api-token>
 
+Verda |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+`Verda <https://www.verda.com/>`_ is your European GPU Cloud Provider. To access Verda:
+
+
+1. Log into your `Verda Console : <https://console.verda.com/>`__.
+2. Navigate to *Keys → Cloud API Keys* in the console, and press **Create**.
+3. Create the file :code:`~/.verda/config.json` with the following contents:
+
+.. code-block:: shell
+
+  mkdir -p ~/.verda
+  echo { "client_id": "YOUR_CLIENT_ID", "client_secret": "YOUR_CLIENT_SECRET" } > ~/.verda/config.json
+
+4. Alternatively, you can set the environment variables :code:`VERDA_CLIENT_ID` and :code:`VERDA_CLIENT_SECRET`.
 
 Request quotas for first time users
 --------------------------------------

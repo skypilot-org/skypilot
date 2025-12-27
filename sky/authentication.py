@@ -38,6 +38,7 @@ from sky.adaptors import runpod
 from sky.adaptors import seeweb as seeweb_adaptor
 from sky.adaptors import shadeform as shadeform_adaptor
 from sky.adaptors import vast
+from sky.adaptors import verda
 from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.lambda_cloud import lambda_utils
@@ -343,6 +344,28 @@ def setup_vast_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         # Only add an ssh key if it hasn't already been added
         if not any(x['public_key'] == public_key for x in current_key_list):
             vast.vast().create_ssh_key(ssh_key=public_key)
+
+    config['auth']['ssh_public_key'] = public_key_path
+    return configure_ssh_info(config)
+
+
+def setup_verda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Verda Cloud.
+    - Generates a new SSH key pair if one does not exist.
+    - Adds the public SSH key to the user's Cloud account.
+    """
+    _, public_key_path = auth_utils.get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
+        public_key = pub_key_file.read().strip()
+        verda_config = verda.get_verda_configuration()
+        if not verda_config[0]:
+            raise Exception(verda_config[1])
+
+        current_key_list = verda_get_ssh_keys(verda_config[2])  # pylint: disable=assignment-from-no-return
+        # Only add an ssh key if it hasn't already been added
+        if not any(ssh_key.public_key == public_key
+                   for ssh_key in current_key_list):
+            verda_ssh_keys_create(name='skypilot-key', key=public_key)
 
     config['auth']['ssh_public_key'] = public_key_path
     return configure_ssh_info(config)

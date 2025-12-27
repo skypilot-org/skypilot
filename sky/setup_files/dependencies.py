@@ -246,6 +246,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'seeweb': ['ecsapi==0.4.0'],
     'shadeform': [],  # No dependencies needed for shadeform
     'slurm': [],  # No dependencies needed for slurm
+    'verda': [],  # No dependencies needed for verda
 }
 
 # Calculate which clouds should be included in the [all] installation.
