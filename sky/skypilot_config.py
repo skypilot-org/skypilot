@@ -152,6 +152,7 @@ _global_config_context = ConfigContext()
 # Track config keys that have already been warned about to avoid duplicate
 # warnings when override_skypilot_config is called multiple times.
 _warned_config_keys: set = set()
+_warned_config_keys_lock = threading.Lock()
 
 SKYPILOT_CONFIG_LOCK_PATH = '~/.sky/locks/.skypilot_config.lock'
 
@@ -736,9 +737,13 @@ def override_skypilot_config(
     # use the same config file when connecting to a local server.
     # Filter out keys that have already been warned about to avoid duplicate
     # warnings when this context manager is called multiple times.
-    new_diff_keys = [k for k in disallowed_diff_keys if k not in _warned_config_keys]
+    with _warned_config_keys_lock:
+        new_diff_keys = [
+            k for k in disallowed_diff_keys if k not in _warned_config_keys
+        ]
+        if new_diff_keys:
+            _warned_config_keys.update(new_diff_keys)
     if new_diff_keys:
-        _warned_config_keys.update(new_diff_keys)
         logger.warning(
             f'The following keys ({json.dumps(new_diff_keys)}) have '
             'different values in the client SkyPilot config with the server '
