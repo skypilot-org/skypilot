@@ -1346,9 +1346,9 @@ def realtime_kubernetes_gpu_availability(
         # information, to avoid assertion errors and show only reliable data.
         common_keys = set(counts.keys()) & set(capacity.keys()) & set(
             available.keys())
-        counts = {k: v for k, v in counts.items() if k in common_keys}
-        capacity = {k: v for k, v in capacity.items() if k in common_keys}
-        available = {k: v for k, v in available.items() if k in common_keys}
+        counts = {k: counts[k] for k in common_keys}
+        capacity = {k: capacity[k] for k in common_keys}
+        available = {k: available[k] for k in common_keys}
         realtime_gpu_availability_list: List[
             models.RealtimeGpuAvailability] = []
 
