@@ -16,9 +16,6 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky.provision.kubernetes import utils as kubernetes_utils
 
-if typing.TYPE_CHECKING:
-    from sky.provision.kubernetes import utils as kubernetes_utils
-
 COMMAND_TRUNC_LENGTH = 25
 NUM_COST_REPORT_LINES = 5
 
