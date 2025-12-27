@@ -224,7 +224,8 @@ _get_name = (lambda cluster_record, _: cluster_record['name'])
 _get_user_hash = (lambda cluster_record, _: cluster_record['user_hash'])
 
 
-def _get_user_name(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
+def _get_user_name(cluster_record: _ClusterRecord,
+                   truncate: bool = True) -> str:
     """Get the user name, appending (SA) for service accounts."""
     del truncate  # unused
     user_name = cluster_record.get('user_name', '-')
@@ -233,6 +234,8 @@ def _get_user_name(cluster_record: _ClusterRecord, truncate: bool = True) -> str
     if user_hash.lower().startswith('sa-'):
         return f'{user_name} (SA)'
     return user_name
+
+
 _get_launched = (lambda cluster_record, _: log_utils.readable_time_duration(
     cluster_record['launched_at']))
 _get_duration = (lambda cluster_record, _: log_utils.readable_time_duration(
