@@ -289,7 +289,7 @@ class SlurmClient:
             if len(parts) != 2:
                 continue
             nodelist_str, gres_str = parts
-            if not gres_str or gres_str == '(null)' or gres_str == 'N/A':
+            if not gres_str or gres_str == 'N/A':
                 continue
 
             for node in hostlist.expand_hostlist(nodelist_str):

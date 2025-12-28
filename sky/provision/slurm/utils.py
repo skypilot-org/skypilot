@@ -422,8 +422,7 @@ def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
         for node_info in nodes:
             node_gpu_type, _ = get_gpu_type_and_count(node_info.gres)
             if node_gpu_type is None:
-                raise ValueError(
-                    f'No GPU type found in GRES string: {node_info.gres}')
+                continue
             if node_gpu_type.lower() == requested_gpu_type.lower():
                 return node_gpu_type
     except Exception as e:  # pylint: disable=broad-except
