@@ -289,12 +289,12 @@ def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
 @mock.patch('sky.catalog.get_accelerators_from_instance_type',
             return_value={'A100-80GB': 1})
 @mock.patch('sky.catalog.get_hourly_cost', return_value=1.5)
-def test_runpod_make_deploy_variables_with_cuda_versions(monkeypatch,
-                                                         *mocks) -> None:
+def test_runpod_make_deploy_variables_with_cuda_versions(*mocks) -> None:
     """Test RunPod make_deploy_variables with allowed_cuda_versions config."""
     # Test with allowed_cuda_versions in config
-    config_path = './tests/test_yamls/test_runpod_config.yaml'
-    monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, config_path)
+    os.environ[
+        skypilot_config.
+        ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_runpod_config.yaml'
     importlib.reload(skypilot_config)
 
     cloud = clouds.RunPod()
@@ -319,7 +319,8 @@ def test_runpod_make_deploy_variables_with_cuda_versions(monkeypatch,
 
     # Test without config (should default to ['12.8'])
     # Clear the environment variable
-    monkeypatch.delenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, raising=False)
+    if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in os.environ:
+        del os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG]
     importlib.reload(skypilot_config)
 
     config = resource.make_deploy_variables(cluster_name,
