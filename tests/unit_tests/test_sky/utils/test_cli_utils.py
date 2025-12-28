@@ -2,9 +2,8 @@
 
 This module contains tests for the CLI utilities in sky.utils.cli_utils.
 """
+import re
 import time
-
-import pytest
 
 from sky import backends
 from sky.resources import Resources
@@ -377,3 +376,51 @@ def test_get_resources_kubernetes():
     # Test K8s TPU resources
     resources_str = status_utils._get_resources(mock_record_k8s_tpu)
     assert resources_str == '1x(gpus=tpu-v4-8:1, cpus=8, mem=32, ...)'
+
+
+def test_get_resources_fractional_values():
+    """Test resources display for fractional CPU and memory values."""
+    from sky.utils import resources_utils
+
+    # Test fractional CPU and integer memory (0.5 CPU, 4GB)
+    mock_resources_fractional_cpu = Resources(infra='k8s/my-cluster-ctx',
+                                              cpus='0.5',
+                                              memory=4,
+                                              instance_type='0.5CPU--4GB')
+    simple, full = resources_utils.format_resource(
+        mock_resources_fractional_cpu)
+    assert 'cpus=0.5' in simple and 'cpus=0.5' in full
+    assert 'mem=4' in simple and 'mem=4' in full
+    # Ensure we don't have truncated values like 'cpus=0' or 'mem=0'
+    assert not re.search(r'\bcpus=0(?![.\d])', simple)
+    assert not re.search(r'\bcpus=0(?![.\d])', full)
+
+    # Test integer CPU and fractional memory (1 CPU, 0.5GB)
+    mock_resources_fractional_mem = Resources(infra='k8s/my-cluster-ctx',
+                                              cpus='1',
+                                              memory=0.5,
+                                              instance_type='1CPU--0.5GB')
+    simple, full = resources_utils.format_resource(
+        mock_resources_fractional_mem)
+    assert 'cpus=1' in simple and 'cpus=1' in full
+    assert 'mem=0.5' in simple and 'mem=0.5' in full
+    assert not re.search(r'\bmem=0(?![.\d])', simple)
+    assert not re.search(r'\bmem=0(?![.\d])', full)
+
+    # Test decimal CPU and memory (4.5 CPU, 8.5GB)
+    mock_resources_decimal = Resources(infra='k8s/my-cluster-ctx',
+                                       cpus='4.5',
+                                       memory=8.5,
+                                       instance_type='4.5CPU--8.5GB')
+    simple, full = resources_utils.format_resource(mock_resources_decimal)
+    assert 'cpus=4.5' in simple and 'cpus=4.5' in full
+    assert 'mem=8.5' in simple and 'mem=8.5' in full
+
+    # Test integer CPU and memory (4 CPU, 8GB)
+    mock_resources_int = Resources(infra='k8s/my-cluster-ctx',
+                                   cpus='4',
+                                   memory=8,
+                                   instance_type='4CPU--8GB')
+    simple, full = resources_utils.format_resource(mock_resources_int)
+    assert 'cpus=4' in simple and 'cpus=4' in full
+    assert 'mem=8' in simple and 'mem=8' in full
