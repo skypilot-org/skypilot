@@ -293,15 +293,8 @@ def test_runpod_allowed_cuda_versions_validation(monkeypatch, tmp_path) -> None:
     ]
     for i, valid_versions in enumerate(valid_versions_list):
         config_path = tmp_path / f'valid_{i}.yaml'
-        # Format the list properly for YAML with quotes to ensure strings
-        versions_yaml = '\n'.join(
-            [f"                - '{v}'" for v in valid_versions])
-        config_path.open('w', encoding='utf-8').write(
-            textwrap.dedent(f"""\
-            runpod:
-                allowed_cuda_versions:
-{versions_yaml}
-            """))
+        config_dict = {'runpod': {'allowed_cuda_versions': valid_versions}}
+        yaml_utils.dump_yaml(config_path, config_dict)
         monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
         # Should not raise an exception
         skypilot_config.reload_config()
@@ -318,14 +311,8 @@ def test_runpod_allowed_cuda_versions_validation(monkeypatch, tmp_path) -> None:
     ]
     for i, invalid_versions in enumerate(invalid_versions_list):
         config_path = tmp_path / f'invalid_{i}.yaml'
-        versions_yaml = '\n'.join(
-            [f"                - '{v}'" for v in invalid_versions])
-        config_path.open('w', encoding='utf-8').write(
-            textwrap.dedent(f"""\
-            runpod:
-                allowed_cuda_versions:
-{versions_yaml}
-            """))
+        config_dict = {'runpod': {'allowed_cuda_versions': invalid_versions}}
+        yaml_utils.dump_yaml(config_path, config_dict)
         monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
         with pytest.raises(ValueError) as e:
             skypilot_config.reload_config()
