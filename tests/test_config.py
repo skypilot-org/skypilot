@@ -282,8 +282,7 @@ def test_gcp_vpc_name_validation(monkeypatch, tmp_path) -> None:
         assert 'Invalid config YAML' in e.value.args[0]
 
 
-def test_runpod_allowed_cuda_versions_validation(monkeypatch,
-                                                  tmp_path) -> None:
+def test_runpod_allowed_cuda_versions_validation(monkeypatch, tmp_path) -> None:
     """Test RunPod allowed_cuda_versions validation with valid and invalid values."""
     # Test valid CUDA versions
     valid_versions_list = [
@@ -306,8 +305,8 @@ def test_runpod_allowed_cuda_versions_validation(monkeypatch,
         monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
         # Should not raise an exception
         skypilot_config.reload_config()
-        assert skypilot_config.get_nested(
-            ('runpod', 'allowed_cuda_versions'), None) == valid_versions
+        assert skypilot_config.get_nested(('runpod', 'allowed_cuda_versions'),
+                                          None) == valid_versions
 
     # Test invalid CUDA versions
     invalid_versions_list = [

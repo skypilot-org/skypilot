@@ -292,8 +292,9 @@ def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
 def test_runpod_make_deploy_variables_with_cuda_versions(*mocks) -> None:
     """Test RunPod make_deploy_variables with allowed_cuda_versions config."""
     # Test with allowed_cuda_versions in config
-    os.environ[skypilot_config.
-               ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_runpod_config.yaml'
+    os.environ[
+        skypilot_config.
+        ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_runpod_config.yaml'
     importlib.reload(skypilot_config)
 
     cloud = clouds.RunPod()

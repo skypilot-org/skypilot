@@ -288,4 +288,3 @@ class TestRunPodLaunchWithCudaVersions:
         assert created_params['gpu_count'] == 4
         assert created_params['min_vcpu_count'] == 16  # 4 * 4
         assert created_params['min_memory_in_gb'] == 320  # 80 * 4
-
