@@ -302,3 +302,42 @@ class TestSlurmGPUDefaults:
 
         assert instance_type.cpus == expected_cpus
         assert instance_type.memory == expected_memory
+
+
+class TestGRESGPUParsing:
+    """Test slurm_utils.get_gpu_type_and_count."""
+
+    @pytest.mark.parametrize(
+        'gres_str,expected_type,expected_count',
+        [
+            # Standard formats
+            ('gpu:H100:8', 'H100', 8),
+            ('gpu:a10g:4', 'a10g', 4),
+            ('gpu:nvidia_h100_80gb_hbm3:8', 'nvidia_h100_80gb_hbm3', 8),
+            ('gpu:A100_sxm4_40gb:4', 'A100_sxm4_40gb', 4),
+            # No type
+            ('gpu:8', None, 8),
+            ('gpu:1', None, 1),
+            # With extra Slurm info
+            ('gpu:H100:8(S:0-1)', 'H100', 8),
+            ('gpu:8(S:0)', None, 8),
+            # Embedded in larger GRES string
+            ('nic:1,gpu:H100:2,license:1', 'H100', 2),
+            # Different casings for 'gpu'
+            ('GPU:V100:1', 'V100', 1),
+            ('Gpu:8', None, 8),
+            # No match
+            ('(null)', None, 0),
+            ('N/A', None, 0),
+            ('nic:1', None, 0),
+            ('gpu', None, 0),
+            ('gpu:', None, 0),
+            ('not_a_gpu:8', None, 0),
+            ('mygpu:8', None, 0),
+        ])
+    def test_get_gpu_type_and_count(self, gres_str, expected_type,
+                                    expected_count):
+        """Test that the helper correctly parses various GRES strings."""
+        gpu_type, gpu_count = slurm_utils.get_gpu_type_and_count(gres_str)
+        assert gpu_type == expected_type
+        assert gpu_count == expected_count
