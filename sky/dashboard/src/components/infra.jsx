@@ -25,11 +25,11 @@ import {
 import {
   getWorkspaceInfrastructure,
   getCloudInfrastructure,
-  refreshCloudStatus,
   getContextJobs,
 } from '@/data/connectors/infra';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
+import { apiClient } from '@/data/connectors/client';
 import {
   getSSHNodePools,
   updateSSHNodePools,
@@ -1729,7 +1729,7 @@ export function GPUs() {
       try {
         if (forceRefresh) {
           try {
-            await refreshCloudStatus();
+            await apiClient.fetch('/check', {}, 'POST');
           } catch (error) {
             console.error('Error during sky check refresh:', error);
           }

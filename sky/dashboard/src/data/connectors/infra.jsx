@@ -5,28 +5,6 @@ import { apiClient } from '@/data/connectors/client';
 import { getErrorMessageFromResponse } from '@/data/utils';
 import dashboardCache from '@/lib/cache';
 
-let ongoingCheckRefreshPromise = null;
-
-export async function refreshCloudStatus() {
-  if (ongoingCheckRefreshPromise) {
-    console.log('Sky check already in progress, reusing existing promise...');
-    return ongoingCheckRefreshPromise;
-  }
-
-  ongoingCheckRefreshPromise = (async () => {
-    try {
-      return await apiClient.fetch('/check', {}, 'POST');
-    } catch (checkError) {
-      console.error('Error running sky check:', checkError);
-      throw checkError;
-    } finally {
-      ongoingCheckRefreshPromise = null;
-    }
-  })();
-
-  return ongoingCheckRefreshPromise;
-}
-
 export async function getCloudInfrastructure(forceRefresh = false) {
   const { getClusters } = await import('@/data/connectors/clusters');
   const { getManagedJobs } = await import('@/data/connectors/jobs');
