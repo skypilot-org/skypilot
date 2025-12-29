@@ -6765,9 +6765,11 @@ def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
             if not verbose:
                 r_id = common_utils.truncate_long_string(r_id, 36)
             req_status = requests.RequestStatus(request.status)
-            row = [r_id, request.user_name, request.name]
+            user_display = status_utils.get_user_display_name(
+                request.user_name or '-', request.user_id)
+            row = [r_id, user_display, request.name]
             if verbose:
-                row.append(request.cluster_name)
+                row.append(request.cluster_name or '-')
             row.extend([
                 log_utils.readable_time_duration(request.created_at),
                 req_status.colored_str()
