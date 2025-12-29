@@ -383,21 +383,20 @@ def test_get_user_display_name():
     """Test the get_user_display_name function for service account detection."""
     # Test regular user (no SA prefix)
     assert status_utils.get_user_display_name('john_doe',
-                                               'abc123') == 'john_doe'
-    assert status_utils.get_user_display_name('alice',
-                                               'regular-id') == 'alice'
+                                              'abc123') == 'john_doe'
+    assert status_utils.get_user_display_name('alice', 'regular-id') == 'alice'
 
     # Test service account (SA prefix - lowercase)
     assert status_utils.get_user_display_name('service-bot',
-                                               'sa-12345') == 'service-bot (SA)'
+                                              'sa-12345') == 'service-bot (SA)'
 
     # Test service account (SA prefix - uppercase)
     assert status_utils.get_user_display_name('ci-runner',
-                                               'SA-67890') == 'ci-runner (SA)'
+                                              'SA-67890') == 'ci-runner (SA)'
 
     # Test service account (SA prefix - mixed case)
     assert status_utils.get_user_display_name('deploy-agent',
-                                               'Sa-AbCdE') == 'deploy-agent (SA)'
+                                              'Sa-AbCdE') == 'deploy-agent (SA)'
 
     # Test with None user_id (should return user_name without modification)
     assert status_utils.get_user_display_name('bob', None) == 'bob'
