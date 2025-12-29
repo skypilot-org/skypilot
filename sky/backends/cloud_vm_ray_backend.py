@@ -5445,6 +5445,75 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'  • Or restart this cluster: sky down {cluster_name}; sky launch -c {cluster_name} ...'
                         f'{colorama.Style.RESET_ALL}')
 
+            # Check for volume mount warnings
+            if task.volume_mounts:
+                # Get existing cluster's volume mounts from cluster yaml
+                existing_volume_names = set()
+                try:
+                    cluster_yaml_str = global_user_state.get_cluster_yaml_str(
+                        cluster_name)
+                    if cluster_yaml_str is not None:
+                        cluster_yaml_obj = yaml_utils.safe_load(
+                            cluster_yaml_str)
+                        # Extract volume names from existing cluster
+                        # For k8s: volumes in node_config.spec.volumes
+                        if isinstance(to_provision.cloud, clouds.Kubernetes):
+                            node_config = cluster_yaml_obj.get(
+                                'available_node_types',
+                                {}).get('ray_head_default',
+                                        {}).get('node_config', {})
+                            volumes = node_config.get('spec',
+                                                      {}).get('volumes', [])
+                            for vol in volumes:
+                                # Volume from PVC has structure:
+                                # - name: <volume_name>
+                                #   persistentVolumeClaim:
+                                #     claimName: <volume_name_on_cloud>
+                                if 'persistentVolumeClaim' in vol:
+                                    # Volume name is user-specified name
+                                    vol_name = vol.get('name')
+                                    if vol_name:
+                                        existing_volume_names.add(vol_name)
+                        else:
+                            # For other clouds (e.g., RunPod), volumes are in
+                            # node_config.VolumeMounts
+                            node_config = cluster_yaml_obj.get(
+                                'available_node_types',
+                                {}).get('ray_head_default',
+                                        {}).get('node_config', {})
+                            volume_mounts_config = node_config.get(
+                                'VolumeMounts', [])
+                            for vol_mount in volume_mounts_config:
+                                vol_name = vol_mount.get('VolumeNameOnCloud')
+                                if vol_name:
+                                    existing_volume_names.add(vol_name)
+                except Exception as e:  # pylint: disable=broad-except
+                    # If we can't get the existing volume mounts, log debug
+                    # and skip the warning check
+                    logger.debug(f'Failed to check existing volume mounts: {e}',
+                                 exc_info=True)
+
+                # Check if task has new volumes not in existing cluster
+                new_volumes = []
+                for volume_mount in task.volume_mounts:
+                    # Compare using volume_name for user-facing name
+                    if volume_mount.volume_name not in existing_volume_names:
+                        new_volumes.append(volume_mount.volume_name)
+
+                if new_volumes:
+                    volume_names_str = ', '.join(new_volumes)
+                    logger.warning(
+                        f'{colorama.Fore.YELLOW}WARNING: New volume(s) '
+                        f'{volume_names_str} specified in task but not '
+                        f'mounted to existing cluster "{cluster_name}". '
+                        f'These volumes will not be mounted to the cluster. '
+                        f'To mount new volumes, either:\n'
+                        f'  • Use a new cluster, or\n'
+                        f'  • Terminate and recreate this cluster: '
+                        f'sky down {cluster_name}; '
+                        f'sky launch -c {cluster_name} ...'
+                        f'{colorama.Style.RESET_ALL}')
+
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
                 to_provision,
