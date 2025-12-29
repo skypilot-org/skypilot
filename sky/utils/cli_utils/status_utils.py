@@ -242,6 +242,8 @@ def _get_user_name(cluster_record: _ClusterRecord,
         return user_name
     user_hash = cluster_record.get('user_hash')
     return get_user_display_name(user_name, user_hash)
+
+
 _get_launched = (lambda cluster_record, _: log_utils.readable_time_duration(
     cluster_record['launched_at']))
 _get_duration = (lambda cluster_record, _: log_utils.readable_time_duration(
