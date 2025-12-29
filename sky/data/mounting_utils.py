@@ -7,6 +7,7 @@ import textwrap
 from typing import Optional
 
 from sky import exceptions
+from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import command_runner
 
@@ -476,6 +477,16 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
     create_log_cmd = (f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} '
                       f'{constants.RCLONE_RC_SOCKET_DIR} && '
                       f'touch {log_file_path}')
+
+    # Check if sequential upload is enabled via config.
+    # Default is False (parallel uploads for better performance).
+    sequential_upload = skypilot_config.get_nested(
+        ('data', 'mount_cached', 'sequential_upload'), False)
+    # '--transfers 1' guarantees files are uploaded in strict order during job
+    # execution. At flush stage, transfers are increased dynamically via RC API
+    # for faster uploads.
+    transfers_flag = '--transfers 1 ' if sequential_upload else ''
+
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
     # not necessary to specify separate cache directories.
@@ -494,14 +505,11 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # interval allows for faster detection of new or updated files on the
         # remote, but increases the frequency of metadata lookups.
         '--allow-other --vfs-cache-mode full --dir-cache-time 10s '
-        # '--transfers 1' guarantees files are uploaded in strict order during
-        # job execution. At flush stage, transfers are increased dynamically
-        # via RC API for faster uploads.
         # '--vfs-cache-poll-interval' specifies the frequency of how often
         # rclone checks the local mount point for stale objects in cache.
         # '--vfs-write-back' defines the time to write files on remote storage
         # after last use of the file in local mountpoint.
-        '--transfers 1 --vfs-cache-poll-interval 10s --vfs-write-back 1s '
+        f'{transfers_flag}--vfs-cache-poll-interval 10s --vfs-write-back 1s '
         # Have rclone evict files if the cache size exceeds 10G.
         # This is to prevent cache from growing too large and
         # using up all the disk space. Note that files that opened
