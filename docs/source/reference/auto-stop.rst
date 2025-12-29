@@ -158,7 +158,7 @@ This is useful for tasks like committing code, saving checkpoints, or performing
          git commit -m "Commit my code"
          git push
 
-The hook script has access to the cluster's filesystem and environment variables.
+The hook script runs on the cluster and has access to the cluster's filesystem and environment variables.
 If the hook script fails (non-zero exit code), the autostop process will still continue,
 but a warning will be logged. The hook execution has a 1-hour timeout.
 
