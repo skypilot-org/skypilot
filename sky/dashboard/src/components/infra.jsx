@@ -2570,7 +2570,7 @@ export function GPUs() {
     if (allInfrastructureDisabled) {
       sections.push({
         name: 'Infrastructure Hint',
-        render: () => <InfrastructureHint/>,
+        render: () => <InfrastructureHint />,
         hasActivity: false,
         priority: 0, // Highest priority, always show at the top
       });
