@@ -5509,9 +5509,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'These volumes will not be mounted to the cluster. '
                         f'To mount new volumes, either:\n'
                         f'  • Use a new cluster, or\n'
-                        f'  • Terminate and recreate this cluster: '
-                        f'sky down {cluster_name}; '
-                        f'sky launch -c {cluster_name} ...'
+                        f'  • Terminate and recreate this cluster'
                         f'{colorama.Style.RESET_ALL}')
 
             return RetryingVmProvisioner.ToProvisionConfig(
