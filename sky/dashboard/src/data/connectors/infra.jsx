@@ -15,27 +15,7 @@ export async function refreshCloudStatus() {
 
   ongoingCheckRefreshPromise = (async () => {
     try {
-      const checkResponse = await apiClient.post('/check', {});
-      if (!checkResponse.ok) {
-        const msg = `Failed to run sky check with status ${checkResponse.status}`;
-        throw new Error(msg);
-      }
-      const checkId =
-        checkResponse.headers.get('X-Skypilot-Request-ID') ||
-        checkResponse.headers.get('X-Request-ID');
-      if (!checkId) {
-        const msg = 'No request ID received from server for sky check';
-        throw new Error(msg);
-      }
-
-      // Wait for the check to complete
-      const checkResult = await apiClient.get(`/api/get?request_id=${checkId}`);
-      if (!checkResult.ok) {
-        const msg = `Failed to get sky check result with status ${checkResult.status}, error: ${checkResult.statusText}`;
-        throw new Error(msg);
-      }
-      const checkData = await checkResult.json();
-      return checkData;
+      return await apiClient.fetch('/check', {}, 'POST');
     } catch (checkError) {
       console.error('Error running sky check:', checkError);
       throw checkError;
