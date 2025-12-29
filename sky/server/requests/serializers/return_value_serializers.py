@@ -50,11 +50,21 @@ def serialize_kubernetes_node_info(return_value: Dict[str, Any]) -> str:
 
     The is_ready field was added in API version 25. Remove it for old clients
     that don't recognize it.
+    The cpu_count, memory_gb, cpu_free, and memory_free_gb fields were added
+    in API version 26. Remove them for old clients that don't recognize them.
     """
     remote_api_version = versions.get_remote_api_version()
-    if (return_value and remote_api_version is not None and
-            remote_api_version < 25):
-        # Remove is_ready field for old clients that don't recognize it
+    if (return_value and remote_api_version is not None):
         for node_info in return_value.get('node_info_dict', {}).values():
-            node_info.pop('is_ready', None)
+            if remote_api_version < 25:
+                # Remove is_ready field for old clients that don't recognize it
+                node_info.pop('is_ready', None)
+            if remote_api_version < 26:
+                # Remove cpu_count, memory_gb, cpu_free, and
+                # memory_free_gb fields for old clients that don't
+                # recognize them
+                node_info.pop('cpu_count', None)
+                node_info.pop('memory_gb', None)
+                node_info.pop('cpu_free', None)
+                node_info.pop('memory_free_gb', None)
     return orjson.dumps(return_value).decode('utf-8')
