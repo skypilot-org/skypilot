@@ -377,3 +377,66 @@ def test_get_resources_kubernetes():
     # Test K8s TPU resources
     resources_str = status_utils._get_resources(mock_record_k8s_tpu)
     assert resources_str == '1x(gpus=tpu-v4-8:1, cpus=8, mem=32, ...)'
+
+
+def test_get_user_display_name():
+    """Test the get_user_display_name function for service account detection."""
+    # Test regular user (no SA prefix)
+    assert status_utils.get_user_display_name('john_doe',
+                                               'abc123') == 'john_doe'
+    assert status_utils.get_user_display_name('alice',
+                                               'regular-id') == 'alice'
+
+    # Test service account (SA prefix - lowercase)
+    assert status_utils.get_user_display_name('service-bot',
+                                               'sa-12345') == 'service-bot (SA)'
+
+    # Test service account (SA prefix - uppercase)
+    assert status_utils.get_user_display_name('ci-runner',
+                                               'SA-67890') == 'ci-runner (SA)'
+
+    # Test service account (SA prefix - mixed case)
+    assert status_utils.get_user_display_name('deploy-agent',
+                                               'Sa-AbCdE') == 'deploy-agent (SA)'
+
+    # Test with None user_id (should return user_name without modification)
+    assert status_utils.get_user_display_name('bob', None) == 'bob'
+
+    # Test with empty string user_id
+    assert status_utils.get_user_display_name('charlie', '') == 'charlie'
+
+
+def test_get_user_name_from_cluster_record():
+    """Test the _get_user_name function for extracting user name from cluster record."""
+    # Test regular user
+    mock_record = {
+        'user_name': 'john_doe',
+        'user_hash': 'abc123',
+    }
+    assert status_utils._get_user_name(mock_record) == 'john_doe'
+
+    # Test service account
+    mock_record_sa = {
+        'user_name': 'service-bot',
+        'user_hash': 'sa-12345',
+    }
+    assert status_utils._get_user_name(mock_record_sa) == 'service-bot (SA)'
+
+    # Test missing user_name (returns '-')
+    mock_record_no_name = {
+        'user_hash': 'abc123',
+    }
+    assert status_utils._get_user_name(mock_record_no_name) == '-'
+
+    # Test user_name is '-' (should return '-' without SA suffix)
+    mock_record_dash = {
+        'user_name': '-',
+        'user_hash': 'sa-12345',
+    }
+    assert status_utils._get_user_name(mock_record_dash) == '-'
+
+    # Test missing user_hash (no SA suffix added)
+    mock_record_no_hash = {
+        'user_name': 'alice',
+    }
+    assert status_utils._get_user_name(mock_record_no_hash) == 'alice'
