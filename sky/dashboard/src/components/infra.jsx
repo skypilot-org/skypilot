@@ -1633,6 +1633,44 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
   );
 }
 
+// Infrastructure Hint component for when all infrastructure is disabled
+function InfrastructureHint() {
+  return (
+    <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
+      <div className="p-5">
+        <div className="flex items-start">
+          <div className="ml-3 flex-1">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              No Infrastructure Enabled
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              No cloud providers, Kubernetes contexts, SSH node pools, or Slurm
+              clusters are currently enabled or configured.
+            </p>
+            <div className="space-y-2 mb-4">
+              <p className="text-sm text-gray-600">
+                To check enabled infrastructures, you can:
+              </p>
+              <ul className="list-disc list-inside text-sm text-gray-600 space-y-1 ml-2">
+                <li>
+                  Click <strong>"Refresh"</strong>.
+                </li>
+                <li>
+                  Run{' '}
+                  <code className="bg-gray-100 px-1.5 py-0.5 rounded">
+                    sky check
+                  </code>{' '}
+                  in your CLI.
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function GPUs() {
   // Separate loading states for different data sources
   const [kubeLoading, setKubeLoading] = useState(true);
@@ -1843,7 +1881,7 @@ export function GPUs() {
   const fetchCloudData = async (forceRefresh) => {
     try {
       const cloudData = forceRefresh
-        ? await getCloudInfrastructure()
+        ? await getCloudInfrastructure(true)
         : await dashboardCache.get(getCloudInfrastructure, [forceRefresh]);
 
       // Set cloud data with defensive checks
@@ -2488,6 +2526,31 @@ export function GPUs() {
       return renderContextDetails(selectedContext);
     }
 
+    // Check if all infrastructure is disabled
+    const allInfrastructureDisabled = React.useMemo(() => {
+      // Ensure all data has been loaded
+      if (!cloudDataLoaded || !kubeDataLoaded || kubeLoading || cloudLoading) {
+        return false; // Still loading, don't show hint
+      }
+
+      // Check all infrastructure types
+      const noCloud = enabledClouds === 0;
+      const noSSH = sshContexts.length === 0;
+      const noKubernetes = kubeContexts.length === 0;
+      const noSlurm = slurmClusters.length === 0;
+
+      return noCloud && noSSH && noKubernetes && noSlurm;
+    }, [
+      cloudDataLoaded,
+      kubeDataLoaded,
+      kubeLoading,
+      cloudLoading,
+      enabledClouds,
+      sshContexts.length,
+      kubeContexts.length,
+      slurmClusters.length,
+    ]);
+
     // Dynamically determine section order based on current data availability
     // Sections will reorder automatically as data becomes ready
     const sections = [];
@@ -2502,6 +2565,16 @@ export function GPUs() {
         return stats.clusters > 0 || stats.jobs > 0;
       });
     };
+
+    // If all infrastructure is disabled, add hint card at the top
+    if (allInfrastructureDisabled) {
+      sections.push({
+        name: 'Infrastructure Hint',
+        render: () => <InfrastructureHint/>,
+        hasActivity: false,
+        priority: 0, // Highest priority, always show at the top
+      });
+    }
 
     // Always add all sections (they handle their own loading/empty states)
 
