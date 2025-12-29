@@ -65,6 +65,11 @@ export async function getClusters({ clusterNames = null } = {}) {
       } else {
         region_or_zone = cluster.region;
       }
+      // For SSH Node Pools, strip the 'ssh-' prefix from region display
+      // to avoid redundant "SSH (ssh-poolname)" showing as "SSH (poolname)"
+      if (cluster.cloud === 'SSH' && region_or_zone?.startsWith('ssh-')) {
+        region_or_zone = region_or_zone.substring(4);
+      }
       // Store the full value before truncation
       const full_region_or_zone = region_or_zone;
       // Truncate region_or_zone in the middle if it's too long
