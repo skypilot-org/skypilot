@@ -88,13 +88,7 @@ class Dag:
         for task in self.tasks:
             task.resolve_and_validate_volumes()
 
-    def pre_mount_volumes(self, cluster_name: Optional[str] = None) -> None:
-        """Process pre-mount operations for all volumes in the DAG.
-
-        Args:
-            cluster_name: Name of the cluster volumes are being mounted to.
-                         Used to show warnings about existing attachments.
-        """
+    def pre_mount_volumes(self) -> None:
         vol_map = {}
         # Deduplicate volume mounts.
         for task in self.tasks:
@@ -102,7 +96,7 @@ class Dag:
                 for volume_mount in task.volume_mounts:
                     vol_map[volume_mount.volume_name] = volume_mount
         for volume_mount in vol_map.values():
-            volume_mount.pre_mount(cluster_name=cluster_name)
+            volume_mount.pre_mount()
 
 
 class _DagContext(threading.local):
