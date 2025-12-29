@@ -471,7 +471,10 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
     hashed_mount_path = hashlib.md5(mount_path.encode()).hexdigest()
     log_file_path = os.path.join(constants.RCLONE_MOUNT_CACHED_LOG_DIR,
                                  f'{hashed_mount_path}.log')
-    create_log_cmd = (f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} && '
+    socket_path = os.path.join(constants.RCLONE_RC_SOCKET_DIR,
+                               f'{hashed_mount_path}.sock')
+    create_log_cmd = (f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} '
+                      f'{constants.RCLONE_RC_SOCKET_DIR} && '
                       f'touch {log_file_path}')
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
@@ -491,8 +494,9 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # interval allows for faster detection of new or updated files on the
         # remote, but increases the frequency of metadata lookups.
         '--allow-other --vfs-cache-mode full --dir-cache-time 10s '
-        # '--transfers 1' guarantees the files written at the local mount point
-        # to be uploaded to the backend storage in the order of creation.
+        # '--transfers 1' guarantees files are uploaded in strict order during
+        # job execution. At flush stage, transfers are increased dynamically
+        # via RC API for faster uploads.
         # '--vfs-cache-poll-interval' specifies the frequency of how often
         # rclone checks the local mount point for stale objects in cache.
         # '--vfs-write-back' defines the time to write files on remote storage
@@ -505,6 +509,12 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         '--vfs-cache-max-size 10G '
         # give each mount its own cache directory
         f'--cache-dir {constants.RCLONE_CACHE_DIR}/{hashed_mount_path} '
+        # Use a faster fingerprint algorithm to detect changes in files.
+        # Recommended by rclone documentation for buckets like s3.
+        '--vfs-fast-fingerprint '
+        # Enable RC server via Unix socket for dynamic configuration.
+        # This allows increasing parallel transfers during flush stage.
+        f'--rc --rc-addr unix://{socket_path} '
         # This command produces children processes, which need to be
         # detached from the current process's terminal. The command doesn't
         # produce any output, so we aren't dropping any logs.

@@ -457,6 +457,10 @@ RCLONE_CONFIG_PATH = f'{RCLONE_CONFIG_DIR}/rclone.conf'
 RCLONE_MOUNT_CACHED_LOG_DIR = '~/.sky/rclone_log'
 RCLONE_CACHE_DIR = '~/.cache/rclone'
 RCLONE_CACHE_REFRESH_INTERVAL = 10
+# Directory for rclone RC Unix sockets (one per mount)
+RCLONE_RC_SOCKET_DIR = '~/.sky/rclone_sockets'
+# Max parallel transfers during flush (actual = min(nproc, this))
+RCLONE_FLUSH_MAX_TRANSFERS = 32
 
 # The keys that can be overridden in the `~/.sky/config.yaml` file. The
 # overrides are specified in task YAMLs.

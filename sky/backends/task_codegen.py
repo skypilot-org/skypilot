@@ -147,6 +147,21 @@ class TaskCodeGen:
         if [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] && \
            [ -d {constants.RCLONE_MOUNT_CACHED_LOG_DIR} ] && \
            [ "$(ls -A {constants.RCLONE_MOUNT_CACHED_LOG_DIR})" ]; then
+            # Increase parallel transfers via RC API for faster uploads during flush.
+            # Use min(nproc --all, max_transfers) to scale with available CPUs.
+            # --all ignores OMP_NUM_THREADS and CPU affinity settings.
+            # Each mount has its own RC socket.
+            if [ -d {constants.RCLONE_RC_SOCKET_DIR} ] && \
+               [ "$(ls -A {constants.RCLONE_RC_SOCKET_DIR} 2>/dev/null)" ]; then
+                NUM_CPUS=$(nproc --all)
+                FLUSH_TRANSFERS=$(( NUM_CPUS < {constants.RCLONE_FLUSH_MAX_TRANSFERS} ? NUM_CPUS : {constants.RCLONE_FLUSH_MAX_TRANSFERS} ))
+                echo "skypilot: increasing rclone transfers to $FLUSH_TRANSFERS for faster flush"
+                for sock in {constants.RCLONE_RC_SOCKET_DIR}/*.sock; do
+                    rclone rc --unix-socket "$sock" options/set \
+                        --json "{{\\"main\\": {{\\"Transfers\\": $FLUSH_TRANSFERS}}}}" \
+                        2>/dev/null || true
+                done
+            fi
             flushed=0
             # extra second on top of --vfs-cache-poll-interval to
             # avoid race condition between rclone log line creation and this check.
