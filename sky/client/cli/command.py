@@ -3935,12 +3935,8 @@ def show_gpus(
                     if hasattr(node_info, 'cpu_free'):
                         cpu_free = node_info.cpu_free
                     if cpu_free is not None:
-                        # Format free CPU
-                        if isinstance(cpu_free,
-                                      float) and cpu_free.is_integer():
-                            cpu_free_str = str(int(cpu_free))
-                        else:
-                            cpu_free_str = f'{cpu_free:.1f}'
+                        cpu_free_str = common_utils.format_float(cpu_free,
+                                                                 precision=0)
                         cpu_str = f'{cpu_free_str} of {cpu_total_str} free'
                     else:
                         cpu_str = cpu_total_str
@@ -3956,8 +3952,8 @@ def show_gpus(
                     if hasattr(node_info, 'memory_free_gb'):
                         memory_free_gb = node_info.memory_free_gb
                     if memory_free_gb is not None:
-                        # Format free memory (without GB since it's in header)
-                        memory_free_str = f'{memory_free_gb:.1f}'
+                        memory_free_str = common_utils.format_float(
+                            memory_free_gb, precision=0)
                         memory_str = (
                             f'{memory_free_str} of {memory_total_str} free')
                     else:
