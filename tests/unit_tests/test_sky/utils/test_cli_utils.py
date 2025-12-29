@@ -438,6 +438,8 @@ def test_get_user_name_from_cluster_record():
         'user_name': 'alice',
     }
     assert status_utils._get_user_name(mock_record_no_hash) == 'alice'
+
+
 def test_get_resources_fractional_values():
     """Test resources display for fractional CPU and memory values."""
     from sky.utils import resources_utils
