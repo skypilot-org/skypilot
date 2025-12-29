@@ -25,6 +25,7 @@ import {
 import {
   getWorkspaceInfrastructure,
   getCloudInfrastructure,
+  refreshCloudStatus,
   getContextJobs,
 } from '@/data/connectors/infra';
 import { getClusters } from '@/data/connectors/clusters';
@@ -1726,6 +1727,14 @@ export function GPUs() {
       }
 
       try {
+        if (forceRefresh) {
+          try {
+            await refreshCloudStatus();
+          } catch (error) {
+            console.error('Error during sky check refresh:', error);
+          }
+        }
+
         async function fetchKubeAndSshData(forceRefresh) {
           await fetchKubernetesData(forceRefresh);
           // Fetch SSH Node Pools after Kubernetes data is loaded
@@ -2262,6 +2271,22 @@ export function GPUs() {
     }, {});
   }, [perNodeGPUs]);
 
+  // Check if all infrastructure is disabled
+  const allInfrastructureDisabled = (() => {
+    // Ensure all data has been loaded
+    if (!cloudDataLoaded || !kubeDataLoaded || kubeLoading || cloudLoading) {
+      return false; // Still loading, don't show hint
+    }
+
+    // Check all infrastructure types
+    const noCloud = enabledClouds === 0;
+    const noSSH = sshContexts.length === 0;
+    const noKubernetes = kubeContexts.length === 0;
+    const noSlurm = slurmClusters.length === 0;
+
+    return noCloud && noSSH && noKubernetes && noSlurm;
+  })();
+
   // Check URL on component mount to set initial context
   useEffect(() => {
     if (router.isReady && router.query.context) {
@@ -2525,31 +2550,6 @@ export function GPUs() {
       }
       return renderContextDetails(selectedContext);
     }
-
-    // Check if all infrastructure is disabled
-    const allInfrastructureDisabled = React.useMemo(() => {
-      // Ensure all data has been loaded
-      if (!cloudDataLoaded || !kubeDataLoaded || kubeLoading || cloudLoading) {
-        return false; // Still loading, don't show hint
-      }
-
-      // Check all infrastructure types
-      const noCloud = enabledClouds === 0;
-      const noSSH = sshContexts.length === 0;
-      const noKubernetes = kubeContexts.length === 0;
-      const noSlurm = slurmClusters.length === 0;
-
-      return noCloud && noSSH && noKubernetes && noSlurm;
-    }, [
-      cloudDataLoaded,
-      kubeDataLoaded,
-      kubeLoading,
-      cloudLoading,
-      enabledClouds,
-      sshContexts.length,
-      kubeContexts.length,
-      slurmClusters.length,
-    ]);
 
     // Dynamically determine section order based on current data availability
     // Sections will reorder automatically as data becomes ready

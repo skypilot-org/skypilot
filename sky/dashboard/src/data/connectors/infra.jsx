@@ -3,9 +3,51 @@ import { CLOUDS_LIST, COMMON_GPUS } from '@/data/connectors/constants';
 // Importing from the same directory
 import { apiClient } from '@/data/connectors/client';
 import { getErrorMessageFromResponse } from '@/data/utils';
+import dashboardCache from '@/lib/cache';
+
+let ongoingCheckRefreshPromise = null;
+
+export async function refreshCloudStatus() {
+  if (ongoingCheckRefreshPromise) {
+    console.log('Sky check already in progress, reusing existing promise...');
+    return ongoingCheckRefreshPromise;
+  }
+
+  ongoingCheckRefreshPromise = (async () => {
+    try {
+      const checkResponse = await apiClient.post('/check', {});
+      if (!checkResponse.ok) {
+        const msg = `Failed to run sky check with status ${checkResponse.status}`;
+        throw new Error(msg);
+      }
+      const checkId =
+        checkResponse.headers.get('X-Skypilot-Request-ID') ||
+        checkResponse.headers.get('X-Request-ID');
+      if (!checkId) {
+        const msg = 'No request ID received from server for sky check';
+        throw new Error(msg);
+      }
+
+      // Wait for the check to complete
+      const checkResult = await apiClient.get(`/api/get?request_id=${checkId}`);
+      if (!checkResult.ok) {
+        const msg = `Failed to get sky check result with status ${checkResult.status}, error: ${checkResult.statusText}`;
+        throw new Error(msg);
+      }
+      const checkData = await checkResult.json();
+      return checkData;
+    } catch (checkError) {
+      console.error('Error running sky check:', checkError);
+      throw checkError;
+    } finally {
+      ongoingCheckRefreshPromise = null;
+    }
+  })();
+
+  return ongoingCheckRefreshPromise;
+}
 
 export async function getCloudInfrastructure(forceRefresh = false) {
-  const dashboardCache = (await import('@/lib/cache')).default;
   const { getClusters } = await import('@/data/connectors/clusters');
   const { getManagedJobs } = await import('@/data/connectors/jobs');
   const { getWorkspaces, getEnabledClouds } = await import(
@@ -33,39 +75,6 @@ export async function getCloudInfrastructure(forceRefresh = false) {
     // Get enabled clouds by aggregating across all workspaces
     let enabledCloudsList = [];
     try {
-      // If forceRefresh is true, first run sky check to refresh cloud status
-      if (forceRefresh) {
-        console.log('Force refreshing clouds by running sky check...');
-        try {
-          const checkResponse = await apiClient.post('/check', {});
-          if (!checkResponse.ok) {
-            const msg = `Failed to run sky check with status ${checkResponse.status}`;
-            throw new Error(msg);
-          }
-          const checkId =
-            checkResponse.headers.get('X-Skypilot-Request-ID') ||
-            checkResponse.headers.get('X-Request-ID');
-          if (!checkId) {
-            const msg = 'No request ID received from server for sky check';
-            throw new Error(msg);
-          }
-
-          // Wait for the check to complete
-          const checkResult = await apiClient.get(
-            `/api/get?request_id=${checkId}`
-          );
-          if (!checkResult.ok) {
-            const msg = `Failed to get sky check result with status ${checkResult.status}, error: ${checkResult.statusText}`;
-            throw new Error(msg);
-          }
-          const checkData = await checkResult.json();
-          console.log('Sky check completed:', checkData);
-        } catch (checkError) {
-          console.error('Error running sky check:', checkError);
-          // Continue anyway - we'll still try to get the cached enabled clouds
-        }
-      }
-
       // Get all accessible workspaces
       const workspacesData = await dashboardCache.get(getWorkspaces);
       const workspaceNames = Object.keys(workspacesData || {});
@@ -304,7 +313,6 @@ export async function getWorkspaceInfrastructure() {
 
     // Step 3: Get detailed GPU information for all contexts
     const { getClusters } = await import('@/data/connectors/clusters');
-    const dashboardCache = (await import('@/lib/cache')).default;
     let clustersData = [];
     try {
       clustersData = await dashboardCache.get(getClusters);
