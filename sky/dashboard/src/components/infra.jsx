@@ -1654,7 +1654,7 @@ function InfrastructureHint() {
               </p>
               <ul className="list-disc list-inside text-sm text-gray-600 space-y-1 ml-2">
                 <li>
-                  Click <strong>"Refresh"</strong>.
+                  Click <strong>&quot;Refresh&quot;</strong>.
                 </li>
                 <li>
                   Run{' '}
