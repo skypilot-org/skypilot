@@ -3923,11 +3923,8 @@ def show_gpus(
                 # free is unknown
                 cpu_str = '-'
                 if node_info.cpu_count is not None:
-                    # Format total CPU
-                    if node_info.cpu_count.is_integer():
-                        cpu_total_str = str(int(node_info.cpu_count))
-                    else:
-                        cpu_total_str = f'{node_info.cpu_count:.1f}'
+                    cpu_total_str = common_utils.format_float(
+                        node_info.cpu_count, precision=0)
 
                     # Check if we have free CPU info (use hasattr to
                     # check if field exists, then access directly)
@@ -3943,8 +3940,8 @@ def show_gpus(
 
                 memory_str = '-'
                 if node_info.memory_gb is not None:
-                    # Format total memory (without GB since it's in header)
-                    memory_total_str = f'{node_info.memory_gb:.1f}'
+                    memory_total_str = common_utils.format_float(
+                        node_info.memory_gb, precision=0)
 
                     # Check if we have free memory info (use hasattr
                     # to check if field exists, then access directly)
