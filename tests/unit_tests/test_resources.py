@@ -285,6 +285,52 @@ def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
                                        'variables generated')
 
 
+@mock.patch('sky.catalog.instance_type_exists', return_value=True)
+@mock.patch('sky.catalog.get_accelerators_from_instance_type',
+            return_value={'A100-80GB': 1})
+@mock.patch('sky.catalog.get_hourly_cost', return_value=1.5)
+def test_runpod_make_deploy_variables_with_cuda_versions(*mocks) -> None:
+    """Test RunPod make_deploy_variables with allowed_cuda_versions config."""
+    # Test with allowed_cuda_versions in config
+    os.environ[
+        skypilot_config.
+        ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_runpod_config.yaml'
+    importlib.reload(skypilot_config)
+
+    cloud = clouds.RunPod()
+    cluster_name = resources_utils.ClusterName(display_name='test-runpod',
+                                               name_on_cloud='test-runpod')
+    region = clouds.Region(name='US')
+    zones = [clouds.Zone(name='US-OR-1')]
+    resource = Resources(cloud=cloud, instance_type='1x_A100-80GB_SECURE')
+
+    config = resource.make_deploy_variables(cluster_name,
+                                            region,
+                                            zones,
+                                            num_nodes=1,
+                                            dryrun=True)
+
+    # Verify allowed_cuda_versions is in the config
+    assert config['allowed_cuda_versions'] == ['12.4', '12.3']
+    assert config['instance_type'] == '1x_A100-80GB_SECURE'
+    assert config['region'] == 'US'
+    assert config['availability_zone'] == 'US-OR-1'
+    assert config['use_spot'] is False
+
+    # Test without config (should default to ['12.8'])
+    # Clear the environment variable
+    if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in os.environ:
+        del os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG]
+    importlib.reload(skypilot_config)
+
+    config = resource.make_deploy_variables(cluster_name,
+                                            region,
+                                            zones,
+                                            num_nodes=1,
+                                            dryrun=True)
+    assert config['allowed_cuda_versions'] == ['12.8']
+
+
 @pytest.mark.parametrize(['resources_kwargs', 'expected_yaml_config'], [
     ({
         'infra': '*/*/us-east-1b',
