@@ -311,6 +311,8 @@ def test_launch_fast_with_autostop_hook(generic_cloud: str):
     # the VM is stopped.
     autostop_timeout = 600 if generic_cloud == 'azure' else 250
     special_str = f'hook-executed-{time.time()}'
+    # Use a long-running hook to ensure we can catch the AUTOSTOPPING state
+    hook_duration = 60  # seconds
 
     # Load the existing minimal.yaml and add resources section with autostop hook
     minimal_yaml_path = 'tests/test_yamls/minimal.yaml'
@@ -318,7 +320,7 @@ def test_launch_fast_with_autostop_hook(generic_cloud: str):
     yaml_config['resources'] = {
         'autostop': {
             'idle_minutes': 1,
-            'hook': f'echo {special_str}'
+            'hook': f'echo {special_str} && sleep {hook_duration} && echo "Hook completed"'
         }
     }
 
@@ -334,7 +336,14 @@ def test_launch_fast_with_autostop_hook(generic_cloud: str):
                 f'sky logs {name} 1 --status',
                 f'sky status -r {name} | grep UP',
 
-                # Ensure cluster is stopped
+                # Wait until cluster enters AUTOSTOPPING state (after idle_minutes + hook starts)
+                # The long-running hook ensures we can catch the AUTOSTOPPING state
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=name,
+                    cluster_status=[sky.ClusterStatus.AUTOSTOPPING],
+                    timeout=autostop_timeout),
+
+                # Ensure cluster eventually stops after hook completes
                 smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                     cluster_name=name,
                     cluster_status=[sky.ClusterStatus.STOPPED],
@@ -351,6 +360,7 @@ def test_launch_fast_with_autostop_hook(generic_cloud: str):
 
                 # Verify the hook was executed by checking the autostop hook log and skylet logs
                 f'hook_log_output=$(sky exec {name} "cat ~/{constants.AUTOSTOP_HOOK_LOG_FILE}") && echo "$hook_log_output" | grep "{special_str}"',
+                f'hook_log_output=$(sky exec {name} "cat ~/{constants.AUTOSTOP_HOOK_LOG_FILE}") && echo "$hook_log_output" | grep "Hook completed"',
                 f'skylet_log_output=$(sky exec {name} "cat ~/{constants.SKYLET_LOG_FILE}") && echo "$skylet_log_output" | grep "Autostop hook executed successfully"',
             ],
             f'sky down -y {name}',

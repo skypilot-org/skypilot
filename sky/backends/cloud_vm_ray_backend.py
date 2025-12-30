@@ -5190,6 +5190,52 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 idle_minutes_to_autostop=idle_minutes_to_autostop,
                 down=down)
 
+    def get_autostop_status(
+            self,
+            handle: CloudVmRayResourceHandle,
+            stream_logs: bool = True) -> Optional[status_lib.ClusterStatus]:
+        """Check if the cluster is autostopping.
+
+        Returns:
+            ClusterStatus.AUTOSTOPPING if the cluster is autostopping or
+            autodowning, None if the cluster is not in an autostop process or
+            cannot be checked.
+        """
+        if handle.head_ip is None:
+            # The head node of the cluster is not UP or in an abnormal state.
+            # We cannot check if the cluster is autostopping.
+            return None
+
+        is_autostopping = False
+
+        if handle.is_grpc_enabled_with_flag:
+            try:
+                request = autostopv1_pb2.IsAutostoppingRequest()
+                response = backend_utils.invoke_skylet_with_retries(
+                    lambda: SkyletClient(handle.get_grpc_channel()
+                                        ).is_autostopping(request))
+                is_autostopping = response.is_autostopping
+            except Exception as e:  # pylint: disable=broad-except
+                # The cluster may have been terminated, causing the gRPC call
+                # to timeout and fail.
+                logger.debug(f'Failed to check if cluster is autostopping: {e}')
+                return None
+        else:
+            code = autostop_lib.AutostopCodeGen.is_autostopping()
+            returncode, stdout, stderr = self.run_on_head(
+                handle, code, require_outputs=True, stream_logs=stream_logs)
+            if returncode == 0:
+                is_autostopping = message_utils.decode_payload(stdout)
+            else:
+                logger.debug('Failed to check if cluster is autostopping with '
+                             f'{returncode}: {stdout+stderr}\n'
+                             f'Command: {code}')
+                return None
+
+        if is_autostopping:
+            return status_lib.ClusterStatus.AUTOSTOPPING
+        return None
+
     def is_definitely_autostopping(self,
                                    handle: CloudVmRayResourceHandle,
                                    stream_logs: bool = True) -> bool:
@@ -5200,32 +5246,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             that the cluster is still autostopping when False is returned,
             due to errors like transient network issues.
         """
-        if handle.head_ip is None:
-            # The head node of the cluster is not UP or in an abnormal state.
-            # We cannot check if the cluster is autostopping.
-            return False
-        if handle.is_grpc_enabled_with_flag:
-            try:
-                request = autostopv1_pb2.IsAutostoppingRequest()
-                response = backend_utils.invoke_skylet_with_retries(
-                    lambda: SkyletClient(handle.get_grpc_channel()
-                                        ).is_autostopping(request))
-                return response.is_autostopping
-            except Exception as e:  # pylint: disable=broad-except
-                # The cluster may have been terminated, causing the gRPC call
-                # to timeout and fail.
-                logger.debug(f'Failed to check if cluster is autostopping: {e}')
-                return False
-        else:
-            code = autostop_lib.AutostopCodeGen.is_autostopping()
-            returncode, stdout, stderr = self.run_on_head(
-                handle, code, require_outputs=True, stream_logs=stream_logs)
-            if returncode == 0:
-                return message_utils.decode_payload(stdout)
-            logger.debug('Failed to check if cluster is autostopping with '
-                         f'{returncode}: {stdout+stderr}\n'
-                         f'Command: {code}')
-            return False
+        return self.get_autostop_status(handle, stream_logs) is not None
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
