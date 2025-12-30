@@ -105,6 +105,9 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
     sqlalchemy.Column('logs_cleaned_at', sqlalchemy.Float, server_default=None),
     sqlalchemy.Column('full_resources', sqlalchemy.JSON, server_default=None),
+    # Per-task cluster name for JobGroups (each task may run on a
+    # different cluster)
+    sqlalchemy.Column('cluster_name', sqlalchemy.Text, server_default=None),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -151,6 +154,10 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('controller_logs_cleaned_at',
                       sqlalchemy.Float,
                       server_default=None),
+    # JobGroup columns
+    sqlalchemy.Column('is_job_group', sqlalchemy.Boolean, server_default='0'),
+    sqlalchemy.Column('placement', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('execution', sqlalchemy.Text, server_default=None),
 )
 
 # TODO(cooperc): drop the table in a migration
@@ -405,6 +412,12 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'current_cluster_name': r.get('current_cluster_name'),
         'job_id_on_pool_cluster': r.get('job_id_on_pool_cluster'),
         'pool_hash': r.get('pool_hash'),
+        # JobGroup columns
+        'is_job_group': r.get('is_job_group'),
+        'placement': r.get('placement'),
+        'execution': r.get('execution'),
+        # Per-task cluster name for JobGroups
+        'cluster_name': r.get('cluster_name'),
     }
 
 
@@ -2825,3 +2838,160 @@ async def job_event_retention_daemon():
             logger.error(f'Error running job event retention daemon: {e}')
 
         await asyncio.sleep(JOB_EVENT_DAEMON_INTERVAL_SECONDS)
+
+
+# === JobGroup functions ===
+
+
+@_init_db
+def set_job_group_info(job_id: int, is_job_group: bool,
+                       placement: Optional[str],
+                       execution: Optional[str]) -> None:
+    """Set JobGroup metadata for a job.
+
+    Args:
+        job_id: The spot_job_id of the managed job.
+        is_job_group: Whether this job is a JobGroup.
+        placement: The placement mode (e.g., 'SAME_INFRA').
+        execution: The execution mode (e.g., 'parallel').
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(job_info_table).filter(
+            job_info_table.c.spot_job_id == job_id).update({
+                job_info_table.c.is_job_group: is_job_group,
+                job_info_table.c.placement: placement,
+                job_info_table.c.execution: execution,
+            })
+        session.commit()
+
+
+@_init_db_async
+async def set_job_group_info_async(job_id: int, is_job_group: bool,
+                                   placement: Optional[str],
+                                   execution: Optional[str]) -> None:
+    """Set JobGroup metadata for a job (async version).
+
+    Args:
+        job_id: The spot_job_id of the managed job.
+        is_job_group: Whether this job is a JobGroup.
+        placement: The placement mode (e.g., 'SAME_INFRA').
+        execution: The execution mode (e.g., 'parallel').
+    """
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        await session.execute(
+            sqlalchemy.update(job_info_table).where(
+                job_info_table.c.spot_job_id == job_id).values({
+                    job_info_table.c.is_job_group: is_job_group,
+                    job_info_table.c.placement: placement,
+                    job_info_table.c.execution: execution,
+                }))
+        await session.commit()
+
+
+@_init_db
+def get_job_group_info(job_id: int) -> Optional[Dict[str, Any]]:
+    """Get JobGroup metadata for a job.
+
+    Args:
+        job_id: The spot_job_id of the managed job.
+
+    Returns:
+        Dict with 'is_job_group', 'placement', 'execution' keys, or None if
+        job not found.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.is_job_group,
+                job_info_table.c.placement,
+                job_info_table.c.execution,
+            ).where(job_info_table.c.spot_job_id == job_id)).fetchone()
+        if result is None:
+            return None
+        return {
+            'is_job_group': result[0],
+            'placement': result[1],
+            'execution': result[2],
+        }
+
+
+@_init_db
+def check_is_job_group(job_id: int) -> bool:
+    """Check if a job is a JobGroup.
+
+    Args:
+        job_id: The spot_job_id of the managed job.
+
+    Returns:
+        True if the job is a JobGroup, False otherwise.
+    """
+    info = get_job_group_info(job_id)
+    if info is None:
+        return False
+    return bool(info.get('is_job_group', False))
+
+
+@_init_db
+def set_task_cluster_name(job_id: int, task_id: int, cluster_name: str) -> None:
+    """Set the cluster name for a specific task.
+
+    This is used by JobGroups where each task may run on a different cluster.
+
+    Args:
+        job_id: The spot_job_id of the managed job.
+        task_id: The task_id within the job.
+        cluster_name: The name of the cluster running this task.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(spot_table).filter(
+            sqlalchemy.and_(
+                spot_table.c.spot_job_id == job_id,
+                spot_table.c.task_id == task_id,
+            )).update({spot_table.c.cluster_name: cluster_name})
+        session.commit()
+
+
+@_init_db_async
+async def set_task_cluster_name_async(job_id: int, task_id: int,
+                                      cluster_name: str) -> None:
+    """Set the cluster name for a specific task (async version).
+
+    Args:
+        job_id: The spot_job_id of the managed job.
+        task_id: The task_id within the job.
+        cluster_name: The name of the cluster running this task.
+    """
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        await session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                )).values({spot_table.c.cluster_name: cluster_name}))
+        await session.commit()
+
+
+@_init_db
+def get_task_cluster_names(job_id: int) -> Dict[int, Optional[str]]:
+    """Get cluster names for all tasks in a job.
+
+    Args:
+        job_id: The spot_job_id of the managed job.
+
+    Returns:
+        Dict mapping task_id to cluster_name (may be None if not set).
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        results = session.execute(
+            sqlalchemy.select(
+                spot_table.c.task_id,
+                spot_table.c.cluster_name,
+            ).where(spot_table.c.spot_job_id == job_id).order_by(
+                spot_table.c.task_id.asc())).fetchall()
+        return {row[0]: row[1] for row in results}

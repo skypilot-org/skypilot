@@ -1,0 +1,33 @@
+# Example JobGroup YAML for testing
+# This defines an RL training workload with multiple heterogeneous jobs
+
+---
+name: rl-experiment
+placement: SAME_INFRA
+execution: parallel
+
+---
+name: trainer
+num_nodes: 1
+resources:
+  cloud: aws
+  cpus: 4+
+run: |
+  echo "Starting trainer job"
+  echo "Hostname: $(hostname)"
+  echo "SKYPILOT_JOBGROUP_NAME: $SKYPILOT_JOBGROUP_NAME"
+  sleep 30
+  echo "Trainer completed"
+
+---
+name: data-processor
+num_nodes: 1
+resources:
+  cloud: aws
+  cpus: 2+
+run: |
+  echo "Starting data-processor job"
+  echo "Hostname: $(hostname)"
+  echo "SKYPILOT_JOBGROUP_NAME: $SKYPILOT_JOBGROUP_NAME"
+  sleep 20
+  echo "Data processor completed"

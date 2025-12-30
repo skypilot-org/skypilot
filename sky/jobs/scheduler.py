@@ -349,6 +349,13 @@ async def scheduled_launch(
         yield
         return
 
+    # For JobGroups, multiple tasks share the same job_id but each launches
+    # a different cluster in parallel. We handle scheduler state at the group
+    # level in _run_job_group(), so bypass per-task scheduling here.
+    if state.check_is_job_group(job_id):
+        yield
+        return
+
     assert starting_lock == starting_signal._lock, (  # type: ignore #pylint: disable=protected-access
         'starting_lock and starting_signal must use the same lock')
 

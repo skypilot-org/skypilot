@@ -819,6 +819,20 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if is_yaml:
         assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
+
+        # Check if this is a JobGroup YAML
+        if dag_utils.is_job_group_yaml(entrypoint):
+            click.secho('Detected JobGroup YAML', fg='cyan')
+            dag = dag_utils.load_job_group_from_yaml(entrypoint,
+                                                     env_overrides=env,
+                                                     secrets_overrides=secret)
+            if override_params:
+                click.secho(
+                    f'WARNING: override params {override_params} are ignored '
+                    'for JobGroup YAML.',
+                    fg='yellow')
+            return dag
+
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint,
                                                  env_overrides=env,
                                                  secret_overrides=secret)

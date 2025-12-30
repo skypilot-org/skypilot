@@ -294,9 +294,9 @@ def launch(
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH)
     dag.resolve_and_validate_volumes()
-    if not dag.is_chain():
+    if not dag.is_chain() and not dag.is_job_group():
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Only single-task or chain DAG is '
+            raise ValueError('Only single-task, chain DAG, or JobGroup is '
                              f'allowed for job_launch. Dag: {dag}')
     dag.validate()
     # TODO(aylei): use consolidated job controller instead of performing
@@ -318,7 +318,7 @@ def launch(
                  ipaddress.ip_address(parsed.hostname).is_loopback)):
                 mutated_user_config.pop('db', None)
 
-    user_dag_str_user_specified = dag_utils.dump_chain_dag_to_yaml_str(
+    user_dag_str_user_specified = dag_utils.dump_dag_to_yaml_str(
         dag, use_user_specified_yaml=True)
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
@@ -455,7 +455,7 @@ def launch(
                 if num_jobs is not None:
                     task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
-            dag_utils.dump_chain_dag_to_yaml(dag_copy, f.name)
+            dag_utils.dump_dag_to_yaml(dag_copy, f.name)
 
             vars_to_fill = {
                 'remote_original_user_yaml_path':

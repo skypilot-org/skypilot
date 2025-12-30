@@ -12,6 +12,12 @@ from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
+# JobGroup header fields
+_JOB_GROUP_HEADER_FIELDS = {'name', 'placement', 'execution'}
+_JOB_GROUP_REQUIRED_HEADER_FIELDS = {'name'}
+# Fields that indicate this is a JobGroup header (not a task)
+_JOB_GROUP_INDICATOR_FIELDS = {'placement', 'execution'}
+
 # Message thrown when APIs sky.{exec,launch,jobs.launch}() received a string
 # instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
 # this.
@@ -179,6 +185,92 @@ def dump_chain_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:
         f.write(dag_str)
 
 
+def dump_dag_to_yaml_str(dag: dag_lib.Dag,
+                         use_user_specified_yaml: bool = False) -> str:
+    """Dumps a DAG to a YAML string, auto-detecting the DAG type.
+
+    This function automatically chooses the correct serialization format:
+    - For JobGroups: uses multi-document YAML with header + jobs
+    - For chain DAGs: uses multi-document YAML with name + tasks
+
+    Args:
+        dag: the DAG to dump (can be either a chain DAG or JobGroup).
+        use_user_specified_yaml: whether to use user-specified YAML format.
+
+    Returns:
+        The YAML string.
+    """
+    if dag.is_job_group():
+        return dump_job_group_to_yaml_str(dag, use_user_specified_yaml)
+    else:
+        return dump_chain_dag_to_yaml_str(dag, use_user_specified_yaml)
+
+
+def dump_dag_to_yaml(dag: dag_lib.Dag,
+                     path: str,
+                     use_user_specified_yaml: bool = False) -> None:
+    """Dumps a DAG to a YAML file, auto-detecting the DAG type.
+
+    Args:
+        dag: the DAG to dump.
+        path: the path to the YAML file.
+        use_user_specified_yaml: whether to use user-specified YAML format.
+    """
+    dag_str = dump_dag_to_yaml_str(dag, use_user_specified_yaml)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(dag_str)
+
+
+def load_dag_from_yaml_str(
+    yaml_str: str,
+    env_overrides: Optional[List[Tuple[str, str]]] = None,
+    secrets_overrides: Optional[List[Tuple[str, str]]] = None,
+) -> dag_lib.Dag:
+    """Loads a DAG from a YAML string, auto-detecting the type.
+
+    This function automatically detects whether the YAML represents a
+    JobGroup or a chain DAG and uses the appropriate loader.
+
+    Args:
+        yaml_str: The YAML string to parse.
+        env_overrides: Environment variable overrides for all tasks.
+        secrets_overrides: Secrets overrides for all tasks.
+
+    Returns:
+        A Dag (either a JobGroup or chain DAG).
+    """
+    if is_job_group_yaml_str(yaml_str):
+        return load_job_group_from_yaml_str(yaml_str, env_overrides,
+                                            secrets_overrides)
+    else:
+        return load_chain_dag_from_yaml_str(yaml_str, env_overrides,
+                                            secrets_overrides)
+
+
+def load_dag_from_yaml(
+    path: str,
+    env_overrides: Optional[List[Tuple[str, str]]] = None,
+    secrets_overrides: Optional[List[Tuple[str, str]]] = None,
+) -> dag_lib.Dag:
+    """Loads a DAG from a YAML file, auto-detecting the type.
+
+    This function automatically detects whether the YAML represents a
+    JobGroup or a chain DAG and uses the appropriate loader.
+
+    Args:
+        path: Path to the YAML file.
+        env_overrides: Environment variable overrides for all tasks.
+        secrets_overrides: Secrets overrides for all tasks.
+
+    Returns:
+        A Dag (either a JobGroup or chain DAG).
+    """
+    if is_job_group_yaml(path):
+        return load_job_group_from_yaml(path, env_overrides, secrets_overrides)
+    else:
+        return load_chain_dag_from_yaml(path, env_overrides, secrets_overrides)
+
+
 def maybe_infer_and_fill_dag_and_task_names(dag: dag_lib.Dag) -> None:
     """Infer and fill the dag/task name if it is None.
 
@@ -237,3 +329,226 @@ def fill_default_config_in_dag_for_job_launch(dag: dag_lib.Dag) -> None:
                                      'the same job recovery strategy.')
 
         task_.set_resources(type(task_.resources)(new_resources_list))
+
+
+def is_job_group_yaml(path: str) -> bool:
+    """Check if a YAML file defines a JobGroup.
+
+    A JobGroup YAML is a multi-document YAML where the first document
+    contains JobGroup header fields like 'placement' or 'execution'.
+
+    Args:
+        path: Path to the YAML file.
+
+    Returns:
+        True if this is a JobGroup YAML, False otherwise.
+    """
+    configs = yaml_utils.read_yaml_all(path)
+    return _is_job_group_configs(configs)
+
+
+def is_job_group_yaml_str(yaml_str: str) -> bool:
+    """Check if a YAML string defines a JobGroup."""
+    configs = yaml_utils.read_yaml_all_str(yaml_str)
+    return _is_job_group_configs(configs)
+
+
+def _is_job_group_configs(configs: List[Dict[str, Any]]) -> bool:
+    """Check if configs represent a JobGroup."""
+    if not configs or len(configs) < 2:
+        # JobGroup needs at least header + 1 job
+        return False
+
+    header = configs[0]
+    if header is None:
+        return False
+
+    # Check if header contains JobGroup indicator fields
+    header_keys = set(header.keys())
+    return bool(header_keys & _JOB_GROUP_INDICATOR_FIELDS)
+
+
+def load_job_group_from_yaml(
+    path: str,
+    env_overrides: Optional[List[Tuple[str, str]]] = None,
+    secrets_overrides: Optional[List[Tuple[str, str]]] = None,
+) -> dag_lib.Dag:
+    """Load a JobGroup from a multi-document YAML file.
+
+    JobGroup YAML format:
+        ---
+        name: my-job-group
+        placement: SAME_INFRA
+        execution: parallel
+        ---
+        name: trainer
+        resources:
+          accelerators: H100:8
+        run: |
+          python train.py
+        ---
+        name: data-processor
+        resources:
+          accelerators: V100:4
+        run: |
+          python process.py
+
+    Args:
+        path: Path to the JobGroup YAML file.
+        env_overrides: Environment variable overrides for all tasks.
+        secrets_overrides: Secrets overrides for all tasks.
+
+    Returns:
+        A Dag marked as a JobGroup with all jobs as tasks.
+
+    Raises:
+        ValueError: If the YAML is not a valid JobGroup format.
+    """
+    configs = yaml_utils.read_yaml_all(path)
+    return _load_job_group(configs, env_overrides, secrets_overrides)
+
+
+def load_job_group_from_yaml_str(
+    yaml_str: str,
+    env_overrides: Optional[List[Tuple[str, str]]] = None,
+    secrets_overrides: Optional[List[Tuple[str, str]]] = None,
+) -> dag_lib.Dag:
+    """Load a JobGroup from a multi-document YAML string."""
+    configs = yaml_utils.read_yaml_all_str(yaml_str)
+    return _load_job_group(configs, env_overrides, secrets_overrides)
+
+
+def _load_job_group(
+    configs: List[Dict[str, Any]],
+    env_overrides: Optional[List[Tuple[str, str]]] = None,
+    secrets_overrides: Optional[List[Tuple[str, str]]] = None,
+) -> dag_lib.Dag:
+    """Load a JobGroup from parsed YAML configs.
+
+    Args:
+        configs: List of YAML document configs. First is header, rest are jobs.
+        env_overrides: Environment variable overrides for all tasks.
+        secrets_overrides: Secrets overrides for all tasks.
+
+    Returns:
+        A Dag marked as a JobGroup.
+    """
+    if not configs or len(configs) < 2:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('JobGroup YAML must have at least 2 documents: '
+                             'header and at least one job definition.')
+
+    # Parse header
+    header = configs[0]
+    if header is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('JobGroup header cannot be empty.')
+
+    # Validate header has required fields
+    missing_fields = _JOB_GROUP_REQUIRED_HEADER_FIELDS - set(header.keys())
+    if missing_fields:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'JobGroup header missing required fields: {missing_fields}')
+
+    # Warn about unknown fields in header
+    unknown_fields = set(header.keys()) - _JOB_GROUP_HEADER_FIELDS
+    if unknown_fields:
+        logger.warning(f'Unknown fields in JobGroup header: {unknown_fields}. '
+                       'These will be ignored.')
+
+    group_name = header['name']
+    placement_str = header.get('placement', 'SAME_INFRA')
+    execution_str = header.get('execution', 'parallel')
+
+    # Parse placement and execution modes
+    try:
+        placement = dag_lib.JobGroupPlacement(placement_str)
+    except ValueError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Invalid placement mode: {placement_str}. '
+                f'Valid options: {[p.value for p in dag_lib.JobGroupPlacement]}'
+            ) from e
+
+    try:
+        execution = dag_lib.JobGroupExecution(execution_str)
+    except ValueError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Invalid execution mode: {execution_str}. '
+                f'Valid options: {[e.value for e in dag_lib.JobGroupExecution]}'
+            ) from e
+
+    # Parse job definitions
+    job_configs = configs[1:]
+    if not job_configs:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('JobGroup must have at least one job definition.')
+
+    # Create DAG using context manager pattern (consistent with _load_chain_dag)
+    job_names = set()
+    with dag_lib.Dag() as dag:
+        for i, job_config in enumerate(job_configs):
+            if job_config is None:
+                continue
+
+            # Ensure each job has a name
+            job_name = job_config.get('name')
+            if job_name is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Job {i + 1} in JobGroup must have a "name" field.')
+
+            # Check for duplicate job names
+            if job_name in job_names:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Duplicate job name in JobGroup: {job_name}')
+            job_names.add(job_name)
+
+            # Create task from job config (auto-added to current dag context)
+            task = task_lib.Task.from_yaml_config(job_config, env_overrides,
+                                                  secrets_overrides)
+            task.name = job_name
+
+    # Set JobGroup properties after context manager
+    dag.name = group_name
+    dag.set_job_group(placement, execution)
+
+    logger.info(f'Loaded JobGroup "{group_name}" with {len(dag.tasks)} jobs: '
+                f'{[t.name for t in dag.tasks]}')
+
+    return dag
+
+
+def dump_job_group_to_yaml_str(dag: dag_lib.Dag,
+                               use_user_specified_yaml: bool = False) -> str:
+    """Dump a JobGroup DAG to a multi-document YAML string.
+
+    Args:
+        dag: The JobGroup DAG to dump.
+        use_user_specified_yaml: Whether to use user-specified YAML format.
+
+    Returns:
+        Multi-document YAML string.
+    """
+    assert dag.is_job_group(), 'DAG is not a JobGroup'
+
+    # Build header
+    header = {
+        'name': dag.name,
+    }
+    if dag.placement is not None:
+        header['placement'] = dag.placement.value
+    if dag.execution is not None:
+        header['execution'] = dag.execution.value
+
+    # Build job configs
+    configs = [header]
+    for task in dag.tasks:
+        job_config = task.to_yaml_config(
+            use_user_specified_yaml=use_user_specified_yaml)
+        configs.append(job_config)
+
+    return yaml_utils.dump_yaml_str(configs)

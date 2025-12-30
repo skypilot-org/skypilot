@@ -113,7 +113,7 @@ def launch(
                               show_default=True)
 
         dag = client_common.upload_mounts_to_api_server(dag)
-        dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+        dag_str = dag_utils.dump_dag_to_yaml_str(dag)
         body = payloads.JobsLaunchBody(
             task=dag_str,
             name=name,

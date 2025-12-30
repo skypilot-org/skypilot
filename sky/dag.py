@@ -1,4 +1,5 @@
 """DAGs: user applications to be run."""
+import enum
 import pprint
 import threading
 import typing
@@ -8,6 +9,17 @@ if typing.TYPE_CHECKING:
     from sky import task
 
 
+class JobGroupPlacement(enum.Enum):
+    """Placement mode for JobGroups."""
+    # All jobs run on same K8s/Slurm cluster or cloud AZ
+    SAME_INFRA = 'SAME_INFRA'
+
+
+class JobGroupExecution(enum.Enum):
+    """Execution mode for JobGroups."""
+    PARALLEL = 'parallel'  # All jobs start in parallel
+
+
 class Dag:
     """Dag: a user application, represented as a DAG of Tasks.
 
@@ -15,6 +27,11 @@ class Dag:
         >>> import sky
         >>> with sky.Dag() as dag:
         >>>     task = sky.Task(...)
+
+    For JobGroups (heterogeneous parallel workloads):
+        >>> dag = dag_utils.load_job_group_from_yaml('job_group.yaml')
+        >>> # dag.is_job_group() returns True
+        >>> # dag.tasks contains jobs to run in parallel
     """
 
     def __init__(self) -> None:
@@ -25,6 +42,11 @@ class Dag:
         self.name: Optional[str] = None
         self.policy_applied: bool = False
         self.pool: Optional[str] = None
+
+        # JobGroup fields
+        self._is_job_group: bool = False
+        self.placement: Optional[JobGroupPlacement] = None
+        self.execution: Optional[JobGroupExecution] = None
 
     def add(self, task: 'task.Task') -> None:
         self.graph.add_node(task)
@@ -55,6 +77,17 @@ class Dag:
 
     def get_graph(self):
         return self.graph
+
+    def is_job_group(self) -> bool:
+        """Check if this DAG represents a JobGroup."""
+        return self._is_job_group
+
+    def set_job_group(self, placement: 'JobGroupPlacement',
+                      execution: 'JobGroupExecution') -> None:
+        """Mark this DAG as a JobGroup with the given configuration."""
+        self._is_job_group = True
+        self.placement = placement
+        self.execution = execution
 
     def is_chain(self) -> bool:
         """Check if the DAG is a linear chain of tasks."""

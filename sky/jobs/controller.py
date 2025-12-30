@@ -19,6 +19,7 @@ import dotenv
 import sky
 from sky import core
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -27,6 +28,7 @@ from sky.backends import cloud_vm_ray_backend
 from sky.data import data_utils
 from sky.jobs import constants as jobs_constants
 from sky.jobs import file_content_utils
+from sky.jobs import job_group_networking
 from sky.jobs import log_gc
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
@@ -90,7 +92,8 @@ def _get_dag(job_id: int) -> 'sky.Dag':
                            'the submission failed to persist the DAG. Please '
                            're-submit the job.')
 
-    dag = dag_utils.load_chain_dag_from_yaml_str(dag_content)
+    # Auto-detect YAML type (JobGroup or chain DAG) and parse accordingly
+    dag = dag_utils.load_dag_from_yaml_str(dag_content)
     assert dag.name is not None, dag
     return dag
 
@@ -865,6 +868,286 @@ class JobController:
                 recovered_time=recovered_time,
                 callback_func=callback_func)
 
+    async def _run_job_group(self) -> bool:
+        """Run a JobGroup with parallel execution.
+
+        This method handles the execution of multiple jobs in parallel:
+        1. Launch all clusters in parallel
+        2. Wait for all clusters to be ready (barrier sync)
+        3. Set up networking between jobs (/etc/hosts injection)
+        4. Monitor all jobs in parallel
+
+        Returns:
+            True if all jobs succeeded, False otherwise.
+        """
+        job_group_name = self._dag.name
+        assert job_group_name is not None, 'JobGroup name must be set'
+        tasks = self._dag.tasks
+        logger.info(f'Starting JobGroup "{job_group_name}" with '
+                    f'{len(tasks)} jobs: {[t.name for t in tasks]}')
+
+        # Set is_job_group in the database so scheduled_launch() can bypass
+        # per-task scheduler logic for parallel JobGroup execution.
+        # Convert Enum values to strings for database storage.
+        placement_str = (self._dag.placement.value
+                         if self._dag.placement is not None else None)
+        execution_str = (self._dag.execution.value
+                         if self._dag.execution is not None else None)
+        managed_job_state.set_job_group_info(self._job_id,
+                                             is_job_group=True,
+                                             placement=placement_str,
+                                             execution=execution_str)
+
+        # Inject JobGroup environment variables into all tasks
+        job_group_env_vars = job_group_networking.get_job_group_env_vars(
+            job_group_name)
+        for task in tasks:
+            task_envs = task.envs or {}
+            task_envs.update(job_group_env_vars)
+            task.update_envs(task_envs)
+
+        # Phase 1: Launch all clusters in parallel
+        logger.info('Phase 1: Launching all clusters in parallel...')
+        launch_start = time.time()
+
+        # Create strategy executors for each task
+        strategy_executors = []
+        cluster_names = []
+        for task_id, task in enumerate(tasks):
+            task_name = task.name
+            assert task_name is not None, f'Task {task_id} must have a name'
+            cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+                task_name, self._job_id) if self._pool is None else None
+            cluster_names.append(cluster_name)
+
+            executor = recovery_strategy.StrategyExecutor.make(
+                cluster_name, self._backend, task, self._job_id, task_id,
+                self._pool, self.starting, self.starting_lock,
+                self.starting_signal)
+            strategy_executors.append(executor)
+
+            # Set state to STARTING for each task
+            callback_func = managed_job_utils.event_callback_func(
+                job_id=self._job_id, task_id=task_id, task=task)
+            resources_str = backend_utils.get_task_resources_str(
+                task, is_managed_job=True)
+            await managed_job_state.set_starting_async(
+                self._job_id,
+                task_id,
+                self._backend.run_timestamp,
+                time.time(),
+                resources_str=resources_str,
+                specs={
+                    'max_restarts_on_errors': executor.max_restarts_on_errors,
+                    'recover_on_exit_codes': executor.recover_on_exit_codes
+                },
+                callback_func=callback_func)
+
+        # Launch all clusters in parallel
+        launch_tasks = [executor.launch() for executor in strategy_executors]
+
+        try:
+            launch_results = await asyncio.gather(*launch_tasks,
+                                                  return_exceptions=True)
+        except Exception as e:
+            logger.error(f'Failed to launch clusters: {e}')
+            await self._cleanup_job_group_clusters(cluster_names)
+            raise
+
+        # Check launch results and update state
+        for task_id, (task, result) in enumerate(zip(tasks, launch_results)):
+            if isinstance(result, Exception):
+                logger.error(f'Job {task.name} failed to launch: {result}')
+                await self._cleanup_job_group_clusters(cluster_names)
+                raise result
+
+        launch_time = time.time() - launch_start
+        logger.info(f'All clusters launched in {launch_time:.2f}s')
+
+        # Phase 2: Barrier sync - wait for all clusters to be UP
+        logger.info('Phase 2: Waiting for all clusters to be ready...')
+        handles = []
+        for task_id, task in enumerate(tasks):
+            cluster_name = cluster_names[task_id]
+            if cluster_name is None:
+                # For pool, get cluster name from state
+                cluster_name, _ = await (
+                    managed_job_state.get_pool_submit_info_async(self._job_id))
+                cluster_names[task_id] = cluster_name
+
+            # Get handle for this cluster
+            handle = await context_utils.to_thread(
+                global_user_state.get_handle_from_cluster_name, cluster_name)
+            handles.append(handle)
+
+            # Record cluster name for this task (for tracking/debugging)
+            if cluster_name is not None:
+                await managed_job_state.set_task_cluster_name_async(
+                    self._job_id, task_id, cluster_name)
+
+            # Set state to RUNNING (started)
+            callback_func = managed_job_utils.event_callback_func(
+                job_id=self._job_id, task_id=task_id, task=task)
+            await managed_job_state.set_started_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                start_time=time.time(),
+                callback_func=callback_func)
+
+        # Phase 3: Set up networking
+        logger.info('Phase 3: Setting up JobGroup networking...')
+        tasks_handles = list(zip(tasks, handles))
+
+        # Get SSH credentials from first handle's cluster config
+        ssh_credentials = None
+        if handles and handles[0] is not None:
+            ssh_credentials = backend_utils.ssh_credential_from_yaml(
+                handles[0].cluster_yaml,
+                docker_user=handles[0].docker_user,
+                ssh_user=handles[0].ssh_user)
+
+        networking_success = await (
+            job_group_networking.setup_job_group_networking(
+                job_group_name, tasks_handles, ssh_credentials))
+        if not networking_success:
+            logger.warning('Some networking setup failed, continuing anyway')
+
+        logger.info('JobGroup setup complete, all jobs are running')
+
+        # Note: JobGroups bypass the scheduler (see scheduler.scheduled_launch),
+        # so we don't need to manage the starting set here.
+
+        # Phase 4: Monitor all jobs in parallel
+        logger.info('Phase 4: Monitoring all jobs...')
+
+        async def monitor_job(task_id: int, task: 'sky.Task', handle,
+                              cluster_name: str) -> bool:
+            """Monitor a single job until completion."""
+            job_id_on_cluster = None
+            callback_func = managed_job_utils.event_callback_func(
+                job_id=self._job_id, task_id=task_id, task=task)
+
+            while True:
+                await asyncio.sleep(
+                    managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
+
+                # Check network connectivity
+                try:
+                    await backend_utils.async_check_network_connection()
+                except exceptions.NetworkError:
+                    logger.info(
+                        f'Network unavailable for {task.name}, retrying')
+                    continue
+
+                try:
+                    job_status, _ = await managed_job_utils.get_job_status(
+                        self._backend, cluster_name, job_id=job_id_on_cluster)
+                except Exception as e:
+                    logger.warning(f'Failed to get status for {task.name}: {e}')
+                    continue
+
+                if job_status == job_lib.JobStatus.SUCCEEDED:
+                    logger.info(f'Job {task.name} succeeded')
+                    end_time = await context_utils.to_thread(
+                        managed_job_utils.try_to_get_job_end_time,
+                        self._backend, cluster_name, job_id_on_cluster)
+                    await managed_job_state.set_succeeded_async(
+                        self._job_id,
+                        task_id,
+                        end_time=end_time,
+                        callback_func=callback_func)
+
+                    # Download logs
+                    try:
+                        self._download_log_and_stream(task_id, handle,
+                                                      job_id_on_cluster)
+                    except Exception as e:
+                        logger.warning(f'Failed to download logs: {e}')
+
+                    return True
+
+                elif job_status in job_lib.JobStatus.user_code_failure_states():
+                    logger.error(f'Job {task.name} failed: {job_status}')
+                    end_time = await context_utils.to_thread(
+                        managed_job_utils.try_to_get_job_end_time,
+                        self._backend, cluster_name, job_id_on_cluster)
+
+                    failure_type = managed_job_state.ManagedJobStatus.FAILED
+                    if job_status == job_lib.JobStatus.FAILED_SETUP:
+                        failure_type = (
+                            managed_job_state.ManagedJobStatus.FAILED_SETUP)
+
+                    await managed_job_state.set_failed_async(
+                        self._job_id,
+                        task_id,
+                        failure_type=failure_type,
+                        failure_reason=f'Job failed with status: {job_status}',
+                        end_time=end_time,
+                        callback_func=callback_func)
+
+                    # Download logs for debugging
+                    try:
+                        self._download_log_and_stream(task_id, handle,
+                                                      job_id_on_cluster)
+                    except Exception as e:
+                        logger.warning(f'Failed to download logs: {e}')
+
+                    return False
+
+                elif job_status == job_lib.JobStatus.FAILED_DRIVER:
+                    logger.error(f'Job {task.name} driver failed')
+                    await managed_job_state.set_failed_async(
+                        self._job_id,
+                        task_id,
+                        failure_type=managed_job_state.ManagedJobStatus.
+                        FAILED_CONTROLLER,
+                        failure_reason='Job driver failed on remote cluster',
+                        callback_func=callback_func)
+                    return False
+
+        # Build monitoring tasks
+        monitor_tasks = []
+        for task_id, (task, handle) in enumerate(zip(tasks, handles)):
+            cluster_name = cluster_names[task_id]
+            assert cluster_name is not None, (
+                f'Cluster name not set for task {task_id}')
+            monitor_tasks.append(
+                monitor_job(task_id, task, handle, cluster_name))
+
+        try:
+            results = await asyncio.gather(*monitor_tasks,
+                                           return_exceptions=True)
+        except Exception as e:
+            logger.error(f'Monitoring failed: {e}')
+            await self._cleanup_job_group_clusters(cluster_names)
+            raise
+
+        # Check results
+        all_succeeded = True
+        for task_id, (task, result) in enumerate(zip(tasks, results)):
+            if isinstance(result, Exception):
+                logger.error(f'Job {task.name} monitoring failed: {result}')
+                all_succeeded = False
+            elif not result:
+                all_succeeded = False
+            else:
+                logger.info(f'Job {task.name} completed successfully')
+
+        # Cleanup all clusters
+        await self._cleanup_job_group_clusters(cluster_names)
+
+        return all_succeeded
+
+    async def _cleanup_job_group_clusters(
+            self, cluster_names: typing.List[typing.Optional[str]]) -> None:
+        """Clean up all clusters in a JobGroup."""
+        for cluster_name in cluster_names:
+            if cluster_name is not None:
+                try:
+                    await self._cleanup_cluster(cluster_name)
+                except Exception as e:
+                    logger.warning(f'Failed to cleanup {cluster_name}: {e}')
+
     async def run(self):
         """Run controller logic and handle exceptions."""
         logger.info(f'Starting JobsController run for job {self._job_id}')
@@ -873,20 +1156,28 @@ class JobController:
 
         try:
             succeeded = True
-            # We support chain DAGs only for now.
-            for task_id, task in enumerate(self._dag.tasks):
-                logger.info(
-                    f'Processing task {task_id}/{len(self._dag.tasks)-1}: '
-                    f'{task.name}')
-                task_start = time.time()
-                succeeded = await self._run_one_task(task_id, task)
-                task_time = time.time() - task_start
-                logger.info(f'Task {task_id} completed in {task_time:.2f}s '
-                            f'with success={succeeded}')
 
-                if not succeeded:
-                    logger.info(f'Task {task_id} failed, stopping execution')
-                    break
+            # Check if this is a JobGroup (parallel execution)
+            if self._dag.is_job_group():
+                logger.info(f'Running as JobGroup with {len(self._dag.tasks)} '
+                            f'parallel jobs')
+                succeeded = await self._run_job_group()
+            else:
+                # Traditional chain DAG: serial execution
+                for task_id, task in enumerate(self._dag.tasks):
+                    logger.info(
+                        f'Processing task {task_id}/{len(self._dag.tasks)-1}: '
+                        f'{task.name}')
+                    task_start = time.time()
+                    succeeded = await self._run_one_task(task_id, task)
+                    task_time = time.time() - task_start
+                    logger.info(f'Task {task_id} completed in {task_time:.2f}s '
+                                f'with success={succeeded}')
+
+                    if not succeeded:
+                        logger.info(
+                            f'Task {task_id} failed, stopping execution')
+                        break
 
         except exceptions.ProvisionPrechecksError as e:
             # Please refer to the docstring of self._run for the cases when
