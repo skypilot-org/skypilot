@@ -37,6 +37,9 @@ _AUTOSTOP_LAST_ACTIVE_TIME = 'autostop_last_active_time'
 # of autostopping for the current machine.
 _AUTOSTOP_INDICATOR = 'autostop_indicator'
 
+# Timeout for hook execution (in seconds)
+AUTOSTOP_HOOK_TIMEOUT_SECONDS = 3600  # 1 hour
+
 
 class AutostopWaitFor(enum.Enum):
     """Enum for the Autostop behaviour.
@@ -261,13 +264,12 @@ def execute_autostop_hook(hook: Optional[str]) -> bool:
     logger.info('Executing autostop hook...')
     try:
         # Execute the hook script in a shell
-        proc = subprocess.run(
-            hook,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=3600,  # 1 hour timeout for hook execution
-            check=False)
+        proc = subprocess.run(hook,
+                              shell=True,
+                              capture_output=True,
+                              text=True,
+                              timeout=AUTOSTOP_HOOK_TIMEOUT_SECONDS,
+                              check=False)
 
         if proc.returncode != 0:
             logger.error(

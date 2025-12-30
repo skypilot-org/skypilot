@@ -49,6 +49,11 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`autostop <yaml-spec-resources-autostop>`:
       idle_minutes: 10
       wait_for: none
+      :ref:`hook <auto-stop-hooks>`: |
+        cd my-code-base
+        git add .
+        git commit -m "Auto-commit before shutdown"
+        git push
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
       - infra: aws/us-west-2
@@ -272,6 +277,8 @@ Format:
     - ``none``: Wait for nothing; autostop right after ``idle_minutes``
   - ``hook``: Optional script to execute before autostop. The script runs on the remote cluster before stopping or tearing down. If the hook fails, autostop will still proceed but a warning will be logged.
 
+    See :ref:`Autostop hooks <auto-stop-hooks>` for detailed explanation and examples.
+
 ``<unit>`` can be one of:
 - ``m``: minutes (default if not specified)
 - ``h``: hours
@@ -317,6 +324,19 @@ OR
     autostop:
       idle_minutes: 10
       wait_for: none  # Stop after 10 minutes, regardless of running jobs or SSH connections
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    autostop:
+      idle_minutes: 10
+      hook: |
+        cd my-code-base
+        git add .
+        git commit -m "Auto-commit before shutdown"
+        git push
 
 
 .. _yaml-spec-resources-accelerators:

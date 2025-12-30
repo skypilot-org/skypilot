@@ -140,6 +140,8 @@ Alternatively, pass the ``--wait-for`` flag to either ``sky autostop`` or ``sky 
    # Hard time limit: Stop after 10 minutes, regardless of running jobs or SSH sessions.
    sky autostop mycluster -i 10 --wait-for none
 
+.. _auto-stop-hooks:
+
 Autostop hooks
 ~~~~~~~~~~~~~~
 
@@ -162,10 +164,73 @@ The hook script runs on the cluster and has access to the cluster's filesystem a
 If the hook script fails (non-zero exit code), the autostop process will still continue,
 but a warning will be logged. The hook execution has a 1-hour timeout.
 
-Common use cases for autostop hooks include:
+Common use cases for autostop hooks:
 
-- Committing and pushing code changes
-- Saving model checkpoints to persistent storage
-- Uploading logs or results to cloud storage
-- Cleaning up temporary files
-- Sending notifications about the cluster shutdown
+.. dropdown:: Committing and pushing code changes
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             cd my-code-base
+             git add .
+             git commit -m "Auto-commit before shutdown"
+             git push
+
+.. dropdown:: Saving model checkpoints to persistent storage
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             # Save checkpoints to a mounted volume or cloud storage
+             cp -r /workspace/checkpoints/* /mnt/persistent-storage/checkpoints/
+             # Or upload to S3
+             aws s3 sync /workspace/checkpoints/ s3://my-bucket/checkpoints/
+
+.. dropdown:: Uploading logs or results to cloud storage
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             # Upload logs to S3
+             aws s3 sync /workspace/logs/ s3://my-bucket/logs/$(date +%Y%m%d)/
+             # Or upload to GCS
+             gsutil -m cp -r /workspace/results/ gs://my-bucket/results/$(date +%Y%m%d)/
+
+.. dropdown:: Cleaning up temporary files
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             # Remove temporary files to save space
+             find /tmp -type f -mtime +1 -delete
+             find /workspace/.cache -type f -mtime +7 -delete
+             # Clean up Docker images if needed
+             docker system prune -af --volumes
+
+.. dropdown:: Sending notifications about the cluster shutdown
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             # Send email notification
+             echo "Cluster shutting down after idle period" | \
+               mail -s "Cluster Autostop" user@example.com
+             # Or send Slack notification via webhook
+             curl -X POST -H 'Content-type: application/json' \
+               --data '{"text":"Cluster shutting down after idle period"}' \
+               https://hooks.slack.com/services/YOUR/WEBHOOK/URL
