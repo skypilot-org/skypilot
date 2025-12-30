@@ -472,20 +472,26 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
     hashed_mount_path = hashlib.md5(mount_path.encode()).hexdigest()
     log_file_path = os.path.join(constants.RCLONE_MOUNT_CACHED_LOG_DIR,
                                  f'{hashed_mount_path}.log')
-    socket_path = os.path.join(constants.RCLONE_RC_SOCKET_DIR,
-                               f'{hashed_mount_path}.sock')
-    create_log_cmd = (f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} '
-                      f'{constants.RCLONE_RC_SOCKET_DIR} && '
-                      f'touch {log_file_path}')
+    # Use $HOME instead of ~ for socket path because ~ is not expanded
+    # when it appears after unix:// in the --rc-addr flag.
+    socket_dir_with_home = constants.RCLONE_RC_SOCKET_DIR.replace('~', '$HOME')
+    socket_path = f'{socket_dir_with_home}/{hashed_mount_path}.sock'
+    create_log_cmd = (
+        f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} '
+        f'{socket_dir_with_home} && '
+        f'touch {log_file_path} ')
 
     # Check if sequential upload is enabled via config.
     # Default is False (parallel uploads for better performance).
     sequential_upload = skypilot_config.get_nested(
         ('data', 'mount_cached', 'sequential_upload'), False)
-    # '--transfers 1' guarantees files are uploaded in strict order during job
-    # execution. At flush stage, transfers are increased dynamically via RC API
-    # for faster uploads.
     transfers_flag = '--transfers 1 ' if sequential_upload else ''
+
+    # Enable RC server via Unix socket for dynamic configuration.
+    # This allows increasing parallel transfers during flush stage.
+    # Note: unix:// followed by $HOME/... expands to unix:///home/user/...
+    # which is the correct syntax (three slashes for absolute path).
+    rc_flag = f'--rc --rc-addr unix://{socket_path} '
 
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
@@ -522,7 +528,7 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         '--vfs-fast-fingerprint '
         # Enable RC server via Unix socket for dynamic configuration.
         # This allows increasing parallel transfers during flush stage.
-        f'--rc --rc-addr unix://{socket_path} '
+        f'{rc_flag}'
         # This command produces children processes, which need to be
         # detached from the current process's terminal. The command doesn't
         # produce any output, so we aren't dropping any logs.
@@ -678,8 +684,24 @@ def get_mounting_script(
                 else
                     echo "No gcsfuse log file found in /tmp"
                 fi
+            elif [ "$MOUNT_BINARY" = "rclone" ]; then
+                echo "Looking for rclone log files..."
+                # Find rclone log files in ~/.sky/rclone_log/ (for MOUNT_CACHED mode)
+                RCLONE_LOG_DIR=~/.sky/rclone_log
+                if [ -d "$RCLONE_LOG_DIR" ]; then
+                    RCLONE_LOGS=$(ls -t "$RCLONE_LOG_DIR"/*.log 2>/dev/null | head -1)
+                    if [ -n "$RCLONE_LOGS" ]; then
+                        echo "=== Rclone log file contents ==="
+                        tail -50 "$RCLONE_LOGS"
+                        echo "=== End of rclone log file ==="
+                    else
+                        echo "No rclone log file found in $RCLONE_LOG_DIR"
+                    fi
+                else
+                    echo "Rclone log directory $RCLONE_LOG_DIR not found"
+                fi
             fi
-            # TODO(kevin): Print logs from rclone, blobfuse2, etc too for observability.
+            # TODO(kevin): Print logs from blobfuse2, etc too for observability.
             exit $MOUNT_EXIT_CODE
         fi
         echo "Mounting done."

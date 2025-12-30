@@ -162,6 +162,7 @@ class TaskCodeGen:
                         2>/dev/null || true
                 done
             fi
+            FLUSH_START_TIME=$(date +%s)
             flushed=0
             # extra second on top of --vfs-cache-poll-interval to
             # avoid race condition between rclone log line creation and this check.
@@ -174,13 +175,15 @@ class TaskCodeGen:
                     exitcode=0
                     tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?
                     if [ $exitcode -ne 0 ]; then
-                        echo "skypilot: cached mount is still uploading to remote"
+                        ELAPSED=$(($(date +%s) - FLUSH_START_TIME))
+                        echo "skypilot: cached mount is still uploading to remote (elapsed: ${{ELAPSED}}s)"
                         flushed=0
                         break
                     fi
                 done
             done
-            echo "skypilot: cached mount uploaded complete"
+            TOTAL_FLUSH_TIME=$(($(date +%s) - FLUSH_START_TIME))
+            echo "skypilot: cached mount upload complete (took ${{TOTAL_FLUSH_TIME}}s)"
         fi""")
 
     def add_prologue(self, job_id: int) -> None:
