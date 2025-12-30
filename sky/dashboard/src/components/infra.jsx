@@ -34,6 +34,7 @@ import {
 } from '@/data/connectors/infra';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
+import { apiClient } from '@/data/connectors/client';
 import {
   getSSHNodePools,
   updateSSHNodePools,
@@ -1728,6 +1729,44 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
   );
 }
 
+// Infrastructure Hint component for when all infrastructure is disabled
+function InfrastructureHint() {
+  return (
+    <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
+      <div className="p-5">
+        <div className="flex items-start">
+          <div className="ml-3 flex-1">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              No Infrastructure Enabled
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              No cloud providers, Kubernetes contexts, SSH node pools, or Slurm
+              clusters are currently enabled or configured.
+            </p>
+            <div className="space-y-2 mb-4">
+              <p className="text-sm text-gray-600">
+                To check enabled infrastructures, you can:
+              </p>
+              <ul className="list-disc list-inside text-sm text-gray-600 space-y-1 ml-2">
+                <li>
+                  Click <strong>&quot;Refresh&quot;</strong>.
+                </li>
+                <li>
+                  Run{' '}
+                  <code className="bg-gray-100 px-1.5 py-0.5 rounded">
+                    sky check
+                  </code>{' '}
+                  in your CLI.
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function GPUs() {
   // Separate loading states for different data sources
   const [kubeLoading, setKubeLoading] = useState(true);
@@ -1783,6 +1822,14 @@ export function GPUs() {
       }
 
       try {
+        if (forceRefresh) {
+          try {
+            await apiClient.fetch('/check', {}, 'POST');
+          } catch (error) {
+            console.error('Error during sky check refresh:', error);
+          }
+        }
+
         async function fetchKubeAndSshData(forceRefresh) {
           await fetchKubernetesData(forceRefresh);
           // Fetch SSH Node Pools after Kubernetes data is loaded
@@ -1938,7 +1985,7 @@ export function GPUs() {
   const fetchCloudData = async (forceRefresh) => {
     try {
       const cloudData = forceRefresh
-        ? await getCloudInfrastructure()
+        ? await getCloudInfrastructure(true)
         : await dashboardCache.get(getCloudInfrastructure, [forceRefresh]);
 
       // Set cloud data with defensive checks
@@ -2319,6 +2366,22 @@ export function GPUs() {
     }, {});
   }, [perNodeGPUs]);
 
+  // Check if all infrastructure is disabled
+  const allInfrastructureDisabled = (() => {
+    // Ensure all data has been loaded
+    if (!cloudDataLoaded || !kubeDataLoaded || kubeLoading || cloudLoading) {
+      return false; // Still loading, don't show hint
+    }
+
+    // Check all infrastructure types
+    const noCloud = enabledClouds === 0;
+    const noSSH = sshContexts.length === 0;
+    const noKubernetes = kubeContexts.length === 0;
+    const noSlurm = slurmClusters.length === 0;
+
+    return noCloud && noSSH && noKubernetes && noSlurm;
+  })();
+
   // Check URL on component mount to set initial context
   useEffect(() => {
     if (router.isReady && router.query.context) {
@@ -2597,6 +2660,16 @@ export function GPUs() {
         return stats.clusters > 0 || stats.jobs > 0;
       });
     };
+
+    // If all infrastructure is disabled, add hint card at the top
+    if (allInfrastructureDisabled) {
+      sections.push({
+        name: 'Infrastructure Hint',
+        render: () => <InfrastructureHint />,
+        hasActivity: false,
+        priority: 0, // Highest priority, always show at the top
+      });
+    }
 
     // Always add all sections (they handle their own loading/empty states)
 
