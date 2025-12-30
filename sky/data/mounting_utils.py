@@ -672,7 +672,7 @@ def get_mounting_script(
             elif [ "$MOUNT_BINARY" = "rclone" ]; then
                 echo "Looking for rclone log files..."
                 # Find rclone log files in ~/.sky/rclone_log/ (for MOUNT_CACHED mode)
-                RCLONE_LOG_DIR=~/.sky/rclone_log
+                RCLONE_LOG_DIR={constants.RCLONE_MOUNT_CACHED_LOG_DIR}
                 if [ -d "$RCLONE_LOG_DIR" ]; then
                     RCLONE_LOGS=$(ls -t "$RCLONE_LOG_DIR"/*.log 2>/dev/null | head -1)
                     if [ -n "$RCLONE_LOGS" ]; then
