@@ -197,28 +197,18 @@ def format_resource(resource: 'resources_lib.Resources',
         elements_simple.append(f'gpus={acc}:{count}')
         elements_full.append(f'gpus={acc}:{count}')
 
-    cpu_to_add = None
-    if vcpu is not None:
-        cpus_formatted = f'{vcpu:.1f}'.rstrip('0').rstrip('.')
-        cpu_to_add = f'cpus={cpus_formatted}'
-
-    mem_to_add = None
-    if mem is not None:
-        mem_formatted = f'{mem:.1f}'.rstrip('0').rstrip('.')
-        mem_to_add = f'mem={mem_formatted}'
-
-    if is_k8s or resource.accelerators is None:
-        if cpu_to_add:
-            elements_simple.append(cpu_to_add)
-            elements_full.append(cpu_to_add)
-        if mem_to_add:
-            elements_simple.append(mem_to_add)
-            elements_full.append(mem_to_add)
+    if (resource.accelerators is None or is_k8s):
+        if vcpu is not None:
+            elements_simple.append(f'cpus={common_utils.format_float(vcpu)}')
+            elements_full.append(f'cpus={common_utils.format_float(vcpu)}')
+        if mem is not None:
+            elements_simple.append(f'mem={common_utils.format_float(mem)}')
+            elements_full.append(f'mem={common_utils.format_float(mem)}')
     elif not simplified_only:
-        if cpu_to_add:
-            elements_full.append(cpu_to_add)
-        if mem_to_add:
-            elements_full.append(mem_to_add)
+        if vcpu is not None:
+            elements_full.append(f'cpus={common_utils.format_float(vcpu)}')
+        if mem is not None:
+            elements_full.append(f'mem={common_utils.format_float(mem)}')
 
     is_slurm = resource.cloud.canonical_name() == 'slurm'
     if not is_k8s and not is_slurm:
