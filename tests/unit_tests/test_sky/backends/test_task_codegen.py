@@ -247,8 +247,9 @@ class TestRcloneFlushScript:
         flush_script = codegen._get_rclone_flush_script()
 
         # Format 1: cache status + uploading files
-        assert ('cached mount is still uploading (elapsed: ${ELAPSED}s) '
-                '[${CACHE_STATUS}] uploading: ${UPLOADING_FILES}') in flush_script
+        assert (
+            'cached mount is still uploading (elapsed: ${ELAPSED}s) '
+            '[${CACHE_STATUS}] uploading: ${UPLOADING_FILES}') in flush_script
 
         # Format 2: cache status only
         assert ('cached mount is still uploading (elapsed: ${ELAPSED}s) '
