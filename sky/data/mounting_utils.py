@@ -472,26 +472,14 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
     hashed_mount_path = hashlib.md5(mount_path.encode()).hexdigest()
     log_file_path = os.path.join(constants.RCLONE_MOUNT_CACHED_LOG_DIR,
                                  f'{hashed_mount_path}.log')
-    # Use $HOME instead of ~ for socket path because ~ is not expanded
-    # when it appears after unix:// in the --rc-addr flag.
-    socket_dir_with_home = constants.RCLONE_RC_SOCKET_DIR.replace('~', '$HOME')
-    socket_path = f'{socket_dir_with_home}/{hashed_mount_path}.sock'
-    create_log_cmd = (
-        f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} '
-        f'{socket_dir_with_home} && '
-        f'touch {log_file_path} ')
+    create_log_cmd = (f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} && '
+                      f'touch {log_file_path}')
 
     # Check if sequential upload is enabled via config.
     # Default is False (parallel uploads for better performance).
     sequential_upload = skypilot_config.get_nested(
         ('data', 'mount_cached', 'sequential_upload'), False)
     transfers_flag = '--transfers 1 ' if sequential_upload else ''
-
-    # Enable RC server via Unix socket for dynamic configuration.
-    # This allows increasing parallel transfers during flush stage.
-    # Note: unix:// followed by $HOME/... expands to unix:///home/user/...
-    # which is the correct syntax (three slashes for absolute path).
-    rc_flag = f'--rc --rc-addr unix://{socket_path} '
 
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
@@ -526,9 +514,6 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # Use a faster fingerprint algorithm to detect changes in files.
         # Recommended by rclone documentation for buckets like s3.
         '--vfs-fast-fingerprint '
-        # Enable RC server via Unix socket for dynamic configuration.
-        # This allows increasing parallel transfers during flush stage.
-        f'{rc_flag}'
         # This command produces children processes, which need to be
         # detached from the current process's terminal. The command doesn't
         # produce any output, so we aren't dropping any logs.

@@ -147,23 +147,6 @@ class TaskCodeGen:
         if [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] && \
            [ -d {constants.RCLONE_MOUNT_CACHED_LOG_DIR} ] && \
            [ "$(ls -A {constants.RCLONE_MOUNT_CACHED_LOG_DIR})" ]; then
-            # Increase parallel transfers via RC API for faster uploads during flush.
-            # Use min(nproc --all, max_transfers) to scale with available CPUs.
-            # --all ignores OMP_NUM_THREADS and CPU affinity settings.
-            # Each mount has its own RC socket.
-            if [ -d {constants.RCLONE_RC_SOCKET_DIR} ] && \
-               [ "$(ls -A {constants.RCLONE_RC_SOCKET_DIR} 2>/dev/null)" ]; then
-                NUM_CPUS=$(nproc --all)
-                FLUSH_TRANSFERS=$(( NUM_CPUS < {constants.RCLONE_FLUSH_MAX_TRANSFERS} ? NUM_CPUS : {constants.RCLONE_FLUSH_MAX_TRANSFERS} ))
-                echo "skypilot: increasing rclone transfers to $FLUSH_TRANSFERS for faster flush"
-                for sock in {constants.RCLONE_RC_SOCKET_DIR}/*.sock; do
-                    # Skip if the glob did not match any files.
-                    [ -e "$sock" ] || continue
-                    rclone rc --unix-socket "$sock" options/set \
-                        --json "{{\\"main\\": {{\\"Transfers\\": $FLUSH_TRANSFERS}}}}" \
-                        2>/dev/null || true
-                done
-            fi
             FLUSH_START_TIME=$(date +%s)
             flushed=0
             # extra second on top of --vfs-cache-poll-interval to
@@ -178,7 +161,9 @@ class TaskCodeGen:
                     tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?
                     if [ $exitcode -ne 0 ]; then
                         ELAPSED=$(($(date +%s) - FLUSH_START_TIME))
-                        echo "skypilot: cached mount is still uploading to remote (elapsed: ${{ELAPSED}}s)"
+                        # Extract the last vfs cache status line to show what we're waiting for
+                        CACHE_STATUS=$(tac $file | grep "vfs cache: cleaned:" -m 1 | sed 's/.*vfs cache: cleaned: //' 2>/dev/null || echo "checking...")
+                        echo "skypilot: cached mount is still uploading to remote (elapsed: ${{ELAPSED}}s) [${{CACHE_STATUS}}]"
                         flushed=0
                         break
                     fi
