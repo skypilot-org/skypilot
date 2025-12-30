@@ -50,8 +50,9 @@ def generate_hosts_entries(
             continue
 
         job_name = task.name
-        for node_idx, (internal_ip, _external_ip) in enumerate(
+        for node_idx, (internal_ip, external_ip) in enumerate(
                 handle.stable_internal_external_ips):
+            del external_ip  # Unused, only need internal IP for hosts file
             hostname = f'{job_name}-{node_idx}.{job_group_name}'
             entries.append(f'{internal_ip} {hostname}')
             logger.debug(f'Host entry: {internal_ip} -> {hostname}')
@@ -73,15 +74,16 @@ async def inject_hosts_on_node(
         True if successful, False otherwise.
     """
     # Use tee with sudo to append to /etc/hosts
-    # Escape single quotes in content
-    escaped_content = hosts_content.replace("'", "'\\''")
-    cmd = f"echo '{escaped_content}' | sudo tee -a /etc/hosts > /dev/null"
+    # Escape single quotes in content for shell command
+    escaped_content = hosts_content.replace("'", "'\\''")  # pylint: disable=invalid-string-quote
+    cmd = (
+        f"echo '{escaped_content}' | "  # pylint: disable=invalid-string-quote
+        'sudo tee -a /etc/hosts > /dev/null')
 
     try:
         returncode, _, stderr = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: runner.run(cmd, stream_logs=False, require_outputs=True)
-        )
+            lambda: runner.run(cmd, stream_logs=False, require_outputs=True))
         if returncode != 0:
             logger.error(f'Failed to inject /etc/hosts: {stderr}')
             return False
@@ -127,8 +129,9 @@ async def setup_job_group_networking(
         if handle is None or handle.stable_internal_external_ips is None:
             continue
 
-        for node_idx, (_internal_ip, external_ip) in enumerate(
+        for node_idx, (internal_ip, external_ip) in enumerate(
                 handle.stable_internal_external_ips):
+            del internal_ip  # Unused, only need external IP for SSH
             # Get SSH port for this node
             ssh_port = 22
             if (handle.stable_ssh_ports is not None and
@@ -140,11 +143,10 @@ async def setup_job_group_networking(
             default_ssh_user = 'sky'
             runner = command_runner.SSHCommandRunner(
                 node=(external_ip, ssh_port),
-                ssh_user=ssh_credentials.get(
-                    'ssh_user', default_ssh_user
-                ) if ssh_credentials else default_ssh_user,
-                ssh_private_key=ssh_credentials.get(
-                    'ssh_private_key') if ssh_credentials else None,
+                ssh_user=ssh_credentials.get('ssh_user', default_ssh_user)
+                if ssh_credentials else default_ssh_user,
+                ssh_private_key=ssh_credentials.get('ssh_private_key')
+                if ssh_credentials else None,
             )
 
             inject_tasks.append(inject_hosts_on_node(runner, hosts_content))
