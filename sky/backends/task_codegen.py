@@ -157,6 +157,8 @@ class TaskCodeGen:
                 FLUSH_TRANSFERS=$(( NUM_CPUS < {constants.RCLONE_FLUSH_MAX_TRANSFERS} ? NUM_CPUS : {constants.RCLONE_FLUSH_MAX_TRANSFERS} ))
                 echo "skypilot: increasing rclone transfers to $FLUSH_TRANSFERS for faster flush"
                 for sock in {constants.RCLONE_RC_SOCKET_DIR}/*.sock; do
+                    # Skip if the glob did not match any files.
+                    [ -e "$sock" ] || continue
                     rclone rc --unix-socket "$sock" options/set \
                         --json "{{\\"main\\": {{\\"Transfers\\": $FLUSH_TRANSFERS}}}}" \
                         2>/dev/null || true
