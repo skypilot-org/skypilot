@@ -10,7 +10,7 @@ THREAD_ID=${BENCHMARK_THREAD_ID:-"0"}
 REPEAT_ID=${BENCHMARK_REPEAT_ID:-"0"}
 
 CLUSTER="load-test-${UNIQUE_ID}"
-JOB="job-${UNIQUE_ID}"
+JOB="load-test-${UNIQUE_ID}"
 
 sky check || true
 sky show-gpus --infra $CLOUD || true
@@ -34,5 +34,5 @@ sky jobs queue
 sky jobs logs -n $JOB || true
 sky jobs logs -n $JOB --controller
 sky volumes ls
-sky show-gpus
-sky cost-report --days 7
+sky show-gpus || true
+sky cost-report --days 7 || true

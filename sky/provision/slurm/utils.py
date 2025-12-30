@@ -14,10 +14,13 @@ from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# TODO(jwj): Choose commonly used default values.
 DEFAULT_SLURM_PATH = '~/.slurm/config'
-DEFAULT_CLUSTER_NAME = 'localcluster'
-DEFAULT_PARTITION = 'dev'
+SLURM_MARKER_FILE = '.sky_slurm_cluster'
+
+# Regex pattern for parsing GPU GRES strings.
+# Format: 'gpu:acc_type:acc_count(optional_extra_info)'
+# Examples: 'gpu:H100:8', 'gpu:nvidia_h100_80gb_hbm3:8(S:0-1)', 'gpu:a10g:8'
+_GRES_GPU_PATTERN = re.compile(r'^gpu:([^:]+):(\d+)')
 
 
 def get_slurm_ssh_config() -> SSHConfig:
@@ -170,35 +173,23 @@ def instance_id(job_id: str, node: str) -> str:
     return f'job{job_id}-{node}'
 
 
-def get_cluster_name_from_config(provider_config: Dict[str, Any]) -> str:
-    """Return the cluster name from the provider config.
-
-    The concept of cluster can be mapped to a cloud region.
-    """
-    return provider_config.get('cluster', DEFAULT_CLUSTER_NAME)
-
-
 def get_partition_from_config(provider_config: Dict[str, Any]) -> str:
     """Return the partition from the provider config.
 
     The concept of partition can be mapped to a cloud zone.
     """
-    return provider_config.get('partition', DEFAULT_PARTITION)
+    partition = provider_config.get('partition')
+    if partition is None:
+        raise ValueError('Partition not specified in provider config.')
+    return partition
 
 
 @annotations.lru_cache(scope='request')
-def get_cluster_default_partition(cluster_name: str) -> str:
+def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
     """Get the default partition for a Slurm cluster.
 
     Queries the Slurm cluster for the partition marked with an asterisk (*)
-    in sinfo output. Falls back to DEFAULT_PARTITION if the query fails or
-    no default partition is found.
-
-    Args:
-        cluster_name: Name of the Slurm cluster.
-
-    Returns:
-        The default partition name for the cluster.
+    in sinfo output. If no default partition is marked, returns None.
     """
     try:
         ssh_config = get_slurm_ssh_config()
@@ -214,16 +205,10 @@ def get_cluster_default_partition(cluster_name: str) -> str:
         ssh_config_dict['user'],
         ssh_config_dict['identityfile'][0],
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
     )
 
-    default_partition = client.get_default_partition()
-    if default_partition is None:
-        # TODO(kevin): Have a way to specify default partition in
-        # ~/.sky/config.yaml if needed, in case a Slurm cluster
-        # really does not have a default partition.
-        raise ValueError('No default partition found for cluster '
-                         f'{cluster_name}.')
-    return default_partition
+    return client.get_default_partition()
 
 
 def get_all_slurm_cluster_names() -> List[str]:
@@ -313,12 +298,16 @@ def check_instance_fits(
         ssh_config_dict['user'],
         ssh_config_dict['identityfile'][0],
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
     )
 
     nodes = client.info_nodes()
     default_partition = get_cluster_default_partition(cluster)
 
     def is_default_partition(node_partition: str) -> bool:
+        if default_partition is None:
+            return False
+
         # info_nodes does not strip the '*' from the default partition name.
         # But non-default partition names can also end with '*',
         # so we need to check whether the partition name without the '*'
@@ -352,16 +341,10 @@ def check_instance_fits(
         assert acc_count is not None, (acc_type, acc_count)
 
         gpu_nodes = []
-        # GRES string format: 'gpu:acc_type:acc_count(optional_extra_info)'
-        # Examples:
-        # - gpu:nvidia_h100_80gb_hbm3:8(S:0-1)
-        # - gpu:a10g:8
-        # - gpu:l4:1
-        gres_pattern = re.compile(r'^gpu:([^:]+):(\d+)')
         for node_info in nodes:
             gres_str = node_info.gres
             # Extract the GPU type and count from the GRES string
-            match = gres_pattern.match(gres_str)
+            match = _GRES_GPU_PATTERN.match(gres_str)
             if not match:
                 continue
 
@@ -394,6 +377,51 @@ def check_instance_fits(
     return fits, reason
 
 
+# GRES names are highly unlikely to change within a cluster.
+# TODO(kevin): Cache using sky/utils/db/kv_cache.py too.
+@annotations.lru_cache(scope='global', maxsize=10)
+def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
+    """Get the actual GPU type as it appears in the cluster's GRES.
+
+    Args:
+        cluster: Name of the Slurm cluster.
+        requested_gpu_type: The GPU type requested by the user.
+
+    Returns:
+        The actual GPU type as it appears in the cluster's GRES string.
+        Falls back to the requested type if not found.
+    """
+    try:
+        ssh_config = get_slurm_ssh_config()
+        ssh_config_dict = ssh_config.lookup(cluster)
+        client = slurm.SlurmClient(
+            ssh_config_dict['hostname'],
+            int(ssh_config_dict.get('port', 22)),
+            ssh_config_dict['user'],
+            ssh_config_dict['identityfile'][0],
+            ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+            ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        )
+
+        nodes = client.info_nodes()
+
+        for node_info in nodes:
+            match = _GRES_GPU_PATTERN.match(node_info.gres)
+            if match:
+                node_gpu_type = match.group(1)
+                if node_gpu_type.lower() == requested_gpu_type.lower():
+                    return node_gpu_type
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(
+            'Failed to determine the exact GPU GRES type from the Slurm '
+            f'cluster {cluster!r}. Falling back to '
+            f'{requested_gpu_type.lower()!r}. This may cause issues if the '
+            f'casing is incorrect. Error: {common_utils.format_exception(e)}')
+
+    # GRES names are more commonly in lowercase from what we've seen so far.
+    return requested_gpu_type.lower()
+
+
 def _get_slurm_node_info_list(
         slurm_cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
     """Gathers detailed information about each node in the Slurm cluster.
@@ -423,6 +451,7 @@ def _get_slurm_node_info_list(
         slurm_config_dict['user'],
         slurm_config_dict['identityfile'][0],
         ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
     )
     node_infos = slurm_client.info_nodes()
 
@@ -469,10 +498,10 @@ def _get_slurm_node_info_list(
         if state in ('alloc', 'mix', 'drain', 'drng', 'drained', 'resv',
                      'comp'):
             try:
-                node_jobs = slurm_client.get_node_jobs(node_name)
-                if node_jobs:
+                jobs_gres = slurm_client.get_jobs_gres(node_name)
+                if jobs_gres:
                     job_gres_pattern = re.compile(r'gpu(?::[^:]+)*:(\d+)')
-                    for job_line in node_jobs:
+                    for job_line in jobs_gres:
                         gres_job_match = job_gres_pattern.search(job_line)
                         if gres_job_match:
                             allocated_gpus += int(gres_job_match.group(1))
@@ -539,10 +568,15 @@ def slurm_node_info(
     return node_list
 
 
-def is_inside_slurm_job() -> bool:
-    return os.environ.get('SLURM_JOB_ID') is not None
+def is_inside_slurm_cluster() -> bool:
+    # Check for the marker file in the current home directory. When run by
+    # the skylet on a compute node, the HOME environment variable is set to
+    # the cluster's sky home directory by the SlurmCommandRunner.
+    marker_file = os.path.join(os.path.expanduser('~'), SLURM_MARKER_FILE)
+    return os.path.exists(marker_file)
 
 
+@annotations.lru_cache(scope='request')
 def get_partitions(cluster_name: str) -> List[str]:
     """Get unique partition names available in a Slurm cluster.
 
@@ -550,7 +584,9 @@ def get_partitions(cluster_name: str) -> List[str]:
         cluster_name: Name of the Slurm cluster.
 
     Returns:
-        Sorted list of unique partition names available in the cluster.
+        List of unique partition names available in the cluster.
+        The default partition appears first,
+        and the rest are sorted alphabetically.
     """
     try:
         slurm_config = SSHConfig.from_path(
@@ -563,12 +599,19 @@ def get_partitions(cluster_name: str) -> List[str]:
             slurm_config_dict['user'],
             slurm_config_dict['identityfile'][0],
             ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
+            ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
         )
 
-        partitions = client.get_partitions()
-        return sorted(partitions)
+        partitions_info = client.get_partitions_info()
+        default_partitions = []
+        other_partitions = []
+        for partition in partitions_info:
+            if partition.is_default:
+                default_partitions.append(partition.name)
+            else:
+                other_partitions.append(partition.name)
+        return default_partitions + sorted(other_partitions)
     except Exception as e:  # pylint: disable=broad-except
-        logger.warning(
-            f'Failed to get partitions for cluster {cluster_name}: {e}')
-        # Fall back to default partition if query fails
-        return [DEFAULT_PARTITION]
+        raise ValueError(
+            f'Failed to get partitions for cluster '
+            f'{cluster_name}: {common_utils.format_exception(e)}') from e

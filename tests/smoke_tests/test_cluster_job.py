@@ -60,6 +60,8 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
+    if not accelerator:
+        pytest.skip(f'No available GPUs for {generic_cloud}')
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'job_queue',
@@ -248,13 +250,15 @@ def test_scp_job_queue():
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
-@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
+@pytest.mark.no_slurm  # Slurm does not support allocating fractional GPUs in a job. Run test_job_queue_multi_gpu instead
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
+    if not accelerator:
+        pytest.skip(f'No available GPUs for {generic_cloud}')
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 30 if generic_cloud == 'azure' else 15
     test = smoke_tests_utils.Test(
@@ -480,7 +484,6 @@ def test_docker_preinstalled_package(generic_cloud: str):
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
 @pytest.mark.no_do  # DO does not have T4 gpus
 @pytest.mark.no_nebius  # Nebius does not have T4 gpus
-@pytest.mark.no_slurm  # Slurm does not support multi-node yet
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.no_seeweb  # Seeweb does not have T4 gpus
 @pytest.mark.resource_heavy
@@ -488,11 +491,9 @@ def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     use_spot = True
     accelerator = 'T4'
-    if generic_cloud == 'kubernetes':
-        # EKS does not support spot instances
-        # Assume tests using a remote api server endpoint do not support spot instances
-        use_spot = not smoke_tests_utils.is_eks_cluster()
-    if generic_cloud in ('kubernetes', 'k8s'):
+    if generic_cloud in ('kubernetes', 'slurm'):
+        # Slurm and Kubernetes do not support spot instances
+        use_spot = False
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
 
     # Determine timeout for 15 running jobs check: 2 min for remote server, single check for local
@@ -775,7 +776,6 @@ def test_tpu_pod_slice_gke():
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
-@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
 def test_multi_hostname(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
@@ -799,7 +799,6 @@ def test_multi_hostname(generic_cloud: str):
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support multi-node
-@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
 def test_multi_node_failure(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -1299,8 +1298,8 @@ def test_container_logs_two_jobs_kubernetes():
             [
                 smoke_tests_utils.launch_cluster_for_cloud_cmd(
                     'kubernetes', name),
-                f'sky launch -y -c {name} {task_yaml}',
-                f'sky launch -y -c {name} {task_yaml}',
+                f'sky launch -y -c {name} --infra kubernetes {task_yaml}',
+                f'sky launch -y -c {name} --infra kubernetes {task_yaml}',
                 _check_container_logs(name, pod_logs, 9, 2),
             ],
             f'sky down -y {name} && '
@@ -1647,12 +1646,11 @@ def test_cancel_azure():
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet
-@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
-    if generic_cloud == 'kubernetes':
-        accelerator = smoke_tests_utils.get_available_gpus()
+    if generic_cloud in ('kubernetes', 'slurm'):
+        accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -1871,7 +1869,16 @@ def test_aws_custom_image():
         'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
         # Test image with PYTHONPATH set and with pyproject.toml.
         # Update this image periodically, nemo does not support :latest tag.
-        'docker:nvcr.io/nvidia/nemo:25.09'
+        'docker:nvcr.io/nvidia/nemo:25.09',
+        # Test image with Python 3.12 site-packages as WORKDIR, which causes
+        # import failures if CWD is not handled properly. When SkyPilot's Python
+        # 3.10 venv runs, it finds Python 3.12 compiled packages (like rpds) in
+        # CWD first, causing "ModuleNotFoundError: No module named 'rpds.rpds'".
+        # Created with:
+        # FROM python:3.12-slim
+        # RUN pip install jsonschema
+        # WORKDIR /usr/local/lib/python3.12/site-packages
+        'docker:michaelvll/skypilot-custom-image-test-cases:py312-site-packages-workdir-v1'
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
@@ -2376,10 +2383,6 @@ def test_autostop_with_unhealthy_ray_cluster(generic_cloud: str):
 def test_autodown(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
-    if generic_cloud == 'slurm':
-        # Slurm does not support multi-node
-        num_nodes = 1
-
     # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
     # the VM is terminated.
     if generic_cloud == 'azure':

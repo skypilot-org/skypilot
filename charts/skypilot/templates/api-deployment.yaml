@@ -132,6 +132,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.uid
+        - name: SKYPILOT_ROLLING_UPDATE_ENABLED
+          value: "true"
         {{- end }}
         {{- if .Values.apiService.metrics.enabled }}
         - name: SKY_API_SERVER_METRICS_ENABLED
@@ -188,13 +190,9 @@ spec:
           fi
           {{- if .Values.apiService.sshNodePools }}
           mkdir -p /root/.sky
-          # The PVC serves as the ground truth for the ssh_node_pools.yaml file, if it already exists we don't overwrite it
-          if [ ! -s /root/.sky/ssh_node_pools.yaml ]; then
-            echo "ssh_node_pools.yaml not found in /root/.sky, copying from ConfigMap \`skypilot-ssh-node-pools\`"
-            cp /var/skypilot/ssh_node_pool/ssh_node_pools.yaml /root/.sky/ssh_node_pools.yaml
-          else
-            echo "ssh_node_pools.yaml already exists in /root/.sky, skipping copy"
-          fi
+          echo "Linking ssh_node_pools.yaml from secret to /root/.sky/ssh_node_pools.yaml"
+          # The secret serves as the ground truth for the ssh_node_pools.yaml file, read-only
+          ln -sf /var/skypilot/ssh_node_pool/ssh_node_pools.yaml /root/.sky/ssh_node_pools.yaml
           # ~/.kube/config is required to be persistent when sshNodePools is enabled, init it if it is empty to avoid parsing error.
           if [ ! -s /root/.kube/config ]; then
             echo "{}" > /root/.kube/config
@@ -329,7 +327,7 @@ spec:
         - name: digitalocean-config
           mountPath: /root/.config/doctl
           readOnly: true
-        {{- end }}        
+        {{- end }}
         {{- if .Values.lambdaCredentials.enabled }}
         - name: lambda-config
           mountPath: /root/.lambda_cloud
@@ -378,6 +376,9 @@ spec:
         - name: state-volume
           mountPath: /root/.sky
           subPath: .sky
+      {{- end }}
+      {{- with .Values.apiService.sidecarContainers }}
+      {{- toYaml . | nindent 6 }}
       {{- end }}
       initContainers:
       {{- if and .Values.awsCredentials.enabled (not .Values.awsCredentials.useCredentialsFile) }}

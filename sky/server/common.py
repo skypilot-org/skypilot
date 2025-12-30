@@ -17,6 +17,7 @@ import time
 import typing
 from typing import (Any, Callable, cast, Dict, Generic, Literal, Optional,
                     Tuple, TypeVar, Union)
+from urllib.request import Request
 import uuid
 
 import cachetools
@@ -228,6 +229,22 @@ def get_api_cookie_jar() -> requests.cookies.RequestsCookieJar:
         file_cookie_jar.load()
         cookie_jar.update(file_cookie_jar)
     return cookie_jar
+
+
+def get_cookie_header_for_url(url: str) -> Dict[str, str]:
+    """Extract Cookie header value from a cookie jar for a specific URL"""
+    cookies = get_api_cookie_jar()
+    if not cookies:
+        return {}
+
+    # Use urllib Request to do URL-aware cookie filtering
+    request = Request(url)
+    cookies.add_cookie_header(request)
+    cookie_header = request.get_header('Cookie')
+
+    if cookie_header is None:
+        return {}
+    return {'Cookie': cookie_header}
 
 
 def set_api_cookie_jar(cookie_jar: CookieJar,

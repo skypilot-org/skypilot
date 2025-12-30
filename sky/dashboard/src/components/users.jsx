@@ -31,6 +31,7 @@ import {
   CustomTooltip,
   TimestampWithTooltip,
   CustomTooltip as Tooltip,
+  LastUpdatedTimestamp,
 } from '@/components/utils';
 import {
   RotateCwIcon,
@@ -276,6 +277,7 @@ export function Users() {
     'gpu type': [],
     infra: [],
   });
+  const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
   // Initialize deduplicateUsers from URL parameter
   const getInitialDeduplicateUsers = () => {
@@ -729,6 +731,12 @@ export function Users() {
               </button>
             )}
 
+          {!loading && lastFetchedTime && (
+            <LastUpdatedTimestamp
+              timestamp={lastFetchedTime}
+              className="mr-2"
+            />
+          )}
           <button
             onClick={handleRefresh}
             disabled={loading}
@@ -877,6 +885,7 @@ export function Users() {
           filters={filters}
           setValueList={setValueList}
           deduplicateUsers={deduplicateUsers}
+          setLastFetchedTime={setLastFetchedTime}
         />
       ) : (
         serviceAccountTokenEnabled && (
@@ -1301,6 +1310,7 @@ function UsersTable({
   filters,
   setValueList,
   deduplicateUsers,
+  setLastFetchedTime,
 }) {
   const [usersWithCounts, setUsersWithCounts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -1628,9 +1638,11 @@ function UsersTable({
         setHasInitiallyLoaded(true);
         if (setLoading && showLoading) setLoading(false);
         if (showLoading) setIsLoading(false);
+      } finally {
+        if (setLastFetchedTime) setLastFetchedTime(new Date());
       }
     },
-    [setLoading]
+    [setLoading, setLastFetchedTime]
   );
 
   useEffect(() => {
@@ -2282,6 +2294,7 @@ UsersTable.propTypes = {
   ingressBasicAuthEnabled: PropTypes.bool,
   currentUserRole: PropTypes.string,
   currentUserId: PropTypes.string,
+  setLastFetchedTime: PropTypes.func,
 };
 
 // Service Account Tokens Management Component

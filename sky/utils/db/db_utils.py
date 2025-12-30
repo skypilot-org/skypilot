@@ -75,6 +75,18 @@ def safe_cursor(db_path: str):
         conn.close()
 
 
+@contextlib.contextmanager
+def safe_cursor_on_connection(conn: 'sqlite3.Connection'):
+    """A auto-committing, auto-closing cursor on an existing connection."""
+    # Ensure commit() is called when the context is exited.
+    with conn:
+        cursor = conn.cursor()
+        try:
+            yield cursor
+        finally:
+            cursor.close()
+
+
 def add_column_to_table(
     cursor: 'sqlite3.Cursor',
     conn: 'sqlite3.Connection',
@@ -286,6 +298,11 @@ def drop_column_from_table_alembic(
             raise
 
 
+def fault_point():
+    """For test fault injection."""
+    pass
+
+
 class SQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database."""
 
@@ -345,8 +362,8 @@ class SQLiteConn(threading.local):
 
         def exec_and_commit(sql: str, parameters: Optional[Iterable[Any]]):
             # pylint: disable=protected-access
-            conn._conn.execute(sql, parameters)
-            conn._conn.commit()
+            with safe_cursor_on_connection(conn._conn) as cursor:
+                cursor.execute(sql, parameters)
 
         # pylint: disable=protected-access
         await conn._execute(exec_and_commit, sql, parameters)
@@ -357,7 +374,20 @@ class SQLiteConn(threading.local):
                                      parameters: Optional[Iterable[Any]] = None
                                     ) -> Iterable[sqlite3.Row]:
         conn = await self._get_async_conn()
-        return await conn.execute_fetchall(sql, parameters)
+        if parameters is None:
+            parameters = []
+
+        def exec_fetch_all(sql: str, parameters: Optional[Iterable[Any]]):
+            # pylint: disable=protected-access
+            with safe_cursor_on_connection(conn._conn) as cursor:
+                cursor.execute(sql, parameters)
+                # Note(dev): sqlite3.Connection cannot be patched, keep
+                # fault_point here to test the integrity of exec_fetch_all()
+                fault_point()
+                return cursor.fetchall()
+
+        # pylint: disable=protected-access
+        return await conn._execute(exec_fetch_all, sql, parameters)
 
     async def execute_get_returning_value_async(
             self,
@@ -372,9 +402,9 @@ class SQLiteConn(threading.local):
         def exec_and_get_returning_value(sql: str,
                                          parameters: Optional[Iterable[Any]]):
             # pylint: disable=protected-access
-            row = conn._conn.execute(sql, parameters).fetchone()
-            conn._conn.commit()
-            return row
+            with safe_cursor_on_connection(conn._conn) as cursor:
+                cursor.execute(sql, parameters)
+                return cursor.fetchone()
 
         # pylint: disable=protected-access
         return await conn._execute(exec_and_get_returning_value, sql,

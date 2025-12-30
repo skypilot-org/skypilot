@@ -5,26 +5,49 @@ import { apiClient } from '@/data/connectors/client';
 export function VersionDisplay() {
   const [version, setVersion] = useState(null);
   const [latestVersion, setLatestVersion] = useState(null);
+  const [commit, setCommit] = useState(null);
+  const [plugins, setPlugins] = useState([]);
 
-  const getVersion = async () => {
-    const data = await apiClient.get('/api/health');
-    if (!data.ok) {
+  const getVersionAndPlugins = async () => {
+    // Concurrently fetch health and plugins data
+    const [healthResponse, pluginsResponse] = await Promise.all([
+      apiClient.get('/api/health'),
+      apiClient.get('/api/plugins'),
+    ]);
+
+    // Process health data
+    if (healthResponse.ok) {
+      const healthData = await healthResponse.json();
+      if (healthData.version) {
+        setVersion(healthData.version);
+      }
+      if (healthData.commit) {
+        setCommit(healthData.commit);
+      }
+      if (healthData.latest_version) {
+        setLatestVersion(healthData.latest_version);
+      }
+    } else {
       console.error(
-        `API request /api/health failed with status ${data.status}`
+        `API request /api/health failed with status ${healthResponse.status}`
       );
-      return;
     }
-    const healthData = await data.json();
-    if (healthData.version) {
-      setVersion(healthData.version);
-    }
-    if (healthData.latest_version) {
-      setLatestVersion(healthData.latest_version);
+
+    // Process plugins data
+    if (pluginsResponse.ok) {
+      const pluginsData = await pluginsResponse.json();
+      if (pluginsData.plugins && pluginsData.plugins.length > 0) {
+        setPlugins(pluginsData.plugins);
+      }
+    } else {
+      console.error(
+        `API request /api/plugins failed with status ${pluginsResponse.status}`
+      );
     }
   };
 
   useEffect(() => {
-    getVersion();
+    getVersionAndPlugins();
   }, []);
 
   // Only show light bulb icon if there's an upgrade available
