@@ -19,7 +19,7 @@ jobs:
         uses: buildkite/trigger-pipeline-action@v2.3.0
         with:
           buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
-          pipeline: "skypilot-1/smoke-tests"
+          pipeline: "fundamental-dot-ai/smoke-tests"
           branch: ${{ github.ref_name }}
           commit: "HEAD"
           message: "Manual Smoke Tests: ${{ github.event.inputs.param }}"

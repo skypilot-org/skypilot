@@ -77,7 +77,7 @@ jobs:
         uses: buildkite/trigger-pipeline-action@v2.3.0
         with:
           buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
-          pipeline: skypilot-1/${{ inputs.pipeline }}
+          pipeline: fundamental-dot-ai/${{ inputs.pipeline }}
           branch: ${{ inputs.branch }}
           commit: ${{ inputs.commit }}
           message: ${{ inputs.message }}

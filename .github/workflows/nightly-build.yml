@@ -310,52 +310,52 @@ jobs:
           EOF
           if [ "${{ needs.smoke-tests-aws.result }}" != "skipped" ] && [ -n "${{ needs.smoke-tests-aws.outputs.build_number }}" ]; then
             cat <<EOF >> "$GITHUB_STEP_SUMMARY"
-          - [Smoke Tests AWS](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-aws.outputs.build_number }}) - $([ "${{ needs.smoke-tests-aws.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Smoke Tests AWS](https://buildkite.com/fundamental-dot-ai/smoke-tests/builds/${{ needs.smoke-tests-aws.outputs.build_number }}) - $([ "${{ needs.smoke-tests-aws.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
           EOF
           fi
           if [ "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" != "skipped" ] && [ -n "${{ needs.smoke-tests-kubernetes-resource-heavy.outputs.build_number }}" ]; then
             cat <<EOF >> "$GITHUB_STEP_SUMMARY"
-          - [Smoke Tests Kubernetes (Resource Heavy)](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-resource-heavy.outputs.build_number }}) - $([ "${{ needs.smoke-tests-kubernetes-resource-heavy.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Smoke Tests Kubernetes (Resource Heavy)](https://buildkite.com/fundamental-dot-ai/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-resource-heavy.outputs.build_number }}) - $([ "${{ needs.smoke-tests-kubernetes-resource-heavy.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
           EOF
           fi
           if [ "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" != "skipped" ] && [ -n "${{ needs.smoke-tests-kubernetes-no-resource-heavy.outputs.build_number }}" ]; then
             cat <<EOF >> "$GITHUB_STEP_SUMMARY"
-          - [Smoke Tests Kubernetes (No Resource Heavy)](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-no-resource-heavy.outputs.build_number }}) - $([ "${{ needs.smoke-tests-kubernetes-no-resource-heavy.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Smoke Tests Kubernetes (No Resource Heavy)](https://buildkite.com/fundamental-dot-ai/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-no-resource-heavy.outputs.build_number }}) - $([ "${{ needs.smoke-tests-kubernetes-no-resource-heavy.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
           EOF
           fi
           if [ "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result }}" != "skipped" ] && [ -n "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.outputs.build_number }}" ]; then
             cat <<EOF >> "$GITHUB_STEP_SUMMARY"
-          - [Smoke Tests Kubernetes (No Resource Heavy, Limit Deps)](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.outputs.build_number }}) - $([ "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Smoke Tests Kubernetes (No Resource Heavy, Limit Deps)](https://buildkite.com/fundamental-dot-ai/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.outputs.build_number }}) - $([ "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
           EOF
           fi
           if [ "${{ needs.smoke-tests-remote-server-kubernetes.result }}" != "skipped" ] && [ -n "${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}" ]; then
             cat <<EOF >> "$GITHUB_STEP_SUMMARY"
-          - [Smoke Tests Remote Server Kubernetes](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}) - $([ "${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Smoke Tests Remote Server Kubernetes](https://buildkite.com/fundamental-dot-ai/smoke-tests/builds/${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}) - $([ "${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
           EOF
           fi
           if [ "${{ needs.smoke-tests-shared-gke-api-server.result }}" != "skipped" ] && [ -n "${{ needs.smoke-tests-shared-gke-api-server.outputs.build_number }}" ]; then
             cat <<EOF >> "$GITHUB_STEP_SUMMARY"
-          - [Smoke Tests Shared GKE API Server](https://buildkite.com/skypilot-1/nightly-build-shared-gke-api-server/builds/${{ needs.smoke-tests-shared-gke-api-server.outputs.build_number }}) - $([ "${{ needs.smoke-tests-shared-gke-api-server.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Smoke Tests Shared GKE API Server](https://buildkite.com/fundamental-dot-ai/nightly-build-shared-gke-api-server/builds/${{ needs.smoke-tests-shared-gke-api-server.outputs.build_number }}) - $([ "${{ needs.smoke-tests-shared-gke-api-server.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
           EOF
           fi
           if [ "${{ needs.smoke-tests-lambda-job-queue.result }}" != "skipped" ] && [ -n "${{ needs.smoke-tests-lambda-job-queue.outputs.build_number }}" ]; then
             cat <<EOF >> "$GITHUB_STEP_SUMMARY"
-          - [Smoke Tests Lambda Job Queue](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-lambda-job-queue.outputs.build_number }}) - $([ "${{ needs.smoke-tests-lambda-job-queue.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Smoke Tests Lambda Job Queue](https://buildkite.com/fundamental-dot-ai/smoke-tests/builds/${{ needs.smoke-tests-lambda-job-queue.outputs.build_number }}) - $([ "${{ needs.smoke-tests-lambda-job-queue.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
           EOF
           fi
           # if [ "${{ needs.smoke-tests-runpod-minimal.result }}" != "skipped" ] && [ -n "${{ needs.smoke-tests-runpod-minimal.outputs.build_number }}" ]; then
           #   cat <<EOF >> "$GITHUB_STEP_SUMMARY"
-          # - [Smoke Tests RunPod Minimal](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-runpod-minimal.outputs.build_number }}) - $([ "${{ needs.smoke-tests-runpod-minimal.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          # - [Smoke Tests RunPod Minimal](https://buildkite.com/fundamental-dot-ai/smoke-tests/builds/${{ needs.smoke-tests-runpod-minimal.outputs.build_number }}) - $([ "${{ needs.smoke-tests-runpod-minimal.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
           # EOF
           # fi
           if [ "${{ needs.backward-compat-test-nightly.result }}" != "skipped" ] && [ -n "${{ needs.backward-compat-test-nightly.outputs.build_number }}" ]; then
             cat <<EOF >> "$GITHUB_STEP_SUMMARY"
-          - [Backward Compat Test (Nightly)](https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.backward-compat-test-nightly.outputs.build_number }}) - $([ "${{ needs.backward-compat-test-nightly.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Backward Compat Test (Nightly)](https://buildkite.com/fundamental-dot-ai/quicktest-core/builds/${{ needs.backward-compat-test-nightly.outputs.build_number }}) - $([ "${{ needs.backward-compat-test-nightly.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
           EOF
           fi
           if [ "${{ needs.backward-compat-test-stable.result }}" != "skipped" ] && [ -n "${{ needs.backward-compat-test-stable.outputs.build_number }}" ]; then
             cat <<EOF >> "$GITHUB_STEP_SUMMARY"
-          - [Backward Compat Test (Stable)](https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.backward-compat-test-stable.outputs.build_number }}) - $([ "${{ needs.backward-compat-test-stable.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Backward Compat Test (Stable)](https://buildkite.com/fundamental-dot-ai/quicktest-core/builds/${{ needs.backward-compat-test-stable.outputs.build_number }}) - $([ "${{ needs.backward-compat-test-stable.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
           EOF
           fi
 
@@ -377,61 +377,61 @@ jobs:
           if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result }}" == "failure" || "${{ needs.smoke-tests-remote-server-kubernetes.result }}" == "failure" || "${{ needs.smoke-tests-shared-gke-api-server.result }}" == "failure" || "${{ needs.smoke-tests-lambda-job-queue.result }}" == "failure" || "${{ needs.backward-compat-test-nightly.result }}" == "failure" || "${{ needs.backward-compat-test-stable.result }}" == "failure" ]]; then
           # if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" == "failure" || "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result }}" == "failure" || "${{ needs.smoke-tests-remote-server-kubernetes.result }}" == "failure" || "${{ needs.smoke-tests-shared-gke-api-server.result }}" == "failure" || "${{ needs.smoke-tests-lambda-job-queue.result }}" == "failure" || "${{ needs.smoke-tests-runpod-minimal.result }}" == "failure" || "${{ needs.backward-compat-test-nightly.result }}" == "failure" || "${{ needs.backward-compat-test-stable.result }}" == "failure" ]]; then
             if [[ "${{ needs.smoke-tests-aws.result }}" == "failure" ]]; then
-              BUILDKITE_MSG="<https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-aws.outputs.build_number }}|Buildkite Log(--aws)>"
+              BUILDKITE_MSG="<https://buildkite.com/fundamental-dot-ai/smoke-tests/builds/${{ needs.smoke-tests-aws.outputs.build_number }}|Buildkite Log(--aws)>"
             fi
             if [[ "${{ needs.smoke-tests-kubernetes-resource-heavy.result }}" == "failure" ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-resource-heavy.outputs.build_number }}|Buildkite Log(--kubernetes --resource-heavy)>"
+              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/fundamental-dot-ai/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-resource-heavy.outputs.build_number }}|Buildkite Log(--kubernetes --resource-heavy)>"
             fi
             if [[ "${{ needs.smoke-tests-kubernetes-no-resource-heavy.result }}" == "failure" ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-no-resource-heavy.outputs.build_number }}|Buildkite Log(--kubernetes --no-resource-heavy)>"
+              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/fundamental-dot-ai/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-no-resource-heavy.outputs.build_number }}|Buildkite Log(--kubernetes --no-resource-heavy)>"
             fi
             if [[ "${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.result }}" == "failure" ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.outputs.build_number }}|Buildkite Log(--kubernetes --no-resource-heavy --dependency kubernetes)>"
+              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/fundamental-dot-ai/smoke-tests/builds/${{ needs.smoke-tests-kubernetes-no-resource-heavy-limit-deps.outputs.build_number }}|Buildkite Log(--kubernetes --no-resource-heavy --dependency kubernetes)>"
             fi
             if [[ "${{ needs.smoke-tests-remote-server-kubernetes.result }}" == "failure" ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}|Buildkite Log(--remote-server --kubernetes)>"
+              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/fundamental-dot-ai/smoke-tests/builds/${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}|Buildkite Log(--remote-server --kubernetes)>"
             fi
             if [[ "${{ needs.smoke-tests-shared-gke-api-server.result }}" == "failure" ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/nightly-build-shared-gke-api-server/builds/${{ needs.smoke-tests-shared-gke-api-server.outputs.build_number }}|Buildkite Log(shared-gke-api-server)>"
+              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/fundamental-dot-ai/nightly-build-shared-gke-api-server/builds/${{ needs.smoke-tests-shared-gke-api-server.outputs.build_number }}|Buildkite Log(shared-gke-api-server)>"
             fi
             if [[ "${{ needs.smoke-tests-lambda-job-queue.result }}" == "failure" ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-lambda-job-queue.outputs.build_number }}|Buildkite Log(test_lambda_job_queue --lambda)>"
+              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/fundamental-dot-ai/smoke-tests/builds/${{ needs.smoke-tests-lambda-job-queue.outputs.build_number }}|Buildkite Log(test_lambda_job_queue --lambda)>"
             fi
             # if [[ "${{ needs.smoke-tests-runpod-minimal.result }}" == "failure" ]]; then
             #   if [[ ! -z "$BUILDKITE_MSG" ]]; then
             #     BUILDKITE_MSG="${BUILDKITE_MSG} and"
             #   fi
-            #   BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-runpod-minimal.outputs.build_number }}|Buildkite Log(test_minimal --runpod)>"
+            #   BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/fundamental-dot-ai/smoke-tests/builds/${{ needs.smoke-tests-runpod-minimal.outputs.build_number }}|Buildkite Log(test_minimal --runpod)>"
             # fi
             if [[ "${{ needs.backward-compat-test-nightly.result }}" == "failure" ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.backward-compat-test-nightly.outputs.build_number }}|Buildkite Log(backward-compat-nightly)>"
+              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/fundamental-dot-ai/quicktest-core/builds/${{ needs.backward-compat-test-nightly.outputs.build_number }}|Buildkite Log(backward-compat-nightly)>"
             fi
             if [[ "${{ needs.backward-compat-test-stable.result }}" == "failure" ]]; then
               if [[ ! -z "$BUILDKITE_MSG" ]]; then
                 BUILDKITE_MSG="${BUILDKITE_MSG} and"
               fi
-              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.backward-compat-test-stable.outputs.build_number }}|Buildkite Log(backward-compat-stable)>"
+              BUILDKITE_MSG="${BUILDKITE_MSG} <https://buildkite.com/fundamental-dot-ai/quicktest-core/builds/${{ needs.backward-compat-test-stable.outputs.build_number }}|Buildkite Log(backward-compat-stable)>"
             fi
             MARKDOWN_TEXT="🚨 Workflow <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|*${{ github.workflow }}*> failed at Buildkite step for commit <${COMMIT_URL}|${SHORT_SHA}>. ${BUILDKITE_MSG}"
           else

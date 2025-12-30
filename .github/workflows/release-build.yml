@@ -336,11 +336,11 @@ jobs:
             PR_BODY="Release ${RELEASE_VERSION}
 
           Buildkite Test Links:
-          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${{ needs.smoke-tests.outputs.build_number }}) - $([ "${{ needs.smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.quicktest-core.outputs.build_number }}) - $([ "${{ needs.quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-          - [Quicktest Core (vs Previous Minor)](https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.quicktest-core-previous-minor.outputs.build_number }}) - $([ "${{ needs.quicktest-core-previous-minor.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-          - [Smoke Tests Remote Server Kubernetes](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}) - $([ "${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-          - [Release Tests](https://buildkite.com/skypilot-1/release/builds/${{ needs.release-tests.outputs.build_number }}) - ⏳ (not waiting for completion)
+          - [Full Smoke Tests](https://buildkite.com/fundamental-dot-ai/full-smoke-tests-run/builds/${{ needs.smoke-tests.outputs.build_number }}) - $([ "${{ needs.smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Quicktest Core](https://buildkite.com/fundamental-dot-ai/quicktest-core/builds/${{ needs.quicktest-core.outputs.build_number }}) - $([ "${{ needs.quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Quicktest Core (vs Previous Minor)](https://buildkite.com/fundamental-dot-ai/quicktest-core/builds/${{ needs.quicktest-core-previous-minor.outputs.build_number }}) - $([ "${{ needs.quicktest-core-previous-minor.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Smoke Tests Remote Server Kubernetes](https://buildkite.com/fundamental-dot-ai/smoke-tests/builds/${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}) - $([ "${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Release Tests](https://buildkite.com/fundamental-dot-ai/release/builds/${{ needs.release-tests.outputs.build_number }}) - ⏳ (not waiting for completion)
 
           *Release Tests may take up to 24 hours to complete and might fail due to resource constraints.*"
           fi
@@ -380,11 +380,11 @@ jobs:
           # Release ${{ needs.release-build.outputs.release_version }}
 
           ## Buildkite Test Links
-          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${{ needs.smoke-tests.outputs.build_number }}) - $([ "${{ needs.smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.quicktest-core.outputs.build_number }}) - $([ "${{ needs.quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-          - [Quicktest Core (vs Previous Minor)](https://buildkite.com/skypilot-1/quicktest-core/builds/${{ needs.quicktest-core-previous-minor.outputs.build_number }}) - $([ "${{ needs.quicktest-core-previous-minor.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-          - [Smoke Tests Remote Server Kubernetes](https://buildkite.com/skypilot-1/smoke-tests/builds/${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}) - $([ "${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-          - [Release Tests](https://buildkite.com/skypilot-1/release/builds/${{ needs.release-tests.outputs.build_number }}) - ⏳ (not waiting for completion)
+          - [Full Smoke Tests](https://buildkite.com/fundamental-dot-ai/full-smoke-tests-run/builds/${{ needs.smoke-tests.outputs.build_number }}) - $([ "${{ needs.smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Quicktest Core](https://buildkite.com/fundamental-dot-ai/quicktest-core/builds/${{ needs.quicktest-core.outputs.build_number }}) - $([ "${{ needs.quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Quicktest Core (vs Previous Minor)](https://buildkite.com/fundamental-dot-ai/quicktest-core/builds/${{ needs.quicktest-core-previous-minor.outputs.build_number }}) - $([ "${{ needs.quicktest-core-previous-minor.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Smoke Tests Remote Server Kubernetes](https://buildkite.com/fundamental-dot-ai/smoke-tests/builds/${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_number }}) - $([ "${{ needs.smoke-tests-remote-server-kubernetes.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Release Tests](https://buildkite.com/fundamental-dot-ai/release/builds/${{ needs.release-tests.outputs.build_number }}) - ⏳ (not waiting for completion)
 
           *Release Tests may take up to 24 hours to complete and might fail due to resource constraints.*
           EOF
