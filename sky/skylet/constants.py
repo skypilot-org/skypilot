@@ -154,6 +154,7 @@ SKYLET_PID_FILE = '.sky/skylet_pid'
 SKYLET_PORT_FILE = '.sky/skylet_port'
 SKYLET_GRPC_PORT = 46590
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
+AUTOSTOP_HOOK_LOG_FILE = '.sky/autostop_hook.log'
 
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'

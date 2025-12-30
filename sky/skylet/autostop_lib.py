@@ -1,5 +1,6 @@
 """Autostop utilities."""
 import enum
+import os
 import pickle
 import shlex
 import subprocess
@@ -11,6 +12,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import configs
 from sky.skylet import constants
+from sky.skylet import log_lib
 from sky.utils import message_utils
 from sky.utils import ux_utils
 
@@ -36,9 +38,6 @@ _AUTOSTOP_LAST_ACTIVE_TIME = 'autostop_last_active_time'
 # starts. This is used for checking whether the cluster is in the process
 # of autostopping for the current machine.
 _AUTOSTOP_INDICATOR = 'autostop_indicator'
-
-# Timeout for hook execution (in seconds)
-AUTOSTOP_HOOK_TIMEOUT_SECONDS = 3600  # 1 hour
 
 
 class AutostopWaitFor(enum.Enum):
@@ -262,31 +261,32 @@ def execute_autostop_hook(hook: Optional[str]) -> bool:
         return True
 
     logger.info('Executing autostop hook...')
+    log_path = os.path.expanduser(constants.AUTOSTOP_HOOK_LOG_FILE)
     try:
-        # Execute the hook script in a shell
-        proc = subprocess.run(hook,
-                              shell=True,
-                              capture_output=True,
-                              text=True,
-                              timeout=AUTOSTOP_HOOK_TIMEOUT_SECONDS,
-                              check=False)
+        # Execute the hook script and log output to file
+        returncode, stdout, stderr = log_lib.run_with_log(hook,
+                                                          log_path,
+                                                          require_outputs=True,
+                                                          shell=True,
+                                                          process_stream=True)
 
-        if proc.returncode != 0:
-            logger.error(
-                f'Autostop hook failed with return code {proc.returncode}. '
-                f'stdout: {proc.stdout}, stderr: {proc.stderr}')
+        if returncode != 0:
+            logger.error(f'Autostop hook failed with return code {returncode}. '
+                         f'Check {log_path} for details. '
+                         f'stdout: {stdout}, stderr: {stderr}')
             return False
 
         logger.info(
-            f'Autostop hook executed successfully. stdout: {proc.stdout}')
-        if proc.stderr:
-            logger.debug(f'Hook stderr: {proc.stderr}')
+            f'Autostop hook executed successfully. Logs saved to {log_path}. '
+            f'stdout: {stdout}')
+        if stderr:
+            logger.error(f'Hook stderr: {stderr}')
         return True
-    except subprocess.TimeoutExpired:
-        logger.error('Autostop hook execution timed out after 1 hour.')
-        return False
     except Exception as e:  # pylint: disable=broad-except
-        logger.error(f'Error executing autostop hook: {e}.', exc_info=True)
+        logger.error(
+            f'Error executing autostop hook: {e}. '
+            f'Check {log_path} for details.',
+            exc_info=True)
         return False
 
 
@@ -310,11 +310,11 @@ class AutostopCodeGen:
             wait_for = DEFAULT_AUTOSTOP_WAIT_FOR
         hook_str = repr(hook) if hook is not None else 'None'
         code = [
-            '\nv = getattr(constants, "SKYLET_LIB_VERSION", 1)'
-            '\nif v < 4: '
+            '\nskylet_lib_version = getattr(constants, "SKYLET_LIB_VERSION", 1)'
+            '\nif skylet_lib_version < 4: '
             f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
             f'{down})'
-            '\nelif v == 4: '
+            '\nelif skylet_lib_version == 4: '
             f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
             f'autostop_lib.{wait_for}, {down})'
             '\nelse: '
