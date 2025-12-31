@@ -1272,3 +1272,24 @@ def pool_sync_down_logs(
                                replica_ids=worker_ids,
                                tail=tail,
                                pool=True)
+
+
+@usage_lib.entrypoint
+def get_job_events(
+    job_id: int,
+    task_id: Optional[int] = None,
+    limit: Optional[int] = 10,
+) -> List[Dict[str, Any]]:
+    """Get task events for a managed job.
+
+    Args:
+        job_id: The job ID to get task events for.
+        task_id: Optional task ID to filter by.
+        limit: Optional limit on number of task events to return (default 10).
+
+    Returns:
+        List of task event records.
+    """
+    return managed_job_state.get_job_events(job_id=job_id,
+                                            task_id=task_id,
+                                            limit=limit)

@@ -225,3 +225,4 @@ class VolumeRecord(ResponseBaseModel):
     usedby_pods: List[str]
     usedby_clusters: List[str]
     is_ephemeral: bool = False
+    usedby_fetch_failed: bool = False

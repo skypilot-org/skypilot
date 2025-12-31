@@ -294,7 +294,7 @@ class TestApplyVolume:
 
         assert result == config
         mock_k8s.storage_api.return_value.read_storage_class.assert_called_once_with(
-            name='standard')
+            name='standard', _request_timeout=mock_k8s.API_TIMEOUT)
         mock_create_pvc.assert_called_once()
 
     @patch('sky.provision.kubernetes.volume.create_persistent_volume_claim')
@@ -611,7 +611,8 @@ class TestGetAllVolumesUsedBy:
     def test_get_all_volumes_usedby_empty(self, mock_get_context, mock_get_map,
                                           mock_k8s):
         """Test with no volumes."""
-        used_by_pods, used_by_clusters = k8s_volume.get_all_volumes_usedby([])
+        used_by_pods, used_by_clusters, _ = k8s_volume.get_all_volumes_usedby(
+            [])
 
         assert used_by_pods == {}
         assert used_by_clusters == {}
@@ -644,7 +645,7 @@ class TestGetAllVolumesUsedBy:
             size=None,
         )
 
-        used_by_pods, used_by_clusters = k8s_volume.get_all_volumes_usedby(
+        used_by_pods, used_by_clusters, _ = k8s_volume.get_all_volumes_usedby(
             [config])
 
         assert 'my-context' in used_by_pods
@@ -683,7 +684,7 @@ class TestGetAllVolumesUsedBy:
             size=None,
         )
 
-        used_by_pods, used_by_clusters = k8s_volume.get_all_volumes_usedby(
+        used_by_pods, used_by_clusters, _ = k8s_volume.get_all_volumes_usedby(
             [config])
 
         # Should have empty dict for the volume
@@ -722,7 +723,7 @@ class TestGetAllVolumesUsedBy:
             size=None,
         )
 
-        used_by_pods, used_by_clusters = k8s_volume.get_all_volumes_usedby(
+        used_by_pods, used_by_clusters, _ = k8s_volume.get_all_volumes_usedby(
             [config])
 
         # Should have empty dict for the volume
@@ -758,7 +759,7 @@ class TestGetAllVolumesUsedBy:
             size=None,
         )
 
-        used_by_pods, used_by_clusters = k8s_volume.get_all_volumes_usedby(
+        used_by_pods, used_by_clusters, _ = k8s_volume.get_all_volumes_usedby(
             [config])
 
         # Should not include the other-pvc
@@ -795,7 +796,7 @@ class TestGetAllVolumesUsedBy:
             size=None,
         )
 
-        used_by_pods, used_by_clusters = k8s_volume.get_all_volumes_usedby(
+        used_by_pods, used_by_clusters, _ = k8s_volume.get_all_volumes_usedby(
             [config])
 
         # Pod should be recorded, but no cluster
@@ -834,7 +835,7 @@ class TestGetAllVolumesUsedBy:
             size=None,
         )
 
-        used_by_pods, used_by_clusters = k8s_volume.get_all_volumes_usedby(
+        used_by_pods, used_by_clusters, _ = k8s_volume.get_all_volumes_usedby(
             [config])
 
         # Pod should be recorded, but no cluster (cluster not in map)
@@ -844,6 +845,90 @@ class TestGetAllVolumesUsedBy:
         # No cluster should be added since it's not in the map
         assert len(
             used_by_clusters.get('my-context', {}).get('my-namespace', {})) == 0
+
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    @patch(
+        'sky.provision.kubernetes.volume._get_cluster_name_on_cloud_to_cluster_name_map'
+    )
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    def test_get_all_volumes_usedby_list_pods_exception(self, mock_get_context,
+                                                        mock_get_map, mock_k8s):
+        """Test when list_namespaced_pod raises an exception."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        mock_get_map.return_value = {}
+
+        # Make list_namespaced_pod raise an exception
+        api_exception = Exception("Failed to list pods")
+        mock_k8s.core_api.return_value.list_namespaced_pod.side_effect = api_exception
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+        )
+
+        used_by_pods, used_by_clusters, failed_volume_names = k8s_volume.get_all_volumes_usedby(
+            [config])
+
+        # The volume should be marked as failed
+        assert 'test-vol' in failed_volume_names
+        # The namespace should still be initialized in the dictionaries
+        assert 'my-context' in used_by_pods
+        assert 'my-namespace' in used_by_pods['my-context']
+        assert 'my-context' in used_by_clusters
+        assert 'my-namespace' in used_by_clusters['my-context']
+        # But the volume should not be in the used_by dictionaries
+        assert 'test-pvc' not in used_by_pods['my-context']['my-namespace']
+        assert 'test-pvc' not in used_by_clusters['my-context']['my-namespace']
+
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    @patch(
+        'sky.provision.kubernetes.volume._get_cluster_name_on_cloud_to_cluster_name_map'
+    )
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    def test_get_all_volumes_usedby_list_pods_exception_multiple_volumes(
+            self, mock_get_context, mock_get_map, mock_k8s):
+        """Test exception handling with multiple volumes in same namespace."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        mock_get_map.return_value = {}
+
+        # Make list_namespaced_pod raise an exception
+        api_exception = Exception("Failed to list pods")
+        mock_k8s.core_api.return_value.list_namespaced_pod.side_effect = api_exception
+
+        config1 = models.VolumeConfig(
+            _version=1,
+            name='test-vol-1',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc-1',
+            size=None,
+        )
+        config2 = models.VolumeConfig(
+            _version=1,
+            name='test-vol-2',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc-2',
+            size=None,
+        )
+
+        used_by_pods, used_by_clusters, failed_volume_names = k8s_volume.get_all_volumes_usedby(
+            [config1, config2])
+
+        # Both volumes should be marked as failed
+        assert 'test-vol-1' in failed_volume_names
+        assert 'test-vol-2' in failed_volume_names
+        assert len(failed_volume_names) == 2
 
 
 class TestMapAllVolumesUsedBy:
@@ -1190,7 +1275,9 @@ class TestCreatePersistentVolumeClaim:
 
         # Should create PVC
         mock_k8s.core_api.return_value.create_namespaced_persistent_volume_claim.assert_called_once_with(
-            namespace='my-namespace', body=pvc_spec)
+            namespace='my-namespace',
+            body=pvc_spec,
+            _request_timeout=mock_k8s.API_TIMEOUT)
 
     @patch('sky.provision.kubernetes.volume.kubernetes')
     def test_create_pvc_api_error(self, mock_k8s):

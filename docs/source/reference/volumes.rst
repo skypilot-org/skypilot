@@ -174,33 +174,77 @@ This section demonstrates how to configure and use distributed filesystems as Sk
 
         1. **Install the JuiceFS CSI driver** on your Kubernetes cluster. Follow the official `installation guide <https://juicefs.com/docs/csi/getting_started>`_ for detailed instructions.
 
-        2. **Verify the driver installation** - Confirm that the ``juicefs-sc`` storage class has been created successfully:
+        2. **Verify the driver installation** - Confirm that the JuiceFS CSI Driver pods are running:
 
         .. code-block:: console
 
-          $ kubectl get storageclass
-          NAME           PROVISIONER         RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
-          juicefs-sc     csi.juicefs.com     Retain          Immediate           false                  10m
+          $ kubectl -n kube-system get pod -l app.kubernetes.io/name=juicefs-csi-driver
+          NAME                       READY   STATUS    RESTARTS   AGE
+          juicefs-csi-controller-0   2/2     Running   0          10m
+          juicefs-csi-node-8rd96     3/3     Running   0          10m
 
-        .. note::
-           If the ``juicefs-sc`` storage class is not available, refer to the `JuiceFS storage class creation guide <https://juicefs.com/docs/csi/guide/pv/#create-storage-class>`_ to set it up.
+        3. **Set up JuiceFS storage and create a SkyPilot volume** - You can use either dynamic provisioning (with a StorageClass) or static provisioning (with a pre-created PV):
 
-        3. **Create a SkyPilot volume for JuiceFS** with a volume YAML:
+        .. tab-set::
 
-        .. code-block:: yaml
+            .. tab-item:: Dynamic Provisioning (StorageClass)
+                :sync: dynamic-tab
 
-          # juicefs-volume.yaml
-          name: juicefs-pvc
-          type: k8s-pvc
-          infra: k8s
-          size: 100Gi
-          config:
-            storage_class_name: juicefs-sc
-            access_mode: ReadWriteMany
+                Create a StorageClass for dynamic provisioning. Refer to the `JuiceFS StorageClass guide <https://juicefs.com/docs/csi/guide/pv/#create-storage-class>`_ for details.
 
-        .. code-block:: console
+                .. code-block:: console
 
-          $ sky volumes apply juicefs-volume.yaml
+                  $ kubectl get storageclass juicefs-sc
+                  NAME         PROVISIONER       RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
+                  juicefs-sc   csi.juicefs.com   Retain          Immediate           false                  10m
+
+                Create a SkyPilot volume YAML referencing the StorageClass:
+
+                .. code-block:: yaml
+
+                  # juicefs-volume.yaml
+                  name: juicefs-volume
+                  type: k8s-pvc
+                  infra: k8s
+                  size: 100Gi
+                  config:
+                    storage_class_name: juicefs-sc
+                    access_mode: ReadWriteMany
+
+                .. code-block:: console
+
+                  $ sky volumes apply juicefs-volume.yaml
+
+            .. tab-item:: Static Provisioning (PV)
+                :sync: static-tab
+
+                Create a PersistentVolume and PVC manually. Refer to the `JuiceFS static provisioning guide <https://juicefs.com/docs/csi/guide/pv/#static-provisioning>`_ for details.
+
+                .. code-block:: console
+
+                  $ kubectl get pv juicefs-pv
+                  NAME         CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                 STORAGECLASS   AGE
+                  juicefs-pv   100Gi      RWX            Retain           Bound    default/juicefs-pvc                  10m
+
+                  $ kubectl get pvc juicefs-pvc
+                  NAME          STATUS   VOLUME       CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+                  juicefs-pvc   Bound    juicefs-pv   100Gi      RWX                           10m
+
+                Create a SkyPilot volume YAML with ``use_existing: true`` to reference the existing PVC:
+
+                .. code-block:: yaml
+
+                  # juicefs-volume.yaml
+                  name: juicefs-volume
+                  type: k8s-pvc
+                  infra: k8s
+                  use_existing: true
+                  config:
+                    access_mode: ReadWriteMany
+
+                .. code-block:: console
+
+                  $ sky volumes apply juicefs-volume.yaml
 
         4. **Mount the volume to SkyPilot task** in your SkyPilot YAML:
 
@@ -211,7 +255,7 @@ This section demonstrates how to configure and use distributed filesystems as Sk
 
           volumes:
             # Mount the JuiceFS volume to /mnt/data across all nodes
-            /mnt/data: juicefs-pvc
+            /mnt/data: juicefs-volume
 
           run: |
             # Verify the volume is mounted and accessible

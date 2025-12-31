@@ -3898,8 +3898,10 @@ def show_gpus(
             contexts_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
             cloud_str: str = 'Kubernetes',
             context_title_str: str = 'CONTEXT') -> str:
-        node_table = log_utils.create_table(
-            [context_title_str, 'NODE', 'GPU', 'UTILIZATION'])
+        node_table = log_utils.create_table([
+            context_title_str, 'NODE', 'vCPU', 'Memory (GB)', 'GPU',
+            'GPU UTILIZATION'
+        ])
 
         no_permissions_str = '<no permissions>'
         hints = []
@@ -3916,6 +3918,44 @@ def show_gpus(
                 acc_type = node_info.accelerator_type
                 if acc_type is None:
                     acc_type = '-'
+
+                # Format CPU and memory: "X of Y free" or just "Y" if
+                # free is unknown
+                cpu_str = '-'
+                if node_info.cpu_count is not None:
+                    cpu_total_str = common_utils.format_float(
+                        node_info.cpu_count, precision=0)
+
+                    # Check if we have free CPU info (use hasattr to
+                    # check if field exists, then access directly)
+                    cpu_free = None
+                    if hasattr(node_info, 'cpu_free'):
+                        cpu_free = node_info.cpu_free
+                    if cpu_free is not None:
+                        cpu_free_str = common_utils.format_float(cpu_free,
+                                                                 precision=0)
+                        cpu_str = f'{cpu_free_str} of {cpu_total_str} free'
+                    else:
+                        cpu_str = cpu_total_str
+
+                memory_str = '-'
+                if node_info.memory_gb is not None:
+                    memory_total_str = common_utils.format_float(
+                        node_info.memory_gb, precision=0)
+
+                    # Check if we have free memory info (use hasattr
+                    # to check if field exists, then access directly)
+                    memory_free_gb = None
+                    if hasattr(node_info, 'memory_free_gb'):
+                        memory_free_gb = node_info.memory_free_gb
+                    if memory_free_gb is not None:
+                        memory_free_str = common_utils.format_float(
+                            memory_free_gb, precision=0)
+                        memory_str = (
+                            f'{memory_free_str} of {memory_total_str} free')
+                    else:
+                        memory_str = memory_total_str
+
                 utilization_str = (
                     f'{available} of '
                     f'{node_info.total["accelerator_count"]} free')
@@ -3924,8 +3964,11 @@ def show_gpus(
                 node_is_ready = getattr(node_info, 'is_ready', True)
                 if not node_is_ready:
                     utilization_str += ' (Node NotReady)'
-                node_table.add_row(
-                    [context_name, node_name, acc_type, utilization_str])
+
+                node_table.add_row([
+                    context_name, node_name, cpu_str, memory_str, acc_type,
+                    utilization_str
+                ])
 
         k8s_per_node_acc_message = (f'{cloud_str} per-node GPU availability')
         if hints:
@@ -4705,6 +4748,13 @@ def volumes_ls(verbose: bool):
               is_flag=True,
               required=False,
               help='Delete all volumes.')
+@click.option('--purge',
+              '-p',
+              default=False,
+              is_flag=True,
+              required=False,
+              help=('Forcibly delete the volume from the volumes table even '
+                    'if the deletion API fails.'))
 @click.option('--yes',
               '-y',
               default=False,
@@ -4713,7 +4763,12 @@ def volumes_ls(verbose: bool):
               help='Skip confirmation prompt.')
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
-def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  # pylint: disable=redefined-builtin
+def volumes_delete(
+        names: List[str],
+        all: bool,  # pylint: disable=redefined-builtin
+        purge: bool,
+        yes: bool,
+        async_call: bool):
     """Delete volumes.
 
     Examples:
@@ -4728,6 +4783,9 @@ def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
         \b
         # Delete all volumes.
         sky volumes delete -a
+        \b
+        # Forcibly delete a volume.
+        sky volumes delete pvc1 -p
     """
     if sum([bool(names), all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
@@ -4754,8 +4812,8 @@ def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
                 show_default=True)
 
         try:
-            _async_call_or_wait(volumes_sdk.delete(names), async_call,
-                                'sky.volumes.delete')
+            _async_call_or_wait(volumes_sdk.delete(names, purge=purge),
+                                async_call, 'sky.volumes.delete')
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'{colorama.Fore.RED}Error deleting volumes {names}: '
                          f'{str(e)}{colorama.Style.RESET_ALL}')
@@ -6759,9 +6817,11 @@ def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
             if not verbose:
                 r_id = common_utils.truncate_long_string(r_id, 36)
             req_status = requests.RequestStatus(request.status)
-            row = [r_id, request.user_name, request.name]
+            user_display = status_utils.get_user_display_name(
+                request.user_name or '-', request.user_id)
+            row = [r_id, user_display, request.name]
             if verbose:
-                row.append(request.cluster_name)
+                row.append(request.cluster_name or '-')
             row.extend([
                 log_utils.readable_time_duration(request.created_at),
                 req_status.colored_str()

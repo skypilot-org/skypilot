@@ -91,8 +91,23 @@ class BasePlugin(abc.ABC):
     """Base class for all SkyPilot server plugins."""
 
     @property
+    def name(self) -> Optional[str]:
+        """Plugin name for display purposes."""
+        return None
+
+    @property
     def js_extension_path(self) -> Optional[str]:
         """Optional API route to the JavaScript extension to load."""
+        return None
+
+    @property
+    def version(self) -> Optional[str]:
+        """Plugin version."""
+        return None
+
+    @property
+    def commit(self) -> Optional[str]:
+        """Plugin git commit hash."""
         return None
 
     @abc.abstractmethod

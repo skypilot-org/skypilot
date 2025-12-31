@@ -98,6 +98,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
     ]
     if secure_only:
         query.append('datacenter=true')
+        query.append('hosting_type>=1')
     query_str = ' '.join(query)
 
     instance_list = vast.vast().search_offers(query=query_str)

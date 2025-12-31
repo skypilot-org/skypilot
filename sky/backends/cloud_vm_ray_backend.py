@@ -81,6 +81,7 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
 from sky.utils import yaml_utils
+from sky.utils.plugin_extensions import ExternalFailureSource
 
 if typing.TYPE_CHECKING:
     import grpc
@@ -3047,6 +3048,26 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                  'sky api status -v | grep '
                                                  f'{cluster_name}'))
 
+    def _maybe_clear_external_cluster_failures(
+            self, cluster_name: str,
+            prev_cluster_status: Optional[status_lib.ClusterStatus]) -> None:
+        """Clear any existing cluster failures when reusing a cluster.
+
+        Clear any existing cluster failures when reusing a cluster. This ensures
+        that when a cluster failure is detected (causing the cluster to be
+        marked as INIT), the user can recover the cluster via `sky start` or
+        `sky launch` and clear the failure.
+        """
+        if prev_cluster_status is not None:
+            failures = ExternalFailureSource.clear(cluster_name=cluster_name)
+            if failures:
+                failure_details = [f'"{f["failure_mode"]}"' for f in failures]
+                plural = 's' if len(failures) > 1 else ''
+                logger.info(f'{colorama.Style.DIM}Cleared {len(failures)} '
+                            f'existing cluster failure{plural} for cluster '
+                            f'{cluster_name!r}: {", ".join(failure_details)}'
+                            f'{colorama.Style.RESET_ALL}')
+
     def _locked_provision(
         self,
         lock_id: str,
@@ -3076,6 +3097,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             usage_lib.messages.usage.update_cluster_resources(
                 to_provision_config.num_nodes, to_provision_config.resources)
             usage_lib.messages.usage.update_cluster_status(prev_cluster_status)
+
+            self._maybe_clear_external_cluster_failures(cluster_name,
+                                                        prev_cluster_status)
 
             # TODO(suquark): once we have sky on PyPI, we should directly
             # install sky from PyPI.
@@ -5338,6 +5362,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             assert handle is not None
             # Cluster already exists.
             self.check_resources_fit_cluster(handle, task)
+
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
             # Take a random resource in order to get resource info that applies

@@ -23,6 +23,11 @@ import {
   openGrafana,
 } from '@/utils/grafana';
 import {
+  formatCpu,
+  formatMemory,
+  calculateAggregatedResource,
+} from '@/utils/resourceUtils';
+import {
   getWorkspaceInfrastructure,
   getCloudInfrastructure,
   getContextJobs,
@@ -230,11 +235,17 @@ export function InfrastructureSection({
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
                         Nodes
                       </th>
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                        CPU
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                        Memory
+                      </th>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/4">
                         GPU Types
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
-                        #GPUs
+                        GPUs
                       </th>
                     </tr>
                   </thead>
@@ -285,6 +296,18 @@ export function InfrastructureSection({
 
                         return Object.keys(typeCounts).join(', ');
                       })();
+
+                      // Calculate aggregated CPU and memory for this context
+                      const aggregatedCpu = calculateAggregatedResource(
+                        nodes,
+                        'cpu_count',
+                        hasNodeData
+                      );
+                      const aggregatedMemory = calculateAggregatedResource(
+                        nodes,
+                        'memory_gb',
+                        hasNodeData
+                      );
 
                       // Format display name for SSH contexts
                       const displayName = isSSH
@@ -374,6 +397,24 @@ export function InfrastructureSection({
                                   ? '0*'
                                   : nodes.length}
                               </span>
+                            )}
+                          </td>
+                          <td className="p-3">
+                            {!hasNodeData ? (
+                              <div className="flex items-center justify-center">
+                                <CircularProgress size={16} />
+                              </div>
+                            ) : (
+                              formatCpu(aggregatedCpu)
+                            )}
+                          </td>
+                          <td className="p-3">
+                            {!hasNodeData ? (
+                              <div className="flex items-center justify-center">
+                                <CircularProgress size={16} />
+                              </div>
+                            ) : (
+                              formatMemory(aggregatedMemory)
                             )}
                           </td>
                           <td className="p-3">
@@ -661,35 +702,89 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         IP Address
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600">
+                        vCPU
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600">
+                        Memory (GB)
+                      </th>
+                      <th className="p-3 text-left font-medium text-gray-600">
                         GPU
                       </th>
-                      <th className="p-3 text-right font-medium text-gray-600">
-                        Availability
+                      <th className="p-3 text-left font-medium text-gray-600">
+                        GPU Utilization
                       </th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {nodesInContext.map((node, index) => (
-                      <tr
-                        key={`${node.node_name}-${index}`}
-                        className="hover:bg-gray-50"
-                      >
-                        <td className="p-3 whitespace-nowrap text-gray-700">
-                          {node.node_name}
-                        </td>
-                        <td className="p-3 whitespace-nowrap text-gray-700">
-                          {node.ip_address || '-'}
-                        </td>
-                        <td className="p-3 whitespace-nowrap text-gray-700">
-                          {node.gpu_name}
-                        </td>
-                        <td className="p-3 whitespace-nowrap text-right text-gray-700">
-                          {node.is_ready === false
-                            ? `0 of ${node.gpu_total} free (Node NotReady)`
-                            : `${node.gpu_free} of ${node.gpu_total} free`}
-                        </td>
-                      </tr>
-                    ))}
+                    {nodesInContext.map((node, index) => {
+                      // Format CPU display: "X of Y free" or just "Y" if free is unknown
+                      let cpuDisplay = '-';
+                      if (
+                        node.cpu_count !== null &&
+                        node.cpu_count !== undefined
+                      ) {
+                        const cpuTotal = formatCpu(node.cpu_count);
+                        if (
+                          node.cpu_free !== null &&
+                          node.cpu_free !== undefined
+                        ) {
+                          const cpuFree = formatCpu(node.cpu_free);
+                          cpuDisplay = `${cpuFree} of ${cpuTotal} free`;
+                        } else {
+                          cpuDisplay = cpuTotal;
+                        }
+                      }
+
+                      // Format memory display: "X of Y free" or just "Y" if free is unknown
+                      // (GB is in column header, so don't include it in values)
+                      let memoryDisplay = '-';
+                      if (
+                        node.memory_gb !== null &&
+                        node.memory_gb !== undefined
+                      ) {
+                        const memoryTotal = node.memory_gb.toFixed(1);
+                        if (
+                          node.memory_free_gb !== null &&
+                          node.memory_free_gb !== undefined
+                        ) {
+                          const memoryFree = node.memory_free_gb.toFixed(1);
+                          memoryDisplay = `${memoryFree} of ${memoryTotal} free`;
+                        } else {
+                          memoryDisplay = memoryTotal;
+                        }
+                      }
+
+                      const utilizationStr =
+                        node.is_ready === false
+                          ? `0 of ${node.gpu_total} free (Node NotReady)`
+                          : `${node.gpu_free} of ${node.gpu_total} free`;
+
+                      return (
+                        <tr
+                          key={`${node.node_name}-${index}`}
+                          className="hover:bg-gray-50"
+                        >
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {node.node_name}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {node.ip_address || '-'}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {cpuDisplay}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {memoryDisplay}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {node.gpu_name}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-gray-700">
+                            {utilizationStr}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1542,7 +1637,7 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
             <th className="p-3 text-left font-medium text-gray-600">
               GPU Types
             </th>
-            <th className="p-3 text-left font-medium text-gray-600">#GPUs</th>
+            <th className="p-3 text-left font-medium text-gray-600">GPUs</th>
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
