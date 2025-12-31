@@ -17,10 +17,20 @@ class TestMountConfig:
     @pytest.mark.parametrize('input_dict,expected_readonly,expected_seq', [
         (None, False, True),
         ({}, False, True),
-        ({'readonly': True}, True, True),
-        ({'sequential_upload': False}, False, False),
-        ({'readonly': True, 'sequential_upload': False}, True, False),
-        ({'readonly': True, 'unknown_field': 'value'}, True, True),
+        ({
+            'readonly': True
+        }, True, True),
+        ({
+            'sequential_upload': False
+        }, False, False),
+        ({
+            'readonly': True,
+            'sequential_upload': False
+        }, True, False),
+        ({
+            'readonly': True,
+            'unknown_field': 'value'
+        }, True, True),
     ])
     def test_mount_config_from_dict(self, input_dict, expected_readonly,
                                     expected_seq):
@@ -36,9 +46,16 @@ class TestStorageFromYamlConfig:
     @pytest.mark.parametrize('config_field,expected_readonly,expected_seq', [
         (None, False, True),
         ({}, False, True),
-        ({'readonly': True}, True, True),
-        ({'sequential_upload': False}, False, False),
-        ({'readonly': True, 'sequential_upload': False}, True, False),
+        ({
+            'readonly': True
+        }, True, True),
+        ({
+            'sequential_upload': False
+        }, False, False),
+        ({
+            'readonly': True,
+            'sequential_upload': False
+        }, True, False),
     ])
     def test_storage_from_yaml_config(self, config_field, expected_readonly,
                                       expected_seq):
@@ -64,21 +81,23 @@ class TestStorageToYamlConfig:
         """Test sequential_upload=True (default) is not serialized."""
         mount_config = storage.MountConfig(sequential_upload=True)
         storage_obj = storage.Storage(name='test-bucket',
-                                       mount_config=mount_config)
+                                      mount_config=mount_config)
         yaml_config = storage_obj.to_yaml_config()
         assert 'config' not in yaml_config
 
-    @pytest.mark.parametrize('ro,seq,expect_ro,expect_seq', [
-        (True, True, True, None),  # readonly only, seq is default
-        (False, False, None, False),  # seq only, readonly is default
-        (True, False, True, False),  # both non-default
-    ])
+    @pytest.mark.parametrize(
+        'ro,seq,expect_ro,expect_seq',
+        [
+            (True, True, True, None),  # readonly only, seq is default
+            (False, False, None, False),  # seq only, readonly is default
+            (True, False, True, False),  # both non-default
+        ])
     def test_non_default_config_serialized(self, ro, seq, expect_ro,
                                            expect_seq):
         """Test non-default mount config values are serialized."""
         mount_config = storage.MountConfig(readonly=ro, sequential_upload=seq)
         storage_obj = storage.Storage(name='test-bucket',
-                                       mount_config=mount_config)
+                                      mount_config=mount_config)
         yaml_config = storage_obj.to_yaml_config()
         assert 'config' in yaml_config
         if expect_ro is not None:
@@ -102,13 +121,15 @@ class TestMountCachedCmd:
             mount_path='/mnt/data',
             mount_config=mount_config)
 
-    @pytest.mark.parametrize('ro,seq,expect_ro,expect_seq', [
-        (None, None, False, True),  # None config
-        (False, True, False, True),  # Default config
-        (True, True, True, True),  # readonly only
-        (False, False, False, False),  # parallel only
-        (True, False, True, False),  # both
-    ])
+    @pytest.mark.parametrize(
+        'ro,seq,expect_ro,expect_seq',
+        [
+            (None, None, False, True),  # None config
+            (False, True, False, True),  # Default config
+            (True, True, True, True),  # readonly only
+            (False, False, False, False),  # parallel only
+            (True, False, True, False),  # both
+        ])
     def test_mount_cached_cmd(self, ro, seq, expect_ro, expect_seq):
         """Test get_mount_cached_cmd with various configs."""
         if ro is None:
@@ -128,11 +149,10 @@ class TestMountCmd:
     def test_s3_mount_cmd(self, ro, expect_flag):
         """Test get_s3_mount_cmd with readonly config."""
         cfg = storage.MountConfig(readonly=ro) if ro else None
-        cmd = mounting_utils.get_s3_mount_cmd(
-            bucket_name='my-bucket',
-            mount_path='/mnt/data',
-            _bucket_sub_path=None,
-            mount_config=cfg)
+        cmd = mounting_utils.get_s3_mount_cmd(bucket_name='my-bucket',
+                                              mount_path='/mnt/data',
+                                              _bucket_sub_path=None,
+                                              mount_config=cfg)
         has_flag = '--read-only' in cmd or '-o ro' in cmd
         assert has_flag == expect_flag
 
@@ -140,9 +160,8 @@ class TestMountCmd:
     def test_gcs_mount_cmd(self, ro, expect_flag):
         """Test get_gcs_mount_cmd with readonly config."""
         cfg = storage.MountConfig(readonly=ro) if ro else None
-        cmd = mounting_utils.get_gcs_mount_cmd(
-            bucket_name='my-bucket',
-            mount_path='/mnt/data',
-            _bucket_sub_path=None,
-            mount_config=cfg)
+        cmd = mounting_utils.get_gcs_mount_cmd(bucket_name='my-bucket',
+                                               mount_path='/mnt/data',
+                                               _bucket_sub_path=None,
+                                               mount_config=cfg)
         assert ('-o ro' in cmd) == expect_flag

@@ -15,13 +15,10 @@ if typing.TYPE_CHECKING:
     from sky.data import storage
 
 
-def _get_readonly_flags(
-    mount_config: Optional['storage.MountConfig']
-) -> tuple:
+def _get_readonly_flags(mount_config: Optional['storage.MountConfig']) -> tuple:
     """Returns (rclone_flag, goofys_flag) for readonly mounting."""
     readonly = mount_config.readonly if mount_config else False
-    return ('--read-only ' if readonly else '',
-            '-o ro ' if readonly else '')
+    return ('--read-only ' if readonly else '', '-o ro ' if readonly else '')
 
 
 # Values used to construct mounting commands
@@ -105,10 +102,11 @@ def get_s3_mount_install_cmd() -> str:
 
 
 # pylint: disable=invalid-name
-def get_s3_mount_cmd(bucket_name: str,
-                     mount_path: str,
-                     _bucket_sub_path: Optional[str] = None,
-                     mount_config: Optional['storage.MountConfig'] = None) -> str:
+def get_s3_mount_cmd(
+        bucket_name: str,
+        mount_path: str,
+        _bucket_sub_path: Optional[str] = None,
+        mount_config: Optional['storage.MountConfig'] = None) -> str:
     """Returns a command to mount an S3 bucket (goofys by default, rclone for
     ARM64)"""
     if _bucket_sub_path is None:
@@ -137,12 +135,13 @@ def get_s3_mount_cmd(bucket_name: str,
     return mount_cmd
 
 
-def get_nebius_mount_cmd(nebius_profile_name: str,
-                         bucket_name: str,
-                         endpoint_url: str,
-                         mount_path: str,
-                         _bucket_sub_path: Optional[str] = None,
-                         mount_config: Optional['storage.MountConfig'] = None) -> str:
+def get_nebius_mount_cmd(
+        nebius_profile_name: str,
+        bucket_name: str,
+        endpoint_url: str,
+        mount_path: str,
+        _bucket_sub_path: Optional[str] = None,
+        mount_config: Optional['storage.MountConfig'] = None) -> str:
     """Returns a command to mount Nebius bucket (goofys by default, rclone for
     ARM64)."""
     if _bucket_sub_path is None:
@@ -174,13 +173,14 @@ def get_nebius_mount_cmd(nebius_profile_name: str,
     return mount_cmd
 
 
-def get_coreweave_mount_cmd(cw_credentials_path: str,
-                            coreweave_profile_name: str,
-                            bucket_name: str,
-                            endpoint_url: str,
-                            mount_path: str,
-                            _bucket_sub_path: Optional[str] = None,
-                            mount_config: Optional['storage.MountConfig'] = None) -> str:
+def get_coreweave_mount_cmd(
+        cw_credentials_path: str,
+        coreweave_profile_name: str,
+        bucket_name: str,
+        endpoint_url: str,
+        mount_path: str,
+        _bucket_sub_path: Optional[str] = None,
+        mount_config: Optional['storage.MountConfig'] = None) -> str:
     """Returns a command to mount CoreWeave bucket"""
     if _bucket_sub_path is None:
         _bucket_sub_path = ''
@@ -232,10 +232,11 @@ def get_gcs_mount_install_cmd() -> str:
 
 
 # pylint: disable=invalid-name
-def get_gcs_mount_cmd(bucket_name: str,
-                      mount_path: str,
-                      _bucket_sub_path: Optional[str] = None,
-                      mount_config: Optional['storage.MountConfig'] = None) -> str:
+def get_gcs_mount_cmd(
+        bucket_name: str,
+        mount_path: str,
+        _bucket_sub_path: Optional[str] = None,
+        mount_config: Optional['storage.MountConfig'] = None) -> str:
     """Returns a command to mount a GCS bucket using gcsfuse."""
     bucket_sub_path_arg = f'--only-dir {_bucket_sub_path} '\
         if _bucket_sub_path else ''
@@ -329,12 +330,13 @@ def get_az_mount_install_cmd() -> str:
 
 
 # pylint: disable=invalid-name
-def get_az_mount_cmd(container_name: str,
-                     storage_account_name: str,
-                     mount_path: str,
-                     storage_account_key: Optional[str] = None,
-                     _bucket_sub_path: Optional[str] = None,
-                     mount_config: Optional['storage.MountConfig'] = None) -> str:
+def get_az_mount_cmd(
+        container_name: str,
+        storage_account_name: str,
+        mount_path: str,
+        storage_account_key: Optional[str] = None,
+        _bucket_sub_path: Optional[str] = None,
+        mount_config: Optional['storage.MountConfig'] = None) -> str:
     """Returns a command to mount an AZ Container using blobfuse2.
 
     Args:
@@ -412,13 +414,14 @@ def get_az_mount_cmd(container_name: str,
 
 
 # pylint: disable=invalid-name
-def get_r2_mount_cmd(r2_credentials_path: str,
-                     r2_profile_name: str,
-                     endpoint_url: str,
-                     bucket_name: str,
-                     mount_path: str,
-                     _bucket_sub_path: Optional[str] = None,
-                     mount_config: Optional['storage.MountConfig'] = None) -> str:
+def get_r2_mount_cmd(
+        r2_credentials_path: str,
+        r2_profile_name: str,
+        endpoint_url: str,
+        bucket_name: str,
+        mount_path: str,
+        _bucket_sub_path: Optional[str] = None,
+        mount_config: Optional['storage.MountConfig'] = None) -> str:
     """Returns a command to mount R2 bucket (goofys by default, rclone for
     ARM64)."""
     if _bucket_sub_path is None:
@@ -452,12 +455,13 @@ def get_r2_mount_cmd(r2_credentials_path: str,
     return mount_cmd
 
 
-def get_cos_mount_cmd(rclone_config: str,
-                      rclone_profile_name: str,
-                      bucket_name: str,
-                      mount_path: str,
-                      _bucket_sub_path: Optional[str] = None,
-                      mount_config: Optional['storage.MountConfig'] = None) -> str:
+def get_cos_mount_cmd(
+        rclone_config: str,
+        rclone_profile_name: str,
+        bucket_name: str,
+        mount_path: str,
+        _bucket_sub_path: Optional[str] = None,
+        mount_config: Optional['storage.MountConfig'] = None) -> str:
     """Returns a command to mount an IBM COS bucket using rclone."""
     # stores bucket profile in rclone config file at the cluster's nodes.
     configure_rclone_profile = (f'{FUSE3_INSTALL_CMD} && '
@@ -557,14 +561,15 @@ def get_mount_cached_cmd(
     return mount_cmd
 
 
-def get_oci_mount_cmd(mount_path: str,
-                      store_name: str,
-                      region: str,
-                      namespace: str,
-                      compartment: str,
-                      config_file: str,
-                      config_profile: str,
-                      mount_config: Optional['storage.MountConfig'] = None) -> str:
+def get_oci_mount_cmd(
+        mount_path: str,
+        store_name: str,
+        region: str,
+        namespace: str,
+        compartment: str,
+        config_file: str,
+        config_profile: str,
+        mount_config: Optional['storage.MountConfig'] = None) -> str:
     """ OCI specific RClone mount command for oci object storage. """
     rclone_ro, _ = _get_readonly_flags(mount_config)
     # pylint: disable=line-too-long

@@ -1910,10 +1910,9 @@ class S3CompatibleStore(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
-    def mount_cached_command(
-            self,
-            mount_path: str,
-            mount_config: Optional[MountConfig] = None) -> str:
+    def mount_cached_command(self,
+                             mount_path: str,
+                             mount_config: Optional[MountConfig] = None) -> str:
         """Get cached mount command. Can be overridden by subclasses."""
         if self.config.mount_cached_cmd_factory is None:
             raise exceptions.NotSupportedError(
@@ -2633,10 +2632,9 @@ class GcsStore(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
 
-    def mount_cached_command(
-            self,
-            mount_path: str,
-            mount_config: Optional[MountConfig] = None) -> str:
+    def mount_cached_command(self,
+                             mount_path: str,
+                             mount_config: Optional[MountConfig] = None) -> str:
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (
             data_utils.Rclone.RcloneStores.GCS.get_profile_name(self.name))
@@ -3541,10 +3539,9 @@ class AzureBlobStore(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
-    def mount_cached_command(
-            self,
-            mount_path: str,
-            mount_config: Optional[MountConfig] = None) -> str:
+    def mount_cached_command(self,
+                             mount_path: str,
+                             mount_config: Optional[MountConfig] = None) -> str:
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (
             data_utils.Rclone.RcloneStores.AZURE.get_profile_name(self.name))
@@ -4634,10 +4631,9 @@ class S3Store(S3CompatibleStore):
             mount_cmd_factory=mounting_utils.get_s3_mount_cmd,
         )
 
-    def mount_cached_command(
-            self,
-            mount_path: str,
-            mount_config: Optional[MountConfig] = None) -> str:
+    def mount_cached_command(self,
+                             mount_path: str,
+                             mount_config: Optional[MountConfig] = None) -> str:
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (
             data_utils.Rclone.RcloneStores.S3.get_profile_name(self.name))
@@ -4688,7 +4684,9 @@ class R2Store(S3CompatibleStore):
         )
 
     @classmethod
-    def _get_r2_mount_cmd(cls, bucket_name: str, mount_path: str,
+    def _get_r2_mount_cmd(cls,
+                          bucket_name: str,
+                          mount_path: str,
                           bucket_sub_path: Optional[str],
                           mount_config: Optional[MountConfig] = None) -> str:
         """Factory method for R2 mount command."""
@@ -4699,10 +4697,9 @@ class R2Store(S3CompatibleStore):
                                                mount_path, bucket_sub_path,
                                                mount_config)
 
-    def mount_cached_command(
-            self,
-            mount_path: str,
-            mount_config: Optional[MountConfig] = None) -> str:
+    def mount_cached_command(self,
+                             mount_path: str,
+                             mount_config: Optional[MountConfig] = None) -> str:
         """R2-specific cached mount implementation using rclone."""
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (
@@ -4738,9 +4735,12 @@ class NebiusStore(S3CompatibleStore):
         )
 
     @classmethod
-    def _get_nebius_mount_cmd(cls, bucket_name: str, mount_path: str,
-                              bucket_sub_path: Optional[str],
-                              mount_config: Optional[MountConfig] = None) -> str:
+    def _get_nebius_mount_cmd(
+            cls,
+            bucket_name: str,
+            mount_path: str,
+            bucket_sub_path: Optional[str],
+            mount_config: Optional[MountConfig] = None) -> str:
         """Factory method for Nebius mount command."""
         # We need to get the endpoint URL, but since this is a static method,
         # we'll need to create a client to get it
@@ -4751,10 +4751,9 @@ class NebiusStore(S3CompatibleStore):
                                                    mount_path, bucket_sub_path,
                                                    mount_config)
 
-    def mount_cached_command(
-            self,
-            mount_path: str,
-            mount_config: Optional[MountConfig] = None) -> str:
+    def mount_cached_command(self,
+                             mount_path: str,
+                             mount_config: Optional[MountConfig] = None) -> str:
         """Nebius-specific cached mount implementation using rclone."""
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (
@@ -4831,9 +4830,12 @@ class CoreWeaveStore(S3CompatibleStore):
         #         f'{self.name}')
 
     @classmethod
-    def _get_coreweave_mount_cmd(cls, bucket_name: str, mount_path: str,
-                                 bucket_sub_path: Optional[str],
-                                 mount_config: Optional[MountConfig] = None) -> str:
+    def _get_coreweave_mount_cmd(
+            cls,
+            bucket_name: str,
+            mount_path: str,
+            bucket_sub_path: Optional[str],
+            mount_config: Optional[MountConfig] = None) -> str:
         """Factory method for CoreWeave mount command."""
         endpoint_url = coreweave.get_endpoint()
         return mounting_utils.get_coreweave_mount_cmd(
@@ -4841,10 +4843,9 @@ class CoreWeaveStore(S3CompatibleStore):
             coreweave.COREWEAVE_PROFILE_NAME, bucket_name, endpoint_url,
             mount_path, bucket_sub_path, mount_config)
 
-    def mount_cached_command(
-            self,
-            mount_path: str,
-            mount_config: Optional[MountConfig] = None) -> str:
+    def mount_cached_command(self,
+                             mount_path: str,
+                             mount_config: Optional[MountConfig] = None) -> str:
         """CoreWeave-specific cached mount implementation using rclone."""
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (
