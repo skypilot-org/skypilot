@@ -344,7 +344,9 @@ class RunPod(clouds.Cloud):
             from sky.adaptors import runpod
             error_msg = str(e)
             if isinstance(e, runpod.runpod.error.QueryError):
-                if 'unauthorized' in error_msg.lower():
+                error_msg_lower = error_msg.lower()
+                auth_keywords = ['unauthorized', 'forbidden', '401', '403']
+                if any(keyword in error_msg_lower for keyword in auth_keywords):
                     return False, (
                         'RunPod API key is invalid or lacks required '
                         f'permissions. Error: {error_msg}')
