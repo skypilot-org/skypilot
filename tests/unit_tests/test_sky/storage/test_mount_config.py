@@ -151,12 +151,7 @@ class TestMountCachedCmd:
         """Test get_mount_cached_cmd sequential_upload with global config."""
         with mock.patch('sky.data.mounting_utils.skypilot_config.get_nested',
                         return_value=global_seq):
-            mount_config = storage.MountConfig(
-                sequential_upload=cfg_seq) if cfg_seq is not None else (
-                    storage.MountConfig() if cfg_seq is None else None)
-            # Handle the case where we want to test with None mount_config
-            if cfg_seq is None:
-                mount_config = storage.MountConfig()  # seq=None by default
+            mount_config = storage.MountConfig(sequential_upload=cfg_seq)
             cmd = self._get_cmd(mount_config)
             assert ('--transfers 1' in cmd) == expect_seq
 
