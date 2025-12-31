@@ -1562,7 +1562,7 @@ def _handle_services_request(
         if controller_status is None:
             msg += (f' (See: {colorama.Style.BRIGHT}sky serve -h'
                     f'{colorama.Style.RESET_ALL})')
-    except RuntimeError as e:
+    except RuntimeError:
         msg = ''
         try:
             # Check the controller status again, as the RuntimeError is likely
@@ -1586,12 +1586,9 @@ def _handle_services_request(
             # print the original error.
             pass
         if not msg:
-            msg = (f'Failed to fetch {noun} statuses due to connection issues. '
-                   'Please try again later. Details: '
-                   f'{common_utils.format_exception(e, use_bracket=True)}')
-    except Exception as e:  # pylint: disable=broad-except
-        msg = (f'Failed to fetch {noun} statuses: '
-               f'{common_utils.format_exception(e, use_bracket=True)}')
+            # This is an actual error (connection issues), not a normal state.
+            # Raise the exception instead of converting to message.
+            raise
     else:
         if show_endpoint:
             if len(service_records) != 1:
@@ -2040,6 +2037,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     sdk.api_cancel(pool_status_request_id, silent=True)
                     num_pools = -1
                     msg = 'KeyboardInterrupt'
+                except Exception:  # pylint: disable=broad-except
+                    # For internal calls, handle exceptions gracefully by
+                    # not showing pools section instead of crashing.
+                    num_pools = None
+                    msg = ''
         if num_pools is not None:
             if num_pools > 0:
                 click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
@@ -2068,6 +2070,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     sdk.api_cancel(service_status_request_id, silent=True)
                     num_services = -1
                     msg = 'KeyboardInterrupt'
+                except Exception:  # pylint: disable=broad-except
+                    # For internal calls, handle exceptions gracefully by
+                    # not showing services section instead of crashing.
+                    num_services = None
+                    msg = ''
         click.echo(msg)
         if num_services is not None:
             hints.append(
@@ -5503,12 +5510,32 @@ def jobs_pool_status(verbose: bool, pool_names: List[str], show_all: bool):
         pool_names_to_query = None
     with rich_utils.client_status('[cyan]Checking pools[/]'):
         pool_status_request_id = managed_jobs.pool_status(pool_names_to_query)
-        _, msg = _handle_services_request(pool_status_request_id,
-                                          service_names=pool_names_to_query,
-                                          show_all=verbose or show_all,
-                                          show_endpoint=False,
-                                          pool=True,
-                                          is_called_by_user=True)
+        try:
+            _, msg = _handle_services_request(pool_status_request_id,
+                                              service_names=pool_names_to_query,
+                                              show_all=verbose or show_all,
+                                              show_endpoint=False,
+                                              pool=True,
+                                              is_called_by_user=True)
+        except RuntimeError as e:
+            # Actual errors are raised from _handle_services_request.
+            # Format and print the error message before exiting.
+            msg = (f'Failed to fetch pool statuses due to connection issues. '
+                   'Please try again later. Details: '
+                   f'{common_utils.format_exception(e, use_bracket=True)}')
+            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Pools{colorama.Style.RESET_ALL}')
+            click.echo(msg)
+            sys.exit(1)
+        except Exception as e:  # pylint: disable=broad-except
+            # Actual errors are raised from _handle_services_request.
+            # Format and print the error message before exiting.
+            msg = (f'Failed to fetch pool statuses: '
+                   f'{common_utils.format_exception(e, use_bracket=True)}')
+            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Pools{colorama.Style.RESET_ALL}')
+            click.echo(msg)
+            sys.exit(1)
 
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Pools{colorama.Style.RESET_ALL}')
@@ -6356,25 +6383,40 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
     # This won't pollute the output of --endpoint.
     with rich_utils.client_status('[cyan]Checking services[/]'):
         service_status_request_id = serve_lib.status(service_names_to_query)
-        num_services, msg = _handle_services_request(
-            service_status_request_id,
-            service_names=service_names_to_query,
-            show_all=verbose,
-            show_endpoint=endpoint,
-            is_called_by_user=True)
+        try:
+            _, msg = _handle_services_request(
+                service_status_request_id,
+                service_names=service_names_to_query,
+                show_all=verbose,
+                show_endpoint=endpoint,
+                is_called_by_user=True)
+        except RuntimeError as e:
+            # Actual errors are raised from _handle_services_request.
+            # Format and print the error message before exiting.
+            msg = (
+                f'Failed to fetch service statuses due to connection issues. '
+                'Please try again later. Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+            if not endpoint:
+                click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                           f'Services{colorama.Style.RESET_ALL}')
+            click.echo(msg)
+            sys.exit(1)
+        except Exception as e:  # pylint: disable=broad-except
+            # Actual errors are raised from _handle_services_request.
+            # Format and print the error message before exiting.
+            msg = (f'Failed to fetch service statuses: '
+                   f'{common_utils.format_exception(e, use_bracket=True)}')
+            if not endpoint:
+                click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                           f'Services{colorama.Style.RESET_ALL}')
+            click.echo(msg)
+            sys.exit(1)
 
     if not endpoint:
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Services{colorama.Style.RESET_ALL}')
     click.echo(msg)
-    # Exit with error code only for actual errors, not "no controller" cases.
-    # Check message content to distinguish between actual errors and normal
-    # "no controller" state (controller doesn't exist or is STOPPED).
-    if num_services is None:
-        # "No live services." or "No live pools." indicates no controller,
-        # which is a normal empty state, not an error.
-        if 'No live services.' not in msg and 'No live pools.' not in msg:
-            sys.exit(1)
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
