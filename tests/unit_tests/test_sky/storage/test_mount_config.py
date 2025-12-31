@@ -1,8 +1,8 @@
 """Tests for MountConfig and Storage config field functionality."""
 import pytest
 
-from sky.data import storage
 from sky.data import mounting_utils
+from sky.data import storage
 
 
 class TestMountConfig:
