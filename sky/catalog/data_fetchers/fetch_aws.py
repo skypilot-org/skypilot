@@ -286,7 +286,7 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 acc_name = 'H200'
                 acc_count = 8
             elif (row['InstanceType'].startswith('g6f') or
-                    row['InstanceType'].startswith('gr6f')):
+                  row['InstanceType'].startswith('gr6f')):
                 # These instance actually have only fractional GPUs, but the API
                 # returns Count: 1 or Count: 0 under GpuInfo. We need to
                 # directly check the GPU memory to get the actual fraction of
