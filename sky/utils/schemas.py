@@ -568,6 +568,13 @@ def get_storage_schema():
                     'attach_mode': {
                         'type': 'string',
                     },
+                    # Mount configuration options for MOUNT/MOUNT_CACHED modes
+                    'readonly': {
+                        'type': 'boolean',
+                    },
+                    'sequential_upload': {
+                        'type': 'boolean',
+                    },
                 },
             },
             '_is_sky_managed': {

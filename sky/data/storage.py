@@ -317,6 +317,30 @@ MOUNTABLE_STORAGE_MODES = [
 DEFAULT_STORAGE_MODE = StorageMode.MOUNT
 
 
+@dataclass
+class MountConfig:
+    """Configuration options for mounting storage buckets.
+
+    These options control the behavior of MOUNT and MOUNT_CACHED modes.
+    """
+    # If True, mount the bucket in read-only mode
+    readonly: bool = False
+    # If True, upload files sequentially instead of in parallel
+    # (only applies to MOUNT_CACHED mode)
+    # Default is True for backward compatibility with existing behavior
+    sequential_upload: bool = True
+
+    @classmethod
+    def from_dict(cls, config: Optional[Dict[str, Any]]) -> 'MountConfig':
+        """Create a MountConfig from a dictionary."""
+        if config is None:
+            return cls()
+        return cls(
+            readonly=config.get('readonly', False),
+            sequential_upload=config.get('sequential_upload', True),
+        )
+
+
 class AbstractStore:
     """AbstractStore abstracts away the different storage types exposed by
     different clouds.
@@ -497,7 +521,9 @@ class AbstractStore:
         """
         raise NotImplementedError
 
-    def mount_command(self, mount_path: str) -> str:
+    def mount_command(self,
+                      mount_path: str,
+                      mount_config: Optional['MountConfig'] = None) -> str:
         """Returns the command to mount the Store to the specified mount_path.
 
         This command is used for MOUNT mode. Includes the setup commands to
@@ -505,10 +531,15 @@ class AbstractStore:
 
         Args:
           mount_path: str; Mount path on remote server
+          mount_config: Optional[MountConfig]; Configuration options for
+            mounting (readonly, sequential_upload).
         """
         raise NotImplementedError
 
-    def mount_cached_command(self, mount_path: str) -> str:
+    def mount_cached_command(
+            self,
+            mount_path: str,
+            mount_config: Optional['MountConfig'] = None) -> str:
         """Returns the command to mount the Store to the specified mount_path.
 
         This command is used for MOUNT_CACHED mode. Includes the setup commands
@@ -516,6 +547,8 @@ class AbstractStore:
 
         Args:
           mount_path: str; Mount path on remote server
+          mount_config: Optional[MountConfig]; Configuration options for
+            mounting (readonly, sequential_upload).
         """
         raise exceptions.NotSupportedError(
             f'{StorageMode.MOUNT_CACHED.value} is '
@@ -636,6 +669,7 @@ class Storage(object):
         persistent: Optional[bool] = True,
         mode: StorageMode = DEFAULT_STORAGE_MODE,
         sync_on_reconstruction: bool = True,
+        mount_config: Optional[MountConfig] = None,
         # pylint: disable=invalid-name
         _is_sky_managed: Optional[bool] = None,
         # pylint: disable=invalid-name
@@ -690,6 +724,8 @@ class Storage(object):
             sub-path, assuming is_sky_managed is False.
           _bucket_sub_path: Optional[str]; The subdirectory to use for the
             storage object.
+          mount_config: Optional[MountConfig]; Configuration options for
+            mounting the storage bucket (readonly, sequential_upload).
         """
         self.name = name
         self.source = source
@@ -703,6 +739,7 @@ class Storage(object):
         self.sync_on_reconstruction = sync_on_reconstruction
         self._is_sky_managed = _is_sky_managed
         self._bucket_sub_path = _bucket_sub_path
+        self.mount_config = mount_config if mount_config else MountConfig()
 
         self._constructed = False
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
@@ -1356,6 +1393,8 @@ class Storage(object):
         _is_sky_managed = config.pop('_is_sky_managed', None)
         # pylint: disable=invalid-name
         _bucket_sub_path = config.pop('_bucket_sub_path', None)
+        # Extract mount config options (readonly, sequential_upload)
+        mount_config_dict = config.pop('config', None)
         if force_delete is None:
             force_delete = False
 
@@ -1375,11 +1414,16 @@ class Storage(object):
             stores = [StoreType(store.upper())]
         else:
             stores = None
+
+        # Parse mount config from dict
+        mount_config = MountConfig.from_dict(mount_config_dict)
+
         storage_obj = cls(name=name,
                           source=source,
                           persistent=persistent,
                           mode=mode,
                           stores=stores,
+                          mount_config=mount_config,
                           _is_sky_managed=_is_sky_managed,
                           _bucket_sub_path=_bucket_sub_path)
 
@@ -1417,6 +1461,17 @@ class Storage(object):
             config['_force_delete'] = True
         if self._bucket_sub_path is not None:
             config['_bucket_sub_path'] = self._bucket_sub_path
+        # Add mount config if any non-default values are set
+        # Default: readonly=False, sequential_upload=True
+        mount_config_dict: Dict[str, Any] = {}
+        if self.mount_config.readonly:
+            # readonly=True is non-default
+            mount_config_dict['readonly'] = True
+        if not self.mount_config.sequential_upload:
+            # sequential_upload=False is non-default
+            mount_config_dict['sequential_upload'] = False
+        if mount_config_dict:
+            config['config'] = mount_config_dict
         return config
 
 
@@ -1840,7 +1895,9 @@ class S3CompatibleStore(AbstractStore):
         """Download file using S3 API."""
         self.bucket.download_file(remote_path, local_path)
 
-    def mount_command(self, mount_path: str) -> str:
+    def mount_command(self,
+                      mount_path: str,
+                      mount_config: Optional[MountConfig] = None) -> str:
         """Get mount command using provider's mount factory."""
         if self.config.mount_cmd_factory is None:
             raise exceptions.NotSupportedError(
@@ -1848,11 +1905,15 @@ class S3CompatibleStore(AbstractStore):
 
         install_cmd = mounting_utils.get_s3_mount_install_cmd()
         mount_cmd = self.config.mount_cmd_factory(self.bucket.name, mount_path,
-                                                  self._bucket_sub_path)
+                                                  self._bucket_sub_path,
+                                                  mount_config)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
-    def mount_cached_command(self, mount_path: str) -> str:
+    def mount_cached_command(
+            self,
+            mount_path: str,
+            mount_config: Optional[MountConfig] = None) -> str:
         """Get cached mount command. Can be overridden by subclasses."""
         if self.config.mount_cached_cmd_factory is None:
             raise exceptions.NotSupportedError(
@@ -1860,7 +1921,7 @@ class S3CompatibleStore(AbstractStore):
 
         install_cmd = mounting_utils.get_rclone_install_cmd()
         mount_cmd = self.config.mount_cached_cmd_factory(
-            self.bucket.name, mount_path, self._bucket_sub_path)
+            self.bucket.name, mount_path, self._bucket_sub_path, mount_config)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -2550,31 +2611,40 @@ class GcsStore(AbstractStore):
                         _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
                         f' To debug, consider running `{command}`.') from e
 
-    def mount_command(self, mount_path: str) -> str:
+    def mount_command(self,
+                      mount_path: str,
+                      mount_config: Optional[MountConfig] = None) -> str:
         """Returns the command to mount the bucket to the mount_path.
 
         Uses gcsfuse to mount the bucket.
 
         Args:
           mount_path: str; Path to mount the bucket to.
+          mount_config: Optional[MountConfig]; Configuration options for
+            mounting (readonly, sequential_upload).
         """
         install_cmd = mounting_utils.get_gcs_mount_install_cmd()
         mount_cmd = mounting_utils.get_gcs_mount_cmd(self.bucket.name,
                                                      mount_path,
-                                                     self._bucket_sub_path)
+                                                     self._bucket_sub_path,
+                                                     mount_config)
         version_check_cmd = (
             f'gcsfuse --version | grep -q {mounting_utils.GCSFUSE_VERSION}')
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
 
-    def mount_cached_command(self, mount_path: str) -> str:
+    def mount_cached_command(
+            self,
+            mount_path: str,
+            mount_config: Optional[MountConfig] = None) -> str:
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (
             data_utils.Rclone.RcloneStores.GCS.get_profile_name(self.name))
         rclone_config = data_utils.Rclone.RcloneStores.GCS.get_config(
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
-            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path,
+            mount_config)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 
@@ -3446,13 +3516,17 @@ class AzureBlobStore(AbstractStore):
             raise exceptions.StorageExternalDeletionError(
                 f'Attempted to fetch a non-existent container: {self.name}')
 
-    def mount_command(self, mount_path: str) -> str:
+    def mount_command(self,
+                      mount_path: str,
+                      mount_config: Optional[MountConfig] = None) -> str:
         """Returns the command to mount the container to the mount_path.
 
         Uses blobfuse2 to mount the container.
 
         Args:
             mount_path: Path to mount the container to
+            mount_config: Optional[MountConfig]; Configuration options for
+              mounting (readonly, sequential_upload).
 
         Returns:
             str: a heredoc used to setup the AZ Container mount
@@ -3462,11 +3536,15 @@ class AzureBlobStore(AbstractStore):
                                                     self.storage_account_name,
                                                     mount_path,
                                                     self.storage_account_key,
-                                                    self._bucket_sub_path)
+                                                    self._bucket_sub_path,
+                                                    mount_config)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
-    def mount_cached_command(self, mount_path: str) -> str:
+    def mount_cached_command(
+            self,
+            mount_path: str,
+            mount_config: Optional[MountConfig] = None) -> str:
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (
             data_utils.Rclone.RcloneStores.AZURE.get_profile_name(self.name))
@@ -3475,7 +3553,8 @@ class AzureBlobStore(AbstractStore):
             storage_account_name=self.storage_account_name,
             storage_account_key=self.storage_account_key)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
-            rclone_config, rclone_profile_name, self.container_name, mount_path)
+            rclone_config, rclone_profile_name, self.container_name, mount_path,
+            mount_config)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 
@@ -3947,7 +4026,9 @@ class IBMCosStore(AbstractStore):
         """
         self.client.download_file(self.name, local_path, remote_path)
 
-    def mount_command(self, mount_path: str) -> str:
+    def mount_command(self,
+                      mount_path: str,
+                      mount_config: Optional[MountConfig] = None) -> str:
         """Returns the command to mount the bucket to the mount_path.
 
         Uses rclone to mount the bucket.
@@ -3955,6 +4036,8 @@ class IBMCosStore(AbstractStore):
 
         Args:
           mount_path: str; Path to mount the bucket to.
+          mount_config: Optional[MountConfig]; Configuration options for
+            mounting (readonly, sequential_upload).
         """
         # install rclone if not installed.
         install_cmd = mounting_utils.get_rclone_install_cmd()
@@ -3968,6 +4051,7 @@ class IBMCosStore(AbstractStore):
                 self.bucket.name,
                 mount_path,
                 self._bucket_sub_path,  # type: ignore
+                mount_config,
             ))
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
@@ -4372,13 +4456,17 @@ class OciStore(AbstractStore):
                     raise exceptions.StorageBucketGetError(
                         f'Failed to connect to OCI bucket {self.name}') from e
 
-    def mount_command(self, mount_path: str) -> str:
+    def mount_command(self,
+                      mount_path: str,
+                      mount_config: Optional[MountConfig] = None) -> str:
         """Returns the command to mount the bucket to the mount_path.
 
         Uses Rclone to mount the bucket.
 
         Args:
           mount_path: str; Path to mount the bucket to.
+          mount_config: Optional[MountConfig]; Configuration options for
+            mounting (readonly, sequential_upload).
         """
         install_cmd = mounting_utils.get_rclone_install_cmd()
         mount_cmd = mounting_utils.get_oci_mount_cmd(
@@ -4388,7 +4476,8 @@ class OciStore(AbstractStore):
             namespace=self.namespace,
             compartment=self.bucket.compartment_id,
             config_file=self.oci_config_file,
-            config_profile=self.config_profile)
+            config_profile=self.config_profile,
+            mount_config=mount_config)
         version_check_cmd = mounting_utils.get_rclone_version_check_cmd()
 
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
@@ -4545,14 +4634,18 @@ class S3Store(S3CompatibleStore):
             mount_cmd_factory=mounting_utils.get_s3_mount_cmd,
         )
 
-    def mount_cached_command(self, mount_path: str) -> str:
+    def mount_cached_command(
+            self,
+            mount_path: str,
+            mount_config: Optional[MountConfig] = None) -> str:
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (
             data_utils.Rclone.RcloneStores.S3.get_profile_name(self.name))
         rclone_config = data_utils.Rclone.RcloneStores.S3.get_config(
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
-            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path,
+            mount_config)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 
@@ -4596,15 +4689,20 @@ class R2Store(S3CompatibleStore):
 
     @classmethod
     def _get_r2_mount_cmd(cls, bucket_name: str, mount_path: str,
-                          bucket_sub_path: Optional[str]) -> str:
+                          bucket_sub_path: Optional[str],
+                          mount_config: Optional[MountConfig] = None) -> str:
         """Factory method for R2 mount command."""
         endpoint_url = cloudflare.create_endpoint()
         return mounting_utils.get_r2_mount_cmd(cloudflare.R2_CREDENTIALS_PATH,
                                                cloudflare.R2_PROFILE_NAME,
                                                endpoint_url, bucket_name,
-                                               mount_path, bucket_sub_path)
+                                               mount_path, bucket_sub_path,
+                                               mount_config)
 
-    def mount_cached_command(self, mount_path: str) -> str:
+    def mount_cached_command(
+            self,
+            mount_path: str,
+            mount_config: Optional[MountConfig] = None) -> str:
         """R2-specific cached mount implementation using rclone."""
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (
@@ -4612,7 +4710,8 @@ class R2Store(S3CompatibleStore):
         rclone_config = data_utils.Rclone.RcloneStores.R2.get_config(
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
-            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path,
+            mount_config)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 
@@ -4640,7 +4739,8 @@ class NebiusStore(S3CompatibleStore):
 
     @classmethod
     def _get_nebius_mount_cmd(cls, bucket_name: str, mount_path: str,
-                              bucket_sub_path: Optional[str]) -> str:
+                              bucket_sub_path: Optional[str],
+                              mount_config: Optional[MountConfig] = None) -> str:
         """Factory method for Nebius mount command."""
         # We need to get the endpoint URL, but since this is a static method,
         # we'll need to create a client to get it
@@ -4648,9 +4748,13 @@ class NebiusStore(S3CompatibleStore):
         endpoint_url = client.meta.endpoint_url
         return mounting_utils.get_nebius_mount_cmd(nebius.NEBIUS_PROFILE_NAME,
                                                    bucket_name, endpoint_url,
-                                                   mount_path, bucket_sub_path)
+                                                   mount_path, bucket_sub_path,
+                                                   mount_config)
 
-    def mount_cached_command(self, mount_path: str) -> str:
+    def mount_cached_command(
+            self,
+            mount_path: str,
+            mount_config: Optional[MountConfig] = None) -> str:
         """Nebius-specific cached mount implementation using rclone."""
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (
@@ -4658,7 +4762,8 @@ class NebiusStore(S3CompatibleStore):
         rclone_config = data_utils.Rclone.RcloneStores.NEBIUS.get_config(
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
-            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path,
+            mount_config)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 
@@ -4727,15 +4832,19 @@ class CoreWeaveStore(S3CompatibleStore):
 
     @classmethod
     def _get_coreweave_mount_cmd(cls, bucket_name: str, mount_path: str,
-                                 bucket_sub_path: Optional[str]) -> str:
+                                 bucket_sub_path: Optional[str],
+                                 mount_config: Optional[MountConfig] = None) -> str:
         """Factory method for CoreWeave mount command."""
         endpoint_url = coreweave.get_endpoint()
         return mounting_utils.get_coreweave_mount_cmd(
             coreweave.COREWEAVE_CREDENTIALS_PATH,
             coreweave.COREWEAVE_PROFILE_NAME, bucket_name, endpoint_url,
-            mount_path, bucket_sub_path)
+            mount_path, bucket_sub_path, mount_config)
 
-    def mount_cached_command(self, mount_path: str) -> str:
+    def mount_cached_command(
+            self,
+            mount_path: str,
+            mount_config: Optional[MountConfig] = None) -> str:
         """CoreWeave-specific cached mount implementation using rclone."""
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (
@@ -4744,7 +4853,8 @@ class CoreWeaveStore(S3CompatibleStore):
         rclone_config = data_utils.Rclone.RcloneStores.COREWEAVE.get_config(
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
-            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path,
+            mount_config)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
 
