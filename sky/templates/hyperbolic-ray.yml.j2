@@ -47,7 +47,7 @@ initialization_commands: []
 setup_commands:
   # Disable unattended-upgrades and handle apt-get locks
   # Install patch utility for Ray
-  # Install conda and Ray
+  # Install virtual environment and Ray
   # Set system limits for Ray performance (nofile and TasksMax)
   - {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}

@@ -47,7 +47,6 @@ file_mounts: {
 setup_commands:
   # Add ~/.ssh/sky-cluster-key to SSH config to allow nodes within a cluster to connect to each other
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
-  # We set auto_activate_base to be false for pre-installed conda.
   # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
   # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.

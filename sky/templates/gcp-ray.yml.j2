@@ -242,9 +242,6 @@ file_mounts: {
 setup_commands:
   # Add ~/.ssh/sky-cluster-key to SSH config to allow nodes within a cluster to connect to each other
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
-  # Line 'which conda ..': some images (TPU VM) do not install conda by
-  # default. 'source ~/.bashrc' is needed so conda takes effect for the next
-  # commands.
   # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'sudo systemctl stop jupyter ..': stop jupyter service to avoid port conflict on 8080
@@ -269,7 +266,6 @@ setup_commands:
     {{ runtime_installation_commands }}
     source ~/.bashrc;
   {%- if tpu_vm %}
-    test -f ~/miniconda3/etc/profile.d/conda.sh && source ~/miniconda3/etc/profile.d/conda.sh && conda activate base || true;
     {{ sky_pip_cmd }} install --upgrade google-api-python-client;
   {%- endif %}
   {%- if tpu_node_name %}
