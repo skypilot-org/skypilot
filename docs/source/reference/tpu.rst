@@ -287,17 +287,12 @@ Here is a complete task YAML that runs `MNIST training <https://cloud.google.com
    setup: |
       git clone https://github.com/tensorflow/models.git
 
-      conda activate mnist
-      if [ $? -eq 0 ]; then
-         echo 'conda env exists'
-      else
-         conda create -n mnist python=3.8 -y
-         conda activate mnist
-         pip install tensorflow==2.12.0 tensorflow-datasets tensorflow-model-optimization cloud-tpu-client
-      fi
+      uv venv ~/mnist --python 3.10 --seed
+      source ~/mnist/bin/activate
+      uv pip install tensorflow==2.12.0 tensorflow-datasets tensorflow-model-optimization cloud-tpu-client
 
    run: |
-      conda activate mnist
+      source ~/mnist/bin/activate
       cd models/official/legacy/image_classification/
 
       export STORAGE_BUCKET=gs://mnist-tpu-node

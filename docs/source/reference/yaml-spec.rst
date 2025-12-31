@@ -1107,9 +1107,9 @@ OR
 .. code-block:: yaml
 
   setup: |
-    conda create -n myenv python=3.9 -y
-    conda activate myenv
-    pip install torch torchvision
+    uv venv ~/myenv --python 3.10 --seed
+    source ~/myenv/bin/activate
+    uv pip install torch torchvision
 
 .. _yaml-spec-run:
 

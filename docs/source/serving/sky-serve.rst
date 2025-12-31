@@ -66,12 +66,12 @@ Here is a simple example of serving an LLM model (:code:`Mixtral-8x7B-Instruct-v
               accelerators: {L4:8, A10g:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
 
             setup: |
-              conda create -n vllm python=3.9 -y
-              conda activate vllm
-              pip install vllm
+              uv venv ~/vllm --python 3.9 --seed
+              source ~/vllm/bin/activate
+              uv pip install vllm
 
             run: |
-              conda activate vllm
+              source ~/vllm/bin/activate
               python -m vllm.entrypoints.openai.api_server \
                 --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
                 --host 0.0.0.0 --port 8080 \
@@ -292,18 +292,15 @@ Let's bring up a real LLM chat service with FastChat + Vicuna. We'll use the `Vi
       disk_tier: best
 
     setup: |
-      conda activate chatbot
-      if [ $? -ne 0 ]; then
-        conda create -n chatbot python=3.9 -y
-        conda activate chatbot
-      fi
-
+      uv venv ~/chatbot --python 3.9 --seed
+      source ~/chatbot/bin/activate
+  
       # Install dependencies
-      pip install "fschat[model_worker,webui]==0.2.24"
-      pip install protobuf
+      uv pip install "fschat[model_worker,webui]==0.2.24"
+      uv pip install protobuf
 
     run: |
-      conda activate chatbot
+      source ~/chatbot/bin/activate
 
       echo 'Starting controller...'
       python -u -m fastchat.serve.controller --host 127.0.0.1 > ~/controller.log 2>&1 &

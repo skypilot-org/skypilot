@@ -78,13 +78,12 @@ def with_oci_env(f):
     def wrapper(*args, **kwargs):
         # pylint: disable=line-too-long
         enter_env_cmds = [
-            'conda info --envs | grep "sky-oci-cli-env" || conda create -n sky-oci-cli-env python=3.10 -y',
-            '. $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true',
-            'conda activate sky-oci-cli-env', 'pip install oci-cli',
+            'source ~/sky-oci-cli-env/bin/activate || uv venv ~/sky-oci-cli-env --python 3.10 --seed && source ~/sky-oci-cli-env/bin/activate',
+            'uv pip install oci-cli',
             'export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True'
         ]
         operation_cmd = [f(*args, **kwargs)]
-        leave_env_cmds = ['conda deactivate']
+        leave_env_cmds = ['deactivate']
         return ' && '.join(enter_env_cmds + operation_cmd + leave_env_cmds)
 
     return wrapper

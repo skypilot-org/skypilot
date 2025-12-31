@@ -798,7 +798,7 @@ available_node_types:
 
                 # Separate packages into two groups: packages that are installed first
                 # so that curl, rsync, ssh and wget are available sooner to unblock the following
-                # conda installation and rsync.
+                # SkyPilot runtime installation and rsync.
                 # Also, we install fuse first to avoid confliction with fuse3.
                 set -e
                 INSTALL_FIRST="";
@@ -904,13 +904,13 @@ available_node_types:
                 fi
               ) &
 
-              # STEP 2: Install conda, ray and skypilot (for dependencies); start
+              # STEP 2: Install SkyPilot runtime, ray and skypilot (for dependencies); start
               # ray cluster.
               (
                 (
                 set -e
                 mkdir -p ~/.sky
-                # Wait for `curl` package to be installed before installing conda
+                # Wait for `curl` package to be installed before installing SkyPilot runtime
                 # and ray.
                 until dpkg -l | grep -q "^ii  curl "; do
                   sleep 0.1

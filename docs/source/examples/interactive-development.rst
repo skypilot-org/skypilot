@@ -187,15 +187,13 @@ The following :code:`jupyter.yaml` is an example of a task specification that ca
         mode: MOUNT
 
     setup: |
-      pip install --upgrade pip
-      conda init bash
-      conda create -n jupyter python=3.9 -y
-      conda activate jupyter
-      pip install jupyter
+      uv venv ~/jupyter --python 3.10 --seed
+      source ~/jupyter/bin/activate
+      uv pip install jupyter
 
     run: |
+      source ~/jupyter/bin/activate
       cd ~/sky_workdir
-      conda activate jupyter
       jupyter notebook --port 8888 &
 
 Launch the GPU-backed Jupyter notebook:
