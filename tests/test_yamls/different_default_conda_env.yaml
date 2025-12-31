@@ -9,3 +9,7 @@ setup: |
 
 run: |
   python --version 2>&1 | grep "Python 3.6" || exit 1
+
+config:
+  provision:
+    install_conda: true

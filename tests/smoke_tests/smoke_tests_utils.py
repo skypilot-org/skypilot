@@ -798,10 +798,6 @@ VALIDATE_LAUNCH_OUTPUT = (
     # ├── Waiting for task resources on 1 node.
     # └── Job started. Streaming logs... (Ctrl-C to exit log streaming; job will not be killed)
     # (setup pid=1277) running setup
-    # (min, pid=1277) # conda environments:
-    # (min, pid=1277) #
-    # (min, pid=1277) base                  *  /opt/conda
-    # (min, pid=1277)
     # (min, pid=1277) task run finish
     # ✓ Job finished (status: SUCCEEDED).
     #
