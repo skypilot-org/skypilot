@@ -4,6 +4,14 @@
 
 SkyPilot provides the `network_tier: best` configuration option that automatically enables InfiniBand support on CoreWeave Kubernetes clusters. This eliminates the need for manual configuration of `rdma/ib` resources, security contexts and environment variables.
 
+### GB300 NVL72 Rack-Aware Scheduling
+
+For CoreWeave GB300 NVL72 systems, SkyPilot automatically enables **rack-aware scheduling** when `network_tier: best` is set. This ensures that all nodes from the same multi-node job are scheduled onto the same rack with the same NVLink domain, which is required for optimal performance across the shared NVLink fabric.
+
+SkyPilot detects NVL72 clusters by checking for the `ds.coreweave.com/nvlink.domain` node label and automatically configures pod affinity rules to enforce same-rack scheduling. No additional configuration is needed.
+
+See [CoreWeave NVL72 documentation](https://docs.coreweave.com/docs/platform/instances/nvl72#manage-pod-affinity) for more details on NVLink domain placement.
+
 ### InfiniBand on CoreWeave managed Kubernetes clusters
 
 Simply add ``network_tier: best`` to your resources specification:

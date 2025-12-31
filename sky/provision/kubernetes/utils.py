@@ -95,6 +95,7 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     GCP_GPUDIRECT_RDMA = 'gcp_gpudirect_rdma'
     NEBIUS = 'nebius'
     COREWEAVE = 'coreweave'
+    COREWEAVE_NVL72 = 'coreweave_nvl72'
     NONE = 'none'
 
     def get_network_env_vars(self) -> Dict[str, str]:
@@ -106,7 +107,8 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                 'UCX_NET_DEVICES': ('mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,'
                                     'mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1')
             }
-        elif self == KubernetesHighPerformanceNetworkType.COREWEAVE:
+        elif self in (KubernetesHighPerformanceNetworkType.COREWEAVE,
+                      KubernetesHighPerformanceNetworkType.COREWEAVE_NVL72):
             return {
                 'NCCL_SOCKET_IFNAME': 'eth0',
                 'NCCL_IB_HCA': 'ibp',
@@ -137,6 +139,24 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
         """Check if this cluster type requires TCPXO daemon."""
         return self == KubernetesHighPerformanceNetworkType.GCP_TCPXO
 
+    def is_coreweave(self) -> bool:
+        """Check if this is a CoreWeave cluster type."""
+        return self in (KubernetesHighPerformanceNetworkType.COREWEAVE,
+                        KubernetesHighPerformanceNetworkType.COREWEAVE_NVL72)
+
+    def requires_nvlink_domain_affinity(self) -> bool:
+        """Check if this cluster type requires NVLink domain pod affinity.
+
+        CoreWeave GB300 NVL72 systems require all pods from the same job
+        to be scheduled on nodes with the same NVLink domain for optimal
+        performance across the shared NVLink fabric.
+        """
+        return self == KubernetesHighPerformanceNetworkType.COREWEAVE_NVL72
+
+
+# CoreWeave NVL72 NVLink domain label for rack-aware scheduling.
+# See: https://docs.coreweave.com/docs/platform/instances/nvl72#manage-pod-affinity
+COREWEAVE_NVLINK_DOMAIN_LABEL = 'ds.coreweave.com/nvlink.domain'
 
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'

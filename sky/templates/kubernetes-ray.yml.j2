@@ -46,6 +46,10 @@ provider:
     # Used to set up the necessary permissions and sidecars.
     fuse_device_required: {{k8s_fuse_device_required}}
 
+    # Boolean flag to indicate if this is a CoreWeave NVL72 cluster (GB200/GB300)
+    # requiring NVLink domain pod affinity for rack-aware scheduling.
+    coreweave_nvlink_affinity: {{k8s_coreweave_nvlink_affinity}}
+
     {% if ephemeral_volume_mounts %}
     ephemeral_volume_specs: {{ephemeral_volume_mounts | tojson}}
     {% endif %}
@@ -1168,7 +1172,7 @@ available_node_types:
               # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work
               {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
-              {% if k8s_network_type == 'coreweave' %}
+              {% if k8s_network_type in ['coreweave', 'coreweave_nvl72'] %}
               rdma/ib: 1
               {% endif %}
             {% if k8s_resource_key is not none %}
@@ -1177,7 +1181,7 @@ available_node_types:
               {% if k8s_resource_key is not none %}
               {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
-              {% if k8s_network_type == 'coreweave' %}
+              {% if k8s_network_type in ['coreweave', 'coreweave_nvl72'] %}
               rdma/ib: 1
               {% endif %}
             {% endif %}
