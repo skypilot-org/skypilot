@@ -523,14 +523,13 @@ def get_mount_cached_cmd(
 
     readonly_flag, _ = _get_readonly_flags(mount_config)
 
-    # Determine sequential_upload: per-bucket config overrides global config
-    # Global config default is False (parallel uploads)
+    # Determine sequential_upload: per-bucket config overrides global config.
     # '--transfers 1' guarantees the files written at the local mount point
     # to be uploaded to the backend storage in the order of creation.
-    sequential_upload = skypilot_config.get_nested(
-        ('data', 'mount_cached', 'sequential_upload'), False)
-    if mount_config is not None and mount_config.sequential_upload is not None:
-        sequential_upload = mount_config.sequential_upload
+    sequential_upload = getattr(mount_config, 'sequential_upload', None)
+    if sequential_upload is None:
+        sequential_upload = skypilot_config.get_nested(
+            ('data', 'mount_cached', 'sequential_upload'), False)
     transfers_flag = '--transfers 1 ' if sequential_upload else ''
 
     # when mounting multiple directories with vfs cache mode, it's handled by
