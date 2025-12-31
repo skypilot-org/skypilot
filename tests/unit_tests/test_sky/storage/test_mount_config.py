@@ -200,8 +200,10 @@ class TestMountCmd:
                                               mount_path='/mnt/data',
                                               _bucket_sub_path=None,
                                               mount_config=cfg)
-        has_flag = '--read-only' in cmd or '-o ro' in cmd
-        assert has_flag == expect_flag
+        # Check rclone uses --read-only flag
+        assert ('--read-only' in cmd) == expect_flag
+        # Check goofys uses comma-separated FUSE options: -o allow_other,ro
+        assert ('-o allow_other,ro' in cmd) == expect_flag
 
     @pytest.mark.parametrize('ro,expect_flag', [(False, False), (True, True)])
     def test_gcs_mount_cmd(self, ro, expect_flag):
@@ -211,4 +213,5 @@ class TestMountCmd:
                                                mount_path='/mnt/data',
                                                _bucket_sub_path=None,
                                                mount_config=cfg)
-        assert ('-o ro' in cmd) == expect_flag
+        # gcsfuse uses comma-separated FUSE options: -o allow_other,ro
+        assert ('-o allow_other,ro' in cmd) == expect_flag

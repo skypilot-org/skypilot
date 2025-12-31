@@ -17,9 +17,14 @@ if typing.TYPE_CHECKING:
 
 
 def _get_readonly_flags(mount_config: Optional['storage.MountConfig']) -> tuple:
-    """Returns (rclone_flag, fuse_ro_flag) for readonly mounting."""
+    """Returns (rclone_flag, fuse_ro_flag) for readonly mounting.
+
+    For FUSE-based tools (goofys, gcsfuse), options must be comma-separated
+    with -o flag (e.g., -o allow_other,ro). The fuse_ro_flag is returned as
+    ',ro' to be appended to existing -o options.
+    """
     readonly = mount_config.readonly if mount_config else False
-    return ('--read-only ' if readonly else '', '-o ro ' if readonly else '')
+    return ('--read-only ' if readonly else '', ',ro' if readonly else '')
 
 
 # Values used to construct mounting commands
@@ -122,7 +127,7 @@ def get_s3_mount_cmd(
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
         f'--daemon --allow-other --s3-env-auth=true {rclone_ro}')
-    goofys_mount = (f'{_GOOFYS_WRAPPER} -o allow_other {fuse_ro}'
+    goofys_mount = (f'{_GOOFYS_WRAPPER} -o allow_other{fuse_ro} '
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                     f'{bucket_name}{_bucket_sub_path} {mount_path}')
@@ -159,7 +164,7 @@ def get_nebius_mount_cmd(
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
         f'--s3-endpoint {endpoint_url} --daemon --allow-other {rclone_ro}')
     goofys_mount = (f'AWS_PROFILE={nebius_profile_name} {_GOOFYS_WRAPPER} '
-                    f'-o allow_other {fuse_ro}'
+                    f'-o allow_other{fuse_ro} '
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                     f'--endpoint {endpoint_url} '
@@ -200,7 +205,7 @@ def get_coreweave_mount_cmd(
         f'--s3-endpoint {endpoint_url} --daemon --allow-other {rclone_ro}')
     goofys_mount = (f'AWS_SHARED_CREDENTIALS_FILE={cw_credentials_path} '
                     f'AWS_PROFILE={coreweave_profile_name} {_GOOFYS_WRAPPER} '
-                    f'-o allow_other {fuse_ro}'
+                    f'-o allow_other{fuse_ro} '
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                     f'--subdomain '
@@ -245,7 +250,7 @@ def get_gcs_mount_cmd(
     _, fuse_ro = _get_readonly_flags(mount_config)
     mount_cmd = (f'gcsfuse --log-file {log_file} '
                  '--debug_fuse_errors '
-                 f'-o allow_other {fuse_ro}'
+                 f'-o allow_other{fuse_ro} '
                  '--implicit-dirs '
                  f'--stat-cache-capacity {_STAT_CACHE_CAPACITY} '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
@@ -441,7 +446,7 @@ def get_r2_mount_cmd(
         f'--s3-endpoint {endpoint_url} --daemon --allow-other {rclone_ro}')
     goofys_mount = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
                     f'AWS_PROFILE={r2_profile_name} {_GOOFYS_WRAPPER} '
-                    f'-o allow_other {fuse_ro}'
+                    f'-o allow_other{fuse_ro} '
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                     f'--endpoint {endpoint_url} '
