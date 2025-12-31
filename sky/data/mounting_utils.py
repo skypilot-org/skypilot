@@ -379,9 +379,10 @@ def get_az_mount_cmd(
         bucket_sub_path_arg = ''
     else:
         bucket_sub_path_arg = f'--subdirectory={_bucket_sub_path}/ '
+    _, fuse_ro = _get_readonly_flags(mount_config)
     mount_options = ['allow_other', 'default_permissions']
-    if mount_config and mount_config.readonly:
-        mount_options.append('ro')
+    if fuse_ro:
+        mount_options.append(fuse_ro.lstrip(','))
     # Format: -o flag1,flag2
     fusermount_options = '-o ' + ','.join(
         mount_options) if mount_options else ''
