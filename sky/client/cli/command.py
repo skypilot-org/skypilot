@@ -3471,7 +3471,12 @@ def _down_or_stop_clusters(
                     click.echo(f'      {name} ({first})')
 
     if failures:
-        click.echo('Cluster(s) failed. See details above.')
+        failure_str = 'Cluster(s) failed. See details above.'
+        if down:
+            failure_str += (
+                ' If you want to ignore the errors and remove the '
+                'cluster(s) from the status table, use `sky down --purge`.')
+        click.echo(failure_str)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
