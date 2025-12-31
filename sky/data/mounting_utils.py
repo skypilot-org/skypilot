@@ -14,6 +14,16 @@ from sky.utils import command_runner
 if typing.TYPE_CHECKING:
     from sky.data import storage
 
+
+def _get_readonly_flags(
+    mount_config: Optional['storage.MountConfig']
+) -> tuple:
+    """Returns (rclone_flag, goofys_flag) for readonly mounting."""
+    readonly = mount_config.readonly if mount_config else False
+    return ('--read-only ' if readonly else '',
+            '-o ro ' if readonly else '')
+
+
 # Values used to construct mounting commands
 _STAT_CACHE_TTL = '5s'
 _STAT_CACHE_CAPACITY = 4096
@@ -106,21 +116,14 @@ def get_s3_mount_cmd(bucket_name: str,
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
 
-    # Determine readonly flag from mount_config
-    readonly = mount_config.readonly if mount_config else False
-    rclone_readonly_flag = '--read-only ' if readonly else ''
-    goofys_readonly_flag = '-o ro ' if readonly else ''
-
-    # Use rclone for ARM64 architectures since goofys doesn't support them
+    rclone_ro, goofys_ro = _get_readonly_flags(mount_config)
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
         f'{FUSE3_INSTALL_CMD} && '
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
-        # Have to add --s3-env-auth=true to allow rclone to access private
-        # buckets.
-        f'--daemon --allow-other --s3-env-auth=true {rclone_readonly_flag}')
-    goofys_mount = (f'{_GOOFYS_WRAPPER} -o allow_other {goofys_readonly_flag}'
+        f'--daemon --allow-other --s3-env-auth=true {rclone_ro}')
+    goofys_mount = (f'{_GOOFYS_WRAPPER} -o allow_other {goofys_ro}'
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                     f'{bucket_name}{_bucket_sub_path} {mount_path}')
@@ -147,22 +150,16 @@ def get_nebius_mount_cmd(nebius_profile_name: str,
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
 
-    # Determine readonly flag from mount_config
-    readonly = mount_config.readonly if mount_config else False
-    rclone_readonly_flag = '--read-only ' if readonly else ''
-    goofys_readonly_flag = '-o ro ' if readonly else ''
-
-    # Use rclone for ARM64 architectures since goofys doesn't support them
+    rclone_ro, goofys_ro = _get_readonly_flags(mount_config)
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
         f'{FUSE3_INSTALL_CMD} && '
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
         f'AWS_PROFILE={nebius_profile_name} '
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
-        f'--s3-endpoint {endpoint_url} --daemon --allow-other '
-        f'{rclone_readonly_flag}')
+        f'--s3-endpoint {endpoint_url} --daemon --allow-other {rclone_ro}')
     goofys_mount = (f'AWS_PROFILE={nebius_profile_name} {_GOOFYS_WRAPPER} '
-                    f'-o allow_other {goofys_readonly_flag}'
+                    f'-o allow_other {goofys_ro}'
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                     f'--endpoint {endpoint_url} '
@@ -190,12 +187,7 @@ def get_coreweave_mount_cmd(cw_credentials_path: str,
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
 
-    # Determine readonly flag from mount_config
-    readonly = mount_config.readonly if mount_config else False
-    rclone_readonly_flag = '--read-only ' if readonly else ''
-    goofys_readonly_flag = '-o ro ' if readonly else ''
-
-    # Use rclone for ARM64 architectures since goofys doesn't support them
+    rclone_ro, goofys_ro = _get_readonly_flags(mount_config)
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
         f'{FUSE3_INSTALL_CMD} && '
@@ -204,11 +196,10 @@ def get_coreweave_mount_cmd(cw_credentials_path: str,
         f'AWS_PROFILE={coreweave_profile_name} '
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
         f'--s3-force-path-style=false '
-        f'--s3-endpoint {endpoint_url} --daemon --allow-other '
-        f'{rclone_readonly_flag}')
+        f'--s3-endpoint {endpoint_url} --daemon --allow-other {rclone_ro}')
     goofys_mount = (f'AWS_SHARED_CREDENTIALS_FILE={cw_credentials_path} '
                     f'AWS_PROFILE={coreweave_profile_name} {_GOOFYS_WRAPPER} '
-                    f'-o allow_other {goofys_readonly_flag}'
+                    f'-o allow_other {goofys_ro}'
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                     f'--subdomain '
@@ -249,12 +240,10 @@ def get_gcs_mount_cmd(bucket_name: str,
     bucket_sub_path_arg = f'--only-dir {_bucket_sub_path} '\
         if _bucket_sub_path else ''
     log_file = '$(mktemp -t gcsfuse.XXXX.log)'
-    # Determine readonly flag from mount_config
-    readonly = mount_config.readonly if mount_config else False
-    readonly_flag = '-o ro ' if readonly else ''
+    _, goofys_ro = _get_readonly_flags(mount_config)
     mount_cmd = (f'gcsfuse --log-file {log_file} '
                  '--debug_fuse_errors '
-                 f'-o allow_other {readonly_flag}'
+                 f'-o allow_other {goofys_ro}'
                  '--implicit-dirs '
                  f'--stat-cache-capacity {_STAT_CACHE_CAPACITY} '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
@@ -382,10 +371,8 @@ def get_az_mount_cmd(container_name: str,
         bucket_sub_path_arg = ''
     else:
         bucket_sub_path_arg = f'--subdirectory={_bucket_sub_path}/ '
-    # Determine readonly flag from mount_config
-    readonly = mount_config.readonly if mount_config else False
     mount_options = ['allow_other', 'default_permissions']
-    if readonly:
+    if mount_config and mount_config.readonly:
         mount_options.append('ro')
     # Format: -o flag1,flag2
     fusermount_options = '-o ' + ','.join(
@@ -439,12 +426,7 @@ def get_r2_mount_cmd(r2_credentials_path: str,
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
 
-    # Determine readonly flag from mount_config
-    readonly = mount_config.readonly if mount_config else False
-    rclone_readonly_flag = '--read-only ' if readonly else ''
-    goofys_readonly_flag = '-o ro ' if readonly else ''
-
-    # Use rclone for ARM64 architectures since goofys doesn't support them
+    rclone_ro, goofys_ro = _get_readonly_flags(mount_config)
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
         f'{FUSE3_INSTALL_CMD} && '
@@ -452,11 +434,10 @@ def get_r2_mount_cmd(r2_credentials_path: str,
         f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
         f'AWS_PROFILE={r2_profile_name} '
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
-        f'--s3-endpoint {endpoint_url} --daemon --allow-other '
-        f'{rclone_readonly_flag}')
+        f'--s3-endpoint {endpoint_url} --daemon --allow-other {rclone_ro}')
     goofys_mount = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
                     f'AWS_PROFILE={r2_profile_name} {_GOOFYS_WRAPPER} '
-                    f'-o allow_other {goofys_readonly_flag}'
+                    f'-o allow_other {goofys_ro}'
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                     f'--endpoint {endpoint_url} '
@@ -488,14 +469,11 @@ def get_cos_mount_cmd(rclone_config: str,
         sub_path_arg = f'{bucket_name}/{_bucket_sub_path}'
     else:
         sub_path_arg = f'/{bucket_name}'
-    # Determine readonly flag from mount_config
-    readonly = mount_config.readonly if mount_config else False
-    readonly_flag = '--read-only ' if readonly else ''
-    # --daemon will keep the mounting process running in the background.
+    rclone_ro, _ = _get_readonly_flags(mount_config)
     mount_cmd = (f'{configure_rclone_profile} && '
                  'rclone mount '
                  f'{rclone_profile_name}:{sub_path_arg} {mount_path} '
-                 f'--daemon {readonly_flag}')
+                 f'--daemon {rclone_ro}')
     return mount_cmd
 
 
@@ -532,14 +510,12 @@ def get_mount_cached_cmd(
     create_log_cmd = (f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} && '
                       f'touch {log_file_path}')
 
-    # Determine transfer and readonly settings from mount_config
     readonly_flag = ''
-    transfers_flag = '--transfers 1 '  # Default: sequential uploads
+    transfers_flag = '--transfers 1 '
     if mount_config is not None:
         if mount_config.readonly:
             readonly_flag = '--read-only '
         if not mount_config.sequential_upload:
-            # Use parallel transfers (rclone default) when not sequential
             transfers_flag = ''
 
     # when mounting multiple directories with vfs cache mode, it's handled by
@@ -590,9 +566,7 @@ def get_oci_mount_cmd(mount_path: str,
                       config_profile: str,
                       mount_config: Optional['storage.MountConfig'] = None) -> str:
     """ OCI specific RClone mount command for oci object storage. """
-    # Determine readonly flag from mount_config
-    readonly = mount_config.readonly if mount_config else False
-    readonly_flag = '--read-only ' if readonly else ''
+    rclone_ro, _ = _get_readonly_flags(mount_config)
     # pylint: disable=line-too-long
     mount_cmd = (
         f'sudo chown -R `whoami` {mount_path}'
@@ -604,7 +578,7 @@ def get_oci_mount_cmd(mount_path: str,
         f' && sed -i "s/oci-config-file/config_file/g;'
         f' s/oci-config-profile/config_profile/g" ~/.config/rclone/rclone.conf'
         f' && ([ ! -f /bin/fusermount3 ] && sudo ln -s /bin/fusermount /bin/fusermount3 || true)'
-        f' && (grep -q {mount_path} /proc/mounts || rclone mount oos_{store_name}:{store_name} {mount_path} --daemon --allow-non-empty {readonly_flag})'
+        f' && (grep -q {mount_path} /proc/mounts || rclone mount oos_{store_name}:{store_name} {mount_path} --daemon --allow-non-empty {rclone_ro})'
     )
     return mount_cmd
 
