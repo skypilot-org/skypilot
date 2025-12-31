@@ -278,10 +278,11 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
             if row['InstanceType'] == 'p4de.24xlarge':
                 acc_name = 'A100-80GB'
                 acc_count = 8
-            if row['InstanceType'] == 'p5en.48xlarge':
+            if row['InstanceType'] in ('p5e.48xlarge', 'p5en.48xlarge'):
                 # TODO(andyl): Check if this workaround still needed after
                 # v0.10.0 released. Currently, the acc_name returned by the
                 # AWS API is 'NVIDIA', which is incorrect. See #4652.
+                # Both p5e.48xlarge and p5en.48xlarge have 8x H200 GPUs.
                 acc_name = 'H200'
                 acc_count = 8
             if (row['InstanceType'].startswith('g6f') or
