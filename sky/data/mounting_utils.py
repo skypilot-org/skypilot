@@ -8,6 +8,7 @@ import typing
 from typing import Optional
 
 from sky import exceptions
+from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import command_runner
 
@@ -515,12 +516,16 @@ def get_mount_cached_cmd(
                       f'touch {log_file_path}')
 
     readonly_flag = ''
-    transfers_flag = '--transfers 1 '
-    if mount_config is not None:
-        if mount_config.readonly:
-            readonly_flag = '--read-only '
-        if not mount_config.sequential_upload:
-            transfers_flag = ''
+    if mount_config is not None and mount_config.readonly:
+        readonly_flag = '--read-only '
+
+    # Determine sequential_upload: per-bucket config overrides global config
+    # Global config default is False (parallel uploads)
+    sequential_upload = skypilot_config.get_nested(
+        ('data', 'mount_cached', 'sequential_upload'), False)
+    if mount_config is not None and mount_config.sequential_upload is not None:
+        sequential_upload = mount_config.sequential_upload
+    transfers_flag = '--transfers 1 ' if sequential_upload else ''
 
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is

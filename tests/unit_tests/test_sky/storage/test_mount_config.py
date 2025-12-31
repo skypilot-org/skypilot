@@ -1,4 +1,6 @@
 """Tests for MountConfig and Storage config field functionality."""
+from unittest import mock
+
 import pytest
 
 from sky.data import mounting_utils
@@ -12,17 +14,20 @@ class TestMountConfig:
         """Test MountConfig default values."""
         config = storage.MountConfig()
         assert config.readonly is False
-        assert config.sequential_upload is True  # default for backward compat
+        assert config.sequential_upload is None  # None = use global config
 
     @pytest.mark.parametrize('input_dict,expected_readonly,expected_seq', [
-        (None, False, True),
-        ({}, False, True),
+        (None, False, None),
+        ({}, False, None),
         ({
             'readonly': True
-        }, True, True),
+        }, True, None),
         ({
             'sequential_upload': False
         }, False, False),
+        ({
+            'sequential_upload': True
+        }, False, True),
         ({
             'readonly': True,
             'sequential_upload': False
@@ -30,7 +35,7 @@ class TestMountConfig:
         ({
             'readonly': True,
             'unknown_field': 'value'
-        }, True, True),
+        }, True, None),
     ])
     def test_mount_config_from_dict(self, input_dict, expected_readonly,
                                     expected_seq):
@@ -44,14 +49,17 @@ class TestStorageFromYamlConfig:
     """Tests for Storage.from_yaml_config with mount config."""
 
     @pytest.mark.parametrize('config_field,expected_readonly,expected_seq', [
-        (None, False, True),
-        ({}, False, True),
+        (None, False, None),
+        ({}, False, None),
         ({
             'readonly': True
-        }, True, True),
+        }, True, None),
         ({
             'sequential_upload': False
         }, False, False),
+        ({
+            'sequential_upload': True
+        }, False, True),
         ({
             'readonly': True,
             'sequential_upload': False
@@ -77,9 +85,9 @@ class TestStorageToYamlConfig:
         yaml_config = storage_obj.to_yaml_config()
         assert 'config' not in yaml_config
 
-    def test_sequential_upload_true_not_serialized(self):
-        """Test sequential_upload=True (default) is not serialized."""
-        mount_config = storage.MountConfig(sequential_upload=True)
+    def test_sequential_upload_none_not_serialized(self):
+        """Test sequential_upload=None (default) is not serialized."""
+        mount_config = storage.MountConfig(sequential_upload=None)
         storage_obj = storage.Storage(name='test-bucket',
                                       mount_config=mount_config)
         yaml_config = storage_obj.to_yaml_config()
@@ -88,9 +96,11 @@ class TestStorageToYamlConfig:
     @pytest.mark.parametrize(
         'ro,seq,expect_ro,expect_seq',
         [
-            (True, True, True, None),  # readonly only, seq is default
-            (False, False, None, False),  # seq only, readonly is default
+            (True, None, True, None),  # readonly only, seq is default
+            (False, False, None, False),  # seq=False, readonly is default
+            (False, True, None, True),  # seq=True explicit
             (True, False, True, False),  # both non-default
+            (True, True, True, True),  # readonly + seq=True explicit
         ])
     def test_non_default_config_serialized(self, ro, seq, expect_ro,
                                            expect_seq):
@@ -122,24 +132,61 @@ class TestMountCachedCmd:
             mount_config=mount_config)
 
     @pytest.mark.parametrize(
-        'ro,seq,expect_ro,expect_seq',
+        'global_seq,cfg_seq,expect_seq',
         [
-            (None, None, False, True),  # None config
-            (False, True, False, True),  # Default config
-            (True, True, True, True),  # readonly only
-            (False, False, False, False),  # parallel only
-            (True, False, True, False),  # both
+            # Global config = False (parallel), no per-bucket override
+            (False, None, False),
+            # Global config = True (sequential), no per-bucket override
+            (True, None, True),
+            # Global config = False, per-bucket override to True
+            (False, True, True),
+            # Global config = True, per-bucket override to False
+            (True, False, False),
+            # Global config = False, per-bucket confirms False
+            (False, False, False),
+            # Global config = True, per-bucket confirms True
+            (True, True, True),
         ])
-    def test_mount_cached_cmd(self, ro, seq, expect_ro, expect_seq):
-        """Test get_mount_cached_cmd with various configs."""
-        if ro is None:
-            mount_config = None
-        else:
-            mount_config = storage.MountConfig(readonly=ro,
-                                               sequential_upload=seq)
-        cmd = self._get_cmd(mount_config)
-        assert ('--read-only' in cmd) == expect_ro
-        assert ('--transfers 1' in cmd) == expect_seq
+    def test_mount_cached_cmd_sequential(self, global_seq, cfg_seq, expect_seq):
+        """Test get_mount_cached_cmd sequential_upload with global config."""
+        with mock.patch('sky.data.mounting_utils.skypilot_config.get_nested',
+                        return_value=global_seq):
+            mount_config = storage.MountConfig(
+                sequential_upload=cfg_seq) if cfg_seq is not None else (
+                    storage.MountConfig() if cfg_seq is None else None)
+            # Handle the case where we want to test with None mount_config
+            if cfg_seq is None:
+                mount_config = storage.MountConfig()  # seq=None by default
+            cmd = self._get_cmd(mount_config)
+            assert ('--transfers 1' in cmd) == expect_seq
+
+    @pytest.mark.parametrize('ro,expect_ro', [
+        (False, False),
+        (True, True),
+    ])
+    def test_mount_cached_cmd_readonly(self, ro, expect_ro):
+        """Test get_mount_cached_cmd readonly flag."""
+        with mock.patch('sky.data.mounting_utils.skypilot_config.get_nested',
+                        return_value=False):
+            mount_config = storage.MountConfig(readonly=ro)
+            cmd = self._get_cmd(mount_config)
+            assert ('--read-only' in cmd) == expect_ro
+
+    def test_mount_cached_cmd_none_config(self):
+        """Test get_mount_cached_cmd with None mount_config uses global."""
+        # With global config = True (sequential)
+        with mock.patch('sky.data.mounting_utils.skypilot_config.get_nested',
+                        return_value=True):
+            cmd = self._get_cmd(None)
+            assert '--transfers 1' in cmd
+            assert '--read-only' not in cmd
+
+        # With global config = False (parallel)
+        with mock.patch('sky.data.mounting_utils.skypilot_config.get_nested',
+                        return_value=False):
+            cmd = self._get_cmd(None)
+            assert '--transfers 1' not in cmd
+            assert '--read-only' not in cmd
 
 
 class TestMountCmd:

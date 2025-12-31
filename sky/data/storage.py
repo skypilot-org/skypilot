@@ -327,8 +327,8 @@ class MountConfig:
     readonly: bool = False
     # If True, upload files sequentially instead of in parallel
     # (only applies to MOUNT_CACHED mode)
-    # Default is True for backward compatibility with existing behavior
-    sequential_upload: bool = True
+    # None means use the global config default from ~/.sky/config.yaml
+    sequential_upload: Optional[bool] = None
 
     @classmethod
     def from_dict(cls, config: Optional[Dict[str, Any]]) -> 'MountConfig':
@@ -337,7 +337,7 @@ class MountConfig:
             return cls()
         return cls(
             readonly=config.get('readonly', False),
-            sequential_upload=config.get('sequential_upload', True),
+            sequential_upload=config.get('sequential_upload'),
         )
 
 
@@ -1462,14 +1462,15 @@ class Storage(object):
         if self._bucket_sub_path is not None:
             config['_bucket_sub_path'] = self._bucket_sub_path
         # Add mount config if any non-default values are set
-        # Default: readonly=False, sequential_upload=True
+        # Default: readonly=False, sequential_upload=None (use global config)
         mount_config_dict: Dict[str, Any] = {}
         if self.mount_config.readonly:
             # readonly=True is non-default
             mount_config_dict['readonly'] = True
-        if not self.mount_config.sequential_upload:
-            # sequential_upload=False is non-default
-            mount_config_dict['sequential_upload'] = False
+        if self.mount_config.sequential_upload is not None:
+            # Explicitly set sequential_upload (override global config)
+            mount_config_dict['sequential_upload'] = (
+                self.mount_config.sequential_upload)
         if mount_config_dict:
             config['config'] = mount_config_dict
         return config
