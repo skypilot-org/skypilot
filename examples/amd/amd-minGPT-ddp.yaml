@@ -15,9 +15,7 @@ setup: |
 run: |
   echo " rocm-smi smoke test:"
   rocm-smi
-  # amd dockers can use their own conda environment
-  conda deactivate
-  
+
   git clone https://github.com/pytorch/examples.git
   cd examples/distributed/minGPT-ddp
   # Install dependencies

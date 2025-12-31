@@ -14,9 +14,9 @@ file_mounts:
 num_nodes: 2
 
 setup: |
-  conda install cuda -c nvidia
   uv venv ~/training --seed --python 3.10
   source ~/training/bin/activate
+  uv pip install nvidia-cuda-toolkit
   sudo DEBIAN_FRONTEND=noninteractive apt install -y vmtouch
   sudo DEBIAN_FRONTEND=noninteractive apt install -y python3-dev python3.10-dev build-essential
 
@@ -38,3 +38,4 @@ run: |
   accelerate launch --config_file /e2e/fsdp2.yaml --num_machines $SKYPILOT_NUM_NODES \
     --num_processes $NP --machine_rank $SKYPILOT_NODE_RANK --main_process_ip $MASTER_ADDR \
     --main_process_port 29500 /e2e/e2e_network.py --model_id ${MODEL_ID} --per_device_train_batch_size 4
+

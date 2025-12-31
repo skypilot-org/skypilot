@@ -36,17 +36,14 @@ file_mounts:
   ./torch_ddp_benchmark.py: ./examples/torch_ddp_benchmark/torch_ddp_benchmark.py
 
 setup: |
-  conda activate ddp
-  if [ $? -eq 0 ]; then
-    echo 'conda env exists'
-  else
-    conda create -n ddp python=3.10 -y
-    conda activate ddp
+  if [ ! -d ~/ddp ]; then
+    uv venv ~/ddp --python 3.10
   fi
+  source ~/ddp/bin/activate
   pip install torch torchvision
 
 run: |
-  conda activate ddp
+  source ~/ddp/bin/activate
   num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
   master_addr=`echo "$SKYPILOT_NODE_IPS" | head -n1`
   LD_LIBRARY_PATH="" torchrun \

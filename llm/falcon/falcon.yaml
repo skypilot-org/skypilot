@@ -18,18 +18,15 @@ file_mounts:
 
 setup: |
   # Setup the environment
-  conda activate falcon
-  if [ $? -ne 0 ]; then
-    conda create -n falcon python=3.10 -y
-    conda activate falcon
-  fi
+  uv venv ~/falcon --python 3.10 --seed
+  source ~/falcon/bin/activate
 
   # Install dependencies
-  pip install -q -U transformers accelerate peft
-  pip install -q trl==0.4.6 datasets bitsandbytes einops wandb scipy torch
+  uv pip install -q -U transformers accelerate peft
+  uv pip install -q trl==0.4.6 datasets bitsandbytes einops wandb scipy torch
 
 run: |
-  conda activate falcon
+  source ~/falcon/bin/activate
   wandb login $WANDB_API_KEY
   echo "Starting training..."
   python train.py \

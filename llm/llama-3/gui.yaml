@@ -21,17 +21,14 @@ resources:
   cpus: 2
 
 setup: |
-  conda activate llama3
-  if [ $? -ne 0 ]; then
-    conda create -n llama3 python=3.10 -y
-    conda activate llama3
-  fi
+  uv venv ~/llama3 --python 3.10 --seed
+  source ~/llama3/bin/activate
 
   # Install Gradio for web UI.
-  pip install gradio openai
+  uv pip install gradio openai
 
 run: |
-  conda activate llama3
+  source ~/llama3/bin/activate
   export PATH=$PATH:/sbin
   WORKER_IP=$(hostname -I | cut -d' ' -f1)
   CONTROLLER_PORT=21001

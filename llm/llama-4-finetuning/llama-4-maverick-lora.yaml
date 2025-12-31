@@ -34,8 +34,8 @@ file_mounts:
   /configs: ./configs
 
 setup: |
-  conda create -n training python=3.10 -y
-  conda activate training
+  uv venv ~/training --python 3.10 --seed
+  source ~/training/bin/activate
 
   # Download the repository configuration package
   wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
@@ -51,12 +51,12 @@ setup: |
 
   git clone -b v0.9.3 --depth 1 https://github.com/hiyouga/LLaMA-Factory.git
   cd LLaMA-Factory
-  pip install -e ".[torch,metrics,deepspeed]" --no-build-isolation
-  pip install "transformers>=4.51.1"
+  uv pip install -e ".[torch,metrics,deepspeed]" --no-build-isolation
+  uv pip install "transformers>=4.51.1"
 
 
 run: |
-  conda activate training
+  source ~/training/bin/activate
 
   MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
   echo "Starting distributed finetuning, head node: $MASTER_ADDR"

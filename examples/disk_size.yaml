@@ -1,7 +1,5 @@
 # A minimal example to ask a 512GB OS disk.
 #
-# Runs a task that simply lists the default conda environments.
-#
 # Usage:
 #   sky launch -c min minimal_os_disk.yaml
 #   sky down min
@@ -17,4 +15,4 @@ setup: |
   lsblk
 
 run: |
-  conda env list
+  df -h

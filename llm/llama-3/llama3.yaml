@@ -84,20 +84,17 @@ resources:
   ports: 8081  # Expose to internet traffic.
 
 setup: |
-  conda activate vllm
-  if [ $? -ne 0 ]; then
-    conda create -n vllm python=3.10 -y
-    conda activate vllm
-  fi
+  uv venv ~/vllm --python 3.10 --seed
+  source ~/vllm/bin/activate
 
-  pip install vllm==0.4.2
+  uv pip install vllm==0.4.2
   # Install Gradio for web UI.
-  pip install gradio openai
-  pip install flash-attn==2.5.9.post1
+  uv pip install gradio openai
+  uv pip install flash-attn==2.5.9.post1
 
 
 run: |
-  conda activate vllm
+  source ~/vllm/bin/activate
   echo 'Starting vllm api server...'
 
   # https://github.com/vllm-project/vllm/issues/3098

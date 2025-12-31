@@ -14,19 +14,16 @@ resources:
     - 8000
 
 setup: |
-  conda activate sglang
-  if [ $? -ne 0 ]; then
-    conda create -n sglang python=3.10 -y
-    conda activate sglang
-  fi
+  uv venv ~/sglang --python 3.10 --seed
+  source ~/sglang/bin/activate
 
-  pip list | grep sglang || pip install "sglang[all]"
-  pip list | grep transformers || pip install transformers==4.37.2
+  uv pip install "sglang[all]"
+  uv pip install transformers==4.37.2
 
 
 
 run: |
-  conda activate sglang
+  source ~/sglang/bin/activate
   echo 'Starting sglang openai api server...'
   export PATH=$PATH:/sbin/
   python -m sglang.launch_server --model-path $MODEL_NAME --tokenizer-path $TOKENIZER_NAME \

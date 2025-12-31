@@ -22,34 +22,22 @@ setup: |
   cd tpu
   git checkout 9459fee
 
-  . $(conda info --base)/etc/profile.d/conda.sh
-  pip install --upgrade pip
 
-  conda activate resnet
+  uv venv ~/resnet --python 3.7 --seed
+  source ~/resnet/bin/activate
+  uv pip install nvidia-cudnn-cu11
+  uv pip install tensorflow==2.4.0 pyyaml
+  uv pip install protobuf==3.20
 
-  if [ $? -eq 0 ]; then
-    echo "conda env exists"
-  else
-    conda create -n resnet python=3.7 -y
-    conda activate resnet
-    conda install cudatoolkit=11.0 -y
-    conda install -c anaconda cudnn -y
-    pip install tensorflow==2.4.0 pyyaml
-    pip install protobuf==3.20
-    
-    # Automatically set CUDNN envvars when conda activate is run
-    mkdir -p $CONDA_PREFIX/etc/conda/activate.d
-    echo 'CUDNN_PATH=$(dirname $(python -c "import nvidia.cudnn;print(nvidia.cudnn.__file__)"))' >> $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
-    echo 'export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/:$CUDNN_PATH/lib:$LD_LIBRARY_PATH' >> $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
-
-    cd models
-    pip install -e .
-  fi
+  cd models
+  uv pip install -e .
 
 run: |
   cd tpu
-  . $(conda info --base)/etc/profile.d/conda.sh
-  conda activate resnet
+  source ~/resnet/bin/activate
+  # Set CUDNN library path
+  CUDNN_PATH=$(dirname $(python -c "import nvidia.cudnn;print(nvidia.cudnn.__file__)"))
+  export LD_LIBRARY_PATH=$CUDNN_PATH/lib:$LD_LIBRARY_PATH
 
   export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'
   python -u models/official/resnet/resnet_main.py --use_tpu=False \

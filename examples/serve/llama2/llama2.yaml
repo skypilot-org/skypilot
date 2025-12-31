@@ -28,18 +28,17 @@ secrets:
   HF_TOKEN: null # Pass with `--secret HF_TOKEN` in CLI
 
 setup: |
-  conda activate chatbot
-  if [ $? -ne 0 ]; then
-    conda create -n chatbot python=3.9 -y
-    conda activate chatbot
+  if [ ! -d ~/chatbot ]; then
+    uv venv ~/chatbot --python 3.9
   fi
+  source ~/chatbot/bin/activate
 
   # Install dependencies
   pip install "fschat[model_worker,webui]==0.2.24"
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
 run: |
-  conda activate chatbot
+  source ~/chatbot/bin/activate
   
   echo 'Starting controller...'
   python -u -m fastchat.serve.controller --host 0.0.0.0 > ~/controller.log 2>&1 &

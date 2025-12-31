@@ -5,14 +5,13 @@ with sky.Dag() as dag:
     workdir = './examples/tpu/tpu_app_code'
 
     # The setup command.  Will be run under the working directory.
-    setup = 'pip install --upgrade pip && \
-        conda activate huggingface || \
-          (conda create -n huggingface python=3.8 -y && \
-           conda activate huggingface && \
-           pip install -r requirements.txt)'
+    setup = 'source ~/huggingface/bin/activate || \
+          (uv venv ~/huggingface --python 3.8 --seed && \
+           source ~/huggingface/bin/activate && \
+           uv pip install -r requirements.txt)'
 
     # The command to run.  Will be run under the working directory.
-    run = 'conda activate huggingface && python -u run_tpu.py'
+    run = 'source ~/huggingface/bin/activate && python -u run_tpu.py'
 
     train = sky.Task(
         'train',

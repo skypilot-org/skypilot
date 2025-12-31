@@ -20,27 +20,22 @@ setup: |
   cd tpu
   git checkout gpu_train
 
-  . $(conda info --base)/etc/profile.d/conda.sh
   pip install --upgrade pip
 
-  conda activate resnet
-
-  if [ $? -eq 0 ]; then
-    echo "conda env exists"
-  else
-    conda create -n resnet python=3.7 -y
-    conda activate resnet
-    conda install cudatoolkit=11.0 -y
+  if [ ! -d ~/resnet ]; then
+    uv venv ~/resnet --python 3.7
+    source ~/resnet/bin/activate
     pip install tensorflow==2.4.0 pyyaml
     pip install protobuf==3.20
     cd models
     pip install -e .
+  else
+    source ~/resnet/bin/activate
   fi
 
 run: |
   cd tpu
-  . $(conda info --base)/etc/profile.d/conda.sh
-  conda activate resnet
+  source ~/resnet/bin/activate
 
   export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'
   python -u models/official/resnet/resnet_main.py --use_tpu=False \

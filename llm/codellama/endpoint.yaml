@@ -21,17 +21,13 @@ resources:
   ports: 8000
 
 setup: |
-  conda activate codellama
-  if [ $? -ne 0 ]; then
-    conda create -n codellama python=3.10 -y
-    conda activate codellama
-  fi
+  uv venv ~/codellama --python 3.10 --seed
+  source ~/codellama/bin/activate
+  uv pip install transformers==4.38.0 vllm==0.3.2
 
-  pip install transformers==4.38.0
-  pip install vllm==0.3.2
 
 run: |
-  conda activate codellama
+  source ~/codellama/bin/activate
   export PATH=$PATH:/sbin
   # Reduce --max-num-seqs to avoid OOM during loading model on L4:8
   python -u -m vllm.entrypoints.openai.api_server \

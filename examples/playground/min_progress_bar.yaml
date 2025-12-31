@@ -3,7 +3,7 @@ resources:
 
 setup: |
   echo "running setup"
+  pip install tqdm
 
 run: |
-  conda env list
   python3 -u -c "from tqdm import tqdm; import time; import sys; [time.sleep(0.5) for i in tqdm(range(120))]; print('done'); print('new')"

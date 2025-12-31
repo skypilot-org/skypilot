@@ -22,20 +22,17 @@ resources:
   ports: 8000
 
 setup: |
-  conda activate vllm
-  if [ $? -ne 0 ]; then
-    conda create -n vllm python=3.10 -y
-    conda activate vllm
-  fi
+  uv venv ~/vllm --python 3.10 --seed
+  source ~/vllm/bin/activate
 
-  pip install transformers==4.38.0
-  pip install vllm==0.3.2
+  uv pip install transformers==4.38.0
+  uv pip install vllm==0.3.2
 
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
 
 run: |
-  conda activate vllm
+  source ~/vllm/bin/activate
   echo 'Starting vllm openai api server...'
   python -m vllm.entrypoints.openai.api_server \
     --model $MODEL_NAME --tokenizer hf-internal-testing/llama-tokenizer \

@@ -3,9 +3,10 @@ resources:
   memory: 16+
 
 setup: |
-  conda create -c conda-forge -n spyder-env -y spyder numpy scipy pandas matplotlib sympy cython
+  uv venv ~/spyder-env --python 3.11 --seed
+  source ~/spyder-env/bin/activate
+  uv pip install spyder numpy scipy pandas matplotlib sympy cython
 
 run: |
-  conda activate spyder-env
+  source ~/spyder-env/bin/activate
   python -m spyder_kernels.console
-  

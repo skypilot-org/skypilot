@@ -22,17 +22,14 @@ resources:
   disk_tier: best
 
 setup: |
-  conda activate mixtral
-  if [ $? -ne 0 ]; then
-    conda create -n mixtral -y python=3.10
-    conda activate mixtral
-  fi
-  pip install transformers==4.38.0
-  pip install vllm==0.3.2
-  pip list | grep megablocks || pip install megablocks
+  uv venv ~/mixtral --python 3.10 --seed
+  source ~/mixtral/bin/activate
+  uv pip install transformers==4.38.0
+  uv pip install vllm==0.3.2
+  uv pip list | grep megablocks || uv pip install megablocks
 
 run: |
-  conda activate mixtral
+  source ~/mixtral/bin/activate
   export PATH=$PATH:/sbin
   python -u -m vllm.entrypoints.openai.api_server \
                 --host 0.0.0.0 \

@@ -16,7 +16,6 @@ setup: |
 
 run: |
   timestamp=$(date +%s)
-  conda env list
   for i in {1..120}; do
     echo "$timestamp $i"
     sleep 1

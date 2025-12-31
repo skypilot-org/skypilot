@@ -10,16 +10,15 @@ resources:
 setup: |
   pip install --upgrade pip
 
-  conda activate huggingface
-  if [ $? -eq 0 ]; then
-    echo 'conda env exists'
-  else
-    conda create -n huggingface python=3.8 -y
-    conda activate huggingface
+  if [ ! -d ~/huggingface ]; then
+    uv venv ~/huggingface --python 3.8
+    source ~/huggingface/bin/activate
     pip install -r requirements.txt
+  else
+    source ~/huggingface/bin/activate
   fi
 
 # The command to run.  Will be run under the working directory.
 run: |
-  conda activate huggingface
+  source ~/huggingface/bin/activate
   python -u run_tpu.py

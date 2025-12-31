@@ -17,7 +17,6 @@ resources:
   
 
 setup: |
-  conda activate base
   cd ~
   pip install tqdm tiktoken requests datasets
 
@@ -70,7 +69,6 @@ setup: |
 
 
 run: |
-  conda activate base
   cd ~/llm.c
   # Processing data
   # tokenize the FineWeb dataset 10B tokens sample (takes ~1 hour, get lunch?)

@@ -10,13 +10,15 @@ resources:
   accelerators: {A10:1}
 
 setup: |
-  conda create -n vllm python=3.12 -y
-  conda activate vllm
+  if [ ! -d ~/vllm ]; then
+    uv venv ~/vllm --python 3.12
+  fi
+  source ~/vllm/bin/activate
   pip install vllm==0.6.3.post1
   pip install vllm-flash-attn==2.6.2
 
 run: |
-  conda activate vllm
+  source ~/vllm/bin/activate
   python -u -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 --port 8080 \
     --model Qwen/Qwen2-7B-Instruct \

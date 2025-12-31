@@ -5,5 +5,5 @@ setup: |
   echo "running setup"
 
 run: |
-  conda env list
+  echo "This task will fail"
   exit 1
