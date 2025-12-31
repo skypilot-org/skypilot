@@ -524,6 +524,8 @@ def get_mount_cached_cmd(
 
     # Determine sequential_upload: per-bucket config overrides global config
     # Global config default is False (parallel uploads)
+    # '--transfers 1' guarantees the files written at the local mount point
+    # to be uploaded to the backend storage in the order of creation.
     sequential_upload = skypilot_config.get_nested(
         ('data', 'mount_cached', 'sequential_upload'), False)
     if mount_config is not None and mount_config.sequential_upload is not None:
@@ -549,8 +551,6 @@ def get_mount_cached_cmd(
         # remote, but increases the frequency of metadata lookups.
         f'--allow-other --vfs-cache-mode full --dir-cache-time 10s '
         f'{readonly_flag}{transfers_flag}'
-        # '--transfers 1' guarantees the files written at the local mount point
-        # to be uploaded to the backend storage in the order of creation.
         # '--vfs-cache-poll-interval' specifies the frequency of how often
         # rclone checks the local mount point for stale objects in cache.
         # '--vfs-write-back' defines the time to write files on remote storage
