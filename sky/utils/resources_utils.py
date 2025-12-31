@@ -184,6 +184,7 @@ def format_resource(resource: 'resources_lib.Resources',
                     simplified_only: bool = False) -> Tuple[str, Optional[str]]:
     resource = resource.assert_launchable()
     is_k8s = resource.cloud.canonical_name() == 'kubernetes'
+    vcpu, mem = None, None
     if resource.accelerators is None or is_k8s or not simplified_only:
         vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
             resource.instance_type)
@@ -198,16 +199,16 @@ def format_resource(resource: 'resources_lib.Resources',
 
     if (resource.accelerators is None or is_k8s):
         if vcpu is not None:
-            elements_simple.append(f'cpus={int(vcpu)}')
-            elements_full.append(f'cpus={int(vcpu)}')
+            elements_simple.append(f'cpus={common_utils.format_float(vcpu)}')
+            elements_full.append(f'cpus={common_utils.format_float(vcpu)}')
         if mem is not None:
-            elements_simple.append(f'mem={int(mem)}')
-            elements_full.append(f'mem={int(mem)}')
+            elements_simple.append(f'mem={common_utils.format_float(mem)}')
+            elements_full.append(f'mem={common_utils.format_float(mem)}')
     elif not simplified_only:
         if vcpu is not None:
-            elements_full.append(f'cpus={int(vcpu)}')
+            elements_full.append(f'cpus={common_utils.format_float(vcpu)}')
         if mem is not None:
-            elements_full.append(f'mem={int(mem)}')
+            elements_full.append(f'mem={common_utils.format_float(mem)}')
 
     is_slurm = resource.cloud.canonical_name() == 'slurm'
     if not is_k8s and not is_slurm:

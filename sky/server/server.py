@@ -1823,10 +1823,17 @@ async def api_status(
 @app.get('/api/plugins', response_class=fastapi_responses.ORJSONResponse)
 async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
     """Return metadata about loaded backend plugins."""
-    plugin_info = [{
-        'js_extension_path': plugin.js_extension_path,
-    } for plugin in plugins.get_plugins()]
-    return {'plugins': plugin_info}
+    plugin_infos = []
+    for plugin_info in plugins.get_plugins():
+        info = {
+            'js_extension_path': plugin_info.js_extension_path,
+        }
+        for attr in ('name', 'version', 'commit'):
+            value = getattr(plugin_info, attr, None)
+            if value is not None:
+                info[attr] = value
+        plugin_infos.append(info)
+    return {'plugins': plugin_infos}
 
 
 @app.get(
@@ -2341,6 +2348,9 @@ if __name__ == '__main__':
     # Restore the server user hash
     logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+    logger.info('Initializing permission service')
+    permission.permission_service.initialize()
+    logger.info('Permission service initialized')
 
     max_db_connections = global_user_state.get_max_db_connections()
     logger.info(f'Max db connections: {max_db_connections}')

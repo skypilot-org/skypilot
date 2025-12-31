@@ -188,7 +188,7 @@ export const NonCapitalizedTooltip = ({ children, ...props }) => {
       {...DEFAULT_TOOLTIP_PROPS}
       {...props}
       content={
-        <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 text-sm rounded">
+        <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 text-sm rounded whitespace-pre-line">
           {content}
         </span>
       }
