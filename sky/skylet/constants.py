@@ -193,12 +193,39 @@ SETUP_SKY_DIRS_COMMANDS = (f'mkdir -p ~/sky_workdir && '
                            f'mkdir -p ~/.sky/sky_app && '
                            f'mkdir -p {SKY_RUNTIME_DIR}/.sky;')
 
+# Commands to set up the SkyPilot runtime environment.
+# This installs uv and creates the skypilot-runtime venv.
+# Always run regardless of whether conda is installed.
+SKYPILOT_RUNTIME_SETUP_COMMANDS = (
+    # Install uv for venv management and pip installation.
+    f'{SKY_UV_INSTALL_CMD};'
+    # Create a separate python environment for SkyPilot dependencies.
+    # Do NOT use --system-site-packages here, because if users upgrade any
+    # packages in the base env, they interfere with skypilot dependencies.
+    # Reference: https://github.com/skypilot-org/skypilot/issues/4097
+    # --seed will include pip and setuptools, which are present in venvs created
+    # with python -m venv.
+    # --python 3.10 will ensure the specific python version is downloaded
+    # and installed in the venv. SkyPilot requires Python<3.12, and 3.10 is
+    # preferred. We have to always pass in `--python` to avoid the issue when a
+    # user has `.python_version` file in their home directory, which will cause
+    # uv to use the python version specified in the `.python_version` file.
+    # TODO(zhwu): consider adding --python-preference only-managed to avoid
+    # using the system python, if a user report such issue.
+    f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
+    f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10;'
+    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > '
+    f'{SKY_PYTHON_PATH_FILE};')
+
 # Install conda on the remote cluster if it is not already installed.
 # We use conda with python 3.10 to be consistent across multiple clouds with
 # best effort.
 # https://github.com/ray-project/ray/issues/31606
 # We use python 3.10 to be consistent with the python version of the
 # AWS's Deep Learning AMI's default conda environment.
+# NOTE: This only contains conda installation/initialization. The SkyPilot
+# runtime setup (uv + venv) is handled separately by
+# SKYPILOT_RUNTIME_SETUP_COMMANDS.
 CONDA_INSTALLATION_COMMANDS = (
     'which conda > /dev/null 2>&1 || '
     '{ '
@@ -229,26 +256,7 @@ CONDA_INSTALLATION_COMMANDS = (
     'if [ "{is_custom_docker}" = "false" ]; then '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
-    'fi;'
-    # Install uv for venv management and pip installation.
-    f'{SKY_UV_INSTALL_CMD};'
-    # Create a separate python environment for SkyPilot dependencies.
-    f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
-    # Do NOT use --system-site-packages here, because if users upgrade any
-    # packages in the base env, they interfere with skypilot dependencies.
-    # Reference: https://github.com/skypilot-org/skypilot/issues/4097
-    # --seed will include pip and setuptools, which are present in venvs created
-    # with python -m venv.
-    # --python 3.10 will ensure the specific python version is downloaded
-    # and installed in the venv. SkyPilot requires Python<3.12, and 3.10 is
-    # preferred. We have to always pass in `--python` to avoid the issue when a
-    # user has `.python_version` file in their home directory, which will cause
-    # uv to use the python version specified in the `.python_version` file.
-    # TODO(zhwu): consider adding --python-preference only-managed to avoid
-    # using the system python, if a user report such issue.
-    f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10;'
-    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
-)
+    'fi;')
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'

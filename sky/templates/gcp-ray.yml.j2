@@ -266,7 +266,7 @@ setup_commands:
     sudo pkill -9 apt-get;
     sudo dpkg --configure --force-overwrite -a;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
-    {{ conda_installation_commands }}
+    {{ runtime_installation_commands }}
     source ~/.bashrc;
   {%- if tpu_vm %}
     test -f ~/miniconda3/etc/profile.d/conda.sh && source ~/miniconda3/etc/profile.d/conda.sh && conda activate base || true;

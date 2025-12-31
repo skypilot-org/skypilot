@@ -899,12 +899,31 @@ def write_cluster_config(
     if to_provision.labels:
         labels.update(to_provision.labels)
 
-    # We disable conda auto-activation if the user has specified a docker image
-    # to use, which is likely to already have a conda environment activated.
-    conda_auto_activate = ('true' if to_provision.extract_docker_image() is None
-                           else 'false')
-    is_custom_docker = ('true' if to_provision.extract_docker_image()
-                        is not None else 'false')
+    # Install conda only if:
+    # 1. User explicitly set provision.install_conda to True, AND
+    # 2. Not using a custom docker image.
+    install_conda = skypilot_config.get_nested(('provision', 'install_conda'),
+                                               False)
+
+    runtime_installation_commands = ''
+    if install_conda:
+        # We disable conda auto-activation if the user has specified a docker
+        # image to use, which is likely to already have a conda environment
+        # activated.
+        conda_auto_activate = (
+            'true' if to_provision.extract_docker_image() is None else 'false')
+        is_custom_docker = ('true' if to_provision.extract_docker_image()
+                            is not None else 'false')
+        # We should not use `.format`, as it contains '{}' as the bash
+        # syntax.
+        # If install_conda is True, prepend conda installation commands.
+        # SKYPILOT_RUNTIME_SETUP_COMMANDS is always run to set up uv + venv.
+        runtime_installation_commands = (
+            constants.CONDA_INSTALLATION_COMMANDS.replace(
+                '{conda_auto_activate}',
+                conda_auto_activate).replace('{is_custom_docker}',
+                                             is_custom_docker))
+    runtime_installation_commands += constants.SKYPILOT_RUNTIME_SETUP_COMMANDS
 
     # Here, if users specify the controller to be high availability, we will
     # provision a high availability controller. Whether the cloud supports
@@ -977,14 +996,8 @@ def write_cluster_config(
                 # currently only used by AWS and GCP.
                 'specific_reservations': specific_reservations,
 
-                # Conda setup
-                # We should not use `.format`, as it contains '{}' as the bash
-                # syntax.
-                'conda_installation_commands':
-                    constants.CONDA_INSTALLATION_COMMANDS.replace(
-                        '{conda_auto_activate}',
-                        conda_auto_activate).replace('{is_custom_docker}',
-                                                     is_custom_docker),
+                # Runtime setup
+                'runtime_installation_commands': runtime_installation_commands,
                 # Currently only used by Slurm. For other clouds, it is
                 # already part of ray_skypilot_installation_commands
                 'setup_sky_dirs_commands': constants.SETUP_SKY_DIRS_COMMANDS,
