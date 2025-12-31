@@ -1134,7 +1134,7 @@ OR
 .. code-block:: yaml
 
   run: |
-    conda activate myenv
+    source ~/myenv/bin/activate
     python my_script.py --data-dir /remote/data --output-dir /remote/output
 
 

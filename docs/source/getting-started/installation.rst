@@ -54,7 +54,7 @@ Install SkyPilot using pip:
 
         .. code-block:: shell
 
-          # Recommended: use a new conda env to avoid package conflicts.
+          # Recommended: use a new virtual environment to avoid package conflicts.
           # SkyPilot requires 3.7 <= python <= 3.13.
           uv venv ~/sky --python 3.10 --seed
           source ~/sky/bin/activate
@@ -92,7 +92,7 @@ Install SkyPilot using pip:
 
         .. code-block:: shell
 
-          # Recommended: use a new conda env to avoid package conflicts.
+          # Recommended: use a new virtual environment to avoid package conflicts.
           # SkyPilot requires 3.7 <= python <= 3.13.
           uv venv ~/sky --python 3.10 --seed
           source ~/sky/bin/activate
