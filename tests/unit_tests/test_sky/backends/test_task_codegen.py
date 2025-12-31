@@ -220,6 +220,8 @@ class TestRcloneFlushScript:
         assert 'UPLOADING_FILES=' in flush_script
         assert 'queuing for upload' in flush_script
         assert 'uploading: ${UPLOADING_FILES}' in flush_script
+        # Should properly handle comma separation (no trailing comma)
+        assert "sed 's/,$//'" in flush_script
 
     def test_flush_script_has_fallback_output(self):
         """Test that flush script falls back to last log line if parsing fails."""

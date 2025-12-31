@@ -164,7 +164,7 @@ class TaskCodeGen:
                         # Extract the last vfs cache status line to show what we're waiting for
                         CACHE_STATUS=$(tac $file | grep "vfs cache: cleaned:" -m 1 | sed 's/.*vfs cache: cleaned: //' 2>/dev/null)
                         # Extract currently uploading files from recent log lines (show up to 2 files)
-                        UPLOADING_FILES=$(tac $file | head -30 | grep -E "queuing for upload" | head -2 | sed 's/.*INFO  : //' | sed 's/: vfs cache:.*//' | tr '\\n' ', ' | sed 's/, $//' | sed 's/^, //' 2>/dev/null)
+                        UPLOADING_FILES=$(tac $file | head -30 | grep -E "queuing for upload" | head -2 | sed 's/.*INFO  : //' | sed 's/: vfs cache:.*//' | tr '\\n' ',' | sed 's/,$//' | sed 's/,/, /g' 2>/dev/null)
                         # Build status message with available info
                         if [ -n "$CACHE_STATUS" ] && [ -n "$UPLOADING_FILES" ]; then
                             echo "skypilot: cached mount is still uploading (elapsed: ${{ELAPSED}}s) [${{CACHE_STATUS}}] uploading: ${{UPLOADING_FILES}}"
