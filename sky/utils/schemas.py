@@ -409,7 +409,7 @@ def get_resources_schema():
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
         'required': [],
-        'additionalProperties': False,
+        'additionalProperties': True,
         'properties': {
             **single_resources_schema,
             # We redefine the 'accelerators' field to allow one line list or

@@ -44,6 +44,8 @@ _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 # addons/fuse-proxy/README.md for more details.
 _FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
 
+_CUSTOM_EFA_RESOURCE_KEY = 'vpc.amazonaws.com/efa'
+
 
 @registry.CLOUD_REGISTRY.register(aliases=['k8s'])
 class Kubernetes(clouds.Cloud):
@@ -635,6 +637,7 @@ class Kubernetes(clouds.Cloud):
         network_type, machine_type = self._detect_network_type(
             context, resources.network_tier)
 
+        user_custom_resources = None
         # Check if this cluster supports high performance networking and
         # configure appropriate settings for different cluster types
         if (resources.network_tier is not None and
@@ -648,6 +651,10 @@ class Kubernetes(clouds.Cloud):
                 # clusters with high performance networking
                 network_env_vars = network_type.get_network_env_vars()
                 k8s_env_vars.update(network_env_vars)
+                if network_type == KubernetesHighPerformanceNetworkType.AWS_EFA:
+                    user_custom_resources = resources.custom_properties or {}
+                    if _CUSTOM_EFA_RESOURCE_KEY not in user_custom_resources:
+                        user_custom_resources[_CUSTOM_EFA_RESOURCE_KEY] = 1
 
         # We specify object-store-memory to be 500MB to avoid taking up too
         # much memory on the head node. 'num-cpus' should be set to limit
@@ -774,6 +781,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_enable_flex_start': enable_flex_start,
             'k8s_max_run_duration_seconds': max_run_duration_seconds,
             'k8s_network_type': network_type.value,
+            'k8s_custom_resources': user_custom_resources,
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
@@ -1169,6 +1177,10 @@ class Kubernetes(clouds.Cloud):
                 if node.metadata.labels:
                     # Check for Nebius clusters
                     for label_key, _ in node.metadata.labels.items():
+                        if label_key.startswith('k8s.io/cloud-provider-aws'):
+                            return (
+                                KubernetesHighPerformanceNetworkType.AWS_EFA,
+                                '')
                         if label_key.startswith('nebius.com/'):
                             return (KubernetesHighPerformanceNetworkType.NEBIUS,
                                     '')
