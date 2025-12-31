@@ -2439,19 +2439,17 @@ def _update_cluster_status(
                     'to_down', False) else 'autostopping'
                 logger.info(f'Cluster {cluster_name!r} is {operation_str}.')
 
+                record['status'] = status_lib.ClusterStatus.AUTOSTOPPING
                 global_user_state.add_cluster_event(
                     cluster_name,
                     status_lib.ClusterStatus.AUTOSTOPPING,
                     f'Cluster is {operation_str}.',
                     global_user_state.ClusterEventType.STATUS_CHANGE,
                     nop_if_duplicate=True)
-                global_user_state.add_or_update_cluster(
-                    cluster_name,
-                    handle,
-                    requested_resources=None,
-                    ready=False,
-                    is_launch=False,
-                    existing_cluster_hash=record['cluster_hash'])
+                # Use set_cluster_status() to directly update the status in DB
+                # instead of add_or_update_cluster() which only supports INIT/UP
+                global_user_state.set_cluster_status(
+                    cluster_name, status_lib.ClusterStatus.AUTOSTOPPING)
                 return global_user_state.get_cluster_from_name(
                     cluster_name,
                     include_user_info=include_user_info,
@@ -2591,12 +2589,40 @@ def _update_cluster_status(
 
             backend = get_backend_from_handle(handle)
             if isinstance(backend, backends.CloudVmRayBackend):
-                if is_head_node_alive:
+                # Check autostopping first, before head_node_alive check
+                # This ensures we detect AUTOSTOPPING even when Ray becomes
+                # unhealthy during hook execution
+                is_autostopping = backend.is_definitely_autostopping(
+                    handle, stream_logs=False)
+
+                if is_autostopping:
+                    # The cluster is autostopping - set to AUTOSTOPPING status
+                    ux_utils.console_newline()
+                    operation_str = 'autodowning' if record[
+                        'to_down'] else 'autostopping'
+                    logger.info(f'Cluster {cluster_name!r} is {operation_str}.')
+
+                    # Set cluster to AUTOSTOPPING status
+                    record['status'] = status_lib.ClusterStatus.AUTOSTOPPING
+                    global_user_state.add_cluster_event(
+                        cluster_name,
+                        status_lib.ClusterStatus.AUTOSTOPPING,
+                        f'Cluster is {operation_str}.',
+                        global_user_state.ClusterEventType.STATUS_CHANGE,
+                        nop_if_duplicate=True)
+                    # Use set_cluster_status() to directly update the status in DB
+                    # instead of add_or_update_cluster() which only supports INIT/UP
+                    global_user_state.set_cluster_status(
+                        cluster_name, status_lib.ClusterStatus.AUTOSTOPPING)
+                    return global_user_state.get_cluster_from_name(
+                        cluster_name,
+                        include_user_info=include_user_info,
+                        summary_response=summary_response)
+                elif is_head_node_alive:
                     logger.debug(
                         f'Skipping autostop reset for cluster {cluster_name!r} '
                         'because the head node is alive.')
-                elif not backend.is_definitely_autostopping(handle,
-                                                            stream_logs=False):
+                elif not is_autostopping:
                     # Friendly hint.
                     autostop = record['autostop']
                     maybe_down_str = ' --down' if record['to_down'] else ''
@@ -2647,31 +2673,6 @@ def _update_cluster_status(
                         f'abnormal state. To fix, try running: {reset}{bright}sky '
                         f'start -f -i {autostop}{maybe_down_str} {cluster_name}'
                         f'{reset}')
-                else:
-                    # The cluster is autostopping - set to AUTOSTOPPING status
-                    ux_utils.console_newline()
-                    operation_str = 'autodowning' if record[
-                        'to_down'] else 'autostopping'
-                    logger.info(f'Cluster {cluster_name!r} is {operation_str}.')
-
-                    # Set cluster to AUTOSTOPPING status
-                    global_user_state.add_cluster_event(
-                        cluster_name,
-                        status_lib.ClusterStatus.AUTOSTOPPING,
-                        f'Cluster is {operation_str}.',
-                        global_user_state.ClusterEventType.STATUS_CHANGE,
-                        nop_if_duplicate=True)
-                    global_user_state.add_or_update_cluster(
-                        cluster_name,
-                        handle,
-                        requested_resources=None,
-                        ready=False,
-                        is_launch=False,
-                        existing_cluster_hash=record['cluster_hash'])
-                    return global_user_state.get_cluster_from_name(
-                        cluster_name,
-                        include_user_info=include_user_info,
-                        summary_response=summary_response)
 
         # If the user starts part of a STOPPED cluster, we still need a status
         # to represent the abnormal status. For spot cluster, it can also
@@ -2757,10 +2758,13 @@ def _must_refresh_cluster_status(
     use_spot = record['handle'].launched_resources.use_spot
     has_autostop = (record['status'] != status_lib.ClusterStatus.STOPPED and
                     record['autostop'] >= 0)
+    # If cluster is AUTOSTOPPING, always refresh to check if it transitioned to STOPPED
+    is_autostopping = record['status'] == status_lib.ClusterStatus.AUTOSTOPPING
     recently_refreshed = (record['status_updated_at'] is not None and
                           time.time() - record['status_updated_at'] <
                           _CLUSTER_STATUS_CACHE_DURATION_SECONDS)
-    is_stale = (use_spot or has_autostop) and not recently_refreshed
+    is_stale = (use_spot or has_autostop or
+                is_autostopping) and not recently_refreshed
 
     return force_refresh_for_cluster or is_stale
 
