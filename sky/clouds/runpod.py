@@ -341,13 +341,17 @@ class RunPod(clouds.Cloud):
             runpod_utils.list_instances()
             return True, None
         except Exception as e:  # pylint: disable=broad-except
+            from sky.adaptors import runpod
             error_msg = str(e)
-            if 'Unauthorized' in error_msg or 'unauthorized' in error_msg:
+            if isinstance(e, runpod.runpod.error.QueryError):
+                if 'unauthorized' in error_msg.lower():
+                    return False, (
+                        'RunPod API key is invalid or lacks required '
+                        f'permissions. Error: {error_msg}')
                 return False, (
-                    'RunPod API key is invalid or lacks required permissions. '
-                    f'Error: {error_msg}')
-            return False, (
-                f'Failed to verify RunPod API key. Error: {error_msg}')
+                    f'Failed to verify RunPod API key. Error: {error_msg}')
+            return False, ('An unexpected error occurred during RunPod API '
+                           f'key validation. Error: {error_msg}')
 
     @classmethod
     def _check_runpod_credentials(cls, profile: str = 'default'):

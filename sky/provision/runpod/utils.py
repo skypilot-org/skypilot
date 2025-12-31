@@ -95,8 +95,8 @@ def retry(func):
             except runpod.runpod.error.QueryError as e:
                 error_msg = str(e).lower()
                 # Don't retry on authorization errors - these won't recover
-                if ('unauthorized' in error_msg or 'forbidden' in error_msg or
-                        '401' in error_msg or '403' in error_msg):
+                auth_keywords = ['unauthorized', 'forbidden', '401', '403']
+                if any(keyword in error_msg for keyword in auth_keywords):
                     logger.error(f'RunPod authorization error (not retrying): '
                                  f'{common_utils.format_exception(e)}')
                     raise
