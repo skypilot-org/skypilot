@@ -3530,12 +3530,9 @@ class AzureBlobStore(AbstractStore):
             str: a heredoc used to setup the AZ Container mount
         """
         install_cmd = mounting_utils.get_az_mount_install_cmd()
-        mount_cmd = mounting_utils.get_az_mount_cmd(self.container_name,
-                                                    self.storage_account_name,
-                                                    mount_path,
-                                                    self.storage_account_key,
-                                                    self._bucket_sub_path,
-                                                    mount_config)
+        mount_cmd = mounting_utils.get_az_mount_cmd(
+            self.container_name, self.storage_account_name, mount_path,
+            self.storage_account_key, self._bucket_sub_path, mount_config)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
