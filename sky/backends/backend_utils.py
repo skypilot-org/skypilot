@@ -899,9 +899,9 @@ def write_cluster_config(
     if to_provision.labels:
         labels.update(to_provision.labels)
 
-    # Install conda only if:
-    # 1. User explicitly set provision.install_conda to True, AND
-    # 2. Not using a custom docker image.
+    # Install conda if `provision.install_conda` is set to True.
+    # The use of a custom docker image will affect whether `conda init` is run,
+    # which is handled within the installation script.
     install_conda = skypilot_config.get_nested(('provision', 'install_conda'),
                                                False)
 
