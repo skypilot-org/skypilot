@@ -25,6 +25,7 @@ from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.catalog import common as service_catalog_common
+from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
@@ -93,6 +94,51 @@ _MANAGED_JOB_FIELDS_FOR_QUEUE_KUBERNETES = [
 ]
 
 
+def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
+    """Warn if local file mounts or workdir may be lost during rolling update.
+
+    When rolling update is enabled with consolidation mode but no jobs bucket
+    is configured, local file mounts and workdirs are stored locally on the API
+    server pod and will be lost during a rolling update.
+    """
+    # If rolling update is not enabled, don't warn.
+    if os.environ.get(skylet_constants.SKYPILOT_ROLLING_UPDATE_ENABLED) is None:
+        return
+
+    # If consolidation mode is not enabled, don't warn.
+    if not managed_job_utils.is_consolidation_mode():
+        return
+
+    # If a jobs bucket is configured, don't warn.
+    if skypilot_config.get_nested(('jobs', 'bucket'), None) is not None:
+        return
+
+    # Check if any task has local file_mounts (not cloud store URLs) or workdir
+    has_local_file_mounts = False
+    has_local_workdir = False
+    for task_ in dag.tasks:
+        if task_.file_mounts:
+            for src in task_.file_mounts.values():
+                if not data_utils.is_cloud_store_url(src):
+                    has_local_file_mounts = True
+                    break
+        if task_.workdir and isinstance(task_.workdir, str):
+            has_local_workdir = True
+            break
+        if has_local_file_mounts:
+            break
+
+    if not has_local_file_mounts and not has_local_workdir:
+        return
+
+    logger.warning(
+        f'{colorama.Fore.YELLOW}WARNING: Local file mounts or workdir detected '
+        'with rolling update enabled for API server. To persist files'
+        ' across API server restarts/update, use buckets, volumes, or git '
+        'for your file mounts; or, configure a bucket in your SkyPilot config '
+        f'under `jobs.bucket`. {colorama.Style.RESET_ALL}')
+
+
 def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     """Upload files to the controller.
 
@@ -103,14 +149,21 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     """
     local_to_controller_file_mounts: Dict[str, str] = {}
 
-    # For consolidation mode, we don't need to use cloud storage,
-    # as uploading to the controller is only a local copy.
+    # Check if user has explicitly configured a bucket for jobs.
+    # If so, we should use cloud storage even in consolidation mode to persist
+    # files across rolling updates and pod restarts.
+    has_explicit_bucket = skypilot_config.get_nested(('jobs', 'bucket'),
+                                                     None) is not None
     storage_clouds = (
         storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
     force_disable_cloud_bucket = skypilot_config.get_nested(
         ('jobs', 'force_disable_cloud_bucket'), False)
-    if (not managed_job_utils.is_consolidation_mode() and storage_clouds and
-            not force_disable_cloud_bucket):
+    # Use cloud storage if:
+    # 1. Not in consolidation mode, OR
+    # 2. In consolidation mode BUT user has explicit bucket configured
+    # AND storage clouds are available AND cloud bucket is not force-disabled
+    if ((not managed_job_utils.is_consolidation_mode() or has_explicit_bucket)
+            and storage_clouds and not force_disable_cloud_bucket):
         for task_ in dag.tasks:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                 task_, task_type='jobs')
@@ -345,6 +398,9 @@ def launch(
                         'removed, consider removing the cluster from SkyPilot '
                         f'with:\n\n`sky down {cluster_name} --purge`\n\n'
                         f'Reason: {common_utils.format_exception(e)}')
+
+    # Warn if file mounts may be lost during rolling update
+    _warn_file_mounts_rolling_update(dag)
 
     local_to_controller_file_mounts = _upload_files_to_controller(dag)
     controller = controller_utils.Controllers.JOBS_CONTROLLER
@@ -1216,3 +1272,24 @@ def pool_sync_down_logs(
                                replica_ids=worker_ids,
                                tail=tail,
                                pool=True)
+
+
+@usage_lib.entrypoint
+def get_job_events(
+    job_id: int,
+    task_id: Optional[int] = None,
+    limit: Optional[int] = 10,
+) -> List[Dict[str, Any]]:
+    """Get task events for a managed job.
+
+    Args:
+        job_id: The job ID to get task events for.
+        task_id: Optional task ID to filter by.
+        limit: Optional limit on number of task events to return (default 10).
+
+    Returns:
+        List of task event records.
+    """
+    return managed_job_state.get_job_events(job_id=job_id,
+                                            task_id=task_id,
+                                            limit=limit)

@@ -123,6 +123,7 @@ Below is the configuration syntax and some example values. See detailed explanat
       Owner: user-unique-name
     :ref:`vpc_name <config-yaml-aws-vpc-name>`: skypilot-vpc
     :ref:`use_internal_ips <config-yaml-aws-use-internal-ips>`: true
+    :ref:`use_ssm <config-yaml-aws-use-ssm>`: true
     :ref:`ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`security_group_name <config-yaml-aws-security-group-name>`: my-security-group
     :ref:`disk_encrypted <config-yaml-aws-disk-encrypted>`: false
@@ -192,6 +193,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
+
+  :ref:`vast <config-yaml-vast>`:
+    :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
@@ -350,6 +354,24 @@ Example:
     force_disable_cloud_bucket: true
 
 .. _config-yaml-jobs-controller:
+.. _config-yaml-jobs-controller-consolidation-mode:
+
+``jobs.controller.consolidation_mode``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable :ref:`consolidation mode <jobs-consolidation-mode>`, which will run the jobs controller within the remote API server, rather than in a separate sky cluster. Don't enable unless you are using a remotely-deployed API server.
+
+Default: ``false``.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      consolidation_mode: true
+      # any specified resources will be ignored
+
 .. _config-yaml-jobs-controller-resources:
 
 ``jobs.controller.resources``
@@ -660,7 +682,17 @@ Private subnets are defined as those satisfying both of these properties:
      (the ``map_public_ip_on_launch`` attribute is ``false``).
 
 This flag is typically set together with ``vpc_name`` above and
-``ssh_proxy_command`` below.
+``ssh_proxy_command`` or ``use_ssm`` below.
+
+Default: ``false``.
+
+.. _config-yaml-aws-use-ssm:
+
+``aws.use_ssm``
+~~~~~~~~~~~~~~~~
+
+Use SSM to communicate with SkyPilot nodes. This flag is typically set together with ``vpc_name`` and
+``use_internal_ips`` above. This is useful for launching clusters in private VPCs without public IPs, refer to :ref:`aws-ssm` for more details.
 
 Default: ``false``.
 
@@ -1657,6 +1689,26 @@ Example:
   nebius:
     domain: api.nebius.cloud:443
 
+.. _config-yaml-vast:
+
+``vast``
+~~~~~~~~
+
+Advanced Vast configuration (optional).
+
+.. _config-yaml-vast-datacenter-only:
+
+``vast.datacenter_only``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Configure SkyPilot to only consider offers on Vast verified datacenters (optional).
+Internally, this will query Vast with the ``datacenter=true`` and ``hosting_type>=1``
+parameters to filter for professional datacenter-hosted machines. Note some GPUs
+may only be available on non-datacenter offers. This config filters both the catalog
+(during resource planning) and the launch query (during provisioning). This config
+can be overridden per task via :ref:`config flag <config-client-cli-flag>`.
+
+Default: ``false``
 
 .. _config-yaml-rbac:
 

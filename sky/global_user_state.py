@@ -16,7 +16,7 @@ import re
 import threading
 import time
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 import uuid
 
 import sqlalchemy
@@ -1020,8 +1020,46 @@ async def cluster_event_retention_daemon():
         await asyncio.sleep(sleep_amount)
 
 
-def get_cluster_events(cluster_name: Optional[str], cluster_hash: Optional[str],
-                       event_type: ClusterEventType) -> List[str]:
+@typing.overload
+def get_cluster_events(
+    cluster_name: Optional[str],
+    cluster_hash: Optional[str],
+    event_type: ClusterEventType,
+    include_timestamps: Literal[False],
+    limit: Optional[int] = ...,
+) -> List[str]:
+    ...
+
+
+@typing.overload
+def get_cluster_events(
+    cluster_name: Optional[str],
+    cluster_hash: Optional[str],
+    event_type: ClusterEventType,
+    include_timestamps: Literal[True],
+    limit: Optional[int] = ...,
+) -> List[Dict[str, Union[str, int]]]:
+    ...
+
+
+@typing.overload
+def get_cluster_events(
+    cluster_name: Optional[str],
+    cluster_hash: Optional[str],
+    event_type: ClusterEventType,
+    include_timestamps: bool = ...,
+    limit: Optional[int] = ...,
+) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
+    ...
+
+
+def get_cluster_events(
+    cluster_name: Optional[str],
+    cluster_hash: Optional[str],
+    event_type: ClusterEventType,
+    include_timestamps: bool = False,
+    limit: Optional[int] = None
+) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
     """Returns the cluster events for the cluster.
 
     Args:
@@ -1030,22 +1068,44 @@ def get_cluster_events(cluster_name: Optional[str], cluster_hash: Optional[str],
         cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
             is specified.
         event_type: Type of the event.
+        include_timestamps: If True, returns list of dicts with 'reason' and
+            'transitioned_at' fields. If False, returns list of reason strings.
+        limit: If specified, returns at most this many events (most recent).
+            If None, returns all events.
+
+    Returns:
+        If include_timestamps is False: List of reason strings.
+        If include_timestamps is True: List of dicts with 'reason' and
+            'transitioned_at' (unix timestamp) fields.
+        Events are ordered from oldest to newest.
     """
     assert _SQLALCHEMY_ENGINE is not None
 
-    if cluster_name is not None and cluster_hash is not None:
-        raise ValueError('Cannot specify both cluster_name and cluster_hash')
-    if cluster_name is None and cluster_hash is None:
-        raise ValueError('Must specify either cluster_name or cluster_hash')
-    if cluster_name is not None:
-        cluster_hash = _get_hash_for_existing_cluster(cluster_name)
-        if cluster_hash is None:
-            raise ValueError(f'Hash for cluster {cluster_name} not found.')
+    cluster_hash = _resolve_cluster_hash(cluster_hash, cluster_name)
+    if cluster_hash is None:
+        raise ValueError(f'Hash for cluster {cluster_name} not found.')
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(cluster_event_table).filter_by(
-            cluster_hash=cluster_hash, type=event_type.value).order_by(
-                cluster_event_table.c.transitioned_at.asc()).all()
+        if limit is not None:
+            # To get the most recent N events in ASC order, we use a subquery:
+            # 1. Get most recent N events (ORDER BY DESC LIMIT N)
+            # 2. Re-order them by ASC
+            subquery = session.query(cluster_event_table).filter_by(
+                cluster_hash=cluster_hash, type=event_type.value).order_by(
+                    cluster_event_table.c.transitioned_at.desc()).limit(
+                        limit).subquery()
+            rows = session.query(subquery).order_by(
+                subquery.c.transitioned_at.asc()).all()
+        else:
+            rows = session.query(cluster_event_table).filter_by(
+                cluster_hash=cluster_hash, type=event_type.value).order_by(
+                    cluster_event_table.c.transitioned_at.asc()).all()
+
+    if include_timestamps:
+        return [{
+            'reason': row.reason,
+            'transitioned_at': row.transitioned_at
+        } for row in rows]
     return [row.reason for row in rows]
 
 
@@ -1535,6 +1595,38 @@ def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
     if row is None or row.cluster_hash is None:
         return None
     return row.cluster_hash
+
+
+def _resolve_cluster_hash(cluster_hash: Optional[str] = None,
+                          cluster_name: Optional[str] = None) -> Optional[str]:
+    """Resolve cluster_hash from either cluster_hash or cluster_name.
+
+    Validates that exactly one of cluster_hash or cluster_name is provided,
+    then resolves cluster_name to cluster_hash if needed.
+
+    Args:
+        cluster_hash: Direct cluster hash, if known.
+        cluster_name: Cluster name to resolve to hash.
+
+    Returns:
+        The cluster_hash string, or None if cluster_name was provided but
+        the cluster doesn't exist.
+
+    Raises:
+        ValueError: If both or neither of cluster_hash/cluster_name are
+        provided.
+    """
+    if cluster_hash is not None and cluster_name is not None:
+        raise ValueError(f'Cannot specify both cluster_hash ({cluster_hash}) '
+                         f'and cluster_name ({cluster_name})')
+
+    if cluster_hash is None and cluster_name is None:
+        raise ValueError('Must specify either cluster_hash or cluster_name')
+
+    if cluster_name is not None:
+        return _get_hash_for_existing_cluster(cluster_name)
+
+    return cluster_hash
 
 
 @_init_db
@@ -2241,7 +2333,7 @@ def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
             rows = session.query(volume_table).all()
         else:
             rows = session.query(volume_table).filter_by(
-                is_ephemeral=is_ephemeral).all()
+                is_ephemeral=int(is_ephemeral)).all()
     records = []
     for row in rows:
         records.append({
@@ -2253,7 +2345,7 @@ def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
             'last_attached_at': row.last_attached_at,
             'last_use': row.last_use,
             'status': status_lib.VolumeStatus[row.status],
-            'is_ephemeral': row.is_ephemeral,
+            'is_ephemeral': bool(row.is_ephemeral),
         })
     return records
 
@@ -2316,7 +2408,7 @@ def add_volume(
             last_attached_at=last_attached_at,
             last_use=last_use,
             status=status.value,
-            is_ephemeral=is_ephemeral,
+            is_ephemeral=int(is_ephemeral),
         )
         do_update_stmt = insert_stmnt.on_conflict_do_nothing()
         session.execute(do_update_stmt)

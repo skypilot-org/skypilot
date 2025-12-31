@@ -16,11 +16,12 @@ import posixpath
 import re
 import resource
 import shutil
+import socket
 import struct
 import sys
 import threading
 import traceback
-from typing import Dict, List, Literal, Optional, Set, Tuple
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
 
@@ -43,11 +44,13 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.data import storage_utils
+from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
 from sky.provision import metadata_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.slurm import utils as slurm_utils
 from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
 from sky.server import common
@@ -56,6 +59,8 @@ from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics
 from sky.server import middleware_utils
+from sky.server import plugins
+from sky.server import server_utils
 from sky.server import state
 from sky.server import stream_utils
 from sky.server import versions
@@ -80,6 +85,7 @@ from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
+from sky.utils import interactive_utils
 from sky.utils import perf_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -470,7 +476,8 @@ async def schedule_on_boot_check_async():
         await executor.schedule_request_async(
             request_id='skypilot-server-on-boot-check',
             request_name=request_names.RequestName.CHECK,
-            request_body=payloads.CheckBody(),
+            request_body=server_utils.build_body_at_server(
+                request=None, body_type=payloads.CheckBody),
             func=sky_check.check,
             schedule_type=requests_lib.ScheduleType.SHORT,
             is_skypilot_system=True,
@@ -493,7 +500,8 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             await executor.schedule_request_async(
                 request_id=event.id,
                 request_name=event.name,
-                request_body=payloads.RequestBody(),
+                request_body=server_utils.build_body_at_server(
+                    request=None, body_type=payloads.RequestBody),
                 func=event.run_event,
                 schedule_type=requests_lib.ScheduleType.SHORT,
                 is_skypilot_system=True,
@@ -618,6 +626,9 @@ app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
     app.add_middleware(metrics.PrometheusMiddleware)
 app.add_middleware(APIVersionMiddleware)
+# The order of all the authentication-related middleware is important.
+# RBACMiddleware must precede all the auth middleware, so it can access
+# request.state.auth_user.
 app.add_middleware(RBACMiddleware)
 app.add_middleware(InternalDashboardPrefixMiddleware)
 app.add_middleware(GracefulShutdownMiddleware)
@@ -632,10 +643,6 @@ app.add_middleware(
     allow_methods=['*'],
     allow_headers=['*'],
     expose_headers=['X-Skypilot-Request-ID'])
-# The order of all the authentication-related middleware is important.
-# RBACMiddleware must precede all the auth middleware, so it can access
-# request.state.auth_user.
-app.add_middleware(RBACMiddleware)
 # Authentication based on oauth2-proxy.
 app.add_middleware(oauth2_proxy.OAuth2ProxyMiddleware)
 # AuthProxyMiddleware should precede BasicAuthMiddleware and
@@ -653,6 +660,17 @@ app.add_middleware(BearerTokenMiddleware)
 # middleware above.
 app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
+
+# Load plugins after all the middlewares are added, to keep the core
+# middleware stack intact if a plugin adds new middlewares.
+# Note: server.py will be imported twice in server process, once as
+# the top-level entrypoint module and once imported by uvicorn, we only
+# load the plugin when imported by uvicorn for server process.
+# TODO(aylei): move uvicorn app out of the top-level module to avoid
+# duplicate app initialization.
+if __name__ == 'sky.server.server':
+    plugins.load_plugins(plugins.ExtensionContext(app=app))
+
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
 app.include_router(users_rest.router, prefix='/users', tags=['users'])
@@ -747,8 +765,11 @@ async def enabled_clouds(request: fastapi.Request,
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS,
-        request_body=payloads.EnabledCloudsBody(workspace=workspace,
-                                                expand=expand),
+        request_body=server_utils.build_body_at_server(
+            request=request,
+            body_type=payloads.EnabledCloudsBody,
+            workspace=workspace,
+            expand=expand),
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -785,6 +806,35 @@ async def kubernetes_node_info(
     )
 
 
+@app.post('/slurm_gpu_availability')
+async def slurm_gpu_availability(
+    request: fastapi.Request,
+    slurm_gpu_availability_body: payloads.SlurmGpuAvailabilityRequestBody
+) -> None:
+    """Gets real-time Slurm GPU availability."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.REALTIME_SLURM_GPU_AVAILABILITY,
+        request_body=slurm_gpu_availability_body,
+        func=core.realtime_slurm_gpu_availability,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
+@app.get('/slurm_node_info')
+async def slurm_node_info(
+        request: fastapi.Request,
+        slurm_node_info_body: payloads.SlurmNodeInfoRequestBody) -> None:
+    """Gets detailed information for each node in the Slurm cluster."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.SLURM_NODE_INFO,
+        request_body=slurm_node_info_body,
+        func=slurm_utils.slurm_node_info,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
 @app.get('/status_kubernetes')
 async def status_kubernetes(request: fastapi.Request) -> None:
     """[Experimental] Get all SkyPilot resources (including from other '
@@ -792,7 +842,8 @@ async def status_kubernetes(request: fastapi.Request) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STATUS_KUBERNETES,
-        request_body=payloads.RequestBody(),
+        request_body=server_utils.build_body_at_server(
+            request=request, body_type=payloads.RequestBody),
         func=core.status_kubernetes,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -1455,13 +1506,29 @@ async def cost_report(request: fastapi.Request,
     )
 
 
+@app.post('/cluster_events')
+async def cluster_events(
+        request: fastapi.Request,
+        cluster_events_body: payloads.ClusterEventsBody) -> None:
+    """Gets events for a cluster."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.CLUSTER_EVENTS,
+        request_body=cluster_events_body,
+        func=core.get_cluster_events,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        request_cluster_name=cluster_events_body.cluster_name or '',
+    )
+
+
 @app.get('/storage/ls')
 async def storage_ls(request: fastapi.Request) -> None:
     """Gets the storages."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STORAGE_LS,
-        request_body=payloads.RequestBody(),
+        request_body=server_utils.build_body_at_server(
+            request=request, body_type=payloads.RequestBody),
         func=core.storage_ls,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -1753,6 +1820,22 @@ async def api_status(
         return encoded_request_tasks
 
 
+@app.get('/api/plugins', response_class=fastapi_responses.ORJSONResponse)
+async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
+    """Return metadata about loaded backend plugins."""
+    plugin_infos = []
+    for plugin_info in plugins.get_plugins():
+        info = {
+            'js_extension_path': plugin_info.js_extension_path,
+        }
+        for attr in ('name', 'version', 'commit'):
+            value = getattr(plugin_info, attr, None)
+            if value is not None:
+                info[attr] = value
+        plugin_infos.append(info)
+    return {'plugins': plugin_infos}
+
+
 @app.get(
     '/api/health',
     # response_model_exclude_unset omits unset fields
@@ -1844,6 +1927,10 @@ async def kubernetes_pod_ssh_proxy(
         client_version = {client_version}')
 
     # Run core.status in another thread to avoid blocking the event loop.
+    # TODO(aylei): core.status() will be called with server user, which has
+    # permission to all workspaces, this will break workspace isolation.
+    # It is ok for now, as users with limited access will not get the ssh config
+    # for the clusters in non-accessible workspaces.
     with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
         cluster_records = await context_utils.to_thread_with_executor(
             thread_pool_executor, core.status, cluster_name, all_users=True)
@@ -2001,6 +2088,96 @@ async def kubernetes_pod_ssh_proxy(
             pid=os.getpid(), reason=reason).inc()
 
 
+@app.websocket('/ssh-interactive-auth')
+async def ssh_interactive_auth(websocket: fastapi.WebSocket,
+                               session_id: str) -> None:
+    """Proxies PTY for SSH interactive authentication via websocket.
+
+    This endpoint receives a PTY file descriptor from a worker process
+    and bridges it bidirectionally with a websocket connection, allowing
+    the client to handle interactive SSH authentication (e.g., 2FA).
+
+    Detects auth completion by monitoring terminal echo state and data flow.
+    """
+    await websocket.accept()
+    logger.info(f'WebSocket connection accepted for SSH auth session: '
+                f'{session_id}')
+
+    loop = asyncio.get_running_loop()
+
+    # Connect to worker process to receive PTY file descriptor
+    fd_socket_path = interactive_utils.get_pty_socket_path(session_id)
+    fd_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    master_fd = -1
+    try:
+        # Connect to worker's FD-passing socket
+        await loop.sock_connect(fd_sock, fd_socket_path)
+        master_fd = await loop.run_in_executor(None, interactive_utils.recv_fd,
+                                               fd_sock)
+        logger.debug(f'Received PTY master fd {master_fd} for session '
+                     f'{session_id}')
+
+        # Bridge PTY ↔ websocket bidirectionally
+        async def websocket_to_pty():
+            """Forward websocket messages to PTY."""
+            try:
+                async for message in websocket.iter_bytes():
+                    await loop.run_in_executor(None, os.write, master_fd,
+                                               message)
+            except fastapi.WebSocketDisconnect:
+                logger.debug(f'WebSocket disconnected for session {session_id}')
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error in websocket_to_pty: {e}')
+
+        async def pty_to_websocket():
+            """Forward PTY output to websocket and detect auth completion.
+
+            Detects auth completion by monitoring terminal echo state.
+            Echo is disabled during password prompts and enabled after
+            successful authentication. Auth is considered complete when
+            echo has been enabled for a sustained period (1s).
+            """
+            try:
+                while True:
+                    try:
+                        data = await loop.run_in_executor(
+                            None, os.read, master_fd, 4096)
+                    except OSError as e:
+                        logger.error(f'PTY read error (likely closed): {e}')
+                        break
+
+                    if not data:
+                        break
+
+                    await websocket.send_bytes(data)
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error in pty_to_websocket: {e}')
+            finally:
+                try:
+                    await websocket.close()
+                except Exception:  # pylint: disable=broad-except
+                    pass
+
+        await asyncio.gather(websocket_to_pty(), pty_to_websocket())
+
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Error in SSH interactive auth websocket: {e}')
+        raise
+    finally:
+        # Clean up
+        if master_fd >= 0:
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
+        fd_sock.close()
+        logger.debug(f'SSH interactive auth session {session_id} completed')
+
+
 @app.get('/all_contexts')
 async def all_contexts(request: fastapi.Request) -> None:
     """Gets all Kubernetes and SSH node pool contexts."""
@@ -2008,7 +2185,8 @@ async def all_contexts(request: fastapi.Request) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ALL_CONTEXTS,
-        request_body=payloads.RequestBody(),
+        request_body=server_utils.build_body_at_server(
+            request=request, body_type=payloads.RequestBody),
         func=core.get_all_contexts,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -2057,6 +2235,14 @@ async def serve_dashboard(full_path: str):
     file_path = os.path.join(server_constants.DASHBOARD_DIR, full_path)
     if os.path.isfile(file_path):
         return fastapi.responses.FileResponse(file_path)
+
+    # Serve plugin catch-all page for any /plugins/* paths so client-side
+    # routing can bootstrap correctly.
+    if full_path == 'plugins' or full_path.startswith('plugins/'):
+        plugin_catchall = os.path.join(server_constants.DASHBOARD_DIR,
+                                       'plugins', '[...slug].html')
+        if os.path.isfile(plugin_catchall):
+            return fastapi.responses.FileResponse(plugin_catchall)
 
     # Serve index.html for client-side routing
     # e.g. /clusters, /jobs
@@ -2162,6 +2348,9 @@ if __name__ == '__main__':
     # Restore the server user hash
     logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+    logger.info('Initializing permission service')
+    permission.permission_service.initialize()
+    logger.info('Permission service initialized')
 
     max_db_connections = global_user_state.get_max_db_connections()
     logger.info(f'Max db connections: {max_db_connections}')
@@ -2198,6 +2387,9 @@ if __name__ == '__main__':
         global_tasks.append(
             background.create_task(
                 global_user_state.cluster_event_retention_daemon()))
+        global_tasks.append(
+            background.create_task(
+                managed_job_state.job_event_retention_daemon()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)
@@ -2221,6 +2413,8 @@ if __name__ == '__main__':
 
         for gt in global_tasks:
             gt.cancel()
+        for plugin in plugins.get_plugins():
+            plugin.shutdown()
         subprocess_utils.run_in_parallel(lambda worker: worker.cancel(),
                                          workers,
                                          num_threads=len(workers))

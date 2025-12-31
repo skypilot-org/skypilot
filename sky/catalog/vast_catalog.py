@@ -7,13 +7,27 @@ query instance types and pricing information for Vast.ai.
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
+import pandas as pd
+
 from sky.catalog import common
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
 _df = common.read_catalog('vast/vms.csv')
+
+
+def _apply_datacenter_filter(df: pd.DataFrame,
+                             datacenter_only: bool) -> pd.DataFrame:
+    """Filter dataframe by hosting_type if datacenter_only is True.
+
+    hosting_type: 0 = Consumer hosted, 1 = Datacenter hosted
+    """
+    if not datacenter_only or 'HostingType' not in df.columns:
+        return df
+    return df[df['HostingType'] >= 1]
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -48,13 +62,16 @@ def get_vcpus_mem_from_instance_type(
 
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None,
+                              disk_tier: Optional[
+                                  resources_utils.DiskTier] = None,
                               region: Optional[str] = None,
-                              zone: Optional[str] = None) -> Optional[str]:
+                              zone: Optional[str] = None,
+                              datacenter_only: bool = False) -> Optional[str]:
     del disk_tier
     # NOTE: After expanding catalog to multiple entries, you may
     # want to specify a default instance type or family.
-    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory, region,
+    df = _apply_datacenter_filter(_df, datacenter_only)
+    return common.get_instance_type_for_cpus_mem_impl(df, cpus, memory, region,
                                                       zone)
 
 
@@ -70,12 +87,19 @@ def get_instance_type_for_accelerator(
         memory: Optional[str] = None,
         use_spot: bool = False,
         region: Optional[str] = None,
-        zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
-    """Returns a list of instance types that have the given accelerator."""
+        zone: Optional[str] = None,
+        datacenter_only: bool = False) -> Tuple[Optional[List[str]], List[str]]:
+    """Returns a list of instance types that have the given accelerator.
+
+    Args:
+        datacenter_only: If True, only return instances hosted in datacenters
+            (hosting_type >= 1).
+    """
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Vast does not support zones.')
-    return common.get_instance_type_for_accelerator_impl(df=_df,
+    df = _apply_datacenter_filter(_df, datacenter_only)
+    return common.get_instance_type_for_accelerator_impl(df=df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
                                                          cpus=cpus,

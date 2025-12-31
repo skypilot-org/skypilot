@@ -35,12 +35,10 @@ pytest
 pytest-xdist
 pytest-env>=0.6
 pytest-asyncio
+buildkite-test-collector
 
 # memory profiler
 memory_profiler==0.61.0
-
-# For testing SkyServe
-aiohttp==3.9.3
 
 # For mocking AWS
 moto==5.1.2

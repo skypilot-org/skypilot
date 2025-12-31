@@ -189,6 +189,7 @@ def _get_cluster_records_and_set_ssh_config(
         # can still exist in the record, and we check for credentials to avoid
         # updating the SSH config for non-existent clusters.
         credentials = record['credentials']
+        ips = handle.cached_external_ips
         if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
             # Replace the proxy command to proxy through the SkyPilot API
             # server with websocket.
@@ -217,10 +218,44 @@ def _get_cluster_records_and_set_ssh_config(
                 f'{server_common.get_server_url()} '
                 f'{handle.cluster_name}\"')
             credentials['ssh_proxy_command'] = proxy_command
+        elif isinstance(handle.launched_resources.cloud, clouds.Slurm):
+            # TODO(kevin): This is a temporary workaround, ideally we want to
+            # get a shell through srun --pty bash on the existing sbatch job.
+
+            # Proxy through the controller/login node to reach the worker node.
+            if (handle.cached_internal_ips is None or
+                    not handle.cached_internal_ips):
+                logger.debug(
+                    f'Cluster {name} does not have cached internal IPs. '
+                    'Skipping SSH config update.')
+                cluster_utils.SSHConfigHelper.remove_cluster(name)
+                continue
+
+            escaped_key_path = shlex.quote(
+                cluster_utils.SSHConfigHelper.generate_local_key_file(
+                    handle.cluster_name, credentials))
+            controller_host = handle.cached_external_ips[0]
+
+            # Build jump proxy: ssh to worker via controller/login node
+            proxy_command = (f'ssh -tt -i {escaped_key_path} '
+                             '-o StrictHostKeyChecking=no '
+                             '-o UserKnownHostsFile=/dev/null '
+                             '-o IdentitiesOnly=yes '
+                             '-W %h:%p '
+                             f'{handle.ssh_user}@{controller_host}')
+            original_proxy = credentials.get('ssh_proxy_command')
+            if original_proxy:
+                proxy_command += (
+                    f' -o ProxyCommand={shlex.quote(original_proxy)}')
+
+            credentials['ssh_proxy_command'] = proxy_command
+
+            # For Slurm, use the worker's internal IP as the SSH target
+            ips = handle.cached_internal_ips
 
         cluster_utils.SSHConfigHelper.add_cluster(
             handle.cluster_name,
-            handle.cached_external_ips,
+            ips,
             credentials,
             handle.cached_external_ssh_ports,
             handle.docker_user,
@@ -832,7 +867,19 @@ class _NaturalOrderGroup(click.Group):
     """
 
     def list_commands(self, ctx):  # pylint: disable=unused-argument
-        return self.commands.keys()
+        # Preserve definition order but hide aliases (same command object) and
+        # commands explicitly marked as hidden.
+        seen_commands = set()
+        names = []
+        for name, command in self.commands.items():
+            if getattr(command, 'hidden', False):
+                continue
+            command_id = id(command)
+            if command_id in seen_commands:
+                continue
+            seen_commands.add(command_id)
+            names.append(name)
+        return names
 
     @usage_lib.entrypoint('sky.cli', fallback=True)
     def invoke(self, ctx):
@@ -3535,6 +3582,10 @@ def show_gpus(
     maximum quantities of the GPU available on a single node and the real-time
     availability of the GPU across all nodes in the Kubernetes cluster.
 
+    If ``--cloud slurm`` is specified, it will show the maximum quantities of
+    the GPU available on a single node and the real-time availability of the
+    GPU across all nodes in the Slurm cluster.
+
     Definitions of certain fields:
 
     * ``DEVICE_MEM``: Memory of a single device; does not depend on the device
@@ -3590,6 +3641,8 @@ def show_gpus(
     cloud_is_kubernetes = isinstance(
         cloud_obj, clouds.Kubernetes) and not isinstance(cloud_obj, clouds.SSH)
     cloud_is_ssh = isinstance(cloud_obj, clouds.SSH)
+    cloud_is_slurm = isinstance(cloud_obj, clouds.Slurm)
+
     # TODO(romilb): We should move this to the backend.
     kubernetes_autoscaling = skypilot_config.get_effective_region_config(
         cloud='kubernetes',
@@ -3598,6 +3651,7 @@ def show_gpus(
         default_value=None) is not None
     kubernetes_is_enabled = clouds.Kubernetes.canonical_name() in enabled_clouds
     ssh_is_enabled = clouds.SSH.canonical_name() in enabled_clouds
+    slurm_is_enabled = clouds.Slurm.canonical_name() in enabled_clouds
     query_k8s_realtime_gpu = (kubernetes_is_enabled and
                               (cloud_name is None or cloud_is_kubernetes))
     query_ssh_realtime_gpu = (ssh_is_enabled and
@@ -3657,8 +3711,9 @@ def show_gpus(
             raise ValueError(full_err_msg)
         no_permissions_str = '<no permissions>'
         realtime_gpu_infos = []
+        # Stores per-GPU totals as [ready_capacity, available, not_ready].
         total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
-            lambda: [0, 0])
+            lambda: [0, 0, 0])
         all_nodes_info = []
 
         # display an aggregated table for all contexts
@@ -3669,6 +3724,33 @@ def show_gpus(
 
         num_filtered_contexts = 0
 
+        def _count_not_ready_gpus(
+            nodes_info: Optional['models.KubernetesNodesInfo']
+        ) -> Dict[str, int]:
+            """Return counts of GPUs on not ready nodes keyed by GPU type."""
+            not_ready_counts: Dict[str, int] = collections.defaultdict(int)
+            if nodes_info is None:
+                return not_ready_counts
+
+            node_info_dict = getattr(nodes_info, 'node_info_dict', {}) or {}
+            for node_info in node_info_dict.values():
+                accelerator_type = getattr(node_info, 'accelerator_type', None)
+                if not accelerator_type:
+                    continue
+
+                total_info = getattr(node_info, 'total', {})
+                accelerator_count = 0
+                if isinstance(total_info, dict):
+                    accelerator_count = int(
+                        total_info.get('accelerator_count', 0))
+                if accelerator_count <= 0:
+                    continue
+
+                node_is_ready = getattr(node_info, 'is_ready', True)
+                if not node_is_ready:
+                    not_ready_counts[accelerator_type] += accelerator_count
+            return not_ready_counts
+
         if realtime_gpu_availability_lists:
             for (ctx, availability_list) in realtime_gpu_availability_lists:
                 if not _filter_ctx(ctx):
@@ -3678,6 +3760,12 @@ def show_gpus(
                 else:
                     display_ctx = ctx
                 num_filtered_contexts += 1
+                # Collect node info for this context before building tables so
+                # we can exclude GPUs on not ready nodes from the totals.
+                nodes_info = sdk.stream_and_get(
+                    sdk.kubernetes_node_info(context=ctx))
+                context_not_ready_counts = _count_not_ready_gpus(nodes_info)
+
                 realtime_gpu_table = log_utils.create_table(
                     ['GPU', qty_header, 'UTILIZATION'])
                 for realtime_gpu_availability in sorted(availability_list):
@@ -3686,24 +3774,116 @@ def show_gpus(
                     available_qty = (gpu_availability.available
                                      if gpu_availability.available != -1 else
                                      no_permissions_str)
+                    # Exclude GPUs on not ready nodes from capacity counts.
+                    not_ready_count = min(
+                        context_not_ready_counts.get(gpu_availability.gpu, 0),
+                        gpu_availability.capacity)
+                    # Ensure capacity is never below the reported available
+                    # quantity (if available is unknown, treat as 0 for totals).
+                    available_for_totals = max(
+                        gpu_availability.available
+                        if gpu_availability.available != -1 else 0, 0)
+                    effective_capacity = max(
+                        gpu_availability.capacity - not_ready_count,
+                        available_for_totals)
+                    utilization = (
+                        f'{available_qty} of {effective_capacity} free')
+                    if not_ready_count > 0:
+                        utilization += f' ({not_ready_count} not ready)'
                     realtime_gpu_table.add_row([
                         gpu_availability.gpu,
                         _list_to_str(gpu_availability.counts),
-                        f'{available_qty} of {gpu_availability.capacity} free',
+                        utilization,
                     ])
                     gpu = gpu_availability.gpu
-                    capacity = gpu_availability.capacity
                     # we want total, so skip permission denied.
-                    available = max(gpu_availability.available, 0)
-                    if capacity > 0:
-                        total_gpu_info[gpu][0] += capacity
-                        total_gpu_info[gpu][1] += available
+                    if effective_capacity > 0 or not_ready_count > 0:
+                        total_gpu_info[gpu][0] += effective_capacity
+                        total_gpu_info[gpu][1] += available_for_totals
+                        total_gpu_info[gpu][2] += not_ready_count
                 realtime_gpu_infos.append((display_ctx, realtime_gpu_table))
-                # Collect node info for this context
-                nodes_info = sdk.stream_and_get(
-                    sdk.kubernetes_node_info(context=ctx))
                 all_nodes_info.append((display_ctx, nodes_info))
         if num_filtered_contexts > 1:
+            total_realtime_gpu_table = log_utils.create_table(
+                ['GPU', 'UTILIZATION'])
+            for gpu, stats in total_gpu_info.items():
+                not_ready = stats[2]
+                utilization = f'{stats[1]} of {stats[0]} free'
+                if not_ready > 0:
+                    utilization += f' ({not_ready} not ready)'
+                total_realtime_gpu_table.add_row([gpu, utilization])
+        else:
+            total_realtime_gpu_table = None
+
+        return realtime_gpu_infos, total_realtime_gpu_table, all_nodes_info
+
+    def _get_slurm_realtime_gpu_tables(
+        name_filter: Optional[str] = None,
+        quantity_filter: Optional[int] = None
+    ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
+               Optional['prettytable.PrettyTable']]:
+        """Get Slurm GPU availability tables.
+
+        Args:
+            name_filter: Filter GPUs by name.
+            quantity_filter: Filter GPUs by quantity.
+
+        Returns:
+            A tuple of (realtime_gpu_infos, total_realtime_gpu_table).
+        """
+        if quantity_filter:
+            qty_header = 'QTY_FILTER'
+        else:
+            qty_header = 'REQUESTABLE_QTY_PER_NODE'
+
+        realtime_gpu_availability_lists = sdk.stream_and_get(
+            sdk.realtime_slurm_gpu_availability(
+                name_filter=name_filter, quantity_filter=quantity_filter))
+        if not realtime_gpu_availability_lists:
+            err_msg = 'No GPUs found in any Slurm partition. '
+            debug_msg = 'To further debug, run: sky check slurm '
+            if name_filter is not None:
+                gpu_info_msg = f' {name_filter!r}'
+                if quantity_filter is not None:
+                    gpu_info_msg += (' with requested quantity'
+                                     f' {quantity_filter}')
+                err_msg = (f'Resources{gpu_info_msg} not found '
+                           'in any Slurm partition. ')
+                debug_msg = ('To show available accelerators on Slurm,'
+                             ' run: sky show-gpus --cloud slurm ')
+            raise ValueError(err_msg + debug_msg)
+
+        realtime_gpu_infos = []
+        total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
+            lambda: [0, 0])
+
+        for (slurm_cluster,
+             availability_list) in realtime_gpu_availability_lists:
+            realtime_gpu_table = log_utils.create_table(
+                ['GPU', qty_header, 'UTILIZATION'])
+            for realtime_gpu_availability in sorted(availability_list):
+                gpu_availability = models.RealtimeGpuAvailability(
+                    *realtime_gpu_availability)
+                # Use the counts directly from the backend, which are already
+                # generated in powers of 2 (plus any actual maximums)
+                requestable_quantities = gpu_availability.counts
+                realtime_gpu_table.add_row([
+                    gpu_availability.gpu,
+                    _list_to_str(requestable_quantities),
+                    (f'{gpu_availability.available} of '
+                     f'{gpu_availability.capacity} free'),
+                ])
+                gpu = gpu_availability.gpu
+                capacity = gpu_availability.capacity
+                available = gpu_availability.available
+                if capacity > 0:
+                    total_gpu_info[gpu][0] += capacity
+                    total_gpu_info[gpu][1] += available
+            realtime_gpu_infos.append((slurm_cluster, realtime_gpu_table))
+
+        # display an aggregated table for all partitions
+        # if there are more than one partitions with GPUs
+        if len(realtime_gpu_infos) > 1:
             total_realtime_gpu_table = log_utils.create_table(
                 ['GPU', 'UTILIZATION'])
             for gpu, stats in total_gpu_info.items():
@@ -3712,14 +3892,16 @@ def show_gpus(
         else:
             total_realtime_gpu_table = None
 
-        return realtime_gpu_infos, total_realtime_gpu_table, all_nodes_info
+        return realtime_gpu_infos, total_realtime_gpu_table
 
     def _format_kubernetes_node_info_combined(
             contexts_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
             cloud_str: str = 'Kubernetes',
             context_title_str: str = 'CONTEXT') -> str:
-        node_table = log_utils.create_table(
-            [context_title_str, 'NODE', 'GPU', 'UTILIZATION'])
+        node_table = log_utils.create_table([
+            context_title_str, 'NODE', 'vCPU', 'Memory (GB)', 'GPU',
+            'GPU UTILIZATION'
+        ])
 
         no_permissions_str = '<no permissions>'
         hints = []
@@ -3736,10 +3918,56 @@ def show_gpus(
                 acc_type = node_info.accelerator_type
                 if acc_type is None:
                     acc_type = '-'
+
+                # Format CPU and memory: "X of Y free" or just "Y" if
+                # free is unknown
+                cpu_str = '-'
+                if node_info.cpu_count is not None:
+                    cpu_total_str = common_utils.format_float(
+                        node_info.cpu_count, precision=0)
+
+                    # Check if we have free CPU info (use hasattr to
+                    # check if field exists, then access directly)
+                    cpu_free = None
+                    if hasattr(node_info, 'cpu_free'):
+                        cpu_free = node_info.cpu_free
+                    if cpu_free is not None:
+                        cpu_free_str = common_utils.format_float(cpu_free,
+                                                                 precision=0)
+                        cpu_str = f'{cpu_free_str} of {cpu_total_str} free'
+                    else:
+                        cpu_str = cpu_total_str
+
+                memory_str = '-'
+                if node_info.memory_gb is not None:
+                    memory_total_str = common_utils.format_float(
+                        node_info.memory_gb, precision=0)
+
+                    # Check if we have free memory info (use hasattr
+                    # to check if field exists, then access directly)
+                    memory_free_gb = None
+                    if hasattr(node_info, 'memory_free_gb'):
+                        memory_free_gb = node_info.memory_free_gb
+                    if memory_free_gb is not None:
+                        memory_free_str = common_utils.format_float(
+                            memory_free_gb, precision=0)
+                        memory_str = (
+                            f'{memory_free_str} of {memory_total_str} free')
+                    else:
+                        memory_str = memory_total_str
+
+                utilization_str = (
+                    f'{available} of '
+                    f'{node_info.total["accelerator_count"]} free')
+                # Check if node is ready (defaults to True for backward
+                # compatibility with older server versions)
+                node_is_ready = getattr(node_info, 'is_ready', True)
+                if not node_is_ready:
+                    utilization_str += ' (Node NotReady)'
+
                 node_table.add_row([
-                    context_name, node_name, acc_type,
-                    f'{available} of {node_info.total["accelerator_count"]} '
-                    'free'
+                    context_name, node_name, cpu_str, memory_str, acc_type,
+                    utilization_str
                 ])
 
         k8s_per_node_acc_message = (f'{cloud_str} per-node GPU availability')
@@ -3748,6 +3976,42 @@ def show_gpus(
 
         return (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                 f'{k8s_per_node_acc_message}'
+                f'{colorama.Style.RESET_ALL}\n'
+                f'{node_table.get_string()}')
+
+    def _format_slurm_node_info(slurm_cluster_names: List[str]) -> str:
+        node_table = log_utils.create_table([
+            'CLUSTER',
+            'NODE',
+            'PARTITION',
+            'STATE',
+            'GPU',
+            'UTILIZATION',
+        ])
+
+        request_ids = [(cluster_name,
+                        sdk.slurm_node_info(slurm_cluster_name=cluster_name))
+                       for cluster_name in slurm_cluster_names]
+
+        for cluster_name, request_id in request_ids:
+            nodes_info = sdk.stream_and_get(request_id)
+
+            for node_info in nodes_info:
+                node_table.add_row([
+                    cluster_name,
+                    node_info.get('node_name'),
+                    node_info.get('partition', '-'),
+                    node_info.get('node_state'),
+                    node_info.get('gpu_type') or '',
+                    (f'{node_info.get("free_gpus", 0)} of '
+                     f'{node_info.get("total_gpus", 0)} free'),
+                ])
+
+        slurm_per_node_msg = 'Slurm per node accelerator availability'
+        # Optional: Add hint message if needed, similar to k8s
+
+        return (f'{colorama.Fore.LIGHTMAGENTA_EX}{colorama.Style.NORMAL}'
+                f'{slurm_per_node_msg}'
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
 
@@ -3880,6 +4144,29 @@ def show_gpus(
                 return True, print_section_titles
         return False, print_section_titles
 
+    def _format_slurm_realtime_gpu(
+            total_table, slurm_realtime_infos,
+            show_node_info: bool) -> Generator[str, None, None]:
+        # print total table
+        yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
+               'Slurm GPUs'
+               f'{colorama.Style.RESET_ALL}\n')
+        if total_table is not None:
+            yield from total_table.get_string()
+            yield '\n'
+
+        # print individual infos.
+        for (partition, slurm_realtime_table) in slurm_realtime_infos:
+            partition_str = f'Slurm Cluster: {partition}'
+            yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'{partition_str}'
+                   f'{colorama.Style.RESET_ALL}\n')
+            yield from slurm_realtime_table.get_string()
+            yield '\n'
+        if show_node_info:
+            cluster_names = [cluster for cluster, _ in slurm_realtime_infos]
+            yield _format_slurm_node_info(cluster_names)
+
     def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(
             ['COMMON_GPU', 'AVAILABLE_QUANTITIES'])
@@ -3897,10 +4184,12 @@ def show_gpus(
         if cloud_name is None:
             clouds_to_list = [
                 c for c in constants.ALL_CLOUDS
-                if c != 'kubernetes' and c != 'ssh'
+                if c != 'kubernetes' and c != 'ssh' and c != 'slurm'
             ]
 
         k8s_messages = ''
+        slurm_messages = ''
+        k8s_printed = False
         if accelerator_str is None:
             # Collect k8s related messages in k8s_messages and print them at end
             print_section_titles = False
@@ -3912,6 +4201,7 @@ def show_gpus(
                     yield '\n\n'
                 stop_iter_one, print_section_titles_one, k8s_messages_one = (
                     yield from _possibly_show_k8s_like_realtime(is_ssh))
+                k8s_printed = True
                 stop_iter = stop_iter or stop_iter_one
                 print_section_titles = (print_section_titles or
                                         print_section_titles_one)
@@ -3919,11 +4209,45 @@ def show_gpus(
                 prev_print_section_titles = print_section_titles_one
             if stop_iter:
                 return
+            # If cloud is slurm, we want to show real-time capacity
+            if slurm_is_enabled and (cloud_name is None or cloud_is_slurm):
+                try:
+                    # If --cloud slurm is not specified, we want to catch
+                    # the case where no GPUs are available on the cluster and
+                    # print the warning at the end.
+                    slurm_realtime_infos, total_table = (
+                        _get_slurm_realtime_gpu_tables())
+                except ValueError as e:
+                    if not cloud_is_slurm:
+                        # Make it a note if cloud is not slurm
+                        slurm_messages += 'Note: '
+                    slurm_messages += str(e)
+                else:
+                    print_section_titles = True
+                    if k8s_printed:
+                        yield '\n'
+
+                    yield from _format_slurm_realtime_gpu(total_table,
+                                                          slurm_realtime_infos,
+                                                          show_node_info=True)
+
+            if cloud_is_slurm:
+                # Do not show clouds if --cloud slurm is specified
+                if not slurm_is_enabled:
+                    yield ('Slurm is not enabled. To fix, run: '
+                           'sky check slurm ')
+                yield slurm_messages
+                return
 
             # For show_all, show the k8s message at the start since output is
             # long and the user may not scroll to the end.
-            if show_all and k8s_messages:
-                yield k8s_messages
+            if show_all and (k8s_messages or slurm_messages):
+                if k8s_messages:
+                    yield k8s_messages
+                if slurm_messages:
+                    if k8s_messages:
+                        yield '\n'
+                    yield slurm_messages
                 yield '\n\n'
 
             list_accelerator_counts_result = sdk.stream_and_get(
@@ -3971,9 +4295,10 @@ def show_gpus(
             else:
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
-                if k8s_messages:
+                if k8s_messages or slurm_messages:
                     yield '\n'
                     yield k8s_messages
+                    yield slurm_messages
                 return
         else:
             # Parse accelerator string
@@ -4013,6 +4338,31 @@ def show_gpus(
         if stop_iter:
             return
 
+        # Handle Slurm filtering by name and quantity
+        if (slurm_is_enabled and (cloud_name is None or cloud_is_slurm) and
+                not show_all):
+            # Print section title if not showing all and instead a specific
+            # accelerator is requested
+            print_section_titles = True
+            try:
+                slurm_realtime_infos, total_table = (
+                    _get_slurm_realtime_gpu_tables(name_filter=name,
+                                                   quantity_filter=quantity))
+
+                yield from _format_slurm_realtime_gpu(total_table,
+                                                      slurm_realtime_infos,
+                                                      show_node_info=False)
+            except ValueError as e:
+                # In the case of a specific accelerator, show the error message
+                # immediately (e.g., "Resources A10G not found ...")
+                yield str(e)
+            yield slurm_messages
+        if cloud_is_slurm:
+            # Do not show clouds if --cloud slurm is specified
+            if not slurm_is_enabled:
+                yield ('Slurm is not enabled. To fix, run: '
+                       'sky check slurm ')
+            return
         # For clouds other than Kubernetes, get the accelerator details
         # Case-sensitive
         list_accelerators_result = sdk.stream_and_get(
@@ -4398,6 +4748,13 @@ def volumes_ls(verbose: bool):
               is_flag=True,
               required=False,
               help='Delete all volumes.')
+@click.option('--purge',
+              '-p',
+              default=False,
+              is_flag=True,
+              required=False,
+              help=('Forcibly delete the volume from the volumes table even '
+                    'if the deletion API fails.'))
 @click.option('--yes',
               '-y',
               default=False,
@@ -4406,7 +4763,12 @@ def volumes_ls(verbose: bool):
               help='Skip confirmation prompt.')
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
-def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  # pylint: disable=redefined-builtin
+def volumes_delete(
+        names: List[str],
+        all: bool,  # pylint: disable=redefined-builtin
+        purge: bool,
+        yes: bool,
+        async_call: bool):
     """Delete volumes.
 
     Examples:
@@ -4421,6 +4783,9 @@ def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
         \b
         # Delete all volumes.
         sky volumes delete -a
+        \b
+        # Forcibly delete a volume.
+        sky volumes delete pvc1 -p
     """
     if sum([bool(names), all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
@@ -4447,8 +4812,8 @@ def volumes_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
                 show_default=True)
 
         try:
-            _async_call_or_wait(volumes_sdk.delete(names), async_call,
-                                'sky.volumes.delete')
+            _async_call_or_wait(volumes_sdk.delete(names, purge=purge),
+                                async_call, 'sky.volumes.delete')
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'{colorama.Fore.RED}Error deleting volumes {names}: '
                          f'{str(e)}{colorama.Style.RESET_ALL}')
@@ -5120,9 +5485,14 @@ def jobs_pool_apply(
 @flags.config_option(expose_value=False)
 @flags.verbose_option()
 @click.argument('pool_names', required=False, type=str, nargs=-1)
+@click.option('--all',
+              '-a',
+              'show_all',
+              is_flag=True,
+              default=False,
+              help='Show all workers.')
 @usage_lib.entrypoint
-# pylint: disable=redefined-builtin
-def jobs_pool_status(verbose: bool, pool_names: List[str]):
+def jobs_pool_status(verbose: bool, pool_names: List[str], show_all: bool):
     """Show statuses of pools.
 
     Show detailed statuses of one or more pools. If POOL_NAME is not
@@ -5135,7 +5505,7 @@ def jobs_pool_status(verbose: bool, pool_names: List[str]):
         pool_status_request_id = managed_jobs.pool_status(pool_names_to_query)
         _, msg = _handle_services_request(pool_status_request_id,
                                           service_names=pool_names_to_query,
-                                          show_all=verbose,
+                                          show_all=verbose or show_all,
                                           show_endpoint=False,
                                           pool=True,
                                           is_called_by_user=True)
@@ -6438,9 +6808,11 @@ def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
             if not verbose:
                 r_id = common_utils.truncate_long_string(r_id, 36)
             req_status = requests.RequestStatus(request.status)
-            row = [r_id, request.user_name, request.name]
+            user_display = status_utils.get_user_display_name(
+                request.user_name or '-', request.user_id)
+            row = [r_id, user_display, request.name]
             if verbose:
-                row.append(request.cluster_name)
+                row.append(request.cluster_name or '-')
             row.extend([
                 log_utils.readable_time_duration(request.created_at),
                 req_status.colored_str()

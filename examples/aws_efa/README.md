@@ -69,7 +69,7 @@ This section is important for EFA integration:
   - `requests.vpc.amazonaws.com/efa: 4`: Requests 4 EFA devices for the Pod
 
 
-The `vpc.amazonaws.com/efa` resource type is exposed by the AWS EFA device plugin in Kubernetes. 
+The `vpc.amazonaws.com/efa` resource type is exposed by the AWS EFA device plugin in Kubernetes.
 To see how many EFA are available for each instance types that have EFA, see the [Network cards](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-eni.html#network-cards) list in the Amazon EC2 User Guide.
 
 Check the following table for the GPU and EFA count mapping for AWS instance types:
@@ -192,6 +192,28 @@ sky launch -c efa efa_vm.yaml
 ```
 
 Check the [`efa_vm.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/efa_vm.yaml) for the complete SkyPilot cluster yaml configurations.
+
+> **NOTE:** For VMs that support multiple EFA interfaces (e.g., `p4d.24xlarge` with 4 EFA interfaces), you must configure SkyPilot to use internal IPs to access all EFA interfaces.
+>
+> Add the following configuration to `~/.sky/config.yaml`:
+>
+> **Option 1: Using SSH proxy**
+> ```yaml
+> aws:
+>   use_internal_ips: true
+>   vpc_name: <vpc name>
+>   ssh_proxy_command: ssh -W %h:%p -i <ssh key path> -o StrictHostKeyChecking=no <user>@<jump server public ip>
+> ```
+>
+> **Option 2: Using AWS Systems Manager (SSM) Session Manager**
+> ```yaml
+> aws:
+>   use_internal_ips: true
+>   vpc_name: <vpc name>
+>   use_ssm: true
+> ```
+>
+> For more details, refer to the [configuration documentation](https://docs.skypilot.co/en/latest/reference/config.html#aws-use-internal-ips).
 
 ### Benchmark results
 

@@ -57,15 +57,9 @@ from sky.utils import controller_utils
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet and storage mounting yet.
 def test_file_mounts(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
-    extra_flags = ''
-    if generic_cloud in 'kubernetes':
-        # Kubernetes does not support multi-node
-        # NOTE: S3 mounting now works on all architectures including ARM64
-        #  (uses rclone fallback for ARM64, goofys for x86_64).
-        extra_flags = '--num-nodes 1'
     test_commands = [
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-        f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {extra_flags} examples/using_file_mounts.yaml',
+        f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/using_file_mounts.yaml',
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
     ]
     test = smoke_tests_utils.Test(

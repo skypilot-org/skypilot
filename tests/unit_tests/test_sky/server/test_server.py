@@ -10,8 +10,10 @@ import fastapi
 import pytest
 import uvicorn
 
+from sky import models
 from sky.server import server
 from sky.server.requests import executor
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 
@@ -273,3 +275,29 @@ def test_server_run_uses_uvloop(mock_asyncio_run, mock_hijack_sys_attrs):
             "is available")
     else:
         pytest.skip("uvloop not available, skipping uvloop policy check")
+
+
+@pytest.mark.asyncio
+async def test_enabled_clouds_respect_auth_user():
+    auth_user = models.User(id='auth-user-id', name='Auth User')
+    request = mock.MagicMock()
+    request.state = mock.MagicMock()
+    request.state.request_id = 'request-id'
+    request.state.auth_user = auth_user
+
+    default_env_vars = {
+        constants.USER_ID_ENV_VAR: 'default-id',
+        constants.USER_ENV_VAR: 'default-name',
+    }
+
+    with mock.patch('sky.server.requests.payloads.request_body_env_vars',
+                    side_effect=lambda: default_env_vars.copy()), \
+         mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        await server.enabled_clouds(request, workspace='ws', expand=True)
+
+    mock_schedule.assert_awaited_once()
+    _, kwargs = mock_schedule.call_args
+    request_body = kwargs['request_body']
+    assert request_body.env_vars[constants.USER_ID_ENV_VAR] == auth_user.id
+    assert request_body.env_vars[constants.USER_ENV_VAR] == auth_user.name
