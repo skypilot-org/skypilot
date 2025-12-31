@@ -548,14 +548,14 @@ def get_mount_cached_cmd(
         # interval allows for faster detection of new or updated files on the
         # remote, but increases the frequency of metadata lookups.
         f'--allow-other --vfs-cache-mode full --dir-cache-time 10s '
-        f'{readonly_flag}'
+        f'{readonly_flag}{transfers_flag}'
         # '--transfers 1' guarantees the files written at the local mount point
         # to be uploaded to the backend storage in the order of creation.
         # '--vfs-cache-poll-interval' specifies the frequency of how often
         # rclone checks the local mount point for stale objects in cache.
         # '--vfs-write-back' defines the time to write files on remote storage
         # after last use of the file in local mountpoint.
-        f'{transfers_flag}--vfs-cache-poll-interval 10s --vfs-write-back 1s '
+        '--vfs-cache-poll-interval 10s --vfs-write-back 1s '
         # Have rclone evict files if the cache size exceeds 10G.
         # This is to prevent cache from growing too large and
         # using up all the disk space. Note that files that opened
