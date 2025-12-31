@@ -1,3 +1,11 @@
+{% macro render_custom_resources(k8s_custom_resources, indent=0) -%}
+{% if k8s_custom_resources is not none %}
+{% for key, value in k8s_custom_resources.items() %}
+{{ ' ' * indent }}{{key}}: {{value}}
+{% endfor %}
+{% endif %}
+{%- endmacro %}
+
 cluster_name: {{cluster_name_on_cloud}}
 
 # The maximum number of workers nodes to launch in addition to the head
@@ -1171,11 +1179,7 @@ available_node_types:
               {% if k8s_network_type == 'coreweave' %}
               rdma/ib: 1
               {% endif %}
-              {% if k8s_custom_resources is not none %}
-              {% for key, value in k8s_custom_resources.items() %}
-              {{key}}: {{value}}
-              {% endfor %}
-              {% endif %}
+              {{ render_custom_resources(k8s_custom_resources, indent=14) }}
             {% if k8s_resource_key is not none or k8s_custom_resources is not none %}
             limits:
               # Limits need to be defined for GPU/TPU requests
@@ -1185,11 +1189,7 @@ available_node_types:
               {% if k8s_network_type == 'coreweave' %}
               rdma/ib: 1
               {% endif %}
-              {% if k8s_custom_resources is not none %}
-              {% for key, value in k8s_custom_resources.items() %}
-              {{key}}: {{value}}
-              {% endfor %}
-              {% endif %}
+              {{ render_custom_resources(k8s_custom_resources, indent=14) }}
             {% endif %}
           {% if k8s_ipc_lock_capability %}
           securityContext:

@@ -652,7 +652,8 @@ class Kubernetes(clouds.Cloud):
                 network_env_vars = network_type.get_network_env_vars()
                 k8s_env_vars.update(network_env_vars)
                 if network_type == KubernetesHighPerformanceNetworkType.AWS_EFA:
-                    user_custom_resources = resources.custom_properties or {}
+                    user_custom_resources = ((resources.custom_resources or
+                                              {}).copy())
                     if _CUSTOM_EFA_RESOURCE_KEY not in user_custom_resources:
                         user_custom_resources[_CUSTOM_EFA_RESOURCE_KEY] = 1
 
@@ -1174,13 +1175,12 @@ class Kubernetes(clouds.Cloud):
         try:
             nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
             for node in nodes:
+                if (node.status and node.status.allocatable and
+                        _CUSTOM_EFA_RESOURCE_KEY in node.status.allocatable):
+                    return (KubernetesHighPerformanceNetworkType.AWS_EFA, '')
                 if node.metadata.labels:
                     # Check for Nebius clusters
                     for label_key, _ in node.metadata.labels.items():
-                        if label_key.startswith('k8s.io/cloud-provider-aws'):
-                            return (
-                                KubernetesHighPerformanceNetworkType.AWS_EFA,
-                                '')
                         if label_key.startswith('nebius.com/'):
                             return (KubernetesHighPerformanceNetworkType.NEBIUS,
                                     '')

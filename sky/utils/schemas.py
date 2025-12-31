@@ -386,6 +386,9 @@ def _get_single_resources_schema():
             '_cluster_config_overrides': {
                 'type': 'object',
             },
+            'custom_resources': {
+                'type': 'object',
+            },
         }
     }
 
@@ -409,7 +412,7 @@ def get_resources_schema():
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
         'required': [],
-        'additionalProperties': True,
+        'additionalProperties': False,
         'properties': {
             **single_resources_schema,
             # We redefine the 'accelerators' field to allow one line list or
