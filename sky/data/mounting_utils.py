@@ -17,7 +17,7 @@ if typing.TYPE_CHECKING:
 
 
 def _get_readonly_flags(mount_config: Optional['storage.MountConfig']) -> tuple:
-    """Returns (rclone_flag, goofys_flag) for readonly mounting."""
+    """Returns (rclone_flag, fuse_ro_flag) for readonly mounting."""
     readonly = mount_config.readonly if mount_config else False
     return ('--read-only ' if readonly else '', '-o ro ' if readonly else '')
 
@@ -115,14 +115,14 @@ def get_s3_mount_cmd(
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
 
-    rclone_ro, goofys_ro = _get_readonly_flags(mount_config)
+    rclone_ro, fuse_ro = _get_readonly_flags(mount_config)
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
         f'{FUSE3_INSTALL_CMD} && '
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
         f'--daemon --allow-other --s3-env-auth=true {rclone_ro}')
-    goofys_mount = (f'{_GOOFYS_WRAPPER} -o allow_other {goofys_ro}'
+    goofys_mount = (f'{_GOOFYS_WRAPPER} -o allow_other {fuse_ro}'
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                     f'{bucket_name}{_bucket_sub_path} {mount_path}')
@@ -150,7 +150,7 @@ def get_nebius_mount_cmd(
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
 
-    rclone_ro, goofys_ro = _get_readonly_flags(mount_config)
+    rclone_ro, fuse_ro = _get_readonly_flags(mount_config)
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
         f'{FUSE3_INSTALL_CMD} && '
@@ -159,7 +159,7 @@ def get_nebius_mount_cmd(
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
         f'--s3-endpoint {endpoint_url} --daemon --allow-other {rclone_ro}')
     goofys_mount = (f'AWS_PROFILE={nebius_profile_name} {_GOOFYS_WRAPPER} '
-                    f'-o allow_other {goofys_ro}'
+                    f'-o allow_other {fuse_ro}'
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                     f'--endpoint {endpoint_url} '
@@ -188,7 +188,7 @@ def get_coreweave_mount_cmd(
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
 
-    rclone_ro, goofys_ro = _get_readonly_flags(mount_config)
+    rclone_ro, fuse_ro = _get_readonly_flags(mount_config)
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
         f'{FUSE3_INSTALL_CMD} && '
@@ -200,7 +200,7 @@ def get_coreweave_mount_cmd(
         f'--s3-endpoint {endpoint_url} --daemon --allow-other {rclone_ro}')
     goofys_mount = (f'AWS_SHARED_CREDENTIALS_FILE={cw_credentials_path} '
                     f'AWS_PROFILE={coreweave_profile_name} {_GOOFYS_WRAPPER} '
-                    f'-o allow_other {goofys_ro}'
+                    f'-o allow_other {fuse_ro}'
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                     f'--subdomain '
@@ -242,10 +242,10 @@ def get_gcs_mount_cmd(
     bucket_sub_path_arg = f'--only-dir {_bucket_sub_path} '\
         if _bucket_sub_path else ''
     log_file = '$(mktemp -t gcsfuse.XXXX.log)'
-    _, goofys_ro = _get_readonly_flags(mount_config)
+    _, fuse_ro = _get_readonly_flags(mount_config)
     mount_cmd = (f'gcsfuse --log-file {log_file} '
                  '--debug_fuse_errors '
-                 f'-o allow_other {goofys_ro}'
+                 f'-o allow_other {fuse_ro}'
                  '--implicit-dirs '
                  f'--stat-cache-capacity {_STAT_CACHE_CAPACITY} '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
@@ -430,7 +430,7 @@ def get_r2_mount_cmd(
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
 
-    rclone_ro, goofys_ro = _get_readonly_flags(mount_config)
+    rclone_ro, fuse_ro = _get_readonly_flags(mount_config)
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
         f'{FUSE3_INSTALL_CMD} && '
@@ -441,7 +441,7 @@ def get_r2_mount_cmd(
         f'--s3-endpoint {endpoint_url} --daemon --allow-other {rclone_ro}')
     goofys_mount = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
                     f'AWS_PROFILE={r2_profile_name} {_GOOFYS_WRAPPER} '
-                    f'-o allow_other {goofys_ro}'
+                    f'-o allow_other {fuse_ro}'
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                     f'--endpoint {endpoint_url} '
@@ -515,9 +515,7 @@ def get_mount_cached_cmd(
     create_log_cmd = (f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} && '
                       f'touch {log_file_path}')
 
-    readonly_flag = ''
-    if mount_config is not None and mount_config.readonly:
-        readonly_flag = '--read-only '
+    readonly_flag, _ = _get_readonly_flags(mount_config)
 
     # Determine sequential_upload: per-bucket config overrides global config
     # Global config default is False (parallel uploads)
@@ -544,7 +542,8 @@ def get_mount_cached_cmd(
         # rclone checks the remote storage for changes again. A shorter
         # interval allows for faster detection of new or updated files on the
         # remote, but increases the frequency of metadata lookups.
-        f'--allow-other --vfs-cache-mode full --dir-cache-time 10s {readonly_flag}'
+        f'--allow-other --vfs-cache-mode full --dir-cache-time 10s '
+        f'{readonly_flag}'
         # '--transfers 1' guarantees the files written at the local mount point
         # to be uploaded to the backend storage in the order of creation.
         # '--vfs-cache-poll-interval' specifies the frequency of how often
