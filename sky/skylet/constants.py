@@ -59,11 +59,11 @@ SKY_REMOTE_RAY_VERSION = '2.9.3'
 # TODO(zhwu): Switch -C $HOME to PYTHONSAFEPATH=1, once we moved our runtime to
 # Python 3.11 for a more robust setup.
 SKY_UNSET_PYTHONPATH_AND_SET_CWD = 'env -u PYTHONPATH -C $HOME'
-# We store the absolute path of the python executable (/opt/conda/bin/python3)
+# We store the absolute path of the python executable (~/skypilot-runtime/bin/python)
 # in this file, so that any future internal commands that need to use python
 # can use this path. This is useful for the case where the user has a custom
-# conda environment as a default environment, which is not the same as the one
-# used for installing SkyPilot runtime (ray and skypilot).
+# conda/virtual environment as a default environment, which is not the same as
+# the one used for installing SkyPilot runtime (ray and skypilot).
 SKY_PYTHON_PATH_FILE = f'{SKY_RUNTIME_DIR}/.sky/python_path'
 SKY_RAY_PATH_FILE = f'{SKY_RUNTIME_DIR}/.sky/ray_path'
 SKY_GET_PYTHON_PATH_CMD = (f'[ -s {SKY_PYTHON_PATH_FILE} ] && '

@@ -900,7 +900,7 @@ def write_cluster_config(
         labels.update(to_provision.labels)
 
     # Install conda if `provision.install_conda` is set to True.
-    # The use of a custom docker image will affect whether `conda init` is run,
+    # The use of a custom docker image will affect whether conda activation is run,
     # which is handled within the installation script.
     install_conda = skypilot_config.get_nested(('provision', 'install_conda'),
                                                False)
