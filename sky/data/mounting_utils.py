@@ -23,7 +23,7 @@ def _get_readonly_flags(mount_config: Optional['storage.MountConfig']) -> tuple:
     with -o flag (e.g., -o allow_other,ro). The fuse_ro_flag is returned as
     ',ro' to be appended to existing -o options.
     """
-    readonly = mount_config.readonly if mount_config else False
+    readonly = getattr(mount_config, 'readonly', False)
     return ('--read-only ' if readonly else '', ',ro' if readonly else '')
 
 
