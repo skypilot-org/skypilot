@@ -665,8 +665,6 @@ def srun_sshd_command(
         '-o',
         'PubkeyAuthentication=yes',
         '-o',
-        'StrictModes=no',
-        '-o',
         # If UsePAM is enabled, we will not be able to run sshd(8)
         # as a non-root user.
         # See https://man7.org/linux/man-pages/man5/sshd_config.5.html
