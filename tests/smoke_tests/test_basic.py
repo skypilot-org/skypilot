@@ -1770,17 +1770,22 @@ def test_cancel_logs_request(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.kubernetes
-def test_kubernetes_ssh_proxy_connection():
-    """Test Kubernetes SSH proxy connection.
+@pytest.mark.no_aws
+@pytest.mark.no_gcp
+@pytest.mark.no_nebius
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_runpod
+@pytest.mark.no_azure
+def test_kubernetes_slurm_ssh_proxy_connection(generic_cloud: str):
+    """Test Kubernetes/Slurm SSH proxy connection.
     """
     cluster_name = smoke_tests_utils.get_cluster_name()
 
     test = smoke_tests_utils.Test(
         'kubernetes_ssh_proxy_connection',
         [
-            # Launch a minimal Kubernetes cluster for SSH proxy testing
-            f'sky launch -y -c {cluster_name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH test cluster ready"',
+            # Launch a minimal Kubernetes/Slurm cluster for SSH proxy testing
+            f'sky launch -y -c {cluster_name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH test cluster ready"',
             # Run an SSH command on the cluster.
             f'ssh {cluster_name} echo "SSH command executed"',
         ],
