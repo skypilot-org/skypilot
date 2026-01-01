@@ -3459,7 +3459,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ssh_user=handle.ssh_user,
                 docker_user=handle.docker_user)
             cluster_utils.SSHConfigHelper.add_cluster(
-                handle.cluster_name, handle.cached_external_ips, auth_config,
+                handle.cluster_name, handle.cluster_name_on_cloud,
+                handle.cached_external_ips, auth_config,
                 handle.cached_external_ssh_ports, handle.docker_user,
                 handle.ssh_user)
 
