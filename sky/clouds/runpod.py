@@ -7,6 +7,7 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -342,18 +343,17 @@ class RunPod(clouds.Cloud):
             return True, None
         except Exception as e:  # pylint: disable=broad-except
             from sky.adaptors import runpod
-            error_msg = str(e)
+            error_msg = common_utils.format_exception(e, use_bracket=True)
             if isinstance(e, runpod.runpod.error.QueryError):
-                error_msg_lower = error_msg.lower()
+                error_msg_lower = str(e).lower()
                 auth_keywords = ['unauthorized', 'forbidden', '401', '403']
                 if any(keyword in error_msg_lower for keyword in auth_keywords):
                     return False, (
                         'RunPod API key is invalid or lacks required '
-                        f'permissions. Error: {error_msg}')
-                return False, (
-                    f'Failed to verify RunPod API key. Error: {error_msg}')
+                        f'permissions. {error_msg}')
+                return False, (f'Failed to verify RunPod API key. {error_msg}')
             return False, ('An unexpected error occurred during RunPod API '
-                           f'key validation. Error: {error_msg}')
+                           f'key validation. {error_msg}')
 
     @classmethod
     def _check_runpod_credentials(cls, profile: str = 'default'):
