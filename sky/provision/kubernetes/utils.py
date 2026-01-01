@@ -1331,12 +1331,20 @@ class V1Pod:
 
 
 @_retry_on_error(resource_type='pod')
-def get_allocated_gpu_qty_by_node(
+def get_allocated_resources_by_node(
     *,
     context: Optional[str] = None,
-) -> Dict[str, int]:
-    """Gets allocated GPU quantity by each node by fetching pods in
+) -> Tuple[Dict[str, int], Dict[str, Tuple[float, float]]]:
+    """Gets allocated GPU, CPU, and memory by each node by fetching pods in
     all namespaces in kubernetes cluster indicated by context.
+
+    This function combines GPU and CPU/memory allocation tracking into a single
+    API call for better performance.
+
+    Returns:
+        Tuple of (allocated_gpu_qty_by_node, allocated_cpu_memory_by_node):
+        - allocated_gpu_qty_by_node: Dict mapping node name to allocated GPU count
+        - allocated_cpu_memory_by_node: Dict mapping node name to (allocated_cpu, allocated_memory_gb) tuple
     """
     if context is None:
         context = get_current_kube_config_context_name()
@@ -1355,27 +1363,65 @@ def get_allocated_gpu_qty_by_node(
         field_selector=field_selector)
     try:
         allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
+        allocated_cpu_memory_by_node: Dict[str, Tuple[
+            float, float]] = collections.defaultdict(lambda: (0.0, 0.0))
         for item_dict in ijson.items(response,
                                      'items.item',
                                      buf_size=IJSON_BUFFER_SIZE):
             pod = V1Pod.from_dict(item_dict)
             if should_exclude_pod_from_gpu_allocation(pod):
                 logger.debug(
-                    f'Excluding pod {pod.metadata.name} from GPU count '
+                    f'Excluding pod {pod.metadata.name} from resource count '
                     f'calculations on node {pod.spec.node_name}')
                 continue
-            # Iterate over all the containers in the pod and sum the
-            # GPU requests
+            if not pod.spec.node_name:
+                continue
+
+            # Iterate over all the containers in the pod and sum the resources
             pod_allocated_qty = 0
+            pod_allocated_cpu = 0.0
+            pod_allocated_memory_gb = 0.0
             for container in pod.spec.containers:
                 if container.resources.requests:
+                    requests = container.resources.requests
+                    # Parse GPU
                     pod_allocated_qty += get_node_accelerator_count(
-                        context, container.resources.requests)
-            if pod_allocated_qty > 0 and pod.spec.node_name:
+                        context, requests)
+                    # Parse CPU
+                    if 'cpu' in requests:
+                        pod_allocated_cpu += parse_cpu_or_gpu_resource_to_float(
+                            requests['cpu'])
+                    # Parse memory
+                    if 'memory' in requests:
+                        pod_allocated_memory_gb += parse_memory_resource(
+                            requests['memory'], unit='G')
+
+            if pod_allocated_qty > 0:
                 allocated_qty_by_node[pod.spec.node_name] += pod_allocated_qty
-        return allocated_qty_by_node
+            if pod_allocated_cpu > 0 or pod_allocated_memory_gb > 0:
+                current_cpu, current_memory = allocated_cpu_memory_by_node[
+                    pod.spec.node_name]
+                allocated_cpu_memory_by_node[pod.spec.node_name] = (
+                    current_cpu + pod_allocated_cpu,
+                    current_memory + pod_allocated_memory_gb)
+        return allocated_qty_by_node, allocated_cpu_memory_by_node
     finally:
         response.release_conn()
+
+
+@_retry_on_error(resource_type='pod')
+def get_allocated_gpu_qty_by_node(
+    *,
+    context: Optional[str] = None,
+) -> Dict[str, int]:
+    """Gets allocated GPU quantity by each node by fetching pods in
+    all namespaces in kubernetes cluster indicated by context.
+
+    Note: For better performance when you also need CPU/memory allocation,
+    use get_allocated_resources_by_node() instead.
+    """
+    allocated_qty_by_node, _ = get_allocated_resources_by_node(context=context)
+    return allocated_qty_by_node
 
 
 def check_instance_fits(context: Optional[str],
@@ -2189,6 +2235,13 @@ def get_current_kube_config_context_name() -> Optional[str]:
         _, current_context = kubernetes.list_kube_config_contexts()
         return current_context['name']
     except k8s.config.config_exception.ConfigException:
+        # If kubeconfig is not available, check if running in-cluster and
+        # return the in-cluster context name. This is needed when kubeconfig
+        # is not uploaded to the pod (e.g., remote_identity: SERVICE_ACCOUNT)
+        # but we still need to know the context name for operations like
+        # port mode detection.
+        if is_incluster_config_available():
+            return kubernetes.in_cluster_context_name()
         return None
 
 
@@ -3061,16 +3114,32 @@ def get_kubernetes_node_info(
             has_accelerator_nodes = True
             break
 
-    # Get the allocated GPU quantity by each node
+    # Get the allocated resources (GPU, CPU, memory) by each node in a single call
     allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
-    error_on_get_allocated_gpu_qty_by_node = False
+    allocated_cpu_memory_by_node: Dict[str, Tuple[float, float]] = {}
+    error_on_get_allocated_resources = False
+    # Get resource allocation. For GPU allocation, only call if there are GPU nodes
+    # (same as master branch). For CPU/memory, we always need it for all nodes.
     if has_accelerator_nodes:
+        # When there are GPU nodes, get both GPU and CPU/memory in one call
         try:
-            allocated_qty_by_node = get_allocated_gpu_qty_by_node(
+            allocated_qty_by_node, allocated_cpu_memory_by_node = get_allocated_resources_by_node(
                 context=context)
         except kubernetes.api_exception() as e:
             if e.status == 403:
-                error_on_get_allocated_gpu_qty_by_node = True
+                error_on_get_allocated_resources = True
+                pass
+            else:
+                raise
+    else:
+        # When there are no GPU nodes, we still need CPU/memory allocation
+        # This is an extra API call compared to master branch
+        try:
+            _, allocated_cpu_memory_by_node = get_allocated_resources_by_node(
+                context=context)
+        except kubernetes.api_exception() as e:
+            if e.status == 403:
+                error_on_get_allocated_resources = True
                 pass
             else:
                 raise
@@ -3106,6 +3175,35 @@ def get_kubernetes_node_info(
 
         accelerator_count = get_node_accelerator_count(context,
                                                        node.status.allocatable)
+
+        # Parse CPU and memory from node capacity
+        cpu_count = None
+        memory_gb = None
+        try:
+            if 'cpu' in node.status.capacity:
+                cpu_count = float(
+                    parse_cpu_or_gpu_resource(node.status.capacity['cpu']))
+            if 'memory' in node.status.capacity:
+                memory_gb = parse_memory_resource(
+                    node.status.capacity['memory'], unit='G')
+        except (KeyError, ValueError) as e:
+            # If parsing fails, log but continue
+            logger.debug(f'Failed to parse CPU/memory for node '
+                         f'{node.metadata.name}: {e}')
+
+        # Calculate free CPU and memory
+        cpu_free = None
+        memory_free_gb = None
+        if cpu_count is not None or memory_gb is not None:
+            if not error_on_get_allocated_resources:
+                allocated_cpu, allocated_memory = allocated_cpu_memory_by_node.get(
+                    node.metadata.name, (0.0, 0.0))
+                if cpu_count is not None:
+                    cpu_free = max(0.0, cpu_count - allocated_cpu)
+                if memory_gb is not None:
+                    memory_free_gb = max(0.0, memory_gb - allocated_memory)
+            # If we can't get allocation info, set free to None (unknown)
+
         # Check if node is ready
         node_is_ready = node.is_ready()
 
@@ -3116,13 +3214,17 @@ def get_kubernetes_node_info(
                 total={'accelerator_count': 0},
                 free={'accelerators_available': 0},
                 ip_address=node_ip,
+                cpu_count=cpu_count,
+                memory_gb=memory_gb,
+                cpu_free=cpu_free,
+                memory_free_gb=memory_free_gb,
                 is_ready=node_is_ready)
             continue
 
         if not node_is_ready:
             # If node is not ready, report 0 available GPUs
             accelerators_available = 0
-        elif not has_accelerator_nodes or error_on_get_allocated_gpu_qty_by_node:
+        elif not has_accelerator_nodes or error_on_get_allocated_resources:
             accelerators_available = -1
         else:
             allocated_qty = allocated_qty_by_node[node.metadata.name]
@@ -3141,6 +3243,10 @@ def get_kubernetes_node_info(
             total={'accelerator_count': int(accelerator_count)},
             free={'accelerators_available': int(accelerators_available)},
             ip_address=node_ip,
+            cpu_count=cpu_count,
+            memory_gb=memory_gb,
+            cpu_free=cpu_free,
+            memory_free_gb=memory_free_gb,
             is_ready=node_is_ready)
     hint = ''
     if has_multi_host_tpu:

@@ -12,7 +12,7 @@ import threading
 import time
 import traceback
 import typing
-from typing import Dict, Optional, Set
+from typing import Dict, List, Optional, Set
 
 import dotenv
 
@@ -32,6 +32,7 @@ from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
+from sky.server import plugins
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -44,6 +45,8 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.utils.plugin_extensions import ExternalClusterFailure
+from sky.utils.plugin_extensions import ExternalFailureSource
 
 if typing.TYPE_CHECKING:
     import psutil
@@ -645,16 +648,16 @@ class JobController:
 
             # Pull the actual cluster status from the cloud provider to
             # determine whether the cluster is preempted or failed.
-            # TODO(zhwu): For hardware failure, such as GPU failure, it may not
-            # be reflected in the cluster status, depending on the cloud, which
-            # can also cause failure of the job, and we need to recover it
-            # rather than fail immediately.
+            # NOTE: Some failures may not be reflected in the cluster status
+            # depending on the cloud, which can also cause failure of the job.
+            # Plugins can report such failures via ExternalFailureSource.
             # TODO(cooperc): do we need to add this to asyncio thread?
             (cluster_status, handle) = await context_utils.to_thread(
                 backend_utils.refresh_cluster_status_handle,
                 cluster_name,
                 force_refresh_statuses=set(status_lib.ClusterStatus))
 
+            external_failures: Optional[List[ExternalClusterFailure]] = None
             if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster is (partially) preempted or failed. It can be
                 # down, INIT or STOPPED, based on the interruption behavior of
@@ -665,6 +668,15 @@ class JobController:
                 logger.info(
                     f'Cluster is preempted or failed{cluster_status_str}. '
                     'Recovering...')
+                if ExternalFailureSource.is_registered():
+                    cluster_failures = await context_utils.to_thread(
+                        ExternalFailureSource.get, cluster_name=cluster_name)
+                    if cluster_failures:
+                        logger.info(
+                            f'Detected cluster failures: {cluster_failures}')
+                        external_failures = (
+                            ExternalClusterFailure.from_failure_list(
+                                cluster_failures))
             else:
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.
@@ -836,7 +848,9 @@ class JobController:
                 job_id=self._job_id,
                 task_id=task_id,
                 force_transit_to_recovering=force_transit_to_recovering,
-                callback_func=callback_func)
+                callback_func=callback_func,
+                external_failures=external_failures,
+            )
 
             recovered_time = await self._strategy_executor.recover()
 
@@ -1330,6 +1344,8 @@ async def main(controller_uuid: str):
     logger.info(f'Starting controller {controller_uuid}')
 
     context_utils.hijack_sys_attrs()
+
+    plugins.load_plugins(plugins.ExtensionContext())
 
     controller = ControllerManager(controller_uuid)
 

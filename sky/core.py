@@ -1,6 +1,6 @@
 """SDK functions for cluster/job management."""
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import colorama
 
@@ -277,6 +277,74 @@ all_clusters, unmanaged_clusters, all_jobs, context
     ]
     all_jobs = [responses.ManagedJobRecord(**job) for job in all_jobs]
     return all_clusters, unmanaged_clusters, all_jobs, context
+
+
+@typing.overload
+def get_cluster_events(
+    cluster_name: Optional[str] = ...,
+    cluster_hash: Optional[str] = ...,
+    event_type: str = ...,
+    include_timestamps: Literal[False] = ...,
+    limit: Optional[int] = ...,
+) -> List[str]:
+    ...
+
+
+@typing.overload
+def get_cluster_events(
+    cluster_name: Optional[str] = ...,
+    cluster_hash: Optional[str] = ...,
+    event_type: str = ...,
+    include_timestamps: Literal[True] = ...,
+    limit: Optional[int] = ...,
+) -> List[Dict[str, Union[str, int]]]:
+    ...
+
+
+@typing.overload
+def get_cluster_events(
+    cluster_name: Optional[str] = ...,
+    cluster_hash: Optional[str] = ...,
+    event_type: str = ...,
+    include_timestamps: bool = ...,
+    limit: Optional[int] = ...,
+) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
+    ...
+
+
+def get_cluster_events(
+    cluster_name: Optional[str] = None,
+    cluster_hash: Optional[str] = None,
+    event_type: str = 'STATUS_CHANGE',
+    include_timestamps: bool = False,
+    limit: Optional[int] = None
+) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
+    """Get events for a cluster.
+
+    Args:
+        cluster_name: Name of the cluster. Cannot be specified if cluster_hash
+            is specified.
+        cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
+            is specified.
+        event_type: Type of events to retrieve ('STATUS_CHANGE' or 'DEBUG').
+        include_timestamps: If True, returns list of dicts with 'reason' and
+            'transitioned_at' fields. If False, returns list of reason strings.
+        limit: If specified, returns at most this many events (most recent).
+            If None, returns all events.
+
+    Returns:
+        If include_timestamps is False: List of event reason strings.
+        If include_timestamps is True: List of dicts with 'reason' and
+            'transitioned_at' (unix timestamp) fields.
+        Events are ordered from oldest to newest.
+    """
+    event_type_enum = global_user_state.ClusterEventType(event_type)
+    return global_user_state.get_cluster_events(
+        cluster_name=cluster_name,
+        cluster_hash=cluster_hash,
+        event_type=event_type_enum,
+        include_timestamps=include_timestamps,
+        limit=limit)
 
 
 def endpoints(cluster: str,

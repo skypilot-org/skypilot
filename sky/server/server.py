@@ -46,6 +46,7 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.data import storage_utils
+from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
@@ -1511,6 +1512,21 @@ async def cost_report(request: fastapi.Request,
     )
 
 
+@app.post('/cluster_events')
+async def cluster_events(
+        request: fastapi.Request,
+        cluster_events_body: payloads.ClusterEventsBody) -> None:
+    """Gets events for a cluster."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.CLUSTER_EVENTS,
+        request_body=cluster_events_body,
+        func=core.get_cluster_events,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        request_cluster_name=cluster_events_body.cluster_name or '',
+    )
+
+
 @app.get('/storage/ls')
 async def storage_ls(request: fastapi.Request) -> None:
     """Gets the storages."""
@@ -1813,10 +1829,17 @@ async def api_status(
 @app.get('/api/plugins', response_class=fastapi_responses.ORJSONResponse)
 async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
     """Return metadata about loaded backend plugins."""
-    plugin_info = [{
-        'js_extension_path': plugin.js_extension_path,
-    } for plugin in plugins.get_plugins()]
-    return {'plugins': plugin_info}
+    plugin_infos = []
+    for plugin_info in plugins.get_plugins():
+        info = {
+            'js_extension_path': plugin_info.js_extension_path,
+        }
+        for attr in ('name', 'version', 'commit'):
+            value = getattr(plugin_info, attr, None)
+            if value is not None:
+                info[attr] = value
+        plugin_infos.append(info)
+    return {'plugins': plugin_infos}
 
 
 @app.get(
@@ -2513,6 +2536,9 @@ if __name__ == '__main__':
     # Restore the server user hash
     logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+    logger.info('Initializing permission service')
+    permission.permission_service.initialize()
+    logger.info('Permission service initialized')
 
     max_db_connections = global_user_state.get_max_db_connections()
     logger.info(f'Max db connections: {max_db_connections}')
@@ -2549,6 +2575,9 @@ if __name__ == '__main__':
         global_tasks.append(
             background.create_task(
                 global_user_state.cluster_event_retention_daemon()))
+        global_tasks.append(
+            background.create_task(
+                managed_job_state.job_event_retention_daemon()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)

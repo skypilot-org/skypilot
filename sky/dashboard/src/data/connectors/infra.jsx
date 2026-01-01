@@ -3,9 +3,9 @@ import { CLOUDS_LIST, COMMON_GPUS } from '@/data/connectors/constants';
 // Importing from the same directory
 import { apiClient } from '@/data/connectors/client';
 import { getErrorMessageFromResponse } from '@/data/utils';
+import dashboardCache from '@/lib/cache';
 
 export async function getCloudInfrastructure(forceRefresh = false) {
-  const dashboardCache = (await import('@/lib/cache')).default;
   const { getClusters } = await import('@/data/connectors/clusters');
   const { getManagedJobs } = await import('@/data/connectors/jobs');
   const { getWorkspaces, getEnabledClouds } = await import(
@@ -33,39 +33,6 @@ export async function getCloudInfrastructure(forceRefresh = false) {
     // Get enabled clouds by aggregating across all workspaces
     let enabledCloudsList = [];
     try {
-      // If forceRefresh is true, first run sky check to refresh cloud status
-      if (forceRefresh) {
-        console.log('Force refreshing clouds by running sky check...');
-        try {
-          const checkResponse = await apiClient.post('/check', {});
-          if (!checkResponse.ok) {
-            const msg = `Failed to run sky check with status ${checkResponse.status}`;
-            throw new Error(msg);
-          }
-          const checkId =
-            checkResponse.headers.get('X-Skypilot-Request-ID') ||
-            checkResponse.headers.get('X-Request-ID');
-          if (!checkId) {
-            const msg = 'No request ID received from server for sky check';
-            throw new Error(msg);
-          }
-
-          // Wait for the check to complete
-          const checkResult = await apiClient.get(
-            `/api/get?request_id=${checkId}`
-          );
-          if (!checkResult.ok) {
-            const msg = `Failed to get sky check result with status ${checkResult.status}, error: ${checkResult.statusText}`;
-            throw new Error(msg);
-          }
-          const checkData = await checkResult.json();
-          console.log('Sky check completed:', checkData);
-        } catch (checkError) {
-          console.error('Error running sky check:', checkError);
-          // Continue anyway - we'll still try to get the cached enabled clouds
-        }
-      }
-
       // Get all accessible workspaces
       const workspacesData = await dashboardCache.get(getWorkspaces);
       const workspaceNames = Object.keys(workspacesData || {});
@@ -304,7 +271,6 @@ export async function getWorkspaceInfrastructure() {
 
     // Step 3: Get detailed GPU information for all contexts
     const { getClusters } = await import('@/data/connectors/clusters');
-    const dashboardCache = (await import('@/lib/cache')).default;
     let clustersData = [];
     try {
       clustersData = await dashboardCache.get(getClusters);
@@ -507,6 +473,12 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           // Check if node is ready (defaults to true for backward compatibility)
           const nodeIsReady = nodeData['is_ready'] !== false;
 
+          // Extract CPU and memory information
+          const cpuCount = nodeData['cpu_count'] ?? null;
+          const memoryGb = nodeData['memory_gb'] ?? null;
+          const cpuFree = nodeData['cpu_free'] ?? null;
+          const memoryFreeGb = nodeData['memory_free_gb'] ?? null;
+
           perNodeGPUs_dict[`${context}/${nodeName}`] = {
             node_name: nodeData['name'] || nodeName,
             gpu_name: acceleratorType,
@@ -514,6 +486,10 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             gpu_free: freeAccelerators,
             ip_address: nodeData['ip_address'] || null,
             context: context,
+            cpu_count: cpuCount,
+            memory_gb: memoryGb,
+            cpu_free: cpuFree,
+            memory_free_gb: memoryFreeGb,
             is_ready: nodeIsReady,
           };
 

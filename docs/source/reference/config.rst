@@ -123,6 +123,7 @@ Below is the configuration syntax and some example values. See detailed explanat
       Owner: user-unique-name
     :ref:`vpc_name <config-yaml-aws-vpc-name>`: skypilot-vpc
     :ref:`use_internal_ips <config-yaml-aws-use-internal-ips>`: true
+    :ref:`use_ssm <config-yaml-aws-use-ssm>`: true
     :ref:`ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`security_group_name <config-yaml-aws-security-group-name>`: my-security-group
     :ref:`disk_encrypted <config-yaml-aws-disk-encrypted>`: false
@@ -194,7 +195,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
 
   :ref:`vast <config-yaml-vast>`:
-    :ref:`secure_only <config-yaml-vast-secure-only>`: true
+    :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
@@ -681,7 +682,17 @@ Private subnets are defined as those satisfying both of these properties:
      (the ``map_public_ip_on_launch`` attribute is ``false``).
 
 This flag is typically set together with ``vpc_name`` above and
-``ssh_proxy_command`` below.
+``ssh_proxy_command`` or ``use_ssm`` below.
+
+Default: ``false``.
+
+.. _config-yaml-aws-use-ssm:
+
+``aws.use_ssm``
+~~~~~~~~~~~~~~~~
+
+Use SSM to communicate with SkyPilot nodes. This flag is typically set together with ``vpc_name`` and
+``use_internal_ips`` above. This is useful for launching clusters in private VPCs without public IPs, refer to :ref:`aws-ssm` for more details.
 
 Default: ``false``.
 
@@ -1685,15 +1696,17 @@ Example:
 
 Advanced Vast configuration (optional).
 
-.. _config-yaml-vast-secure-only:
+.. _config-yaml-vast-datacenter-only:
 
-``vast.secure_only``
-~~~~~~~~~~~~~~~~~~~~
+``vast.datacenter_only``
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 Configure SkyPilot to only consider offers on Vast verified datacenters (optional).
-Internally, this will query Vast with the ``datacenters=true`` parameters. Note
-some GPUs may only be available on non-secure offers. This config can be
-overridden per task via :ref:`config flag <config-client-cli-flag>`.
+Internally, this will query Vast with the ``datacenter=true`` and ``hosting_type>=1``
+parameters to filter for professional datacenter-hosted machines. Note some GPUs
+may only be available on non-datacenter offers. This config filters both the catalog
+(during resource planning) and the launch query (during provisioning). This config
+can be overridden per task via :ref:`config flag <config-client-cli-flag>`.
 
 Default: ``false``
 
