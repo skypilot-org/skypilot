@@ -2318,7 +2318,7 @@ class GcsStore(AbstractStore):
         """
         try:
             if isinstance(self.source, list):
-                self.batch_gsutil_rsync(self.source, create_dirs=True)
+                self.batch_gcloud_rsync(self.source, create_dirs=True)
             elif self.source is not None:
                 if self.source.startswith('gs://'):
                     pass
@@ -2331,7 +2331,7 @@ class GcsStore(AbstractStore):
                 else:
                     # If a single directory is specified in source, upload
                     # contents to root of bucket by suffixing /*.
-                    self.batch_gsutil_rsync([self.source])
+                    self.batch_gcloud_rsync([self.source])
         except exceptions.StorageUploadError:
             raise
         except Exception as e:
@@ -2371,6 +2371,10 @@ class GcsStore(AbstractStore):
                         source_path_list: List[Path],
                         create_dirs: bool = False) -> None:
         """Invokes gsutil cp -n to batch upload a list of local paths
+
+        NOTE: This function is kept for backward compatibility but is not
+        actively used. The main upload function is batch_gcloud_rsync() which
+        uses gcloud storage rsync for improved performance.
 
         -n flag to gsutil cp checks the existence of an object before uploading,
         making it similar to gsutil rsync. Since it allows specification of a
@@ -2414,16 +2418,17 @@ class GcsStore(AbstractStore):
             ux_utils.finishing_message(f'Storage synced: {sync_path}',
                                        log_path))
 
-    def batch_gsutil_rsync(self,
+    def batch_gcloud_rsync(self,
                            source_path_list: List[Path],
                            create_dirs: bool = False) -> None:
-        """Invokes gsutil rsync to batch upload a list of local paths
+        """Invokes gcloud storage rsync to batch upload a list of local paths
 
-        Since gsutil rsync does not support include commands, We use negative
-        look-ahead regex to exclude everything else than the path(s) we want to
-        upload.
+        Uses gcloud storage rsync for improved performance with automatic
+        parallelism. Since rsync does not support include commands, we use
+        negative look-ahead regex to exclude everything else than the path(s)
+        we want to upload.
 
-        Since gsutil rsync does not support batch operations, we construct
+        Since rsync does not support batch operations, we construct
         multiple commands to be run in parallel.
 
         Args:
@@ -2439,10 +2444,10 @@ class GcsStore(AbstractStore):
 
         def get_file_sync_command(base_dir_path, file_names):
             sync_format = '|'.join(file_names)
-            gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+            gcloud_storage_cmd = data_utils.get_gcloud_storage_command()
             base_dir_path = shlex.quote(base_dir_path)
-            sync_command = (f'{alias_gen}; {gsutil_alias} '
-                            f'rsync -e -x \'^(?!{sync_format}$).*\' '
+            sync_command = (f'{gcloud_storage_cmd} '
+                            f'rsync --exclude=\'^(?!{sync_format}$).*\' '
                             f'{base_dir_path} gs://{self.name}{sub_path}')
             return sync_command
 
@@ -2451,10 +2456,11 @@ class GcsStore(AbstractStore):
             # we exclude .git directory from the sync
             excluded_list.append(r'^\.git/.*$')
             excludes = '|'.join(excluded_list)
-            gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+            gcloud_storage_cmd = data_utils.get_gcloud_storage_command()
             src_dir_path = shlex.quote(src_dir_path)
-            sync_command = (f'{alias_gen}; {gsutil_alias} '
-                            f'rsync -e -r -x \'({excludes})\' {src_dir_path} '
+            sync_command = (f'{gcloud_storage_cmd} '
+                            f'rsync --recursive --exclude=\'({excludes})\' '
+                            f'{src_dir_path} '
                             f'gs://{self.name}{sub_path}/{dest_dir_name}')
             return sync_command
 
@@ -2660,10 +2666,10 @@ class GcsStore(AbstractStore):
                         bucket_name=bucket_name))
                 return False
             try:
-                gsutil_alias, alias_gen = data_utils.get_gsutil_command()
-                remove_obj_command = (
-                    f'{alias_gen};{gsutil_alias} '
-                    f'rm -r gs://{bucket_name}{command_suffix}')
+                gcloud_storage_cmd = data_utils.get_gcloud_storage_command()
+                remove_obj_command = (f'{gcloud_storage_cmd} '
+                                      f'rm --recursive '
+                                      f'gs://{bucket_name}{command_suffix}')
                 subprocess.check_output(remove_obj_command,
                                         stderr=subprocess.STDOUT,
                                         shell=True,

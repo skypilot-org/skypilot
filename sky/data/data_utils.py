@@ -578,6 +578,21 @@ def get_gsutil_command() -> Tuple[str, str]:
     return gsutil_alias, alias_gen
 
 
+def get_gcloud_storage_command() -> str:
+    """Gets the gcloud storage command.
+
+    Unlike gsutil, gcloud storage has automatic parallelism built-in and
+    does not require platform-specific workarounds. It offers significant
+    performance improvements over gsutil for data transfers.
+
+    See: https://cloud.google.com/storage/docs/gsutil-transition-to-gcloud
+
+    Returns:
+        str: The gcloud storage command string.
+    """
+    return 'gcloud storage'
+
+
 def run_upload_cli(command: str, access_denied_message: str, bucket_name: str,
                    log_path: str):
     returncode, stdout, stderr = log_lib.run_with_log(
