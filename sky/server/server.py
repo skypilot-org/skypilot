@@ -2131,7 +2131,7 @@ async def kubernetes_pod_ssh_proxy(
                          f'output: {str(stdout)}')
             reason = 'KubectlPortForwardExit'
             metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
-                pid=os.getpid(), reason='KubectlPortForwardExit').inc()
+                pid=os.getpid(), reason=reason).inc()
         else:
             if ssh_failed:
                 reason = 'SSHToPodDisconnected'
@@ -2220,9 +2220,11 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             line = await stderr.readline()
             if not line:
                 break
-            logger.error(f'srun stderr: {line.decode().rstrip()}')
+            logger.debug(f'srun stderr: {line.decode().rstrip()}')
 
-    stderr_task = asyncio.create_task(log_stderr())
+    stderr_task = None
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        stderr_task = asyncio.create_task(log_stderr())
     conn_gauge = metrics_utils.SKY_APISERVER_WEBSOCKET_CONNECTIONS.labels(
         pid=os.getpid())
     ssh_failed = False
@@ -2268,7 +2270,7 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             pid=os.getpid(), reason=reason).inc()
 
         # Cancel the stderr logging task if it's still running
-        if not stderr_task.done():
+        if stderr_task is not None and not stderr_task.done():
             stderr_task.cancel()
             try:
                 await stderr_task
