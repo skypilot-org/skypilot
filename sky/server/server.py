@@ -1932,7 +1932,6 @@ async def _run_websocket_proxy(
     write_to_backend: Callable[[bytes], Awaitable[None]],
     close_backend: Callable[[], Awaitable[None]],
     timestamps_supported: bool,
-    backend_name: str,
 ) -> bool:
     """Run bidirectional WebSocket-to-backend proxy.
 
@@ -1942,7 +1941,6 @@ async def _run_websocket_proxy(
         write_to_backend: Async callable to write bytes to backend
         close_backend: Async callable to close backend connection
         timestamps_supported: Whether to use message type framing
-        backend_name: Name of backend ("pod" or "srun") for log messages
 
     Returns:
         True if SSH failed, False otherwise
@@ -1985,10 +1983,18 @@ async def _run_websocket_proxy(
                         raise ValueError(
                             f'Unknown message type: {message_type}')
 
-                await write_to_backend(message)
+                try:
+                    await write_to_backend(message)
+                except Exception as e:  # pylint: disable=broad-except
+                    # Typically we will not reach here, if the conn to backend
+                    # is disconnected, backend_to_websocket will exit first.
+                    # But just in case.
+                    logger.error(f'Failed to write to backend through '
+                                 f'connection: {e}')
+                    nonlocal ssh_failed
+                    ssh_failed = True
+                    break
         except fastapi.WebSocketDisconnect:
-            pass
-        except Exception:  # pylint: disable=broad-except
             pass
         nonlocal websocket_closed
         websocket_closed = True
@@ -2001,7 +2007,7 @@ async def _run_websocket_proxy(
                 if not data:
                     if not websocket_closed:
                         logger.warning(
-                            f'SSH connection to {backend_name} is disconnected '
+                            'SSH connection to backend is disconnected '
                             'before websocket connection is closed')
                         nonlocal ssh_failed
                         ssh_failed = True
@@ -2088,7 +2094,6 @@ async def kubernetes_pod_ssh_proxy(
             write_to_backend=write_and_drain,
             close_backend=close_writer,
             timestamps_supported=timestamps_supported,
-            backend_name='pod',
         )
     finally:
         conn_gauge.dec()
@@ -2132,18 +2137,20 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
     assert handle.cached_cluster_info is not None, 'Cached cluster info is None'
     provider_config = handle.cached_cluster_info.provider_config
     assert provider_config is not None, 'Provider config is None'
-    ssh_config_dict = provider_config['ssh']
-    ssh_host = ssh_config_dict['hostname']
-    ssh_port = int(ssh_config_dict['port'])
-    ssh_user = ssh_config_dict['user']
-    ssh_key = ssh_config_dict['private_key']
-    ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
+    login_node_ssh_config = provider_config['ssh']
+    login_node_host = login_node_ssh_config['hostname']
+    login_node_port = int(login_node_ssh_config['port'])
+    login_node_user = login_node_ssh_config['user']
+    login_node_key = login_node_ssh_config['private_key']
+    login_node_proxy_command = login_node_ssh_config.get('proxycommand', None)
+    login_node_proxy_jump = login_node_ssh_config.get('proxyjump', None)
 
     login_node_runner = command_runner.SSHCommandRunner(
-        (ssh_host, ssh_port),
-        ssh_user,
-        ssh_key,
-        ssh_proxy_command=ssh_proxy_command,
+        (login_node_host, login_node_port),
+        login_node_user,
+        login_node_key,
+        ssh_proxy_command=login_node_proxy_command,
+        ssh_proxy_jump=login_node_proxy_jump,
     )
 
     ssh_cmd = login_node_runner.ssh_base_command(
@@ -2168,7 +2175,8 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
 
     # Run sshd inside the Slurm job "container" via srun, such that it inherits
     # the resource constraints of the Slurm job.
-    ssh_cmd.extend(slurm_utils.srun_sshd_command(job_id, target_node, ssh_user))
+    ssh_cmd.extend(
+        slurm_utils.srun_sshd_command(job_id, target_node, login_node_user))
 
     proc = await asyncio.create_subprocess_exec(
         *ssh_cmd,
@@ -2211,7 +2219,6 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
             write_to_backend=write_and_drain,
             close_backend=close_stdin,
             timestamps_supported=timestamps_supported,
-            backend_name='srun',
         )
 
     finally:
