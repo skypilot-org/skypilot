@@ -15,6 +15,7 @@ import pathlib
 import posixpath
 import re
 import resource
+import shlex
 import shutil
 import socket
 import struct
@@ -2198,14 +2199,16 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
 
     # Run sshd inside the Slurm job "container" via srun, such that it inherits
     # the resource constraints of the Slurm job.
-    ssh_cmd.extend(
-        slurm_utils.srun_sshd_command(job_id, target_node, login_node_user))
+    ssh_cmd += [
+        shlex.quote(
+            slurm_utils.srun_sshd_command(job_id, target_node, login_node_user))
+    ]
 
-    proc = await asyncio.create_subprocess_exec(
-        *ssh_cmd,
+    proc = await asyncio.create_subprocess_shell(
+        ' '.join(ssh_cmd),
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE  # Capture stderr separately for logging
+        stderr=asyncio.subprocess.PIPE,  # Capture stderr separately for logging
     )
     assert proc.stdin is not None
     assert proc.stdout is not None
