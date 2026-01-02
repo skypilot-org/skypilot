@@ -1508,37 +1508,6 @@ class SlurmCommandRunner(SSHCommandRunner):
         self.job_id = job_id
         self.slurm_node = slurm_node
 
-        # Build a chained ProxyCommand that goes through the login node to reach
-        # the compute node where the job is running.
-
-        # First, build SSH options to reach the login node, using the user's
-        # existing proxy command or proxy jump if provided.
-        proxy_ssh_options = ' '.join(
-            ssh_options_list(
-                self.ssh_private_key,
-                self.ssh_control_name,
-                ssh_proxy_command=self._ssh_proxy_command,
-                ssh_proxy_jump=self._ssh_proxy_jump,
-                port=self.port,
-                disable_control_master=self.disable_control_master,
-                # We need to escape the %C on the ControlPath,
-                # since this is going to be embedded in a
-                # ProxyCommand.
-                escape_percent_expand=True))
-        login_node_proxy_command = (f'ssh {proxy_ssh_options} '
-                                    f'-W %h:%p {self.ssh_user}@{self.ip}')
-
-        # Update the proxy command to be the login node proxy, which will
-        # be used by super().run() to reach the compute node.
-        self._ssh_proxy_command = login_node_proxy_command
-        # Clear the proxy jump since it's now embedded in the proxy command.
-        self._ssh_proxy_jump = None
-        # Update self.ip to target the compute node.
-        self.ip = slurm_node
-        # Assume the compute node's SSH port is 22.
-        # TODO(kevin): Make this configurable if needed.
-        self.port = 22
-
     def rsync(
         self,
         source: str,
@@ -1549,40 +1518,36 @@ class SlurmCommandRunner(SSHCommandRunner):
         stream_logs: bool = True,
         max_retry: int = 1,
     ) -> None:
-        """Rsyncs files directly to the Slurm compute node,
-        by proxying through the Slurm login node.
-
-        For Slurm, files need to be accessible by compute nodes where jobs
-        execute via srun. This means either it has to be on the compute node's
-        local filesystem, or on a shared filesystem.
+        """Rsyncs files to/from the Slurm compute node using srun as transport.
         """
-        # TODO(kevin): We can probably optimize this to skip the proxying
-        # if the target dir is in a shared filesystem, since it will
-        # be accessible by the compute node.
+        ssh_command = ' '.join(
+            self.ssh_base_command(ssh_mode=SshMode.NON_INTERACTIVE,
+                                  port_forward=None,
+                                  connect_timeout=None))
 
-        # Build SSH options for rsync using the ProxyCommand set up in __init__
-        # to reach the compute node through the login node.
-        ssh_options = ' '.join(
-            ssh_options_list(
-                # Use the same private key as the one used for
-                # connecting to the login node.
-                self.ssh_private_key,
-                None,
-                ssh_proxy_command=self._ssh_proxy_command,
-                disable_control_master=True))
-        rsh_option = f'ssh {ssh_options}'
-
-        self._rsync(
-            source,
-            target,
-            # Compute node
-            node_destination=f'{self.ssh_user}@{self.slurm_node}',
-            up=up,
-            rsh_option=rsh_option,
-            log_path=log_path,
-            stream_logs=stream_logs,
-            max_retry=max_retry,
-            get_remote_home_dir=lambda: self.sky_dir)
+        # rsh command: parse job_id|node_list from $1, ssh to login node,
+        # run srun with rsync command. Use | delimiter since + can appear
+        # in Slurm node list expressions.
+        rsh_option = (
+            f'bash --norc --noprofile -c \''
+            f'job_id=$(echo "$1" | cut -d"|" -f1); '
+            f'node_list=$(echo "$1" | cut -d"|" -f2); '
+            f'shift; '
+            f'exec {ssh_command} '
+            f'srun --unbuffered --quiet --overlap '
+            f'--jobid="$job_id" --nodelist="$node_list" --nodes=1 --ntasks=1 '
+            f'"$@"'
+            f'\' --')
+        encoded_info = f'{self.job_id}|{self.slurm_node}'
+        self._rsync(source,
+                    target,
+                    node_destination=encoded_info,
+                    up=up,
+                    rsh_option=rsh_option,
+                    log_path=log_path,
+                    stream_logs=stream_logs,
+                    max_retry=max_retry,
+                    get_remote_home_dir=lambda: self.sky_dir)
 
     @timeline.event
     @context_utils.cancellation_guard
@@ -1621,5 +1586,9 @@ class SlurmCommandRunner(SSHCommandRunner):
             # ~/.cache/uv.
             f'export UV_CACHE_DIR=/tmp/uv_cache_$(id -u) && '
             f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
+
+        cmd = (f'srun --quiet --overlap --jobid={self.job_id} '
+               f'--nodelist={self.slurm_node} '
+               f'--nodes=1 --ntasks=1 bash -c {shlex.quote(cmd)}')
 
         return super().run(cmd, **kwargs)
