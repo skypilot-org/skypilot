@@ -697,8 +697,10 @@ class Task:
         for storage in all_storages:
             mount_path = storage[0]
             assert mount_path, 'Storage mount path cannot be empty.'
+            storage_config = storage[1]
             try:
-                storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
+                storage_obj = storage_lib.Storage.from_yaml_config(
+                    storage_config)
             except exceptions.StorageSourceError as e:
                 # Patch the error message to include the mount path, if included
                 e.args = (e.args[0].replace('<destination_path>',
@@ -1469,6 +1471,17 @@ class Task:
                     else:
                         assert storage.name is not None, storage
                         blob_path = 's3://' + storage.name
+                    blob_path = storage.get_bucket_sub_path_prefix(blob_path)
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
+                elif store_type is storage_lib.StoreType.SEEWEB:
+                    if (isinstance(storage.source, str) and
+                            storage.source.startswith('seeweb://')):
+                        blob_path = storage.source
+                    else:
+                        assert storage.name is not None, storage
+                        blob_path = 'seeweb://' + storage.name
                     blob_path = storage.get_bucket_sub_path_prefix(blob_path)
                     self.update_file_mounts({
                         mnt_path: blob_path,

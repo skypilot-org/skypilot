@@ -45,7 +45,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
           file_mounts:
             /my_data:
               name: my-sky-bucket
-              store: gcs  # Optional: either of s3, gcs, azure, r2, coreweave, ibm, oci
+              store: gcs  # Optional: either of s3, gcs, azure, r2, coreweave, ibm, oci, seeweb
 
         SkyPilot will create an empty GCS bucket called ``my-sky-bucket`` and mount it at ``/my_data``.
         This bucket can be used to write checkpoints, logs or other outputs directly to the cloud.
