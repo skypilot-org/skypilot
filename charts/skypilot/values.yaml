@@ -566,7 +566,9 @@ prometheus:
   server:
     persistentVolume:
       enabled: true
-      size: 10Gi
+      size: 50Gi
+    retention: "1000d"
+    retentionSize: "43GB"
   # Configure additional scrape configs using extraScrapeConfigs
   extraScrapeConfigs: |
     # Static scrape target for SkyPilot API server GPU metrics
