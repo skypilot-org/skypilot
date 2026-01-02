@@ -792,7 +792,7 @@ function ActiveTab({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
                     {/* GPU Utilization */}
                     <div className="bg-white rounded-md border border-gray-200 shadow-sm">
                       <div className="p-2">
@@ -819,6 +819,21 @@ function ActiveTab({
                           title="GPU Memory Utilization"
                           className="rounded"
                           key={`gpu-memory-${clusterData?.cluster}-${timeRange.from}-${timeRange.to}`}
+                        />
+                      </div>
+                    </div>
+
+                    {/* GPU Temperature */}
+                    <div className="bg-white rounded-md border border-gray-200 shadow-sm">
+                      <div className="p-2">
+                        <iframe
+                          src={buildGrafanaMetricsUrl('3')}
+                          width="100%"
+                          height="400"
+                          frameBorder="0"
+                          title="GPU Temperature"
+                          className="rounded"
+                          key={`gpu-temp-${clusterData?.cluster}-${timeRange.from}-${timeRange.to}`}
                         />
                       </div>
                     </div>
