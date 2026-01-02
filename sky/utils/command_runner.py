@@ -1525,20 +1525,19 @@ class SlurmCommandRunner(SSHCommandRunner):
                                   port_forward=None,
                                   connect_timeout=None))
 
-        # rsh command: parse job_id|node_list from $1, ssh to login node,
-        # run srun with rsync command. Use | delimiter since + can appear
-        # in Slurm node list expressions.
+        # rsh command: parse job_id+node_list from $1, ssh to login node,
+        # run srun with rsync command.
         rsh_option = (
             f'bash --norc --noprofile -c \''
-            f'job_id=$(echo "$1" | cut -d"|" -f1); '
-            f'node_list=$(echo "$1" | cut -d"|" -f2); '
+            f'job_id=$(echo "$1" | cut -d+ -f1); '
+            f'node_list=$(echo "$1" | cut -d+ -f2); '
             f'shift; '
             f'exec {ssh_command} '
             f'srun --unbuffered --quiet --overlap '
             f'--jobid="$job_id" --nodelist="$node_list" --nodes=1 --ntasks=1 '
             f'"$@"'
             f'\' --')
-        encoded_info = f'{self.job_id}|{self.slurm_node}'
+        encoded_info = f'{self.job_id}+{self.slurm_node}'
         self._rsync(source,
                     target,
                     node_destination=encoded_info,
