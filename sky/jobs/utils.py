@@ -18,6 +18,7 @@ import traceback
 import typing
 from typing import (Any, Deque, Dict, Iterable, List, Literal, Optional, Set,
                     TextIO, Tuple, Union)
+import uuid as uuid_lib
 
 import colorama
 import filelock
@@ -909,12 +910,13 @@ def cancel_jobs_by_pool(pool_name: str,
     return cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
 
 
-def controller_log_file_for_job(job_id: Union[int, str],
+def controller_log_file_for_job(identifier: Union[int, str],
                                 create_if_not_exists: bool = False) -> str:
+    # id is taken as a builtin in python, so we use identifier instead :()
     log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     if create_if_not_exists:
         os.makedirs(log_dir, exist_ok=True)
-    return os.path.join(log_dir, f'{job_id}.log')
+    return os.path.join(log_dir, f'{identifier}.log')
 
 
 def stream_logs_by_id(job_id: int,
@@ -1213,49 +1215,70 @@ def find_controller_pid_by_uuid(uuid: str) -> Optional[int]:
     Returns:
         The PID of the controller process if found, None otherwise.
     """
-    try:
-        for proc in psutil.process_iter(['pid', 'cmdline']):
-            try:
-                cmdline = proc.cmdline()
-                if not cmdline:
-                    continue
-                cmd_str = ' '.join(cmdline)
-                # Check if this is a controller process with the given UUID
-                if ('controller' in cmd_str.lower() and uuid in cmd_str):
-                    return proc.pid
-            except (psutil.NoSuchProcess, psutil.AccessDenied,
-                    psutil.ZombieProcess):
-                # Process may have terminated or we don't have access
-                continue
-    except Exception:  # pylint: disable=broad-except
-        pass
-
+    alive_controllers = scheduler.get_alive_controllers_pids()
+    if alive_controllers is None:
+        # short circuit since we know it doesn't exist
+        return None
+    for pid in alive_controllers:
+        try:
+            process = psutil.Process(pid)
+        except (psutil.NoSuchProcess, psutil.AccessDenied,
+                psutil.ZombieProcess):
+            continue
+        cmdline = process.cmdline()
+        if not cmdline:
+            continue
+        if uuid in cmdline:
+            return pid
     return None
 
 
-def get_all_active_systems() -> List[str]:
+def get_alive_controller_uuids() -> List[str]:
     pids = scheduler.get_alive_controllers_pids()
     if pids is None:
         return []
+
+    # in consolidation mode the process command lines are in the format:
+    # ['bash', '-c', 'python -u -msky.jobs.controller <controller_uuid>']
+    # in non-consolidation mode the process command lines are in the format:
+    # ['python', '-u', '-msky.jobs.controller', '<controller_uuid>']
+    # we have 3 options,
+    # 1. check if we are in consolidation mode or not and then process
+    # accordingly
+    # 2. check if the length of the command line is 3 or 4 and then process
+    # accordingly
+    # 3. join then split since the uuid is always at the end, we choose this
+    # option since it only assumes that the uuid is the final arguement and
+    # should be safe if another arugment is added or something minor changes.
     cmdlines = [psutil.Process(pid).cmdline() for pid in pids]
+    cmdlines = [' '.join(cmdline) for cmdline in cmdlines]
+    cmdlines = [cmdline.split(' ') for cmdline in cmdlines]
 
     # we use the following command to start the controller
     # run_controller_cmd = (f'{sys.executable} -u -m'
     #                       f'sky.jobs.controller {controller_uuid}')
 
-    # we extract the controller_uuid from the cmdline
-    uuids = [cmdline[3] for cmdline in cmdlines if len(cmdline) == 4]
+    # we extract the controller_uuid from the cmdline (no controller_ prefix)
+    uuids = [cmdline[-1] for cmdline in cmdlines]
+
+    for uuid, cmdline in zip(uuids, cmdlines):
+        try:
+            uuid_lib.UUID(uuid)  # check if the uuid is a valid uuid
+        except ValueError:
+            print(f'Invalid commandline: {cmdline}')
+            continue
 
     return uuids
 
 
 def stream_controller_logs(controller_uuid: Union[str, bool],
                            follow: bool = True) -> Tuple[str, int]:
-    """Stream controller logs by job id."""
+    """Stream controller logs by controller uuid."""
     if controller_uuid is True:
-        controller_uuids = get_all_active_systems()
-        for controller_uuid in controller_uuids:
-            print(controller_uuid, flush=True)
+        controller_uuids = get_alive_controller_uuids()
+        print('Available system uuids:')
+        for uuid in controller_uuids:
+            print(uuid, flush=True)
         return '', exceptions.JobExitCode.SUCCEEDED
     if controller_uuid is False:
         # should not happen, but lets not error
@@ -2414,10 +2437,10 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_all_active_systems(cls) -> str:
+    def get_alive_controller_uuids(cls) -> str:
         code = textwrap.dedent("""\
         from sky.utils import message_utils
-        system = utils.get_all_active_systems()
+        system = utils.get_alive_controller_uuids()
         print(message_utils.encode_payload(system), end="", flush=True)
         """)
         return cls._build(code)

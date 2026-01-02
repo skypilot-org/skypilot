@@ -165,7 +165,7 @@ def start_controller() -> None:
     activate_python_env_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
 
     # IMPORTANT: IF YOU CHANGE THE COMMAND HERE, CHANGE
-    # utils.get_all_active_systems() TOO CORRECTLY PARSE COMMAND LINE
+    # utils.get_alive_controller_uuids() TOO CORRECTLY PARSE COMMAND LINE
     run_controller_cmd = (f'{sys.executable} -u -m'
                           f'sky.jobs.controller {controller_uuid}')
 
@@ -191,18 +191,10 @@ def get_alive_controllers_pids() -> Optional[List[int]]:
 
 
 def get_alive_controllers() -> Optional[int]:
-    records = get_controller_process_records()
-    if records is None:
-        # If we cannot read the file reliably, avoid starting extra controllers.
+    controller_pids = get_alive_controllers_pids()
+    if controller_pids is None:
         return None
-    if not records:
-        return 0
-
-    alive = 0
-    for record in records:
-        if managed_job_utils.controller_process_alive(record, quiet=False):
-            alive += 1
-    return alive
+    return len(controller_pids)
 
 
 def maybe_start_controllers(from_scheduler: bool = False) -> None:

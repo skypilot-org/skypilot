@@ -5243,45 +5243,48 @@ def jobs_cancel(
               help='Download logs for all jobs shown in the queue.')
 @click.option(
     '--system',
-    is_flag=True,
+    is_flag=False,
+    flag_value=True,
     default=None,
     required=False,
     hidden=True,
     help=('Show the system logs of the job. Can be used as --system (flag)'
           ' or --system <UUID>. Should rarely be used as the controller'
           'processes manage multiple jobs.'))
-@click.argument('job_id', required=False, type=str)
+@click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
-def jobs_logs(name: Optional[str], job_id: Optional[Union[str, int]],
-              follow: bool, controller: bool, refresh: bool, sync_down: bool,
-              system: Union[str, bool]):
-    """Tail or sync down the log of a managed job."""
+def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
+              controller: bool, refresh: bool, sync_down: bool,
+              system: Optional[Union[str, bool]]):
+    """Tail or sync down the log of a managed job.
 
-    if system and job_id is not None:
-        try:
-            parsed_uuid = uuid.UUID(str(job_id))
-            system = f'controller_{parsed_uuid}'
-            job_id = None
-        except (ValueError, TypeError):
-            # keep same typeerror message as before - just adds "UUID" instead
-            # of "integer" to the error message
-            raise click.UsageError(  # pylint: disable=raise-missing-from
-                f'Error: Invalid value for \'[JOB_ID]\': \'{system}\' is not '
-                'a valid UUID.')
-    elif job_id is not None:
-        try:
-            job_id = int(job_id)
-        except (ValueError, TypeError):
-            # same error message as before in the non system case
-            raise click.UsageError(  # pylint: disable=raise-missing-from
-                f'Error: Invalid value for \'[JOB_ID]\': \'{job_id}\' is not '
-                'a valid integer.')
+    Args:
+        system: The system UUID to sync down logs for or True to sync all
+                active logs.
+    """
+
+    if system and job_id:
+        raise click.UsageError('Cannot specify both --system and job_id.')
 
     if controller and system:
         # this doesn't make sense because system requires a UUID, controller
         # requires a job ID
         raise click.UsageError(
             'Cannot specify both --controller and --system at the same time.')
+
+    if system and system == 'True':
+        # AFAIK click can not handle Union[str, bool] so system will get auto
+        # converted to a str. We just convert it back to a bool here. Not the
+        # cleanest but it works.
+        system = True
+    elif isinstance(system, str):
+        try:
+            parsed_uuid = uuid.UUID(system)
+            system = 'controller_' + str(parsed_uuid)
+        except (ValueError, TypeError) as e:
+            raise click.UsageError(
+                f'Error: Invalid value for \'[SYSTEM]\': \'{system}\' is not '
+                'a valid UUID.') from e
 
     try:
         if sync_down:
@@ -5309,11 +5312,6 @@ def jobs_logs(name: Optional[str], job_id: Optional[Union[str, int]],
                                                 follow=follow,
                                                 controller=controller,
                                                 refresh=refresh)
-            if system is True:
-                logger.info(f'{colorama.Fore.YELLOW}'
-                            'To stream all controller logs, run: '
-                            f'{colorama.Style.BRIGHT}sky jobs logs --system'
-                            f'{colorama.Style.RESET_ALL}')
             sys.exit(returncode)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():

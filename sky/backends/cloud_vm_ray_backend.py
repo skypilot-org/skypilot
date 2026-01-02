@@ -4465,7 +4465,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert job_name is None or job_id is None, (job_name, job_id)
 
         if system is True:
-            code = managed_jobs.ManagedJobCodeGen.get_all_active_systems()
+            code = managed_jobs.ManagedJobCodeGen.get_alive_controller_uuids()
             returncode, job_ids_payload, stderr = self.run_on_head(
                 handle,
                 code,
@@ -4475,12 +4475,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             subprocess_utils.handle_returncode(returncode, code,
                                                'Failed to sync down logs.',
                                                stderr)
-            system = message_utils.decode_payload(job_ids_payload)
-            system = ['controller_' + s for s in system]  # type: ignore
+            system_array = message_utils.decode_payload(job_ids_payload)
+            system_array = ['controller_' + s for s in system_array]
         elif system is not None:
-            system = [system]  # type: ignore
+            system_array = [system]
+        else:
+            system_array = None
 
-        if job_id is None and system is None:
+        if job_id is None and system_array is None:
             # get the job_id
             # if job_name is None, get all job_ids
             # TODO: Only get the latest job_id, since that's the only one we use
@@ -4536,7 +4538,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             run_timestamps = {
                 job_id: f'managed-jobs-consolidation-mode-{job_id}'
             }
-        elif system is None:
+        elif system_array is None:
             # we know the log dir if system is True
             # get the run_timestamp
             # the function takes in [job_id]
@@ -4545,8 +4547,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 try:
                     # safe to ignore type, since job_id can only be None if
                     # system is True and we already checked that
+                    assert job_id is not None, 'job_id is None'
                     log_dirs_request = jobsv1_pb2.GetLogDirsForJobsRequest(
-                        job_ids=[job_id])  # type: ignore
+                        job_ids=[job_id])
                     log_dirs_response = (
                         backend_utils.invoke_skylet_with_retries(
                             lambda: SkyletClient(handle.get_grpc_channel(
@@ -4575,9 +4578,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # returns with a dict of {job_id: run_timestamp}
                 run_timestamps = message_utils.decode_payload(
                     run_timestamps_payload)
-        elif system is not None:
+        elif system_array is not None:
             run_timestamps = {}
-            for job_id in system:  # type: ignore
+            for job_id in system_array:
                 run_timestamps[job_id] = job_id  # type: ignore
         else:
             assert False, 'Should not reach here'
@@ -4622,7 +4625,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 else:
                     raise
 
-        if system is not None:
+        if system_array is not None:
             for job_id in run_timestamps.keys():
                 remote_log = os.path.join(managed_jobs.JOBS_CONTROLLER_LOGS_DIR,
                                           f'{job_id}.log')
@@ -4641,7 +4644,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     (runner, local_log_dir, remote_log) for runner in runners
                 ]
                 subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
-        elif controller or system is not None:  # download controller logs
+        elif controller:  # download controller logs
             remote_log = os.path.join(managed_jobs.JOBS_CONTROLLER_LOGS_DIR,
                                       f'{job_id}.log')
             local_log_dir = os.path.join(local_dir, 'managed_jobs',
