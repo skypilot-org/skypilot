@@ -1942,10 +1942,10 @@ def test_managed_jobs_system_logs(generic_cloud: str):
                 job_name=f'{name}',
                 job_status=[sky.ManagedJobStatus.RUNNING],
                 timeout=335),
-            
+
             # List all active system UUIDs (should show at least one)
             's=$(sky jobs logs --system) && echo "$s" && test -n "$s"',
-            
+
             # Get the UUID and view its logs
             'UUID=$(sky jobs logs --system | head -n1) && '
             'echo "System UUID: $UUID" && '
@@ -1954,7 +1954,7 @@ def test_managed_jobs_system_logs(generic_cloud: str):
             'echo "$s" && '
             # Controller logs should contain job status information
             'echo "$s" | grep -E "Job status:|controller"',
-            
+
             # Test sync down system logs
             'UUID=$(sky jobs logs --system | head -n1) && '
             's=$(SKYPILOT_DEBUG=0 sky jobs logs --system $UUID --sync-down) && '
@@ -1965,10 +1965,10 @@ def test_managed_jobs_system_logs(generic_cloud: str):
             'echo "Log path: $log_path" && '
             'test -d "$log_path" && '
             'test -f "$log_path/controller.log"',
-            
+
             # Test that --system and --controller flags are mutually exclusive
             'sky jobs logs --system --controller 2>&1 | grep -i "Cannot specify both"',
-            
+
             # Test that --system and job name are mutually exclusive
             f'sky jobs logs --system -n {name} 2>&1 | grep -i "Cannot specify both"',
         ],
