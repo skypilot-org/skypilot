@@ -167,8 +167,11 @@ SkyPilot supports PostgreSQL as an alternative to SQLite for the API server data
 docker run --name skypilot-postgres -e POSTGRES_USER=skypilot \
     -e POSTGRES_PASSWORD=skypilot -e POSTGRES_DB=skypilot \
     -p 5432:5432 -d postgres:14
+```
 
-# Configure SkyPilot to use PostgreSQL via config file (~/.sky/config.yaml)
+Configure SkyPilot to use PostgreSQL via config file (`~/.sky/config.yaml`):
+
+```yaml
 db: postgresql://skypilot:skypilot@localhost:5432/skypilot
 ```
 
@@ -330,12 +333,20 @@ Example of a well-documented constraint:
 
 ### Commit Message Format
 
-Follow conventional format:
-- `fix:` for bug fixes
-- `feat:` for new features
-- `docs:` for documentation
-- `refactor:` for code restructuring
-- `test:` for test additions/changes
+Use the `[Area] Description` format:
+- `[Core]` for core system changes
+- `[CLI]` for CLI changes
+- `[API]` for API server changes
+- `[Docs]` for documentation
+- `[AWS]`, `[GCP]`, `[Azure]`, `[Kubernetes]` for cloud-specific changes
+- `[Jobs]` for managed jobs
+- `[Serve]` for SkyServe
+- `[Dashboard]` for web UI changes
+
+Examples:
+- `[Core] Fix cluster status refresh logic`
+- `[AWS] Add support for new instance types`
+- `[Docs] Update installation guide`
 
 ## API Server Helm Deployment Testing
 
