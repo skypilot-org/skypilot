@@ -1595,7 +1595,7 @@ class SlurmCommandRunner(SSHCommandRunner):
             f'export UV_CACHE_DIR=/tmp/uv_cache_$(id -u) && '
             f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
 
-        cmd = (f'srun --quiet --overlap --jobid={self.job_id} '
+        cmd = (f'srun --unbuffered --quiet --overlap --jobid={self.job_id} '
                f'--nodelist={self.slurm_node} '
                f'--nodes=1 --ntasks=1 bash -c {shlex.quote(cmd)}')
 
