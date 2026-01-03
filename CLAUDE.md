@@ -58,20 +58,20 @@ skypilot/
 ### Environment Setup
 
 ```bash
-# Create conda environment (Python 3.8-3.11)
-conda create -y -n sky python=3.10
-conda activate sky
+# Create virtual environment with uv (Python 3.8-3.11 supported)
+uv venv --python 3.10
+source .venv/bin/activate
 
 # Install in editable mode with all cloud support
-pip install -e ".[all]"
+uv pip install -e ".[all]"
 # Or specific clouds only:
-# pip install -e ".[aws,gcp,kubernetes]"
+# uv pip install -e ".[aws,gcp,kubernetes]"
 
 # Install development dependencies
-pip install -r requirements-dev.txt
+uv pip install -r requirements-dev.txt
 
 # Optional: Install pre-commit hooks
-pip install pre-commit
+uv pip install pre-commit
 pre-commit install
 ```
 
@@ -153,7 +153,7 @@ From `pyproject.toml`:
 
 ```bash
 docker run -it --rm berkeleyskypilot/skypilot-debug /bin/bash
-# Then: pip install -e ".[all]"
+# Then: uv pip install -e ".[all]"
 ```
 
 ## Code Style Guidelines
@@ -305,7 +305,7 @@ helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
 
 ```bash
 # Profile CLI performance
-pip install py-spy
+uv pip install py-spy
 py-spy record -t -o sky.svg -- python -m sky.cli status
 
 # Check cloud credentials
