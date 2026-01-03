@@ -1,3 +1,6 @@
+# Claude Issue Triage workflow for automatically labeling issues and notifying oncall
+# Based on: https://github.com/anthropics/claude-code/blob/main/.github/workflows/claude-issue-triage.yml
+
 name: Claude Issue Triage
 
 on:
