@@ -3813,6 +3813,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Note that the order of ">filename 2>&1" matters.
             f'> {remote_log_path} 2>&1')
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
+
+        # For Slurm, we need to wait for the job to complete before exiting,
+        # because Slurm's proctrack/cgroup kills all processes when the srun
+        # job step ends, including child processes launched as a separate
+        # process group.
+        # So this keeps srun alive so the job driver process that was spawned
+        # (and runs in the background) by job_lib.JobScheduler.schedule_step()
+        # does not get killed.
+        # Note: proctrack/cgroup is enabled by default on Nebius' Managed
+        # Soperator.
+        is_slurm = isinstance(handle.launched_resources.cloud, clouds.Slurm)
+        if is_slurm:
+            wait_code = job_lib.JobLibCodeGen.wait_for_job(job_id)
+            code = code + ' && ' + wait_code
+
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
 
         # Should also be ealier than is_command_length_over_limit
@@ -3897,10 +3912,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
 
-            returncode, stdout, stderr = self.run_on_head(handle,
-                                                          job_submit_cmd,
-                                                          stream_logs=False,
-                                                          require_outputs=True)
+            # For Slurm, run in background so that SSH returns immediately.
+            # This is needed because we add the wait_for_job code above which
+            # makes the command block until the job completes.
+            returncode, stdout, stderr = self.run_on_head(
+                handle,
+                job_submit_cmd,
+                stream_logs=False,
+                require_outputs=True,
+                run_in_background=is_slurm)
             # Happens when someone calls `sky exec` but remote is outdated for
             # running a job. Necessitating calling `sky launch`.
             backend_utils.check_stale_runtime_on_remote(returncode, stderr,
@@ -3917,11 +3937,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'
                 job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
+                # See comment above for why run_in_background=is_slurm.
                 returncode, stdout, stderr = self.run_on_head(
                     handle,
                     job_submit_cmd,
                     stream_logs=False,
-                    require_outputs=True)
+                    require_outputs=True,
+                    run_in_background=is_slurm)
 
             subprocess_utils.handle_returncode(
                 returncode,
