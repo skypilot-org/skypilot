@@ -282,6 +282,28 @@ python -m grpc_tools.protoc \
     sky/schemas/proto/*.proto
 ```
 
+### Dependency Management
+
+Dependencies are defined in `sky/setup_files/dependencies.py`:
+
+- **Core dependencies**: Listed in `install_requires`
+- **Cloud-specific**: Defined in `extras_require` (e.g., `aws`, `gcp`, `kubernetes`)
+- **Development**: Listed in `requirements-dev.txt`
+
+When updating dependencies:
+
+1. Check version constraints carefully - some packages have breaking changes
+2. Consider Python version compatibility (3.8-3.11)
+3. Test with both minimum and latest allowed versions
+4. Document version constraints with comments explaining why
+
+Example of a well-documented constraint:
+```python
+# uvicorn 0.36.0 removed setup_event_loop(), but we now support both
+# old (setup_event_loop) and new (get_loop_factory) approaches
+'uvicorn[standard] >=0.33.0',
+```
+
 ## Key Modules Reference
 
 | Module | Purpose |
