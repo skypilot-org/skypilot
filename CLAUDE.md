@@ -156,6 +156,50 @@ docker run -it --rm berkeleyskypilot/skypilot-debug /bin/bash
 # Then: uv pip install -e ".[all]"
 ```
 
+### Testing with PostgreSQL Backend
+
+SkyPilot supports PostgreSQL as an alternative to SQLite for the API server database. To run tests with PostgreSQL:
+
+**Local PostgreSQL Setup:**
+
+```bash
+# Start a local PostgreSQL container
+docker run --name skypilot-postgres -e POSTGRES_USER=skypilot \
+    -e POSTGRES_PASSWORD=skypilot -e POSTGRES_DB=skypilot \
+    -p 5432:5432 -d postgres:14
+
+# Configure SkyPilot to use PostgreSQL via config file (~/.sky/config.yaml)
+db: postgresql://skypilot:skypilot@localhost:5432/skypilot
+```
+
+**Running Tests with PostgreSQL:**
+
+```bash
+# Run smoke tests with PostgreSQL backend
+pytest tests/smoke_tests/ --postgres
+
+# Run with jobs consolidation mode (recommended for PostgreSQL)
+pytest tests/smoke_tests/ --postgres --jobs-consolidation
+```
+
+**Production-Scale Testing:**
+
+For large-scale performance testing with PostgreSQL, use the load test scripts:
+
+```bash
+# Run production performance test with AWS RDS PostgreSQL
+bash tests/load_tests/db_scale_tests/test_large_production_performance.sh \
+    --postgres --restart-api-server
+
+# Manual data injection for debugging
+python tests/load_tests/db_scale_tests/inject_production_scale_data.py \
+    --active-cluster scale-test-active \
+    --terminated-cluster scale-test-terminated \
+    --managed-job-id 1
+```
+
+See `tests/load_tests/db_scale_tests/README.md` and `README_POSTGRES.md` for detailed instructions.
+
 ## Code Style Guidelines
 
 ### General Principles
