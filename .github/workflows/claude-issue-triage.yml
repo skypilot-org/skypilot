@@ -1,0 +1,215 @@
+name: Claude Issue Triage
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  triage-issue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create triage prompt
+        run: |
+          mkdir -p /tmp/claude-prompts
+          cat > /tmp/claude-prompts/triage-prompt.txt << 'EOF'
+          You're an issue triage assistant for GitHub issues in the SkyPilot repository. SkyPilot is an open-source framework for running AI and batch workloads on any cloud or Kubernetes cluster. Your task is to analyze the issue, select appropriate labels, and determine if oncall attention is needed.
+
+          IMPORTANT: Don't post any comments or messages to the issue. Your actions should be limited to applying labels and outputting a JSON result for oncall notification.
+
+          Issue Information:
+          - REPO: ${{ github.repository }}
+          - ISSUE_NUMBER: ${{ github.event.issue.number }}
+
+          TASK OVERVIEW:
+
+          1. First, fetch the list of labels available in this repository by running: `gh label list`. Run exactly this command with nothing else.
+
+          2. Next, use the GitHub tools to get context about the issue:
+             - You have access to these tools:
+               - mcp__github__get_issue: Use this to retrieve the current issue's details including title, description, and existing labels
+               - mcp__github__get_issue_comments: Use this to read any discussion or additional context provided in the comments
+               - mcp__github__update_issue: Use this to apply labels to the issue (do not use this for commenting)
+               - mcp__github__search_issues: Use this to find similar issues that might provide context for proper categorization and to identify potential duplicate issues
+               - mcp__github__list_issues: Use this to understand patterns in how other issues are labeled
+             - Start by using mcp__github__get_issue to get the issue details
+
+          3. Analyze the issue content, considering:
+             - The issue title and description
+             - The type of issue (bug report, feature request, question, etc.)
+             - Technical areas mentioned (cloud providers: AWS, GCP, Azure, Kubernetes, etc.)
+             - Severity or priority indicators
+             - User impact and urgency
+             - Components affected (Jobs, Clusters, Storage, Autoscaling, etc.)
+
+          4. Select appropriate labels from the available labels list:
+             - Choose labels that accurately reflect the issue's nature
+             - Be specific but comprehensive
+             - Select priority labels if you can determine urgency (P0, P1, P2, etc.)
+             - Consider cloud provider labels if applicable (aws, gcp, azure, kubernetes, etc.)
+             - If you find similar issues using mcp__github__search_issues, consider using a "duplicate" label if appropriate. Only do so if the issue is a duplicate of another OPEN issue.
+
+          5. Apply the selected labels:
+             - Use mcp__github__update_issue to apply your selected labels
+             - DO NOT post any comments explaining your decision
+             - DO NOT communicate directly with users
+             - If no labels are clearly applicable, do not apply any labels
+
+          6. Determine if this issue requires oncall attention. An issue REQUIRES ONCALL ATTENTION if ANY of the following are true:
+             - It appears to be a critical bug affecting production workloads
+             - It involves data loss or security concerns
+             - It affects core functionality (cluster launch, job submission, etc.) and appears to be a regression
+             - The user indicates urgent business impact
+             - It's labeled as P0 or appears to warrant P0 priority
+             - Multiple users seem to be affected by the same issue
+             - It involves breaking changes or backwards compatibility issues
+
+          7. FINAL STEP - Output your oncall decision:
+             After completing all labeling, you MUST output a JSON block with your oncall assessment.
+             Write a file to /tmp/oncall-result.json with the following format:
+
+             ```json
+             {
+               "requires_oncall": true or false,
+               "reason": "Brief explanation of why oncall is or is not needed",
+               "priority": "P0, P1, P2, or P3",
+               "issue_title": "The issue title",
+               "issue_number": <issue number>
+             }
+             ```
+
+             Use the Bash tool to write this file:
+             echo '{"requires_oncall": <boolean>, "reason": "<reason>", "priority": "<priority>", "issue_title": "<title>", "issue_number": <number>}' > /tmp/oncall-result.json
+
+          IMPORTANT GUIDELINES:
+          - Be thorough in your analysis
+          - Only select labels from the provided list
+          - DO NOT post any comments to the issue
+          - Your actions should be: apply labels AND write the oncall result JSON file
+          - It's okay to not add any labels if none are clearly applicable
+          - Be conservative with oncall notifications - only flag truly urgent issues
+          EOF
+
+      - name: Setup GitHub MCP Server
+        run: |
+          mkdir -p /tmp/mcp-config
+          cat > /tmp/mcp-config/mcp-servers.json << 'EOF'
+          {
+            "mcpServers": {
+              "github": {
+                "command": "docker",
+                "args": [
+                  "run",
+                  "-i",
+                  "--rm",
+                  "-e",
+                  "GITHUB_PERSONAL_ACCESS_TOKEN",
+                  "ghcr.io/github/github-mcp-server:sha-7aced2b"
+                ],
+                "env": {
+                  "GITHUB_PERSONAL_ACCESS_TOKEN": "${{ secrets.GITHUB_TOKEN }}"
+                }
+              }
+            }
+          }
+          EOF
+
+      - name: Run Claude Code for Issue Triage
+        uses: anthropics/claude-code-base-action@beta
+        with:
+          prompt_file: /tmp/claude-prompts/triage-prompt.txt
+          allowed_tools: "Bash(gh label list),Bash(echo *),mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__update_issue,mcp__github__search_issues,mcp__github__list_issues"
+          timeout_minutes: "5"
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          mcp_config: /tmp/mcp-config/mcp-servers.json
+          claude_args: "--model claude-sonnet-4-5-20250929"
+          claude_env: |
+            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check oncall result
+        id: oncall_check
+        run: |
+          if [ -f /tmp/oncall-result.json ]; then
+            echo "Oncall result file found"
+            cat /tmp/oncall-result.json
+
+            REQUIRES_ONCALL=$(jq -r '.requires_oncall' /tmp/oncall-result.json)
+            REASON=$(jq -r '.reason' /tmp/oncall-result.json)
+            PRIORITY=$(jq -r '.priority' /tmp/oncall-result.json)
+            ISSUE_TITLE=$(jq -r '.issue_title' /tmp/oncall-result.json)
+            ISSUE_NUMBER=$(jq -r '.issue_number' /tmp/oncall-result.json)
+
+            echo "requires_oncall=${REQUIRES_ONCALL}" >> $GITHUB_OUTPUT
+            echo "reason=${REASON}" >> $GITHUB_OUTPUT
+            echo "priority=${PRIORITY}" >> $GITHUB_OUTPUT
+            echo "issue_title=${ISSUE_TITLE}" >> $GITHUB_OUTPUT
+            echo "issue_number=${ISSUE_NUMBER}" >> $GITHUB_OUTPUT
+          else
+            echo "No oncall result file found, defaulting to no oncall needed"
+            echo "requires_oncall=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Slack notification for oncall
+        if: steps.oncall_check.outputs.requires_oncall == 'true'
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ secrets.SLACK_ONCALL_CHANNEL_ID }}",
+              "text": "🚨 Issue requires oncall attention: #${{ steps.oncall_check.outputs.issue_number }}",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "🚨 Issue Requires Oncall Attention",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Priority:*\n${{ steps.oncall_check.outputs.priority }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Issue:*\n<${{ github.server_url }}/${{ github.repository }}/issues/${{ github.event.issue.number }}|#${{ github.event.issue.number }}>"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Title:*\n${{ github.event.issue.title }}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Reason for oncall:*\n${{ steps.oncall_check.outputs.reason }}"
+                  }
+                },
+                {
+                  "type": "context",
+                  "elements": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "Triggered by Claude Issue Triage | <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View workflow run>"
+                    }
+                  ]
+                }
+              ]
+            }
