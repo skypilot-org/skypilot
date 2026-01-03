@@ -684,7 +684,39 @@ def get_service_schema():
                 }]
             },
             'pool': {
-                'type': 'boolean',
+                'anyOf': [{
+                    'type': 'boolean',
+                }, {
+                    'type': 'object',
+                    'required': ['workers'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'workers': {
+                            'type': 'integer',
+                            'minimum': 0,
+                        },
+                        'min_workers': {
+                            'type': 'integer',
+                            'minimum': 0,
+                        },
+                        'queue_length_threshold': {
+                            'type': 'integer',
+                            'minimum': 0,
+                        },
+                        'max_workers': {
+                            'type': 'integer',
+                            'minimum': 0,
+                        },
+                        'upscale_delay_seconds': {
+                            'type': 'number',
+                            'minimum': 0,
+                        },
+                        'downscale_delay_seconds': {
+                            'type': 'number',
+                            'minimum': 0,
+                        },
+                    },
+                }],
             },
             'replica_policy': {
                 'type': 'object',
@@ -751,6 +783,26 @@ def get_service_schema():
             },
             'workers': {
                 'type': 'integer',
+            },
+            'min_workers': {
+                'type': 'integer',
+                'minimum': 0,
+            },
+            'max_workers': {
+                'type': 'integer',
+                'minimum': 0,
+            },
+            'queue_length_threshold': {
+                'type': 'integer',
+                'minimum': 0,
+            },
+            'upscale_delay_seconds': {
+                'type': 'number',
+                'minimum': 0,
+            },
+            'downscale_delay_seconds': {
+                'type': 'number',
+                'minimum': 0,
             },
             'load_balancing_policy': {
                 'type': 'string',

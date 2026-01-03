@@ -546,6 +546,7 @@ class Task:
         env_overrides: Optional[List[Tuple[str, str]]] = None,
         secrets_overrides: Optional[List[Tuple[str, str]]] = None,
     ) -> 'Task':
+        logger.info(f'lloyd: starting config: {config}')
         user_specified_yaml = config.pop('_user_specified_yaml',
                                          yaml_utils.dump_yaml_str(config))
         # More robust handling for 'envs': explicitly convert keys and values to
@@ -751,12 +752,23 @@ class Task:
                     'Cannot set both service and pool in the same task.')
 
         if service is not None:
+            logger.info(f'lloyd: service: {service}')
             service = service_spec.SkyServiceSpec.from_yaml_config(service)
             task.set_service(service)
         elif pool is not None:
-            pool['pool'] = True
-            pool = service_spec.SkyServiceSpec.from_yaml_config(pool)
-            task.set_service(pool)
+            # When pool is a dict (from top-level pool: in YAML), wrap it properly
+            # The schema expects {'pool': {...}} structure, not {'workers': 1, 'pool': True}
+            if isinstance(pool, dict):
+                # pool is a dict like {'workers': 1, 'max_workers': 3}
+                # Wrap it as {'pool': {'workers': 1, 'max_workers': 3}}
+                pool_config_dict = {'pool': pool}
+            else:
+                # pool is a boolean True (shouldn't happen, but handle it)
+                pool_config_dict = {'pool': True}
+            logger.info(f'lloyd: pool (from config.pop): {pool}, pool_config_dict: {pool_config_dict}')
+            pool_spec = service_spec.SkyServiceSpec.from_yaml_config(pool_config_dict)
+            logger.info(f'lloyd: pool after from_yaml_config: {pool_spec}')
+            task.set_service(pool_spec)
 
         volume_mounts = config.pop('volume_mounts', None)
         if volume_mounts is not None:

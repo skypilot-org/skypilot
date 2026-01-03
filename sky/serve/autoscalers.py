@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 from sky import sky_logging
 from sky.serve import constants
 from sky.serve import serve_state
+from sky.jobs import state as managed_job_state
 from sky.serve import serve_utils
 
 if typing.TYPE_CHECKING:
@@ -211,13 +212,26 @@ class Autoscaler:
     def from_spec(cls, service_name: str,
                   spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
         # TODO(MaoZiming): use NAME to get the class.
-        if spec.use_ondemand_fallback:
+        # Check for pool autoscaling first
+        # Use queue length autoscaler if it's a pool and max_replicas is set
+        # (max_replicas is set from max_workers in from_yaml_config, and we ensure
+        # it's set if queue_length_threshold is set)
+        logger.info(f'from_spec: spec.pool={spec.pool}, spec.max_replicas={spec.max_replicas}, spec.queue_length_threshold={spec.queue_length_threshold}')
+        if spec.pool and spec.max_replicas is not None:
+            # Pool with max_workers specified - use queue length autoscaler
+            logger.info(f'QueueLengthAutoscaler initialized for pool "{service_name}" '
+                       f'(max_replicas={spec.max_replicas}, queue_length_threshold={spec.queue_length_threshold})')
+            return QueueLengthAutoscaler(service_name, spec)
+        elif spec.use_ondemand_fallback:
+            logger.info(f'FallbackRequestRateAutoscaler initialized for pool "{service_name}"')
             return FallbackRequestRateAutoscaler(service_name, spec)
         elif isinstance(spec.target_qps_per_replica, dict):
+            logger.info(f'InstanceAwareRequestRateAutoscaler initialized for pool "{service_name}"')
             # Use instance-aware autoscaler
             # when target_qps_per_replica is a dict
             return InstanceAwareRequestRateAutoscaler(service_name, spec)
         else:
+            logger.info(f'RequestRateAutoscaler initialized for pool "{service_name}"')
             return RequestRateAutoscaler(service_name, spec)
 
     def get_decision_interval(self) -> int:
@@ -1065,3 +1079,177 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             _generate_scale_down_decisions(all_replica_ids_to_scale_down))
 
         return scaling_decisions
+
+
+class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
+    """QueueLengthAutoscaler: Autoscale pools based on queue length.
+
+    Scales pool workers based on the number of pending jobs in the queue.
+    When queue length exceeds the threshold, scales up by 1 worker.
+    When queue length is below the threshold, scales down by 1 worker.
+    Uses hysteresis to prevent rapid scaling decisions.
+    """
+
+    def __init__(self, service_name: str,
+                 spec: 'service_spec.SkyServiceSpec') -> None:
+        """Initialize the queue length autoscaler.
+
+        Variables:
+            queue_length_threshold: Threshold for queue length to trigger
+            scaling up or down.
+            service_name: The pool name (used to query pending jobs).
+        """
+        super().__init__(service_name, spec)
+        # Use default threshold if not specified
+        self.queue_length_threshold: int = (
+            spec.queue_length_threshold
+            if spec.queue_length_threshold is not None
+            else constants.AUTOSCALER_DEFAULT_QUEUE_LENGTH_THRESHOLD)
+        self._service_name: str = service_name
+        logger.info(f'QueueLengthAutoscaler initialized for pool "{service_name}": '
+                    f'min_replicas={self.min_replicas}, '
+                    f'max_replicas={self.max_replicas}, '
+                    f'queue_length_threshold={self.queue_length_threshold}')
+
+    def _calculate_target_num_replicas(self) -> int:
+        """Calculate target number of replicas based on queue length."""
+        queue_length = managed_job_state.get_pending_jobs_count_by_pool(
+            self._service_name)
+        current_num_replicas = self.target_num_replicas
+
+        logger.info(f'[QueueLengthAutoscaler] Pool "{self._service_name}": '
+                    f'queue_length={queue_length}, '
+                    f'threshold={self.queue_length_threshold}, '
+                    f'current_target_replicas={current_num_replicas}, '
+                    f'min_replicas={self.min_replicas}, '
+                    f'max_replicas={self.max_replicas}')
+
+        # Determine target based on queue length vs threshold
+        if queue_length > self.queue_length_threshold:
+            # Scale up by 1
+            target_num_replicas = current_num_replicas + 1
+            decision = 'SCALE_UP'
+            logger.info(f'[QueueLengthAutoscaler] Decision: {decision} '
+                        f'(queue_length {queue_length} > threshold {self.queue_length_threshold}): '
+                        f'{current_num_replicas} -> {target_num_replicas}')
+        elif queue_length < self.queue_length_threshold:
+            # Scale down by 1
+            target_num_replicas = current_num_replicas - 1
+            decision = 'SCALE_DOWN'
+            logger.info(f'[QueueLengthAutoscaler] Decision: {decision} '
+                        f'(queue_length {queue_length} < threshold {self.queue_length_threshold}): '
+                        f'{current_num_replicas} -> {target_num_replicas}')
+        else:
+            # Queue length equals threshold, keep current
+            target_num_replicas = current_num_replicas
+            decision = 'NO_CHANGE'
+            logger.info(f'[QueueLengthAutoscaler] Decision: {decision} '
+                        f'(queue_length {queue_length} == threshold {self.queue_length_threshold}): '
+                        f'staying at {target_num_replicas}')
+
+        clipped_target = self._clip_target_num_replicas(target_num_replicas)
+        if clipped_target != target_num_replicas:
+            logger.info(f'[QueueLengthAutoscaler] Clipped target: '
+                        f'{target_num_replicas} -> {clipped_target} '
+                        f'(bounds: [{self.min_replicas}, {self.max_replicas}])')
+        else:
+            logger.info(f'[QueueLengthAutoscaler] Final target: {clipped_target}')
+
+        return clipped_target
+
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       update_mode: serve_utils.UpdateMode) -> None:
+        super().update_version(version, spec, update_mode)
+        # Update threshold, using default if not specified
+        self.queue_length_threshold = (
+            spec.queue_length_threshold
+            if spec.queue_length_threshold is not None
+            else constants.AUTOSCALER_DEFAULT_QUEUE_LENGTH_THRESHOLD)
+
+    def collect_request_information(
+            self, request_aggregator_info: Dict[str, Any]) -> None:
+        """Collect request information from aggregator for autoscaling.
+        
+        Not needed for queue-based autoscaling, we query the job queue directly.
+        """
+        pass
+
+    def _generate_scaling_decisions(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+    ) -> List[AutoscalerDecision]:
+        """Generate Autoscaling decisions based on queue length."""
+
+        logger.info(f'[QueueLengthAutoscaler] Generating scaling decisions for pool "{self._service_name}"')
+        
+        # Use hysteresis-based logic from base class
+        self._set_target_num_replicas_with_hysteresis()
+
+        latest_nonterminal_replicas: List['replica_managers.ReplicaInfo'] = []
+
+        for info in replica_infos:
+            if info.version == self.latest_version:
+                if not info.is_terminal:
+                    latest_nonterminal_replicas.append(info)
+
+        current_num_replicas = len(latest_nonterminal_replicas)
+        logger.info(f'[QueueLengthAutoscaler] Current non-terminal replicas: {current_num_replicas} '
+                    f'(version {self.latest_version})')
+
+        scaling_decisions: List[AutoscalerDecision] = []
+
+        # Case 1: when latest_nonterminal_replicas is less
+        # than target_num_replicas, we scale up new replicas.
+        target_num_replicas = self.get_final_target_num_replicas()
+        logger.info(f'[QueueLengthAutoscaler] Target replicas (with overprovision): {target_num_replicas}')
+        
+        if len(latest_nonterminal_replicas) < target_num_replicas:
+            num_replicas_to_scale_up = (target_num_replicas -
+                                        len(latest_nonterminal_replicas))
+            logger.info(f'[QueueLengthAutoscaler] SCALING UP: {num_replicas_to_scale_up} replicas '
+                        f'({current_num_replicas} -> {target_num_replicas})')
+            scaling_decisions.extend(
+                _generate_scale_up_decisions(num_replicas_to_scale_up, None))
+        else:
+            logger.info(f'[QueueLengthAutoscaler] No scale up needed '
+                        f'(current: {current_num_replicas} >= target: {target_num_replicas})')
+
+        # Case 2: when latest_nonterminal_replicas is more
+        # than target_num_replicas, we scale down new replicas.
+        replicas_to_scale_down = []
+        if len(latest_nonterminal_replicas) > target_num_replicas:
+            num_replicas_to_scale_down = (len(latest_nonterminal_replicas) -
+                                          target_num_replicas)
+            # Use standard downscaling logic
+            replicas_to_scale_down = (
+                _select_nonterminal_replicas_to_scale_down(
+                    num_replicas_to_scale_down, latest_nonterminal_replicas))
+            logger.info(f'[QueueLengthAutoscaler] SCALING DOWN: {num_replicas_to_scale_down} replicas '
+                        f'({current_num_replicas} -> {target_num_replicas}), '
+                        f'replica IDs: {replicas_to_scale_down}')
+        else:
+            logger.info(f'[QueueLengthAutoscaler] No scale down needed '
+                        f'(current: {current_num_replicas} <= target: {target_num_replicas})')
+
+        scaling_decisions.extend(
+            _generate_scale_down_decisions(replicas_to_scale_down))
+
+        logger.info(f'[QueueLengthAutoscaler] Total scaling decisions: {len(scaling_decisions)}')
+        for i, decision in enumerate(scaling_decisions):
+            logger.info(f'[QueueLengthAutoscaler] Decision {i+1}: {decision.operator.value}, target: {decision.target}')
+
+        return scaling_decisions
+
+    def _dump_dynamic_states(self) -> Dict[str, Any]:
+        """Dump dynamic states from autoscaler.
+        
+        Hysteresis state is handled by base class, no additional state needed.
+        """
+        return {}
+
+    def _load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
+        """Load dynamic states to autoscaler.
+        
+        Hysteresis state is handled by base class, no additional state needed.
+        """
+        pass

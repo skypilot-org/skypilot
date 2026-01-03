@@ -2059,6 +2059,44 @@ def get_num_alive_jobs(pool: Optional[str] = None) -> int:
 
 
 @_init_db
+def get_pending_jobs_count_by_pool(pool: str) -> int:
+    """Get the count of pending jobs in a pool.
+    
+    Pending jobs are jobs that are waiting for a worker, i.e., jobs with:
+    - schedule_state in (WAITING, ALIVE_WAITING)
+    - status = PENDING
+    
+    Args:
+        pool: The pool name
+        
+    Returns:
+        The number of pending jobs in the pool
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Join job_info_table with spot_table to get status
+        query = sqlalchemy.select(
+            sqlalchemy.func.count()  # pylint: disable=not-callable
+        ).select_from(
+            job_info_table.join(
+                spot_table,
+                job_info_table.c.spot_job_id == spot_table.c.spot_job_id
+            )
+        ).where(
+            sqlalchemy.and_(
+                # job_info_table.c.schedule_state.in_([
+                #     ManagedJobScheduleState.WAITING.value,
+                #     ManagedJobScheduleState.ALIVE_WAITING.value,
+                # ]),
+                spot_table.c.status == ManagedJobStatus.PENDING.value,
+                job_info_table.c.pool == pool,
+            )
+        )
+        result = session.execute(query).fetchone()
+        return result[0] if result else 0
+
+
+@_init_db
 def get_nonterminal_job_ids_by_pool(pool: str,
                                     cluster_name: Optional[str] = None
                                    ) -> List[int]:
