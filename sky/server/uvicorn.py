@@ -201,23 +201,20 @@ class Server(uvicorn.Server):
         logger.info(
             f'Request {request_id} interrupted and will be retried by client.')
 
-    async def _serve_with_lag_monitoring(self, *args, **kwargs):
-        """Wrapper to configure event loop lag monitoring before serving."""
-        lag_threshold = perf_utils.get_loop_lag_threshold()
-        if lag_threshold is not None:
-            event_loop = asyncio.get_running_loop()
-            # Same as set PYTHONASYNCIODEBUG=1, but with custom threshold.
-            event_loop.set_debug(True)
-            event_loop.slow_callback_duration = lag_threshold
-        await self.serve(*args, **kwargs)
-
     def run(self, *args, **kwargs):
         """Run the server process."""
         if self.max_db_connections is not None:
             db_utils.set_max_connections(self.max_db_connections)
         add_timestamp_prefix_for_server_logs()
         context_utils.hijack_sys_attrs()
-
+        # Use default loop policy of uvicorn (use uvloop if available).
+        self.config.setup_event_loop()
+        lag_threshold = perf_utils.get_loop_lag_threshold()
+        if lag_threshold is not None:
+            event_loop = asyncio.get_event_loop()
+            # Same as set PYTHONASYNCIODEBUG=1, but with custom threshold.
+            event_loop.set_debug(True)
+            event_loop.slow_callback_duration = lag_threshold
         stop_monitor = threading.Event()
         monitor = threading.Thread(target=metrics_lib.process_monitor,
                                    args=('server', stop_monitor),
@@ -225,23 +222,7 @@ class Server(uvicorn.Server):
         monitor.start()
         try:
             with self.capture_signals():
-                # Use uvicorn's event loop setup mechanism.
-                # uvicorn < 0.36.0 uses config.setup_event_loop()
-                # uvicorn >= 0.36.0 uses config.get_loop_factory() with
-                # uvicorn._compat.asyncio_run()
-                if hasattr(self.config, 'setup_event_loop'):
-                    # Old uvicorn: setup event loop before asyncio.run()
-                    self.config.setup_event_loop()
-                    asyncio.run(self._serve_with_lag_monitoring(*args, **kwargs))
-                else:
-                    # New uvicorn (>=0.36.0): use loop_factory with compat
-                    # asyncio_run that handles loop_factory for all Python
-                    # versions
-                    # pylint: disable=import-outside-toplevel
-                    from uvicorn._compat import asyncio_run
-                    loop_factory = self.config.get_loop_factory()
-                    asyncio_run(self._serve_with_lag_monitoring(*args, **kwargs),
-                                loop_factory=loop_factory)
+                asyncio.run(self.serve(*args, **kwargs))
         finally:
             stop_monitor.set()
             monitor.join()
