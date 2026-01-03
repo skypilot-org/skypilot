@@ -1548,8 +1548,8 @@ class SlurmCommandRunner(SSHCommandRunner):
             f'bash --norc --noprofile -c \''
             f'job_id=$(echo "$1" | cut -d+ -f1); '
             f'node_list=$(echo "$1" | cut -d+ -f2); '
-            f'shift; '
-            f'exec {ssh_command} '
+            f'shift; '  # Shift past the encoded job_id+node_list
+            f'exec {ssh_command} '  # SSH to login node to run srun
             f'srun --unbuffered --quiet --overlap '
             f'--jobid="$job_id" --nodelist="$node_list" --nodes=1 --ntasks=1 '
             f'"$@"'
