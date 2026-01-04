@@ -2406,6 +2406,42 @@ def _update_cluster_status(
                          exc_info=e)
         return False
 
+    def _handle_autostopping_cluster(
+            print_newline: bool = False) -> Optional[Dict[str, Any]]:
+        """Handle cluster that is autostopping/autodowning.
+
+        Sets the cluster status to AUTOSTOPPING and returns the cluster record.
+
+        Args:
+            print_newline: Whether to print a newline before logging (for UX).
+
+        Returns:
+            Cluster record if autostopping, None otherwise.
+        """
+        # The cluster is autostopping - set to AUTOSTOPPING status
+        if print_newline:
+            ux_utils.console_newline()
+        operation_str = 'autodowning' if record.get('to_down',
+                                                    False) else 'autostopping'
+        logger.info(f'Cluster {cluster_name!r} is {operation_str}.')
+
+        # Set cluster to AUTOSTOPPING status
+        record['status'] = status_lib.ClusterStatus.AUTOSTOPPING
+        global_user_state.add_cluster_event(
+            cluster_name,
+            status_lib.ClusterStatus.AUTOSTOPPING,
+            f'Cluster is {operation_str}.',
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            nop_if_duplicate=True)
+        # Use set_cluster_status() to directly update the status in DB
+        # instead of add_or_update_cluster() which only supports INIT/UP
+        global_user_state.set_cluster_status(
+            cluster_name, status_lib.ClusterStatus.AUTOSTOPPING)
+        return global_user_state.get_cluster_from_name(
+            cluster_name,
+            include_user_info=include_user_info,
+            summary_response=summary_response)
+
     # Determining if the cluster is healthy (UP):
     #
     # For non-spot clusters: If ray status shows all nodes are healthy, it is
@@ -2434,26 +2470,7 @@ def _update_cluster_status(
             autostop_status = backend.get_autostop_status(handle,
                                                           stream_logs=False)
             if autostop_status is not None:
-                # The cluster is autostopping - set to AUTOSTOPPING status
-                operation_str = 'autodowning' if record.get(
-                    'to_down', False) else 'autostopping'
-                logger.info(f'Cluster {cluster_name!r} is {operation_str}.')
-
-                record['status'] = status_lib.ClusterStatus.AUTOSTOPPING
-                global_user_state.add_cluster_event(
-                    cluster_name,
-                    status_lib.ClusterStatus.AUTOSTOPPING,
-                    f'Cluster is {operation_str}.',
-                    global_user_state.ClusterEventType.STATUS_CHANGE,
-                    nop_if_duplicate=True)
-                # Use set_cluster_status() to directly update the status in DB
-                # instead of add_or_update_cluster() which only supports INIT/UP
-                global_user_state.set_cluster_status(
-                    cluster_name, status_lib.ClusterStatus.AUTOSTOPPING)
-                return global_user_state.get_cluster_from_name(
-                    cluster_name,
-                    include_user_info=include_user_info,
-                    summary_response=summary_response)
+                return _handle_autostopping_cluster(print_newline=False)
 
         record['status'] = status_lib.ClusterStatus.UP
         # Add cluster event for instance status check.
@@ -2596,28 +2613,7 @@ def _update_cluster_status(
                     handle, stream_logs=False)
 
                 if is_autostopping:
-                    # The cluster is autostopping - set to AUTOSTOPPING status
-                    ux_utils.console_newline()
-                    operation_str = 'autodowning' if record[
-                        'to_down'] else 'autostopping'
-                    logger.info(f'Cluster {cluster_name!r} is {operation_str}.')
-
-                    # Set cluster to AUTOSTOPPING status
-                    record['status'] = status_lib.ClusterStatus.AUTOSTOPPING
-                    global_user_state.add_cluster_event(
-                        cluster_name,
-                        status_lib.ClusterStatus.AUTOSTOPPING,
-                        f'Cluster is {operation_str}.',
-                        global_user_state.ClusterEventType.STATUS_CHANGE,
-                        nop_if_duplicate=True)
-                    # Use set_cluster_status() to directly update the status in DB
-                    # instead of add_or_update_cluster() which only supports INIT/UP
-                    global_user_state.set_cluster_status(
-                        cluster_name, status_lib.ClusterStatus.AUTOSTOPPING)
-                    return global_user_state.get_cluster_from_name(
-                        cluster_name,
-                        include_user_info=include_user_info,
-                        summary_response=summary_response)
+                    return _handle_autostopping_cluster(print_newline=True)
                 elif is_head_node_alive:
                     logger.debug(
                         f'Skipping autostop reset for cluster {cluster_name!r} '
