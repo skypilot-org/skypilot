@@ -38,6 +38,7 @@ from sky.server import versions
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
+from sky.utils import common as utils_common
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
@@ -127,6 +128,7 @@ class ApiServerInfo:
     user: Optional[Dict[str, Any]] = None
     basic_auth_enabled: bool = False
     error: Optional[str] = None
+    server_user_hash: Optional[str] = None
 
 
 def get_api_cookie_jar_path() -> pathlib.Path:
@@ -438,6 +440,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             version_on_disk = result.get('version_on_disk')
             commit = result.get('commit')
             user = result.get('user')
+            server_user_hash = result.get('server_user_hash')
             basic_auth_enabled = result.get('basic_auth_enabled')
             server_info = ApiServerInfo(status=ApiServerStatus(server_status),
                                         api_version=api_version,
@@ -445,6 +448,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
                                         version_on_disk=version_on_disk,
                                         commit=commit,
                                         user=user,
+                                        server_user_hash=server_user_hash,
                                         basic_auth_enabled=basic_auth_enabled)
             if api_version is None or version is None or commit is None:
                 logger.warning(f'API server response missing '
@@ -473,6 +477,12 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             # Save or refresh the cookie jar in case of session affinity and
             # OAuth.
             set_api_cookie_jar(cookies, create_if_not_exists=True)
+            if server_user_hash is not None:
+                common_utils.save_server_user_hash(server_url, server_user_hash)
+                usage_lib.update_usage_user(
+                    server_url=server_url,
+                    server_user_hash=server_user_hash,
+                    client_user_hash=user.get('id') if user else None)
             return server_info
         except (requests.JSONDecodeError, AttributeError) as e:
             # Try to check if we got redirected to a login page.
@@ -957,6 +967,11 @@ def reload_for_new_request(client_entrypoint: Optional[str],
     # We need to reset usage message, so that the message is up-to-date with the
     # latest information in the context, e.g. client entrypoint and run id.
     usage_lib.messages.reset(usage_lib.MessageType.USAGE)
+    # Ensure server-side usage reports include both client and server user hash.
+    if user is not None and getattr(user, 'id', None) is not None:
+        usage_lib.update_usage_user(server_url=get_server_url(),
+                                    server_user_hash=utils_common.SERVER_ID,
+                                    client_user_hash=user.id)
 
 
 def clear_local_api_server_database() -> None:

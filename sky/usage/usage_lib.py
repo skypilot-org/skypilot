@@ -81,7 +81,7 @@ class UsageMessageToReport(MessageToReport):
     def __init__(self) -> None:
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
         # Message identifier.
-        self.user: str = common_utils.get_user_hash()
+        self.user: str = common_utils.get_usage_user_id()
         self.run_id: str = common_utils.get_usage_run_id()
         self.sky_version: str = sky.__version__
         self.sky_commit: str = sky.__commit__
@@ -497,6 +497,16 @@ def maybe_show_privacy_policy():
                 logger.info(constants.USAGE_POLICY_MESSAGE)
         except FileExistsError:
             pass
+
+
+def update_usage_user(server_url: Optional[str] = None,
+                      server_user_hash: Optional[str] = None,
+                      client_user_hash: Optional[str] = None) -> None:
+    """Update the usage message user id with client-server combined hash."""
+    messages.usage.user = common_utils.get_usage_user_id(
+        server_url=server_url,
+        server_user_hash=server_user_hash,
+        client_user_hash=client_user_hash)
 
 
 @contextlib.contextmanager
