@@ -1286,6 +1286,7 @@ def autostop(
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
     down: bool = False,  # pylint: disable=redefined-outer-name
     hook: Optional[str] = None,
+    hook_timeout: Optional[int] = None,
 ) -> server_common.RequestId[None]:
     """Schedules an autostop/autodown for a cluster.
 
@@ -1330,6 +1331,10 @@ def autostop(
             The script runs before the cluster is stopped or torn down. If the
             hook fails, autostop will still proceed but a warning will be
             logged. Requires API server version 26 or higher.
+        hook_timeout: timeout in seconds for hook execution. If None, uses
+            DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
+            be terminated if it exceeds this timeout. Requires API server
+            version 27 or higher.
 
     Returns:
         The request ID of the autostop request.
@@ -1359,12 +1364,20 @@ def autostop(
         logger.warning('Autostop hook is not supported in your API server. '
                        'Please upgrade to a newer API server to use it.')
 
+    # Hook timeout support requires API version 27 or higher
+    if hook_timeout is not None and (remote_api_version is None or
+                                     remote_api_version < 27):
+        logger.warning(
+            'Autostop hook timeout is not supported in your API '
+            'server. Please upgrade to a newer API server to use it.')
+
     body = payloads.AutostopBody(
         cluster_name=cluster_name,
         idle_minutes=idle_minutes,
         wait_for=wait_for,
         down=down,
         hook=hook,
+        hook_timeout=hook_timeout,
     )
     response = server_common.make_authenticated_request(
         'POST', '/autostop', json=json.loads(body.model_dump_json()), timeout=5)

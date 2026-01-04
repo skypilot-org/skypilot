@@ -812,6 +812,7 @@ def autostop(
         autostop_lib.AutostopWaitFor] = autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
     down: bool = False,  # pylint: disable=redefined-outer-name
     hook: Optional[str] = None,
+    hook_timeout: Optional[int] = None,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Schedules an autostop/autodown for a cluster.
@@ -848,6 +849,9 @@ def autostop(
         hook: optional script to execute on the remote cluster before autostop.
           The script runs before the cluster is stopped or torn down. If the
           hook fails, autostop will still proceed but a warning will be logged.
+        hook_timeout: timeout in seconds for hook execution. If None, uses
+          DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
+          be terminated if it exceeds this timeout.
 
     Raises:
         sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
@@ -903,7 +907,12 @@ def autostop(
                 f'see reason above.') from e
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend.set_autostop(handle, idle_minutes, wait_for, down, hook=hook)
+    backend.set_autostop(handle,
+                         idle_minutes,
+                         wait_for,
+                         down,
+                         hook=hook,
+                         hook_timeout=hook_timeout)
 
 
 # ==================

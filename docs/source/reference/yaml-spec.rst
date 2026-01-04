@@ -279,6 +279,9 @@ Format:
 
     See :ref:`Autostop hooks <auto-stop-hooks>` for detailed explanation and examples.
 
+  - ``hook_timeout``: Timeout in seconds for hook execution (default: 3600 = 1 hour, minimum: 1).
+    If the hook exceeds this timeout, it will be terminated and autostop continues.
+
 ``<unit>`` can be one of:
 - ``m``: minutes (default if not specified)
 - ``h``: hours

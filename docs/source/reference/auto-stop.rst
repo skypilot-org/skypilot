@@ -164,6 +164,29 @@ The hook script runs on the cluster and has access to the cluster's filesystem a
 If the hook script fails (non-zero exit code), the autostop process will still continue,
 but a warning will be logged.
 
+**Hook Timeout**
+
+By default, autostop hooks have a **1-hour (3600 seconds) timeout**. If your hook
+takes longer than this, it will be terminated and autostop will proceed. You can
+customize the timeout in your YAML configuration:
+
+.. code-block:: yaml
+
+   resources:
+     autostop:
+       idle_minutes: 10
+       hook: |
+         # Long-running backup operation
+         tar -czf backup.tar.gz /large/dataset
+         aws s3 cp backup.tar.gz s3://my-bucket/
+       hook_timeout: 7200  # 2 hours in seconds
+
+**Important Notes:**
+
+- If the hook times out, autostop will still proceed after logging a warning
+- The minimum timeout is 1 second
+- Consider the hook execution time when setting ``idle_minutes``
+
 Common use cases for autostop hooks:
 
 .. dropdown:: Committing and pushing code changes

@@ -73,6 +73,10 @@ _AUTOSTOP_SCHEMA = {
                 },
                 'hook': {
                     'type': 'string',
+                },
+                'hook_timeout': {
+                    'type': 'integer',
+                    'minimum': 1,
                 }
             },
         },

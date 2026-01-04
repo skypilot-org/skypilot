@@ -347,6 +347,7 @@ class AutostopBody(RequestBody):
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     down: bool = False
     hook: Optional[str] = None
+    hook_timeout: Optional[int] = None
 
 
 class QueueBody(RequestBody):

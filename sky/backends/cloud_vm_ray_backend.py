@@ -5162,7 +5162,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      wait_for: Optional[autostop_lib.AutostopWaitFor],
                      down: bool = False,
                      stream_logs: bool = True,
-                     hook: Optional[str] = None) -> None:
+                     hook: Optional[str] = None,
+                     hook_timeout: Optional[int] = None) -> None:
         # The core.autostop() function should have already checked that the
         # cloud and resources support requested autostop.
         if idle_minutes_to_autostop is not None:
@@ -5215,12 +5216,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     autostopv1_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED,
                     down=down,
                     hook=hook if hook else '',
+                    hook_timeout=(
+                        hook_timeout if hook_timeout is not None else
+                        constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS),
                 )
                 backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
                     handle.get_grpc_channel()).set_autostop(request))
             else:
                 code = autostop_lib.AutostopCodeGen.set_autostop(
-                    idle_minutes_to_autostop, self.NAME, wait_for, down, hook)
+                    idle_minutes_to_autostop, self.NAME, wait_for, down, hook,
+                    hook_timeout)
                 returncode, _, stderr = self.run_on_head(
                     handle, code, require_outputs=True, stream_logs=stream_logs)
                 subprocess_utils.handle_returncode(returncode,

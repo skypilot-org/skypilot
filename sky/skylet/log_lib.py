@@ -171,6 +171,7 @@ def run_with_log(
     line_processor: Optional[log_utils.LineProcessor] = None,
     streaming_prefix: Optional[str] = None,
     log_cmd: bool = False,
+    timeout: Optional[int] = None,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str], Tuple[int, int]]:
     """Runs a command and logs its output to a file.
@@ -185,9 +186,15 @@ def run_with_log(
             enabled, lines are printed only when '\r' or '\n' is found.
         streaming_prefix: Optional prefix for each log line. Can contain {pid}
             placeholder which will be replaced with the subprocess PID.
+        timeout: Optional timeout in seconds. If the command does not complete
+            within this time, it will be terminated and TimeoutExpired will be
+            raised. None means no timeout (default).
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
+
+    Raises:
+        subprocess.TimeoutExpired: If the command times out.
     """
     assert process_stream or not require_outputs, (
         process_stream, require_outputs,
@@ -295,7 +302,21 @@ def run_with_log(
                 stdout, stderr = process_subprocess_stream(
                     proc, stdout_stream_handler, stderr_stream_handler)
             # Ensure returncode is set.
-            proc.wait()
+            try:
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                # Kill the process and all its children
+                subprocess_utils.kill_children_processes(proc.pid)
+                # Wait for the process to be cleaned up
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Force kill if still not dead
+                    proc.kill()
+                    proc.wait()
+                logger.error(
+                    f'Command timed out after {timeout} seconds: {cmd}')
+                raise
             if require_outputs:
                 return proc.returncode, stdout, stderr
             return proc.returncode
