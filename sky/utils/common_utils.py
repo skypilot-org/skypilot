@@ -166,9 +166,9 @@ def _normalize_server_url_for_hash(server_url: Optional[str]) -> Optional[str]:
             return None
         normalized = f'{scheme}://{netloc}'.rstrip('/')
         return normalized
-    except Exception:  # pylint: disable=broad-except
-        logger.debug('Failed to normalize server url for user hash mapping: '
-                     f'{server_url}')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to normalize server url {server_url} for user'
+                     f' hash mapping: {e}.')
         return None
 
 
@@ -207,12 +207,10 @@ def _write_server_user_hash_mapping(mapping: Dict[str, str]) -> None:
 def get_server_user_hash(server_url: Optional[str]) -> Optional[str]:
     """Returns cached server user hash for the given server URL."""
     normalized_url = _normalize_server_url_for_hash(server_url)
+    if not normalized_url:
+        return None
     mapping = _read_server_user_hash_mapping()
-    if normalized_url is not None:
-        cached = mapping.get(normalized_url)
-        if cached is not None:
-            return cached
-    return None
+    return mapping.get(normalized_url)
 
 
 def save_server_user_hash(server_url: str,

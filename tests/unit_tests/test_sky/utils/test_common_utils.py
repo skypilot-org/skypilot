@@ -684,7 +684,7 @@ class TestGetServerUserHash:
         mock_normalize.return_value = None
         result = common_utils.get_server_user_hash(None)
         assert result is None
-        mock_read.assert_called_once()
+        mock_read.assert_not_called()
 
     @mock.patch('sky.utils.common_utils._read_server_user_hash_mapping')
     @mock.patch('sky.utils.common_utils._normalize_server_url_for_hash')
