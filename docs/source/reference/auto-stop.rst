@@ -205,7 +205,7 @@ Common use cases for autostop hooks:
              # Or upload to GCS
              gsutil -m cp -r /workspace/results/ gs://my-bucket/results/$(date +%Y%m%d)/
 
-.. dropdown:: Cleaning up temporary files
+.. dropdown:: Syncing W&B runs before shutdown
 
     .. code-block:: yaml
 
@@ -213,11 +213,11 @@ Common use cases for autostop hooks:
          autostop:
            idle_minutes: 10
            hook: |
-             # Remove temporary files to save space
-             find /tmp -type f -mtime +1 -delete
-             find /workspace/.cache -type f -mtime +7 -delete
-             # Clean up Docker images if needed
-             docker system prune -af --volumes
+             # Sync W&B runs to the cloud before shutdown
+             # Sync all runs in the wandb directory
+             wandb sync ./wandb
+             # Or sync a specific run
+             # wandb sync ./wandb/run-20250813_124246-n67z9ude
 
 .. dropdown:: Sending notifications about the cluster shutdown
 
