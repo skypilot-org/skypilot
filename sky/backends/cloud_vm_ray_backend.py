@@ -4430,6 +4430,54 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             final = e.code
         return final
 
+    def tail_autostop_logs(self,
+                           handle: CloudVmRayResourceHandle,
+                           follow: bool = True,
+                           tail: int = 0) -> int:
+        """Tail the autostop hook logs.
+
+        Args:
+            handle: The handle to the cluster.
+            follow: Whether to follow the logs.
+            tail: The number of lines to display from the end of the
+                log file. If 0, print all lines.
+
+        Returns:
+            The exit code of the tail command.
+        """
+        # Construct tail command for the autostop hook log
+        log_path = f'~/{constants.AUTOSTOP_HOOK_LOG_FILE}'
+        tail_cmd_parts = ['tail']
+        if tail > 0:
+            tail_cmd_parts.extend(['-n', str(tail)])
+        if follow:
+            tail_cmd_parts.append('-f')
+        tail_cmd_parts.append(log_path)
+
+        # Add fallback to show helpful message if file doesn't exist
+        tail_cmd = ' '.join(tail_cmd_parts)
+        error_msg = (f'Autostop hook log file not found at {log_path}. '
+                     f'The autostop hook may not have been executed yet.')
+        cmd = (f'if [ -f {log_path} ]; then {tail_cmd}; '
+               f'else echo "{error_msg}"; exit 1; fi')
+
+        # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
+        # kill the process, so we need to handle it manually here.
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+            signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+        try:
+            returncode = self.run_on_head(
+                handle,
+                cmd,
+                stream_logs=True,
+                # Allocate a pseudo-terminal to disable output buffering.
+                ssh_mode=command_runner.SshMode.INTERACTIVE,
+            )
+        except SystemExit as e:
+            returncode = e.code
+        return returncode
+
     def tail_managed_job_logs(self,
                               handle: CloudVmRayResourceHandle,
                               job_id: Optional[int] = None,

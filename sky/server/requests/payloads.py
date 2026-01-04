@@ -379,6 +379,13 @@ class ProvisionLogsBody(RequestBody):
     worker: Optional[int] = None
 
 
+class AutostopLogsBody(RequestBody):
+    """Autostop logs request body."""
+    cluster_name: str
+    follow: bool = True
+    tail: int = 0
+
+
 class ClusterJobBody(RequestBody):
     """The request body for the cluster job endpoint."""
     cluster_name: str

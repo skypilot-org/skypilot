@@ -359,8 +359,8 @@ def test_launch_fast_with_autostop_hook(generic_cloud: str):
                 f'sky status -r {name} | grep UP',
 
                 # Verify the hook was executed by checking the autostop hook log and skylet logs
-                f'hook_log_output=$(sky exec {name} "cat ~/{constants.AUTOSTOP_HOOK_LOG_FILE}") && echo "$hook_log_output" | grep "{special_str}"',
-                f'hook_log_output=$(sky exec {name} "cat ~/{constants.AUTOSTOP_HOOK_LOG_FILE}") && echo "$hook_log_output" | grep "Hook completed"',
+                f'hook_log_output=$(sky logs {name} --autostop --no-follow) && echo "$hook_log_output" | grep "{special_str}"',
+                f'hook_log_output=$(sky logs {name} --autostop --no-follow) && echo "$hook_log_output" | grep "Hook completed"',
                 f'skylet_log_output=$(sky exec {name} "cat ~/{constants.SKYLET_LOG_FILE}") && echo "$skylet_log_output" | grep "Autostop hook executed successfully"',
             ],
             f'sky down -y {name}',

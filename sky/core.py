@@ -1146,6 +1146,45 @@ def tail_logs(cluster_name: str,
 
 
 @usage_lib.entrypoint
+def tail_autostop_logs(cluster_name: str,
+                       follow: bool = True,
+                       tail: int = 0) -> int:
+    """Tails the autostop hook logs of a cluster.
+
+    Args:
+        cluster_name: name of the cluster.
+        follow: whether to follow the logs.
+        tail: number of lines to display from the end of the log file.
+
+    Raises:
+        ValueError: if arguments are invalid or the cluster is not supported.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
+        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
+        sky.exceptions.NotSupportedError: if the cluster is not based on
+          CloudVmRayBackend.
+        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
+          not the same as the user who created the cluster.
+        sky.exceptions.CloudUserIdentityError: if we fail to get the current
+          user identity.
+
+    Returns:
+        Return code 0 on success, non-zero on failure.
+    """
+    # Check the status of the cluster.
+    handle = backend_utils.check_cluster_available(
+        cluster_name,
+        operation='tailing autostop logs',
+    )
+    backend = backend_utils.get_backend_from_handle(handle)
+
+    usage_lib.record_cluster_name_for_current_operation(cluster_name)
+    returnval = backend.tail_autostop_logs(handle, follow=follow, tail=tail)
+    assert isinstance(returnval,
+                      int), (f'returnval must be an int, but got {returnval}')
+    return returnval
+
+
+@usage_lib.entrypoint
 def download_logs(
         cluster_name: str,
         job_ids: Optional[List[str]],

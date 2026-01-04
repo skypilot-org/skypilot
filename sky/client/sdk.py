@@ -1020,6 +1020,44 @@ def tail_provision_logs(cluster_name: str,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+def tail_autostop_logs(cluster_name: str,
+                       follow: bool = True,
+                       tail: int = 0) -> int:
+    """Tails the autostop hook logs (autostop_hook.log) for a cluster.
+
+    Args:
+        cluster_name: name of the cluster.
+        follow: whether to follow the logs.
+        tail: number of lines to display from the end of the log file.
+
+    Returns:
+        Exit code 0 on streaming success; non-zero on failure.
+
+    Request Raises:
+        ValueError: if arguments are invalid or the cluster is not supported.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
+        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
+        sky.exceptions.NotSupportedError: if the cluster is not based on
+          CloudVmRayBackend.
+        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
+          not the same as the user who created the cluster.
+        sky.exceptions.CloudUserIdentityError: if we fail to get the current
+          user identity.
+    """
+    body = payloads.AutostopLogsBody(cluster_name=cluster_name,
+                                     follow=follow,
+                                     tail=tail)
+
+    response = server_common.make_authenticated_request(
+        'POST', '/autostop_logs', json=json.loads(body.model_dump_json()))
+    request_id: server_common.RequestId[int] = server_common.get_request_id(
+        response)
+    return stream_and_get(request_id)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
 def download_logs(cluster_name: str,
                   job_ids: Optional[List[str]]) -> Dict[str, str]:
     """Downloads the logs of jobs.
