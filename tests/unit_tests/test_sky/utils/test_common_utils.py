@@ -1,6 +1,8 @@
 import asyncio
 import contextvars
+import json
 import os
+import tempfile
 from unittest import mock
 
 import pytest
@@ -483,3 +485,408 @@ async def test_set_request_context_coroutine_is_context_safe():
     # Process-scope var should not be unchanged
     assert common_utils.get_current_user().name == original_user.name
     assert common_utils.get_current_user().id == original_user.id
+
+
+class TestNormalizeServerUrlForHash:
+
+    def test_full_url_with_scheme(self):
+        """Test URL with http scheme."""
+        result = common_utils._normalize_server_url_for_hash(
+            'http://example.com')
+        assert result == 'http://example.com'
+
+    def test_full_url_with_https_scheme(self):
+        """Test URL with https scheme."""
+        result = common_utils._normalize_server_url_for_hash(
+            'https://api.example.com')
+        assert result == 'https://api.example.com'
+
+    def test_url_with_trailing_slash(self):
+        """Test URL with trailing slash is stripped."""
+        result = common_utils._normalize_server_url_for_hash(
+            'http://example.com/')
+        assert result == 'http://example.com'
+
+    def test_url_with_path(self):
+        """Test URL with path - only netloc is used."""
+        result = common_utils._normalize_server_url_for_hash(
+            'http://example.com/api/v1')
+        assert result == 'http://example.com'
+
+    def test_url_without_scheme(self):
+        """Test URL without scheme defaults to http."""
+        result = common_utils._normalize_server_url_for_hash('example.com')
+        assert result == 'http://example.com'
+
+    def test_url_with_port(self):
+        """Test URL with port number."""
+        result = common_utils._normalize_server_url_for_hash(
+            'http://example.com:8080')
+        assert result == 'http://example.com:8080'
+
+    def test_url_with_path_only(self):
+        """Test URL with path but no netloc uses path as netloc."""
+        result = common_utils._normalize_server_url_for_hash('/some/path')
+        assert result == 'http:///some/path'
+
+    def test_none_input(self):
+        """Test None input returns None."""
+        assert common_utils._normalize_server_url_for_hash(None) is None
+
+    def test_empty_string(self):
+        """Test empty string returns None."""
+        assert common_utils._normalize_server_url_for_hash('') is None
+
+    @mock.patch('sky.utils.common_utils.urllib.parse.urlparse')
+    def test_urlparse_exception_handled(self, mock_urlparse):
+        """Test that exceptions from urlparse are caught and handled."""
+        # Make urlparse raise an exception to test the exception handler (line 169)
+        mock_urlparse.side_effect = Exception('URL parse error')
+        result = common_utils._normalize_server_url_for_hash(
+            'http://example.com')
+        assert result is None
+
+
+class TestReadServerUserHashMapping:
+
+    @mock.patch('builtins.open', new_callable=mock.mock_open)
+    @mock.patch('os.path.exists')
+    def test_read_valid_mapping(self, mock_exists, mock_open):
+        """Test reading valid JSON mapping."""
+        mock_exists.return_value = True
+        mock_open.return_value.__enter__().read.return_value = (
+            '{"http://server1.com": "hash1", "http://server2.com": "hash2"}')
+        result = common_utils._read_server_user_hash_mapping()
+        assert result == {
+            'http://server1.com': 'hash1',
+            'http://server2.com': 'hash2'
+        }
+
+    @mock.patch('builtins.open', new_callable=mock.mock_open)
+    @mock.patch('os.path.exists')
+    def test_read_mapping_with_numeric_values(self, mock_exists, mock_open):
+        """Test reading mapping with numeric values converted to strings."""
+        mock_exists.return_value = True
+        mock_open.return_value.__enter__().read.return_value = (
+            '{"http://server1.com": 12345}')
+        result = common_utils._read_server_user_hash_mapping()
+        assert result == {'http://server1.com': '12345'}
+
+    @mock.patch('builtins.open', side_effect=FileNotFoundError)
+    def test_file_not_found_returns_empty_dict(self, mock_open):
+        """Test file not found returns empty dict."""
+        result = common_utils._read_server_user_hash_mapping()
+        assert result == {}
+
+    @mock.patch('builtins.open', new_callable=mock.mock_open)
+    @mock.patch('os.path.exists')
+    def test_invalid_json_returns_empty_dict(self, mock_exists, mock_open):
+        """Test invalid JSON returns empty dict."""
+        mock_exists.return_value = True
+        mock_open.return_value.__enter__().read.return_value = 'invalid json'
+        result = common_utils._read_server_user_hash_mapping()
+        assert result == {}
+
+    @mock.patch('builtins.open', new_callable=mock.mock_open)
+    @mock.patch('os.path.exists')
+    def test_non_dict_json_returns_empty_dict(self, mock_exists, mock_open):
+        """Test non-dict JSON returns empty dict."""
+        mock_exists.return_value = True
+        mock_open.return_value.__enter__(
+        ).read.return_value = '["not", "a", "dict"]'
+        result = common_utils._read_server_user_hash_mapping()
+        assert result == {}
+
+    @mock.patch('builtins.open', side_effect=OSError('Permission denied'))
+    def test_os_error_returns_empty_dict(self, mock_open):
+        """Test OSError returns empty dict."""
+        result = common_utils._read_server_user_hash_mapping()
+        assert result == {}
+
+
+class TestWriteAtomic:
+
+    def test_write_atomic_creates_file(self):
+        """Test atomic write creates file successfully."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, 'test_file.txt')
+            content = 'test content'
+            common_utils._write_atomic(file_path, content)
+
+            assert os.path.exists(file_path)
+            with open(file_path, 'r', encoding='utf-8') as f:
+                assert f.read() == content
+
+    def test_write_atomic_creates_directory(self):
+        """Test atomic write creates parent directory if needed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, 'subdir', 'test_file.txt')
+            content = 'test content'
+            common_utils._write_atomic(file_path, content)
+
+            assert os.path.exists(file_path)
+            with open(file_path, 'r', encoding='utf-8') as f:
+                assert f.read() == content
+
+    def test_write_atomic_overwrites_existing(self):
+        """Test atomic write overwrites existing file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, 'test_file.txt')
+            # Create initial file
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write('old content')
+
+            common_utils._write_atomic(file_path, 'new content')
+
+            with open(file_path, 'r', encoding='utf-8') as f:
+                assert f.read() == 'new content'
+
+
+class TestWriteServerUserHashMapping:
+
+    @mock.patch('sky.utils.common_utils._write_atomic')
+    def test_write_mapping_calls_write_atomic(self, mock_write_atomic):
+        """Test write mapping calls _write_atomic with JSON."""
+        mapping = {'http://server1.com': 'hash1', 'http://server2.com': 'hash2'}
+        common_utils._write_server_user_hash_mapping(mapping)
+
+        mock_write_atomic.assert_called_once()
+        call_args = mock_write_atomic.call_args
+        assert call_args[0][0] == common_utils.SERVER_USER_HASH_FILE
+        written_data = json.loads(call_args[0][1])
+        assert written_data == mapping
+
+
+class TestGetServerUserHash:
+
+    @mock.patch('sky.utils.common_utils._read_server_user_hash_mapping')
+    @mock.patch('sky.utils.common_utils._normalize_server_url_for_hash')
+    def test_get_cached_hash(self, mock_normalize, mock_read):
+        """Test getting cached hash for server URL."""
+        mock_normalize.return_value = 'http://server.com'
+        mock_read.return_value = {'http://server.com': 'cached_hash'}
+        result = common_utils.get_server_user_hash('http://server.com')
+        assert result == 'cached_hash'
+
+    @mock.patch('sky.utils.common_utils._read_server_user_hash_mapping')
+    @mock.patch('sky.utils.common_utils._normalize_server_url_for_hash')
+    def test_get_hash_not_found(self, mock_normalize, mock_read):
+        """Test getting hash when not in cache."""
+        mock_normalize.return_value = 'http://server.com'
+        mock_read.return_value = {}
+        result = common_utils.get_server_user_hash('http://server.com')
+        assert result is None
+
+    @mock.patch('sky.utils.common_utils._read_server_user_hash_mapping')
+    @mock.patch('sky.utils.common_utils._normalize_server_url_for_hash')
+    def test_get_hash_with_none_url(self, mock_normalize, mock_read):
+        """Test getting hash with None URL."""
+        mock_normalize.return_value = None
+        result = common_utils.get_server_user_hash(None)
+        assert result is None
+        mock_read.assert_called_once()
+
+    @mock.patch('sky.utils.common_utils._read_server_user_hash_mapping')
+    @mock.patch('sky.utils.common_utils._normalize_server_url_for_hash')
+    def test_get_hash_url_normalization(self, mock_normalize, mock_read):
+        """Test that URL is normalized before lookup."""
+        mock_normalize.return_value = 'http://server.com'
+        mock_read.return_value = {'http://server.com': 'hash1'}
+        result = common_utils.get_server_user_hash('http://server.com/')
+        assert result == 'hash1'
+        mock_normalize.assert_called_once_with('http://server.com/')
+
+
+class TestSaveServerUserHash:
+
+    @mock.patch('sky.utils.common_utils._write_server_user_hash_mapping')
+    @mock.patch('sky.utils.common_utils._read_server_user_hash_mapping')
+    @mock.patch('sky.utils.common_utils._normalize_server_url_for_hash')
+    def test_save_new_hash(self, mock_normalize, mock_read, mock_write):
+        """Test saving new hash for server URL."""
+        mock_normalize.return_value = 'http://server.com'
+        mock_read.return_value = {}
+        # Use valid hash format (alphanumeric with hyphens, no underscores)
+        result = common_utils.save_server_user_hash('http://server.com',
+                                                    'newhash123')
+        assert result == 'newhash123'
+        mock_write.assert_called_once()
+        call_args = mock_write.call_args[0][0]
+        assert call_args == {'http://server.com': 'newhash123'}
+
+    @mock.patch('sky.utils.common_utils._write_server_user_hash_mapping')
+    @mock.patch('sky.utils.common_utils._read_server_user_hash_mapping')
+    @mock.patch('sky.utils.common_utils._normalize_server_url_for_hash')
+    def test_save_hash_does_not_overwrite(self, mock_normalize, mock_read,
+                                          mock_write):
+        """Test saving hash does not overwrite existing."""
+        mock_normalize.return_value = 'http://server.com'
+        mock_read.return_value = {'http://server.com': 'existinghash123'}
+        # Use valid hash format (alphanumeric with hyphens, no underscores)
+        result = common_utils.save_server_user_hash('http://server.com',
+                                                    'newhash456')
+        assert result == 'existinghash123'
+        # Should not write since hash already exists
+        mock_write.assert_not_called()
+
+    @mock.patch('sky.utils.common_utils._read_server_user_hash_mapping')
+    @mock.patch('sky.utils.common_utils._normalize_server_url_for_hash')
+    def test_save_invalid_hash_returns_none(self, mock_normalize, mock_read):
+        """Test saving invalid hash returns None."""
+        mock_normalize.return_value = 'http://server.com'
+        result = common_utils.save_server_user_hash('http://server.com', None)
+        assert result is None
+        result = common_utils.save_server_user_hash('http://server.com', '')
+        assert result is None
+        result = common_utils.save_server_user_hash('http://server.com',
+                                                    '@invalid')
+        assert result is None
+
+    @mock.patch('sky.utils.common_utils._read_server_user_hash_mapping')
+    @mock.patch('sky.utils.common_utils._normalize_server_url_for_hash')
+    def test_save_hash_with_invalid_url(self, mock_normalize, mock_read):
+        """Test saving hash with invalid URL returns None."""
+        mock_normalize.return_value = None
+        result = common_utils.save_server_user_hash('invalid', 'validhash123')
+        assert result is None
+        # Verify normalization was called
+        mock_normalize.assert_called_once_with('invalid')
+        # Verify read was not called since normalization returned None
+        mock_read.assert_not_called()
+
+    def test_save_hash_with_url_that_normalizes_to_none(self):
+        """Test saving hash with URL that actually normalizes to None."""
+        # Use an empty string which will normalize to None
+        result = common_utils.save_server_user_hash('', 'validhash123')
+        assert result is None
+
+    @mock.patch('sky.utils.common_utils._write_server_user_hash_mapping')
+    @mock.patch('sky.utils.common_utils._read_server_user_hash_mapping')
+    @mock.patch('sky.utils.common_utils._normalize_server_url_for_hash')
+    def test_save_hash_preserves_existing_mappings(self, mock_normalize,
+                                                   mock_read, mock_write):
+        """Test saving hash preserves existing mappings."""
+        mock_normalize.return_value = 'http://server2.com'
+        mock_read.return_value = {'http://server1.com': 'hash1'}
+        result = common_utils.save_server_user_hash('http://server2.com',
+                                                    'hash2')
+        assert result == 'hash2'
+        call_args = mock_write.call_args[0][0]
+        assert call_args == {
+            'http://server1.com': 'hash1',
+            'http://server2.com': 'hash2'
+        }
+
+    @mock.patch('sky.utils.common_utils._write_server_user_hash_mapping',
+                side_effect=OSError('Write failed'))
+    @mock.patch('sky.utils.common_utils._read_server_user_hash_mapping')
+    @mock.patch('sky.utils.common_utils._normalize_server_url_for_hash')
+    def test_save_hash_handles_write_error(self, mock_normalize, mock_read,
+                                           mock_write):
+        """Test saving hash handles write errors gracefully."""
+        mock_normalize.return_value = 'http://server.com'
+        mock_read.return_value = {}
+        # Should not raise exception
+        result = common_utils.save_server_user_hash('http://server.com',
+                                                    'hash1')
+        assert result == 'hash1'
+
+
+class TestGetUsageUserId:
+
+    @mock.patch('sky.utils.common_utils.get_user_hash')
+    @mock.patch('sky.utils.common_utils.get_server_user_hash')
+    def test_with_both_hashes(self, mock_get_server_hash, mock_get_user_hash):
+        """Test combining client and server hashes."""
+        mock_get_user_hash.return_value = 'client_hash'
+        mock_get_server_hash.return_value = 'server_hash'
+        result = common_utils.get_usage_user_id(server_url='http://server.com')
+        assert result == 'client_hash-server_hash'
+
+    @mock.patch('sky.utils.common_utils.get_user_hash')
+    @mock.patch('sky.utils.common_utils.get_server_user_hash')
+    def test_with_explicit_hashes(self, mock_get_server_hash,
+                                  mock_get_user_hash):
+        """Test with explicitly provided hashes."""
+        mock_get_user_hash.return_value = 'fallback-client'
+        # Use valid hash format (alphanumeric with hyphens, no underscores)
+        result = common_utils.get_usage_user_id(
+            client_user_hash='explicit-client',
+            server_user_hash='explicit-server')
+        assert result == 'explicit-client-explicit-server'
+        # Should not call get_user_hash or get_server_user_hash
+        mock_get_user_hash.assert_not_called()
+        mock_get_server_hash.assert_not_called()
+
+    @mock.patch('sky.utils.common_utils.get_user_hash')
+    @mock.patch('sky.utils.common_utils.get_server_user_hash')
+    def test_without_server_hash(self, mock_get_server_hash,
+                                 mock_get_user_hash):
+        """Test without server hash returns only client hash."""
+        mock_get_user_hash.return_value = 'client_hash'
+        mock_get_server_hash.return_value = None
+        result = common_utils.get_usage_user_id(server_url='http://server.com')
+        assert result == 'client_hash'
+
+    @mock.patch('sky.utils.common_utils.get_user_hash')
+    def test_without_server_url(self, mock_get_user_hash):
+        """Test without server URL uses only client hash."""
+        mock_get_user_hash.return_value = 'client_hash'
+        result = common_utils.get_usage_user_id()
+        assert result == 'client_hash'
+
+    @mock.patch('sky.utils.common_utils.get_user_hash')
+    @mock.patch('sky.utils.common_utils.get_server_user_hash')
+    def test_invalid_client_hash_fallback(self, mock_get_server_hash,
+                                          mock_get_user_hash):
+        """Test invalid client hash falls back to get_user_hash."""
+        mock_get_user_hash.return_value = 'valid_client'
+        mock_get_server_hash.return_value = None
+        result = common_utils.get_usage_user_id(client_user_hash='@invalid')
+        assert result == 'valid_client'
+        mock_get_user_hash.assert_called_once()
+
+    @mock.patch('sky.utils.common_utils.get_user_hash')
+    @mock.patch('sky.utils.common_utils.get_server_user_hash')
+    def test_invalid_server_hash_fallback(self, mock_get_server_hash,
+                                          mock_get_user_hash):
+        """Test invalid server hash falls back to lookup."""
+        mock_get_user_hash.return_value = 'client_hash'
+        mock_get_server_hash.return_value = 'valid_server'
+        result = common_utils.get_usage_user_id(server_user_hash='@invalid',
+                                                server_url='http://server.com')
+        assert result == 'client_hash-valid_server'
+        mock_get_server_hash.assert_called_once_with('http://server.com')
+
+    @mock.patch('sky.utils.common_utils.get_user_hash')
+    @mock.patch('sky.utils.common_utils.get_server_user_hash')
+    def test_none_client_hash_fallback(self, mock_get_server_hash,
+                                       mock_get_user_hash):
+        """Test None client hash falls back to get_user_hash."""
+        mock_get_user_hash.return_value = 'fallback_client'
+        mock_get_server_hash.return_value = None
+        result = common_utils.get_usage_user_id(client_user_hash=None)
+        assert result == 'fallback_client'
+        mock_get_user_hash.assert_called_once()
+
+    @mock.patch('sky.utils.common_utils.get_user_hash')
+    @mock.patch('sky.utils.common_utils.get_server_user_hash')
+    def test_none_server_hash_fallback(self, mock_get_server_hash,
+                                       mock_get_user_hash):
+        """Test None server hash falls back to lookup."""
+        mock_get_user_hash.return_value = 'client_hash'
+        mock_get_server_hash.return_value = 'lookup_server'
+        result = common_utils.get_usage_user_id(server_user_hash=None,
+                                                server_url='http://server.com')
+        assert result == 'client_hash-lookup_server'
+        mock_get_server_hash.assert_called_once_with('http://server.com')
+
+    @mock.patch('sky.utils.common_utils.get_user_hash')
+    @mock.patch('sky.utils.common_utils.get_server_user_hash')
+    def test_service_account_format_hash(self, mock_get_server_hash,
+                                         mock_get_user_hash):
+        """Test with service account format hash."""
+        mock_get_user_hash.return_value = 'sa-abc123-token-xyz'
+        mock_get_server_hash.return_value = 'sa-def456-token-uvw'
+        result = common_utils.get_usage_user_id(server_url='http://server.com')
+        assert result == 'sa-abc123-token-xyz-sa-def456-token-uvw'

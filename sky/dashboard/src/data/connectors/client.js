@@ -1,7 +1,28 @@
 'use client';
 
 import { getErrorMessageFromResponse } from '@/data/utils';
-import { ENDPOINT } from './constants';
+import {
+  ENDPOINT,
+  DASHBOARD_FLAG_VALUE,
+  DASHBOARD_USER_ID,
+  DASHBOARD_USER,
+} from './constants';
+
+/**
+ * Adds dashboard-specific environment variables to the request body.
+ * @param {Object} body - The request body object
+ * @returns {void} - Modifies the body object in place
+ */
+function addDashboardEnvVars(body) {
+  if (body !== undefined) {
+    body.env_vars = {
+      ...(body.env_vars || {}),
+      SKYPILOT_IS_FROM_DASHBOARD: DASHBOARD_FLAG_VALUE,
+      SKYPILOT_USER_ID: DASHBOARD_USER_ID,
+      SKYPILOT_USER: DASHBOARD_USER,
+    };
+  }
+}
 
 export const apiClient = {
   fetchImmediate: async (path, body, method = 'POST', options = {}) => {
@@ -17,14 +38,7 @@ export const apiClient = {
     const baseUrl = window.location.origin;
     const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
 
-    if (body !== undefined) {
-      body.env_vars = {
-        ...(body.env_vars || {}),
-        SKYPILOT_IS_FROM_DASHBOARD: 'true',
-        SKYPILOT_USER_ID: 'dashboard',
-        SKYPILOT_USER: 'dashboard',
-      };
-    }
+    addDashboardEnvVars(body);
 
     return await fetch(fullUrl, {
       method,
@@ -86,12 +100,7 @@ export const apiClient = {
     const baseUrl = window.location.origin;
     const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
 
-    if (body !== undefined) {
-      body.env_vars = body.env_vars || {};
-      body.env_vars.SKYPILOT_IS_FROM_DASHBOARD = 'true';
-      body.env_vars.SKYPILOT_USER_ID = 'dashboard';
-      body.env_vars.SKYPILOT_USER = 'dashboard';
-    }
+    addDashboardEnvVars(body);
 
     return await fetch(fullUrl, {
       method: 'POST',

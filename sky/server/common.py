@@ -968,10 +968,9 @@ def reload_for_new_request(client_entrypoint: Optional[str],
     # latest information in the context, e.g. client entrypoint and run id.
     usage_lib.messages.reset(usage_lib.MessageType.USAGE)
     # Ensure server-side usage reports include both client and server user hash.
-    if user is not None and getattr(user, 'id', None) is not None:
-        usage_lib.update_usage_user(server_url=get_server_url(),
-                                    server_user_hash=utils_common.SERVER_ID,
-                                    client_user_hash=user.id)
+    usage_lib.update_usage_user(server_url=get_server_url(),
+                                server_user_hash=utils_common.SERVER_ID,
+                                client_user_hash=user.id)
 
 
 def clear_local_api_server_database() -> None:
