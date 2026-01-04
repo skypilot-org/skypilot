@@ -1,26 +1,26 @@
-import copy
 import functools
 import getpass
 import hashlib
 import io
-import json
-import multiprocessing
 import os
 import pathlib
 import selectors
 import shlex
-import signal
 import subprocess
 import sys
 import tempfile
 import textwrap
-import threading
 import time
 from typing import Dict, List, Optional, Tuple, Union
 
 import colorama
-
+import copy
+import json
+import multiprocessing
+import signal
+import threading
 from sky.backends import backend_utils
+
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -30,7 +30,6 @@ from sky.utils import subprocess_utils
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 
 CANCELLED_RETURN_CODE = 137
-
 
 class _ProcessingArgs:
     """Arguments for processing logs."""
@@ -53,7 +52,6 @@ class _ProcessingArgs:
         self.line_processor = line_processor
         self.streaming_prefix = streaming_prefix
 
-
 def _get_context():
     # TODO(aylei): remove this after we drop the backward-compatibility for
     # 0.9.x in 0.12.0
@@ -62,7 +60,6 @@ def _get_context():
         return context.get()
     else:
         return None
-
 
 def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     """Process the stream of a process."""
@@ -118,7 +115,6 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
                 out.append(line)
     return ''.join(out)
 
-
 def process_subprocess_stream(proc, stdout_stream_handler,
                               stderr_stream_handler) -> Tuple[str, str]:
     """Process the stream of a process in threads, blocking."""
@@ -139,7 +135,6 @@ def process_subprocess_stream(proc, stdout_stream_handler,
         stdout = stdout_stream_handler(proc.stdout, sys.stdout)
         stderr = ''
     return stdout, stderr
-
 
 def run_with_log(
     cmd: Union[List[str], str],
@@ -312,7 +307,6 @@ def run_with_log(
             subprocess_utils.kill_children_processes()
             raise
 
-
 def make_task_bash_script(codegen: str,
                           env_vars: Optional[Dict[str, str]] = None) -> str:
     # set -a is used for exporting all variables functions to the environment
@@ -343,7 +337,6 @@ def make_task_bash_script(codegen: str,
     script = '\n'.join(script)
     return script
 
-
 def add_ray_env_vars(
         env_vars: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     # Adds Ray-related environment variables.
@@ -358,7 +351,6 @@ def add_ray_env_vars(
         if env_var in env_dict:
             env_vars[env_var] = env_dict[env_var]
     return env_vars
-
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
@@ -383,7 +375,6 @@ def run_bash_command_with_log(bash_command: str,
                             streaming_prefix=streaming_prefix,
                             shell=True)
 
-
 def run_bash_command_with_log_and_return_pid(
         bash_command: str,
         log_path: str,
@@ -399,7 +390,6 @@ def run_bash_command_with_log_and_return_pid(
                                             streaming_prefix=streaming_prefix)
     return {'return_code': return_code, 'pid': os.getpid()}
 
-
 def _cancel_slurm_job_steps():
     slurm_job_id = '12345'
     assert slurm_job_id is not None, 'SLURM_JOB_ID is not set'
@@ -411,9 +401,7 @@ def _cancel_slurm_job_steps():
         # Validate this assumption.
         result = subprocess.run(
             ['squeue', '-s', '-j', slurm_job_id, '-h', '-o', '%i %j'],
-            capture_output=True,
-            text=True,
-            check=False)
+            capture_output=True, text=True, check=False)
         for line in result.stdout.strip().split('\n'):
             if not line:
                 continue
@@ -422,19 +410,16 @@ def _cancel_slurm_job_steps():
             step_id, step_name = parts[0], parts[1]
             if step_name == f'sky-2':
                 subprocess.run(['scancel', step_id],
-                               check=False,
-                               capture_output=True)
+                                check=False, capture_output=True)
     except Exception as e:
         print(f'Error in _cancel_slurm_job_steps: {e}', flush=True)
         pass
-
 
 def _slurm_cleanup_handler(signum, _frame):
     _cancel_slurm_job_steps()
     # Re-raise to let default handler terminate.
     signal.signal(signum, signal.SIG_DFL)
     os.kill(os.getpid(), signum)
-
 
 signal.signal(signal.SIGTERM, _slurm_cleanup_handler)
 
@@ -449,8 +434,7 @@ print(message, flush=True)
 sky_env_vars_dict = {}
 sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = 2
 
-sky_env_vars_dict[
-    'SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000001-cluster-2'
+sky_env_vars_dict['SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000001-cluster-2'
 sky_env_vars_dict['MODEL_NAME'] = 'resnet50'
 script = 'python train.py'
 if script is None:
@@ -478,14 +462,9 @@ if script or True:
     # Start exclusive srun in a thread to reserve allocation (similar to ray.get(pg.ready()))
     gpu_arg = f'--gpus-per-node=1' if 1 > 0 else ''
 
-    def build_task_runner_cmd(user_script,
-                              extra_flags,
-                              log_dir,
-                              env_vars_dict,
-                              task_name=None,
-                              is_setup=False,
-                              alloc_signal=None,
-                              setup_done_signal=None):
+    def build_task_runner_cmd(user_script, extra_flags, log_dir, env_vars_dict,
+                              task_name=None, is_setup=False,
+                              alloc_signal=None, setup_done_signal=None):
         env_vars_json = json.dumps(env_vars_dict)
 
         log_dir = shlex.quote(log_dir)
@@ -509,10 +488,7 @@ if script or True:
         script_path = None
         prefix = 'sky_setup_' if is_setup else 'sky_task_'
         if backend_utils.is_command_length_over_limit(user_script):
-            with tempfile.NamedTemporaryFile('w',
-                                             prefix=prefix,
-                                             suffix='.sh',
-                                             delete=False) as f:
+            with tempfile.NamedTemporaryFile('w', prefix=prefix, suffix='.sh', delete=False) as f:
                 f.write(user_script)
                 script_path = f.name
             runner_args += f' --script-path={shlex.quote(script_path)}'
@@ -536,19 +512,16 @@ if script or True:
         # --mem=0 to match RayCodeGen's behavior where we don't explicitly request memory.
         run_flags = f'--nodes=1 --cpus-per-task=4 --mem=0 {gpu_arg} --exclusive'
         srun_cmd, task_script_path = build_task_runner_cmd(
-            script,
-            run_flags,
-            '/sky/logs/tasks',
-            sky_env_vars_dict,
+            script, run_flags, '/sky/logs/tasks', sky_env_vars_dict,
             task_name='train_task',
             alloc_signal=alloc_signal_file,
-            setup_done_signal=setup_done_signal_file)
+            setup_done_signal=setup_done_signal_file
+        )
 
-        proc = subprocess.Popen(srun_cmd,
-                                shell=True,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT,
-                                text=True)
+        proc = subprocess.Popen(srun_cmd, shell=True,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT,
+                              text=True)
         for line in proc.stdout:
             print(line, end='', flush=True)
         proc.wait()
@@ -558,7 +531,6 @@ if script or True:
         return {'return_code': proc.returncode, 'pid': proc.pid}
 
     run_thread_result = {'result': None}
-
     def run_thread_wrapper():
         run_thread_result['result'] = run_thread_func()
 
@@ -583,9 +555,7 @@ if script or True:
             sys.exit(1)
         time.sleep(0.1)
 
-    print(
-        '\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m',
-        flush=True)
+    print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
 
     if True:
         job_lib.set_status(2, job_lib.JobStatus.SETTING_UP)
@@ -599,21 +569,15 @@ if script or True:
         # and otherwise this srun would get blocked and deadlock.
         setup_flags = f'--overlap --nodes=1'
         setup_srun, setup_script_path = build_task_runner_cmd(
-            'pip install torch',
-            setup_flags,
-            '/sky/logs', {
-                'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2',
-                'MODEL_NAME': 'resnet50',
-                'SKYPILOT_NUM_NODES': '1'
-            },
-            is_setup=True)
+            'pip install torch', setup_flags, '/sky/logs', {'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'},
+            is_setup=True
+        )
 
         # Run setup srun directly, streaming output to driver stdout
-        setup_proc = subprocess.Popen(setup_srun,
-                                      shell=True,
-                                      stdout=subprocess.PIPE,
-                                      stderr=subprocess.STDOUT,
-                                      text=True)
+        setup_proc = subprocess.Popen(setup_srun, shell=True,
+                                     stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT,
+                                     text=True)
         for line in setup_proc.stdout:
             print(line, end='', flush=True)
         setup_proc.wait()
