@@ -328,8 +328,14 @@ Example of a well-documented constraint:
 2. **Run `format.sh`** before committing
 3. **Add tests** for core system changes
 4. **Run smoke tests** for significant changes
-5. **Include `Tested:` section** in PR description
+5. **Include `Tested:` section** in PR description with test plan
 6. **Delete branch** after merging
+
+### PR Description Format
+
+PRs should include:
+- **Summary**: Brief description of changes (1-3 bullet points)
+- **Test plan**: How the changes were tested (commands run, manual verification steps)
 
 ### Commit Message Format
 
