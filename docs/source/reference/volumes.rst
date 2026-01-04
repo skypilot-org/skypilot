@@ -484,42 +484,41 @@ Examples:
 
       .. code-block:: yaml
 
-           # task.yaml
-           run: |
-             echo "Hello, world!" > /mnt/nfs/hello.txt
-             ls -la /mnt/nfs
-
-           config:
-             kubernetes:
-               pod_config:
-                 spec:
-                   containers:
-                     - volumeMounts:
-                         - mountPath: /mnt/nfs
-                           name: my-host-nfs
-                   volumes:
-                     - name: my-host-nfs
-                       hostPath:
-                         path: /path/on/host/nfs
-                         type: Directory
+          # task.yaml
+          run: |
+            echo "Hello, world!" > /mnt/nfs/hello.txt
+            ls -la /mnt/nfs
+          config:
+            kubernetes:
+              pod_config:
+                spec:
+                  containers:
+                    - volumeMounts:
+                        - mountPath: /mnt/nfs
+                          name: my-host-nfs
+                  volumes:
+                    - name: my-host-nfs
+                      hostPath:
+                        path: /path/on/host/nfs
+                        type: Directory
 
       **Global configuration:**
 
       .. code-block:: yaml
 
-           # SkyPilot config
-           kubernetes:
-             pod_config:
-               spec:
-                 containers:
-                   - volumeMounts:
-                       - mountPath: /mnt/nfs
-                         name: my-host-nfs
-                 volumes:
-                   - name: my-host-nfs
-                     hostPath:
-                       path: /path/on/host/nfs
-                       type: Directory
+          # SkyPilot config
+          kubernetes:
+            pod_config:
+              spec:
+                containers:
+                  - volumeMounts:
+                      - mountPath: /mnt/nfs
+                        name: my-host-nfs
+                volumes:
+                  - name: my-host-nfs
+                    hostPath:
+                      path: /path/on/host/nfs
+                      type: Directory
 
     .. tab-item:: NFS using native volume
       :name: kubernetes-volumes-native-nfs
@@ -530,44 +529,43 @@ Examples:
 
       .. code-block:: yaml
 
-           # task.yaml
-           run: |
-             echo "Hello, world!" > /mnt/nfs/hello.txt
-             ls -la /mnt/nfs
-
-           config:
-             kubernetes:
-               pod_config:
-                 spec:
-                    containers:
-                      - volumeMounts:
-                          - mountPath: /mnt/nfs
-                            name: nfs-volume
-                    volumes:
-                      - name: nfs-volume
-                        nfs:
-                          server: nfs.example.com
-                          path: /shared
-                          readOnly: false
+          # task.yaml
+          run: |
+            echo "Hello, world!" > /mnt/nfs/hello.txt
+            ls -la /mnt/nfs
+          config:
+            kubernetes:
+              pod_config:
+                spec:
+                  containers:
+                    - volumeMounts:
+                        - mountPath: /mnt/nfs
+                          name: nfs-volume
+                  volumes:
+                    - name: nfs-volume
+                      nfs:
+                        server: nfs.example.com
+                        path: /shared
+                        readOnly: false
 
       **Global configuration:**
 
       .. code-block:: yaml
 
-           # SkyPilot config
-           kubernetes:
-             pod_config:
-               spec:
-                 containers:
-                   - volumeMounts:
-                       - mountPath: /mnt/nfs
-                         name: nfs-volume
-                 volumes:
-                   - name: nfs-volume
-                     nfs:
-                       server: nfs.example.com
-                       path: /shared
-                       readOnly: false
+          # SkyPilot config
+          kubernetes:
+            pod_config:
+              spec:
+                containers:
+                  - volumeMounts:
+                      - mountPath: /mnt/nfs
+                        name: nfs-volume
+                volumes:
+                  - name: nfs-volume
+                    nfs:
+                      server: nfs.example.com
+                      path: /shared
+                      readOnly: false
 
     .. tab-item:: NVMe using hostPath
       :name: kubernetes-volumes-hostpath-nvme
@@ -578,42 +576,41 @@ Examples:
 
       .. code-block:: yaml
 
-           # task.yaml
-           run: |
-             echo "Hello, world!" > /mnt/nvme/hello.txt
-             ls -la /mnt/nvme
-
-           config:
-             kubernetes:
-               pod_config:
-                 spec:
-                    containers:
-                      - volumeMounts:
-                          - mountPath: /mnt/nvme
-                            name: nvme
-                    volumes:
-                      - name: nvme
-                        hostPath:
-                          path: /path/on/host/nvme
-                          type: Directory
+          # task.yaml
+          run: |
+            echo "Hello, world!" > /mnt/nvme/hello.txt
+            ls -la /mnt/nvme
+          config:
+            kubernetes:
+              pod_config:
+                spec:
+                  containers:
+                    - volumeMounts:
+                        - mountPath: /mnt/nvme
+                          name: nvme
+                  volumes:
+                    - name: nvme
+                      hostPath:
+                        path: /path/on/host/nvme
+                        type: Directory
 
       **Global configuration:**
 
       .. code-block:: yaml
 
-           # SkyPilot config
-           kubernetes:
-             pod_config:
-               spec:
-                 containers:
-                   - volumeMounts:
-                       - mountPath: /mnt/nvme
-                         name: nvme
-                 volumes:
-                   - name: nvme
-                     hostPath:
-                       path: /path/on/host/nvme
-                       type: Directory
+          # SkyPilot config
+          kubernetes:
+            pod_config:
+              spec:
+                containers:
+                  - volumeMounts:
+                      - mountPath: /mnt/nvme
+                        name: nvme
+                volumes:
+                  - name: nvme
+                    hostPath:
+                      path: /path/on/host/nvme
+                      type: Directory
 
     .. tab-item:: Nebius shared filesystem
       :name: kubernetes-volumes-nebius-shared-filesystem
@@ -633,42 +630,41 @@ Examples:
 
       .. code-block:: yaml
 
-           # task.yaml
-           run: |
-             echo "Hello, world!" > /mnt/nfs/hello.txt
-             ls -la /mnt/nfs
-
-           config:
-             kubernetes:
-               pod_config:
-                 spec:
-                   containers:
-                     - volumeMounts:
-                         - mountPath: /mnt/nfs
-                           name: nebius-sharedfs
-                   volumes:
-                     - name: nebius-sharedfs
-                       hostPath:
-                         path: /mnt/<mount_tag> # e.g. /mnt/filesystem-d0
-                         type: Directory
+          # task.yaml
+          run: |
+            echo "Hello, world!" > /mnt/nfs/hello.txt
+            ls -la /mnt/nfs
+          config:
+            kubernetes:
+              pod_config:
+                spec:
+                  containers:
+                    - volumeMounts:
+                        - mountPath: /mnt/nfs
+                          name: nebius-sharedfs
+                  volumes:
+                    - name: nebius-sharedfs
+                      hostPath:
+                        path: /mnt/<mount_tag> # e.g. /mnt/filesystem-d0
+                        type: Directory
 
       **Global configuration:**
 
       .. code-block:: yaml
 
-           # SkyPilot config
-           kubernetes:
-             pod_config:
-               spec:
-                 containers:
-                   - volumeMounts:
-                       - mountPath: /mnt/nfs
-                         name: nebius-sharedfs
-                 volumes:
-                   - name: nebius-sharedfs
-                     hostPath:
-                       path: /mnt/<mount_tag> # e.g. /mnt/filesystem-d0
-                       type: Directory
+          # SkyPilot config
+          kubernetes:
+            pod_config:
+              spec:
+                containers:
+                  - volumeMounts:
+                      - mountPath: /mnt/nfs
+                        name: nebius-sharedfs
+                volumes:
+                  - name: nebius-sharedfs
+                    hostPath:
+                      path: /mnt/<mount_tag> # e.g. /mnt/filesystem-d0
+                      type: Directory
 
 .. note::
 
