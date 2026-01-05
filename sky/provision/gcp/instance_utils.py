@@ -1608,15 +1608,15 @@ class GCPTPUVMInstance(GCPInstance):
                 for detail in error_details:
                     # To be consistent with error messages returned by operation
                     # wait.
-                    viloations = detail.get('violations', [])
-                    if not viloations:
+                    violations = detail.get('violations', [])
+                    if not violations:
                         errors.append({
                             'code': detail.get('reason'),
                             'domain': detail.get('domain'),
                             'message': detail.get('message', str(e)),
                         })
                     else:
-                        for violation in viloations:
+                        for violation in violations:
                             errors.append({
                                 'code': detail.get('@type'),
                                 'domain': violation.get('subject'),
