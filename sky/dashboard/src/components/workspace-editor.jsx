@@ -120,28 +120,27 @@ const WorkspaceConfigDescription = ({
     if (cloudConfig?.disabled === true) {
       disabledClouds.push(cloudName);
     } else if (cloudConfig && Object.keys(cloudConfig).length > 0) {
-      let detail = '';
-      if (cloud.toLowerCase() === 'gcp' && cloudConfig.project_id) {
-        detail = ` (Project ID: ${cloudConfig.project_id})`;
-      } else if (cloud.toLowerCase() === 'aws' && cloudConfig.region) {
-        detail = ` (Region: ${cloudConfig.region})`;
-      } else if (cloud.toLowerCase() === 'kubernetes') {
-        const enabledContexts = getEnabledKubernetesContexts();
-        if (enabledContexts.length > 0) {
-          detail = ` (Contexts: ${enabledContexts.join(', ')})`;
+      if (!isLoading) {
+        let detail = '';
+        if (cloud.toLowerCase() === 'gcp' && cloudConfig.project_id) {
+          detail = ` (Project ID: ${cloudConfig.project_id})`;
+        } else if (cloud.toLowerCase() === 'aws' && cloudConfig.region) {
+          detail = ` (Region: ${cloudConfig.region})`;
+        } else if (cloud.toLowerCase() === 'kubernetes') {
+          const enabledContexts = getEnabledKubernetesContexts();
+          if (enabledContexts.length > 0) {
+            detail = ` (Contexts: ${enabledContexts.join(', ')})`;
+          }
         }
-      }
 
-      if (isActuallyEnabled) {
-        enabledDescriptions.push(
-          <span key={`${cloud}-enabled`} className="block">
-            {cloudName}
-            {detail} is enabled.
-          </span>
-        );
-      } else {
-        // Only show "not enabled" if we're not still loading
-        if (!isLoading) {
+        if (isActuallyEnabled) {
+          enabledDescriptions.push(
+            <span key={`${cloud}-enabled`} className="block">
+              {cloudName}
+              {detail} is enabled.
+            </span>
+          );
+        } else {
           configuredButNotEnabled.push(
             <span
               key={`${cloud}-configured-not-enabled`}
@@ -154,25 +153,24 @@ const WorkspaceConfigDescription = ({
         }
       }
     } else {
-      if (isActuallyEnabled) {
-        // For Kubernetes with no specific config, still show available contexts
-        let defaultDetail = '';
-        if (cloud.toLowerCase() === 'kubernetes') {
-          const enabledContexts = getEnabledKubernetesContexts();
-          if (enabledContexts.length > 0) {
-            defaultDetail = ` (Contexts: ${enabledContexts.join(', ')})`;
+      if (!isLoading) {
+        if (isActuallyEnabled) {
+          // For Kubernetes with no specific config, still show available contexts
+          let defaultDetail = '';
+          if (cloud.toLowerCase() === 'kubernetes') {
+            const enabledContexts = getEnabledKubernetesContexts();
+            if (enabledContexts.length > 0) {
+              defaultDetail = ` (Contexts: ${enabledContexts.join(', ')})`;
+            }
           }
-        }
 
-        enabledDescriptions.push(
-          <span key={`${cloud}-default-enabled`} className="block">
-            {cloudName}
-            {defaultDetail} is enabled (using default settings).
-          </span>
-        );
-      } else {
-        // Only show "not enabled" if we're not still loading
-        if (!isLoading) {
+          enabledDescriptions.push(
+            <span key={`${cloud}-default-enabled`} className="block">
+              {cloudName}
+              {defaultDetail} is enabled (using default settings).
+            </span>
+          );
+        } else {
           configuredButNotEnabled.push(
             <span
               key={`${cloud}-default-not-enabled`}
@@ -325,42 +323,49 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   });
   const [statsLoading, setStatsLoading] = useState(false);
 
-  const fetchWorkspaceConfig = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [allWorkspaces, usersResponse] = await Promise.all([
-        getWorkspaces(),
-        getUsers(),
-      ]);
-
-      const config = allWorkspaces[workspaceName] || {};
-      setWorkspaceConfig(config);
-      setOriginalConfig(config);
-      setAllUsers(usersResponse || []);
-
-      // Format as YAML with workspace name as top-level key
-      const fullConfig = { [workspaceName]: config };
-      let yamlOutput;
-      if (Object.keys(config).length === 0) {
-        yamlOutput = `${workspaceName}:\n  # Empty workspace configuration - uses all accessible infrastructure\n`;
-      } else {
-        yamlOutput = yaml.dump(fullConfig, {
-          indent: 2,
-          lineWidth: -1,
-          noRefs: true,
-          skipInvalid: true,
-          flowLevel: -1,
-        });
+  const fetchWorkspaceConfig = useCallback(
+    async (showLoading = true) => {
+      if (showLoading) {
+        setLoading(true);
       }
-      setYamlValue(yamlOutput);
-    } catch (err) {
-      console.error('Error fetching workspace config:', err);
-      setError(err);
-    } finally {
-      setLoading(false);
-    }
-  }, [workspaceName]);
+      setError(null);
+      try {
+        const [allWorkspaces, usersResponse] = await Promise.all([
+          getWorkspaces(),
+          getUsers(),
+        ]);
+
+        const config = allWorkspaces[workspaceName] || {};
+        setWorkspaceConfig(config);
+        setOriginalConfig(config);
+        setAllUsers(usersResponse || []);
+
+        // Format as YAML with workspace name as top-level key
+        const fullConfig = { [workspaceName]: config };
+        let yamlOutput;
+        if (Object.keys(config).length === 0) {
+          yamlOutput = `${workspaceName}:\n  # Empty workspace configuration - uses all accessible infrastructure\n`;
+        } else {
+          yamlOutput = yaml.dump(fullConfig, {
+            indent: 2,
+            lineWidth: -1,
+            noRefs: true,
+            skipInvalid: true,
+            flowLevel: -1,
+          });
+        }
+        setYamlValue(yamlOutput);
+      } catch (err) {
+        console.error('Error fetching workspace config:', err);
+        setError(err);
+      } finally {
+        if (showLoading) {
+          setLoading(false);
+        }
+      }
+    },
+    [workspaceName]
+  );
 
   const fetchWorkspaceStats = useCallback(async () => {
     if (isNewWorkspace) return;
@@ -590,7 +595,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     setLoading(true);
     try {
       await apiClient.fetch('/check', {}, 'POST');
-      await Promise.all([fetchWorkspaceConfig(), fetchWorkspaceStats()]);
+      await Promise.all([fetchWorkspaceConfig(false), fetchWorkspaceStats()]);
     } catch (error) {
       console.error('Error during sky check refresh:', error);
     } finally {
