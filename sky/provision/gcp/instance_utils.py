@@ -1462,7 +1462,7 @@ class GCPTPUVMInstance(GCPInstance):
                 time.sleep(constants.POLL_INTERVAL)
                 continue
 
-            state = qr.get('state').get('state')
+            state = qr.get('state', {}).get('state')
 
             # Values: STATE_UNSPECIFIED, CREATING, ACCEPTED, PROVISIONING, FAILED, DELETING, ACTIVE, SUSPENDING, SUSPENDED, WAITING_FOR_RESOURCES
             if state == 'ACTIVE':
