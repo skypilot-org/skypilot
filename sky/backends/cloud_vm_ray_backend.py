@@ -3459,7 +3459,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ssh_user=handle.ssh_user,
                 docker_user=handle.docker_user)
             cluster_utils.SSHConfigHelper.add_cluster(
-                handle.cluster_name, handle.cached_external_ips, auth_config,
+                handle.cluster_name, handle.cluster_name_on_cloud,
+                handle.cached_external_ips, auth_config,
                 handle.cached_external_ssh_ports, handle.docker_user,
                 handle.ssh_user)
 
@@ -4979,6 +4980,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     ports_cleaned_up = True
                 except exceptions.PortDoesNotExistError:
                     logger.debug('Ports do not exist. Skipping cleanup.')
+                    ports_cleaned_up = True
                 except Exception as e:  # pylint: disable=broad-except
                     if purge:
                         msg = common_utils.format_exception(e, use_bracket=True)
@@ -5051,11 +5053,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     config['provider'],
                     non_terminated_only=False)
 
-                unexpected_node_state: Optional[Tuple[str, str]] = None
+                unexpected_nodes = []
                 for node_id, node_status_tuple in node_status_dict.items():
                     node_status, reason = node_status_tuple
-                    reason = '' if reason is None else f' ({reason})'
-                    logger.debug(f'{node_id} status: {node_status}{reason}')
+                    reason_str = '' if reason is None else f' ({reason})'
+                    logger.debug(f'{node_id} status: {node_status}{reason_str}')
                     # FIXME(cooperc): Some clouds (e.g. GCP) do not distinguish
                     # between "stopping/stopped" and "terminating/terminated",
                     # so we allow for either status instead of casing on
@@ -5063,19 +5065,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     if node_status not in [
                             None, status_lib.ClusterStatus.STOPPED
                     ]:
-                        unexpected_node_state = (node_id, node_status)
-                        break
+                        unexpected_nodes.append((node_id, node_status, reason))
 
-                if unexpected_node_state is None:
+                if not unexpected_nodes:
                     break
 
                 attempts += 1
                 if attempts < _TEARDOWN_WAIT_MAX_ATTEMPTS:
                     time.sleep(_TEARDOWN_WAIT_BETWEEN_ATTEMPS_SECONDS)
                 else:
-                    (node_id, node_status) = unexpected_node_state
-                    raise RuntimeError(f'Instance {node_id} in unexpected '
-                                       f'state {node_status}.')
+                    unexpected_nodes_str = '\n'.join([
+                        f'  - {node_id}: {node_status}' +
+                        (f' ({reason})' if reason else '')
+                        for node_id, node_status, reason in unexpected_nodes
+                    ])
+                    raise RuntimeError(f'Instances in unexpected state:\n'
+                                       f'{unexpected_nodes_str}')
 
         # If cluster_yaml is None, the cluster should ensured to be terminated,
         # so we don't need to do the double check.

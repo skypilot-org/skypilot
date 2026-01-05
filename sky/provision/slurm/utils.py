@@ -9,6 +9,7 @@ from paramiko.config import SSHConfig
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import slurm
+from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 
@@ -21,6 +22,9 @@ SLURM_MARKER_FILE = '.sky_slurm_cluster'
 # Format: 'gpu:acc_type:acc_count(optional_extra_info)'
 # Examples: 'gpu:H100:8', 'gpu:nvidia_h100_80gb_hbm3:8(S:0-1)', 'gpu:a10g:8'
 _GRES_GPU_PATTERN = re.compile(r'^gpu:([^:]+):(\d+)')
+
+# SSH host key filename for sshd.
+SLURM_SSHD_HOST_KEY_FILENAME = 'skypilot_host_key'
 
 
 def get_slurm_ssh_config() -> SSHConfig:
@@ -615,3 +619,56 @@ def get_partitions(cluster_name: str) -> List[str]:
         raise ValueError(
             f'Failed to get partitions for cluster '
             f'{cluster_name}: {common_utils.format_exception(e)}') from e
+
+
+def srun_sshd_command(
+    job_id: str,
+    target_node: str,
+    unix_user: str,
+) -> List[str]:
+    """Build srun command for launching sshd -i inside a Slurm job.
+
+    This is used by the API server to proxy SSH connections to Slurm jobs
+    via sshd running in inetd mode within srun.
+
+    Args:
+        job_id: The Slurm job ID
+        target_node: The target compute node hostname
+        unix_user: The Unix user for the job
+
+    Returns:
+        List of command arguments to be extended to ssh base command
+    """
+    # We use ~username to ensure we use the real home of the user ssh'ing in,
+    # because we override the home directory in SlurmCommandRunner.run.
+    user_home_ssh_dir = f'~{unix_user}/.ssh'
+    return [
+        'srun',
+        '--quiet',
+        '--unbuffered',
+        '--overlap',
+        '--jobid',
+        job_id,
+        '-w',
+        target_node,
+        '/usr/sbin/sshd',
+        '-i',  # Uses stdin/stdout
+        '-e',  # Writes errors to stderr
+        '-f',  # Use /dev/null to avoid reading system sshd_config
+        '/dev/null',
+        '-h',
+        f'{user_home_ssh_dir}/{SLURM_SSHD_HOST_KEY_FILENAME}',
+        '-o',
+        f'AuthorizedKeysFile={user_home_ssh_dir}/authorized_keys',
+        '-o',
+        'PasswordAuthentication=no',
+        '-o',
+        'PubkeyAuthentication=yes',
+        '-o',
+        # If UsePAM is enabled, we will not be able to run sshd(8)
+        # as a non-root user.
+        # See https://man7.org/linux/man-pages/man5/sshd_config.5.html
+        'UsePAM=no',
+        '-o',
+        f'AcceptEnv={constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}',
+    ]
