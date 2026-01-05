@@ -81,7 +81,7 @@ class UsageMessageToReport(MessageToReport):
     def __init__(self) -> None:
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
         # Message identifier.
-        self.user: str = common_utils.get_usage_user_id()
+        self.user: str = common_utils.get_user_hash()
         self.run_id: str = common_utils.get_usage_run_id()
         self.sky_version: str = sky.__version__
         self.sky_commit: str = sky.__commit__
@@ -388,6 +388,7 @@ def _send_to_loki(message_type: MessageType):
             'values': [[str(log_timestamp), str(message)]]
         }]
     }
+    logger.info(f'payload: {payload}')
     payload = json.dumps(payload)
     response = requests.post(constants.LOG_URL,
                              data=payload,
@@ -499,14 +500,18 @@ def maybe_show_privacy_policy():
             pass
 
 
-def update_usage_user(server_url: Optional[str] = None,
-                      server_user_hash: Optional[str] = None,
+def update_usage_user(server_user_hash: Optional[str] = None,
                       client_user_hash: Optional[str] = None) -> None:
     """Update the usage message user id with client-server combined hash."""
-    messages.usage.user = common_utils.get_usage_user_id(
-        server_url=server_url,
-        server_user_hash=server_user_hash,
-        client_user_hash=client_user_hash)
+    if (client_user_hash is None or
+            not common_utils.is_valid_user_hash(client_user_hash)):
+        client_user_hash = common_utils.get_user_hash()
+    if (server_user_hash is not None and
+            common_utils.is_valid_user_hash(server_user_hash)):
+        user_hash = f'{client_user_hash}-{server_user_hash}'
+    else:
+        user_hash = client_user_hash
+    messages.usage.user = user_hash
 
 
 @contextlib.contextmanager

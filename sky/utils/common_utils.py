@@ -8,7 +8,6 @@ import gc
 import getpass
 import hashlib
 import inspect
-import json
 import os
 import platform
 import random
@@ -16,11 +15,9 @@ import re
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Union
-import urllib.parse
 import uuid
 
 import jsonschema
@@ -44,7 +41,6 @@ else:
     psutil = adaptors_common.LazyImport('psutil')
 
 USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
-SERVER_USER_HASH_FILE = os.path.expanduser('~/.sky/server_user_hash')
 USER_HASH_LENGTH = 8
 
 # We are using base36 to reduce the length of the hash. 2 chars -> 36^2 = 1296
@@ -152,108 +148,6 @@ def set_user_hash_locally(user_hash: str) -> None:
     os.makedirs(os.path.dirname(USER_HASH_FILE), exist_ok=True)
     with open(USER_HASH_FILE, 'w', encoding='utf-8') as f:
         f.write(user_hash)
-
-
-def _normalize_server_url_for_hash(server_url: Optional[str]) -> Optional[str]:
-    """Normalizes server URL to a consistent key for user-hash mapping."""
-    if server_url is None:
-        return None
-    try:
-        parsed = urllib.parse.urlparse(server_url)
-        scheme = parsed.scheme or 'http'
-        netloc = parsed.netloc or parsed.path
-        if not netloc:
-            return None
-        normalized = f'{scheme}://{netloc}'.rstrip('/')
-        return normalized
-    except Exception as e:  # pylint: disable=broad-except
-        logger.debug(f'Failed to normalize server url {server_url} for user'
-                     f' hash mapping: {e}.')
-        return None
-
-
-def _read_server_user_hash_mapping() -> Dict[str, str]:
-    """Reads server user hash mapping from disk."""
-    try:
-        with open(SERVER_USER_HASH_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            return {k: str(v) for k, v in data.items()}
-        logger.debug('Malformed server user hash mapping.')
-    except FileNotFoundError:
-        logger.debug('Server user hash mapping file not found.')
-    except json.JSONDecodeError as e:
-        logger.debug(f'Failed to decode server user hash mapping: {e}.')
-    except OSError as e:
-        logger.debug(f'Failed to read server user hash mapping: {e}.')
-    return {}
-
-
-def _write_atomic(path: str, content: str) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=os.path.dirname(path),
-                                     delete=False,
-                                     mode='w',
-                                     encoding='utf-8') as tmp_file:
-        tmp_file.write(content)
-        tmp_path = tmp_file.name
-    os.replace(tmp_path, path)
-
-
-def _write_server_user_hash_mapping(mapping: Dict[str, str]) -> None:
-    _write_atomic(SERVER_USER_HASH_FILE, json.dumps(mapping))
-
-
-def get_server_user_hash(server_url: Optional[str]) -> Optional[str]:
-    """Returns cached server user hash for the given server URL."""
-    normalized_url = _normalize_server_url_for_hash(server_url)
-    if not normalized_url:
-        return None
-    mapping = _read_server_user_hash_mapping()
-    return mapping.get(normalized_url)
-
-
-def save_server_user_hash(server_url: str,
-                          server_user_hash: Optional[str]) -> Optional[str]:
-    """Persists server user hash keyed by server URL without overwriting."""
-    if not is_valid_user_hash(server_user_hash):
-        return None
-    normalized_url = _normalize_server_url_for_hash(server_url)
-    if normalized_url is None:
-        return None
-
-    mapping = _read_server_user_hash_mapping()
-    if normalized_url in mapping:
-        return mapping[normalized_url]
-
-    assert server_user_hash is not None
-    mapping[normalized_url] = server_user_hash
-    try:
-        _write_server_user_hash_mapping(mapping)
-    except OSError as e:
-        logger.debug(f'Failed to persist server user hash mapping: {e}')
-
-    return server_user_hash
-
-
-def get_usage_user_id(server_url: Optional[str] = None,
-                      server_user_hash: Optional[str] = None,
-                      client_user_hash: Optional[str] = None) -> str:
-    """Returns the usage user identifier, combining client and server hashes.
-
-    Args:
-        server_url: The API server URL, used to look up cached server hash.
-        server_user_hash: Explicit server hash to use; overrides lookup if set.
-        client_user_hash: Explicit client hash (e.g., from an authenticated
-            request on the server side). Falls back to get_user_hash().
-    """
-    if client_user_hash is None or not is_valid_user_hash(client_user_hash):
-        client_user_hash = get_user_hash()
-    if server_user_hash is None or not is_valid_user_hash(server_user_hash):
-        server_user_hash = get_server_user_hash(server_url)
-    if server_user_hash is not None:
-        return f'{client_user_hash}-{server_user_hash}'
-    return client_user_hash
 
 
 def base36_encode(hex_str: str) -> str:

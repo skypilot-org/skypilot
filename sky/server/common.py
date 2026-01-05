@@ -478,9 +478,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             # OAuth.
             set_api_cookie_jar(cookies, create_if_not_exists=True)
             if server_user_hash is not None:
-                common_utils.save_server_user_hash(server_url, server_user_hash)
                 usage_lib.update_usage_user(
-                    server_url=server_url,
                     server_user_hash=server_user_hash,
                     client_user_hash=user.get('id') if user else None)
             return server_info
@@ -967,8 +965,7 @@ def reload_for_new_request(client_entrypoint: Optional[str],
     # We need to reset usage message, so that the message is up-to-date with the
     # latest information in the context, e.g. client entrypoint and run id.
     usage_lib.messages.reset(usage_lib.MessageType.USAGE)
-    usage_lib.update_usage_user(server_url=get_server_url(),
-                                server_user_hash=utils_common.SERVER_ID,
+    usage_lib.update_usage_user(server_user_hash=utils_common.SERVER_ID,
                                 client_user_hash=user.id)
 
 
