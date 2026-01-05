@@ -126,21 +126,13 @@ pytest tests/unit_tests/
 
 # Specific test file
 pytest tests/unit_tests/test_resources.py
-
-# Smoke tests (WARNING: launches ~20 cloud clusters)
-pytest tests/test_smoke.py
-
-# Smoke tests with auto-cleanup on failure
-pytest tests/test_smoke.py --terminate-on-failure
-
-# Cloud-specific tests
-pytest tests/test_smoke.py --gcp
-pytest tests/test_smoke.py --aws
-pytest tests/test_smoke.py --azure
-
-# Re-run failed tests
-pytest --lf
 ```
+
+### CI Tests via PR Comments
+
+Trigger CI tests on pull requests using comments:
+- `/quicktest-core` - Run quick core tests
+- `/smoke-test` - Run smoke tests (launches cloud clusters)
 
 ### Test Configuration
 
@@ -148,13 +140,6 @@ From `pyproject.toml`:
 - Uses pytest-xdist with 16 parallel workers
 - Environment: `SKYPILOT_DEBUG=1`, `SKYPILOT_DISABLE_USAGE_COLLECTION=1`
 - Buildkite integration for CI
-
-### Testing in Container
-
-```bash
-docker run -it --rm berkeleyskypilot/skypilot-debug /bin/bash
-# Then: uv pip install -e ".[all]"
-```
 
 ### Testing with PostgreSQL Backend
 
@@ -336,6 +321,8 @@ Example of a well-documented constraint:
 PRs should include:
 - **Summary**: Brief description of changes (1-3 bullet points)
 - **Test plan**: How the changes were tested (commands run, manual verification steps)
+
+**Important**: Always generate a manual test plan describing how to verify the changes work correctly. Include specific commands, expected outputs, or UI verification steps.
 
 ### Commit Message Format
 
