@@ -656,6 +656,7 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
                                               'configuration.'))
                 else:
                     # Default case - not set up
+                    assert context.startswith("ssh-"), "SSH context must start with 'ssh-'"
                     text_suffix = (': ' + _red_color('disabled. ') +
                                    _dim_color('Reason: Not set up. Use '
                                               '`sky ssh up --infra '

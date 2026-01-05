@@ -1290,6 +1290,7 @@ def _check_specified_regions(task: task_lib.Task) -> None:
         msg = f'Task{task_name} requires '
         if region not in existing_contexts:
             if is_ssh:
+                assert region.startswith("ssh-"), "SSH context must start with 'ssh-'"
                 infra_str = f'SSH/{region.lstrip("ssh-")}'
             else:
                 infra_str = f'Kubernetes/{region}'

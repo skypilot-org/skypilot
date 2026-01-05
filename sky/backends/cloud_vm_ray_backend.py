@@ -916,6 +916,7 @@ class RetryingVmProvisioner(object):
         elif to_provision.region is not None and to_provision.cloud is not None:
             # For public clouds, provision.region is always set.
             if clouds.SSH().is_same_cloud(to_provision.cloud):
+                assert to_provision.region.startswith("ssh-"), "SSH context must start with 'ssh-'"
                 message += (
                     f'in SSH Node Pool ({to_provision.region.lstrip("ssh-")}) '
                     f'for {requested_resources}. The SSH Node Pool may not '
