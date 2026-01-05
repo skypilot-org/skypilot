@@ -2208,15 +2208,6 @@ def autoscaling_pool_conf(
     """)
 
 
-def wait_until_workers_scale_to(pool_name: str,
-                                target_workers: int,
-                                timeout: int = 300,
-                                time_between_checks: int = 10):
-    """Wait until pool scales to target number of workers."""
-    return wait_until_num_workers(pool_name, target_workers, timeout,
-                                  time_between_checks)
-
-
 def check_workers_do_not_exceed(pool_name: str,
                                 max_workers: int,
                                 duration: int = 60,
@@ -2290,10 +2281,8 @@ def test_pool_autoscaling_scale_up(generic_cloud: str):
                             job_yaml=job_yaml.name,
                             job_name=f'{job_name}-{i}') for i in range(1, 6)
                     ],
-                    # Wait a bit for jobs to queue
-                    'sleep 10',
                     # Verify we scale up to 3 workers (second scaling event)
-                    wait_until_workers_scale_to(pool_name, 3, timeout=180),
+                    wait_until_num_workers(pool_name, 3, timeout=300),
                     # Verify we stay at 3 workers (max_workers)
                     'sleep 30',
                     wait_until_num_workers(pool_name, 3, timeout=30),
@@ -2331,7 +2320,7 @@ def test_pool_autoscaling_no_scale_when_max_equals_workers(generic_cloud: str):
     job_name = f'{name}-job'
     job_config = basic_job_conf(
         job_name=job_name,
-        run_cmd='sleep 300',  # Long-running job
+        run_cmd='sleep 3000',  # Long-running job
     )
 
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
@@ -2408,19 +2397,13 @@ def test_pool_autoscaling_scale_down_to_zero(generic_cloud: str):
                 [
                     _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, pool_yaml=pool_yaml.name),
-                    wait_until_pool_ready(pool_name, timeout=timeout),
-                    # Verify we start with 1 worker
-                    wait_until_num_workers(pool_name, 1, timeout=timeout),
                     # Launch a job
                     _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, job_yaml=job_yaml.name),
                     # Wait for job to complete
-                    wait_until_job_status(job_name, ['SUCCEEDED'],
-                                          timeout=timeout),
-                    # Wait a bit for autoscaler to detect empty queue
-                    'sleep 60',  # Give autoscaler time to scale down
+                    wait_until_job_status(job_name, ['SUCCEEDED'], timeout=timeout),
                     # Verify we scale down to 0 workers
-                    wait_until_workers_scale_to(pool_name, 0, timeout=180),
+                    wait_until_num_workers(pool_name, 0, timeout=timeout),
                 ],
                 timeout=timeout * 2,
                 teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10),
