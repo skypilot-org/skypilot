@@ -48,6 +48,9 @@ class Fluidstack(clouds.Cloud):
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             'Spot instances are'
             f' not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.QUEUED_RESOURCE:
+            ('Queued resource is not supported in '
+             f'{_REPR}.'),
         clouds.CloudImplementationFeatures.IMAGE_ID:
             'Specifying image ID '
             f'is not supported for {_REPR}.',

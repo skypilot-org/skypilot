@@ -45,6 +45,8 @@ class Shadeform(clouds.Cloud):
             'Multi-node clusters not supported on Shadeform.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             'Spot instances not supported on Shadeform.',
+        clouds.CloudImplementationFeatures.QUEUED_RESOURCE:
+            'Queued resources not supported on Shadeform.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             'Custom disk tiers not supported on Shadeform.',
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:

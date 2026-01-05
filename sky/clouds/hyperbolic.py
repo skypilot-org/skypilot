@@ -37,6 +37,9 @@ class Hyperbolic(clouds.Cloud):
             ('High availability controllers not supported.'),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             ('Spot instances not supported.'),
+        clouds.CloudImplementationFeatures.QUEUED_RESOURCE:
+            ('Queued resource is not supported in '
+             f'{_REPR}.'),
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             ('Disk cloning not supported.'),
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
