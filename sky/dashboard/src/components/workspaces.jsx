@@ -731,14 +731,13 @@ export function Workspaces() {
     setLoading(true);
     try {
       await apiClient.fetch('/check', {}, 'POST');
+      await fetchData(false);
+      setLastFetchedTime(new Date());
     } catch (error) {
       console.error('Error during sky check refresh:', error);
     } finally {
       setLoading(false);
     }
-
-    await fetchData(true); // Show loading on manual refresh
-    setLastFetchedTime(new Date());
   };
 
   const handleCancelDelete = () => {

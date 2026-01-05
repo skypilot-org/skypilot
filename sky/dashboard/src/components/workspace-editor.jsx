@@ -65,6 +65,7 @@ const WorkspaceConfigDescription = ({
   workspaceName,
   config,
   enabledClouds = [],
+  isLoading = false,
 }) => {
   if (!config) return null;
 
@@ -139,15 +140,18 @@ const WorkspaceConfigDescription = ({
           </span>
         );
       } else {
-        configuredButNotEnabled.push(
-          <span
-            key={`${cloud}-configured-not-enabled`}
-            className="block text-amber-700"
-          >
-            {cloudName}
-            {detail} is configured but not currently available.
-          </span>
-        );
+        // Only show "not enabled" if we're not still loading
+        if (!isLoading) {
+          configuredButNotEnabled.push(
+            <span
+              key={`${cloud}-configured-not-enabled`}
+              className="block text-amber-700"
+            >
+              {cloudName}
+              {detail} is configured but not currently available.
+            </span>
+          );
+        }
       }
     } else {
       if (isActuallyEnabled) {
@@ -167,14 +171,17 @@ const WorkspaceConfigDescription = ({
           </span>
         );
       } else {
-        configuredButNotEnabled.push(
-          <span
-            key={`${cloud}-default-not-enabled`}
-            className="block text-amber-700"
-          >
-            {cloudName} is configured but not currently available.
-          </span>
-        );
+        // Only show "not enabled" if we're not still loading
+        if (!isLoading) {
+          configuredButNotEnabled.push(
+            <span
+              key={`${cloud}-default-not-enabled`}
+              className="block text-amber-700"
+            >
+              {cloudName} is configured but not currently available.
+            </span>
+          );
+        }
       }
     }
   });
@@ -583,12 +590,12 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
     setLoading(true);
     try {
       await apiClient.fetch('/check', {}, 'POST');
+      await Promise.all([fetchWorkspaceConfig(), fetchWorkspaceStats()]);
     } catch (error) {
       console.error('Error during sky check refresh:', error);
     } finally {
       setLoading(false);
     }
-    await Promise.all([fetchWorkspaceConfig(), fetchWorkspaceStats()]);
   };
 
   if (!router.isReady) {
@@ -759,6 +766,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                           workspaceName={workspaceName}
                           config={originalConfig}
                           enabledClouds={workspaceStats.clouds}
+                          isLoading={statsLoading}
                         />
                       </div>
 
