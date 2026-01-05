@@ -1445,7 +1445,6 @@ class GCPTPUVMInstance(GCPInstance):
 
         @_retry_on_gcp_http_exception()
         def get_queued_resource():
-            logger.info(f'Getting queued resource {queued_resource_id}...')
             return cls.load_resource().projects().locations().queuedResources(
             ).get(
                 name=f'projects/{project_id}/locations/{zone}/queuedResources/'
@@ -1453,14 +1452,13 @@ class GCPTPUVMInstance(GCPInstance):
 
         wait_start = time.time()
         while time.time() - wait_start < GCP_QUEUED_RESOURCE_TIMEOUT:
-            # try:
-            qr = get_queued_resource()
-            logger.info(f'Queued resource {queued_resource_id} state: {qr.get('state', {}).get('state')}.')
-            # except Exception as e:  # pylint: disable=broad-except
-            #     logger.warning(
-            #         f'Failed to get queued resource status: {e}. Retrying...')
-            #     time.sleep(constants.POLL_INTERVAL)
-            #     continue
+            try:
+                qr = get_queued_resource()
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to get queued resource status: {e}. Retrying...')
+                time.sleep(constants.POLL_INTERVAL)
+                continue
 
             state = qr.get('state', {}).get('state')
 
