@@ -59,9 +59,9 @@ class Cudo(clouds.Cloud):
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             ('Spot is not supported, as Cudo API does not implement spot.'),
-        clouds.CloudImplementationFeatures.QUEUED_RESOURCE: (
-            'Queued resource is not supported, as Cudo API does not implement queued resource.'
-        ),
+        clouds.CloudImplementationFeatures.QUEUED_RESOURCE:
+            ('Queued resource is not supported, as Cudo API does not implement '
+             'queued resource.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Custom disk tier is currently not supported on Cudo Compute'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
