@@ -170,8 +170,6 @@ class SkyServiceSpec:
                 raise ValueError(
                     'Cannot specify both `replicas` and `replica_policy` in '
                     'the service YAML. Please use one of them.')
-        
-        logger.info(f'lloyd: config: {config}')
 
         service_config: Dict[str, Any] = {}
 
@@ -248,7 +246,6 @@ class SkyServiceSpec:
         pool_upscale_delay = None
         pool_downscale_delay = None
         if pool_config is not None and isinstance(pool_config, dict):
-            logger.info(f'lloyd: pool_config: {pool_config}')
             queue_length_threshold = pool_config.get('queue_length_threshold', None)
             pool_min_workers = pool_config.get('min_workers', None)
             pool_max_workers = pool_config.get('max_workers', None)
@@ -298,7 +295,6 @@ class SkyServiceSpec:
             # For pools with autoscaling (max_workers specified), use max_workers from pool config
             if pool_config is not None and pool_max_workers is not None:
                 service_config['max_replicas'] = pool_max_workers
-                logger.info(f'lloyd: Set max_replicas={pool_max_workers} for pool with max_workers={pool_max_workers}')
                 service_config['upscale_delay_seconds'] = pool_upscale_delay
                 service_config['downscale_delay_seconds'] = pool_downscale_delay
                 # Set default threshold if max_workers is set but threshold is not
@@ -307,14 +303,12 @@ class SkyServiceSpec:
                     logger.info(f'Set default queue_length_threshold={queue_length_threshold} '
                                f'for pool with max_workers={pool_max_workers}')
             else:
-                logger.info(f'lloyd: Set max_replicas=None for pool with max_workers={pool_max_workers}')
                 service_config['max_replicas'] = None
                 service_config['upscale_delay_seconds'] = None
                 service_config['downscale_delay_seconds'] = None
             service_config['num_overprovision'] = None
             service_config['target_qps_per_replica'] = None
         else:
-            logger.info(f'lloyd: policy section: {policy_section}')
             service_config['min_replicas'] = policy_section['min_replicas']
             service_config['max_replicas'] = policy_section.get(
                 'max_replicas', None)
@@ -382,7 +376,6 @@ class SkyServiceSpec:
 
     @staticmethod
     def from_yaml_str(yaml_str: str) -> 'SkyServiceSpec':
-        logger.info(f'lloyd: yaml_str: {yaml_str}')
         config = yaml_utils.safe_load(yaml_str)
 
         if isinstance(config, str):
@@ -398,7 +391,6 @@ class SkyServiceSpec:
                 raise ValueError('Service YAML must have a "service" section. '
                                  f'Is it correct? content:\n{yaml_str}')
 
-        logger.info(f'lloyd: config loaded from yaml_str: {config}')
         return SkyServiceSpec.from_yaml_config(config['service'])
 
     @staticmethod
