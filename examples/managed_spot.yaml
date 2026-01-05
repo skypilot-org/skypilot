@@ -12,6 +12,7 @@ run: |
   python -u - << EOF
   import time
   import tqdm
+
   for i in tqdm.trange(240):
     time.sleep(1)
   
