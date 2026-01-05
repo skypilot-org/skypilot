@@ -322,7 +322,7 @@ PRs should include:
 - **Summary**: Brief description of changes (1-3 bullet points)
 - **Test plan**: How the changes were tested (commands run, manual verification steps)
 
-**Important**: Always generate a manual test plan describing how to verify the changes work correctly. Include specific commands, expected outputs, or UI verification steps.
+**Important**: Always generate a manual test plan describing how to verify the changes work correctly. Include specific commands, expected outputs, or UI verification steps. Whenever possible, add unit tests and smoke tests for the changes.
 
 ### Commit Message Format
 
