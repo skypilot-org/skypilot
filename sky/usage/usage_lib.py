@@ -499,6 +499,20 @@ def maybe_show_privacy_policy():
             pass
 
 
+def update_usage_user(server_user_hash: Optional[str] = None,
+                      client_user_hash: Optional[str] = None) -> None:
+    """Update the usage message user id with client-server combined hash."""
+    if (client_user_hash is None or
+            not common_utils.is_valid_user_hash(client_user_hash)):
+        client_user_hash = common_utils.get_user_hash()
+    if (server_user_hash is not None and
+            common_utils.is_valid_user_hash(server_user_hash)):
+        user_hash = f'{client_user_hash}-{server_user_hash}'
+    else:
+        user_hash = client_user_hash
+    messages.usage.user = user_hash
+
+
 @contextlib.contextmanager
 def entrypoint_context(name: str, fallback: bool = False):
     """Context manager for entrypoint.
