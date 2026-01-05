@@ -179,11 +179,11 @@ def _read_server_user_hash_mapping() -> Dict[str, str]:
             data = json.load(f)
         if isinstance(data, dict):
             return {k: str(v) for k, v in data.items()}
-        logger.debug(f'Malformed server user hash mapping: {data}.')
+        logger.debug('Malformed server user hash mapping.')
     except FileNotFoundError:
         logger.debug('Server user hash mapping file not found.')
     except json.JSONDecodeError as e:
-        logger.debug(f'Failed to decode server user hash mapping file: {e}.')
+        logger.debug(f'Failed to decode server user hash mapping: {e}.')
     except OSError as e:
         logger.debug(f'Failed to read server user hash mapping: {e}.')
     return {}

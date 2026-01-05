@@ -967,7 +967,6 @@ def reload_for_new_request(client_entrypoint: Optional[str],
     # We need to reset usage message, so that the message is up-to-date with the
     # latest information in the context, e.g. client entrypoint and run id.
     usage_lib.messages.reset(usage_lib.MessageType.USAGE)
-    # Ensure server-side usage reports include both client and server user hash.
     usage_lib.update_usage_user(server_url=get_server_url(),
                                 server_user_hash=utils_common.SERVER_ID,
                                 client_user_hash=user.id)
