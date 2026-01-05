@@ -356,6 +356,14 @@ function ActiveTab({
   isGrafanaAvailable,
   isHistoricalCluster = false,
 }) {
+  // Define panel data
+  const gpuPanels = [
+    { id: '1', title: 'GPU Utilization', keyPrefix: 'gpu-util' },
+    { id: '2', title: 'GPU Memory Utilization', keyPrefix: 'gpu-memory' },
+    { id: '3', title: 'GPU Temperature', keyPrefix: 'gpu-temp' },
+    { id: '4', title: 'GPU Power Usage', keyPrefix: 'gpu-power' },
+  ];
+
   const GPU_METRICS_EXPANDED_KEY = 'skypilot-gpu-metrics-expanded';
 
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
@@ -792,51 +800,25 @@ function ActiveTab({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                    {/* GPU Utilization */}
-                    <div className="bg-white rounded-md border border-gray-200 shadow-sm">
-                      <div className="p-2">
-                        <iframe
-                          src={buildGrafanaMetricsUrl('1')}
-                          width="100%"
-                          height="400"
-                          frameBorder="0"
-                          title="GPU Utilization"
-                          className="rounded"
-                          key={`gpu-util-${clusterData?.cluster}-${timeRange.from}-${timeRange.to}`}
-                        />
+                  <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
+                    {gpuPanels.map((panel) => (
+                      <div
+                        key={panel.id}
+                        className="bg-white rounded-md border border-gray-200 shadow-sm"
+                      >
+                        <div className="p-2">
+                          <iframe
+                            src={buildGrafanaMetricsUrl(panel.id)}
+                            width="100%"
+                            height="400"
+                            frameBorder="0"
+                            title={panel.title}
+                            className="rounded"
+                            key={`${panel.keyPrefix}-${clusterData?.cluster}-${timeRange.from}-${timeRange.to}`}
+                          />
+                        </div>
                       </div>
-                    </div>
-
-                    {/* GPU Memory Utilization */}
-                    <div className="bg-white rounded-md border border-gray-200 shadow-sm">
-                      <div className="p-2">
-                        <iframe
-                          src={buildGrafanaMetricsUrl('2')}
-                          width="100%"
-                          height="400"
-                          frameBorder="0"
-                          title="GPU Memory Utilization"
-                          className="rounded"
-                          key={`gpu-memory-${clusterData?.cluster}-${timeRange.from}-${timeRange.to}`}
-                        />
-                      </div>
-                    </div>
-
-                    {/* GPU Power Usage */}
-                    <div className="bg-white rounded-md border border-gray-200 shadow-sm">
-                      <div className="p-2">
-                        <iframe
-                          src={buildGrafanaMetricsUrl('4')}
-                          width="100%"
-                          height="400"
-                          frameBorder="0"
-                          title="GPU Power Usage"
-                          className="rounded"
-                          key={`gpu-power-${clusterData?.cluster}-${timeRange.from}-${timeRange.to}`}
-                        />
-                      </div>
-                    </div>
+                    ))}
                   </div>
                 </div>
               )}
