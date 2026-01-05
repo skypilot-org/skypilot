@@ -2550,7 +2550,8 @@ class Resources:
                 '_no_missing_accel_warnings', None)
 
         if version < 29:
-            self._use_queued_resource = state.get('_use_queued_resource', None)
+            self._use_queued_resource = False
+            self._use_queued_resource_specified = False
 
         self.__dict__.update(state)
 
