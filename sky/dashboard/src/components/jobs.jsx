@@ -1182,12 +1182,17 @@ export function ManagedJobsTable({
                         <TableCell>
                           <NonCapitalizedTooltip
                             content={
-                              item.requested_resources || item.resources_str_full || item.resources_str || '-'
+                              item.requested_resources ||
+                              item.resources_str_full ||
+                              item.resources_str ||
+                              '-'
                             }
                             className="text-sm text-muted-foreground"
                           >
                             <span>
-                              {item.requested_resources || item.resources_str || '-'}
+                              {item.requested_resources ||
+                                item.resources_str ||
+                                '-'}
                             </span>
                           </NonCapitalizedTooltip>
                         </TableCell>
