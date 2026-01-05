@@ -364,16 +364,20 @@ helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
 
 ## Common Pitfalls
 
-1. **Don't modify `sky/schemas/generated/`** - These are auto-generated
-2. **Match formatter versions exactly** - Version mismatches cause CI failures
-3. **Test on multiple Python versions** - Support range is 3.8-3.11
-4. **Consider import time** - Heavy imports slow down CLI responsiveness
-5. **Handle cloud differences** - Not all features work on all clouds
-6. **API versioning** - Always maintain backward compatibility
+1. **Always restart API server after code changes** - Run `sky api stop; sky api start` to pick up changes
+2. **Don't modify `sky/schemas/generated/`** - These are auto-generated
+3. **Match formatter versions exactly** - Version mismatches cause CI failures
+4. **Test on multiple Python versions** - Support range is 3.8-3.11
+5. **Consider import time** - Heavy imports slow down CLI responsiveness
+6. **Handle cloud differences** - Not all features work on all clouds
+7. **API versioning** - Always maintain backward compatibility
 
 ## Useful Commands
 
 ```bash
+# IMPORTANT: Always restart the API server after code changes
+sky api stop; sky api start
+
 # Profile CLI performance
 uv pip install py-spy
 py-spy record -t -o sky.svg -- python -m sky.cli status
