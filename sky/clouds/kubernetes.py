@@ -637,7 +637,7 @@ class Kubernetes(clouds.Cloud):
         network_type, machine_type = self._detect_network_type(
             context, resources.network_tier)
 
-        user_custom_resources = None
+        user_custom_resources = (resources.custom_resources or {}).copy()
         # Check if this cluster supports high performance networking and
         # configure appropriate settings for different cluster types
         if (resources.network_tier is not None and
@@ -652,8 +652,6 @@ class Kubernetes(clouds.Cloud):
                 network_env_vars = network_type.get_network_env_vars()
                 k8s_env_vars.update(network_env_vars)
                 if network_type == KubernetesHighPerformanceNetworkType.AWS_EFA:
-                    user_custom_resources = ((resources.custom_resources or
-                                              {}).copy())
                     if _CUSTOM_EFA_RESOURCE_KEY not in user_custom_resources:
                         user_custom_resources[_CUSTOM_EFA_RESOURCE_KEY] = 1
 
