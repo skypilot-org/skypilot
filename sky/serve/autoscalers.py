@@ -466,6 +466,55 @@ class _AutoscalerWithHysteresis(Autoscaler):
             f'{self.scale_down_threshold}. ')
 
 
+    def _generate_scaling_decisions(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+    ) -> List[AutoscalerDecision]:
+        """Generate Autoscaling decisions based on request rate."""
+
+        # Use standard hysteresis-based logic (non-instance-aware)
+        self._set_target_num_replicas_with_hysteresis()
+
+        latest_nonterminal_replicas: List['replica_managers.ReplicaInfo'] = []
+
+        for info in replica_infos:
+            if info.version == self.latest_version:
+                if not info.is_terminal:
+                    latest_nonterminal_replicas.append(info)
+
+        scaling_decisions: List[AutoscalerDecision] = []
+
+        # Case 1. when latest_nonterminal_replicas is less
+        # than num_to_provision, we always scale up new replicas.
+        target_num_replicas = self.get_final_target_num_replicas()
+        if len(latest_nonterminal_replicas) < target_num_replicas:
+            num_replicas_to_scale_up = (target_num_replicas -
+                                        len(latest_nonterminal_replicas))
+            logger.info('Number of replicas to scale up: '
+                        f'{num_replicas_to_scale_up}')
+            scaling_decisions.extend(
+                _generate_scale_up_decisions(num_replicas_to_scale_up, None))
+
+        # Case 2: when latest_nonterminal_replicas is more
+        # than target_num_replicas, we scale down new replicas.
+        replicas_to_scale_down = []
+        if len(latest_nonterminal_replicas) > target_num_replicas:
+            num_replicas_to_scale_down = (len(latest_nonterminal_replicas) -
+                                          target_num_replicas)
+            # Use standard downscaling logic
+            replicas_to_scale_down = (
+                _select_nonterminal_replicas_to_scale_down(
+                    num_replicas_to_scale_down, latest_nonterminal_replicas))
+            logger.info(
+                'Number of replicas to scale down: '
+                f'{num_replicas_to_scale_down} {replicas_to_scale_down}')
+
+        scaling_decisions.extend(
+            _generate_scale_down_decisions(replicas_to_scale_down))
+
+        return scaling_decisions
+
+
 class RequestRateAutoscaler(_AutoscalerWithHysteresis):
     """RequestRateAutoscaler: Autoscale according to request rate.
 
@@ -532,53 +581,6 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
         logger.info(f'Num of requests in the last {self.qps_window_size} '
                     f'seconds: {len(self.request_timestamps)}')
 
-    def _generate_scaling_decisions(
-        self,
-        replica_infos: List['replica_managers.ReplicaInfo'],
-    ) -> List[AutoscalerDecision]:
-        """Generate Autoscaling decisions based on request rate."""
-
-        # Use standard hysteresis-based logic (non-instance-aware)
-        self._set_target_num_replicas_with_hysteresis()
-
-        latest_nonterminal_replicas: List['replica_managers.ReplicaInfo'] = []
-
-        for info in replica_infos:
-            if info.version == self.latest_version:
-                if not info.is_terminal:
-                    latest_nonterminal_replicas.append(info)
-
-        scaling_decisions: List[AutoscalerDecision] = []
-
-        # Case 1. when latest_nonterminal_replicas is less
-        # than num_to_provision, we always scale up new replicas.
-        target_num_replicas = self.get_final_target_num_replicas()
-        if len(latest_nonterminal_replicas) < target_num_replicas:
-            num_replicas_to_scale_up = (target_num_replicas -
-                                        len(latest_nonterminal_replicas))
-            logger.info('Number of replicas to scale up: '
-                        f'{num_replicas_to_scale_up}')
-            scaling_decisions.extend(
-                _generate_scale_up_decisions(num_replicas_to_scale_up, None))
-
-        # Case 2: when latest_nonterminal_replicas is more
-        # than target_num_replicas, we scale down new replicas.
-        replicas_to_scale_down = []
-        if len(latest_nonterminal_replicas) > target_num_replicas:
-            num_replicas_to_scale_down = (len(latest_nonterminal_replicas) -
-                                          target_num_replicas)
-            # Use standard downscaling logic
-            replicas_to_scale_down = (
-                _select_nonterminal_replicas_to_scale_down(
-                    num_replicas_to_scale_down, latest_nonterminal_replicas))
-            logger.info(
-                'Number of replicas to scale down: '
-                f'{num_replicas_to_scale_down} {replicas_to_scale_down}')
-
-        scaling_decisions.extend(
-            _generate_scale_down_decisions(replicas_to_scale_down))
-
-        return scaling_decisions
 
     def _dump_dynamic_states(self) -> Dict[str, Any]:
         return {
@@ -1106,7 +1108,7 @@ class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
             if spec.queue_length_threshold is not None
             else constants.AUTOSCALER_DEFAULT_QUEUE_LENGTH_THRESHOLD)
         self._service_name: str = service_name
-        logger.info(f'QueueLengthAutoscaler initialized for pool "{service_name}": '
+        logger.info(f'QueueLengthAutoscaler for pool "{service_name}": '
                     f'min_replicas={self.min_replicas}, '
                     f'max_replicas={self.max_replicas}, '
                     f'queue_length_threshold={self.queue_length_threshold}')
@@ -1130,30 +1132,30 @@ class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
             target_num_replicas = current_num_replicas + 1
             decision = 'SCALE_UP'
             logger.info(f'[QueueLengthAutoscaler] Decision: {decision} '
-                        f'(queue_length {queue_length} > threshold {self.queue_length_threshold}): '
                         f'{current_num_replicas} -> {target_num_replicas}')
         elif queue_length < self.queue_length_threshold:
             # Scale down by 1
             target_num_replicas = current_num_replicas - 1
             decision = 'SCALE_DOWN'
             logger.info(f'[QueueLengthAutoscaler] Decision: {decision} '
-                        f'(queue_length {queue_length} < threshold {self.queue_length_threshold}): '
                         f'{current_num_replicas} -> {target_num_replicas}')
         else:
             # Queue length equals threshold, keep current
             target_num_replicas = current_num_replicas
             decision = 'NO_CHANGE'
             logger.info(f'[QueueLengthAutoscaler] Decision: {decision} '
-                        f'(queue_length {queue_length} == threshold {self.queue_length_threshold}): '
                         f'staying at {target_num_replicas}')
+
+        if target_num_replicas == 0 and queue_length > 0:
+            target_num_replicas = 1
+            logger.info('Preventing scale to zero since there are jobs in the'
+                        f'queue: {queue_length}')
 
         clipped_target = self._clip_target_num_replicas(target_num_replicas)
         if clipped_target != target_num_replicas:
             logger.info(f'[QueueLengthAutoscaler] Clipped target: '
                         f'{target_num_replicas} -> {clipped_target} '
                         f'(bounds: [{self.min_replicas}, {self.max_replicas}])')
-        else:
-            logger.info(f'[QueueLengthAutoscaler] Final target: {clipped_target}')
 
         return clipped_target
 
@@ -1174,71 +1176,6 @@ class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
         """
         pass
 
-    def _generate_scaling_decisions(
-        self,
-        replica_infos: List['replica_managers.ReplicaInfo'],
-    ) -> List[AutoscalerDecision]:
-        """Generate Autoscaling decisions based on queue length."""
-
-        logger.info(f'[QueueLengthAutoscaler] Generating scaling decisions for pool "{self._service_name}"')
-        
-        # Use hysteresis-based logic from base class
-        self._set_target_num_replicas_with_hysteresis()
-
-        latest_nonterminal_replicas: List['replica_managers.ReplicaInfo'] = []
-
-        for info in replica_infos:
-            if info.version == self.latest_version:
-                if not info.is_terminal:
-                    latest_nonterminal_replicas.append(info)
-
-        current_num_replicas = len(latest_nonterminal_replicas)
-        logger.info(f'[QueueLengthAutoscaler] Current non-terminal replicas: {current_num_replicas} '
-                    f'(version {self.latest_version})')
-
-        scaling_decisions: List[AutoscalerDecision] = []
-
-        # Case 1: when latest_nonterminal_replicas is less
-        # than target_num_replicas, we scale up new replicas.
-        target_num_replicas = self.get_final_target_num_replicas()
-        logger.info(f'[QueueLengthAutoscaler] Target replicas (with overprovision): {target_num_replicas}')
-        
-        if len(latest_nonterminal_replicas) < target_num_replicas:
-            num_replicas_to_scale_up = (target_num_replicas -
-                                        len(latest_nonterminal_replicas))
-            logger.info(f'[QueueLengthAutoscaler] SCALING UP: {num_replicas_to_scale_up} replicas '
-                        f'({current_num_replicas} -> {target_num_replicas})')
-            scaling_decisions.extend(
-                _generate_scale_up_decisions(num_replicas_to_scale_up, None))
-        else:
-            logger.info(f'[QueueLengthAutoscaler] No scale up needed '
-                        f'(current: {current_num_replicas} >= target: {target_num_replicas})')
-
-        # Case 2: when latest_nonterminal_replicas is more
-        # than target_num_replicas, we scale down new replicas.
-        replicas_to_scale_down = []
-        if len(latest_nonterminal_replicas) > target_num_replicas:
-            num_replicas_to_scale_down = (len(latest_nonterminal_replicas) -
-                                          target_num_replicas)
-            # Use standard downscaling logic
-            replicas_to_scale_down = (
-                _select_nonterminal_replicas_to_scale_down(
-                    num_replicas_to_scale_down, latest_nonterminal_replicas))
-            logger.info(f'[QueueLengthAutoscaler] SCALING DOWN: {num_replicas_to_scale_down} replicas '
-                        f'({current_num_replicas} -> {target_num_replicas}), '
-                        f'replica IDs: {replicas_to_scale_down}')
-        else:
-            logger.info(f'[QueueLengthAutoscaler] No scale down needed '
-                        f'(current: {current_num_replicas} <= target: {target_num_replicas})')
-
-        scaling_decisions.extend(
-            _generate_scale_down_decisions(replicas_to_scale_down))
-
-        logger.info(f'[QueueLengthAutoscaler] Total scaling decisions: {len(scaling_decisions)}')
-        for i, decision in enumerate(scaling_decisions):
-            logger.info(f'[QueueLengthAutoscaler] Decision {i+1}: {decision.operator.value}, target: {decision.target}')
-
-        return scaling_decisions
 
     def _dump_dynamic_states(self) -> Dict[str, Any]:
         """Dump dynamic states from autoscaler.
