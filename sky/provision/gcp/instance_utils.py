@@ -1440,31 +1440,33 @@ class GCPTPUVMInstance(GCPInstance):
                                  queued_resource_id: str) -> None:
         """Wait for queued resource to be ready."""
         logger.debug(
-            f'Waiting for queued resource {queued_resource_id} to be ready (timeout={GCP_QUEUED_RESOURCE_TIMEOUT}s)...'
-        )
+            f'Waiting for queued resource {queued_resource_id} to be ready '
+            f'(timeout={GCP_QUEUED_RESOURCE_TIMEOUT}s)...')
 
-        @_retry_on_gcp_http_exception(
-            f'Failed to get queued resource {queued_resource_id}')
+        @_retry_on_gcp_http_exception()
         def get_queued_resource():
+            logger.info(f'Getting queued resource {queued_resource_id}...')
             return cls.load_resource().projects().locations().queuedResources(
             ).get(
-                name=
-                f'projects/{project_id}/locations/{zone}/queuedResources/{queued_resource_id}'
-            ).execute()
+                name=f'projects/{project_id}/locations/{zone}/queuedResources/'
+                f'{queued_resource_id}').execute()
 
         wait_start = time.time()
         while time.time() - wait_start < GCP_QUEUED_RESOURCE_TIMEOUT:
-            try:
-                qr = get_queued_resource()
-            except Exception as e:
-                logger.warning(
-                    f'Failed to get queued resource status: {e}. Retrying...')
-                time.sleep(constants.POLL_INTERVAL)
-                continue
+            # try:
+            qr = get_queued_resource()
+            logger.info(f'Queued resource {queued_resource_id} state: {qr.get('state', {}).get('state')}.')
+            # except Exception as e:  # pylint: disable=broad-except
+            #     logger.warning(
+            #         f'Failed to get queued resource status: {e}. Retrying...')
+            #     time.sleep(constants.POLL_INTERVAL)
+            #     continue
 
             state = qr.get('state', {}).get('state')
 
-            # Values: STATE_UNSPECIFIED, CREATING, ACCEPTED, PROVISIONING, FAILED, DELETING, ACTIVE, SUSPENDING, SUSPENDED, WAITING_FOR_RESOURCES
+            # Values: STATE_UNSPECIFIED, CREATING, ACCEPTED, PROVISIONING,
+            # FAILED, DELETING, ACTIVE, SUSPENDING, SUSPENDED,
+            # WAITING_FOR_RESOURCES
             if state == 'ACTIVE':
                 logger.debug(f'Queued resource {queued_resource_id} is active.')
                 return
@@ -1472,8 +1474,8 @@ class GCPTPUVMInstance(GCPInstance):
             if state == 'FAILED':
                 error_details = qr.get('status', {})
                 provisioner_error = common.ProvisionerError(
-                    f'Queued resource {queued_resource_id} failed with state {state}. '
-                    f'Error: {error_details}')
+                    f'Queued resource {queued_resource_id} failed with state '
+                    f'{state}. Error: {error_details}')
                 provisioner_error.errors = [{
                     'code': error_details.get('code', 'UNKNOWN'),
                     'message': error_details.get('message', str(error_details)),
@@ -1482,16 +1484,17 @@ class GCPTPUVMInstance(GCPInstance):
                 raise provisioner_error
 
             logger.debug(
-                f'Queued resource {queued_resource_id} state: {state}. Waiting...'
-            )
+                f'Queued resource {queued_resource_id} state: {state}. '
+                'Waiting...')
             time.sleep(constants.POLL_INTERVAL)
 
         provisioner_error = common.ProvisionerError(
-            f'Timed out waiting for queued resource {queued_resource_id} to be ready.'
-        )
+            f'Timed out waiting for queued resource {queued_resource_id} to be '
+            'ready.')
         provisioner_error.errors = [{
             'code': 'TIMEOUT',
-            'message': f'Timed out waiting for queued resource {queued_resource_id} to be ready.',
+            'message': (f'Timed out waiting for queued resource '
+                        f'{queued_resource_id} to be ready.'),
             'domain': 'queued_resource',
         }]
         raise provisioner_error

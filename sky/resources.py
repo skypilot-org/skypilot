@@ -307,7 +307,8 @@ class Resources:
         self._use_spot = use_spot if use_spot is not None else False
 
         self._use_queued_resource_specified = use_queued_resource is not None
-        self._use_queued_resource = use_queued_resource if use_queued_resource is not None else False
+        self._use_queued_resource = (use_queued_resource if use_queued_resource
+                                     is not None else False)
 
         self._job_recovery: Optional[Dict[str, Optional[Union[str,
                                                               int]]]] = None
@@ -631,7 +632,8 @@ class Resources:
 
     @property
     def use_queued_resource(self) -> bool:
-        return self._use_queued_resource if self._use_queued_resource is not None else False
+        return (self._use_queued_resource
+                if self._use_queued_resource is not None else False)
 
     @property
     def use_queued_resource_specified(self) -> bool:
@@ -1923,7 +1925,8 @@ class Resources:
         """Returns a copy of the given Resources."""
         use_spot = self.use_spot if self._use_spot_specified else None
 
-        use_queued_resource = self.use_queued_resource if self._use_queued_resource_specified else None
+        use_queued_resource = (self.use_queued_resource
+                               if self._use_queued_resource_specified else None)
 
         current_override_configs = self._cluster_config_overrides
         if current_override_configs is None:
