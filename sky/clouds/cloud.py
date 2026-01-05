@@ -45,6 +45,7 @@ class CloudImplementationFeatures(enum.Enum):
     IMAGE_ID = 'image_id'
     DOCKER_IMAGE = 'docker_image'
     SPOT_INSTANCE = 'spot_instance'
+    QUEUED_RESOURCE = 'queued_resource'
     CUSTOM_DISK_TIER = 'custom_disk_tier'
     CUSTOM_NETWORK_TIER = 'custom_network_tier'
     OPEN_PORTS = 'open_ports'

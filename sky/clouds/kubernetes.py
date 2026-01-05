@@ -74,6 +74,10 @@ class Kubernetes(clouds.Cloud):
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Kubernetes.',
+        clouds.CloudImplementationFeatures.QUEUED_RESOURCE:
+            'Queued resources are '
+            'not supported in '
+            'Kubernetes.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: 'Custom disk '
                                                              'tiers are not '
                                                              'supported in '
