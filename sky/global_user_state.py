@@ -206,6 +206,10 @@ class ClusterEventType(enum.Enum):
     STATUS_CHANGE = 'STATUS_CHANGE'
     """Used to denote events that modify cluster status."""
 
+    TERMINAL = 'TERMINAL'
+    """Used to denote events that are directly related to
+    a cluster's termination."""
+
 
 # Table for cluster status change events.
 # starting_status: Status of the cluster at the start of the event.
@@ -944,28 +948,61 @@ def get_last_cluster_event(cluster_hash: str,
     return row.reason
 
 
-def _get_last_cluster_event_multiple(
-        cluster_hashes: Set[str],
-        event_type: ClusterEventType) -> Dict[str, str]:
+def get_terminal_or_last_status_change_event(
+        cluster_hash: str) -> Optional[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        # Use a subquery to get the latest event for each cluster_hash
-        latest_events = session.query(
-            cluster_event_table.c.cluster_hash,
-            sqlalchemy.func.max(cluster_event_table.c.transitioned_at).label(
-                'max_time')).filter(
-                    cluster_event_table.c.cluster_hash.in_(cluster_hashes),
-                    cluster_event_table.c.type == event_type.value).group_by(
-                        cluster_event_table.c.cluster_hash).subquery()
+        # Order by type (TERMINAL first, STATUS_CHANGE after),
+        # then by transitioned_at desc.
+        # Use a CASE expression for ordering type.
+        type_priority = sqlalchemy.case(
+            (cluster_event_table.c.type == ClusterEventType.TERMINAL.value, 0),
+            else_=1)
+        row = session.query(cluster_event_table).filter(
+            cluster_event_table.c.cluster_hash == cluster_hash,
+            cluster_event_table.c.type.in_([
+                ClusterEventType.TERMINAL.value,
+                ClusterEventType.STATUS_CHANGE.value
+            ])).order_by(type_priority,
+                         cluster_event_table.c.transitioned_at.desc()).first()
+    if row is None:
+        return None
+    return row.reason
 
-        # Join with original table to get the full event details
-        rows = session.query(cluster_event_table).join(
-            latest_events,
-            sqlalchemy.and_(
-                cluster_event_table.c.cluster_hash ==
-                latest_events.c.cluster_hash,
-                cluster_event_table.c.transitioned_at ==
-                latest_events.c.max_time)).all()
+
+def _get_last_cluster_event_multiple(
+        cluster_hashes: Set[str]) -> Dict[str, str]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Create a priority expression: TERMINAL (0) before STATUS_CHANGE (1)
+        type_priority = sqlalchemy.case(
+            (cluster_event_table.c.type == ClusterEventType.TERMINAL.value, 0),
+            else_=1)
+
+        # Use ROW_NUMBER to rank events within each cluster_hash,
+        # ordered by type priority (TERMINAL first) then by transitioned_at
+        # (latest first)
+        row_number = sqlalchemy.func.row_number().over(
+            partition_by=cluster_event_table.c.cluster_hash,
+            order_by=[
+                type_priority,
+                cluster_event_table.c.transitioned_at.desc()
+            ]).label('rn')
+
+        # Subquery to get all events with their rank
+        ranked_events = session.query(
+            cluster_event_table.c.cluster_hash, cluster_event_table.c.reason,
+            row_number).filter(
+                cluster_event_table.c.cluster_hash.in_(cluster_hashes),
+                cluster_event_table.c.type.in_([
+                    ClusterEventType.TERMINAL.value,
+                    ClusterEventType.STATUS_CHANGE.value
+                ])).subquery()
+
+        # Select only the top-ranked event for each cluster
+        rows = session.query(
+            ranked_events.c.cluster_hash,
+            ranked_events.c.reason).filter(ranked_events.c.rn == 1).all()
 
     return {row.cluster_hash: row.reason for row in rows}
 
@@ -1720,8 +1757,7 @@ def get_cluster_from_name(
         user = get_user(user_hash)
         user_name = user.name if user is not None else None
     if not summary_response:
-        last_event = get_last_cluster_event(
-            row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE)
+        last_event = get_terminal_or_last_status_change_event(row.cluster_hash)
     # TODO: use namedtuple instead of dict
     record = {
         'name': row.name,
@@ -1853,15 +1889,20 @@ def get_clusters(
     if not summary_response:
         cluster_hashes = {row.cluster_hash for row in rows}
         last_cluster_event_dict = _get_last_cluster_event_multiple(
-            cluster_hashes, ClusterEventType.STATUS_CHANGE)
+            cluster_hashes)
 
     for row in rows:
+        handle = pickle.loads(row.handle)
+        priority = (handle.launched_resources.priority
+                    if handle.launched_resources is not None else None)
         # TODO: use namedtuple instead of dict
         record = {
             'name': row.name,
             'launched_at': row.launched_at,
-            'handle': pickle.loads(row.handle),
+            'handle': handle,
             'status': status_lib.ClusterStatus[row.status],
+            'priority': priority
+                        if priority is not None else constants.DEFAULT_PRIORITY,
             'autostop': row.autostop,
             'to_down': bool(row.to_down),
             'cluster_hash': row.cluster_hash,
@@ -1994,17 +2035,14 @@ def get_clusters_from_history(
     user_hashes = set(row_to_user_hash.values())
     user_hash_to_user = get_users(user_hashes)
     cluster_hashes = set(row_to_user_hash.keys())
-    if not abbreviate_response:
-        last_cluster_event_dict = _get_last_cluster_event_multiple(
-            cluster_hashes, ClusterEventType.STATUS_CHANGE)
+    last_cluster_event_dict = _get_last_cluster_event_multiple(cluster_hashes)
 
     records = []
     for row in rows:
         user_hash = row_to_user_hash[row.cluster_hash]
         user = user_hash_to_user.get(user_hash, None)
         user_name = user.name if user is not None else None
-        if not abbreviate_response:
-            last_event = last_cluster_event_dict.get(row.cluster_hash, None)
+        last_event = last_cluster_event_dict.get(row.cluster_hash, None)
         launched_at = row.launched_at
         usage_intervals: Optional[List[Tuple[
             int,
@@ -2033,17 +2071,19 @@ def get_clusters_from_history(
             'duration': duration,
             'num_nodes': row.num_nodes,
             'resources': launched_resources,
+            'priority': launched_resources.priority
+                        if launched_resources is not None else None,
             'cluster_hash': row.cluster_hash,
             'usage_intervals': usage_intervals,
             'status': status,
             'user_hash': user_hash,
             'user_name': user_name,
             'workspace': workspace,
+            'last_event': last_event,
         }
         if not abbreviate_response:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
-            record['last_event'] = last_event
 
         records.append(record)
 

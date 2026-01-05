@@ -1767,6 +1767,39 @@ def get_config_schema():
                         'disabled': {
                             'type': 'boolean'
                         },
+                        'kueue': {
+                            'type': 'object',
+                            'required': [],
+                            'additionalProperties': False,
+                            'properties': {
+                                'local_queue_name': {
+                                    'type': 'string',
+                                },
+                            },
+                        },
+                        'context_configs': {
+                            'type': 'object',
+                            'required': [],
+                            'properties': {},
+                            # Properties are kubernetes context names.
+                            'additionalProperties': {
+                                'type': 'object',
+                                'required': [],
+                                'additionalProperties': False,
+                                'properties': {
+                                    'kueue': {
+                                        'type': 'object',
+                                        'required': [],
+                                        'additionalProperties': False,
+                                        'properties': {
+                                            'local_queue_name': {
+                                                'type': 'string',
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
                     },
                     'additionalProperties': False,
                 },
