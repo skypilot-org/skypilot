@@ -957,7 +957,11 @@ def get_next_cluster_name(
                           not _is_empty_resource(task_resources_list[0]))
         resource_aware = resource_aware and free_resources is not None
         if free_resources is not None:
-            first_free_resource = list(free_resources.values())[0]
+            free_resource_list = list(free_resources.values())
+            if len(free_resource_list) > 0:
+                first_free_resource = free_resource_list[0]
+            else:
+                first_free_resource = None
             if first_free_resource is not None:
                 resource_aware = resource_aware and not _is_empty_resource(
                     first_free_resource)

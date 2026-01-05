@@ -691,7 +691,7 @@ def get_service_schema():
                         },
                         'queue_length_threshold': {
                             'type': 'integer',
-                            'minimum': 0,
+                            'minimum': 1,
                         },
                         'max_workers': {
                             'type': 'integer',
@@ -784,7 +784,7 @@ def get_service_schema():
             },
             'queue_length_threshold': {
                 'type': 'integer',
-                'minimum': 0,
+                'minimum': 1,
             },
             'upscale_delay_seconds': {
                 'type': 'number',
