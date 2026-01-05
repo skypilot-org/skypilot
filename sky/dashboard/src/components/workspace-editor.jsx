@@ -46,6 +46,7 @@ import yaml from 'js-yaml';
 import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
 import { getUsers } from '@/data/connectors/users';
 import { dashboardCache } from '@/lib/cache';
+import { apiClient } from '@/data/connectors/client';
 
 // Success display component
 const SuccessDisplay = ({ message }) => {
@@ -579,6 +580,14 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
   };
 
   const handleRefresh = async () => {
+    setLoading(true);
+    try {
+      await apiClient.fetch('/check', {}, 'POST');
+    } catch (error) {
+      console.error('Error during sky check refresh:', error);
+    } finally {
+      setLoading(false);
+    }
     await Promise.all([fetchWorkspaceConfig(), fetchWorkspaceStats()]);
   };
 

@@ -728,6 +728,15 @@ export function Workspaces() {
     dashboardCache.invalidateFunction(getWorkspaceClusters); // Invalidate all workspace clusters
     dashboardCache.invalidateFunction(getWorkspaceManagedJobs); // Invalidate all workspace jobs
 
+    setLoading(true);
+    try {
+      await apiClient.fetch('/check', {}, 'POST');
+    } catch (error) {
+      console.error('Error during sky check refresh:', error);
+    } finally {
+      setLoading(false);
+    }
+
     await fetchData(true); // Show loading on manual refresh
     setLastFetchedTime(new Date());
   };
