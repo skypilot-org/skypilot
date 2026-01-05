@@ -388,7 +388,6 @@ def _send_to_loki(message_type: MessageType):
             'values': [[str(log_timestamp), str(message)]]
         }]
     }
-    logger.info(f'payload: {payload}')
     payload = json.dumps(payload)
     response = requests.post(constants.LOG_URL,
                              data=payload,
