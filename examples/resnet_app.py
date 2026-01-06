@@ -17,24 +17,17 @@ subprocess.run(f'cd {workdir} && git checkout 9459fee', shell=True, check=True)
 setup = """\
     set -e
     pip install --upgrade pip
-    conda init bash
-    conda activate resnet && exists=1 || exists=0
-    if [ $exists -eq 0 ]; then
-        conda create -n resnet python=3.7 -y
-        conda activate resnet
-        conda install cudatoolkit=11.0 -y
-        pip install tensorflow==2.4.0 pyyaml
-        pip install protobuf==3.20
-        mkdir -p $CONDA_PREFIX/etc/conda/activate.d
-        echo 'CUDNN_PATH=$(dirname $(python -c "import nvidia.cudnn;print(nvidia.cudnn.__file__)"))' >> $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
-        echo 'export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/:$CUDNN_PATH/lib:$LD_LIBRARY_PATH' >> $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
-        cd models && pip install -e .
-    fi
+    uv venv ~/resnet --python 3.7
+    source ~/resnet/bin/activate
+    uv pip install nvidia-cudnn-cu11
+    uv pip install tensorflow==2.4.0 pyyaml
+    uv pip install protobuf==3.20
+    cd models && uv pip install -e .
     """
 
 # The command to run.  Will be run under the working directory.
 run = """\
-    conda activate resnet
+    source ~/resnet/bin/activate
     export XLA_FLAGS=\'--xla_gpu_cuda_data_dir=/usr/local/cuda/\'
     python -u models/official/resnet/resnet_main.py --use_tpu=False \
         --mode=train --train_batch_size=256 --train_steps=250 \

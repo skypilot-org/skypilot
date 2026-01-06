@@ -30,19 +30,19 @@ num_nodes: 2
 #    mode: MOUNT_CACHED  # MOUNT_CACHED mode will intelligently cache the checkpoint for faster writes
 
 setup: |
-  conda create -n training python=3.10 -y
-  conda activate training
+  uv venv ~/training --python 3.10 --seed
+  source ~/training/bin/activate
 
   # Install torch and torchtune nightly builds
-  pip install --pre --upgrade torch==2.8.0.dev20250610+cu126 torchvision==0.23.0.dev20250610+cu126 torchao==0.12.0.dev20250611+cu126 --index-url https://download.pytorch.org/whl/nightly/cu126 # full options are cpu/cu118/cu124/cu126/xpu/rocm6.2/rocm6.3/rocm6.4
-  pip install --pre --upgrade torchtune==0.7.0.dev20250610+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+  uv pip install --pre --upgrade torch==2.8.0.dev20250610+cu126 torchvision==0.23.0.dev20250610+cu126 torchao==0.12.0.dev20250611+cu126 --index-url https://download.pytorch.org/whl/nightly/cu126 # full options are cpu/cu118/cu124/cu126/xpu/rocm6.2/rocm6.3/rocm6.4
+  uv pip install --pre --upgrade torchtune==0.7.0.dev20250610+cpu --extra-index-url https://download.pytorch.org/whl/nightly/cpu
 
   # Download the model (~200 GB, may take time to download)
   tune download meta-llama/Llama-4-Scout-17B-16E-Instruct \
     --hf-token $HF_TOKEN
 
 run: |
-  conda activate training
+  source ~/training/bin/activate
 
   MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
   echo "Starting distributed finetuning, head node: $MASTER_ADDR"

@@ -7,4 +7,4 @@ setup: |
   echo "running setup"
 
 run: |
-  conda env list
+  nvidia-smi

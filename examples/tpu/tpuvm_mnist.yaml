@@ -7,14 +7,10 @@ resources:
 setup: |
   git clone https://github.com/google/flax.git --branch v0.10.1
 
-  conda activate flax
-  if [ $? -eq 0 ]; then
-    echo 'conda env exists'
-  else
-    conda create -n flax python=3.10 -y
-    conda activate flax
-    # Make sure to install TPU related packages in a conda env to avoid package conflicts.
-    pip install uv
+  if [ ! -d ~/flax-venv ]; then
+    uv venv ~/flax-venv --python 3.10
+    source ~/flax-venv/bin/activate
+    # Make sure to install TPU related packages in a venv to avoid package conflicts.
     uv pip install --prerelease=allow \
       -f https://storage.googleapis.com/jax-releases/libtpu_releases.html -f https://storage.googleapis.com/jax-releases/jax_releases.html "jax[tpu]==0.4.35" \
       clu \
@@ -22,12 +18,14 @@ setup: |
     uv pip install -e flax
     uv pip install --upgrade tensorflow-datasets
     uv pip install --upgrade protobuf
+  else
+    source ~/flax-venv/bin/activate
   fi
 
 
 # The command to run.  Will be run under the working directory.
 run: |
-  conda activate flax
+  source ~/flax-venv/bin/activate
   cd flax/examples/mnist
   python3 main.py --workdir=/tmp/mnist \
     --config=configs/default.py \

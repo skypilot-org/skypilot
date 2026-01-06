@@ -1,7 +1,6 @@
 #!/bin/bash
 
-conda activate resnet
-conda env list
+source ~/resnet/bin/activate
 
 cd pytorch-distributed-resnet
 num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`

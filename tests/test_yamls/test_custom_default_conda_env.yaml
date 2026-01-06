@@ -16,6 +16,5 @@ setup: |
   pip install ray==2.6.0
 
 run: |
-  conda env list
   echo hi
   echo bye

@@ -350,7 +350,7 @@ However, if you are operating in a cluster with restricted permissions, you can 
 Set up proxy configuration
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If your Kubernetes cluster is behind a corporate proxy or firewall, SkyPilot pods may fail to download dependencies during setup. This typically manifests as the installation getting stuck during conda initialization or package downloads.
+If your Kubernetes cluster is behind a corporate proxy or firewall, SkyPilot pods may fail to download dependencies during setup. This typically manifests as the installation getting stuck during virtual environment initialization or package downloads.
 
 To resolve this, you can configure proxy settings for SkyPilot pods by adding environment variables to your pod configuration in ``~/.sky/config.yaml``:
 

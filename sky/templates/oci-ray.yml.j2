@@ -83,7 +83,7 @@ setup_commands:
     sudo systemctl disable firewalld || true;
     {%- endif %}
     mkdir -p ~/.ssh; touch ~/.ssh/config;
-    {{ conda_installation_commands }}
+    {{ runtime_installation_commands }}
     {{ ray_skypilot_installation_commands }}
     {{ copy_skypilot_templates_commands }}
     touch ~/.sudo_as_admin_successful;

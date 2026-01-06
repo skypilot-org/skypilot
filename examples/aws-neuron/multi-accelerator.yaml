@@ -60,7 +60,7 @@ run: |
     NEURON_RT_VISIBLE_CORES="0-$(($TENSOR_PARALLEL_SIZE - 1))"
     OMP_NUM_THREADS=$SKYPILOT_NUM_GPUS_PER_NODE
     MASTER_PORT=12355
-    LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/home/ubuntu/miniconda3/lib"
+    # Set library path for neuron runtime
     PREFIX="numactl --cpunodebind=0 --membind=0"
     DEVICE="neuron"
   fi

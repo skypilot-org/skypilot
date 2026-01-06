@@ -18,12 +18,12 @@ We use GitHub to track issues and features. For new contributors, we recommend l
 
 Follow the steps below to set up a local development environment for contributing to SkyPilot.
 
-#### Create a conda environment
-To avoid package conflicts, create and activate a clean conda environment:
+#### Create a uv venv environment
+To avoid package conflicts, create and activate a clean uv venv environment:
 ```bash
 # SkyPilot requires 3.7 <= python <= 3.11.
-conda create -y -n sky python=3.10
-conda activate sky
+uv venv ~/sky --python 3.10 --seed
+source ~/sky/bin/activate
 ```
 
 #### Install SkyPilot

@@ -6,17 +6,15 @@ resources:
 setup: |
   pip install --upgrade pip
 
-  conda activate d2
-
-  if [ $? -eq 0 ]; then
-    echo "conda env exists"
-  else
-    conda create -n d2 python=3.8 -y
-    conda activate d2
+  if [ ! -d ~/d2 ]; then
+    uv venv ~/d2 --python 3.8
+    source ~/d2/bin/activate
     pip install torch torchvision
     git clone https://github.com/facebookresearch/detectron2
     cd detectron2
     pip install -e .
+  else
+    source ~/d2/bin/activate
   fi
 
   cd tools
@@ -42,7 +40,7 @@ setup: |
   rm stuff_annotations_trainval2017.zip
 
 run: |
-  conda activate d2
+  source ~/d2/bin/activate
   
   cd detectron2/tools
   python train_net.py --config-file ../configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_1x.yaml --num-gpus 1 SOLVER.IMS_PER_BATCH 2 SOLVER.BASE_LR 0.0025 SOLVER.MAX_ITER 100

@@ -68,9 +68,6 @@ As another example, here's how to use `NVIDIA's PyTorch NGC Container <https://c
   run: |
     # Commands to run inside the container
 
-    # Since SkyPilot tasks are run inside a fresh conda "(base)" environment,
-    # deactivate first to access what the Docker image has already installed.
-    source deactivate
     nvidia-smi
     python -c 'import torch; print(torch.__version__)'
 

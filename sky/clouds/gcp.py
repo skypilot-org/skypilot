@@ -180,8 +180,8 @@ class GCP(clouds.Cloud):
         'GCP tools are not installed. Run the following commands:\n'
         # Install the Google Cloud SDK:
         f'{_INDENT_PREFIX}  $ pip install google-api-python-client\n'
-        f'{_INDENT_PREFIX}  $ conda install -c conda-forge '
-        'google-cloud-sdk -y\n'
+        f'{_INDENT_PREFIX}  $ curl https://sdk.cloud.google.com | bash\n'
+        f'{_INDENT_PREFIX}  $ exec -l $SHELL\n'
         f'{_INDENT_PREFIX} If gcloud was recently installed with wget, API server'
         ' may need to be restarted with following commands:\n'
         f'{_INDENT_PREFIX}  $ sky api stop; sky api start')

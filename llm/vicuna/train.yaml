@@ -23,33 +23,30 @@ workdir: .
 
 setup: |
   # Setup the environment
-  conda activate chatbot
-  if [ $? -ne 0 ]; then
-    conda create -n chatbot python=3.10 -y
-    conda activate chatbot
-  fi
+  uv venv ~/chatbot --python 3.10 --seed
+  source ~/chatbot/bin/activate
 
   # Install pytorch
-  pip install torch==1.13.1+cu116 torchvision==0.14.1+cu116 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu116
+  uv pip install torch==1.13.1+cu116 torchvision==0.14.1+cu116 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu116
 
   # Install huggingface with the LLaMA commit
-  git clone https://github.com/huggingface/transformers.git
+  git clone https://github.com/huggingface/transformers.git || true
   cd transformers
   git checkout 41a2f3529c6b56866c317031375ffd3e7b8bea01
-  pip install .
+  uv pip install .
   cd -
 
   # Install fastchat
-  git clone https://github.com/lm-sys/FastChat.git
+  git clone https://github.com/lm-sys/FastChat.git || true
   cd FastChat
-  pip install -e .
+  uv pip install -e .
   if [ $USE_FLASH_ATTN -eq 1 ]; then
-    pip install flash-attn
+    uv pip install flash-attn
   fi
 
 run: |
   cd FastChat
-  conda activate chatbot
+  source ~/chatbot/bin/activate
   USE_FLASH_ATTN=${USE_FLASH_ATTN:-0}
   if [ $USE_FLASH_ATTN -eq 1 ]; then
     TRAIN_SCRIPT=fastchat/train/train_mem.py

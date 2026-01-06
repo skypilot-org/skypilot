@@ -30,23 +30,12 @@ service:
 # Typical use: pip install -r requirements.txt
 # Invoked under the workdir (i.e., can use its files).
 setup: |
-  wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
-  bash miniconda.sh -b -p $HOME/miniconda
-  rm miniconda.sh
-  echo "Miniconda installed"
-
-  $HOME/miniconda/bin/conda init bash
-  source ~/.bashrc
-  echo "Conda initialized"
-
-  $HOME/miniconda/bin/conda create --name vllm python=3.12 -y
-  echo "Conda environment created"
-
-  source $HOME/miniconda/bin/activate vllm
-  pip install vllm==0.7.3 # should test upper version
+  uv venv ~/vllm-venv --python 3.12
+  source ~/vllm-venv/bin/activate
+  uv pip install vllm==0.7.3 # should test upper version
   echo "vllm installed"
 
 
 run: |
-  conda activate vllm
+  source ~/vllm-venv/bin/activate
   vllm serve BAAI/bge-reranker-v2-m3 --port 8080

@@ -21,32 +21,31 @@ resources:
 num_nodes: 2
 
 setup: |
-  conda activate nemo
-  if [ $? -eq 0 ]; then
-      echo "conda env exists"
-  else
-      conda create -y --name nemo python==3.10.12
-      conda activate nemo
-  
+  if [ ! -d ~/nemo ]; then
+      uv venv ~/nemo --python 3.10
+      source ~/nemo/bin/activate
+
       # Install PyTorch
       pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-      
+
       # Install nemo
       sudo apt-get update
       sudo apt-get install -y libsndfile1 ffmpeg
       pip install Cython
       pip install nemo_toolkit['all']
-    
+
       # Clone the NeMo repo to get the examples
       git clone https://github.com/NVIDIA/NeMo.git
-      
+
       # Download GLUE dataset
       wget https://gist.githubusercontent.com/W4ngatang/60c2bdb54d156a41194446737ce03e2e/raw/70e86a10fbf4ab4ec3f04c9ba82ba58f87c530bf/download_glue_data.py
       python download_glue_data.py --data_dir glue_data --tasks CoLA
+  else
+      source ~/nemo/bin/activate
   fi
 
 run: |
-  conda activate nemo
+  source ~/nemo/bin/activate
   
   # Get the number of nodes and master address from SkyPilot envvars
   num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`

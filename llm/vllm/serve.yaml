@@ -5,22 +5,19 @@ resources:
   accelerators: A100-80GB:8
 
 setup: |
-  conda activate vllm
-  if [ $? -ne 0 ]; then
-    conda create -n vllm python=3.10 -y
-    conda activate vllm
-  fi
+  uv venv ~/vllm --python 3.10 --seed
+  source ~/vllm/bin/activate
 
   # Install fschat and accelerate for chat completion
   git clone https://github.com/vllm-project/vllm.git || true
-  pip install transformers==4.38.0
-  pip install vllm==0.3.2
+  uv pip install transformers==4.38.0
+  uv pip install vllm==0.3.2
 
-  pip install gradio
+  uv pip install gradio
 
 
 run: |
-  conda activate vllm
+  source ~/vllm/bin/activate
   echo 'Starting vllm api server...'
   python -u -m vllm.entrypoints.api_server \
                    --model $MODEL_NAME \

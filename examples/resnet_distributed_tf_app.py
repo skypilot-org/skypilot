@@ -24,12 +24,12 @@ def run(cluster: Optional[str] = None, infra: Optional[str] = None):
         setup = """
                 git clone https://github.com/concretevitamin/tpu || true
                 cd tpu && git checkout 9459fee
-                conda create -n resnet python=3.7 -y
-                conda activate resnet
-                conda install cudatoolkit=11.0 -y
-                pip install tensorflow==2.4.0 pyyaml
-                pip install protobuf==3.20
-                cd models && pip install -e .
+                uv venv ~/resnet --python 3.7
+                source ~/resnet/bin/activate
+                uv pip install nvidia-cudnn-cu11
+                uv pip install tensorflow==2.4.0 pyyaml
+                uv pip install protobuf==3.20
+                cd models && uv pip install -e .
                 """
 
         # The command to run.  Will be run under the working directory.
@@ -53,7 +53,7 @@ def run(cluster: Optional[str] = None, infra: Optional[str] = None):
             print(f'{str_tf_config!r}')
             run = f"""
                 cd tpu
-                conda activate resnet
+                source ~/resnet/bin/activate
                 rm -rf resnet_model-dir
                 export TF_CONFIG={str_tf_config!r}
                 export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'

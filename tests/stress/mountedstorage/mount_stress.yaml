@@ -22,13 +22,10 @@ file_mounts:
 setup: |
   # Install jupyter for playing around with
   pip install --upgrade pip
-  conda init bash
-  conda activate jupyter
-  conda create -n jupyter python=3.9 -y
-  conda activate jupyter
-  pip install jupyter
+  uv venv ~/jupyter-env --python 3.9 --seed
+  source ~/jupyter-env/bin/activate
+  uv pip install jupyter
 
 run: |
+  source ~/jupyter-env/bin/activate
   python -u read_parallel.py /covid/ --list
-#  conda activate jupyter
-#  jupyter notebook --port 8888

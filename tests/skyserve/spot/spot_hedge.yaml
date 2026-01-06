@@ -33,17 +33,14 @@ resources:
   ports: 9000  # Expose to internet traffic.
 
 setup: |
-  conda activate vllm
-  if [ $? -ne 0 ]; then
-    conda create -n vllm python=3.10 -y
-    conda activate vllm
-  fi
+  uv venv ~/vllm-env --python 3.10 --seed
+  source ~/vllm-env/bin/activate
 
-  pip install fschat==0.2.36 accelerate==0.28.0 vllm==0.3.3 outlines==0.0.39
+  uv pip install fschat==0.2.36 accelerate==0.28.0 vllm==0.3.3 outlines==0.0.39
   python -c "import huggingface_hub; huggingface_hub.login('$HF_TOKEN')"
 
 run: |
-  conda activate vllm
+  source ~/vllm-env/bin/activate
   echo 'Starting vllm api server...'
 
   # https://github.com/vllm-project/vllm/issues/3098

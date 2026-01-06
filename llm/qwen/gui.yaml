@@ -20,17 +20,14 @@ resources:
   cpus: 2
 
 setup: |
-  conda activate qwen
-  if [ $? -ne 0 ]; then
-    conda create -n qwen python=3.10 -y
-    conda activate qwen
-  fi
+  uv venv ~/qwen --python 3.10 --seed
+  source ~/qwen/bin/activate
 
   # Install Gradio for web UI.
-  pip install gradio openai
+  uv pip install gradio openai
 
 run: |
-  conda activate qwen
+  source ~/qwen/bin/activate
   export PATH=$PATH:/sbin
   WORKER_IP=$(hostname -I | cut -d' ' -f1)
   CONTROLLER_PORT=21001

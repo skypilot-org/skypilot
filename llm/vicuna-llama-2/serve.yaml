@@ -13,18 +13,15 @@ file_mounts:
     mode: COPY
 
 setup: |
-  conda activate chatbot
-  if [ $? -ne 0 ]; then
-    conda create -n chatbot python=3.10 -y
-    conda activate chatbot
-  fi
+  uv venv ~/chatbot --python 3.10 --seed
+  source ~/chatbot/bin/activate
 
   # Install dependencies
-  pip install git+https://github.com/lm-sys/FastChat.git
+  uv pip install git+https://github.com/lm-sys/FastChat.git
 
 
 run: |
-  conda activate chatbot
+  source ~/chatbot/bin/activate
   
   echo 'Starting controller...'
   python -u -m fastchat.serve.controller --host 127.0.0.1 > ~/controller.log 2>&1 &

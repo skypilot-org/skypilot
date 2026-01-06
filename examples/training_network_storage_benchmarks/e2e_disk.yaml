@@ -31,11 +31,10 @@ volumes:
   /mnt/data: nebius-pvc
 
 setup: |
-  conda install cuda -c nvidia
   uv venv ~/training --seed --python 3.10
   source ~/training/bin/activate
-  sudo DEBIAN_FRONTEND=noninteractive apt install -y vmtouch
-  sudo DEBIAN_FRONTEND=noninteractive apt install -y python3-dev python3.10-dev build-essential
+  uv pip install nvidia-cuda-toolkit
+  sudo DEBIAN_FRONTEND=noninteractive apt install -y vmtouch 
 
   uv pip install torch --index-url https://download.pytorch.org/whl/cu128
   uv pip install "trl>=0.20.0" "peft>=0.17.0" "transformers>=4.55.0"
@@ -114,3 +113,4 @@ run: |
     --per_device_train_batch_size 4 \
     --skip_training \
     --dirs /checkpoints_s3_mount_cached
+

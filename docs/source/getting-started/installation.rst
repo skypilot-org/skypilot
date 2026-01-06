@@ -15,10 +15,10 @@ Install SkyPilot using pip:
 
         .. code-block:: shell
 
-          # Recommended: use a new conda env to avoid package conflicts.
+          # Recommended: use a new virtual environment to avoid package conflicts.
           # SkyPilot requires 3.7 <= python <= 3.13.
-          conda create -y -n sky python=3.10
-          conda activate sky
+          uv venv ~/sky --python 3.10 --seed
+          source ~/sky/bin/activate
 
           # Choose your infra:
 
@@ -54,10 +54,10 @@ Install SkyPilot using pip:
 
         .. code-block:: shell
 
-          # Recommended: use a new conda env to avoid package conflicts.
+          # Recommended: use a new virtual environment to avoid package conflicts.
           # SkyPilot requires 3.7 <= python <= 3.13.
-          conda create -y -n sky python=3.10
-          conda activate sky
+          uv venv ~/sky --python 3.10 --seed
+          source ~/sky/bin/activate
 
           # Choose your infra:
 
@@ -92,10 +92,10 @@ Install SkyPilot using pip:
 
         .. code-block:: shell
 
-          # Recommended: use a new conda env to avoid package conflicts.
+          # Recommended: use a new virtual environment to avoid package conflicts.
           # SkyPilot requires 3.7 <= python <= 3.13.
-          conda create -y -n sky python=3.10
-          conda activate sky
+          uv venv ~/sky --python 3.10 --seed
+          source ~/sky/bin/activate
 
           git clone https://github.com/skypilot-org/skypilot.git
           cd skypilot
@@ -362,6 +362,24 @@ GCP
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. tab-set::
+
+    .. tab-item:: Google Cloud CLI installer
+      :sync: gcp-cli-tab
+
+      .. code-block:: shell
+
+        # Install Google Cloud CLI
+        curl https://sdk.cloud.google.com | bash
+
+        # Restart your shell to update your path.
+        exec -l $SHELL
+
+        # Initialize gcloud
+        gcloud init
+
+        # Run this if you don't have a credentials file.
+        # This will generate ~/.config/gcloud/application_default_credentials.json.
+        gcloud auth application-default login
 
     .. tab-item:: Conda
         :sync: gcp-conda-tab

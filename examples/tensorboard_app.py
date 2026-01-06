@@ -10,13 +10,11 @@ with sky.Dag() as dag:
                    shell=True,
                    check=True)
     # The setup command.  Will be run under the working directory.
-    setup = 'pip install --upgrade pip && \
-        conda init bash && \
-        conda activate resnet || \
-          (conda create -n resnet python=3.7 -y && \
-           conda activate resnet && \
-           pip install tensorflow==2.4.0 pyyaml && \
-           cd models && pip install -e .)'
+    setup = 'source ~/resnet/bin/activate || \
+          (uv venv ~/resnet --python 3.7 --seed && \
+           source ~/resnet/bin/activate && \
+           uv pip install tensorflow==2.4.0 pyyaml && \
+           cd models && uv pip install -e .)'
 
     task = sky.Task('setup', workdir=workdir, setup=setup)
     task.set_resources(sky.Resources(infra='aws', accelerators={'V100': 1}))
@@ -24,7 +22,7 @@ sky.stream_and_get(sky.launch(dag, cluster_name='tb'))
 
 # Run the training task.
 # The command to run.  Will be run under the working directory.
-run = 'conda activate resnet && mkdir -p resnet-model-dir && \
+run = 'source ~/resnet/bin/activate && mkdir -p resnet-model-dir && \
     export XLA_FLAGS=\'--xla_gpu_cuda_data_dir=/usr/local/cuda/\' && \
     python -u models/official/resnet/resnet_main.py --use_tpu=False \
     --mode=train --train_batch_size=256 --train_steps=250 \
@@ -51,7 +49,7 @@ tensorboard = sky.Task(
     'tensorboard',
     workdir=workdir,
     setup=setup,
-    run='conda activate resnet && \
+    run='source ~/resnet/bin/activate && \
         tensorboard --logdir resnet-model-dir --port 4650',
 )
 tensorboard.set_resources(sky.Resources())

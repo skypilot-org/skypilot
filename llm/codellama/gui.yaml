@@ -16,17 +16,14 @@ resources:
   cpus: 2
 
 setup: |
-  conda activate codellama
-  if [ $? -ne 0 ]; then
-    conda create -n codellama python=3.10 -y
-    conda activate codellama
-  fi
+  uv venv ~/codellama --python 3.10 --seed
+  source ~/codellama/bin/activate
 
-  pip install "fschat[model_worker,webui]"
-  pip install "openai<1"
+  uv pip install "fschat[model_worker,webui]"
+  uv pip install "openai<1"
 
 run: |
-  conda activate codellama
+  source ~/codellama/bin/activate
   export PATH=$PATH:/sbin
   WORKER_IP=$(hostname -I | cut -d' ' -f1)
   CONTROLLER_PORT=21001

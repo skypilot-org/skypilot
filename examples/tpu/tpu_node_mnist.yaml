@@ -15,21 +15,20 @@ file_mounts:
 
 
 # The setup command.  Will be run under the working directory.
-setup: | 
+setup: |
   git clone https://github.com/tensorflow/models.git
 
-  conda activate mnist
-  if [ $? -eq 0 ]; then
-    echo 'conda env exists'
-  else
-    conda create -n mnist python=3.8 -y
-    conda activate mnist
+  if [ ! -d ~/mnist ]; then
+    uv venv ~/mnist --python 3.8
+    source ~/mnist/bin/activate
     pip install tensorflow==2.12.0 tensorflow-datasets tensorflow-model-optimization cloud-tpu-client
+  else
+    source ~/mnist/bin/activate
   fi
 
 # The command to run.  Will be run under the working directory.
 run: |
-  conda activate mnist
+  source ~/mnist/bin/activate
   cd models/official/legacy/image_classification/
 
   export STORAGE_BUCKET=gs://demo-mnist-tpu

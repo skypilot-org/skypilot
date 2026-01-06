@@ -54,7 +54,6 @@ Create a directory from anywhere on your machine:
       # Invoked under the workdir (i.e., can use its files).
       run: |
         echo "Hello, SkyPilot!"
-        conda env list
 
   .. tab-item:: Python
     :sync: python
@@ -69,7 +68,6 @@ Create a directory from anywhere on your machine:
       # List of commands to run
       commands = [
           'echo "Hello, SkyPilot!"',
-          'conda env list'
       ]
 
       # Define a resource object.
@@ -117,8 +115,6 @@ Create a directory from anywhere on your machine:
         for i in {1..5}; do
           echo "Hello, SkyPilot!"
         done
-      
-        conda env list
         """)
 
         task = sky.Task(run=commands)
@@ -173,7 +169,7 @@ By launching, SkyPilot performs much of the heavy-lifting:
 - executes the :code:`run` commands.
 
 In a few minutes, the cluster will finish provisioning and the task will be executed.
-The outputs will show ``Hello, SkyPilot!`` and the list of installed Conda environments.
+The outputs will show ``Hello, SkyPilot!``.
 
 Execute a task on an existing cluster
 =====================================

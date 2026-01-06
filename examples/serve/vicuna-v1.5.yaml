@@ -20,18 +20,17 @@ envs:
   MODEL_SIZE: 13
 
 setup: |
-  conda activate chatbot
-  if [ $? -ne 0 ]; then
-    conda create -n chatbot python=3.9 -y
-    conda activate chatbot
+  if [ ! -d ~/chatbot ]; then
+    uv venv ~/chatbot --python 3.9
   fi
+  source ~/chatbot/bin/activate
 
   # Install dependencies
   pip install "fschat[model_worker,webui]==0.2.24"
   pip install protobuf
 
 run: |
-  conda activate chatbot
+  source ~/chatbot/bin/activate
   
   echo 'Starting controller...'
   python -u -m fastchat.serve.controller --host 127.0.0.1 > ~/controller.log 2>&1 &

@@ -26,17 +26,14 @@ setup: |
   wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json -O $HOME/data/sharegpt.json
 
   # Setup the environment
-  conda activate chatbot
-  if [ $? -ne 0 ]; then
-    conda create -n chatbot python=3.10 -y
-    conda activate chatbot
-  fi
+  uv venv ~/chatbot --python 3.10 --seed
+  source ~/chatbot/bin/activate
   cd ./scripts
   # Use an older version of fastchat to install transformers==4.28.1, as the transformers>=4.31
   # has issues with checkpoint saving -- saving additional large files in the checkpoint folder
-  pip install git+https://github.com/lm-sys/FastChat.git@cfc73bf3e13c22ded81e89675e0d7b228cf4b342
+  uv pip install git+https://github.com/lm-sys/FastChat.git@cfc73bf3e13c22ded81e89675e0d7b228cf4b342
   if [ $USE_XFORMERS -eq 1 ]; then
-    pip install -U xformers
+    uv pip install -U xformers
   fi
   python hardcoded_questions.py
   python -m fastchat.data.merge --in $HOME/data/sharegpt.json hardcoded.json --out $HOME/data/mydata.json
@@ -45,7 +42,7 @@ setup: |
 
 run: |
   cd scripts
-  conda activate chatbot
+  source ~/chatbot/bin/activate
   if [ $USE_XFORMERS -eq 1 ]; then
     TRAIN_SCRIPT=train_xformers.py
   else

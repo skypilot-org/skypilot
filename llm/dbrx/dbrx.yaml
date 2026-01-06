@@ -56,19 +56,16 @@ resources:
   ports: 8081  # Expose to internet traffic.
 
 setup: |
-  conda activate vllm
-  if [ $? -ne 0 ]; then
-    conda create -n vllm python=3.10 -y
-    conda activate vllm
-  fi
+  uv venv ~/vllm --python 3.10 --seed
+  source ~/vllm/bin/activate
 
   # DBRX merged on master, 3/27/2024
-  pip install git+https://github.com/vllm-project/vllm.git@e24336b5a772ab3aa6ad83527b880f9e5050ea2a
+  uv pip install git+https://github.com/vllm-project/vllm.git@e24336b5a772ab3aa6ad83527b880f9e5050ea2a
 
-  pip install gradio tiktoken==0.6.0 openai
+  uv pip install gradio tiktoken==0.6.0 openai
 
 run: |
-  conda activate vllm
+  source ~/vllm/bin/activate
   echo 'Starting vllm api server...'
 
   # https://github.com/vllm-project/vllm/issues/3098

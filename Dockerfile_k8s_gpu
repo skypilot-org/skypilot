@@ -19,11 +19,9 @@ RUN sudo mkdir -p /var/run/sshd && \
     cd /etc/ssh/ && \
     sudo ssh-keygen -A
 
-# Setup new user named sky and add to sudoers. \
-# Also add /opt/conda/bin to sudo path and give sky user permission to run sudo without password
+# Setup new user named sky and add to sudoers.
 RUN sudo useradd -m -s /bin/bash sky && \
-    sudo /bin/bash -c 'echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers' && \
-    sudo /bin/bash -c "echo 'Defaults        secure_path=\"/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"' > /etc/sudoers.d/sky"
+    sudo /bin/bash -c 'echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers'
 
 # Switch to sky user
 USER sky
@@ -36,33 +34,25 @@ WORKDIR /home/sky
 
 SHELL ["/bin/bash", "-c"]
 
-# Install conda and other dependencies based on architecture
-# Keep the conda and Ray versions below in sync with the ones in skylet.constants
+# Install dependencies using uv
+# Keep the Ray version below in sync with the one in skylet.constants
 # Keep this section in sync with the custom image optimization recommendations in our docs (kubernetes-getting-started.rst)
 RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         "x86_64") echo "amd64" ;; \
         "aarch64") echo "arm64" ;; \
         *) echo "$(uname -m)" ;; \
     esac)} && \
-    if [ "$ARCH" = "arm64" ]; then \
-        curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-aarch64.sh -o miniconda.sh; \
-    else \
-        curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o miniconda.sh; \
-    fi && \
-    bash miniconda.sh -b -p $HOME/miniconda3 && \
-    rm miniconda.sh && \
-    eval "$($HOME/miniconda3/bin/conda shell.bash hook)" && \
-    conda init && \
-    conda config --set auto_activate_base true && \
     export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
-    curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    $HOME/.local/bin/uv venv ~/skypilot-runtime --seed --python=3.10 && \
+    # Install uv to ~/.local/bin (aligned with SKY_UV_INSTALL_DIR in constants.py)
+    curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$HOME/.local/bin" sh && \
+    # Create skypilot-runtime venv (aligned with SKYPILOT_RUNTIME_SETUP_COMMANDS)
+    $HOME/.local/bin/uv venv ~/skypilot-runtime --seed --python 3.10 && \
     source ~/skypilot-runtime/bin/activate && \
     $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
     $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
-    curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" && \
     # Install kubectl to user's local bin instead of system path to avoid
     # sudo-related issues during cross-architecture builds, especially on ARM
+    curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" && \
     chmod +x kubectl && \
     mkdir -p $HOME/.local/bin && \
     mv kubectl $HOME/.local/bin/ && \

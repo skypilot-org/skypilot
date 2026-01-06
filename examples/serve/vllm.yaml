@@ -18,19 +18,18 @@ resources:
   accelerators: A100:1
 
 setup: |
-  conda activate chatbot
-  if [ $? -eq 0 ]; then
-    echo 'conda env exists'
+  if [ -d ~/chatbot ]; then
+    echo 'venv exists'
   else
     # Setup the environment
-    conda create -n chatbot python=3.10 -y
-    conda activate chatbot
+    uv venv ~/chatbot --python 3.10
+    source ~/chatbot/bin/activate
     pip install "fschat[model_worker,webui]==0.2.24"
     pip install vllm accelerate protobuf
   fi
 
 run: |
-  conda activate chatbot
+  source ~/chatbot/bin/activate
 
   WORKER_IP=$(hostname -I | cut -d' ' -f1)
   CONTROLLER_PORT=21001

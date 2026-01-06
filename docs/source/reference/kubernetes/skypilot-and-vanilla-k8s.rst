@@ -76,11 +76,9 @@ Here is a side-by-side comparison of the YAMLs for serving Gemma with vLLM on Sk
      ports: 8000
 
    setup: |
-     conda deactivate
      python3 -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
    run: |
-     conda deactivate
      echo 'Starting vllm openai api server...'
      python -m vllm.entrypoints.openai.api_server \
      --model $MODEL_NAME --tokenizer hf-internal-testing/llama-tokenizer \

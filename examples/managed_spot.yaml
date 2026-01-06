@@ -8,7 +8,6 @@ setup: |
   pip install tqdm
 
 run: |
-  conda env list
   python -u - << EOF
   import time
   import tqdm

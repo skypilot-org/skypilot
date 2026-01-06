@@ -5,7 +5,7 @@ This post shows how to **use** [**SkyPilot**](https://github.com/skypilot-org/sk
 
 It will automatically perform the following:
 - **Get a beefy GPU instance** on AWS, GCP, Azure, or Lambda Labs 
-- **Set up the instance** (download weights, install requirements in a Conda env, etc.)
+- **Set up the instance** (download weights, install requirements in a virtual environment, etc.)
 - **Launch a chatbot interface** that we can connect to through our laptop's browser
 
 ...and it does so while abstracting away all of the above infra burden and minimizing costs.
