@@ -159,9 +159,9 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
 - `export SKYPILOT_DEBUG=1` to show debugging logs (use logging.DEBUG level).
 - `export SKYPILOT_MINIMIZE_LOGGING=1` to minimize logging. Useful when trying to avoid multiple lines of output, such as for demos.
 
-### Testing the API Server
+### Testing the API server
 
-#### Local API Server (Recommended for Development)
+#### Local API server (recommended for development)
 
 For most development work, test with the local API server:
 
@@ -174,7 +174,7 @@ sky api start
 sky api status
 ```
 
-#### Mocking Remote API Server Locally
+#### Mocking remote API server locally
 
 To test remote API server behavior locally:
 
