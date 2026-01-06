@@ -2001,7 +2001,7 @@ def test_pool_autoscaling_scale_up(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
-    
+
     # Pool with autoscaling: start with 1 worker, can scale up to 3
     pool_config = autoscaling_pool_conf(
         num_workers=1,
@@ -2011,19 +2011,19 @@ def test_pool_autoscaling_scale_up(generic_cloud: str):
         upscale_delay_seconds=20,
         downscale_delay_seconds=20,
     )
-    
+
     # Job that runs for a while to keep queue length high
     job_name = f'{name}-job'
     job_config = basic_job_conf(
         job_name=job_name,
         run_cmd='sleep 3000',  # Long-running job
     )
-    
+
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
             write_yaml(pool_yaml, pool_config)
             write_yaml(job_yaml, job_config)
-            
+
             test = smoke_tests_utils.Test(
                 'test_pool_autoscaling_scale_up',
                 [
@@ -2038,8 +2038,7 @@ def test_pool_autoscaling_scale_up(generic_cloud: str):
                         _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
                             pool_name=pool_name,
                             job_yaml=job_yaml.name,
-                            job_name=f'{job_name}-{i}')
-                        for i in range(1, 6)
+                            job_name=f'{job_name}-{i}') for i in range(1, 6)
                     ],
                     # Verify we scale up to 3 workers (second scaling event)
                     wait_until_num_workers(pool_name, 3, timeout=300),
@@ -2065,7 +2064,7 @@ def test_pool_autoscaling_no_scale_when_max_equals_workers(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
-    
+
     # Pool with autoscaling: start with 2 workers, max_workers=2 (no scaling up)
     pool_config = autoscaling_pool_conf(
         num_workers=2,
@@ -2075,19 +2074,19 @@ def test_pool_autoscaling_no_scale_when_max_equals_workers(generic_cloud: str):
         upscale_delay_seconds=20,
         downscale_delay_seconds=20,
     )
-    
+
     # Job that runs for a while
     job_name = f'{name}-job'
     job_config = basic_job_conf(
         job_name=job_name,
         run_cmd='sleep 3000',  # Long-running job
     )
-    
+
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
             write_yaml(pool_yaml, pool_config)
             write_yaml(job_yaml, job_config)
-            
+
             test = smoke_tests_utils.Test(
                 'test_pool_autoscaling_no_scale_when_max_equals_workers',
                 [
@@ -2102,8 +2101,7 @@ def test_pool_autoscaling_no_scale_when_max_equals_workers(generic_cloud: str):
                         _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
                             pool_name=pool_name,
                             job_yaml=job_yaml.name,
-                            job_name=f'{job_name}-{i}')
-                        for i in range(1, 6)
+                            job_name=f'{job_name}-{i}') for i in range(1, 6)
                     ],
                     # Wait for jobs to queue
                     'sleep 10',
@@ -2130,7 +2128,7 @@ def test_pool_autoscaling_scale_down_to_zero(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
-    
+
     # Pool with autoscaling: start with 1 worker, can scale down to 0
     pool_config = autoscaling_pool_conf(
         num_workers=1,
@@ -2140,19 +2138,19 @@ def test_pool_autoscaling_scale_down_to_zero(generic_cloud: str):
         upscale_delay_seconds=20,
         downscale_delay_seconds=20,
     )
-    
+
     # Job that completes quickly
     job_name = f'{name}-job'
     job_config = basic_job_conf(
         job_name=job_name,
         run_cmd='echo "Job completed"',  # Quick job
     )
-    
+
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
         with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
             write_yaml(pool_yaml, pool_config)
             write_yaml(job_yaml, job_config)
-            
+
             test = smoke_tests_utils.Test(
                 'test_pool_autoscaling_scale_down_to_zero',
                 [
@@ -2162,7 +2160,8 @@ def test_pool_autoscaling_scale_down_to_zero(generic_cloud: str):
                     _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, job_yaml=job_yaml.name),
                     # Wait for job to complete
-                    wait_until_job_status(job_name, ['SUCCEEDED'], timeout=timeout),
+                    wait_until_job_status(job_name, ['SUCCEEDED'],
+                                          timeout=timeout),
                     # Verify we scale down to 0 workers
                     wait_until_num_workers(pool_name, 0, timeout=timeout),
                 ],
