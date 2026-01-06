@@ -2260,7 +2260,6 @@ class Resources:
         resources_fields['accelerators'] = config.pop('accelerators', None)
         resources_fields['accelerator_args'] = config.pop(
             'accelerator_args', None)
-
         resources_fields['use_spot'] = config.pop('use_spot', None)
         if config.get('spot_recovery') is not None:
             logger.warning('spot_recovery is deprecated. Use job_recovery '
@@ -2324,6 +2323,7 @@ class Resources:
         add_if_not_none('memory', self.memory)
         add_if_not_none('accelerators', self._accelerators)
         add_if_not_none('accelerator_args', self.accelerator_args)
+
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
         add_if_not_none('job_recovery', self.job_recovery)
