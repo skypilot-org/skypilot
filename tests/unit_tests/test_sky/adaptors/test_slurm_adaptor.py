@@ -339,8 +339,16 @@ class TestRequestScopedCache:
 
     def test_same_client_within_request(self, mock_ssh_tunnel):
         """Same params return same client instance within a request."""
-        client1 = slurm_utils.get_slurm_client('host', 22, 'user', None)
-        client2 = slurm_utils.get_slurm_client('host', 22, 'user', None)
+        client1 = slurm_utils.get_slurm_client('host',
+                                               22,
+                                               'user',
+                                               None,
+                                               ssh_proxy_command='proxy-cmd')
+        client2 = slurm_utils.get_slurm_client('host',
+                                               22,
+                                               'user',
+                                               None,
+                                               ssh_proxy_command='proxy-cmd')
 
         assert client1 is client2
         # Tunnel should only be created once
@@ -348,11 +356,19 @@ class TestRequestScopedCache:
 
     def test_new_client_after_cache_clear(self, mock_ssh_tunnel):
         """New client instance after clearing request cache."""
-        client1 = slurm_utils.get_slurm_client('host', 22, 'user', None)
+        client1 = slurm_utils.get_slurm_client('host',
+                                               22,
+                                               'user',
+                                               None,
+                                               ssh_proxy_command='proxy-cmd')
 
         annotations.clear_request_level_cache()
 
-        client2 = slurm_utils.get_slurm_client('host', 22, 'user', None)
+        client2 = slurm_utils.get_slurm_client('host',
+                                               22,
+                                               'user',
+                                               None,
+                                               ssh_proxy_command='proxy-cmd')
 
         assert client1 is not client2
         # Tunnel created twice (once per client)
@@ -360,7 +376,11 @@ class TestRequestScopedCache:
 
     def test_tunnel_cleanup_on_gc(self, mock_ssh_tunnel):
         """Tunnel process is terminated when client is garbage collected."""
-        client = slurm_utils.get_slurm_client('host', 22, 'user', None)
+        client = slurm_utils.get_slurm_client('host',
+                                              22,
+                                              'user',
+                                              None,
+                                              ssh_proxy_command='proxy-cmd')
         tunnel_proc = client._tunnel_proc
 
         annotations.clear_request_level_cache()

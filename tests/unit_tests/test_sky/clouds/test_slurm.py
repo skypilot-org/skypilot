@@ -120,15 +120,15 @@ class TestTerminateInstances:
             ('STAGING_OUT', True, True),
         ])
     @patch('sky.provision.slurm.instance.slurm_utils.is_inside_slurm_cluster')
-    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_slurm_client')
     def test_terminate_instances_handles_job_states(
-            self, mock_slurm_client_class, mock_is_inside_slurm_cluster,
+            self, mock_get_slurm_client, mock_is_inside_slurm_cluster,
             job_state, should_cancel, should_signal):
         """Test terminate_instances handles different job states correctly."""
         mock_is_inside_slurm_cluster.return_value = False
 
         mock_client = mock.MagicMock()
-        mock_slurm_client_class.return_value = mock_client
+        mock_get_slurm_client.return_value = mock_client
 
         cluster_name = 'test-cluster'
         provider_config = {
@@ -164,14 +164,14 @@ class TestTerminateInstances:
             mock_client.cancel_jobs_by_name.assert_not_called()
 
     @patch('sky.provision.slurm.instance.slurm_utils.is_inside_slurm_cluster')
-    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
-    def test_terminate_instances_no_jobs_found(self, mock_slurm_client_class,
+    @patch('sky.provision.slurm.instance.slurm_utils.get_slurm_client')
+    def test_terminate_instances_no_jobs_found(self, mock_get_slurm_client,
                                                mock_is_inside_slurm_cluster):
         """Test terminate_instances when no jobs are found."""
         mock_is_inside_slurm_cluster.return_value = False
 
         mock_client = mock.MagicMock()
-        mock_slurm_client_class.return_value = mock_client
+        mock_get_slurm_client.return_value = mock_client
 
         cluster_name = 'test-cluster'
         provider_config = {
