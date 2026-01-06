@@ -156,6 +156,9 @@ kubernetes_dependencies = [
     'kubernetes>=20.0.0,!=32.0.0',
     'websockets',
     'python-dateutil',
+    # google-auth 2.35.0+ uses Sequence[str] type annotations that require
+    # Python 3.9+. Pin to older version for Python 3.8 compatibility.
+    'google-auth<2.35.0; python_version < "3.9"',
 ]
 
 # azure-cli cannot be installed normally by uv, so we need to work around it in
