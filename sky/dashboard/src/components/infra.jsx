@@ -2703,8 +2703,7 @@ export function GPUs() {
     });
 
     // Add SSH section (always show)
-    const sshHasActivity =
-      sshContexts.length > 0 && hasContextActivity(sshContexts, true);
+    const sshHasActivity = sshContexts.length > 0;
     sections.push({
       name: 'SSH Node Pool',
       render: renderSSHNodePoolInfrastructure,
