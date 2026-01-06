@@ -34,7 +34,7 @@ def get_slurm_ssh_config() -> SSHConfig:
     return slurm_config
 
 
-@annotations.lru_cache(scope='request', maxsize=10)
+@annotations.lru_cache(scope='request', maxsize=128)
 def get_slurm_client(
         ssh_host: Optional[str] = None,
         ssh_port: Optional[int] = None,
