@@ -133,7 +133,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 29
+    _VERSION = 28
 
     def __init__(
         self,
@@ -145,7 +145,6 @@ class Resources:
         accelerator_args: Optional[Dict[str, str]] = None,
         infra: Optional[str] = None,
         use_spot: Optional[bool] = None,
-        use_queued_resource: Optional[bool] = None,
         job_recovery: Optional[Union[Dict[str, Optional[Union[str, int]]],
                                      str]] = None,
         region: Optional[str] = None,
@@ -210,8 +209,6 @@ class Resources:
             specifying cloud, region, and zone separately. If provided, it
             takes precedence over cloud, region, and zone parameters.
           use_spot: whether to use spot instances. If None, defaults to
-            False.
-          use_queued_resource: whether to use queued resources. If None, defaults to
             False.
           job_recovery: the job recovery strategy to use for the managed
             job to recover the cluster from preemption. Refer to
@@ -305,11 +302,6 @@ class Resources:
 
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
-
-        self._use_queued_resource_specified = use_queued_resource is not None
-        self._use_queued_resource = (use_queued_resource if use_queued_resource
-                                     is not None else False)
-
         self._job_recovery: Optional[Dict[str, Optional[Union[str,
                                                               int]]]] = None
         if job_recovery is not None:
@@ -477,10 +469,6 @@ class Resources:
         if self.use_spot:
             use_spot = '[Spot]'
 
-        use_queued_resource = ''
-        if self.use_queued_resource:
-            use_queued_resource = '[QR]'
-
         image_id = ''
         if self.image_id is not None:
             if None in self.image_id:
@@ -513,7 +501,7 @@ class Resources:
         # separate columns. Also, Resources repr will be printed during
         # failover, and the region may be dynamically determined.
         hardware_str = (
-            f'{instance_type}{use_spot}{use_queued_resource}'
+            f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
             f'{disk_tier}{network_tier}{disk_size}{ports}')
         # It may have leading ',' (for example, instance_type not set) or empty
@@ -629,15 +617,6 @@ class Resources:
     @property
     def use_spot_specified(self) -> bool:
         return self._use_spot_specified
-
-    @property
-    def use_queued_resource(self) -> bool:
-        return (self._use_queued_resource
-                if self._use_queued_resource is not None else False)
-
-    @property
-    def use_queued_resource_specified(self) -> bool:
-        return self._use_queued_resource_specified
 
     @property
     def job_recovery(self) -> Optional[Dict[str, Optional[Union[str, int]]]]:
@@ -1817,7 +1796,6 @@ class Resources:
             self._accelerators is None,
             self._accelerator_args is None,
             not self._use_spot_specified,
-            not self._use_queued_resource_specified,
             self._disk_size == DEFAULT_DISK_SIZE_GB,
             self._disk_tier is None,
             self._network_tier is None,
@@ -1925,9 +1903,6 @@ class Resources:
         """Returns a copy of the given Resources."""
         use_spot = self.use_spot if self._use_spot_specified else None
 
-        use_queued_resource = (self.use_queued_resource
-                               if self._use_queued_resource_specified else None)
-
         current_override_configs = self._cluster_config_overrides
         if current_override_configs is None:
             current_override_configs = {}
@@ -1956,8 +1931,6 @@ class Resources:
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', use_spot),
-            use_queued_resource=override.pop('use_queued_resource',
-                                             use_queued_resource),
             job_recovery=override.pop('job_recovery', self.job_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
@@ -2001,8 +1974,6 @@ class Resources:
             self) -> Set[clouds.CloudImplementationFeatures]:
         """Returns the set of cloud features required by this Resources."""
         features = set()
-        if self.use_queued_resource:
-            features.add(clouds.CloudImplementationFeatures.QUEUED_RESOURCE)
         if self.use_spot:
             features.add(clouds.CloudImplementationFeatures.SPOT_INSTANCE)
         if (self.disk_tier is not None and
@@ -2277,9 +2248,6 @@ class Resources:
         resources_fields['accelerator_args'] = config.pop(
             'accelerator_args', None)
 
-        resources_fields['use_queued_resource'] = config.pop(
-            'use_queued_resource', None)
-
         resources_fields['use_spot'] = config.pop('use_spot', None)
         if config.get('spot_recovery') is not None:
             logger.warning('spot_recovery is deprecated. Use job_recovery '
@@ -2343,8 +2311,6 @@ class Resources:
         add_if_not_none('memory', self.memory)
         add_if_not_none('accelerators', self._accelerators)
         add_if_not_none('accelerator_args', self.accelerator_args)
-        if self._use_queued_resource_specified:
-            add_if_not_none('use_queued_resource', self.use_queued_resource)
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
         add_if_not_none('job_recovery', self.job_recovery)
@@ -2551,10 +2517,6 @@ class Resources:
         if version < 28:
             self._no_missing_accel_warnings = state.get(
                 '_no_missing_accel_warnings', None)
-
-        if version < 29:
-            self._use_queued_resource = False
-            self._use_queued_resource_specified = False
 
         self.__dict__.update(state)
 

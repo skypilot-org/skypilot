@@ -57,9 +57,6 @@ class Seeweb(clouds.Cloud):
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             ('Spot instances not supported. '
              'Seeweb does not support spot instances.'),
-        clouds.CloudImplementationFeatures.QUEUED_RESOURCE:
-            ('Queued resources are not supported in '
-             'Seeweb does not support queued resources.'),
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             ('Disk cloning not supported. '
              'Seeweb does not support disk cloning.'),
