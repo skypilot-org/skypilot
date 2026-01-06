@@ -4,8 +4,8 @@ import os
 import textwrap
 from typing import Any, Dict, List, Optional, Union
 
-from sky import sky_logging
 from sky import serve
+from sky import sky_logging
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.serve import serve_utils
@@ -42,24 +42,24 @@ class SkyServiceSpec:
         load_balancing_policy: Optional[str] = None,
         pool: Optional[bool] = None,
         queue_length_threshold: Optional[int] = None,
-        _original_workers: Optional[int] = None,
+        original_workers: Optional[int] = None,
     ) -> None:
         if pool:
-            # For pools, max_replicas should never be specified directly by the user
-            # It should only be set via max_workers in the pool config
-            # However, if queue_length_threshold is set, that means max_replicas was
-            # set internally from max_workers, so we allow it
+            # For pools, max_replicas should never be specified directly by the
+            # user. It should only be set via max_workers in the pool config.
+            # However, if queue_length_threshold is set, that means max_replicas
+            # was set internally from max_workers, so we allow it
             unsupported_fields = [
-                    'num_overprovision',
-                    'target_qps_per_replica',
-                    'base_ondemand_fallback_replicas',
-                    'dynamic_ondemand_fallback',
-                    'spot_placer',
-                    'load_balancing_policy',
-                    'ports',
-                    'post_data',
-                    'tls_credential',
-                    'readiness_headers',
+                'num_overprovision',
+                'target_qps_per_replica',
+                'base_ondemand_fallback_replicas',
+                'dynamic_ondemand_fallback',
+                'spot_placer',
+                'load_balancing_policy',
+                'ports',
+                'post_data',
+                'tls_credential',
+                'readiness_headers',
             ]
             # Disallow max_replicas only if queue_length_threshold is not set
             # (meaning max_replicas was not set from max_workers)
@@ -72,29 +72,31 @@ class SkyServiceSpec:
                     'upscale_delay_seconds',
                     'downscale_delay_seconds',
                 ])
-            
+
             for unsupported_field in unsupported_fields:
                 if locals()[unsupported_field] is not None:
                     with ux_utils.print_exception_no_traceback():
-                        error_msg = (f'{unsupported_field} is not supported for pool. '
-                                   f'For pools, use max_workers instead of max_replicas.'
-                                   if unsupported_field == 'max_replicas'
-                                   else f'{unsupported_field} is not supported for pool.')
+                        error_msg = (
+                            f'{unsupported_field} is not supported for pool. '
+                            'For pools use max_workers instead of max_replicas.'
+                            if unsupported_field == 'max_replicas' else
+                            f'{unsupported_field} is not supported for pool.')
                         raise ValueError(error_msg)
-            
+
             # Validate queue_length_threshold if provided
             if queue_length_threshold is not None:
                 if queue_length_threshold < 1:
                     with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            'queue_length_threshold must be >= 1. '
-                            f'Got: {queue_length_threshold}')
-                # If queue_length_threshold is set, max_workers (max_replicas) must also be set
+                        raise ValueError('queue_length_threshold must be >= 1. '
+                                         f'Got: {queue_length_threshold}')
+                # If queue_length_threshold is set, max_workers (max_replicas)
+                # must also be set.
                 if max_replicas is None:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
-                            'max_workers must be set when queue_length_threshold is '
-                            'specified for pool autoscaling.')
+                            'max_workers must be set when '
+                            'queue_length_threshold is specified for pool '
+                            'autoscaling.')
 
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
@@ -109,7 +111,8 @@ class SkyServiceSpec:
                     raise ValueError('max_replicas must be set where '
                                      'target_qps_per_replica is set.')
         else:
-            # Allow different min/max replicas for pools with queue-length autoscaling
+            # Allow different min/max replicas for pools with queue-length
+            # autoscaling
             if (max_replicas is not None and max_replicas != min_replicas and
                     not (pool and queue_length_threshold is not None)):
                 with ux_utils.print_exception_no_traceback():
@@ -153,7 +156,7 @@ class SkyServiceSpec:
         self._load_balancing_policy: Optional[str] = load_balancing_policy
         self._pool: Optional[bool] = pool
         self._queue_length_threshold: Optional[int] = queue_length_threshold
-        self._original_workers: Optional[int] = _original_workers
+        self.original_workers: Optional[int] = original_workers
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -238,7 +241,7 @@ class SkyServiceSpec:
                                  'Please use `workers` instead.')
         if simplified_policy_section is None:
             simplified_policy_section = workers_config
-        
+
         # Parse pool config if it's a dict (for autoscaling support)
         queue_length_threshold = None
         pool_min_workers = None
@@ -246,20 +249,23 @@ class SkyServiceSpec:
         pool_upscale_delay = None
         pool_downscale_delay = None
         if pool_config is not None and isinstance(pool_config, dict):
-            queue_length_threshold = pool_config.get('queue_length_threshold', None)
+            queue_length_threshold = pool_config.get('queue_length_threshold',
+                                                     None)
             pool_min_workers = pool_config.get('min_workers', None)
             pool_max_workers = pool_config.get('max_workers', None)
             pool_upscale_delay = pool_config.get('upscale_delay_seconds', None)
-            pool_downscale_delay = pool_config.get('downscale_delay_seconds', None)
+            pool_downscale_delay = pool_config.get('downscale_delay_seconds',
+                                                   None)
             # Get workers from pool config if not specified at top level
             if simplified_policy_section is None:
                 simplified_policy_section = pool_config.get('workers', None)
-            # Validate: if queue_length_threshold is set, max_workers must also be set
+            # Validate: if queue_length_threshold is set, max_workers must also
+            # be set
             if queue_length_threshold is not None and pool_max_workers is None:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        'max_workers must be set when queue_length_threshold is '
-                        'specified for pool autoscaling.')
+                        'max_workers must be set when queue_length_threshold '
+                        'is specified for pool autoscaling.')
             # Validate: if min_workers is set, max_workers must also be set
             if pool_min_workers is not None and pool_max_workers is None:
                 with ux_utils.print_exception_no_traceback():
@@ -271,9 +277,10 @@ class SkyServiceSpec:
                 if pool_min_workers > pool_max_workers:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
-                            f'min_workers ({pool_min_workers}) must be <= max_workers '
-                            f'({pool_max_workers}) for pool autoscaling.')
-        
+                            f'min_workers ({pool_min_workers}) must be <= '
+                            f'max_workers ({pool_max_workers}) for pool '
+                            'autoscaling.')
+
         if policy_section is None or simplified_policy_section is not None:
             if simplified_policy_section is not None:
                 min_replicas = simplified_policy_section
@@ -282,26 +289,35 @@ class SkyServiceSpec:
             else:
                 min_replicas = constants.DEFAULT_MIN_REPLICAS
                 original_workers = constants.DEFAULT_MIN_REPLICAS
-            # For pools with autoscaling (max_workers specified), use min_workers if set,
-            # otherwise use workers (simplified_policy_section) as min_replicas
+            # For pools with autoscaling (max_workers specified), use
+            # min_workers if set, otherwise use workers
+            # (simplified_policy_section) as min_replicas
             if pool_config is not None and pool_max_workers is not None:
                 if pool_min_workers is not None:
                     min_replicas = pool_min_workers
-                # If min_workers is not set, use workers (simplified_policy_section) as min_replicas
+                # If min_workers is not set, use workers
+                # (simplified_policy_section) as min_replicas
             service_config['min_replicas'] = min_replicas
-            # Store original workers value for pool serialization (only if different from min_replicas)
-            if pool_config is not None and pool_max_workers is not None and pool_min_workers is not None:
-                service_config['_original_workers'] = original_workers
-            # For pools with autoscaling (max_workers specified), use max_workers from pool config
+            # Store original workers value for pool serialization (only if
+            # different from min_replicas)
+            if (pool_config is not None and pool_max_workers is not None and
+                    pool_min_workers is not None):
+                service_config['original_workers'] = original_workers
+            # For pools with autoscaling (max_workers specified), use
+            # max_workers from pool config
             if pool_config is not None and pool_max_workers is not None:
                 service_config['max_replicas'] = pool_max_workers
                 service_config['upscale_delay_seconds'] = pool_upscale_delay
                 service_config['downscale_delay_seconds'] = pool_downscale_delay
-                # Set default threshold if max_workers is set but threshold is not
+                # Set default threshold if max_workers is set but threshold is
+                # not
                 if queue_length_threshold is None:
-                    queue_length_threshold = constants.AUTOSCALER_DEFAULT_QUEUE_LENGTH_THRESHOLD
-                    logger.info(f'Set default queue_length_threshold={queue_length_threshold} '
-                               f'for pool with max_workers={pool_max_workers}')
+                    queue_length_threshold = (
+                        constants.AUTOSCALER_DEFAULT_QUEUE_LENGTH_THRESHOLD)
+                    logger.info(
+                        'Set default queue_length_threshold='
+                        f'{queue_length_threshold} for pool with max_workers='
+                        f'{pool_max_workers}')
             else:
                 service_config['max_replicas'] = None
                 service_config['upscale_delay_seconds'] = None
@@ -327,20 +343,24 @@ class SkyServiceSpec:
                 'dynamic_ondemand_fallback', None)
             service_config['spot_placer'] = policy_section.get(
                 'spot_placer', None)
-        
+
         # Set queue_length_threshold from pool config
         service_config['queue_length_threshold'] = queue_length_threshold
-        
-        # Ensure max_replicas is set if queue_length_threshold is set (for queue-length autoscaling)
-        # This should already be handled by the logic above, but double-check for consistency
+
+        # Ensure max_replicas is set if queue_length_threshold is set (for
+        # queue-length autoscaling)
+        # This should already be handled by the logic above, but double-check
+        # for consistency
         if service_config.get('pool') and queue_length_threshold is not None:
             if service_config.get('max_replicas') is None:
                 # This should not happen - validation should have caught this
-                # But if it does, it means queue_length_threshold was set without max_workers
+                # But if it does, it means queue_length_threshold was set
+                # without max_workers
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        'max_replicas must be set when queue_length_threshold is set. '
-                        'This indicates max_workers was not set in the pool config.')
+                        'max_replicas must be set when queue_length_threshold '
+                        'is set. This indicates max_workers was not set in the '
+                        'pool config.')
 
         service_config['load_balancing_policy'] = config.get(
             'load_balancing_policy', None)
@@ -421,20 +441,27 @@ class SkyServiceSpec:
         if self.pool:
             # For pool, serialize workers and autoscaling config
             pool_dict: Dict[str, Any] = {}
-            # Use original_workers if available (when min_workers was set), otherwise use min_replicas
-            workers_value = self._original_workers if self._original_workers is not None else self.min_replicas
+            # Use original_workers if available (when min_workers was set),
+            # otherwise use min_replicas
+            workers_value = (self.original_workers if self.original_workers
+                             is not None else self.min_replicas)
             pool_dict['workers'] = workers_value
             if self.queue_length_threshold is not None:
-                pool_dict['queue_length_threshold'] = self.queue_length_threshold
+                pool_dict[
+                    'queue_length_threshold'] = self.queue_length_threshold
                 if self.max_replicas is not None:
                     pool_dict['max_workers'] = self.max_replicas
-                    # Serialize min_workers if it's different from workers (i.e., if original_workers was stored)
-                    if self._original_workers is not None and self._original_workers != self.min_replicas:
+                    # Serialize min_workers if it's different from workers
+                    # (i.e., if original_workers was stored)
+                    if (self.original_workers is not None and
+                            self.original_workers != self.min_replicas):
                         pool_dict['min_workers'] = self.min_replicas
                 if self.upscale_delay_seconds is not None:
-                    pool_dict['upscale_delay_seconds'] = self.upscale_delay_seconds
+                    pool_dict[
+                        'upscale_delay_seconds'] = self.upscale_delay_seconds
                 if self.downscale_delay_seconds is not None:
-                    pool_dict['downscale_delay_seconds'] = self.downscale_delay_seconds
+                    pool_dict['downscale_delay_seconds'] = (
+                        self.downscale_delay_seconds)
             config['pool'] = pool_dict
             return config
 

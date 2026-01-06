@@ -2061,13 +2061,13 @@ def get_num_alive_jobs(pool: Optional[str] = None) -> int:
 @_init_db
 def get_pending_jobs_count_by_pool(pool: str) -> int:
     """Get the count of pending jobs in a pool.
-    
+
     Pending jobs are jobs that are waiting for a worker, i.e., jobs with:
     - status = PENDING
-    
+
     Args:
         pool: The pool name
-        
+
     Returns:
         The number of pending jobs in the pool
     """
@@ -2078,15 +2078,12 @@ def get_pending_jobs_count_by_pool(pool: str) -> int:
             sqlalchemy.func.count()  # pylint: disable=not-callable
         ).select_from(
             job_info_table.join(
-                spot_table,
-                job_info_table.c.spot_job_id == spot_table.c.spot_job_id
-            )
-        ).where(
-            sqlalchemy.and_(
-                spot_table.c.status == ManagedJobStatus.PENDING.value,
-                job_info_table.c.pool == pool,
-            )
-        )
+                spot_table, job_info_table.c.spot_job_id ==
+                spot_table.c.spot_job_id)).where(
+                    sqlalchemy.and_(
+                        spot_table.c.status == ManagedJobStatus.PENDING.value,
+                        job_info_table.c.pool == pool,
+                    ))
         result = session.execute(query).fetchone()
         return result[0] if result else 0
 
