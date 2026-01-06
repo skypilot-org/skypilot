@@ -37,7 +37,7 @@ def get_slurm_ssh_config() -> SSHConfig:
 # maxsize=32 is mainly for status refresh daemon,
 # which fetches multiple clusters status concurrently.
 # For normal requests, each process likely only needs
-# to cache a single client object.
+# to cache a single client object per-request.
 @annotations.lru_cache(scope='request', maxsize=32)
 def get_slurm_client(
         ssh_host: Optional[str] = None,

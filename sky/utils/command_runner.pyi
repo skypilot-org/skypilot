@@ -5,6 +5,7 @@ overloaded type hints for SSHCommandRunner.run(), as we need to
 determine the return type based on the value of require_outputs.
 """
 import enum
+import re
 import subprocess
 import typing
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
@@ -17,6 +18,7 @@ from sky.utils import subprocess_utils as subprocess_utils
 
 GIT_EXCLUDE: str
 RSYNC_DISPLAY_OPTION: str
+SSH_CONNECTION_ERROR_PATTERN: re.Pattern[str]
 RSYNC_FILTER_GITIGNORE: str
 RSYNC_FILTER_SKYIGNORE: str
 RSYNC_EXCLUDE_OPTION: str

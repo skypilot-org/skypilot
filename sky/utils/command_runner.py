@@ -39,6 +39,10 @@ logger = sky_logging.init_logger(__name__)
 # Pattern to extract home directory from command output
 _HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
 
+# Pattern to detect SSH connection errors that should not be retried
+SSH_CONNECTION_ERROR_PATTERN = re.compile(
+    r'^ssh:.*(timed out|connection refused)$', re.IGNORECASE)
+
 # Rsync options
 # TODO(zhwu): This will print a per-file progress bar (with -P),
 # shooting a lot of messages to the output. --info=progress2 is used

@@ -2407,7 +2407,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # connection refused, Kubernetes pods not found,
                 # or an in-progress termination.
                 if (e.detailed_reason is not None and
-                    (backend_utils.SSH_CONNECTION_ERROR_PATTERN.search(
+                    (command_runner.SSH_CONNECTION_ERROR_PATTERN.search(
                         e.detailed_reason) or
                      backend_utils.K8S_PODS_NOT_FOUND_PATTERN.search(
                          e.detailed_reason) or attempt == max_attempts - 1)):

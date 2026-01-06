@@ -113,8 +113,6 @@ _LAUNCHED_RESERVED_WORKER_PATTERN = re.compile(
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._](?:default|reserved)'.format(IP_ADDR_REGEX))
-SSH_CONNECTION_ERROR_PATTERN = re.compile(
-    r'^ssh:.*(timed out|connection refused)$', re.IGNORECASE)
 _SSH_CONNECTION_TIMED_OUT_PATTERN = re.compile(r'^ssh:.*timed out$',
                                                re.IGNORECASE)
 K8S_PODS_NOT_FOUND_PATTERN = re.compile(r'.*(NotFound|pods .* not found).*',

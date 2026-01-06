@@ -106,8 +106,7 @@ class SlurmClient:
             assert ssh_port is not None
             assert ssh_user is not None
 
-            # Create SSH tunnel.
-            tunnel_runner = command_runner.SSHCommandRunner(
+            ssh_tunnel_runner = command_runner.SSHCommandRunner(
                 (ssh_host, ssh_port),
                 ssh_user,
                 ssh_key,
@@ -124,9 +123,17 @@ class SlurmClient:
                 local_port = random.randint(10000, 65535)
                 try:
                     tunnel_proc = command_runner.open_ssh_tunnel(
-                        tunnel_runner, (local_port, 22))
+                        ssh_tunnel_runner, (local_port, 22))
                     break
                 except exceptions.CommandError as e:
+                    # Don't retry if the error is due to timeout or
+                    # connection refused.
+                    if (e.detailed_reason is not None and
+                            command_runner.SSH_CONNECTION_ERROR_PATTERN.search(
+                                e.detailed_reason)):
+                        raise RuntimeError(
+                            f'Failed to open SSH tunnel: '
+                            f'{common_utils.format_exception(e)}') from e
                     if attempt == max_attempts - 1:
                         raise RuntimeError(
                             f'Failed to open SSH tunnel on port {local_port}: '
@@ -141,6 +148,8 @@ class SlurmClient:
             assert tunnel_proc is not None
             self._tunnel_proc = tunnel_proc
 
+            # Now the actual runner can simply use the tunnel which is
+            # listening on local_port.
             self._runner = command_runner.SSHCommandRunner(
                 ('127.0.0.1', local_port),
                 ssh_user,
