@@ -1155,7 +1155,10 @@ def test_pools_num_jobs_basic(generic_cloud: str):
         with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
             write_yaml(pool_yaml, pool_config)
             write_yaml(job_yaml, job_config)
-            job_ids = list(range(2, 2 + num_jobs))
+            if smoke_tests_utils.server_side_is_consolidation_mode():
+                job_ids = list(range(1, 1 + num_jobs))
+            else:
+                job_ids = list(range(2, 2 + num_jobs))
             test = smoke_tests_utils.Test(
                 'test_pools_num_jobs',
                 [
