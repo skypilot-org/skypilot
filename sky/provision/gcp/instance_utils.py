@@ -1538,7 +1538,7 @@ class GCPTPUVMInstance(GCPInstance):
             raise NotImplementedError(
                 'TPU VMs do not support reservations yet.')
 
-        if config.get('use_queued_resource'):
+        if config.get('gcp_queued_resource'):
             return cls._create_queued_resource_instances(
                 names, project_id, zone, config)
         else:
@@ -1563,7 +1563,7 @@ class GCPTPUVMInstance(GCPInstance):
             else:
                 node_config['labels'].update(
                     provision_constants.WORKER_NODE_TAGS)
-            node_config.pop('use_queued_resource')
+            node_config.pop('gcp_queued_resource')
 
             qr_id = f'{name}-q'  # TODO: should this be configurable?
             parent = f'projects/{project_id}/locations/{zone}'
