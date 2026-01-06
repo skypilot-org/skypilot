@@ -68,6 +68,10 @@ RSYNC_NO_OWNER_NO_GROUP_OPTION = '--no-owner --no-group'
 _HASH_MAX_LENGTH = 10
 _DEFAULT_CONNECT_TIMEOUT = 30
 
+# Messages used to detect successful port forward establishment
+_ACK_MESSAGE = 'ack'
+_FORWARDING_FROM_MESSAGE = 'Forwarding from'
+
 
 def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     """Returns a temporary path to be used as the ssh control path."""
@@ -543,6 +547,18 @@ class CommandRunner:
         """
         raise NotImplementedError
 
+    def open_ssh_tunnel(self, port_forward: Tuple[int,
+                                                  int]) -> subprocess.Popen:
+        """Opens an SSH tunnel for port forwarding.
+
+        Args:
+            port_forward: A tuple of (local_port, remote_port).
+
+        Returns:
+            The subprocess.Popen object of the tunnel process.
+        """
+        raise NotImplementedError
+
     @timeline.event
     def git_clone(
         self,
@@ -771,6 +787,48 @@ class SSHCommandRunner(CommandRunner):
                                      port_forward=port_forward,
                                      connect_timeout=connect_timeout)
 
+    def open_ssh_tunnel(self, port_forward: Tuple[int,
+                                                  int]) -> subprocess.Popen:
+        """Opens an SSH tunnel for port forwarding.
+
+        Args:
+            port_forward: A tuple of (local_port, remote_port).
+
+        Returns:
+            The subprocess.Popen object for the tunnel process.
+        """
+        local_port, remote_port = port_forward
+        # Disabling ControlMaster makes things easier to reason about
+        # with respect to resource management/ownership,
+        # as killing the process will close the tunnel too.
+        self.disable_control_master = False
+        self.port_forward_execute_remote_command = True
+
+        # The default connect_timeout of 1s is too short for
+        # connecting to clusters using a jump server.
+        # We use NON_INTERACTIVE mode to avoid allocating a pseudo-tty,
+        # which is counted towards non-idleness.
+        cmd: List[str] = self.port_forward_command(
+            [(local_port, remote_port)],
+            connect_timeout=5,
+            ssh_mode=SshMode.NON_INTERACTIVE)
+        # cat so the command doesn't exit until we kill it
+        cmd += [f'"echo {_ACK_MESSAGE} && cat"']
+        ack_fn: Callable[[str], bool] = lambda ack: ack == f'{_ACK_MESSAGE}\n'
+
+        try:
+            return _open_tunnel_subprocess(cmd, ack_fn)
+        except exceptions.CommandError as e:
+            # If the tunnel failed with exit code 255 and interactive auth is
+            # enabled, retry with interactive auth.
+            if not self.enable_interactive_auth or e.returncode != 255:
+                raise e
+            cmd, preexec_fn, cleanup = self._setup_interactive_auth(cmd)
+            try:
+                return _open_tunnel_subprocess(cmd, ack_fn, preexec_fn)
+            finally:
+                cleanup()
+
     def ssh_base_command(self, *, ssh_mode: SshMode,
                          port_forward: Optional[List[Tuple[int, int]]],
                          connect_timeout: Optional[int]) -> List[str]:
@@ -807,12 +865,10 @@ class SSHCommandRunner(CommandRunner):
                 f'{self.ssh_user}@{self.ip}'
             ]
 
-    def _retry_with_interactive_auth(
-            self, session_id: str, command: List[str], log_path: str,
-            require_outputs: bool, process_stream: bool, stream_logs: bool,
-            executable: str,
-            **kwargs) -> Union[int, Tuple[int, str, str], Tuple[int, int]]:
-        """Retries command with interactive auth.
+    def _setup_interactive_auth(
+        self, command: List[str]
+    ) -> Tuple[List[str], Callable[[], None], Callable[[], None]]:
+        """Set up PTY and socket for interactive auth.
 
         This handles SSH connections requiring keyboard-interactive
         authentication (e.g., 2FA) by using a PTY for auth prompts and
@@ -820,10 +876,16 @@ class SSHCommandRunner(CommandRunner):
         other SSH sessions can reuse without re-authenticating.
 
         The PTY is bridged to a websocket connection that allows the client
-        to handle interactive authentication. Command output flows through
-        normal stdout/stderr pipes, which gets printed to log_path.
+        to handle interactive authentication.
 
-        See ssh_options_list for when ControlMaster is not enabled.
+        Args:
+            command: The SSH command to run.
+
+        Returns:
+            A tuple of (modified_command, preexec_fn, cleanup_fn) where:
+            - modified_command: Command with ControlPersist option added.
+            - preexec_fn: Function to call before exec in subprocess.
+            - cleanup_fn: Function to call to clean up PTY fds and sockets.
         """
         extra_options = [
             # Override ControlPersist to reduce frequency of manual user
@@ -849,6 +911,7 @@ class SSHCommandRunner(CommandRunner):
         pty_m_fd, pty_s_fd = pty.openpty()
 
         # Create Unix socket to pass PTY master fd to websocket handler
+        session_id = str(uuid.uuid4())
         fd_socket_path = interactive_utils.get_pty_socket_path(session_id)
         if os.path.exists(fd_socket_path):
             os.unlink(fd_socket_path)
@@ -892,32 +955,19 @@ class SSHCommandRunner(CommandRunner):
             target=handle_unix_socket_connection, daemon=True)
         unix_sock_thread.start()
 
-        try:
+        def setup_pty_session():
+            # Set PTY as controlling terminal so SSH can access /dev/tty
+            # for keyboard-interactive auth. Without this:
+            # "can't open /dev/tty: Device not configured"
+            fcntl.ioctl(pty_s_fd, termios.TIOCSCTTY, 0)
+            # Ignore SIGHUP so ControlMaster survives when PTY closes.
+            signal.signal(signal.SIGHUP, signal.SIG_IGN)
+            # Ignore SIGTERM so ControlMaster survives subprocess_daemon
+            # killing the process group.
+            if self._ssh_proxy_jump is not None:
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
-            def setup_pty_session():
-                # Set PTY as controlling terminal so SSH can access /dev/tty
-                # for keyboard-interactive auth. Without this:
-                # "can't open /dev/tty: Device not configured"
-                fcntl.ioctl(pty_s_fd, termios.TIOCSCTTY, 0)
-                # Ignore SIGHUP so ControlMaster survives when PTY closes.
-                signal.signal(signal.SIGHUP, signal.SIG_IGN)
-                # Ignore SIGTERM so ControlMaster survives subprocess_daemon
-                # killing the process group.
-                if self._ssh_proxy_jump is not None:
-                    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-
-            return log_lib.run_with_log(' '.join(command),
-                                        log_path,
-                                        require_outputs=require_outputs,
-                                        stream_logs=stream_logs,
-                                        process_stream=process_stream,
-                                        shell=True,
-                                        executable=executable,
-                                        preexec_fn=setup_pty_session,
-                                        **kwargs)
-        except Exception as e:
-            raise RuntimeError(f'Exception in setup: {e}') from e
-        finally:
+        def cleanup():
             # Clean up PTY fds and sockets.
             fd_server.close()
             if os.path.exists(fd_socket_path):
@@ -927,6 +977,32 @@ class SSHCommandRunner(CommandRunner):
             except OSError:
                 pass  # Already closed by background thread
             os.close(pty_s_fd)
+
+        return command, setup_pty_session, cleanup
+
+    def _retry_with_interactive_auth(
+            self, command: List[str], log_path: str, require_outputs: bool,
+            process_stream: bool, stream_logs: bool, executable: str,
+            **kwargs) -> Union[int, Tuple[int, str, str], Tuple[int, int]]:
+        """Retries command with interactive auth.
+
+        See _setup_interactive_auth for details on the interactive auth flow.
+        """
+        command, preexec_fn, cleanup = self._setup_interactive_auth(command)
+        try:
+            return log_lib.run_with_log(' '.join(command),
+                                        log_path,
+                                        require_outputs=require_outputs,
+                                        stream_logs=stream_logs,
+                                        process_stream=process_stream,
+                                        shell=True,
+                                        executable=executable,
+                                        preexec_fn=preexec_fn,
+                                        **kwargs)
+        except Exception as e:
+            raise RuntimeError(f'Exception in setup: {e}') from e
+        finally:
+            cleanup()
 
     def close_cached_connection(self) -> None:
         """Close the cached connection to the remote machine.
@@ -1056,8 +1132,7 @@ class SSHCommandRunner(CommandRunner):
         # the stdout/stderr does not contain the auth failure message,
         # which is why we don't check the output here, and just attempt
         # the interactive auth flow.
-        session_id = str(uuid.uuid4())
-        return self._retry_with_interactive_auth(session_id, command, log_path,
+        return self._retry_with_interactive_auth(command, log_path,
                                                  require_outputs,
                                                  process_stream, stream_logs,
                                                  executable, **kwargs)
@@ -1196,6 +1271,57 @@ class KubernetesCommandRunner(CommandRunner):
             f'{local_port_str}:{remote_port}',
         ]
         return kubectl_cmd
+
+    def open_ssh_tunnel(self, port_forward: Tuple[int,
+                                                  int]) -> subprocess.Popen:
+        """Opens a kubectl port-forward tunnel.
+
+        Args:
+            port_forward: A tuple of (local_port, remote_port).
+
+        Returns:
+            The subprocess.Popen object for the tunnel process.
+        """
+        local_port, remote_port = port_forward
+        cmd: List[str] = self.port_forward_command(
+            [(local_port, remote_port)],
+            connect_timeout=5,
+            ssh_mode=SshMode.NON_INTERACTIVE)
+
+        def ack_fn(ack: str) -> bool:
+            if _FORWARDING_FROM_MESSAGE in ack:
+                # On kind clusters, this error occurs if we make a request
+                # immediately after the port-forward is established on a
+                # new pod:
+                # "Unhandled Error" err="an error occurred forwarding
+                # ... -> 46590: failed to execute portforward in network
+                # namespace "/var/run/netns/cni-...": failed to connect to
+                # localhost:46590 inside namespace "...", IPv4: dial tcp4
+                # 127.0.0.1:46590: connect: connection refused
+                # So we need to poll the port on the pod to check if it is
+                # open. We did not observe this with real Kubernetes clusters.
+                timeout = 5
+                port_check_cmd = (
+                    # We install netcat in our ray-node container,
+                    # so we can use it here.
+                    # (See kubernetes-ray.yml.j2)
+                    f'end=$((SECONDS+{timeout})); '
+                    f'while ! nc -z -w 1 localhost {remote_port}; do '
+                    'if (( SECONDS >= end )); then exit 1; fi; '
+                    'sleep 0.1; '
+                    'done')
+                returncode, stdout, stderr = self.run(port_check_cmd,
+                                                      require_outputs=True,
+                                                      stream_logs=False)
+                subprocess_utils.handle_returncode(
+                    returncode,
+                    ' '.join(cmd),
+                    f'Failed to check remote port {remote_port}',
+                    stderr=stdout + '\n' + stderr)
+                return True
+            return False
+
+        return _open_tunnel_subprocess(cmd, ack_fn)
 
     @timeline.event
     @context_utils.cancellation_guard
@@ -1631,41 +1757,33 @@ class SlurmCommandRunner(SSHCommandRunner):
         return super().run(cmd, **kwargs)
 
 
-_ACK_MESSAGE = 'ack'
-_FORWARDING_FROM_MESSAGE = 'Forwarding from'
+def _open_tunnel_subprocess(
+    cmd: List[str],
+    ack_fn: Callable[[str], bool],
+    preexec_fn: Optional[Callable[[], None]] = None,
+) -> subprocess.Popen:
+    """Spawns SSH tunnel subprocess and waits for ack message.
 
+    Args:
+        cmd: The SSH command to run.
+        ack_fn: Function to check if the ack message is received.
+        preexec_fn: Optional function to call before exec in subprocess.
 
-def open_ssh_tunnel(head_runner: Union[SSHCommandRunner,
-                                       KubernetesCommandRunner],
-                    port_forward: Tuple[int, int]) -> subprocess.Popen:
-    local_port, remote_port = port_forward
-    if isinstance(head_runner, SSHCommandRunner):
-        # Disabling ControlMaster makes things easier to reason about
-        # with respect to resource management/ownership,
-        # as killing the process will close the tunnel too.
-        head_runner.disable_control_master = True
-        head_runner.port_forward_execute_remote_command = True
-
-    # The default connect_timeout of 1s is too short for
-    # connecting to clusters using a jump server.
-    # We use NON_INTERACTIVE mode to avoid allocating a pseudo-tty,
-    # which is counted towards non-idleness.
-    cmd: List[str] = head_runner.port_forward_command(
-        [(local_port, remote_port)],
-        connect_timeout=5,
-        ssh_mode=SshMode.NON_INTERACTIVE)
-    if isinstance(head_runner, SSHCommandRunner):
-        # cat so the command doesn't exit until we kill it
-        cmd += [f'"echo {_ACK_MESSAGE} && cat"']
+    Returns:
+        The subprocess.Popen object. If the tunnel failed to establish,
+        the returncode will be set.
+    """
     cmd_str = ' '.join(cmd)
     logger.debug(f'Running port forward command: {cmd_str}')
+    # pylint: disable=subprocess-popen-preexec-fn
     ssh_tunnel_proc = subprocess.Popen(cmd_str,
                                        shell=True,
                                        stdin=subprocess.PIPE,
                                        stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE,
                                        start_new_session=True,
-                                       text=True)
+                                       text=True,
+                                       preexec_fn=preexec_fn)
     # Wait until we receive an ack from the remote cluster or
     # the SSH connection times out.
     queue: queue_lib.Queue = queue_lib.Queue()
@@ -1682,50 +1800,18 @@ def open_ssh_tunnel(head_runner: Union[SSHCommandRunner,
             time.sleep(0.1)
             continue
         assert ack is not None
-        if isinstance(head_runner,
-                      SSHCommandRunner) and ack == f'{_ACK_MESSAGE}\n':
-            break
-        elif isinstance(
-                head_runner,
-                KubernetesCommandRunner) and _FORWARDING_FROM_MESSAGE in ack:
-            # On kind clusters, this error occurs if we make a request
-            # immediately after the port-forward is established on a new pod:
-            # "Unhandled Error" err="an error occurred forwarding ... -> 46590:
-            # failed to execute portforward in network namespace
-            # "/var/run/netns/cni-...": failed to connect to localhost:46590
-            # inside namespace "...", IPv4: dial tcp4 127.0.0.1:46590:
-            # connect: connection refused
-            # So we need to poll the port on the pod to check if it is open.
-            # We did not observe this with real Kubernetes clusters.
-            timeout = 5
-            port_check_cmd = (
-                # We install netcat in our ray-node container,
-                # so we can use it here.
-                # (See kubernetes-ray.yml.j2)
-                f'end=$((SECONDS+{timeout})); '
-                f'while ! nc -z -w 1 localhost {remote_port}; do '
-                'if (( SECONDS >= end )); then exit 1; fi; '
-                'sleep 0.1; '
-                'done')
-            returncode, stdout, stderr = head_runner.run(port_check_cmd,
-                                                         require_outputs=True,
-                                                         stream_logs=False)
-            if returncode != 0:
-                try:
-                    ssh_tunnel_proc.terminate()
-                    ssh_tunnel_proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    ssh_tunnel_proc.kill()
-                    ssh_tunnel_proc.wait()
-                finally:
-                    error_msg = (f'Failed to check remote port {remote_port}')
-                    if stdout:
-                        error_msg += f'\n-- stdout --\n{stdout}\n'
-                    raise exceptions.CommandError(returncode=returncode,
-                                                  command=cmd_str,
-                                                  error_msg=error_msg,
-                                                  detailed_reason=stderr)
-            break
+        try:
+            if ack_fn(ack):
+                break
+        except Exception as e:  # pylint: disable=broad-except
+            try:
+                ssh_tunnel_proc.terminate()
+                ssh_tunnel_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                ssh_tunnel_proc.kill()
+                ssh_tunnel_proc.wait()
+            finally:
+                raise e
 
     if ssh_tunnel_proc.poll() is not None:
         stdout, stderr = ssh_tunnel_proc.communicate()

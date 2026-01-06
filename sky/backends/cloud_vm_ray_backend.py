@@ -2400,8 +2400,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             head_runner = runners[0]
             local_port = random.randint(10000, 65535)
             try:
-                ssh_tunnel_proc = command_runner.open_ssh_tunnel(
-                    head_runner, (local_port, constants.SKYLET_GRPC_PORT))
+                ssh_tunnel_proc = head_runner.open_ssh_tunnel(
+                    (local_port, constants.SKYLET_GRPC_PORT))
             except exceptions.CommandError as e:
                 # Don't retry if the error is due to timeout,
                 # connection refused, Kubernetes pods not found,

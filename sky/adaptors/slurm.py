@@ -122,8 +122,8 @@ class SlurmClient:
             for attempt in range(max_attempts):
                 local_port = random.randint(10000, 65535)
                 try:
-                    tunnel_proc = command_runner.open_ssh_tunnel(
-                        ssh_tunnel_runner, (local_port, 22))
+                    tunnel_proc = ssh_tunnel_runner.open_ssh_tunnel(
+                        (local_port, 22))
                     break
                 except exceptions.CommandError as e:
                     # Don't retry if the error is due to timeout or

@@ -17,10 +17,11 @@ def mock_ssh_tunnel():
     """Mock open_ssh_tunnel to avoid real SSH connections in tests."""
     mock_proc = mock.MagicMock(spec=subprocess.Popen)
     mock_proc.poll.return_value = None  # Tunnel is "running"
-    with mock.patch.object(command_runner,
+    with mock.patch.object(command_runner.SSHCommandRunner,
                            'open_ssh_tunnel',
-                           return_value=mock_proc):
-        yield mock_proc
+                           return_value=mock_proc) as mock_method:
+        mock_method.mock_proc = mock_proc
+        yield mock_method
 
 
 class TestGetPartitions:
@@ -344,7 +345,7 @@ class TestRequestScopedCache:
 
         assert client1 is client2
         # Tunnel should only be created once
-        assert command_runner.open_ssh_tunnel.call_count == 1
+        assert mock_ssh_tunnel.call_count == 1
 
     def test_new_client_after_cache_clear(self, mock_ssh_tunnel):
         """New client instance after clearing request cache."""
@@ -356,7 +357,7 @@ class TestRequestScopedCache:
 
         assert client1 is not client2
         # Tunnel created twice (once per client)
-        assert command_runner.open_ssh_tunnel.call_count == 2
+        assert mock_ssh_tunnel.call_count == 2
 
     def test_tunnel_cleanup_on_gc(self, mock_ssh_tunnel):
         """Tunnel process is terminated when client is garbage collected."""

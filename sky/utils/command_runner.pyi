@@ -117,6 +117,11 @@ class CommandRunner:
             ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
         ...
 
+    def open_ssh_tunnel(
+            self,
+            port_forward: Tuple[int, int]) -> subprocess.Popen[str]:
+        ...
+
     @classmethod
     def make_runner_list(cls: typing.Type[CommandRunner],
                          node_list: Iterable[Tuple[Any, ...]],
@@ -234,6 +239,11 @@ class SSHCommandRunner(CommandRunner):
             ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
         ...
 
+    def open_ssh_tunnel(
+            self,
+            port_forward: Tuple[int, int]) -> subprocess.Popen[str]:
+        ...
+
 
 class KubernetesCommandRunner(CommandRunner):
 
@@ -311,6 +321,11 @@ class KubernetesCommandRunner(CommandRunner):
             port_forward: List[Tuple[int, int]],
             connect_timeout: int = 1,
             ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
+        ...
+
+    def open_ssh_tunnel(
+            self,
+            port_forward: Tuple[int, int]) -> subprocess.Popen[str]:
         ...
 
 
@@ -391,10 +406,3 @@ class LocalProcessCommandRunner(CommandRunner):
             skip_lines: int = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
-
-
-def open_ssh_tunnel(
-    head_runner: Union[SSHCommandRunner, KubernetesCommandRunner],
-    port_forward: Tuple[int, int],
-) -> subprocess.Popen[str]:
-    ...
