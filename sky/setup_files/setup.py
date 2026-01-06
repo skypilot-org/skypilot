@@ -165,7 +165,7 @@ if __name__ == '__main__':
         long_description=long_description,
         long_description_content_type='text/markdown',
         setup_requires=['wheel'],
-        requires_python='>=3.7',
+        requires_python='>=3.9',
         install_requires=dependencies['install_requires'],
         extras_require=dependencies['extras_require'],
         entry_points={
@@ -173,8 +173,6 @@ if __name__ == '__main__':
         },
         include_package_data=True,
         classifiers=[
-            'Programming Language :: Python :: 3.7',
-            'Programming Language :: Python :: 3.8',
             'Programming Language :: Python :: 3.9',
             'Programming Language :: Python :: 3.10',
             'Programming Language :: Python :: 3.11',
