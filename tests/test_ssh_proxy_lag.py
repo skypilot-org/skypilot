@@ -938,7 +938,7 @@ async def test_endpoint_validate(monitor):
     print("\n🔍 Testing: /validate")
 
     async def test_func():
-        with mock.patch('sky.utils.asyncio.to_thread') as mock_thread:
+        with mock.patch('sky.server.server.asyncio.to_thread') as mock_thread:
             # to_thread should handle blocking properly
             async def async_validate(*args):
                 await asyncio.sleep(0.001)
