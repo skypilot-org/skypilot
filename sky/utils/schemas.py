@@ -213,9 +213,6 @@ def _get_single_resources_schema():
             'use_spot': {
                 'type': 'boolean',
             },
-            'use_queued_resource': {
-                'type': 'boolean',
-            },
             'job_recovery': {
                 # Either a string or a dict.
                 'anyOf': [
@@ -347,7 +344,10 @@ def _get_single_resources_schema():
                     },
                     'tpu_vm': {
                         'type': 'boolean',
-                    }
+                    },
+                    'use_queued_resource': {
+                        'type': 'boolean',
+                    },
                 }
             },
             '_no_missing_accel_warnings': {

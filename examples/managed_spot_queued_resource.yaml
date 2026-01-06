@@ -2,11 +2,11 @@ name: minimal
 
 resources:
   use_spot: true
-  use_queued_resource: true
   infra: gcp/us-central1/us-central1-a
   accelerators: tpu-v5litepod-16:1
   accelerator_args:
     runtime_version: v2-alpha-tpuv5-lite
+    use_queued_resource: true
 
 setup: |
   echo "running setup"

@@ -242,9 +242,6 @@ class GCP(clouds.Cloud):
             unsupported[clouds.CloudImplementationFeatures.SPOT_INSTANCE] = (
                 'Managed Instance Group with DWS does not support '
                 'spot instances.')
-            unsupported[clouds.CloudImplementationFeatures.QUEUED_RESOURCE] = (
-                'Queued resource is not supported in '
-                f'{cls._REPR}.')
 
         unsupported[
             clouds.CloudImplementationFeatures.
@@ -545,7 +542,8 @@ class GCP(clouds.Cloud):
                     'runtime_version']
                 resources_vars['tpu_node_name'] = r.accelerator_args.get(
                     'tpu_name')
-                resources_vars['use_queued_resource'] = r.use_queued_resource
+                resources_vars['use_queued_resource'] = r.accelerator_args.get(
+                    'use_queued_resource')
                 # TPU VMs require privileged mode for docker containers to
                 # access TPU devices.
                 resources_vars['docker_run_options'] = ['--privileged']
