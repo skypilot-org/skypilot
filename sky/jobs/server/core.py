@@ -303,6 +303,12 @@ def launch(
     # pre-mount operations when submitting jobs.
     dag.pre_mount_volumes()
 
+    # Optimize JobGroup placement before sending to controller
+    # This pre-determines cloud+region for SAME_INFRA, enabling parallel launch
+    if dag.is_job_group():
+        from sky import optimizer as optimizer_lib
+        dag = optimizer_lib.Optimizer.optimize_job_group(dag)
+
     # If there is a local postgres db, when the api server tries launching on
     # the remote jobs controller it will fail. therefore, we should remove this
     # before sending the config to the jobs controller.

@@ -18,7 +18,6 @@ import dotenv
 
 import sky
 from sky import core
-from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -54,6 +53,7 @@ from sky.utils.plugin_extensions import ExternalFailureSource
 if typing.TYPE_CHECKING:
     import psutil
 
+    from sky import task as task_lib
     from sky.schemas.generated import jobsv1_pb2
 else:
     psutil = adaptors_common.LazyImport('psutil')
@@ -905,23 +905,6 @@ class JobController:
 
         return cluster_name, executor
 
-    def _apply_placement_constraint(self, task: 'sky.Task',
-                                    cloud: Optional['sky.clouds.Cloud'],
-                                    region: Optional[str],
-                                    zone: Optional[str]) -> None:
-        """Apply placement constraint to task resources."""
-        if region is None:
-            return
-        constrained_resources = set()
-        for res in task.resources:
-            # Only constrain if same cloud or cloud not specified
-            if res.cloud is None or (cloud is not None and
-                                     res.cloud.is_same_cloud(cloud)):
-                constrained_resources.add(res.copy(region=region, zone=zone))
-            else:
-                constrained_resources.add(res)
-        task.set_resources(constrained_resources)
-
     async def _monitor_job_group_task(
         self,
         task_id: int,
@@ -1117,79 +1100,35 @@ class JobController:
                                              execution=execution_str)
 
         # Inject JobGroup environment variables into all tasks
+        # Use pre-launch prediction mode with tasks and job_id
         job_group_env_vars = job_group_networking.get_job_group_env_vars(
-            job_group_name)
+            job_group_name, tasks=tasks, job_id=self._job_id)
         for task in tasks:
             task_envs = task.envs or {}
             task_envs.update(job_group_env_vars)
             task.update_envs(task_envs)
 
-        # Phase 1: Launch clusters
+        # Phase 1: Launch all clusters in parallel
+        # For SAME_INFRA, placement is pre-determined by optimizer before
+        # reaching controller, so we can launch all clusters in parallel
         launch_start = time.time()
         cluster_names: List[Optional[str]] = []
         strategy_executors: List[recovery_strategy.StrategyExecutor] = []
-        enforce_same_infra = (
-            self._dag.placement == dag_lib.JobGroupPlacement.SAME_INFRA)
 
         try:
-            if enforce_same_infra and len(tasks) > 1:
-                # SAME_INFRA: Launch first task, get placement, then launch rest
-                logger.info('Phase 1a: Launching first cluster to determine '
-                            'placement...')
-                first_name, first_exec = await self._prepare_task_for_launch(
-                    tasks[0], 0)
-                cluster_names.append(first_name)
-                strategy_executors.append(first_exec)
-                await first_exec.launch()
+            logger.info('Phase 1: Launching all clusters in parallel...')
+            for task_id, task in enumerate(tasks):
+                name, executor = await self._prepare_task_for_launch(
+                    task, task_id)
+                cluster_names.append(name)
+                strategy_executors.append(executor)
 
-                # Get placement info from first cluster
-                first_handle = await context_utils.to_thread(
-                    global_user_state.get_handle_from_cluster_name, first_name)
-                placement_cloud = placement_region = placement_zone = None
-                if first_handle and first_handle.launched_resources:
-                    placement_region = first_handle.launched_resources.region
-                    placement_zone = first_handle.launched_resources.zone
-                    placement_cloud = first_handle.launched_resources.cloud
-                    logger.info(f'Determined placement: cloud={placement_cloud}'
-                                f', region={placement_region}, '
-                                f'zone={placement_zone}')
-
-                # Apply constraint and launch remaining tasks
-                logger.info(f'Phase 1b: Launching remaining clusters with '
-                            f'placement constraint (region={placement_region})')
-                for task_id in range(1, len(tasks)):
-                    task = tasks[task_id]
-                    self._apply_placement_constraint(task, placement_cloud,
-                                                     placement_region,
-                                                     placement_zone)
-                    name, executor = await self._prepare_task_for_launch(
-                        task, task_id)
-                    cluster_names.append(name)
-                    strategy_executors.append(executor)
-
-                # Launch remaining in parallel
-                if len(strategy_executors) > 1:
-                    results = await asyncio.gather(
-                        *[e.launch() for e in strategy_executors[1:]],
-                        return_exceptions=True)
-                    for result in results:
-                        if isinstance(result, Exception):
-                            raise result
-            else:
-                # No placement enforcement: launch all in parallel
-                logger.info('Phase 1: Launching all clusters in parallel...')
-                for task_id, task in enumerate(tasks):
-                    name, executor = await self._prepare_task_for_launch(
-                        task, task_id)
-                    cluster_names.append(name)
-                    strategy_executors.append(executor)
-
-                results = await asyncio.gather(
-                    *[e.launch() for e in strategy_executors],
-                    return_exceptions=True)
-                for result in results:
-                    if isinstance(result, Exception):
-                        raise result
+            results = await asyncio.gather(
+                *[e.launch() for e in strategy_executors],
+                return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    raise result
 
         except Exception as e:
             logger.error(f'Failed to launch clusters: {e}')
@@ -1200,17 +1139,18 @@ class JobController:
 
         # Phase 2: Barrier sync - collect handles and set RUNNING state
         logger.info('Phase 2: Waiting for all clusters to be ready...')
-        handles = []
-        for task_id, task in enumerate(tasks):
-            cluster_name = cluster_names[task_id]
+
+        async def sync_task_state(
+            task_id: int, task: 'task_lib.Task',
+            cluster_name: typing.Optional[str]
+        ) -> Tuple[str, 'cloud_vm_ray_backend.CloudVmRayResourceHandle']:
+            """Sync state for a single task (parallel execution)."""
             if cluster_name is None:
                 cluster_name, _ = await (
                     managed_job_state.get_pool_submit_info_async(self._job_id))
-                cluster_names[task_id] = cluster_name
 
             handle = await context_utils.to_thread(
                 global_user_state.get_handle_from_cluster_name, cluster_name)
-            handles.append(handle)
 
             if cluster_name is not None:
                 await managed_job_state.set_task_cluster_name_async(
@@ -1223,6 +1163,20 @@ class JobController:
                 task_id=task_id,
                 start_time=time.time(),
                 callback_func=callback_func)
+
+            return cluster_name, handle
+
+        # Execute all state syncs in parallel
+        sync_results = await asyncio.gather(*[
+            sync_task_state(task_id, task, cluster_names[task_id])
+            for task_id, task in enumerate(tasks)
+        ])
+
+        # Unpack results
+        handles = []
+        for task_id, (synced_name, handle) in enumerate(sync_results):
+            cluster_names[task_id] = synced_name
+            handles.append(handle)
 
         # Phase 3: Set up networking
         logger.info('Phase 3: Setting up JobGroup networking...')
