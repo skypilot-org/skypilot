@@ -338,7 +338,7 @@ def _get_single_resources_schema():
                     'tpu_vm': {
                         'type': 'boolean',
                     },
-                    'use_queued_resource': {
+                    'gcp_queued_resource': {
                         'type': 'boolean',
                     },
                 }

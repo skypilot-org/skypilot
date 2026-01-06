@@ -6,7 +6,7 @@ resources:
   accelerators: tpu-v5litepod-16:1
   accelerator_args:
     runtime_version: v2-alpha-tpuv5-lite
-    use_queued_resource: true
+    gcp_queued_resource: true
 
 setup: |
   echo "running setup"
