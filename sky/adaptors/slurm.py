@@ -52,15 +52,15 @@ class NodeInfo(NamedTuple):
 class SlurmClient:
     """Client for Slurm control plane operations.
 
-    Each instance manages its own SSH tunnel, which is then multiplexed via
-    ControlMaster to run all commands within the client's lifetime, thereby
-    removing the overhead in establishing and authenticating SSH connections.
+    Uses ControlMaster to multiplex SSH connections.
+
+    When ssh_proxy_command is used (e.g., AWS SSM), ControlMaster normally
+    fails due to the proxy process getting orphaned when SSH ControlMaster
+    forks to background. To work around this, we create an SSH tunnel, which is
+    then multiplexed via ControlMaster to run all commands within the client's
+    lifetime.
 
     The tunnel is automatically cleaned up when the client is garbage collected.
-
-    This approach works reliably even with ProxyCommand (e.g., AWS SSM) where
-    ControlMaster normally fails due to the proxy process getting orphaned when
-    SSH ControlMaster forks to background.
     """
 
     def __init__(
@@ -106,62 +106,76 @@ class SlurmClient:
             assert ssh_port is not None
             assert ssh_user is not None
 
-            ssh_tunnel_runner = command_runner.SSHCommandRunner(
-                (ssh_host, ssh_port),
-                ssh_user,
-                ssh_key,
-                ssh_proxy_command=ssh_proxy_command,
-                ssh_proxy_jump=ssh_proxy_jump,
-                disable_control_master=True,
-                enable_interactive_auth=True,
-            )
+            if ssh_proxy_command is None:
+                self._runner = command_runner.SSHCommandRunner(
+                    (ssh_host, ssh_port),
+                    ssh_user,
+                    ssh_key,
+                    ssh_proxy_command=ssh_proxy_command,
+                    ssh_proxy_jump=ssh_proxy_jump,
+                    enable_interactive_auth=True,
+                )
+            else:
+                # ProxyCommand does not work well with ControlMaster, so we
+                # open an SSH tunnel to have the same benefits as using
+                # ControlMaster, at the cost of one additional RTT.
+                ssh_tunnel_runner = command_runner.SSHCommandRunner(
+                    (ssh_host, ssh_port),
+                    ssh_user,
+                    ssh_key,
+                    ssh_proxy_command=ssh_proxy_command,
+                    ssh_proxy_jump=ssh_proxy_jump,
+                    disable_control_master=True,
+                    enable_interactive_auth=True,
+                )
 
-            max_attempts = 3
-            local_port: Optional[int] = None
-            tunnel_proc: Optional[subprocess.Popen] = None
-            for attempt in range(max_attempts):
-                local_port = random.randint(10000, 65535)
-                try:
-                    tunnel_proc = ssh_tunnel_runner.open_ssh_tunnel(
-                        (local_port, 22))
-                    break
-                except exceptions.CommandError as e:
-                    # Don't retry if the error is due to timeout or
-                    # connection refused.
-                    if (e.detailed_reason is not None and
-                            command_runner.SSH_CONNECTION_ERROR_PATTERN.search(
-                                e.detailed_reason)):
-                        raise RuntimeError(
-                            f'Failed to open SSH tunnel: '
-                            f'{common_utils.format_exception(e)}') from e
-                    if attempt == max_attempts - 1:
-                        raise RuntimeError(
-                            f'Failed to open SSH tunnel on port {local_port}: '
-                            f'{common_utils.format_exception(e)}') from e
-                    logger.debug(
-                        f'Failed to open SSH tunnel on port {local_port} '
-                        f'({attempt + 1}/{max_attempts}): '
-                        f'{common_utils.format_exception(e)}')
-                    continue
+                max_attempts = 3
+                local_port: Optional[int] = None
+                tunnel_proc: Optional[subprocess.Popen] = None
+                for attempt in range(max_attempts):
+                    local_port = random.randint(10000, 65535)
+                    try:
+                        tunnel_proc = ssh_tunnel_runner.open_ssh_tunnel(
+                            (local_port, 22))
+                        break
+                    except exceptions.CommandError as e:
+                        # Don't retry if the error is due to timeout or
+                        # connection refused.
+                        if (e.detailed_reason is not None and
+                                command_runner.SSH_CONNECTION_ERROR_PATTERN.
+                                search(e.detailed_reason)):
+                            raise RuntimeError(
+                                f'Failed to open SSH tunnel: '
+                                f'{common_utils.format_exception(e)}') from e
+                        if attempt == max_attempts - 1:
+                            raise RuntimeError(
+                                'Failed to open SSH tunnel on port '
+                                f'{local_port}: '
+                                f'{common_utils.format_exception(e)}') from e
+                        logger.debug(
+                            f'Failed to open SSH tunnel on port {local_port} '
+                            f'({attempt + 1}/{max_attempts}): '
+                            f'{common_utils.format_exception(e)}')
+                        continue
 
-            assert local_port is not None
-            assert tunnel_proc is not None
-            self._tunnel_proc = tunnel_proc
+                assert local_port is not None
+                assert tunnel_proc is not None
+                self._tunnel_proc = tunnel_proc
 
-            # Now the actual runner can simply use the tunnel which is
-            # listening on local_port.
-            self._runner = command_runner.SSHCommandRunner(
-                ('127.0.0.1', local_port),
-                ssh_user,
-                ssh_key,
-            )
+                # Now the actual runner can simply use the tunnel which is
+                # listening on local_port.
+                self._runner = command_runner.SSHCommandRunner(
+                    ('127.0.0.1', local_port),
+                    ssh_user,
+                    ssh_key,
+                )
 
-            # Register cleanup handler to be called when GC'd.
-            self._finalizer = weakref.finalize(
-                self,
-                SlurmClient._cleanup_tunnel,
-                tunnel_proc,
-            )
+                # Register cleanup handler to be called when GC'd.
+                self._finalizer = weakref.finalize(
+                    self,
+                    SlurmClient._cleanup_tunnel,
+                    tunnel_proc,
+                )
 
     @staticmethod
     def _cleanup_tunnel(tunnel_proc: subprocess.Popen) -> None:
