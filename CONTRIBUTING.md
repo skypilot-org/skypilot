@@ -21,7 +21,7 @@ Follow the steps below to set up a local development environment for contributin
 #### Create a conda environment
 To avoid package conflicts, create and activate a clean conda environment:
 ```bash
-# SkyPilot requires 3.9 <= python <= 3.11.
+# SkyPilot requires 3.9 <= python <= 3.13.
 conda create -y -n sky python=3.10
 conda activate sky
 ```
