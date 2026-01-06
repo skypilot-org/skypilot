@@ -2400,7 +2400,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             head_runner = runners[0]
             local_port = random.randint(10000, 65535)
             try:
-                ssh_tunnel_proc = backend_utils.open_ssh_tunnel(
+                ssh_tunnel_proc = command_runner.open_ssh_tunnel(
                     head_runner, (local_port, constants.SKYLET_GRPC_PORT))
             except exceptions.CommandError as e:
                 # Don't retry if the error is due to timeout,

@@ -5,6 +5,7 @@ overloaded type hints for SSHCommandRunner.run(), as we need to
 determine the return type based on the value of require_outputs.
 """
 import enum
+import subprocess
 import typing
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
@@ -388,3 +389,10 @@ class LocalProcessCommandRunner(CommandRunner):
             skip_lines: int = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
+
+
+def open_ssh_tunnel(
+    head_runner: Union[SSHCommandRunner, KubernetesCommandRunner],
+    port_forward: Tuple[int, int],
+) -> subprocess.Popen[str]:
+    ...

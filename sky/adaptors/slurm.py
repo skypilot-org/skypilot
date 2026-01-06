@@ -2,11 +2,15 @@
 
 import ipaddress
 import logging
+import random
 import re
 import socket
+import subprocess
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
+import weakref
 
+from sky import exceptions
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -46,7 +50,18 @@ class NodeInfo(NamedTuple):
 
 
 class SlurmClient:
-    """Client for Slurm control plane operations."""
+    """Client for Slurm control plane operations.
+
+    Each instance manages its own SSH tunnel, which is then multiplexed via
+    ControlMaster to run all commands within the client's lifetime, thereby
+    removing the overhead in establishing and authenticating SSH connections.
+
+    The tunnel is automatically cleaned up when the client is garbage collected.
+
+    This approach works reliably even with ProxyCommand (e.g., AWS SSM) where
+    ControlMaster normally fails due to the proxy process getting orphaned when
+    SSH ControlMaster forks to background.
+    """
 
     def __init__(
         self,
@@ -79,23 +94,75 @@ class SlurmClient:
 
         self._runner: command_runner.CommandRunner
 
+        self._tunnel_proc: Optional[subprocess.Popen] = None
+
         if is_inside_slurm_cluster:
             # Local execution mode - for running on the Slurm cluster itself
             # (e.g., autodown from skylet).
             self._runner = command_runner.LocalProcessCommandRunner()
         else:
-            # Remote execution via SSH
+            # Remote execution via SSH.
             assert ssh_host is not None
             assert ssh_port is not None
             assert ssh_user is not None
-            self._runner = command_runner.SSHCommandRunner(
+
+            # Create SSH tunnel.
+            tunnel_runner = command_runner.SSHCommandRunner(
                 (ssh_host, ssh_port),
                 ssh_user,
                 ssh_key,
                 ssh_proxy_command=ssh_proxy_command,
                 ssh_proxy_jump=ssh_proxy_jump,
+                disable_control_master=True,
                 enable_interactive_auth=True,
             )
+
+            max_attempts = 3
+            local_port: Optional[int] = None
+            tunnel_proc: Optional[subprocess.Popen] = None
+            for attempt in range(max_attempts):
+                local_port = random.randint(10000, 65535)
+                try:
+                    tunnel_proc = command_runner.open_ssh_tunnel(
+                        tunnel_runner, (local_port, 22))
+                    break
+                except exceptions.CommandError as e:
+                    if attempt == max_attempts - 1:
+                        raise RuntimeError(
+                            f'Failed to open SSH tunnel on port {local_port}: '
+                            f'{common_utils.format_exception(e)}') from e
+                    logger.debug(
+                        f'Failed to open SSH tunnel on port {local_port} '
+                        f'({attempt + 1}/{max_attempts}): '
+                        f'{common_utils.format_exception(e)}')
+                    continue
+
+            assert local_port is not None
+            assert tunnel_proc is not None
+            self._tunnel_proc = tunnel_proc
+
+            self._runner = command_runner.SSHCommandRunner(
+                ('127.0.0.1', local_port),
+                ssh_user,
+                ssh_key,
+            )
+
+            # Register cleanup handler to be called when GC'd.
+            self._finalizer = weakref.finalize(
+                self,
+                SlurmClient._cleanup_tunnel,
+                tunnel_proc,
+            )
+
+    @staticmethod
+    def _cleanup_tunnel(tunnel_proc: subprocess.Popen) -> None:
+        """Static cleanup method for weakref.finalize."""
+        if tunnel_proc.poll() is None:  # Still running
+            tunnel_proc.terminate()
+            try:
+                tunnel_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                tunnel_proc.kill()
 
     def _run_slurm_cmd(self, cmd: str) -> Tuple[int, str, str]:
         return self._runner.run(cmd,

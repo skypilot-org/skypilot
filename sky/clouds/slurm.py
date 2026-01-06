@@ -7,7 +7,6 @@ from sky import catalog
 from sky import clouds
 from sky import sky_logging
 from sky import skypilot_config
-from sky.adaptors import slurm
 from sky.provision.slurm import utils as slurm_utils
 from sky.skylet import constants
 from sky.utils import annotations
@@ -505,7 +504,7 @@ class Slurm(clouds.Cloud):
             # Retrieve the config options for a given SlurmctldHost name alias.
             ssh_config_dict = ssh_config.lookup(cluster)
             try:
-                client = slurm.SlurmClient(
+                client = slurm_utils.get_slurm_client(
                     ssh_config_dict['hostname'],
                     int(ssh_config_dict.get('port', 22)),
                     ssh_config_dict['user'],

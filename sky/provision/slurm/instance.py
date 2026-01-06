@@ -7,7 +7,6 @@ from typing import Any, cast, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky import skypilot_config
-from sky.adaptors import slurm
 from sky.provision import common
 from sky.provision import constants
 from sky.provision.slurm import utils as slurm_utils
@@ -75,7 +74,7 @@ def _create_virtual_instance(
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
     partition = slurm_utils.get_partition_from_config(provider_config)
 
-    client = slurm.SlurmClient(
+    client = slurm_utils.get_slurm_client(
         ssh_host,
         ssh_port,
         ssh_user,
@@ -313,7 +312,7 @@ def query_instances(
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
-    client = slurm.SlurmClient(
+    client = slurm_utils.get_slurm_client(
         ssh_host,
         ssh_port,
         ssh_user,
@@ -411,7 +410,7 @@ def get_cluster_info(
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
-    client = slurm.SlurmClient(
+    client = slurm_utils.get_slurm_client(
         ssh_host,
         ssh_port,
         ssh_user,
@@ -497,7 +496,7 @@ def terminate_instances(
     # TODO(kevin): Validate this assumption.
     if slurm_utils.is_inside_slurm_cluster():
         logger.debug('Running inside a Slurm cluster, using local execution')
-        client = slurm.SlurmClient(is_inside_slurm_cluster=True)
+        client = slurm_utils.get_slurm_client(is_inside_slurm_cluster=True)
     else:
         ssh_config_dict = provider_config['ssh']
         ssh_host = ssh_config_dict['hostname']
@@ -507,7 +506,7 @@ def terminate_instances(
         ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
         ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
-        client = slurm.SlurmClient(
+        client = slurm_utils.get_slurm_client(
             ssh_host,
             ssh_port,
             ssh_user,

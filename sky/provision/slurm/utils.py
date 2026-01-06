@@ -34,6 +34,32 @@ def get_slurm_ssh_config() -> SSHConfig:
     return slurm_config
 
 
+@annotations.lru_cache(scope='request', maxsize=10)
+def get_slurm_client(
+        ssh_host: Optional[str] = None,
+        ssh_port: Optional[int] = None,
+        ssh_user: Optional[str] = None,
+        ssh_key: Optional[str] = None,
+        *,
+        ssh_proxy_command: Optional[str] = None,
+        ssh_proxy_jump: Optional[str] = None,
+        is_inside_slurm_cluster: bool = False,  ## pylint: disable=redefined-outer-name
+) -> slurm.SlurmClient:
+    """Get or create a SlurmClient.
+
+    Within a single request, returns the same SlurmClient instance.
+    """
+    return slurm.SlurmClient(
+        ssh_host=ssh_host,
+        ssh_port=ssh_port,
+        ssh_user=ssh_user,
+        ssh_key=ssh_key,
+        ssh_proxy_command=ssh_proxy_command,
+        ssh_proxy_jump=ssh_proxy_jump,
+        is_inside_slurm_cluster=is_inside_slurm_cluster,
+    )
+
+
 class SlurmInstanceType:
     """Class to represent the "Instance Type" in a Slurm cluster.
 
@@ -203,7 +229,7 @@ def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
             f'Failed to load SSH configuration from {DEFAULT_SLURM_PATH}: '
             f'{common_utils.format_exception(e)}') from e
 
-    client = slurm.SlurmClient(
+    client = get_slurm_client(
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
         ssh_config_dict['user'],
@@ -296,7 +322,7 @@ def check_instance_fits(
                 f'could not be loaded: {common_utils.format_exception(e)}.')
     ssh_config_dict = ssh_config.lookup(cluster)
 
-    client = slurm.SlurmClient(
+    client = get_slurm_client(
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
         ssh_config_dict['user'],
@@ -398,7 +424,7 @@ def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
     try:
         ssh_config = get_slurm_ssh_config()
         ssh_config_dict = ssh_config.lookup(cluster)
-        client = slurm.SlurmClient(
+        client = get_slurm_client(
             ssh_config_dict['hostname'],
             int(ssh_config_dict.get('port', 22)),
             ssh_config_dict['user'],
@@ -449,7 +475,7 @@ def _get_slurm_node_info_list(
             f'configuration.')
     slurm_config_dict = slurm_config.lookup(slurm_cluster_name)
     logger.debug(f'Slurm config dict: {slurm_config_dict}')
-    slurm_client = slurm.SlurmClient(
+    slurm_client = get_slurm_client(
         slurm_config_dict['hostname'],
         int(slurm_config_dict.get('port', 22)),
         slurm_config_dict['user'],
@@ -597,7 +623,7 @@ def get_partitions(cluster_name: str) -> List[str]:
             os.path.expanduser(DEFAULT_SLURM_PATH))
         slurm_config_dict = slurm_config.lookup(cluster_name)
 
-        client = slurm.SlurmClient(
+        client = get_slurm_client(
             slurm_config_dict['hostname'],
             int(slurm_config_dict.get('port', 22)),
             slurm_config_dict['user'],

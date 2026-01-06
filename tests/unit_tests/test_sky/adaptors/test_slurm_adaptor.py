@@ -1,11 +1,26 @@
 """Unit tests for Slurm adaptor."""
 
+import subprocess
 import time
 import unittest.mock as mock
 
 import pytest
 
 from sky.adaptors import slurm
+from sky.provision.slurm import utils as slurm_utils
+from sky.utils import annotations
+from sky.utils import command_runner
+
+
+@pytest.fixture(autouse=True)
+def mock_ssh_tunnel():
+    """Mock open_ssh_tunnel to avoid real SSH connections in tests."""
+    mock_proc = mock.MagicMock(spec=subprocess.Popen)
+    mock_proc.poll.return_value = None  # Tunnel is "running"
+    with mock.patch.object(command_runner,
+                           'open_ssh_tunnel',
+                           return_value=mock_proc):
+        yield mock_proc
 
 
 class TestGetPartitions:
@@ -310,3 +325,48 @@ class TestGetJobNodes:
 
             # Verify wait_for_job_nodes was not called
             mock_wait.assert_not_called()
+
+
+class TestRequestScopedCache:
+    """Test request-scoped caching of SlurmClient."""
+
+    @pytest.fixture(autouse=True)
+    def clear_cache(self):
+        """Clear request cache before each test."""
+        annotations.clear_request_level_cache()
+        yield
+        annotations.clear_request_level_cache()
+
+    def test_same_client_within_request(self, mock_ssh_tunnel):
+        """Same params return same client instance within a request."""
+        client1 = slurm_utils.get_slurm_client('host', 22, 'user', None)
+        client2 = slurm_utils.get_slurm_client('host', 22, 'user', None)
+
+        assert client1 is client2
+        # Tunnel should only be created once
+        assert command_runner.open_ssh_tunnel.call_count == 1
+
+    def test_new_client_after_cache_clear(self, mock_ssh_tunnel):
+        """New client instance after clearing request cache."""
+        client1 = slurm_utils.get_slurm_client('host', 22, 'user', None)
+
+        annotations.clear_request_level_cache()
+
+        client2 = slurm_utils.get_slurm_client('host', 22, 'user', None)
+
+        assert client1 is not client2
+        # Tunnel created twice (once per client)
+        assert command_runner.open_ssh_tunnel.call_count == 2
+
+    def test_tunnel_cleanup_on_gc(self, mock_ssh_tunnel):
+        """Tunnel process is terminated when client is garbage collected."""
+        client = slurm_utils.get_slurm_client('host', 22, 'user', None)
+        tunnel_proc = client._tunnel_proc
+
+        annotations.clear_request_level_cache()
+        del client
+        # No gc.collect() needed: CPython's reference counting immediately
+        # deallocates when refcount hits zero, triggering weakref.finalize.
+        # gc.collect() is only needed for cyclic references.
+
+        tunnel_proc.terminate.assert_called_once()
