@@ -603,7 +603,6 @@ class Task:
                             'value for it in task YAML or with --env flag. To '
                             f'set it to be empty, use an empty string ({k}: "" '
                             f'in task YAML or --env {k}="" in CLI).')
-        if not skip_secrets_validation:
             for k, v in config.get('secrets', {}).items():
                 if v is None:
                     with ux_utils.print_exception_no_traceback():
