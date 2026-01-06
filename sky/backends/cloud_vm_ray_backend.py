@@ -18,8 +18,8 @@ import textwrap
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterable, Iterator, List, Optional,
-                    Set, Tuple, Union)
+from typing import (Any, Callable, Dict, Iterable, Iterator, List, Literal,
+                    Optional, Set, Tuple, Union)
 
 import colorama
 import psutil
@@ -4410,7 +4410,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               handle: CloudVmRayResourceHandle,
                               job_id: Optional[int] = None,
                               job_name: Optional[str] = None,
-                              system: Optional[str] = None,
+                              system: Optional[Union[str,
+                                                     Literal[True]]] = None,
                               controller: bool = False,
                               follow: bool = True,
                               tail: Optional[int] = None) -> int:
@@ -4418,7 +4419,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert job_name is None or job_id is None, (job_name, job_id)
         # TODO(kevin): Migrate stream_logs to gRPC
         code = managed_jobs.ManagedJobCodeGen.stream_logs(
-            job_name, job_id, system, follow, controller, tail)
+            job_name, job_id, follow, controller, tail, system)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
@@ -4444,7 +4445,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle: CloudVmRayResourceHandle,
             job_id: Optional[int] = None,
             job_name: Optional[str] = None,
-            system: Optional[Union[str, bool]] = None,
+            system: Optional[Union[str, Literal[True]]] = None,
             controller: bool = False,
             local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
         """Sync down logs for a managed job.

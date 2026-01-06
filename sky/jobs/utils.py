@@ -1271,7 +1271,7 @@ def get_alive_controller_uuids() -> List[str]:
     return uuids
 
 
-def stream_controller_logs(controller_uuid: Union[str, bool],
+def stream_controller_logs(controller_uuid: Union[str, Literal[True]],
                            follow: bool = True) -> Tuple[str, int]:
     """Stream controller logs by controller uuid."""
     if controller_uuid is True:
@@ -1279,9 +1279,6 @@ def stream_controller_logs(controller_uuid: Union[str, bool],
         print('Available system uuids:')
         for uuid in controller_uuids:
             print(uuid, flush=True)
-        return '', exceptions.JobExitCode.SUCCEEDED
-    if controller_uuid is False:
-        # should not happen, but lets not error
         return '', exceptions.JobExitCode.SUCCEEDED
 
     controller_uuid: str = controller_uuid  # type: ignore
@@ -1327,7 +1324,7 @@ def stream_controller_logs(controller_uuid: Union[str, bool],
 
 def stream_logs(job_id: Optional[int],
                 job_name: Optional[str],
-                system: Optional[str] = None,
+                system: Optional[Union[str, Literal[True]]] = None,
                 controller: bool = False,
                 follow: bool = True,
                 tail: Optional[int] = None) -> Tuple[str, int]:
@@ -2446,13 +2443,15 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def stream_logs(cls,
-                    job_name: Optional[str],
-                    job_id: Optional[int],
-                    system: Optional[str],
-                    follow: bool = True,
-                    controller: bool = False,
-                    tail: Optional[int] = None) -> str:
+    def stream_logs(
+        cls,
+        job_name: Optional[str],
+        job_id: Optional[int],
+        follow: bool = True,
+        controller: bool = False,
+        tail: Optional[int] = None,
+        system: Optional[Union[str, Literal[True]]] = None,
+    ) -> str:
         code = textwrap.dedent(f"""\
         if managed_job_version < 6:
             # Versions before 5 did not support tail parameter

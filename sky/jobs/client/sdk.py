@@ -1,7 +1,8 @@
 """SDK functions for managed jobs."""
 import json
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import (Any, Dict, List, Literal, Optional, overload, Sequence,
+                    Tuple, Union)
 
 import click
 
@@ -327,12 +328,12 @@ def cancel(
 @rest.retry_transient_errors()
 def tail_logs(name: Optional[str] = None,
               job_id: Optional[int] = None,
-              system: Optional[str] = None,
               follow: bool = True,
               controller: bool = False,
               refresh: bool = False,
               tail: Optional[int] = None,
-              output_stream: Optional['io.TextIOBase'] = None) -> Optional[int]:
+              output_stream: Optional['io.TextIOBase'] = None,
+              system: Optional[str] = None) -> Optional[int]:
     """Tails logs of managed jobs.
 
     You can provide either a job name or a job ID or a system UUID to tail
@@ -360,14 +361,19 @@ def tail_logs(name: Optional[str] = None,
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
+    version = versions.get_remote_api_version()
+    if version is not None and version < 26 and system is not None:
+        raise ValueError('system is not supported in your API server.'
+                         'Please upgrade to a newer API server to use this '
+                         'feature.')
     body = payloads.JobsLogsBody(
         name=name,
         job_id=job_id,
-        system=system,
         follow=follow,
         controller=controller,
         refresh=refresh,
         tail=tail,
+        system=system,
     )
     response = server_common.make_authenticated_request(
         'POST',
@@ -386,15 +392,39 @@ def tail_logs(name: Optional[str] = None,
                                get_result=follow)
 
 
+@overload
+def download_logs(
+    name: Optional[str],
+    job_id: Optional[int],
+    refresh: bool,
+    controller: bool,
+    system: Union[str, Literal[True]],
+    local_dir: str = constants.SKY_LOGS_DIRECTORY,
+) -> Dict[str, str]:
+    ...
+
+
+@overload
+def download_logs(
+    name: Optional[str],
+    job_id: Optional[int],
+    refresh: bool,
+    controller: bool,
+    system: Literal[None],
+    local_dir: str = constants.SKY_LOGS_DIRECTORY,
+) -> Dict[int, str]:
+    ...
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def download_logs(
     name: Optional[str],
     job_id: Optional[int],
-    system: Optional[Union[str, bool]],
     refresh: bool,
     controller: bool,
-    local_dir: str = constants.SKY_LOGS_DIRECTORY
+    system=None,
+    local_dir: str = constants.SKY_LOGS_DIRECTORY,
 ) -> Union[Dict[int, str], Dict[str, str]]:
     """Sync down logs of managed jobs.
 
@@ -416,6 +446,12 @@ def download_logs(
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
+
+    version = versions.get_remote_api_version()
+    if version is not None and version < 26 and system is not None:
+        raise ValueError('system is not supported in your API server.'
+                         'Please upgrade to a newer API server to use this '
+                         'feature.')
 
     body = payloads.JobsDownloadLogsBody(
         name=name,

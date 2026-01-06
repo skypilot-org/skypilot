@@ -6,7 +6,7 @@ import os
 import pathlib
 import tempfile
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from urllib import parse as urlparse
 import uuid
 
@@ -1057,7 +1057,7 @@ def cancel(name: Optional[str] = None,
 @usage_lib.entrypoint
 def tail_logs(name: Optional[str],
               job_id: Optional[int],
-              system: Optional[str],
+              system: Optional[Union[str, Literal[True]]],
               follow: bool,
               controller: bool,
               refresh: bool,
@@ -1118,9 +1118,9 @@ def tail_logs(name: Optional[str],
 def download_logs(
         name: Optional[str],
         job_id: Optional[int],
-        system: Optional[Union[str, bool]],
         refresh: bool,
         controller: bool,
+        system: Optional[Union[str, Literal[True]]],
         local_dir: str = skylet_constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
     """Sync down logs of managed jobs.
 

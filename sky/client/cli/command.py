@@ -35,8 +35,8 @@ import sys
 import time
 import traceback
 import typing
-from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
-                    TypeVar, Union)
+from typing import (Any, Callable, Dict, Generator, List, Literal, Optional,
+                    Set, Tuple, TypeVar, Union)
 import uuid
 
 import click
@@ -5255,7 +5255,7 @@ def jobs_cancel(
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
               controller: bool, refresh: bool, sync_down: bool,
-              system: Optional[Union[str, bool]]):
+              system: Optional[Union[str, Literal[True]]]):
     """Tail or sync down the log of a managed job.
 
     Args:

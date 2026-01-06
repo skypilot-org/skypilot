@@ -1,6 +1,6 @@
 """Async SDK functions for managed jobs."""
 import typing
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, overload, Tuple, Union
 
 from sky import backends
 from sky import sky_logging
@@ -109,7 +109,8 @@ async def tail_logs(cluster_name: str,
                     job_id: Optional[int],
                     follow: bool,
                     tail: int = 0,
-                    output_stream: Optional['io.TextIOBase'] = None) -> int:
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    system: Optional[Union[str, Literal[True]]] = None) -> int:
     """Async version of tail_logs() that tails the logs of a job."""
     return await context_utils.to_thread(
         sdk.tail_logs,
@@ -118,21 +119,46 @@ async def tail_logs(cluster_name: str,
         follow,
         tail,
         output_stream,
+        system,
     )
+
+
+@overload
+async def download_logs(
+    name: Optional[str],
+    job_id: Optional[int],
+    refresh: bool,
+    controller: bool,
+    system: Union[str, Literal[True]],
+    local_dir: str = constants.SKY_LOGS_DIRECTORY,
+) -> Dict[str, str]:
+    ...
+
+
+@overload
+async def download_logs(
+    name: Optional[str],
+    job_id: Optional[int],
+    refresh: bool,
+    controller: bool,
+    system: Literal[None],
+    local_dir: str = constants.SKY_LOGS_DIRECTORY,
+) -> Dict[int, str]:
+    ...
 
 
 @usage_lib.entrypoint
 async def download_logs(
     name: Optional[str],
     job_id: Optional[int],
-    system: Optional[Union[str, bool]],
     refresh: bool,
     controller: bool,
-    local_dir: str = constants.SKY_LOGS_DIRECTORY
+    system=None,
+    local_dir: str = constants.SKY_LOGS_DIRECTORY,
 ) -> Union[Dict[int, str], Dict[str, str]]:
     """Async version of download_logs() that syncs down logs of managed jobs."""
     return await context_utils.to_thread(sdk.download_logs, name, job_id,
-                                         system, refresh, controller, local_dir)
+                                         refresh, controller, system, local_dir)
 
 
 @usage_lib.entrypoint
