@@ -83,3 +83,8 @@ export const COMMON_GPUS = [
   'V100',
   'V100-32GB',
 ];
+
+// Dashboard environment variable constants
+export const DASHBOARD_FLAG_VALUE = 'true';
+export const DASHBOARD_USER_ID = 'dashboard';
+export const DASHBOARD_USER = 'dashboard';
