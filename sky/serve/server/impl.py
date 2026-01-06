@@ -516,11 +516,25 @@ def update(
                     'Non-pool service, trying to update replicas to '
                     f'{workers} is not supported. Ignoring the update.')
 
-        # Load the existing task configuration from the service's YAML file
-        yaml_content = service_record['pool_yaml']
-
-        # Load the existing task configuration
-        task = task_lib.Task.from_yaml_str(yaml_content)
+        # Load the existing task configuration from the deployed YAML file
+        # Use the deployed YAML (which has secrets) instead of pool_yaml
+        # (which is the original user YAML without CLI overrides)
+        version = service_record['version']
+        try:
+            yaml_content = serve_utils.get_yaml_content(service_name, version)
+        except Exception as e:  # pylint: disable=broad-except
+            # Fallback to pool_yaml if deployed YAML is not available
+            logger.warning(f'Failed to get deployed YAML for version {version},'
+                           f' falling back to pool_yaml: {e}')
+            yaml_content = service_record['pool_yaml']
+            # Skip secrets validation since secrets may have been provided via
+            # CLI during initial pool creation and are stored in the deployed
+            # config
+            task = task_lib.Task.from_yaml_str(yaml_content,
+                                               skip_secrets_validation=True)
+        else:
+            # Load from deployed YAML which should have the secrets
+            task = task_lib.Task.from_yaml_str(yaml_content)
 
         if task.service is None:
             with ux_utils.print_exception_no_traceback():
