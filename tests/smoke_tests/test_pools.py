@@ -2401,7 +2401,8 @@ def test_pool_autoscaling_scale_down_to_zero(generic_cloud: str):
                     _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
                         pool_name=pool_name, job_yaml=job_yaml.name),
                     # Wait for job to complete
-                    wait_until_job_status(job_name, ['SUCCEEDED'], timeout=timeout),
+                    wait_until_job_status(job_name, ['SUCCEEDED'],
+                                          timeout=timeout),
                     # Verify we scale down to 0 workers
                     wait_until_num_workers(pool_name, 0, timeout=timeout),
                 ],
