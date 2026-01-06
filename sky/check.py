@@ -656,11 +656,11 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
                                               'configuration.'))
                 else:
                     # Default case - not set up
-                    text_suffix = (': ' + _red_color('disabled. ') +
-                                   _dim_color('Reason: Not set up. Use '
-                                              '`sky ssh up --infra '
-                                              f'{context.lstrip("ssh-")}` '
-                                              'to set up.'))
+                    text_suffix = (': ' + _red_color('disabled. ') + _dim_color(
+                        'Reason: Not set up. Use '
+                        '`sky ssh up --infra '
+                        f'{common_utils.removeprefix(context, "ssh-")}` '
+                        'to set up.'))
         contexts_formatted.append(
             f'\n    {symbol}{cleaned_context}{text_suffix}')
     if isinstance(cloud_type, sky_clouds.SSH):
