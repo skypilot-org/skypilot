@@ -36,11 +36,13 @@ repos:
     rev: v1.14.1  # Match the version from requirements
     hooks:
     -   id: mypy
-        args:
-            # From tests/mypy_files.txt
+        args:            # Match tests/mypy_files.txt - check sky and examples/admin_policy/example_policy
             - "sky"
+            - "examples/admin_policy/example_policy"
             - "--exclude"
-            - "sky/benchmark|sky/callbacks|sky/backends/monkey_patches"
+            - "sky/backends/monkey_patches"
+            - "--exclude"
+            - "examples/admin_policy/example_policy/build"
             - "--cache-dir"
             - "/dev/null"
             - "--check-untyped-defs"
