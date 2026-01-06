@@ -135,6 +135,7 @@ class SlurmClient:
                 for attempt in range(max_attempts):
                     local_port = random.randint(10000, 65535)
                     try:
+                        # TODO(kevin): Handle 2FA.
                         tunnel_proc = command_runner.open_ssh_tunnel(
                             ssh_tunnel_runner, (local_port, 22))
                         break
