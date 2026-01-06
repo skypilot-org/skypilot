@@ -4581,8 +4581,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     run_timestamps_payload)
         elif system_array is not None:
             run_timestamps = {}
-            for job_id in system_array:
-                run_timestamps[job_id] = job_id  # type: ignore
+            for system_uuid in system_array:
+                run_timestamps[system_uuid] = system_uuid
         else:
             assert False, 'Should not reach here'
 
