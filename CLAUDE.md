@@ -7,10 +7,9 @@ This document provides guidance for AI assistants working with the SkyPilot code
 SkyPilot is a system to run, manage, and scale AI workloads on any AI infrastructure. It provides a unified interface across 25+ cloud providers (AWS, GCP, Azure, Kubernetes, Slurm, and many others), enabling users to launch compute resources, run jobs, and serve models without vendor lock-in.
 
 **Key capabilities:**
-- Multi-cloud orchestration and resource provisioning
-- Job management with automatic failover and spot instance support
-- Model serving with autoscaling (SkyServe)
-- Managed jobs with preemption recovery
+- **Clusters**: Launch and manage compute clusters across clouds and Kubernetes
+- **Managed jobs**: Run jobs with automatic recovery from preemptions and failures
+- **Multi-cloud and multi-Kubernetes**: Unified interface across 25+ clouds and multiple K8s clusters
 - Cost optimization and GPU availability maximization
 
 ## Repository Structure
@@ -59,7 +58,8 @@ skypilot/
 
 ```bash
 # Create virtual environment with uv (Python 3.8-3.11 supported)
-uv venv --python 3.10
+# --seed is required to ensure pip is installed (needed for building wheels)
+uv venv --seed --python 3.11
 source .venv/bin/activate
 
 # Install in editable mode with all cloud support
@@ -78,9 +78,8 @@ pre-commit install
 ### Environment Variables
 
 ```bash
+export SKYPILOT_DEV=1                      # Enable development mode
 export SKYPILOT_DEBUG=1                    # Enable debug logging
-export SKYPILOT_DISABLE_USAGE_COLLECTION=1 # Disable telemetry
-export SKYPILOT_MINIMIZE_LOGGING=1         # Minimal output (demos)
 ```
 
 ## Code Formatting and Linting
@@ -133,60 +132,28 @@ pytest tests/unit_tests/test_resources.py
 Trigger CI tests on pull requests using comments:
 - `/quicktest-core` - Run quick core tests
 - `/smoke-test` - Run smoke tests (launches cloud clusters)
+- `/smoke-test --kubernetes --postgres` - Test with PostgreSQL backend on Kubernetes
+- `/smoke-test --kubernetes --remote-server --postgres` - Test remote API server with PostgreSQL
 
 ### Test Configuration
 
 From `pyproject.toml`:
 - Uses pytest-xdist with 16 parallel workers
-- Environment: `SKYPILOT_DEBUG=1`, `SKYPILOT_DISABLE_USAGE_COLLECTION=1`
+- Environment: `SKYPILOT_DEBUG=1`, `SKYPILOT_DEV=1`
 - Buildkite integration for CI
 
-### Testing with PostgreSQL Backend
+### Checking Buildkite CI Status
 
-SkyPilot supports PostgreSQL as an alternative to SQLite for the API server database. To run tests with PostgreSQL:
+To check CI test results for a PR:
 
-**Local PostgreSQL Setup:**
-
-```bash
-# Start a local PostgreSQL container
-docker run --name skypilot-postgres -e POSTGRES_USER=skypilot \
-    -e POSTGRES_PASSWORD=skypilot -e POSTGRES_DB=skypilot \
-    -p 5432:5432 -d postgres:14
-```
-
-Configure SkyPilot to use PostgreSQL via config file (`~/.sky/config.yaml`):
-
-```yaml
-db: postgresql://skypilot:skypilot@localhost:5432/skypilot
-```
-
-**Running Tests with PostgreSQL:**
+1. **Get Buildkite URL from GitHub**: Check the PR's commit status checks to find the Buildkite build URL (may take a moment to appear after triggering)
+2. **Fetch build logs via Buildkite API**: Use the Buildkite API to retrieve detailed logs and test results
 
 ```bash
-# Run smoke tests with PostgreSQL backend
-pytest tests/smoke_tests/ --postgres
-
-# Run with jobs consolidation mode (recommended for PostgreSQL)
-pytest tests/smoke_tests/ --postgres --jobs-consolidation
+# Example: Get build details (requires BUILDKITE_TOKEN)
+curl -H "Authorization: Bearer $BUILDKITE_TOKEN" \
+  "https://api.buildkite.com/v2/organizations/skypilot/pipelines/skypilot/builds/<build-number>"
 ```
-
-**Production-Scale Testing:**
-
-For large-scale performance testing with PostgreSQL, use the load test scripts:
-
-```bash
-# Run production performance test with AWS RDS PostgreSQL
-bash tests/load_tests/db_scale_tests/test_large_production_performance.sh \
-    --postgres --restart-api-server
-
-# Manual data injection for debugging
-python tests/load_tests/db_scale_tests/inject_production_scale_data.py \
-    --active-cluster scale-test-active \
-    --terminated-cluster scale-test-terminated \
-    --managed-job-id 1
-```
-
-See `tests/load_tests/db_scale_tests/README.md` and `README_POSTGRES.md` for detailed instructions.
 
 ## Code Style Guidelines
 
@@ -285,13 +252,6 @@ When updating dependencies:
 3. Test with both minimum and latest allowed versions
 4. Document version constraints with comments explaining why
 
-Example of a well-documented constraint:
-```python
-# uvicorn 0.36.0 removed setup_event_loop(), but we now support both
-# old (setup_event_loop) and new (get_loop_factory) approaches
-'uvicorn[standard] >=0.33.0',
-```
-
 ## Key Modules Reference
 
 | Module | Purpose |
@@ -302,10 +262,9 @@ Example of a well-documented constraint:
 | `sky/optimizer.py` | Cloud selection and cost optimization |
 | `sky/client/sdk.py` | Python SDK implementation |
 | `sky/client/cli/` | CLI commands |
-| `sky/backends/cloud_vm_ray_backend.py` | Main execution backend |
+| `sky/backends/cloud_vm_ray_backend.py` | Main execution backend for clusters |
 | `sky/provision/provisioner.py` | Resource provisioning |
-| `sky/jobs/controller.py` | Managed job orchestration |
-| `sky/serve/` | Model serving (SkyServe) |
+| `sky/jobs/` | Managed jobs with recovery and scheduling |
 
 ## Pull Request Guidelines
 
@@ -333,15 +292,48 @@ Use the `[Area] Description` format:
 - `[Docs]` for documentation
 - `[AWS]`, `[GCP]`, `[Azure]`, `[Kubernetes]` for cloud-specific changes
 - `[Jobs]` for managed jobs
-- `[Serve]` for SkyServe
 - `[Dashboard]` for web UI changes
+- `[Serve]` for model serving (SkyServe)
+- `[Test]` for testing changes
+- `[CI]` for CI/CD changes
 
 Examples:
 - `[Core] Fix cluster status refresh logic`
 - `[AWS] Add support for new instance types`
 - `[Docs] Update installation guide`
 
-## API Server Helm Deployment Testing
+## API Server Testing
+
+### Local API Server (Recommended for Development)
+
+```bash
+# Always restart API server after code changes to pick up changes
+sky api stop
+sky api start
+
+# Verify server is running
+sky api status
+```
+
+### Mocking Remote API Server Locally
+
+To test remote API server behavior locally:
+
+```bash
+# Start local API server (runs on port 46580 by default)
+sky api stop
+sky api start
+
+# Forward to a different port to simulate remote server
+socat TCP-LISTEN:46590,fork TCP:127.0.0.1:46580 &
+
+# Connect to the forwarded port as if it were a remote server
+sky api login -e http://127.0.0.1:46590
+```
+
+### Remote API Server (Kubernetes Deployment)
+
+For testing with a remote API server on Kubernetes:
 
 ```bash
 # Build local changes
@@ -362,22 +354,46 @@ helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
     --set apiService.image=$DOCKER_IMAGE
 ```
 
+## Critical Code Paths (Handle with Care)
+
+The following modules contain complex, stateful logic that requires careful review when modifying:
+
+**Managed Jobs Recovery:**
+- `sky/jobs/controller.py` - Job lifecycle management, state transitions, async coordination
+- `sky/jobs/recovery_strategy.py` - Preemption recovery, retry logic for managed jobs
+- `sky/backends/cloud_vm_ray_backend.py` - Execution backend with complex state handling
+
+These modules handle edge cases like preemption during job submission, controller failures mid-recovery, and race conditions between concurrent operations. Changes can have subtle effects on job reliability.
+
+**API Server Performance & Robustness:**
+- `sky/server/` - API server with memory efficiency, low latency requirements
+- `sky/backends/backend_utils.py` - Cluster status caching, network resilience, SSH handling
+
+These modules are optimized for performance. Be cautious about adding blocking calls, memory-heavy operations, or changing caching behavior.
+
+**CLI/SDK Interface Design:**
+- `sky/client/cli/` - Command-line interface
+- `sky/client/sdk.py` - Python SDK
+
+Be cautious about adding new interfaces or changing existing UX significantly. Keep the interface clean and minimal for both CLI and SDK.
+
+**Backward Compatibility:**
+- Test with old server + new client, and old client + new server
+- Ensure existing clusters and jobs continue working after server upgrades
+- `/quicktest-core` tests some backward compatibility scenarios
+- See `docs/source/developers/CONTRIBUTING.md` for API versioning guidelines
+
 ## Common Pitfalls
 
 1. **Always restart API server after code changes** - Run `sky api stop; sky api start` to pick up changes
 2. **Don't modify `sky/schemas/generated/`** - These are auto-generated
 3. **Match formatter versions exactly** - Version mismatches cause CI failures
-4. **Test on multiple Python versions** - Support range is 3.8-3.11
-5. **Consider import time** - Heavy imports slow down CLI responsiveness
-6. **Handle cloud differences** - Not all features work on all clouds
-7. **API versioning** - Always maintain backward compatibility
+4. **Consider import time** - Heavy imports slow down CLI responsiveness
+5. **API versioning** - Always maintain backward compatibility
 
 ## Useful Commands
 
 ```bash
-# IMPORTANT: Always restart the API server after code changes
-sky api stop; sky api start
-
 # Profile CLI performance
 uv pip install py-spy
 py-spy record -t -o sky.svg -- python -m sky.cli status
@@ -388,8 +404,17 @@ sky check
 # View cluster status
 sky status
 
-# Interactive cluster access
-sky exec <cluster> -- bash
+# Launch a cluster
+sky launch <cluster-name> <cluster-spec.yaml>
+
+# Execute a command on the cluster
+sky exec <cluster-name> -- bash
+
+# SSH into the cluster
+ssh <cluster-name>
+
+# Launch a managed job
+sky jobs launch <job-spec.yaml>
 ```
 
 ## Documentation
@@ -398,8 +423,10 @@ sky exec <cluster> -- bash
 - **Source**: `docs/source/` (Sphinx)
 - **Build docs**: See `.readthedocs.yml`
 
-## Getting Help
+## Additional Resources
 
-- GitHub Issues: https://github.com/skypilot-org/skypilot/issues
-- Discussions: https://github.com/skypilot-org/skypilot/discussions
-- Slack: http://slack.skypilot.co
+- **Full contributing guide**: `docs/source/developers/CONTRIBUTING.md`
+- **User docs**: https://docs.skypilot.co/
+- **GitHub Issues**: https://github.com/skypilot-org/skypilot/issues
+- **Discussions**: https://github.com/skypilot-org/skypilot/discussions
+- **Slack**: http://slack.skypilot.co
