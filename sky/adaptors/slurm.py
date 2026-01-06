@@ -187,6 +187,7 @@ class SlurmClient:
                 tunnel_proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 tunnel_proc.kill()
+                tunnel_proc.wait()
 
     def _run_slurm_cmd(self, cmd: str) -> Tuple[int, str, str]:
         return self._runner.run(cmd,
