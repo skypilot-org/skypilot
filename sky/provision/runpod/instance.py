@@ -114,6 +114,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     'docker_login_config'),
                 network_volume_id=network_volume_id,
                 volume_mount_path=volume_mount_path,
+                allowed_cuda_versions=config.node_config.get(
+                    'AllowedCudaVersions'),
             )
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')

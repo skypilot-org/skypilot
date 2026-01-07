@@ -194,6 +194,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
 
+  :ref:`runpod <config-yaml-runpod>`:
+    :ref:`allowed_cuda_versions <config-yaml-runpod-allowed-cuda-versions>`: ['12.4', '12.3']
+
   :ref:`vast <config-yaml-vast>`:
     :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
 
@@ -1692,6 +1695,41 @@ Example:
 
   nebius:
     domain: api.nebius.cloud:443
+
+.. _config-yaml-runpod:
+
+``runpod``
+~~~~~~~~~~
+
+Advanced RunPod configuration (optional).
+
+.. _config-yaml-runpod-allowed-cuda-versions:
+
+``runpod.allowed_cuda_versions``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Specify which CUDA versions are acceptable for RunPod instances (optional).
+
+RunPod will only provision machines that have one of the specified CUDA versions
+installed. This is useful when your workload requires specific CUDA versions for
+compatibility.
+
+The value should be a list of CUDA version strings in the format ``'Major.Minor'``
+(e.g., ``'12.4'``, ``'12.3'``, ``'11.8'``).
+
+Supported CUDA versions: ``12.9``, ``12.8``, ``12.7``, ``12.6``, ``12.5``, ``12.4``,
+``12.3``, ``12.2``, ``12.1``, ``12.0``, ``11.8``.
+
+Default: ``['12.8']`` (matches the default RunPod Docker image CUDA version).
+
+Example:
+
+.. code-block:: yaml
+
+  runpod:
+    allowed_cuda_versions:
+      - '12.4'
+      - '12.3'
 
 .. _config-yaml-vast:
 

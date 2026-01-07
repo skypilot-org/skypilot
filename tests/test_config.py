@@ -282,6 +282,43 @@ def test_gcp_vpc_name_validation(monkeypatch, tmp_path) -> None:
         assert 'Invalid config YAML' in e.value.args[0]
 
 
+def test_runpod_allowed_cuda_versions_validation(monkeypatch, tmp_path) -> None:
+    """Test RunPod allowed_cuda_versions validation with valid and invalid values."""
+    # Test valid CUDA versions
+    valid_versions_list = [
+        ['12.4'],
+        ['12.4', '12.3', '12.2'],
+        ['11.8', '12.0'],
+        ['12.4', '12.3', '12.2', '12.1', '12.0', '11.8'],
+    ]
+    for i, valid_versions in enumerate(valid_versions_list):
+        config_path = tmp_path / f'valid_{i}.yaml'
+        config_dict = {'runpod': {'allowed_cuda_versions': valid_versions}}
+        yaml_utils.dump_yaml(config_path, config_dict)
+        monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+        # Should not raise an exception
+        skypilot_config.reload_config()
+        assert skypilot_config.get_nested(('runpod', 'allowed_cuda_versions'),
+                                          None) == valid_versions
+
+    # Test invalid CUDA versions
+    invalid_versions_list = [
+        ['13.0'],  # Not in enum (too high)
+        ['12.4', 'invalid'],  # Mixed valid/invalid
+        ['CUDA-12.4'],  # Wrong format
+        ['11.7'],  # Not in enum (too low)
+        ['10.0'],  # Not in enum (way too low)
+    ]
+    for i, invalid_versions in enumerate(invalid_versions_list):
+        config_path = tmp_path / f'invalid_{i}.yaml'
+        config_dict = {'runpod': {'allowed_cuda_versions': invalid_versions}}
+        yaml_utils.dump_yaml(config_path, config_dict)
+        monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', config_path)
+        with pytest.raises(ValueError) as e:
+            skypilot_config.reload_config()
+        assert 'Invalid config YAML' in e.value.args[0]
+
+
 def test_valid_num_items_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file contains an invalid number of array items."""
     config_path = tmp_path / 'valid.yaml'

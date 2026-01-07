@@ -279,6 +279,7 @@ def launch(
     *,
     network_volume_id: Optional[str] = None,
     volume_mount_path: Optional[str] = None,
+    allowed_cuda_versions: Optional[List[str]] = None,
 ) -> str:
     """Launches an instance with the given parameters.
 
@@ -287,6 +288,10 @@ def launch(
 
     For GPU instances, we convert the instance_type to the RunPod GPU name,
     and finds the specs for the GPU, before launching the instance.
+
+    Args:
+        allowed_cuda_versions: List of acceptable CUDA versions for GPU pods.
+            If not set, any CUDA version is acceptable.
 
     Returns:
         instance_id: The instance ID.
@@ -375,6 +380,9 @@ def launch(
             'min_memory_in_gb': gpu_specs['memoryInGb'] * gpu_quantity,
             'gpu_count': gpu_quantity,
         })
+        # Add allowed_cuda_versions for GPU instances if specified
+        if allowed_cuda_versions is not None:
+            params['allowed_cuda_versions'] = allowed_cuda_versions
 
     if preemptible is None or not preemptible:
         new_instance = runpod.runpod.create_pod(**params)

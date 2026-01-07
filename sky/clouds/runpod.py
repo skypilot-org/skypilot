@@ -7,6 +7,7 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky import skypilot_config
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -216,6 +217,15 @@ class RunPod(clouds.Cloud):
                                       if resources.docker_username_for_runpod
                                       is not None else 'root')
 
+        # Get allowed_cuda_versions from config if specified
+        # Default to 12.8 which matches the default docker image
+        allowed_cuda_versions = skypilot_config.get_effective_region_config(
+            cloud='runpod',
+            region=region.name,
+            keys=('allowed_cuda_versions',),
+            default_value=['12.8'],
+            override_configs=resources.cluster_config_overrides)
+
         return {
             'instance_type': instance_type,
             'custom_resources': custom_resources,
@@ -225,6 +235,7 @@ class RunPod(clouds.Cloud):
             'use_spot': use_spot,
             'bid_per_gpu': str(hourly_cost),
             'docker_username_for_runpod': docker_username_for_runpod,
+            'allowed_cuda_versions': allowed_cuda_versions,
         }
 
     def _get_feasible_launchable_resources(

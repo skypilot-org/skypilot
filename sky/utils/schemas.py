@@ -1479,6 +1479,23 @@ def get_config_schema():
                 }
             },
         },
+        'runpod': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'allowed_cuda_versions': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                        'enum': [
+                            '12.9', '12.8', '12.7', '12.6', '12.5', '12.4',
+                            '12.3', '12.2', '12.1', '12.0', '11.8'
+                        ]
+                    }
+                }
+            }
+        },
         'vast': {
             'type': 'object',
             'required': [],
