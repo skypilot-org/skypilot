@@ -41,6 +41,7 @@ import {
 } from '@/components/elements/icons';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { RotateCwIcon, PlusIcon, Trash2Icon, EditIcon } from 'lucide-react';
+import { LastUpdatedTimestamp } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import { statusGroups } from './jobs';
 import dashboardCache from '@/lib/cache';
@@ -338,6 +339,7 @@ export function Workspaces() {
   });
   const [loading, setLoading] = useState(true);
   const [rawWorkspacesData, setRawWorkspacesData] = useState(null);
+  const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
   // Sorting state
   const [sortConfig, setSortConfig] = useState({
@@ -593,7 +595,8 @@ export function Workspaces() {
       // Trigger cache preloading for workspaces page and background preload other pages
       await cachePreloader.preloadForPage('workspaces');
 
-      fetchData(true); // Show loading on initial load
+      await fetchData(true); // Show loading on initial load
+      setLastFetchedTime(new Date());
     };
 
     initializeData();
@@ -716,7 +719,7 @@ export function Workspaces() {
     }
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getWorkspaces);
     dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
@@ -725,7 +728,16 @@ export function Workspaces() {
     dashboardCache.invalidateFunction(getWorkspaceClusters); // Invalidate all workspace clusters
     dashboardCache.invalidateFunction(getWorkspaceManagedJobs); // Invalidate all workspace jobs
 
-    fetchData(true); // Show loading on manual refresh
+    setLoading(true);
+    try {
+      await apiClient.fetch('/check', {}, 'POST');
+      await fetchData(false);
+      setLastFetchedTime(new Date());
+    } catch (error) {
+      console.error('Error during sky check refresh:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCancelDelete = () => {
@@ -835,6 +847,12 @@ export function Workspaces() {
               <CircularProgress size={15} className="mt-0" />
               <span className="ml-2 text-gray-500 text-xs">Refreshing...</span>
             </div>
+          )}
+          {!loading && lastFetchedTime && (
+            <LastUpdatedTimestamp
+              timestamp={lastFetchedTime}
+              className="mr-2"
+            />
           )}
           <button
             onClick={handleRefresh}

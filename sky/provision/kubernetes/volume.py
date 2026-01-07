@@ -45,7 +45,9 @@ def check_pvc_usage_for_pod(context: Optional[str], namespace: str,
             continue
         pvc = kubernetes.core_api(
             context).read_namespaced_persistent_volume_claim(
-                name=pvc_name, namespace=namespace)
+                name=pvc_name,
+                namespace=namespace,
+                _request_timeout=kubernetes.API_TIMEOUT)
         access_mode = pvc.spec.access_modes[0]
         if access_mode not in once_modes:
             continue
@@ -65,7 +67,8 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     if storage_class_name is not None:
         try:
             kubernetes.storage_api(context).read_storage_class(
-                name=storage_class_name)
+                name=storage_class_name,
+                _request_timeout=kubernetes.API_TIMEOUT)
         except kubernetes.api_exception() as e:
             raise config_lib.KubernetesError(
                 f'Check storage class {storage_class_name} error: {e}')
@@ -82,7 +85,7 @@ def delete_volume(config: models.VolumeConfig) -> models.VolumeConfig:
             context).delete_namespaced_persistent_volume_claim(
                 name=pvc_name,
                 namespace=namespace,
-                _request_timeout=config_lib.DELETION_TIMEOUT),
+                _request_timeout=kubernetes.API_TIMEOUT),
         resource_type='pvc',
         resource_name=pvc_name)
     logger.info(f'Deleted PVC {pvc_name} in namespace {namespace}')
@@ -119,7 +122,9 @@ def _get_volume_usedby(
     cloud_to_name_map = _get_cluster_name_on_cloud_to_cluster_name_map()
     # Get all pods in the namespace
     pods = kubernetes.core_api(context).list_namespaced_pod(
-        namespace=namespace, field_selector=field_selector)
+        namespace=namespace,
+        field_selector=field_selector,
+        _request_timeout=kubernetes.API_TIMEOUT)
     for pod in pods.items:
         if pod.spec.volumes is None:
             continue
@@ -164,8 +169,21 @@ def get_volume_usedby(
 
 def get_all_volumes_usedby(
     configs: List[models.VolumeConfig],
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Gets the usedby resources of all volumes."""
+) -> Tuple[Dict[str, Any], Dict[str, Any], Set[str]]:
+    """Gets the usedby resources of all volumes.
+
+    Args:
+        configs: List of VolumeConfig objects.
+
+    Returns:
+        usedby_pods: Dictionary of context to namespace to volume name to pods
+                     using the volume. These may include pods not created by
+                     SkyPilot.
+        usedby_clusters: Dictionary of context to namespace to volume name to
+                         clusters using the volume.
+        failed_volume_names: Set of volume names whose usedby info failed to
+          fetch.
+    """
     field_selector = ','.join([
         f'status.phase!={phase}'
         for phase in k8s_constants.PVC_NOT_HOLD_POD_PHASES
@@ -173,26 +191,39 @@ def get_all_volumes_usedby(
     label_selector = 'parent=skypilot'
     context_to_namespaces: Dict[str, Set[str]] = {}
     pvc_names = set()
+    original_volume_names: Dict[str, Dict[str, List[str]]] = {}
     for config in configs:
         context, namespace = _get_context_namespace(config)
-        if context not in context_to_namespaces:
-            context_to_namespaces[context] = set()
-        context_to_namespaces[context].add(namespace)
+        context_to_namespaces.setdefault(context, set()).add(namespace)
+        original_volume_names.setdefault(context,
+                                         {}).setdefault(namespace,
+                                                        []).append(config.name)
         pvc_names.add(config.name_on_cloud)
     cloud_to_name_map = _get_cluster_name_on_cloud_to_cluster_name_map()
     # Get all pods in the namespace
     used_by_pods: Dict[str, Dict[str, Dict[str, List[str]]]] = {}
     used_by_clusters: Dict[str, Dict[str, Dict[str, List[str]]]] = {}
+    failed_volume_names: Set[str] = set()
     for context, namespaces in context_to_namespaces.items():
         used_by_pods[context] = {}
         used_by_clusters[context] = {}
         for namespace in namespaces:
             used_by_pods[context][namespace] = {}
             used_by_clusters[context][namespace] = {}
-            pods = kubernetes.core_api(context).list_namespaced_pod(
-                namespace=namespace,
-                field_selector=field_selector,
-                label_selector=label_selector)
+            try:
+                pods = kubernetes.core_api(context).list_namespaced_pod(
+                    namespace=namespace,
+                    field_selector=field_selector,
+                    label_selector=label_selector,
+                    _request_timeout=kubernetes.API_TIMEOUT)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to get pods in namespace {namespace} '
+                             f'in context {context}: {e}')
+                # Mark all volumes in this namespace as failed
+                for original_volume_name in original_volume_names[context][
+                        namespace]:
+                    failed_volume_names.add(original_volume_name)
+                continue
             for pod in pods.items:
                 if pod.spec.volumes is None:
                     continue
@@ -217,7 +248,7 @@ def get_all_volumes_usedby(
                         used_by_clusters[context][namespace][cluster_name] = []
                     used_by_clusters[context][namespace][cluster_name].append(
                         cluster_name)
-    return used_by_pods, used_by_clusters
+    return used_by_pods, used_by_clusters, failed_volume_names
 
 
 def map_all_volumes_usedby(
@@ -292,7 +323,9 @@ def create_persistent_volume_claim(
     try:
         pvc = kubernetes.core_api(
             context).read_namespaced_persistent_volume_claim(
-                name=pvc_name, namespace=namespace)
+                name=pvc_name,
+                namespace=namespace,
+                _request_timeout=kubernetes.API_TIMEOUT)
         if config is not None:
             _populate_config_from_pvc(config, pvc)
         logger.debug(f'PVC {pvc_name} already exists')
@@ -305,8 +338,10 @@ def create_persistent_volume_claim(
         raise ValueError(
             f'PVC {pvc_name} does not exist while use_existing is True.')
     pvc = kubernetes.core_api(
-        context).create_namespaced_persistent_volume_claim(namespace=namespace,
-                                                           body=pvc_spec)
+        context).create_namespaced_persistent_volume_claim(
+            namespace=namespace,
+            body=pvc_spec,
+            _request_timeout=kubernetes.API_TIMEOUT)
     logger.info(f'Created PVC {pvc_name} in namespace {namespace}')
     if config is not None:
         _populate_config_from_pvc(config, pvc)

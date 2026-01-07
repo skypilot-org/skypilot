@@ -82,6 +82,7 @@ MULTI_WORD_TERMS = {
     'OAuth2 Proxy',
     'Google Workspace',
     'Google Auth Platform',
+    'Pod Identity',
     'Google Cloud Logging',
     'AWS Systems Manager',
     'Microsoft Entra ID',

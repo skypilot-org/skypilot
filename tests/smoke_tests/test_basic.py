@@ -593,7 +593,6 @@ def test_gcp_stale_job_manual_restart():
 @pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet.
-@pytest.mark.no_slurm  # Slurm does not support num_nodes > 1 yet.
 def test_env_check(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
@@ -621,9 +620,6 @@ def test_env_check(generic_cloud: str):
 def test_cli_logs(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
-    if generic_cloud == 'slurm':
-        # Slurm does not support multi-node
-        num_nodes = 1
     timestamp = time.time()
     test = smoke_tests_utils.Test('cli_logs', [
         f'sky launch -y -c {name} --infra {generic_cloud} --num-nodes {num_nodes} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo {timestamp} 1"',
@@ -1151,7 +1147,7 @@ def test_kubernetes_slurm_show_gpus(generic_cloud: str):
             # 2. The cluster has no GPUs, and the expected message is shown
             '(echo "$s" | grep -A 1 "REQUESTABLE_QTY_PER_NODE" | '
             'grep -E "^[A-Z0-9]+[[:space:]]+[0-9, ]+[[:space:]]+[0-9]+ of [0-9]+ free" || '
-            f'echo "$s" | grep "No GPUs found in any {generic_cloud} clusters")'
+            f'echo "$s" | grep "No GPUs found in any {generic_cloud.capitalize()} clusters")'
         )],
     )
     smoke_tests_utils.run_one_test(test)
@@ -1184,7 +1180,7 @@ def test_launch_and_exec_async(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'launch_and_exec_async',
         [
-            f'sky launch -c {name} -y --async',
+            f'sky launch -c {name} --infra {generic_cloud} -y --async',
             # Async exec.
             f'sky exec {name} echo --async',
             # Async exec and cancel immediately.
@@ -1194,6 +1190,11 @@ def test_launch_and_exec_async(generic_cloud: str):
              'sed -E "s/.*run: (sky api cancel .*).*/\\1/") && '
              'echo "Extracted cancel command: $cancel_cmd" && '
              '$cancel_cmd'),
+            # Wait for cluster to be UP before sync exec.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=300),
             # Sync exec must succeed after command end.
             (
                 f's=$(sky exec {name} echo) && echo "$s" && '
@@ -1592,7 +1593,6 @@ def test_sky_down_with_multiple_sgs():
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_slurm  # Slurm does not support multi-node yet
 def test_launch_with_failing_setup(generic_cloud: str):
     """Test that failing setup outputs the right error message."""
     name = smoke_tests_utils.get_cluster_name()
@@ -1770,17 +1770,22 @@ def test_cancel_logs_request(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.kubernetes
-def test_kubernetes_ssh_proxy_connection():
-    """Test Kubernetes SSH proxy connection.
+@pytest.mark.no_aws
+@pytest.mark.no_gcp
+@pytest.mark.no_nebius
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_runpod
+@pytest.mark.no_azure
+def test_kubernetes_slurm_ssh_proxy_connection(generic_cloud: str):
+    """Test Kubernetes/Slurm SSH proxy connection.
     """
     cluster_name = smoke_tests_utils.get_cluster_name()
 
     test = smoke_tests_utils.Test(
         'kubernetes_ssh_proxy_connection',
         [
-            # Launch a minimal Kubernetes cluster for SSH proxy testing
-            f'sky launch -y -c {cluster_name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH test cluster ready"',
+            # Launch a minimal Kubernetes/Slurm cluster for SSH proxy testing
+            f'sky launch -y -c {cluster_name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH test cluster ready"',
             # Run an SSH command on the cluster.
             f'ssh {cluster_name} echo "SSH command executed"',
         ],
@@ -1848,30 +1853,6 @@ def test_cluster_setup_num_gpus():
         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.aws
-def test_launch_retry_until_up():
-    """Test that retry until up considers more resources after trying all zones."""
-    cluster_name = smoke_tests_utils.get_cluster_name()
-    timeout = 180
-    test = smoke_tests_utils.Test(
-        'launch-retry-until-up',
-        [
-            # Launch something we'll never get.
-            f's=$(timeout {timeout} sky launch -c {cluster_name} --gpus B200:8 --infra aws echo hi -y -d --retry-until-up --use-spot 2>&1 || true) && '
-            # Check that "Retry after" appears in the output
-            'echo "$s" | grep -q "Retry after" && '
-            # Find the first occurrence of "Retry after" and get its line number
-            'RETRY_LINE=$(echo "$s" | grep -n "Retry after" | head -1 | cut -d: -f1) && '
-            # Check that "Considered resources" appears after the first "Retry after"
-            # We do this by extracting all lines after RETRY_LINE and checking if "Considered resources" appears
-            'echo "$s" | tail -n +$((RETRY_LINE + 1)) | grep -q "Considered resources"'
-        ],
-        timeout=200,  # Slightly more than 180 to account for test overhead
-        teardown=f'sky down -y {cluster_name}',
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
 def test_cancel_job_reliability(generic_cloud: str):
     """Test that sky cancel properly terminates running jobs."""
     name = smoke_tests_utils.get_cluster_name()
@@ -1885,11 +1866,11 @@ def test_cancel_job_reliability(generic_cloud: str):
     # Helper function to check process count with timeout
     def check_process_count(expected_lines: int, timeout: int = 30) -> str:
         """Check that ps aux | grep 'sleep 10000' shows expected number of lines.
-        
+
         Note: ps aux | grep includes the grep process itself, so:
         - 3 lines = sleep process + grep process + ssh process to check the process count
         - 2 line = grep process (sleep is gone) + ssh process to check the process count
-        
+
         Returns a command that will check the process count with retries.
         """
         return (

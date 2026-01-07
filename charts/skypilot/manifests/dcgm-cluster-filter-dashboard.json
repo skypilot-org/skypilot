@@ -115,7 +115,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_GPU_UTIL{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster_name) kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}",
+          "expr": "DCGM_FI_DEV_GPU_UTIL{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster_name) group by (pod, namespace, label_skypilot_cluster_name) (kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
@@ -231,7 +231,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_FB_USED{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster_name) kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}",
+          "expr": "DCGM_FI_DEV_FB_USED{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster_name) group by (pod, namespace, label_skypilot_cluster_name) (kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
@@ -347,7 +347,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_GPU_TEMP{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster_name) kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}",
+          "expr": "DCGM_FI_DEV_GPU_TEMP{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster_name) group by (pod, namespace, label_skypilot_cluster_name) (kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
@@ -463,7 +463,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_POWER_USAGE{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster_name) kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}",
+          "expr": "DCGM_FI_DEV_POWER_USAGE{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster_name) group by (pod, namespace, label_skypilot_cluster_name) (kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "{{node}} - {{modelName}} GPU {{gpu}}",
@@ -571,7 +571,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_XID_ERRORS{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster_name) kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"}",
+          "expr": "DCGM_FI_DEV_XID_ERRORS{node=~\"$node\", gpu=~\"$gpu\"} * on(pod, namespace) group_left(label_skypilot_cluster_name) group by (pod, namespace, label_skypilot_cluster_name) (kube_pod_labels{label_skypilot_cluster_name=~\"$cluster\"})",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"

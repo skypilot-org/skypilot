@@ -33,6 +33,7 @@ import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
   TimestampWithTooltip,
+  LastUpdatedTimestamp,
 } from '@/components/utils';
 import {
   FileSearchIcon,
@@ -51,6 +52,8 @@ import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
 import dashboardCache from '@/lib/cache';
+import cachePreloader from '@/lib/cache-preloader';
+import { PluginSlot } from '@/plugins/PluginSlot';
 import {
   FilterDropdown,
   Filters,
@@ -184,6 +187,8 @@ export function ManagedJobs() {
     workspace: [],
     pool: [],
   });
+  const [preloadingComplete, setPreloadingComplete] = useState(false);
+  const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
   const fetchData = React.useCallback(
     async (isRefreshButton = false) => {
@@ -211,7 +216,20 @@ export function ManagedJobs() {
   );
 
   useEffect(() => {
-    fetchData();
+    const preloadData = async () => {
+      try {
+        // Await cache preloading for jobs page
+        await cachePreloader.preloadForPage('jobs');
+      } catch (error) {
+        console.error('Error preloading jobs data:', error);
+      } finally {
+        // Signal completion even on error so the table can load
+        setPreloadingComplete(true);
+        setLastFetchedTime(new Date());
+        fetchData();
+      }
+    };
+    preloadData();
   }, [fetchData]);
 
   const handleRefresh = () => {
@@ -220,13 +238,21 @@ export function ManagedJobs() {
     dashboardCache.invalidate(getPoolStatus, [{}]);
     dashboardCache.invalidate(getWorkspaces);
 
-    // Trigger a re-fetch in both tables via their refreshDataRef
-    if (jobsRefreshRef.current) {
-      jobsRefreshRef.current();
-    }
-    if (poolsRefreshRef.current) {
-      poolsRefreshRef.current();
-    }
+    // Reset preloading state
+    setPreloadingComplete(false);
+
+    // Trigger a new preload cycle
+    cachePreloader.preloadForPage('jobs', { force: true }).then(() => {
+      setPreloadingComplete(true);
+      setLastFetchedTime(new Date());
+      // Trigger a re-fetch in both tables via their refreshDataRef
+      if (jobsRefreshRef.current) {
+        jobsRefreshRef.current();
+      }
+      if (poolsRefreshRef.current) {
+        poolsRefreshRef.current();
+      }
+    });
   };
 
   // Helper function to update URL query parameters
@@ -292,6 +318,8 @@ export function ManagedJobs() {
         poolsData={poolsData}
         poolsLoading={poolsLoading}
         setValueList={setValueList}
+        preloadingComplete={preloadingComplete}
+        lastFetchedTime={lastFetchedTime}
       />
 
       {/* Pools table - always visible */}
@@ -315,6 +343,8 @@ export function ManagedJobsTable({
   poolsData,
   poolsLoading,
   setValueList,
+  preloadingComplete,
+  lastFetchedTime,
 }) {
   const [data, setData] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -543,38 +573,46 @@ export function ManagedJobsTable({
   // only trigger on actual user interactions (page change, filter change, etc.)
   const isInitialFetch = React.useRef(true);
 
-  // Initial load - only runs once on mount
+  // Initial load - runs immediately on mount, don't wait for full preloading
+  // The preloader will warm the cache in background, but we fetch jobs data
+  // right away so the table displays as fast as possible
   React.useEffect(() => {
     fetchData({ includeStatus: true });
     // Mark that initial fetch is complete so other effects can run
     isInitialFetch.current = false;
-  }, [fetchData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch on pagination (page) changes without status request
   // Skip on initial fetch (page defaults to 1)
   React.useEffect(() => {
-    if (!isInitialFetch.current) {
+    if (!isInitialFetch.current && preloadingComplete) {
       fetchData({ includeStatus: false });
     }
-  }, [currentPage, fetchData]);
+  }, [currentPage, fetchData, preloadingComplete]);
 
   // Fetch on filters or page size changes with status request
   // Skip on initial fetch (filters default to [] and pageSize to 10)
   React.useEffect(() => {
-    if (!isInitialFetch.current) {
+    if (!isInitialFetch.current && preloadingComplete) {
       fetchData({ includeStatus: true });
     }
-  }, [filters, pageSize, fetchData]);
+  }, [filters, pageSize, fetchData, preloadingComplete]);
 
   // Fetch on status filter changes (activeTab, selectedStatuses, showAllMode)
   // Skip on initial fetch (these have default values)
   React.useEffect(() => {
-    if (!isInitialFetch.current) {
+    if (!isInitialFetch.current && preloadingComplete) {
       fetchData({ includeStatus: true });
     }
-  }, [activeTab, selectedStatuses, showAllMode, fetchData]);
+  }, [activeTab, selectedStatuses, showAllMode, fetchData, preloadingComplete]);
 
+  // Set up periodic refresh interval only after preloading is complete
   useEffect(() => {
+    if (!preloadingComplete) {
+      return;
+    }
+
     const interval = setInterval(() => {
       if (
         fetchDataRef.current &&
@@ -589,7 +627,7 @@ export function ManagedJobsTable({
       // Don't invalidate cache on component unmount - this causes premature cache invalidation
       // Cache should only be invalidated on manual refresh or TTL expiration
     };
-  }, [refreshInterval]);
+  }, [refreshInterval, preloadingComplete]);
 
   // Reset to first page when activeTab changes
   useEffect(() => {
@@ -885,6 +923,9 @@ export function ManagedJobsTable({
                 <span className="ml-2 text-gray-500 text-sm">Loading...</span>
               </div>
             )}
+            {!loading && lastFetchedTime && (
+              <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+            )}
             <button
               onClick={() => {
                 // Call the refresh function passed from parent
@@ -997,7 +1038,7 @@ export function ManagedJobsTable({
                   className="sortable whitespace-nowrap"
                   onClick={() => requestSort('cluster')}
                 >
-                  Resources{getSortDirection('cluster')}
+                  Requested Resources{getSortDirection('cluster')}
                 </TableHead>
                 <TableHead
                   className="sortable whitespace-nowrap"
@@ -1079,7 +1120,16 @@ export function ManagedJobsTable({
                           {formatDuration(item.job_duration)}
                         </TableCell>
                         <TableCell>
-                          <StatusBadge status={item.status} />
+                          <PluginSlot
+                            name="jobs.table.status.badge"
+                            context={item}
+                            fallback={
+                              <StatusBadge
+                                status={item.status}
+                                statusTooltip={item.statusTooltip}
+                              />
+                            }
+                          />
                         </TableCell>
                         <TableCell>
                           {item.infra && item.infra !== '-' ? (
@@ -1132,11 +1182,18 @@ export function ManagedJobsTable({
                         <TableCell>
                           <NonCapitalizedTooltip
                             content={
-                              item.resources_str_full || item.resources_str
+                              item.requested_resources ||
+                              item.resources_str_full ||
+                              item.resources_str ||
+                              '-'
                             }
                             className="text-sm text-muted-foreground"
                           >
-                            <span>{item.resources_str}</span>
+                            <span>
+                              {item.requested_resources ||
+                                item.resources_str ||
+                                '-'}
+                            </span>
                           </NonCapitalizedTooltip>
                         </TableCell>
                         <TableCell>{item.recoveries}</TableCell>

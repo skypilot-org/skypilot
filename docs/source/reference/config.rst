@@ -3,12 +3,12 @@
 Advanced Configuration
 ======================
 
-You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file.
+You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file (for :ref:`local API server <sky-api-server-local>`) or on your SkyPilot API server dashboard (for :ref:`remote API server <sky-api-server-remote>`) at ``http://<api-server-url>/dashboard/config``.
 
 Configuration sources and overrides
 -----------------------------------
 
-SkyPilot allows you to set configuration globally in ``~/.sky/config.yaml``, in your project, or for specific jobs, providing flexibility in how you manage your configurations.
+SkyPilot allows you to set configuration globally in ``~/.sky/config.yaml`` (for :ref:`local API server <sky-api-server-local>`) or on the API server dashboard (for :ref:`remote API server <sky-api-server-remote>`) at ``http://<api-server-url>/dashboard/config``, in your project, or for specific jobs, providing flexibility in how you manage your configurations.
 
 For example, you can have a :ref:`user configuration<config-client-user-config>` to apply globally to all projects, a :ref:`project configuration<config-client-project-config>` storing default values for all jobs in a project, and :ref:`Task YAML overrides<config-client-cli-flag>` for specific jobs.
 
@@ -123,6 +123,7 @@ Below is the configuration syntax and some example values. See detailed explanat
       Owner: user-unique-name
     :ref:`vpc_name <config-yaml-aws-vpc-name>`: skypilot-vpc
     :ref:`use_internal_ips <config-yaml-aws-use-internal-ips>`: true
+    :ref:`use_ssm <config-yaml-aws-use-ssm>`: true
     :ref:`ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`security_group_name <config-yaml-aws-security-group-name>`: my-security-group
     :ref:`disk_encrypted <config-yaml-aws-disk-encrypted>`: false
@@ -194,7 +195,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
 
   :ref:`vast <config-yaml-vast>`:
-    :ref:`secure_only <config-yaml-vast-secure-only>`: true
+    :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
@@ -205,6 +206,10 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`store <config-yaml-logs-store>`: gcp
     gcp:
       project_id: my-project-id
+
+  :ref:`data <config-yaml-data>`:
+    :ref:`mount_cached <config-yaml-data-mount-cached>`:
+      :ref:`sequential_upload <config-yaml-data-mount-cached-sequential-upload>`: false
 
   :ref:`daemons <config-yaml-daemons>`:
     skypilot-status-refresh-daemon:
@@ -353,6 +358,24 @@ Example:
     force_disable_cloud_bucket: true
 
 .. _config-yaml-jobs-controller:
+.. _config-yaml-jobs-controller-consolidation-mode:
+
+``jobs.controller.consolidation_mode``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable :ref:`consolidation mode <jobs-consolidation-mode>`, which will run the jobs controller within the remote API server, rather than in a separate sky cluster. Don't enable unless you are using a remotely-deployed API server.
+
+Default: ``false``.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      consolidation_mode: true
+      # any specified resources will be ignored
+
 .. _config-yaml-jobs-controller-resources:
 
 ``jobs.controller.resources``
@@ -663,7 +686,17 @@ Private subnets are defined as those satisfying both of these properties:
      (the ``map_public_ip_on_launch`` attribute is ``false``).
 
 This flag is typically set together with ``vpc_name`` above and
-``ssh_proxy_command`` below.
+``ssh_proxy_command`` or ``use_ssm`` below.
+
+Default: ``false``.
+
+.. _config-yaml-aws-use-ssm:
+
+``aws.use_ssm``
+~~~~~~~~~~~~~~~~
+
+Use SSM to communicate with SkyPilot nodes. This flag is typically set together with ``vpc_name`` and
+``use_internal_ips`` above. This is useful for launching clusters in private VPCs without public IPs, refer to :ref:`aws-ssm` for more details.
 
 Default: ``false``.
 
@@ -1667,15 +1700,17 @@ Example:
 
 Advanced Vast configuration (optional).
 
-.. _config-yaml-vast-secure-only:
+.. _config-yaml-vast-datacenter-only:
 
-``vast.secure_only``
-~~~~~~~~~~~~~~~~~~~~
+``vast.datacenter_only``
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 Configure SkyPilot to only consider offers on Vast verified datacenters (optional).
-Internally, this will query Vast with the ``datacenters=true`` parameters. Note
-some GPUs may only be available on non-secure offers. This config can be
-overridden per task via :ref:`config flag <config-client-cli-flag>`.
+Internally, this will query Vast with the ``datacenter=true`` and ``hosting_type>=1``
+parameters to filter for professional datacenter-hosted machines. Note some GPUs
+may only be available on non-datacenter offers. This config filters both the catalog
+(during resource planning) and the launch query (during provisioning). This config
+can be overridden per task via :ref:`config flag <config-client-cli-flag>`.
 
 Default: ``false``
 
@@ -1763,6 +1798,46 @@ The type of external logging storage to use. Each logging storage might have its
 
   logs:
     store: gcp
+
+.. _config-yaml-data:
+
+``data``
+~~~~~~~~
+
+Data storage configuration (optional).
+
+.. code-block:: yaml
+
+  data:
+    mount_cached:
+      sequential_upload: false
+
+.. _config-yaml-data-mount-cached:
+
+``data.mount_cached``
+~~~~~~~~~~~~~~~~~~~~~
+
+Configuration for MOUNT_CACHED storage mode.
+
+.. _config-yaml-data-mount-cached-sequential-upload:
+
+``data.mount_cached.sequential_upload``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether to upload files sequentially to the remote storage (default: ``false``).
+
+When set to ``true``, files written to the mounted directory are uploaded one at a time
+in the order they were written. This is useful when your framework relies on the order
+of files being uploaded (e.g., checkpoint files that need to appear in sequence).
+
+When set to ``false`` (default), files are uploaded in parallel for better performance.
+The upload order is not guaranteed, but throughput is significantly higher.
+
+.. code-block:: yaml
+
+  data:
+    mount_cached:
+      sequential_upload: true
 
 .. _config-yaml-daemons:
 

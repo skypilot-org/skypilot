@@ -27,6 +27,7 @@ def ssh_options_list(
     ssh_control_name: Optional[str],
     *,
     ssh_proxy_command: Optional[str] = ...,
+    ssh_proxy_jump: Optional[str] = ...,
     docker_ssh_proxy_command: Optional[str] = ...,
     timeout: int = ...,
     port: int = ...,
@@ -135,6 +136,7 @@ class SSHCommandRunner(CommandRunner):
     docker_user: str
     disable_control_master: Optional[bool]
     port_forward_execute_remote_command: Optional[bool]
+    enable_interactive_auth: bool
 
     def __init__(
         self,
@@ -143,9 +145,11 @@ class SSHCommandRunner(CommandRunner):
         ssh_private_key: Optional[str],
         ssh_control_name: Optional[str] = ...,
         ssh_proxy_command: Optional[str] = ...,
+        ssh_proxy_jump: Optional[str] = ...,
         docker_user: Optional[str] = ...,
         disable_control_master: Optional[bool] = ...,
         port_forward_execute_remote_command: Optional[bool] = ...,
+        enable_interactive_auth: bool = ...,
     ) -> None:
         ...
 

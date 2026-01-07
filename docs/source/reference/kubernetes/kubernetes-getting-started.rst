@@ -219,7 +219,7 @@ Your image must satisfy the following requirements:
 
 Using images from private repositories
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Google Container Registry), create a `secret <https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line>`_ in your Kubernetes cluster and edit your :code:`~/.sky/config.yaml` to specify the secret like so:
+To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Google Artifact Registry), create a `secret <https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line>`_ in your Kubernetes cluster and edit your :ref:`SkyPilot config <config-yaml>` to specify the secret like so:
 
 .. code-block:: yaml
 
@@ -229,9 +229,73 @@ To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Go
           imagePullSecrets:
             - name: your-secret-here
 
-.. tip::
 
-    If you use Amazon ECR, your secret credentials may expire every 12 hours. Consider using `k8s-ecr-login-renew <https://github.com/nabsul/k8s-ecr-login-renew>`_ to automatically refresh your secrets.
+.. dropdown:: Creating private registry secrets (Docker Hub, AWS ECR, GCP, NVIDIA NGC)
+
+    To create these private registry secrets on Kubernetes cluster, run the following commands:
+
+    .. tab-set::
+
+        .. tab-item:: Docker Hub
+            :sync: docker-hub-tab
+
+            .. code-block:: bash
+
+              kubectl create secret docker-registry <secret-name> \
+                --docker-username=<docker-hub-username> \
+                --docker-password=<docker-hub-password> \
+                --docker-server=docker.io
+
+        .. tab-item:: AWS ECR
+            :sync: aws-ecr-tab
+
+            .. code-block:: bash
+
+              kubectl create secret docker-registry <secret-name> \
+                --docker-username=AWS \
+                --docker-password=<aws-ecr-password> \
+                --docker-server=<your-user-id>.dkr.ecr.<region>.amazonaws.com
+
+            .. tip::
+
+                ECR secret credentials expire every 12 hours. Consider using `k8s-ecr-login-renew <https://github.com/nabsul/k8s-ecr-login-renew>`_ to automatically refresh your secrets.
+
+        .. tab-item:: GCP
+            :sync: gcp-tab
+
+            For **Artifact Registry** (recommended):
+
+            .. code-block:: bash
+
+              kubectl create secret docker-registry <secret-name> \
+                --docker-username=_json_key \
+                --docker-password="$(cat ~/gcp-key.json)" \
+                --docker-server=<location>-docker.pkg.dev
+
+            For **Container Registry (GCR)** (deprecated):
+
+            .. code-block:: bash
+
+              kubectl create secret docker-registry <secret-name> \
+                --docker-username=_json_key \
+                --docker-password="$(cat ~/gcp-key.json)" \
+                --docker-server=gcr.io
+
+            .. hint::
+              If you are not sure which registry to use, check the base of your
+              image URL. For example, if your image URL looks like ``gcr.io/project-id/repo/image-name:latest``,
+              you should use ``gcr.io`` as the registry server. If your image URL looks like ``us-docker.pkg.dev/project-id/registry-repo/image-name:latest``,
+              you should use ``us-docker.pkg.dev`` as the registry server.
+
+        .. tab-item:: NVIDIA NGC
+            :sync: nvidia-container-registry-tab
+
+            .. code-block:: bash
+
+              kubectl create secret docker-registry <secret-name> \
+                --docker-username=$oauthtoken \
+                --docker-password=<NGC_API_KEY> \
+                --docker-server=nvcr.io
 
 
 Opening ports
@@ -320,12 +384,18 @@ For example, to set custom environment variables and use GPUDirect RDMA, you can
 
 .. _kubernetes-using-volumes:
 
-Mounting NFS and other volumes
+Mounting volumes
 ------------------------------
 
-`Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ can be attached to SkyPilot pods using the :ref:`pod_config <kubernetes-custom-pod-config>` field. This is useful for accessing shared storage such as NFS or local high-performance storage like NVMe drives.
+SkyPilot supports mounting various types of volumes to your pods on Kubernetes:
 
-Refer to :ref:`kubernetes-setup-volumes` for details and examples.
+* **Persistent volumes**: Independently managed volumes with lifecycle separate from clusters, ideal for long-term data storage and sharing datasets across clusters. These can be backed by block storage (e.g., AWS EBS, GCP Persistent Disk) or distributed file systems (e.g., JuiceFS, Nebius shared file system, AWS EFS, GCP Filestore).
+
+* **Ephemeral volumes**: Automatically created and deleted with your cluster, suitable for temporary storage and caches that are cluster-specific.
+
+* **Other volume types**: You can also mount hostPath, NFS, etc. as needed.
+
+For detailed information on configuring and using volumes, see :ref:`volumes-on-kubernetes`.
 
 FAQs
 ----

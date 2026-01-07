@@ -69,6 +69,7 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
+from sky.utils.plugin_extensions import ExternalFailureSource
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -763,7 +764,20 @@ def write_cluster_config(
                     keys=('allowed_contexts',),
                     default_value=None)
             if allowed_contexts is None:
-                excluded_clouds.add(cloud)
+                # Exclude both Kubernetes and SSH explicitly since:
+                # 1. isinstance(cloud, clouds.Kubernetes) matches both (SSH
+                #    inherits from Kubernetes)
+                # 2. Both share the same get_credential_file_mounts() which
+                #    returns the kubeconfig. So if we don't exclude both, the
+                #    unexcluded one will upload the kubeconfig.
+                # TODO(romilb): This is a workaround. The right long-term fix
+                # is to have SSH Node Pools use its own kubeconfig instead of
+                # sharing the global kubeconfig at ~/.kube/config. In the
+                # interim, SSH Node Pools' get_credential_file_mounts can filter
+                # contexts starting with ssh- and create a temp kubeconfig
+                # to upload.
+                excluded_clouds.add(clouds.Kubernetes())
+                excluded_clouds.add(clouds.SSH())
         else:
             excluded_clouds.add(cloud)
 
@@ -1086,7 +1100,11 @@ def write_cluster_config(
         with open(tmp_yaml_path, 'w', encoding='utf-8') as f:
             f.write(restored_yaml_content)
 
-    config_dict['cluster_name_on_cloud'] = cluster_name_on_cloud
+    # Read the cluster_name_on_cloud from the restored yaml. This is a hack to
+    # make sure that launching on the same cluster across multiple users works
+    # correctly. See #8232.
+    yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
+    config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
 
     # Make sure to do this before we optimize file mounts. Optimization is
     # non-deterministic, but everything else before this point should be
@@ -2258,6 +2276,12 @@ def _update_cluster_status(
                         for status in node_statuses) and
                     len(node_statuses) == handle.launched_nodes)
 
+    external_cluster_failures = ExternalFailureSource.get(
+        cluster_hash=record['cluster_hash'])
+    logger.debug(f'Cluster {cluster_name} with cluster_hash '
+                 f'{record["cluster_hash"]} has external cluster failures: '
+                 f'{external_cluster_failures}')
+
     def get_node_counts_from_ray_status(
             runner: command_runner.CommandRunner) -> Tuple[int, int, str, str]:
         rc, output, stderr = runner.run(
@@ -2397,8 +2421,9 @@ def _update_cluster_status(
 
     # For Slurm, skip Ray health check since it doesn't use Ray.
     should_check_ray = cloud is not None and cloud.uses_ray()
-    if all_nodes_up and (not should_check_ray or
-                         run_ray_status_to_check_ray_cluster_healthy()):
+    if (all_nodes_up and (not should_check_ray or
+                          run_ray_status_to_check_ray_cluster_healthy()) and
+            not external_cluster_failures):
         # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.
@@ -2501,15 +2526,15 @@ def _update_cluster_status(
     #  (2) Otherwise, we will reset the autostop setting, unless the cluster is
     #      autostopping/autodowning.
     some_nodes_terminated = 0 < len(node_statuses) < handle.launched_nodes
-    # If all nodes are up and ray cluster is health, we would have returned
-    # earlier. So if all_nodes_up is True and we are here, it means the ray
-    # cluster must have been unhealthy.
-    ray_cluster_unhealthy = all_nodes_up
     some_nodes_not_stopped = any(status[0] != status_lib.ClusterStatus.STOPPED
                                  for status in node_statuses)
     is_abnormal = (some_nodes_terminated or some_nodes_not_stopped)
 
-    if is_abnormal:
+    if is_abnormal and not external_cluster_failures:
+        # If all nodes are up and ray cluster is healthy, we would have returned
+        # earlier. So if all_nodes_up is True and we are here, it means the ray
+        # cluster must have been unhealthy.
+        ray_cluster_unhealthy = all_nodes_up
         status_reason = ', '.join(
             [status[1] for status in node_statuses if status[1] is not None])
 
@@ -2637,8 +2662,25 @@ def _update_cluster_status(
             cluster_name,
             include_user_info=include_user_info,
             summary_response=summary_response)
-    # Now is_abnormal is False: either node_statuses is empty or all nodes are
-    # STOPPED.
+    # Now either:
+    # (1) is_abnormal is False: either node_statuses is empty or all nodes are
+    #                           STOPPED
+    # or
+    # (2) there are external cluster failures reported by a plugin.
+
+    # If there are external cluster failures and the cluster has not been
+    # terminated on cloud (to_terminate), we can return the cluster record as is.
+    # This is because when an external failure is detected, the cluster will be
+    # marked as INIT with a reason indicating the details of the failure. So, we
+    # do not want to modify the cluster status in this function except for in the
+    # case where the cluster has been terminated on cloud, in which case we should
+    # clean up the cluster from SkyPilot's global state.
+    if external_cluster_failures and not to_terminate:
+        return global_user_state.get_cluster_from_name(
+            cluster_name,
+            include_user_info=include_user_info,
+            summary_response=summary_response)
+
     verb = 'terminated' if to_terminate else 'stopped'
     backend = backends.CloudVmRayBackend()
     global_user_state.add_cluster_event(
