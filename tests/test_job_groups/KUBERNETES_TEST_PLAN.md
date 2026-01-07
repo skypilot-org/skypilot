@@ -1,6 +1,6 @@
 # JobGroup Kubernetes Test Plan
 
-This document provides a comprehensive test plan for testing the JobGroup feature on Kubernetes clusters.
+This document provides a comprehensive test plan for testing the JobGroup feature on Kubernetes clusters, specifically targeting Google Kubernetes Engine (GKE).
 
 ## Overview
 
@@ -17,15 +17,250 @@ JobGroups enable users to run heterogeneous workloads as a single unit, where ea
 
 ---
 
+## GKE Cluster Setup
+
+This section covers setting up a GKE cluster with the necessary node pools for testing JobGroups with heterogeneous resources.
+
+### Prerequisites
+
+```bash
+# Install gcloud CLI if not already installed
+# https://cloud.google.com/sdk/docs/install
+
+# Authenticate with GCP
+gcloud auth login
+gcloud auth application-default login
+
+# Set your project
+export GCP_PROJECT="your-gcp-project-id"
+gcloud config set project $GCP_PROJECT
+
+# Set region/zone
+export GCP_REGION="us-central1"
+export GCP_ZONE="us-central1-a"
+gcloud config set compute/region $GCP_REGION
+gcloud config set compute/zone $GCP_ZONE
+```
+
+### Step 1: Create GKE Cluster
+
+```bash
+# Cluster configuration
+export CLUSTER_NAME="skypilot-jobgroup-test"
+export K8S_VERSION="1.29"  # Use a recent stable version
+
+# Create the GKE cluster with a default node pool
+gcloud container clusters create $CLUSTER_NAME \
+    --zone $GCP_ZONE \
+    --num-nodes 2 \
+    --machine-type e2-standard-4 \
+    --enable-autoscaling \
+    --min-nodes 1 \
+    --max-nodes 5 \
+    --cluster-version $K8S_VERSION \
+    --workload-pool="${GCP_PROJECT}.svc.id.goog" \
+    --enable-ip-alias \
+    --tags=skypilot
+
+# Get credentials for kubectl
+gcloud container clusters get-credentials $CLUSTER_NAME --zone $GCP_ZONE
+
+# Verify cluster is accessible
+kubectl cluster-info
+kubectl get nodes
+```
+
+### Step 2: Create Node Pools for Heterogeneous Workloads
+
+Create specialized node pools for different resource requirements:
+
+#### CPU Node Pool (General Purpose)
+
+```bash
+# General-purpose CPU nodes for lightweight jobs
+gcloud container node-pools create cpu-pool \
+    --cluster $CLUSTER_NAME \
+    --zone $GCP_ZONE \
+    --machine-type e2-standard-4 \
+    --num-nodes 2 \
+    --enable-autoscaling \
+    --min-nodes 0 \
+    --max-nodes 10 \
+    --node-labels="skypilot.co/node-type=cpu"
+```
+
+#### High-Memory Node Pool
+
+```bash
+# High-memory nodes for replay buffer and memory-intensive jobs
+gcloud container node-pools create highmem-pool \
+    --cluster $CLUSTER_NAME \
+    --zone $GCP_ZONE \
+    --machine-type e2-highmem-8 \
+    --num-nodes 1 \
+    --enable-autoscaling \
+    --min-nodes 0 \
+    --max-nodes 5 \
+    --node-labels="skypilot.co/node-type=highmem"
+```
+
+#### High-CPU Node Pool
+
+```bash
+# High-CPU nodes for compute-intensive jobs
+gcloud container node-pools create highcpu-pool \
+    --cluster $CLUSTER_NAME \
+    --zone $GCP_ZONE \
+    --machine-type e2-highcpu-16 \
+    --num-nodes 1 \
+    --enable-autoscaling \
+    --min-nodes 0 \
+    --max-nodes 5 \
+    --node-labels="skypilot.co/node-type=highcpu"
+```
+
+#### GPU Node Pool (Optional - for GPU tests)
+
+```bash
+# GPU nodes for trainer jobs (T4 GPUs)
+# Note: Check GPU availability in your zone
+gcloud container node-pools create gpu-pool \
+    --cluster $CLUSTER_NAME \
+    --zone $GCP_ZONE \
+    --machine-type n1-standard-4 \
+    --accelerator type=nvidia-tesla-t4,count=1 \
+    --num-nodes 0 \
+    --enable-autoscaling \
+    --min-nodes 0 \
+    --max-nodes 4 \
+    --node-labels="skypilot.co/node-type=gpu"
+
+# Install NVIDIA GPU drivers (required for GPU nodes)
+kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml
+```
+
+### Step 3: Verify Node Pools
+
+```bash
+# List all node pools
+gcloud container node-pools list --cluster $CLUSTER_NAME --zone $GCP_ZONE
+
+# Check nodes and their labels
+kubectl get nodes --show-labels
+
+# Check node resources
+kubectl describe nodes | grep -A 10 "Allocatable:"
+
+# Verify GPU availability (if GPU pool created)
+kubectl get nodes -l skypilot.co/node-type=gpu
+```
+
+### Step 4: Scale Up Node Pools Before Testing
+
+Before running tests, ensure sufficient nodes are available:
+
+```bash
+# Scale up CPU pool for basic tests
+gcloud container clusters resize $CLUSTER_NAME \
+    --node-pool cpu-pool \
+    --num-nodes 3 \
+    --zone $GCP_ZONE \
+    --quiet
+
+# Scale up highmem pool for RL architecture tests
+gcloud container clusters resize $CLUSTER_NAME \
+    --node-pool highmem-pool \
+    --num-nodes 2 \
+    --zone $GCP_ZONE \
+    --quiet
+
+# Scale up highcpu pool for env-worker tests
+gcloud container clusters resize $CLUSTER_NAME \
+    --node-pool highcpu-pool \
+    --num-nodes 2 \
+    --zone $GCP_ZONE \
+    --quiet
+
+# Verify scaling
+kubectl get nodes
+```
+
+### Step 5: Resource Capacity Planning
+
+For the full RL Architecture test (Phase 4), you need:
+
+| Job | Nodes | CPUs/Node | Memory/Node | Total CPUs | Total Memory |
+|-----|-------|-----------|-------------|------------|--------------|
+| trainer | 2 | 4 | 8GB | 8 | 16GB |
+| data-processor | 2 | 2 | 4GB | 4 | 8GB |
+| replay-buffer | 1 | 4 | 16GB | 4 | 16GB |
+| env-worker | 2 | 8 | 8GB | 16 | 16GB |
+| **Total** | **7** | - | - | **32** | **56GB** |
+
+**Recommended cluster capacity:** At least 40 CPUs and 70GB memory available.
+
+```bash
+# Check current cluster capacity
+kubectl top nodes
+
+# Alternative: Check allocatable resources
+kubectl get nodes -o custom-columns=\
+NAME:.metadata.name,\
+CPU:.status.allocatable.cpu,\
+MEMORY:.status.allocatable.memory
+```
+
+### Step 6: Configure SkyPilot for GKE
+
+```bash
+# Verify SkyPilot can see the Kubernetes cluster
+sky check kubernetes
+
+# Expected output should show Kubernetes as enabled
+
+# Check available resources via SkyPilot
+sky show-gpus --cloud kubernetes
+```
+
+### GKE-Specific Configuration (Optional)
+
+Create a SkyPilot config for GKE-specific settings:
+
+```bash
+# Create/update ~/.sky/config.yaml
+cat >> ~/.sky/config.yaml << 'EOF'
+
+kubernetes:
+  # Use the GKE cluster context
+  # context: gke_<project>_<zone>_<cluster-name>
+
+  # Pod configuration
+  pod_config:
+    metadata:
+      labels:
+        app: skypilot-jobgroup-test
+    spec:
+      # Optional: Use specific node pools via node selector
+      # nodeSelector:
+      #   skypilot.co/node-type: cpu
+EOF
+```
+
+---
+
 ## Test Environment Setup
 
 ### Prerequisites
 ```bash
-# Ensure Kubernetes cluster is accessible
+# Ensure GKE cluster is set up (see above)
 kubectl cluster-info
 
 # Verify SkyPilot can access the cluster
 sky check kubernetes
+
+# Check cluster has sufficient resources
+kubectl get nodes
+kubectl top nodes
 
 # Ensure sufficient cluster resources for testing
 # Minimum: 8+ CPUs, 16GB+ memory available
@@ -37,6 +272,19 @@ sky check kubernetes
 sky api stop && sky api start
 sky api status
 ```
+
+---
+
+## Pre-Test Checklist
+
+Before running tests, verify:
+
+- [ ] GKE cluster is running: `gcloud container clusters list`
+- [ ] Node pools are created: `gcloud container node-pools list --cluster $CLUSTER_NAME --zone $GCP_ZONE`
+- [ ] Sufficient nodes are available: `kubectl get nodes`
+- [ ] SkyPilot can access cluster: `sky check kubernetes`
+- [ ] API server is running: `sky api status`
+- [ ] No orphaned resources from previous tests: `kubectl get pods -A | grep sky`
 
 ---
 
@@ -670,7 +918,9 @@ sky jobs launch /tmp/k8s_duplicate_names.yaml -y
 
 ---
 
-## Phase 6: Recovery Tests
+## Phase 6: Failure and Recovery Tests
+
+This phase tests failure handling and recovery mechanisms in JobGroups. These tests are critical for understanding system behavior under adverse conditions.
 
 ### 6.1 Job Recovery Configuration
 
@@ -711,30 +961,324 @@ run: |
 
 **Note:** Recovery behavior in JobGroups may differ from single jobs. Document actual behavior.
 
-### 6.2 Preemption Simulation (if possible)
+### 6.2 Pod Deletion / Preemption Simulation
 
-For Kubernetes, preemption can be simulated by:
-1. Using low-priority pods
-2. Manually deleting pods
-3. Using resource pressure
+For Kubernetes, preemption can be simulated by manually deleting pods.
+
+#### Test Procedure
 
 ```bash
-# Launch JobGroup
-sky jobs launch k8s_recovery_test.yaml -y
+# Step 1: Launch a long-running JobGroup
+cat > /tmp/k8s_preemption_test.yaml << 'EOF'
+---
+name: k8s-preemption-test
+placement: SAME_INFRA
+execution: parallel
+---
+name: long-running-a
+resources:
+  cpus: 2
+  infra: kubernetes
+run: |
+  echo "Job A starting at $(date)"
+  for i in {1..60}; do
+    echo "Job A heartbeat $i at $(date)"
+    sleep 10
+  done
+  echo "Job A completed"
+---
+name: long-running-b
+resources:
+  cpus: 2
+  infra: kubernetes
+run: |
+  echo "Job B starting at $(date)"
+  for i in {1..60}; do
+    echo "Job B heartbeat $i at $(date)"
+    sleep 10
+  done
+  echo "Job B completed"
+EOF
 
-# Get pod names
+sky jobs launch /tmp/k8s_preemption_test.yaml -y
+JOB_ID=$?  # Capture job ID
+
+# Step 2: Wait for jobs to be running
+sleep 60
+sky jobs queue
+
+# Step 3: Find the pods
 kubectl get pods -A | grep sky
+# Note the namespace and pod names
 
-# Simulate preemption by deleting a pod
-kubectl delete pod <pod-name> -n <namespace>
+# Step 4: Simulate preemption by deleting ONE pod
+NAMESPACE="default"  # Update based on actual namespace
+POD_NAME="<pod-name-from-step-3>"
+echo "Deleting pod: $POD_NAME in namespace: $NAMESPACE"
+kubectl delete pod $POD_NAME -n $NAMESPACE
 
-# Observe recovery behavior
+# Step 5: Monitor recovery behavior
+watch -n 5 "sky jobs queue && echo '---' && kubectl get pods -A | grep sky"
+
+# Step 6: Check job status and logs
+sky jobs logs $JOB_ID
+```
+
+**Verification checklist:**
+- [ ] Pod deletion is detected by SkyPilot
+- [ ] Job status changes (RECOVERING or FAILED)
+- [ ] Document whether job recovers or fails
+- [ ] Document behavior of other jobs in the group
+- [ ] Check if networking is re-established after recovery
+
+### 6.3 Node Drain Simulation
+
+Simulate node maintenance or eviction:
+
+```bash
+# Step 1: Launch JobGroup on specific node pool
+sky jobs launch /tmp/k8s_preemption_test.yaml -y
+
+# Step 2: Wait for pods to be scheduled
+sleep 60
+kubectl get pods -A -o wide | grep sky
+
+# Step 3: Identify the node running the pods
+NODE_NAME=$(kubectl get pods -A -o wide | grep sky | head -1 | awk '{print $8}')
+echo "Target node: $NODE_NAME"
+
+# Step 4: Cordon the node (prevent new pods)
+kubectl cordon $NODE_NAME
+
+# Step 5: Drain the node (evict pods gracefully)
+kubectl drain $NODE_NAME --ignore-daemonsets --delete-emptydir-data --force
+
+# Step 6: Monitor job behavior
+watch -n 5 sky jobs queue
+
+# Step 7: Uncordon the node after testing
+kubectl uncordon $NODE_NAME
+```
+
+**Verification:**
+- [ ] Jobs detect node drain
+- [ ] Document recovery or failure behavior
+- [ ] Check if pods are rescheduled
+
+### 6.4 Resource Exhaustion Test
+
+Test behavior when cluster resources are exhausted:
+
+```bash
+# Step 1: Create resource-consuming pods to exhaust cluster
+cat > /tmp/resource_hog.yaml << 'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: resource-hog-1
+spec:
+  containers:
+  - name: hog
+    image: nginx
+    resources:
+      requests:
+        cpu: "4"
+        memory: "8Gi"
+EOF
+
+# Deploy multiple resource hogs
+for i in {1..5}; do
+  sed "s/resource-hog-1/resource-hog-$i/" /tmp/resource_hog.yaml | kubectl apply -f -
+done
+
+# Step 2: Launch JobGroup while resources are constrained
+sky jobs launch tests/test_job_groups/k8s_basic_test.yaml -y
+
+# Step 3: Observe behavior
+sky jobs queue
+kubectl get pods -A | grep -E "(sky|resource-hog)"
+
+# Step 4: Clean up resource hogs
+kubectl delete pods -l app!=skypilot --field-selector=metadata.name=resource-hog-1
+for i in {1..5}; do
+  kubectl delete pod resource-hog-$i --ignore-not-found
+done
+
+# Step 5: Check if jobs recover
 watch -n 5 sky jobs queue
 ```
 
-**Expected behavior (based on PR notes):**
-- Jobs may fail rather than recover automatically
-- Document actual recovery behavior
+**Verification:**
+- [ ] Jobs queue or fail gracefully when resources unavailable
+- [ ] Clear error messages about resource constraints
+- [ ] Jobs proceed when resources become available
+
+### 6.5 Network Partition Simulation
+
+Test behavior when network issues occur between pods:
+
+```bash
+# Step 1: Launch networking test
+sky jobs launch tests/test_job_groups/k8s_networking_test.yaml -y
+
+# Step 2: Wait for both pods to be running
+sleep 30
+kubectl get pods -A | grep sky
+
+# Step 3: Create network policy to block traffic (requires NetworkPolicy support)
+cat > /tmp/network_block.yaml << 'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: block-all-traffic
+spec:
+  podSelector:
+    matchLabels:
+      # Match SkyPilot pods - adjust label as needed
+      app: skypilot
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress: []
+  egress: []
+EOF
+
+# Apply network policy
+NAMESPACE="default"  # Update based on actual namespace
+kubectl apply -f /tmp/network_block.yaml -n $NAMESPACE
+
+# Step 4: Observe behavior
+sleep 30
+sky jobs queue
+
+# Step 5: Remove network policy
+kubectl delete networkpolicy block-all-traffic -n $NAMESPACE
+
+# Step 6: Check if jobs recover
+watch -n 5 sky jobs queue
+```
+
+**Note:** NetworkPolicy support varies by cluster configuration.
+
+### 6.6 Controller Process Failure
+
+Test behavior when the SkyPilot controller encounters issues:
+
+```bash
+# Step 1: Launch a long-running JobGroup
+sky jobs launch /tmp/k8s_preemption_test.yaml -y
+
+# Step 2: Wait for jobs to be running
+sleep 60
+sky jobs queue
+
+# Step 3: Restart the API server (simulates controller restart)
+sky api stop
+sleep 5
+sky api start
+
+# Step 4: Check if jobs continue correctly
+sky jobs queue
+
+# Step 5: Verify job completion
+# Jobs should either:
+# - Continue running and complete successfully
+# - Be marked as needing recovery
+```
+
+**Verification:**
+- [ ] API server restart doesn't crash running jobs
+- [ ] Job status is correctly reflected after restart
+- [ ] Jobs either complete or enter recovery state
+
+### 6.7 Partial JobGroup Failure Recovery
+
+Test what happens when only some jobs in a JobGroup fail:
+
+**Test file:** `k8s_partial_failure_test.yaml`
+
+```yaml
+---
+name: k8s-partial-failure
+placement: SAME_INFRA
+execution: parallel
+---
+name: stable-job-1
+resources:
+  cpus: 2
+  infra: kubernetes
+run: |
+  echo "Stable job 1 starting"
+  for i in {1..30}; do
+    echo "Stable 1 heartbeat $i"
+    sleep 5
+  done
+  echo "Stable job 1 completed successfully"
+---
+name: flaky-job
+resources:
+  cpus: 2
+  infra: kubernetes
+  job_recovery:
+    max_restarts_on_errors: 2
+    recover_on_exit_codes: [1]
+run: |
+  echo "Flaky job starting"
+  sleep 30
+  echo "Flaky job failing intentionally"
+  exit 1
+---
+name: stable-job-2
+resources:
+  cpus: 2
+  infra: kubernetes
+run: |
+  echo "Stable job 2 starting"
+  for i in {1..30}; do
+    echo "Stable 2 heartbeat $i"
+    sleep 5
+  done
+  echo "Stable job 2 completed successfully"
+```
+
+```bash
+# Launch the test
+sky jobs launch k8s_partial_failure_test.yaml -y
+
+# Monitor behavior
+watch -n 5 sky jobs queue
+
+# Document:
+# 1. Does flaky-job attempt recovery?
+# 2. Do stable jobs continue running?
+# 3. What is the final state of each job?
+# 4. Are all clusters cleaned up?
+```
+
+**Verification:**
+- [ ] Recovery attempts occur for flaky-job
+- [ ] Stable jobs are not affected by flaky-job failure
+- [ ] Final states are correctly reported
+- [ ] Cleanup handles partial success/failure
+
+### 6.8 Recovery Test Result Template
+
+| Scenario | Expected Behavior | Actual Behavior | Pass/Fail | Notes |
+|----------|-------------------|-----------------|-----------|-------|
+| Pod deletion | Recovery or FAILED | | | |
+| Node drain | Pods rescheduled or FAILED | | | |
+| Resource exhaustion | Queued or clear error | | | |
+| Network partition | Timeout/retry or FAILED | | | |
+| Controller restart | Jobs continue | | | |
+| Partial failure | Other jobs unaffected | | | |
+| Exit code recovery | Job restarts | | | |
+
+**Key questions to document:**
+1. Does the JobGroup use all-or-nothing failure semantics?
+2. Are healthy jobs affected when one job fails?
+3. Is networking re-established after pod recovery?
+4. How long does recovery take?
+5. What happens to in-progress work when recovery occurs?
 
 ---
 
@@ -905,6 +1449,8 @@ sky jobs queue
 
 ## Cleanup Commands
 
+### SkyPilot Resource Cleanup
+
 ```bash
 # Cancel all running jobs
 sky jobs cancel -a
@@ -917,6 +1463,60 @@ sky down --all -y
 
 # Verify cleanup
 kubectl get pods -A | grep sky
+```
+
+### GKE Cluster Management
+
+#### Scale Down Node Pools (Cost Savings)
+
+```bash
+# Scale down node pools after testing to save costs
+gcloud container clusters resize $CLUSTER_NAME \
+    --node-pool cpu-pool \
+    --num-nodes 0 \
+    --zone $GCP_ZONE \
+    --quiet
+
+gcloud container clusters resize $CLUSTER_NAME \
+    --node-pool highmem-pool \
+    --num-nodes 0 \
+    --zone $GCP_ZONE \
+    --quiet
+
+gcloud container clusters resize $CLUSTER_NAME \
+    --node-pool highcpu-pool \
+    --num-nodes 0 \
+    --zone $GCP_ZONE \
+    --quiet
+
+# Scale down GPU pool if created
+gcloud container clusters resize $CLUSTER_NAME \
+    --node-pool gpu-pool \
+    --num-nodes 0 \
+    --zone $GCP_ZONE \
+    --quiet 2>/dev/null || true
+```
+
+#### Delete GKE Cluster (Full Teardown)
+
+```bash
+# WARNING: This deletes the entire cluster and all data
+gcloud container clusters delete $CLUSTER_NAME \
+    --zone $GCP_ZONE \
+    --quiet
+
+# Verify deletion
+gcloud container clusters list
+```
+
+#### Delete Individual Node Pools
+
+```bash
+# Delete specific node pool
+gcloud container node-pools delete gpu-pool \
+    --cluster $CLUSTER_NAME \
+    --zone $GCP_ZONE \
+    --quiet
 ```
 
 ---
