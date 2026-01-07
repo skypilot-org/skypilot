@@ -535,9 +535,14 @@ def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]]) -> str:
 
     script = textwrap.dedent(f"""
         # Background K8s DNS to IP updater for /etc/hosts
-        (
+        nohup bash -c '
           MAPPINGS="{mapping_pairs}"
           MARKER="# SkyPilot JobGroup K8s entries"
+          LOGFILE="/tmp/skypilot-jobgroup-dns-updater.log"
+
+          echo "$(date '\''+%Y-%m-%d %H:%M:%S'\'') [INFO] Starting DNS updater" >> "$LOGFILE"
+          echo "$(date '\''+%Y-%m-%d %H:%M:%S'\'') [INFO] Monitoring mappings: $MAPPINGS" >> "$LOGFILE"
+
           while true; do
             # Build new entries
             new_entries=""
@@ -553,26 +558,36 @@ def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]]) -> str:
                 current_ip=$(getent hosts "$simple_name" 2>/dev/null | awk '{{print $1}}')
                 if [ "$ip" != "$current_ip" ]; then
                   needs_update=1
+                  echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] IP changed for $simple_name: $current_ip -> $ip" >> "$LOGFILE"
                 fi
+              else
+                echo "$(date '+%Y-%m-%d %H:%M:%S') [WARN] Failed to resolve $k8s_dns" >> "$LOGFILE"
               fi
             done
 
             # Only update /etc/hosts if IPs have changed
             if [ -n "$new_entries" ] && [ $needs_update -eq 1 ]; then
+              echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Updating /etc/hosts" >> "$LOGFILE"
               # Create temp file with updated content
               tmp_file=$(mktemp)
               # Copy existing /etc/hosts, excluding marked JobGroup entries
-              sudo grep -v "$MARKER" /etc/hosts 2>/dev/null > "$tmp_file" || true
+              if ! sudo grep -v "$MARKER" /etc/hosts 2>/dev/null > "$tmp_file"; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Failed to read /etc/hosts" >> "$LOGFILE"
+              fi
               # Append new entries
               echo -n "$new_entries" >> "$tmp_file"
               # Set permissions before move to avoid read failures
               sudo chmod 644 "$tmp_file"
               # Atomic move (rename is atomic on POSIX)
-              sudo mv "$tmp_file" /etc/hosts
+              if sudo mv "$tmp_file" /etc/hosts; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Successfully updated /etc/hosts" >> "$LOGFILE"
+              else
+                echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Failed to update /etc/hosts" >> "$LOGFILE"
+              fi
             fi
             sleep 5
           done
-        ) &
+        ' > /dev/null 2>&1 &
     """)
     return script.strip()
 
