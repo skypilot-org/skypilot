@@ -157,6 +157,7 @@ export function InfrastructureSection({
   actionButton = null, // Optional action button for the header
   contextWorkspaceMap = {}, // Mapping of contexts to workspaces
   contextErrors = {}, // Mapping of contexts to error messages
+  gpuMetricsRefreshTrigger = 0, // Counter for forcing iframe refresh
 }) {
   // Add defensive check for contexts
   const safeContexts = contexts || [];
@@ -526,7 +527,12 @@ export function InfrastructureSection({
 }
 
 // Reusable component for context details
-export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
+export function ContextDetails({
+  contextName,
+  gpusInContext,
+  nodesInContext,
+  gpuMetricsRefreshTrigger = 0,
+}) {
   // Determine if this is an SSH context
   const isSSHContext = contextName.startsWith('ssh-');
   const displayTitle = isSSHContext ? 'Node Pool' : 'Context';
@@ -904,7 +910,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         frameBorder="0"
                         title="GPU Utilization"
                         className="rounded"
-                        key={`gpu-util-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                        key={`gpu-util-${selectedHosts}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger || 0}`}
                       />
                     </div>
                   </div>
@@ -919,7 +925,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         frameBorder="0"
                         title="GPU Memory"
                         className="rounded"
-                        key={`gpu-memory-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                        key={`gpu-memory-${selectedHosts}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger || 0}`}
                       />
                     </div>
                   </div>
@@ -934,7 +940,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         frameBorder="0"
                         title="GPU Power Consumption"
                         className="rounded"
-                        key={`gpu-power-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                        key={`gpu-power-${selectedHosts}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger || 0}`}
                       />
                     </div>
                   </div>
@@ -949,7 +955,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         frameBorder="0"
                         title="GPU Temperature"
                         className="rounded"
-                        key={`gpu-temp-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                        key={`gpu-temp-${selectedHosts}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger || 0}`}
                       />
                     </div>
                   </div>
@@ -964,7 +970,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         frameBorder="0"
                         title="CPU Utilization"
                         className="rounded"
-                        key={`cpu-util-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                        key={`cpu-util-${selectedHosts}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger || 0}`}
                       />
                     </div>
                   </div>
@@ -979,7 +985,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         frameBorder="0"
                         title="Memory Utilization"
                         className="rounded"
-                        key={`memory-util-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                        key={`memory-util-${selectedHosts}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger || 0}`}
                       />
                     </div>
                   </div>
@@ -1808,6 +1814,10 @@ export function GPUs() {
   const [sshAndKubeJobsData, setSshAndKubeJobsData] = useState({});
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
+  // Counter incremented on refresh to force GPU metrics iframes to reload.
+  // When this value changes, the iframe key changes, causing React to remount the iframe.
+  const [gpuMetricsRefreshTrigger, setGpuMetricsRefreshTrigger] = useState(0);
+
   // Selected context for subpage view
   const [selectedContext, setSelectedContext] = useState(null);
 
@@ -2144,6 +2154,9 @@ export function GPUs() {
     dashboardCache.invalidate(getCloudInfrastructure, [false]);
     dashboardCache.invalidate(getSSHNodePools);
 
+    // Increment GPU metrics refresh trigger to force iframe reload
+    setGpuMetricsRefreshTrigger((prev) => prev + 1);
+
     if (refreshDataRef.current) {
       await refreshDataRef.current({
         showLoadingIndicators: true,
@@ -2452,6 +2465,7 @@ export function GPUs() {
         contextName={contextName}
         gpusInContext={gpusInContext}
         nodesInContext={nodesInContext}
+        gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
       />
     );
   };
@@ -2575,6 +2589,7 @@ export function GPUs() {
         isSSH={true}
         contextWorkspaceMap={contextWorkspaceMap}
         contextErrors={contextErrors}
+        gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
         actionButton={
           // TODO: Add back when SSH Node Pool add operation is more robust
           // <button
@@ -2607,6 +2622,7 @@ export function GPUs() {
         isSSH={false}
         contextWorkspaceMap={contextWorkspaceMap}
         contextErrors={contextErrors}
+        gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
       />
     );
   };
