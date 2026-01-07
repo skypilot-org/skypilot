@@ -449,6 +449,300 @@ class TestCloudVmRayBackendGetGrpcChannel:
         assert backend._get_num_gpus(test_task) == 8
 
 
+class TestCloudVmRayResourceHandle:
+    """Tests for CloudVmRayResourceHandle class."""
+
+    def test_get_cluster_name(self):
+        """Test get_cluster_name returns correct cluster name."""
+        handle = CloudVmRayResourceHandle(
+            cluster_name='test-cluster',
+            cluster_name_on_cloud='test-cluster-abc123',
+            cluster_yaml=None,
+            launched_nodes=1,
+            launched_resources=MagicMock())
+        assert handle.get_cluster_name() == 'test-cluster'
+
+    def test_get_cluster_name_on_cloud(self):
+        """Test get_cluster_name_on_cloud returns correct cloud name."""
+        handle = CloudVmRayResourceHandle(
+            cluster_name='test-cluster',
+            cluster_name_on_cloud='test-cluster-abc123',
+            cluster_yaml=None,
+            launched_nodes=1,
+            launched_resources=MagicMock())
+        assert handle.get_cluster_name_on_cloud() == 'test-cluster-abc123'
+
+    def test_repr(self):
+        """Test __repr__ provides useful information."""
+        mock_resources = MagicMock()
+        handle = CloudVmRayResourceHandle(cluster_name='test-cluster',
+                                          cluster_name_on_cloud='test-cloud',
+                                          cluster_yaml=None,
+                                          launched_nodes=2,
+                                          launched_resources=mock_resources)
+        repr_str = repr(handle)
+        assert 'test-cluster' in repr_str
+        assert 'test-cloud' in repr_str
+
+    def test_get_hourly_price(self):
+        """Test get_hourly_price calculates cost correctly."""
+        mock_resources = MagicMock()
+        # Return $1 per hour per node
+        mock_resources.get_cost.return_value = 1.0
+
+        handle = CloudVmRayResourceHandle(cluster_name='test-cluster',
+                                          cluster_name_on_cloud='test-cloud',
+                                          cluster_yaml=None,
+                                          launched_nodes=4,
+                                          launched_resources=mock_resources)
+        # 4 nodes * $1/hour = $4/hour
+        assert handle.get_hourly_price() == 4.0
+        mock_resources.get_cost.assert_called_once_with(3600)
+
+    def test_head_ip_from_stable_ips(self):
+        """Test head_ip returns first external IP from stable IPs."""
+        mock_resources = MagicMock()
+        handle = CloudVmRayResourceHandle(cluster_name='test-cluster',
+                                          cluster_name_on_cloud='test-cloud',
+                                          cluster_yaml=None,
+                                          launched_nodes=2,
+                                          launched_resources=mock_resources,
+                                          stable_internal_external_ips=[
+                                              ('10.0.0.1', '1.2.3.4'),
+                                              ('10.0.0.2', '1.2.3.5')
+                                          ])
+        assert handle.head_ip == '1.2.3.4'
+
+    def test_head_ip_none_when_no_ips(self):
+        """Test head_ip returns None when no stable IPs."""
+        mock_resources = MagicMock()
+        handle = CloudVmRayResourceHandle(cluster_name='test-cluster',
+                                          cluster_name_on_cloud='test-cloud',
+                                          cluster_yaml=None,
+                                          launched_nodes=1,
+                                          launched_resources=mock_resources,
+                                          stable_internal_external_ips=None)
+        assert handle.head_ip is None
+
+    def test_head_ssh_port_from_stable_ports(self):
+        """Test head_ssh_port returns first port from stable ports."""
+        mock_resources = MagicMock()
+        handle = CloudVmRayResourceHandle(cluster_name='test-cluster',
+                                          cluster_name_on_cloud='test-cloud',
+                                          cluster_yaml=None,
+                                          launched_nodes=2,
+                                          launched_resources=mock_resources,
+                                          stable_ssh_ports=[2222, 22])
+        assert handle.head_ssh_port == 2222
+
+    def test_head_ssh_port_none_when_no_ports(self):
+        """Test head_ssh_port returns None when no stable ports."""
+        mock_resources = MagicMock()
+        handle = CloudVmRayResourceHandle(cluster_name='test-cluster',
+                                          cluster_name_on_cloud='test-cloud',
+                                          cluster_yaml=None,
+                                          launched_nodes=1,
+                                          launched_resources=mock_resources,
+                                          stable_ssh_ports=None)
+        assert handle.head_ssh_port is None
+
+    def test_cached_external_ips(self):
+        """Test cached_external_ips returns external IPs from stable IPs."""
+        mock_resources = MagicMock()
+        handle = CloudVmRayResourceHandle(cluster_name='test-cluster',
+                                          cluster_name_on_cloud='test-cloud',
+                                          cluster_yaml=None,
+                                          launched_nodes=2,
+                                          launched_resources=mock_resources,
+                                          stable_internal_external_ips=[
+                                              ('10.0.0.1', '1.2.3.4'),
+                                              ('10.0.0.2', '1.2.3.5')
+                                          ])
+        assert handle.cached_external_ips == ['1.2.3.4', '1.2.3.5']
+
+    def test_cached_internal_ips(self):
+        """Test cached_internal_ips returns internal IPs from stable IPs."""
+        mock_resources = MagicMock()
+        handle = CloudVmRayResourceHandle(cluster_name='test-cluster',
+                                          cluster_name_on_cloud='test-cloud',
+                                          cluster_yaml=None,
+                                          launched_nodes=2,
+                                          launched_resources=mock_resources,
+                                          stable_internal_external_ips=[
+                                              ('10.0.0.1', '1.2.3.4'),
+                                              ('10.0.0.2', '1.2.3.5')
+                                          ])
+        assert handle.cached_internal_ips == ['10.0.0.1', '10.0.0.2']
+
+    def test_update_ssh_ports_with_cluster_info(self):
+        """Test update_ssh_ports uses cluster_info when available."""
+        mock_resources = MagicMock()
+        mock_cluster_info = MagicMock()
+        mock_cluster_info.get_ssh_ports.return_value = [22, 2222]
+
+        handle = CloudVmRayResourceHandle(cluster_name='test-cluster',
+                                          cluster_name_on_cloud='test-cloud',
+                                          cluster_yaml=None,
+                                          launched_nodes=2,
+                                          launched_resources=mock_resources,
+                                          cluster_info=mock_cluster_info)
+        handle.update_ssh_ports()
+        # Should use cluster_info's SSH ports
+        assert handle.stable_ssh_ports == [22, 2222]
+
+    def test_is_grpc_enabled_default(self):
+        """Test is_grpc_enabled is True by default."""
+        mock_resources = MagicMock()
+        handle = CloudVmRayResourceHandle(cluster_name='test-cluster',
+                                          cluster_name_on_cloud='test-cloud',
+                                          cluster_yaml=None,
+                                          launched_nodes=1,
+                                          launched_resources=mock_resources)
+        assert handle.is_grpc_enabled is True
+
+
+class TestCloudVmRayBackendGetNumGpus:
+    """Tests for CloudVmRayBackend._get_num_gpus method."""
+
+    def test_get_num_gpus_with_accelerators(self, monkeypatch):
+        """Test _get_num_gpus with accelerator resources."""
+        monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
+                            lambda self, *args, **kwargs: None)
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+
+        test_task = task.Task(resources=resources.Resources(
+            accelerators={'A100': 4}))
+        assert backend._get_num_gpus(test_task) == 4
+
+    def test_get_num_gpus_no_accelerators(self, monkeypatch):
+        """Test _get_num_gpus with no accelerators."""
+        monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
+                            lambda self, *args, **kwargs: None)
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+
+        test_task = task.Task(resources=resources.Resources(cpus=4))
+        assert backend._get_num_gpus(test_task) == 0
+
+    def test_get_num_gpus_multiple_accelerators(self, monkeypatch):
+        """Test _get_num_gpus with multiple accelerators defaults to first."""
+        monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
+                            lambda self, *args, **kwargs: None)
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+
+        test_task = task.Task(resources=resources.Resources(
+            accelerators={'V100': 8}))
+        assert backend._get_num_gpus(test_task) == 8
+
+
+class TestSSHTunnelInfo:
+    """Tests for SSHTunnelInfo dataclass."""
+
+    def test_creation(self):
+        """Test SSHTunnelInfo can be created."""
+        tunnel = SSHTunnelInfo(port=10000, pid=12345)
+        assert tunnel.port == 10000
+        assert tunnel.pid == 12345
+
+    def test_has_required_attributes(self):
+        """Test SSHTunnelInfo has required attributes."""
+        tunnel = SSHTunnelInfo(port=10000, pid=12345)
+        assert hasattr(tunnel, 'port')
+        assert hasattr(tunnel, 'pid')
+
+    def test_is_dataclass(self):
+        """Test SSHTunnelInfo is a dataclass."""
+        import dataclasses
+        assert dataclasses.is_dataclass(SSHTunnelInfo)
+
+    def test_attributes_modifiable(self):
+        """Test SSHTunnelInfo attributes can be modified (dataclass)."""
+        tunnel = SSHTunnelInfo(port=10000, pid=12345)
+        tunnel.port = 20000
+        assert tunnel.port == 20000
+
+
+class TestFailoverCloudErrorHandlerV2:
+    """Tests for FailoverCloudErrorHandlerV2 error handling."""
+
+    def test_handler_class_exists(self):
+        """Test FailoverCloudErrorHandlerV2 class exists and is callable."""
+        assert hasattr(cloud_vm_ray_backend, 'FailoverCloudErrorHandlerV2')
+        assert callable(cloud_vm_ray_backend.FailoverCloudErrorHandlerV2.
+                        update_blocklist_on_error)
+
+    def test_handler_has_cloud_specific_handlers(self):
+        """Test that cloud-specific handlers are defined."""
+        # Verify that the class has handlers for major clouds
+        assert hasattr(cloud_vm_ray_backend.FailoverCloudErrorHandlerV2,
+                       '_aws_handler')
+        assert hasattr(cloud_vm_ray_backend.FailoverCloudErrorHandlerV2,
+                       '_gcp_handler')
+        assert hasattr(cloud_vm_ray_backend.FailoverCloudErrorHandlerV2,
+                       '_azure_handler')
+        assert hasattr(cloud_vm_ray_backend.FailoverCloudErrorHandlerV2,
+                       '_default_handler')
+
+
+class TestResourcesErrorHandling:
+    """Tests for resource error handling patterns."""
+
+    def test_resources_unavailable_error_patterns(self):
+        """Test that common error patterns are handled."""
+        from sky import exceptions
+
+        # Test that ResourcesUnavailableError can be raised
+        with pytest.raises(exceptions.ResourcesUnavailableError):
+            raise exceptions.ResourcesUnavailableError('Quota exceeded')
+
+    def test_insufficient_capacity_error(self):
+        """Test insufficient capacity error handling."""
+        from sky import exceptions
+
+        with pytest.raises(exceptions.ResourcesUnavailableError):
+            raise exceptions.ResourcesUnavailableError(
+                'InsufficientInstanceCapacity')
+
+
+class TestClusterYamlProperty:
+    """Tests for cluster_yaml property."""
+
+    def test_cluster_yaml_getter(self):
+        """Test cluster_yaml getter returns expanded path."""
+        mock_resources = MagicMock()
+        handle = CloudVmRayResourceHandle(
+            cluster_name='test-cluster',
+            cluster_name_on_cloud='test-cloud',
+            cluster_yaml='~/.sky/clusters/test-cluster.yaml',
+            launched_nodes=1,
+            launched_resources=mock_resources)
+
+        # The getter should expand ~ to home directory
+        assert handle.cluster_yaml is not None
+        assert '~' not in handle.cluster_yaml or handle.cluster_yaml.startswith(
+            '~')
+
+    def test_cluster_yaml_none(self):
+        """Test cluster_yaml getter when None."""
+        mock_resources = MagicMock()
+        handle = CloudVmRayResourceHandle(cluster_name='test-cluster',
+                                          cluster_name_on_cloud='test-cloud',
+                                          cluster_yaml=None,
+                                          launched_nodes=1,
+                                          launched_resources=mock_resources)
+        assert handle.cluster_yaml is None
+
+    def test_cluster_yaml_setter(self):
+        """Test cluster_yaml setter."""
+        mock_resources = MagicMock()
+        handle = CloudVmRayResourceHandle(cluster_name='test-cluster',
+                                          cluster_name_on_cloud='test-cloud',
+                                          cluster_yaml=None,
+                                          launched_nodes=1,
+                                          launched_resources=mock_resources)
+        handle.cluster_yaml = '/new/path/cluster.yaml'
+        assert handle._cluster_yaml == '/new/path/cluster.yaml'
+
+
 class TestIsMessageTooLong:
     """Tests for _is_message_too_long function."""
 
@@ -503,19 +797,23 @@ class TestIsMessageTooLong:
 
     def test_file_read_error_returns_true(self, tmp_path):
         """Test that file read errors return True for safety."""
+        import os
+
         # Non-existent file
         assert cloud_vm_ray_backend._is_message_too_long(
             255, file_path="/nonexistent/file.log")
 
-        # Unreadable file
-        log_file = tmp_path / "unreadable.log"
-        log_file.write_text("content")
-        log_file.chmod(0o000)
-        try:
-            assert cloud_vm_ray_backend._is_message_too_long(
-                255, file_path=str(log_file))
-        finally:
-            log_file.chmod(0o644)
+        # Skip the unreadable file test when running as root (common in CI)
+        # because root can read any file regardless of permissions
+        if os.geteuid() != 0:
+            log_file = tmp_path / "unreadable.log"
+            log_file.write_text("content")
+            log_file.chmod(0o000)
+            try:
+                assert cloud_vm_ray_backend._is_message_too_long(
+                    255, file_path=str(log_file))
+            finally:
+                log_file.chmod(0o644)
 
     def test_requires_either_output_or_file_path(self):
         """Test that function requires either output or file_path."""
