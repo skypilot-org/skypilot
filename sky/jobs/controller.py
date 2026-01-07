@@ -869,16 +869,36 @@ class JobController:
                 recovered_time=recovered_time,
                 callback_func=callback_func)
 
-    async def _prepare_task_for_launch(
-        self, task: 'sky.Task', task_id: int
+    async def _prepare_job_group_task_for_launch(
+        self, task: 'sky.Task', task_id: int, job_group_name: str,
+        other_job_names: List[str]
     ) -> Tuple[Optional[str], recovery_strategy.StrategyExecutor]:
-        """Prepare a task for launch: create executor and set STARTING state.
+        """Prepare a JobGroup task for launch.
+
+        This function:
+        1. Injects a wait script to ensure /etc/hosts is ready
+        2. Creates the recovery strategy executor
+        3. Sets task state to STARTING
+
+        Args:
+            task: Task to prepare.
+            task_id: Task ID.
+            job_group_name: JobGroup name.
+            other_job_names: Other job names in the group (to wait for).
 
         Returns:
             Tuple of (cluster_name, executor).
         """
         task_name = task.name
         assert task_name is not None, f'Task {task_id} must have a name'
+
+        # Inject wait script to ensure /etc/hosts is ready before task starts
+        wait_script = job_group_networking.generate_wait_for_networking_script(
+            job_group_name, other_job_names)
+        if wait_script:
+            # Prepend wait script to task setup
+            current_setup = task.setup or ''
+            task.setup = wait_script + '\n\n' + current_setup
 
         cluster_name = (managed_job_utils.generate_managed_job_cluster_name(
             task_name, self._job_id) if self._pool is None else None)
@@ -1118,8 +1138,10 @@ class JobController:
         try:
             logger.info('Phase 1: Launching all clusters in parallel...')
             for task_id, task in enumerate(tasks):
-                name, executor = await self._prepare_task_for_launch(
-                    task, task_id)
+                # Get list of other job names (excluding current task)
+                other_job_names = [t.name for t in tasks if t.name != task.name]
+                name, executor = await self._prepare_job_group_task_for_launch(
+                    task, task_id, job_group_name, other_job_names)
                 cluster_names.append(name)
                 strategy_executors.append(executor)
 

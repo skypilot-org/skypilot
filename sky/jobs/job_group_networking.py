@@ -23,15 +23,13 @@ Design Goals:
 """
 import asyncio
 import enum
+import textwrap
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from sky import clouds as sky_clouds
 from sky import sky_logging
-from sky.jobs import utils as managed_job_utils
-from sky.utils import common_utils
 
 if TYPE_CHECKING:
-    from sky import clouds
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.utils import command_runner
@@ -59,35 +57,56 @@ def _is_kubernetes(
     if handle is None:
         return False
     if handle.launched_resources and handle.launched_resources.cloud:
-        # Import here to avoid circular dependency
-        from sky import clouds as sky_clouds
         return handle.launched_resources.cloud.is_same_cloud(
             sky_clouds.Kubernetes())
     return False
 
 
-def _get_k8s_internal_svc(
-        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
-) -> Optional[str]:
-    """Get Kubernetes internal service DNS URL.
+def _get_k8s_namespace_from_handle(
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle') -> str:
+    """Get Kubernetes namespace from a resource handle.
 
     Returns:
-        DNS URL like 'pod-name.namespace.svc.cluster.local', or None if
-        not available.
+        Namespace string, defaults to 'default' if not available.
     """
-    if handle is None or handle.cached_cluster_info is None:
-        return None
+    if handle is None:
+        return 'default'
 
-    try:
-        # cached_cluster_info is already a ClusterInfo object
-        cluster_info = handle.cached_cluster_info
-        head_instance = cluster_info.get_head_instance()
-        if head_instance and head_instance.internal_svc:
-            return head_instance.internal_svc
-    except Exception as e:
-        logger.warning(f'Failed to get K8s internal_svc: {e}')
+    # Try to get namespace from launched_resources
+    if handle.launched_resources and handle.launched_resources.region:
+        # In K8s, region is the context name
+        try:
+            from sky.provision.kubernetes import utils as k8s_utils
+            return k8s_utils.get_kube_config_context_namespace(
+                handle.launched_resources.region)
+        except Exception:
+            pass
 
-    return None
+    # Fallback to default namespace
+    return 'default'
+
+
+def _construct_k8s_internal_svc(cluster_name_on_cloud: str, namespace: str,
+                                node_idx: int) -> str:
+    """Construct Kubernetes internal service DNS URL.
+
+    The pod creation logic guarantees this format.
+
+    Args:
+        cluster_name_on_cloud: Cluster name on cloud
+        namespace: Kubernetes namespace
+        node_idx: Node index (0 for head, 1+ for workers)
+
+    Returns:
+        DNS URL like '{cluster}-head.{namespace}.svc.cluster.local'
+    """
+    if node_idx == 0:
+        # Head node
+        return f'{cluster_name_on_cloud}-head.{namespace}.svc.cluster.local'
+    else:
+        # Worker node
+        return (f'{cluster_name_on_cloud}-worker{node_idx}.'
+                f'{namespace}.svc.cluster.local')
 
 
 def _get_k8s_external_ip(
@@ -107,81 +126,23 @@ def _get_k8s_external_ip(
     return handle.head_ip
 
 
-class JobAddressResolver:
-    """Resolves job addresses based on placement mode.
+def _get_job_address(job_name: str,
+                     job_group_name: str,
+                     node_idx: int = 0) -> str:
+    """Get the address for a job node.
 
-    This class abstracts address resolution to support different placement
-    modes. Currently only SAME_INFRA is implemented.
+    Returns the hostname that will be resolved via /etc/hosts injection.
+    Both K8s and SSH clouds use this same hostname format.
 
-    For SAME_INFRA:
-        - K8s: Uses internal DNS (pod.namespace.svc.cluster.local)
-        - SSH clouds: Uses cluster hostname (resolved via /etc/hosts)
+    Args:
+        job_name: Name of the job.
+        job_group_name: Name of the JobGroup.
+        node_idx: Node index (0 for head, 1+ for workers). Defaults to 0.
 
-    For future CROSS_INFRA:
-        - K8s: Uses external IP (LoadBalancer/Ingress)
-        - SSH clouds: Uses public IP
+    Returns:
+        Hostname string in format: {job_name}-{node_idx}.{job_group_name}
     """
-
-    @staticmethod
-    def get_address(
-        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-        job_name: str,
-        job_group_name: str,
-        placement: PlacementMode = PlacementMode.SAME_INFRA,
-    ) -> str:
-        """Get the address for a job.
-
-        Args:
-            handle: Resource handle for the job's cluster.
-            job_name: Name of the job.
-            job_group_name: Name of the JobGroup.
-            placement: Placement mode.
-
-        Returns:
-            Address string (DNS hostname or IP).
-        """
-        if placement == PlacementMode.SAME_INFRA:
-            return JobAddressResolver._get_internal_address(
-                handle, job_name, job_group_name)
-        else:
-            # Future: CROSS_INFRA
-            return JobAddressResolver._get_external_address(handle)
-
-    @staticmethod
-    def _get_internal_address(
-        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-        job_name: str,
-        job_group_name: str,
-    ) -> str:
-        """Get internal address for SAME_INFRA placement."""
-        if _is_kubernetes(handle):
-            # K8s: Use native DNS URL
-            internal_svc = _get_k8s_internal_svc(handle)
-            if internal_svc:
-                return internal_svc
-            # Fallback: use head IP
-            logger.warning(f'K8s internal_svc not available for {job_name}, '
-                           'falling back to head_ip')
-            if handle and handle.head_ip:
-                return handle.head_ip
-            return f'{job_name}.{job_group_name}'
-        else:
-            # SSH clouds: Use hostname (resolved via /etc/hosts)
-            # Format: {job_name}.{job_group_name} for head node
-            return f'{job_name}.{job_group_name}'
-
-    @staticmethod
-    def _get_external_address(
-        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',) -> str:
-        """Get external address for CROSS_INFRA placement (future)."""
-        if _is_kubernetes(handle):
-            external_ip = _get_k8s_external_ip(handle)
-            if external_ip:
-                return external_ip
-        # SSH clouds: Use external IP
-        if handle and handle.head_ip:
-            return handle.head_ip
-        raise ValueError('Cannot determine external address for job')
+    return f'{job_name}-{node_idx}.{job_group_name}'
 
 
 # ============================================================================
@@ -196,8 +157,9 @@ def _generate_hosts_entries(
 ) -> str:
     """Generate /etc/hosts entries for all jobs in a JobGroup.
 
-    For SSH clouds: Only head node (index 0) with format {job_name}.{job_group_name}
-    For K8s: Headless service URL with format {job_name}.{job_group_name}
+    For SSH clouds: Each node with format {job_name}-{node_idx}.{job_group_name}
+    For K8s: Headless service URLs for head and workers with format
+        {job_name}-{node_idx}.{job_group_name}
 
     Args:
         job_group_name: Name of the JobGroup.
@@ -215,26 +177,36 @@ def _generate_hosts_entries(
             continue
 
         job_name = task.name
-        hostname = f'{job_name}.{job_group_name}'
 
         if _is_kubernetes(handle):
-            # K8s: Inject headless service URL
-            internal_svc = _get_k8s_internal_svc(handle)
-            if internal_svc:
+            # K8s: Inject headless service URLs for head and workers
+            # Construct internal_svc URLs using the guaranteed format
+            cluster_name_on_cloud = handle.cluster_name_on_cloud
+            namespace = _get_k8s_namespace_from_handle(handle)
+
+            # Get number of nodes
+            num_nodes = (len(handle.stable_internal_external_ips)
+                         if handle.stable_internal_external_ips else 1)
+
+            # Generate entries for all nodes (head + workers)
+            for node_idx in range(num_nodes):
+                hostname = f'{job_name}-{node_idx}.{job_group_name}'
+                internal_svc = _construct_k8s_internal_svc(
+                    cluster_name_on_cloud, namespace, node_idx)
                 entries.append(f'{internal_svc} {hostname}')
-                logger.debug(f'Host entry (K8s): {internal_svc} -> {hostname}')
-            else:
-                logger.warning(f'K8s internal_svc not available for {job_name}')
+                node_type = 'head' if node_idx == 0 else f'worker{node_idx}'
+                logger.debug(f'Host entry (K8s {node_type}): '
+                             f'{internal_svc} -> {hostname}')
         else:
-            # SSH clouds: Inject head node IP only
+            # SSH clouds: Inject all nodes with IPs
             if handle.stable_internal_external_ips is None:
                 logger.warning(f'Skipping job {task.name}: no IP information')
                 continue
-            # Only use head node (index 0)
-            if len(handle.stable_internal_external_ips) > 0:
-                head_ip = handle.stable_internal_external_ips[0][0]
-                entries.append(f'{head_ip} {hostname}')
-                logger.debug(f'Host entry (SSH): {head_ip} -> {hostname}')
+            for node_idx, (internal_ip,
+                           _) in enumerate(handle.stable_internal_external_ips):
+                hostname = f'{job_name}-{node_idx}.{job_group_name}'
+                entries.append(f'{internal_ip} {hostname}')
+                logger.debug(f'Host entry (SSH): {internal_ip} -> {hostname}')
 
     return '\n'.join(entries)
 
@@ -252,10 +224,12 @@ async def _inject_hosts_on_node(
     Returns:
         True if successful, False otherwise.
     """
-    escaped_content = hosts_content.replace("'", "'\\''")
+    # pylint: disable=invalid-string-quote
+    escaped_content = hosts_content.replace("'", "'\\''")  # noqa: Q000
     cmd = (
         f"echo '{escaped_content}' | "  # noqa: Q000
         'sudo tee -a /etc/hosts > /dev/null')
+    # pylint: enable=invalid-string-quote
 
     try:
         returncode, _, stderr = await asyncio.get_event_loop().run_in_executor(
@@ -443,120 +417,41 @@ def get_job_group_env_vars(
     """Get environment variables for JobGroup jobs.
 
     This function generates environment variables that allow jobs to discover
-    each other's addresses.
-
-    There are two modes:
-    1. Post-launch (tasks_handles provided): Uses actual handles
-    2. Pre-launch (tasks + job_id provided): Predicts addresses based on task
-       resources
+    each other's addresses using the consistent hostname format.
 
     Args:
         job_group_name: Name of the JobGroup.
-        tasks_handles: List of (Task, ResourceHandle) tuples. If provided,
-            generates address environment variables using actual handles.
-        tasks: List of tasks (for pre-launch prediction).
-        job_id: Job ID (for pre-launch prediction).
-        placement: Placement mode.
+        tasks_handles: List of (Task, ResourceHandle) tuples.
+        tasks: List of tasks (alternative to tasks_handles).
+        job_id: Job ID (unused, kept for backward compatibility).
+        placement: Placement mode (unused, kept for backward compatibility).
 
     Returns:
         Dict of environment variable name to value.
     """
+    del job_id, placement  # Unused, reserved for future use
+
     env_vars = {
         SKYPILOT_JOBGROUP_NAME_ENV_VAR: job_group_name,
     }
 
-    # Post-launch mode: use actual handles
+    # Get task list from either tasks_handles or tasks
+    task_list: List['task_lib.Task'] = []
     if tasks_handles:
-        for task, handle in tasks_handles:
-            if task.name is None:
-                continue
-            address = JobAddressResolver.get_address(handle, task.name,
-                                                     job_group_name, placement)
-            env_var_name = _make_env_var_name(task.name)
-            env_vars[env_var_name] = address
-        return env_vars
+        task_list = [task for task, _ in tasks_handles]
+    elif tasks:
+        task_list = tasks
 
-    # Pre-launch mode: predict addresses based on task resources
-    if tasks and job_id is not None:
-        for task in tasks:
-            if task.name is None:
-                continue
-            address = _predict_job_address(task, task.name, job_group_name,
-                                           job_id, placement)
-            env_var_name = _make_env_var_name(task.name)
-            env_vars[env_var_name] = address
+    # Generate environment variables for all jobs
+    for task in task_list:
+        if task.name is None:
+            continue
+        # All jobs use head node address (node index 0)
+        address = _get_job_address(task.name, job_group_name, node_idx=0)
+        env_var_name = _make_env_var_name(task.name)
+        env_vars[env_var_name] = address
 
     return env_vars
-
-
-def _predict_job_address(
-    task: 'task_lib.Task',
-    job_name: str,
-    job_group_name: str,
-    job_id: int,
-    placement: PlacementMode,
-) -> str:
-    """Predict job address before launch.
-
-    For SSH clouds: Uses hostname format {job_name}.{job_group_name}
-    For K8s: Predicts DNS URL based on cluster naming convention
-    """
-    # Check if task targets Kubernetes
-    is_k8s = False
-    if task.resources:
-        for resources in task.resources:
-            if resources.cloud is not None:
-                if resources.cloud.is_same_cloud(sky_clouds.Kubernetes()):
-                    is_k8s = True
-                    break
-
-    if is_k8s:
-        # K8s: Predict DNS URL based on managed_job cluster naming convention
-        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-            job_name, job_id)
-        # Apply the same transformation that happens during cluster launch
-        # to get the actual cluster_name_on_cloud
-        k8s_cloud = sky_clouds.Kubernetes()
-        cluster_name_on_cloud = common_utils.make_cluster_name_on_cloud(
-            cluster_name, max_length=k8s_cloud.max_cluster_name_length())
-        # K8s headless service DNS format
-        # Default namespace is 'default', can be configured
-        namespace = _get_k8s_namespace_for_task(task)
-        # Head pod DNS: {cluster_name_on_cloud}-head.{namespace}.svc.cluster.local
-        return f'{cluster_name_on_cloud}-head.{namespace}.svc.cluster.local'
-    else:
-        # SSH clouds: Use hostname format (resolved via /etc/hosts)
-        # Format: {job_name}.{job_group_name} for head node
-        return f'{job_name}.{job_group_name}'
-
-
-def _get_k8s_namespace_for_task(task: 'task_lib.Task') -> str:
-    """Get Kubernetes namespace for a task.
-
-    Checks task resources for K8s context/region and gets the associated
-    namespace. Falls back to 'default'.
-    """
-    # Try to get namespace from task resources
-    if task.resources:
-        for resources in task.resources:
-            if resources.region:
-                # In K8s, region is the context name
-                try:
-                    from sky.provision.kubernetes import utils as k8s_utils
-                    return k8s_utils.get_kube_config_context_namespace(
-                        resources.region)
-                except Exception:
-                    pass
-
-    # Fallback: try current context
-    try:
-        from sky.provision.kubernetes import utils as k8s_utils
-        return k8s_utils.get_kube_config_context_namespace(None)
-    except Exception:
-        pass
-
-    # Default namespace
-    return 'default'
 
 
 def _make_env_var_name(job_name: str) -> str:
@@ -564,3 +459,51 @@ def _make_env_var_name(job_name: str) -> str:
     # Convert job name to uppercase and replace hyphens with underscores
     safe_name = job_name.upper().replace('-', '_')
     return f'SKYPILOT_JOBGROUP_{safe_name}_HOST'
+
+
+def generate_wait_for_networking_script(job_group_name: str,
+                                        other_job_names: List[str]) -> str:
+    """Generate a bash script to wait for /etc/hosts injection.
+
+    This script should be prepended to task.setup to ensure networking
+    is ready before the task starts.
+
+    Args:
+        job_group_name: Name of the JobGroup.
+        other_job_names: List of other job names in the group to wait for.
+
+    Returns:
+        Bash script as a string.
+    """
+    # Generate hostnames to wait for
+    hostnames = [
+        f'{job_name}-0.{job_group_name}' for job_name in other_job_names
+    ]
+
+    if not hostnames:
+        # No other jobs to wait for
+        return ''
+
+    # Create a script that waits for all hostnames to be resolvable
+    hostname_list = ' '.join(hostnames)
+    script = textwrap.dedent(f"""
+        # Wait for JobGroup networking to be ready
+        echo "[SkyPilot] Waiting for JobGroup networking setup..."
+        HOSTNAMES="{hostname_list}"
+        MAX_WAIT=300  # 5 minutes
+        ELAPSED=0
+        for hostname in $HOSTNAMES; do
+          while ! grep -q "$hostname" /etc/hosts 2>/dev/null; do
+            if [ $ELAPSED -ge $MAX_WAIT ]; then
+              echo "[SkyPilot] Error: Timed out waiting for $hostname in /etc/hosts"
+              exit 1
+            fi
+            echo "[SkyPilot] Waiting for $hostname to appear in /etc/hosts..."
+            sleep 2
+            ELAPSED=$((ELAPSED + 2))
+          done
+          echo "[SkyPilot] Found $hostname in /etc/hosts"
+        done
+        echo "[SkyPilot] JobGroup networking is ready!"
+    """)
+    return script.strip()
