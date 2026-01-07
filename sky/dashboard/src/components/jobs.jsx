@@ -1038,7 +1038,7 @@ export function ManagedJobsTable({
                   className="sortable whitespace-nowrap"
                   onClick={() => requestSort('cluster')}
                 >
-                  Resources{getSortDirection('cluster')}
+                  Requested Resources{getSortDirection('cluster')}
                 </TableHead>
                 <TableHead
                   className="sortable whitespace-nowrap"
@@ -1182,11 +1182,18 @@ export function ManagedJobsTable({
                         <TableCell>
                           <NonCapitalizedTooltip
                             content={
-                              item.resources_str_full || item.resources_str
+                              item.requested_resources ||
+                              item.resources_str_full ||
+                              item.resources_str ||
+                              '-'
                             }
                             className="text-sm text-muted-foreground"
                           >
-                            <span>{item.resources_str}</span>
+                            <span>
+                              {item.requested_resources ||
+                                item.resources_str ||
+                                '-'}
+                            </span>
                           </NonCapitalizedTooltip>
                         </TableCell>
                         <TableCell>{item.recoveries}</TableCell>
