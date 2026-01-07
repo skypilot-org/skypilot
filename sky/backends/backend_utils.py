@@ -2467,8 +2467,8 @@ def _update_cluster_status(
         # Check if the cluster is in the process of autostopping
         backend = get_backend_from_handle(handle)
         if isinstance(backend, backends.CloudVmRayBackend):
-            autostop_status = backend.get_autostop_status(handle,
-                                                          stream_logs=False)
+            autostop_status = backend.refresh_autostop_status(handle,
+                                                              stream_logs=False)
             if autostop_status is not None:
                 return _handle_autostopping_cluster(print_newline=False)
 

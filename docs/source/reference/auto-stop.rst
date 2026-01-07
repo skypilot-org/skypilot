@@ -226,7 +226,7 @@ Common use cases for autostop hooks:
              # Upload logs to S3
              aws s3 sync /workspace/logs/ s3://my-bucket/logs/$(date +%Y%m%d)/
              # Or upload to GCS
-             gsutil -m cp -r /workspace/results/ gs://my-bucket/results/$(date +%Y%m%d)/
+             gcloud storage cp -r /workspace/results/ gs://my-bucket/results/$(date +%Y%m%d)/
 
 .. dropdown:: Syncing W&B runs before shutdown
 

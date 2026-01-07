@@ -5252,7 +5252,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 idle_minutes_to_autostop=idle_minutes_to_autostop,
                 down=down)
 
-    def get_autostop_status(
+    def refresh_autostop_status(
             self,
             handle: CloudVmRayResourceHandle,
             stream_logs: bool = True) -> Optional[status_lib.ClusterStatus]:
@@ -5308,7 +5308,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             that the cluster is still autostopping when False is returned,
             due to errors like transient network issues.
         """
-        return self.get_autostop_status(handle, stream_logs) is not None
+        return self.refresh_autostop_status(handle, stream_logs) is not None
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
