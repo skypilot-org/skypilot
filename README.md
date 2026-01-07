@@ -46,8 +46,6 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 </picture>
 
 
-----
-
 :fire: *News* :fire:
 - [Dec 2025] **SkyPilot v0.11** released: Multi-Cloud Pools, Fast Managed Jobs, Enterprise-Readiness at Large Scale, Programmability. [**Release notes**](https://github.com/skypilot-org/skypilot/releases/tag/v0.11.0)
 - [Dec 2025] **SkyPilot Pools** released: Run jobs on a pool of workers (across clouds or clusters) while reusing environment setup. [**blog**](https://blog.skypilot.co/skypilot-pools-deepseek-ocr/), [**docs**](https://docs.skypilot.co/en/latest/examples/pools.html)
@@ -59,8 +57,6 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 - [Sep 2025] Network and Storage Benchmarks for LLM training on the cloud: [**blog**](https://maknee.github.io/blog/2025/Network-And-Storage-Training-Skypilot/)
 - [Aug 2025] Serve and finetune **OpenAI GPT-OSS models** (gpt-oss-120b, gpt-oss-20b) with one command on any infra: [**serve**](./llm/gpt-oss/) + [**LoRA and full finetuning**](./llm/gpt-oss-finetuning/)
 - [Jul 2025] Run distributed **RL training for LLMs** with Verl (PPO, GRPO) on any cloud: [**example**](./llm/verl/)
-
-----
 
 ## Overview
 
