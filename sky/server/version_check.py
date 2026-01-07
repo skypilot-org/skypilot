@@ -4,7 +4,7 @@ import json
 import pathlib
 import re
 import time
-from typing import Optional, Tuple
+from typing import Optional
 
 from packaging import version as version_lib
 import requests
@@ -72,27 +72,6 @@ def _is_cache_valid(cache: dict) -> bool:
     return (current_time - cached_time) < CACHE_TTL_SECONDS
 
 
-def _check_pypi_nightly() -> Optional[str]:
-    """Check pypi.org for latest nightly version."""
-    try:
-        # Check pypi.org for skypilot-nightly
-        url = 'https://pypi.org/pypi/skypilot-nightly/json'
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            versions = list(data.get('releases', {}).keys())
-            if versions:
-                # Filter dev versions and get the latest
-                dev_versions = [v for v in versions if '.dev' in v]
-                if dev_versions:
-                    # Sort by version and return latest
-                    dev_versions.sort(key=version_lib.parse)
-                    return dev_versions[-1]
-    except Exception as e:  # pylint: disable=broad-except
-        logger.debug(f'Failed to check pypi.org for nightly: {e}')
-    return None
-
-
 def _check_pypi_release() -> Optional[str]:
     """Check pypi.org for latest release version."""
     try:
@@ -110,66 +89,57 @@ def _check_pypi_release() -> Optional[str]:
     return None
 
 
-def _check_pypi_versions() -> Tuple[Optional[str], Optional[str]]:
-    """Check PyPI for latest nightly and release versions.
+def _check_pypi_versions() -> Optional[str]:
+    """Check PyPI for latest stable release version.
 
     Returns:
-        Tuple of (latest_nightly_version, latest_release_version)
+        Latest stable release version, or None if not available.
     """
-    nightly_version = _check_pypi_nightly()
-    release_version = _check_pypi_release()
-    return nightly_version, release_version
+    return _check_pypi_release()
 
 
-def get_latest_versions() -> Tuple[Optional[str], Optional[str]]:
-    """Get latest versions from cache or PyPI.
+def get_latest_versions() -> Optional[str]:
+    """Get latest stable release version from cache or PyPI.
 
     Returns:
-        Tuple of (latest_nightly_version, latest_release_version)
+        Latest stable release version, or None if not available.
     """
     # Check cache first
     cache = _load_cache()
     if cache and _is_cache_valid(cache):
-        return cache.get('nightly_version'), cache.get('release_version')
+        return cache.get('release_version')
 
     # Cache expired or doesn't exist, check PyPI
-    nightly_version, release_version = _check_pypi_versions()
+    release_version = _check_pypi_versions()
 
     # Save to cache
     _save_cache({
-        'nightly_version': nightly_version,
         'release_version': release_version,
         'cached_at': time.time(),
     })
 
-    return nightly_version, release_version
+    return release_version
 
 
 def get_latest_version_for_current() -> Optional[str]:
-    """Get latest version for the current SkyPilot version type.
+    """Get latest stable release version for notifications.
 
     Returns:
-        Latest nightly version if current is nightly, latest release
-        version otherwise. Returns None if current version is dev, if
-        no latest version is available, or if latest version is not newer
-        than current version.
+        Latest stable release version (not nightly or dev). Returns None
+        if current version is dev, if no latest version is available, or
+        if latest version is not newer than current version.
     """
     # Skip for dev versions - cache should handle this, but double-check
     if _is_dev_version(sky.__version__):
         return None
 
-    nightly_version, release_version = get_latest_versions()
-
-    # If current version is nightly, return nightly_version;
-    # otherwise return release_version
-    is_current_nightly = '.dev' in sky.__version__.lower()
-    if is_current_nightly:
-        latest_version = nightly_version
-    else:
-        latest_version = release_version
+    latest_version = get_latest_versions()
 
     # Only return if latest version exists and is newer than current
     if latest_version:
+        # Skip if latest version is a dev/nightly version
+        if _is_dev_version(latest_version) or '.dev' in latest_version.lower():
+            return None
         if version_lib.parse(latest_version) > version_lib.parse(
                 sky.__version__):
             return latest_version

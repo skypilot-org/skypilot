@@ -186,13 +186,9 @@ def _check_and_print_upgrade_hint(api_server_info: ApiServerInfo,
 
     # Add server-specific instructions
     if is_local:
-        # Deduce if it's a nightly version and generate upgrade command
-        is_nightly = version_lib.parse(latest_version).is_devrelease
-
-        if is_nightly:
-            upgrade_command = 'pip install --upgrade --pre skypilot-nightly'
-        else:
-            upgrade_command = 'pip install --upgrade skypilot'
+        # Server only returns stable releases, so always
+        # use stable upgrade command
+        upgrade_command = 'pip install --upgrade skypilot'
 
         hint_lines.extend([
             f'{ux_utils.INDENT_SYMBOL}Upgrade with: '
