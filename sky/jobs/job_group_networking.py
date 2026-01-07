@@ -25,7 +25,10 @@ import asyncio
 import enum
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
+from sky import clouds as sky_clouds
 from sky import sky_logging
+from sky.jobs import utils as managed_job_utils
+from sky.utils import common_utils
 
 if TYPE_CHECKING:
     from sky import clouds
@@ -161,11 +164,11 @@ class JobAddressResolver:
                            'falling back to head_ip')
             if handle and handle.head_ip:
                 return handle.head_ip
-            return f'{job_name}-0.{job_group_name}'
+            return f'{job_name}.{job_group_name}'
         else:
             # SSH clouds: Use hostname (resolved via /etc/hosts)
-            # Format: {job_name}-0.{job_group_name}
-            return f'{job_name}-0.{job_group_name}'
+            # Format: {job_name}.{job_group_name} for head node
+            return f'{job_name}.{job_group_name}'
 
     @staticmethod
     def _get_external_address(
@@ -193,8 +196,8 @@ def _generate_hosts_entries(
 ) -> str:
     """Generate /etc/hosts entries for all jobs in a JobGroup.
 
-    Each node gets a hostname in the format:
-        {job_name}-{node_index}.{job_group_name}
+    For SSH clouds: Only head node (index 0) with format {job_name}.{job_group_name}
+    For K8s: Headless service URL with format {job_name}.{job_group_name}
 
     Args:
         job_group_name: Name of the JobGroup.
@@ -207,16 +210,31 @@ def _generate_hosts_entries(
     entries.append(f'# JobGroup: {job_group_name}')
 
     for task, handle in tasks_handles:
-        if handle is None or handle.stable_internal_external_ips is None:
-            logger.warning(f'Skipping job {task.name}: no IP information')
+        if handle is None:
+            logger.warning(f'Skipping job {task.name}: no handle')
             continue
 
         job_name = task.name
-        for node_idx, (internal_ip,
-                       _) in enumerate(handle.stable_internal_external_ips):
-            hostname = f'{job_name}-{node_idx}.{job_group_name}'
-            entries.append(f'{internal_ip} {hostname}')
-            logger.debug(f'Host entry: {internal_ip} -> {hostname}')
+        hostname = f'{job_name}.{job_group_name}'
+
+        if _is_kubernetes(handle):
+            # K8s: Inject headless service URL
+            internal_svc = _get_k8s_internal_svc(handle)
+            if internal_svc:
+                entries.append(f'{internal_svc} {hostname}')
+                logger.debug(f'Host entry (K8s): {internal_svc} -> {hostname}')
+            else:
+                logger.warning(f'K8s internal_svc not available for {job_name}')
+        else:
+            # SSH clouds: Inject head node IP only
+            if handle.stable_internal_external_ips is None:
+                logger.warning(f'Skipping job {task.name}: no IP information')
+                continue
+            # Only use head node (index 0)
+            if len(handle.stable_internal_external_ips) > 0:
+                head_ip = handle.stable_internal_external_ips[0][0]
+                entries.append(f'{head_ip} {hostname}')
+                logger.debug(f'Host entry (SSH): {head_ip} -> {hostname}')
 
     return '\n'.join(entries)
 
@@ -293,10 +311,11 @@ class NetworkConfigurator:
             logger.info(f'K8s clusters ({len(k8s_handles)} jobs): '
                         'using native DNS, no /etc/hosts injection needed')
 
-        # SSH clouds: Inject /etc/hosts
+        # SSH clouds: Inject /etc/hosts with entries for ALL jobs (SSH + K8s)
+        # This allows SSH nodes to resolve K8s jobs via headless service URLs
         if ssh_handles:
             success = await NetworkConfigurator._inject_etc_hosts(
-                job_group_name, ssh_handles)
+                job_group_name, tasks_handles)  # Pass all handles, not just SSH
             if not success:
                 return False
 
@@ -312,13 +331,17 @@ class NetworkConfigurator:
 
         Args:
             job_group_name: Name of the JobGroup.
-            tasks_handles: List of (Task, ResourceHandle) tuples (SSH only).
+            tasks_handles: List of (Task, ResourceHandle) tuples (all jobs, both
+                K8s and SSH). Hosts entries will include all jobs, but injection
+                only happens on SSH nodes.
 
         Returns:
             True if all injections succeeded, False otherwise.
         """
-        logger.info(f'SSH clusters ({len(tasks_handles)} jobs): '
-                    'injecting /etc/hosts entries')
+        # Count SSH jobs for logging
+        ssh_job_count = sum(1 for _, h in tasks_handles
+                            if h is not None and not _is_kubernetes(h))
+        logger.info(f'Injecting /etc/hosts entries on {ssh_job_count} SSH jobs')
 
         # Generate hosts content (include all jobs for cross-job resolution)
         hosts_content = _generate_hosts_entries(job_group_name, tasks_handles)
@@ -329,10 +352,11 @@ class NetworkConfigurator:
 
         logger.debug(f'Hosts entries:\n{hosts_content}')
 
-        # Collect all injection tasks
+        # Collect all injection tasks (only for SSH nodes)
         inject_tasks = []
         for task, handle in tasks_handles:
-            if handle is None:
+            if handle is None or _is_kubernetes(handle):
+                # Skip K8s jobs (they use native DNS)
                 continue
 
             # Use handle.get_command_runners() (not hardcoded SSHCommandRunner)
@@ -474,7 +498,7 @@ def _predict_job_address(
 ) -> str:
     """Predict job address before launch.
 
-    For SSH clouds: Uses hostname format {job_name}-0.{job_group_name}
+    For SSH clouds: Uses hostname format {job_name}.{job_group_name}
     For K8s: Predicts DNS URL based on cluster naming convention
     """
     # Check if task targets Kubernetes
@@ -482,24 +506,28 @@ def _predict_job_address(
     if task.resources:
         for resources in task.resources:
             if resources.cloud is not None:
-                from sky import clouds as sky_clouds
                 if resources.cloud.is_same_cloud(sky_clouds.Kubernetes()):
                     is_k8s = True
                     break
 
     if is_k8s:
         # K8s: Predict DNS URL based on managed_job cluster naming convention
-        from sky.jobs import utils as managed_job_utils
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             job_name, job_id)
+        # Apply the same transformation that happens during cluster launch
+        # to get the actual cluster_name_on_cloud
+        k8s_cloud = sky_clouds.Kubernetes()
+        cluster_name_on_cloud = common_utils.make_cluster_name_on_cloud(
+            cluster_name, max_length=k8s_cloud.max_cluster_name_length())
         # K8s headless service DNS format
         # Default namespace is 'default', can be configured
         namespace = _get_k8s_namespace_for_task(task)
-        # Head pod DNS: {cluster_name}-head.{namespace}.svc.cluster.local
-        return f'{cluster_name}-head.{namespace}.svc.cluster.local'
+        # Head pod DNS: {cluster_name_on_cloud}-head.{namespace}.svc.cluster.local
+        return f'{cluster_name_on_cloud}-head.{namespace}.svc.cluster.local'
     else:
         # SSH clouds: Use hostname format (resolved via /etc/hosts)
-        return f'{job_name}-0.{job_group_name}'
+        # Format: {job_name}.{job_group_name} for head node
+        return f'{job_name}.{job_group_name}'
 
 
 def _get_k8s_namespace_for_task(task: 'task_lib.Task') -> str:

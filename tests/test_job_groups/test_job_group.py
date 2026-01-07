@@ -121,7 +121,8 @@ run: echo hello
             f.flush()
 
             try:
-                with pytest.raises(ValueError, match='must have a "name" field'):
+                with pytest.raises(ValueError,
+                                   match='must have a "name" field'):
                     dag_utils.load_job_group_from_yaml(f.name)
             finally:
                 os.unlink(f.name)
@@ -183,10 +184,8 @@ class TestDagJobGroup:
     def test_dag_set_job_group(self):
         """Test setting DAG as JobGroup."""
         dag = dag_lib.Dag()
-        dag.set_job_group(
-            dag_lib.JobGroupPlacement.SAME_INFRA,
-            dag_lib.JobGroupExecution.PARALLEL
-        )
+        dag.set_job_group(dag_lib.JobGroupPlacement.SAME_INFRA,
+                          dag_lib.JobGroupExecution.PARALLEL)
         assert dag.is_job_group() is True
         assert dag.placement == dag_lib.JobGroupPlacement.SAME_INFRA
         assert dag.execution == dag_lib.JobGroupExecution.PARALLEL
