@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ArrowUpCircle } from 'lucide-react';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { apiClient } from '@/data/connectors/client';
 
@@ -68,10 +69,8 @@ export function VersionDisplay() {
       content={tooltipContent}
       className="text-sm text-muted-foreground"
     >
-      <div className="inline-flex items-center cursor-help">
-        <span className="text-yellow-600 text-lg" title="Update Available">
-          💡
-        </span>
+      <div className="inline-flex items-center justify-center p-2 rounded-full transition-colors duration-150 cursor-help text-gray-600 hover:bg-gray-100 hover:text-blue-600">
+        <ArrowUpCircle className="w-5 h-5" />
       </div>
     </NonCapitalizedTooltip>
   );
