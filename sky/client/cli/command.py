@@ -335,6 +335,7 @@ def _update_ssh_config_for_pool_workers(
 
             cluster_utils.SSHConfigHelper.add_cluster(
                 worker_name,
+                worker_name,
                 ips,
                 credentials,
                 ports,

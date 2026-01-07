@@ -28,6 +28,7 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants as skylet_constants
 from sky.utils import auth_utils
+from sky.utils import cluster_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import subprocess_utils
@@ -113,6 +114,22 @@ def cleanup_storage(yaml_content: str) -> bool:
     return not failed
 
 
+def _remove_ssh_config_if_exists(cluster_name: str) -> None:
+    """Remove SSH config for a cluster if it exists.
+
+    This is a helper function that safely removes SSH configs for pool workers
+    when they are terminated.
+
+    Args:
+        cluster_name: The cluster name to remove SSH config for.
+    """
+    try:
+        cluster_utils.SSHConfigHelper.remove_cluster(cluster_name)
+        logger.debug(f'Successfully removed SSH config for {cluster_name}')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to remove SSH config for {cluster_name}: {e}')
+
+
 # NOTE(dev): We don't need to acquire the `with_lock` in replica manager here
 # because we killed all the processes (controller & replica manager) before
 # calling this function.
@@ -190,6 +207,12 @@ def _cleanup(service_name: str, pool: bool) -> bool:
                     serve_state.remove_replica(service_name, info.replica_id)
                     logger.info(
                         f'Replica {info.replica_id} terminated successfully.')
+                    # Remove SSH config for pool workers
+                    if pool:
+                        logger.debug(
+                    f'Removing SSH config for pool worker {info.cluster_name}'
+                        )
+                        _remove_ssh_config_if_exists(info.cluster_name)
                 else:
                     _set_to_failed_cleanup(info)
         time.sleep(3)
