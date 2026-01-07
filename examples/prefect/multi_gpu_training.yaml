@@ -1,0 +1,106 @@
+# Example: Multi-GPU Distributed Training Task
+# This SkyPilot task demonstrates multi-GPU training
+# using PyTorch distributed data parallel (DDP).
+#
+# Usage with Prefect:
+#   from sky_train_flow import run_sky_task
+#   run_sky_task(
+#       base_path='/path/to/examples/prefect',
+#       yaml_path='multi_gpu_training.yaml',
+#       envs_override={'NUM_EPOCHS': '5'}
+#   )
+
+name: multi-gpu-training
+
+resources:
+  accelerators: A100:4  # Request 4 A100 GPUs
+  cpus: 16+
+  memory: 64+
+
+envs:
+  MODEL_NAME: bert-large-uncased
+  NUM_EPOCHS: 3
+  BATCH_SIZE: 64
+  LEARNING_RATE: "0.0001"
+
+setup: |
+  # Install dependencies
+  pip install torch transformers datasets accelerate
+  
+  # Verify multi-GPU setup
+  python -c "
+import torch
+print(f'CUDA available: {torch.cuda.is_available()}')
+print(f'Number of GPUs: {torch.cuda.device_count()}')
+for i in range(torch.cuda.device_count()):
+    print(f'  GPU {i}: {torch.cuda.get_device_name(i)}')
+"
+
+run: |
+  echo "Starting multi-GPU training task"
+  echo "Model: $MODEL_NAME"
+  echo "Epochs: $NUM_EPOCHS"
+  echo "Batch size per GPU: $BATCH_SIZE"
+  echo "Learning rate: $LEARNING_RATE"
+  
+  # Display all GPUs
+  nvidia-smi
+  
+  # Multi-GPU training using torch.distributed
+  python -c "
+import torch
+import torch.distributed as dist
+import torch.multiprocessing as mp
+import os
+import time
+
+def setup(rank, world_size):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+    dist.init_process_group('nccl', rank=rank, world_size=world_size)
+
+def cleanup():
+    dist.destroy_process_group()
+
+def train(rank, world_size, num_epochs, batch_size):
+    setup(rank, world_size)
+    
+    # Set device
+    torch.cuda.set_device(rank)
+    device = torch.device(f'cuda:{rank}')
+    
+    print(f'Rank {rank}: Training on {torch.cuda.get_device_name(device)}')
+    
+    # Simulate training
+    for epoch in range(num_epochs):
+        # Synchronize all processes
+        dist.barrier()
+        
+        # Simulate epoch
+        time.sleep(1)
+        
+        # Only rank 0 prints progress
+        if rank == 0:
+            loss = 0.5 - (0.1 * epoch)
+            print(f'Epoch {epoch+1}/{num_epochs} - Loss: {loss:.4f}')
+    
+    cleanup()
+    if rank == 0:
+        print('Training complete!')
+
+if __name__ == '__main__':
+    world_size = torch.cuda.device_count()
+    num_epochs = int(os.environ.get('NUM_EPOCHS', 3))
+    batch_size = int(os.environ.get('BATCH_SIZE', 64))
+    
+    print(f'Starting distributed training on {world_size} GPUs')
+    
+    mp.spawn(
+        train,
+        args=(world_size, num_epochs, batch_size),
+        nprocs=world_size,
+        join=True
+    )
+"
+  
+  echo "Multi-GPU training completed successfully"
