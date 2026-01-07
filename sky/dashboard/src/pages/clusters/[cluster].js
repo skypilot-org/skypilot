@@ -197,9 +197,9 @@ function ClusterDetails() {
 
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
+    await refreshData();
     // Increment GPU metrics refresh trigger to force iframe reload
     setGpuMetricsRefreshTrigger((prev) => prev + 1);
-    await refreshData();
     setIsRefreshing(false);
   };
 
