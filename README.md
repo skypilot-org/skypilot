@@ -45,6 +45,7 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
   <img src="./docs/source/images/skypilot-abstractions-long-2.png" alt="SkyPilot Abstractions">
 </picture>
 
+-----
 
 :fire: *News* :fire:
 - [Dec 2025] **SkyPilot v0.11** released: Multi-Cloud Pools, Fast Managed Jobs, Enterprise-Readiness at Large Scale, Programmability. [**Release notes**](https://github.com/skypilot-org/skypilot/releases/tag/v0.11.0)
