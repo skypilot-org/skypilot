@@ -31,9 +31,15 @@ The `run_sky_task` Prefect task wraps SkyPilot's SDK:
 @task(name='run_sky_task', retries=2, retry_delay_seconds=30)
 def run_sky_task(task_config: dict, cluster_prefix: str = 'prefect') -> str:
     import sky
+    import uuid
 
     task_config['resources']['cloud'] = 'kubernetes'
     sky_task = sky.Task.from_yaml_config(task_config)
+
+    # Generate a unique cluster name
+    task_name = task_config.get('name', 'task')
+    cluster_uuid = str(uuid.uuid4())[:4]
+    cluster_name = f'{cluster_prefix}-{task_name}-{cluster_uuid}'
 
     request_id = sky.launch(sky_task, cluster_name=cluster_name, down=True)
     job_id, _ = sky.stream_and_get(request_id)
@@ -55,6 +61,6 @@ python sky_k8s_example.py
 
 ## Related
 
-- [Airflow Integration](../airflow/) - Similar integration for Apache Airflow
+- [Airflow Integration](https://github.com/skypilot-org/skypilot/tree/master/examples/airflow) - Similar integration for Apache Airflow
 - [SkyPilot Docs](https://docs.skypilot.co/)
 - [Prefect Docs](https://docs.prefect.io/)

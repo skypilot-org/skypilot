@@ -29,9 +29,14 @@ def run_sky_task(
         The name of the cluster used.
     """
     # pylint: disable=import-outside-toplevel
+    import copy
+
     import sky
 
     logger = get_run_logger()
+
+    # Deep copy to avoid modifying the original config
+    task_config = copy.deepcopy(task_config)
 
     # Ensure the task targets Kubernetes
     if 'resources' not in task_config:
