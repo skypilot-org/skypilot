@@ -84,7 +84,6 @@ class APIHealthResponse(ResponseBaseModel):
     service_account_token_enabled: bool = False
     # Whether basic auth on ingress is enabled
     ingress_basic_auth_enabled: bool = False
-    server_user_hash: Optional[str] = None
 
 
 class StatusResponse(ResponseBaseModel):
