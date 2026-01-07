@@ -123,10 +123,10 @@ SkyPilot supports installation with ``uv`` or ``pip``.
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
 
-Run locally or connect to a team API server
--------------------------------------------
+Run locally or connect to a remote API server
+---------------------------------------------
 
-SkyPilot can be run as a :ref:`standalone application <sky-api-server-local>`, or connect to a :ref:`team API server <sky-api-server-remote>` for multi-user collaboration.
+SkyPilot can be run as a :ref:`standalone application <sky-api-server-local>`, or connect to a :ref:`remote API server <sky-api-server-remote>` for multi-user collaboration.
 
 **To run SkyPilot locally:**
 
@@ -175,17 +175,21 @@ Refer to the :ref:`cloud setup section <cloud-account-setup>` to download the ne
   to enable the new version.
   See :ref:`upgrade-skypilot` for more details.
 
-**To connect to a team API server:**
+**To connect to a remote API server:**
 
-If your team has set up a :ref:`SkyPilot API server <sky-api-server>`, connect to it by running :code:`sky api login`.
+If your team has set up a :ref:`SkyPilot remote API server <sky-api-server>`, connect to it by running:
+
+.. code-block:: shell
+
+  sky api login
 
 There is no need to install any dependencies locally.
 
 See :ref:`sky-api-server-connect` for more details.
 
-**To deploy a team API server:**
+**To deploy a remote API server:**
 
-See :ref:`sky-api-server-deploy` for detailed instructions on how to deploy a team API server.
+See :ref:`sky-api-server-deploy` for detailed instructions on how to deploy a remote API server.
 
 .. _verify-cloud-access:
 
@@ -282,10 +286,10 @@ If you experience any issues after installation, you can use the :code:`--uninst
 
 .. _cloud-account-setup:
 
-Appendix: Set up infra for local deployment
--------------------------------------------
+Appendix: Cloud access for local SkyPilot
+-----------------------------------------
 
-SkyPilot can be run as a :ref:`standalone application <sky-api-server-local>`, or connect to a :ref:`team API server <sky-api-server-remote>` for multi-user collaboration.
+SkyPilot can be run as a :ref:`standalone application <sky-api-server-local>`, or connect to a :ref:`remote API server <sky-api-server-remote>` for multi-user collaboration.
 
 When running SkyPilot locally, necessary dependencies and credentials need to be set up for the clouds you want to use. You can configure access to at least one cloud using the guides below.
 
