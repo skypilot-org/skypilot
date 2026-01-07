@@ -1,0 +1,80 @@
+# RL Experiment Architecture Test
+# Tests the heterogeneous workload pattern from the JobGroup design document
+# with trainer, data-processor, replay-buffer, and env-worker components
+
+---
+name: rl-experiment
+placement: SAME_INFRA
+execution: parallel
+---
+name: trainer
+resources:
+  cpus: 4
+  memory: 8+
+  infra: kubernetes
+num_nodes: 2
+run: |
+  echo "Trainer node ${SKYPILOT_NODE_RANK} starting"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Master addr: trainer-0.${SKYPILOT_JOBGROUP_NAME}"
+  echo "Replay buffer: replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:6379"
+
+  # Simulate training
+  for i in {1..10}; do
+    echo "Training iteration $i"
+    sleep 5
+  done
+  echo "Trainer done"
+---
+name: data-processor
+resources:
+  cpus: 2
+  memory: 4+
+  infra: kubernetes
+num_nodes: 2
+run: |
+  echo "Data processor ${SKYPILOT_NODE_RANK} starting"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Output to: replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:6379"
+
+  # Simulate data processing
+  for i in {1..8}; do
+    echo "Processing batch $i"
+    sleep 5
+  done
+  echo "Data processor done"
+---
+name: replay-buffer
+resources:
+  cpus: 4
+  memory: 16+
+  infra: kubernetes
+run: |
+  echo "Replay buffer starting on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+
+  # Simulate replay buffer service
+  echo "Listening on port 6379..."
+  for i in {1..12}; do
+    echo "Replay buffer heartbeat $i"
+    sleep 5
+  done
+  echo "Replay buffer done"
+---
+name: env-worker
+resources:
+  cpus: 8
+  memory: 8+
+  infra: kubernetes
+num_nodes: 2
+run: |
+  echo "Env worker ${SKYPILOT_NODE_RANK} starting"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Trainer addr: trainer-0.${SKYPILOT_JOBGROUP_NAME}:8080"
+
+  # Simulate environment execution
+  for i in {1..10}; do
+    echo "Environment step $i"
+    sleep 5
+  done
+  echo "Env worker done"

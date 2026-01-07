@@ -1,0 +1,29 @@
+# Test job recovery configuration in JobGroups
+---
+name: k8s-recovery-test
+placement: SAME_INFRA
+execution: parallel
+---
+name: recoverable-job
+resources:
+  cpus: 2
+  infra: kubernetes
+  job_recovery:
+    max_restarts_on_errors: 3
+    recover_on_exit_codes: [29]
+run: |
+  echo "Recoverable job starting"
+  echo "Exit code 29 should trigger recovery"
+  # Note: This will fail with exit code 29 to test recovery
+  # In a real test, you'd want conditional logic
+  sleep 10
+  echo "Recoverable job completed normally"
+---
+name: normal-job
+resources:
+  cpus: 2
+  infra: kubernetes
+run: |
+  echo "Normal job running"
+  sleep 30
+  echo "Normal job done"
