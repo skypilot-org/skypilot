@@ -69,6 +69,9 @@ function ClusterDetails() {
   const [historyData, setHistoryData] = useState(null);
   const [isHistoricalCluster, setIsHistoricalCluster] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // Counter incremented on refresh to force GPU metrics iframes to reload.
+  // When this value changes, the iframe key changes, causing React to remount the iframe.
+  const [gpuMetricsRefreshTrigger, setGpuMetricsRefreshTrigger] = useState(0);
   const isMobile = useMobile();
   const [timeRange, setTimeRange] = useState({
     from: 'now-1h',
@@ -194,6 +197,8 @@ function ClusterDetails() {
 
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
+    // Increment GPU metrics refresh trigger to force iframe reload
+    setGpuMetricsRefreshTrigger((prev) => prev + 1);
     await refreshData();
     setIsRefreshing(false);
   };
@@ -297,6 +302,7 @@ function ClusterDetails() {
             matchedClusterName={matchedClusterName}
             isLoadingClusterMatch={isLoadingClusterMatch}
             isGrafanaAvailable={isGrafanaAvailable}
+            gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
             isHistoricalCluster={false}
           />
         ) : isHistoricalCluster && historyData ? (
@@ -313,6 +319,7 @@ function ClusterDetails() {
             matchedClusterName={null}
             isLoadingClusterMatch={false}
             isGrafanaAvailable={false}
+            gpuMetricsRefreshTrigger={0}
             isHistoricalCluster={true}
           />
         ) : (
@@ -354,6 +361,7 @@ function ActiveTab({
   matchedClusterName,
   isLoadingClusterMatch,
   isGrafanaAvailable,
+  gpuMetricsRefreshTrigger,
   isHistoricalCluster = false,
 }) {
   // Define panel data
@@ -814,7 +822,7 @@ function ActiveTab({
                             frameBorder="0"
                             title={panel.title}
                             className="rounded"
-                            key={`${panel.keyPrefix}-${clusterData?.cluster}-${timeRange.from}-${timeRange.to}`}
+                            key={`${panel.keyPrefix}-${clusterData?.cluster}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger || 0}`}
                           />
                         </div>
                       </div>
