@@ -416,9 +416,11 @@ sky jobs logs <job_id>
 - [ ] Jobs complete within expected time
 - [ ] Cleanup removes both clusters
 
-### 2.2 Cross-Job Networking Test
+### 2.2 Cross-Job Networking Test (with Environment Variable)
 
 **Test file:** `k8s_networking_test.yaml`
+
+This test uses the environment variable `${SKYPILOT_JOBGROUP_NAME}` to construct hostnames.
 
 ```yaml
 ---
@@ -456,10 +458,10 @@ run: |
   # Wait for server to start
   sleep 10
 
-  # Test DNS resolution
-  echo "Testing DNS resolution..."
+  # Test DNS resolution using ENVIRONMENT VARIABLE
+  echo "Testing DNS resolution with env var..."
   SERVER_HOST="server-0.${SKYPILOT_JOBGROUP_NAME}"
-  echo "Server host: $SERVER_HOST"
+  echo "Server host (env var): $SERVER_HOST"
 
   # Try to resolve the hostname
   getent hosts $SERVER_HOST || echo "DNS lookup failed, checking /etc/hosts"
@@ -482,8 +484,119 @@ run: |
 
 **Verification:**
 - [ ] Server starts and listens on port 8080
-- [ ] Client can resolve server hostname
+- [ ] Client can resolve server hostname using `${SKYPILOT_JOBGROUP_NAME}`
 - [ ] Client successfully connects to server
+- [ ] Both jobs complete with SUCCEEDED status
+
+### 2.2b Cross-Job Networking Test (with Simple Hostname)
+
+**Test file:** `k8s_networking_simple_hostname_test.yaml`
+
+This test uses the **simple/hardcoded hostname format** directly instead of the environment variable. This is important to verify that the hostname format `{job_name}-{node_idx}.{job_group_name}` works as documented.
+
+```yaml
+---
+name: simple-hostname-test
+placement: SAME_INFRA
+execution: parallel
+---
+name: api-server
+resources:
+  cpus: 2
+  infra: kubernetes
+run: |
+  echo "API Server starting on $(hostname)"
+  echo "JobGroup name: ${SKYPILOT_JOBGROUP_NAME}"
+
+  # Start HTTP server on port 9000
+  python3 -m http.server 9000 &
+  SERVER_PID=$!
+
+  # Keep running
+  for i in {1..12}; do
+    echo "API Server heartbeat $i"
+    sleep 5
+  done
+
+  kill $SERVER_PID 2>/dev/null || true
+  echo "API Server done"
+---
+name: api-client
+resources:
+  cpus: 2
+  infra: kubernetes
+run: |
+  echo "API Client starting"
+  echo "JobGroup name: ${SKYPILOT_JOBGROUP_NAME}"
+
+  sleep 10
+
+  # Test 1: Using SIMPLE HOSTNAME (hardcoded job group name)
+  echo "=== Test 1: Simple hostname format ==="
+  SIMPLE_HOST="api-server-0.simple-hostname-test"
+  echo "Testing simple hostname: $SIMPLE_HOST"
+
+  getent hosts $SIMPLE_HOST && echo "DNS resolution: SUCCESS" || echo "DNS resolution: FAILED"
+
+  for i in {1..5}; do
+    if curl -s --connect-timeout 5 http://$SIMPLE_HOST:9000/ > /dev/null 2>&1; then
+      echo "Test 1 PASSED: Connected using simple hostname"
+      break
+    fi
+    sleep 2
+  done
+
+  # Test 2: Using ENVIRONMENT VARIABLE
+  echo "=== Test 2: Environment variable format ==="
+  ENV_HOST="api-server-0.${SKYPILOT_JOBGROUP_NAME}"
+  echo "Testing env var hostname: $ENV_HOST"
+
+  getent hosts $ENV_HOST && echo "DNS resolution: SUCCESS" || echo "DNS resolution: FAILED"
+
+  for i in {1..5}; do
+    if curl -s --connect-timeout 5 http://$ENV_HOST:9000/ > /dev/null 2>&1; then
+      echo "Test 2 PASSED: Connected using env var hostname"
+      break
+    fi
+    sleep 2
+  done
+
+  # Test 3: Verify both resolve to the same IP
+  echo "=== Test 3: IP verification ==="
+  SIMPLE_IP=$(getent hosts $SIMPLE_HOST | awk '{print $1}')
+  ENV_IP=$(getent hosts $ENV_HOST | awk '{print $1}')
+  echo "Simple hostname IP: $SIMPLE_IP"
+  echo "Env var hostname IP: $ENV_IP"
+
+  if [ "$SIMPLE_IP" = "$ENV_IP" ] && [ -n "$SIMPLE_IP" ]; then
+    echo "Test 3 PASSED: Both hostnames resolve to same IP"
+  else
+    echo "Test 3 WARNING: IPs differ or empty"
+  fi
+
+  # Final connection test
+  echo "=== Final connectivity test ==="
+  if curl -s --connect-timeout 5 http://$SIMPLE_HOST:9000/ > /dev/null 2>&1; then
+    echo "SUCCESS: All networking tests passed"
+    exit 0
+  else
+    echo "FAILED: Could not connect"
+    exit 1
+  fi
+```
+
+**Hostname Formats Tested:**
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| Simple hostname | `api-server-0.simple-hostname-test` | Hardcoded job group name |
+| Environment variable | `api-server-0.${SKYPILOT_JOBGROUP_NAME}` | Uses injected env var |
+
+**Verification:**
+- [ ] Simple hostname `{job}-{idx}.{group}` resolves correctly
+- [ ] Environment variable hostname resolves correctly
+- [ ] Both formats resolve to the same IP address
+- [ ] Both formats allow successful HTTP connection
 - [ ] Both jobs complete with SUCCEEDED status
 
 ### 2.3 Multi-Node Job in JobGroup
@@ -1511,7 +1624,8 @@ sky jobs queue
 | 1.2 Networking Unit | | |
 | **Phase 2: Basic Integration** | | |
 | 2.1 Minimal JobGroup | | |
-| 2.2 Cross-Job Networking | | |
+| 2.2 Cross-Job Networking (env var) | | |
+| 2.2b Cross-Job Networking (simple hostname) | | |
 | 2.3 Multi-Node Job | | |
 | **Phase 3: Heterogeneous Resources** | | |
 | 3.1 Mixed Resources | | |
