@@ -2357,11 +2357,12 @@ async def update_links_async(job_id: int, task_id: int,
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     logger.info(f'Updating external links with: {links}')
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        # Get existing links and merge with new links
+        # Get existing links with row lock and merge with new links
         result = await session.execute(
             sqlalchemy.select(spot_table.c.links).where(
-                sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
-                                spot_table.c.task_id == task_id)))
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id)).with_for_update())
         existing_links_row = result.fetchone()
         existing_links = {}
         if existing_links_row and existing_links_row[0]:

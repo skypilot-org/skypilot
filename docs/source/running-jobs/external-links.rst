@@ -1,9 +1,9 @@
-.. _custom-links:
+.. _external-links:
 
-Custom Links
-============
+External Links
+==============
 
-Custom links allow you to view URLs associated with your managed jobs directly in the SkyPilot dashboard. This is useful for quickly accessing experiment trackers, dashboards, or any other external resources related to your jobs.
+External links allow you to view URLs associated with your managed jobs directly in the SkyPilot dashboard. This is useful for quickly accessing experiment trackers, dashboards, or any other external resources related to your jobs.
 
 Supported services
 ------------------
@@ -14,7 +14,7 @@ SkyPilot automatically supports the following URLs for your job:
 - **Instance Links**: URLs to the cloud console for jobs running on AWS, GCP, or Azure.
 
 
-When your job prints a URL from a supported service to stdout or stderr, the dashboard will automatically extract it and display it in the "Custom Links" section of the job details page.
+When your job prints a URL from a supported service (currently only W&B is supported) to stdout or stderr, the dashboard will automatically extract it and display it in the "External Links" section of the job details page.
 
 Example: Using Weights & Biases
 -------------------------------
@@ -53,13 +53,14 @@ Launch the job:
 
 Once the job starts and W&B prints the run URL to the logs, you'll see the link appear in the dashboard:
 
-.. image:: ../images/examples/custom-links/job-page-wandb.png
+.. image:: ../images/examples/external-links/job-page-wandb.png
   :width: 800
-  :alt: Job detail page showing W&B custom link
+  :alt: Job detail page showing W&B external link
 
 Clicking the link will take you directly to the W&B run page allowing you to quickly view the run metrics and artifacts.
 
-.. image:: ../images/examples/custom-links/wandb.png
+.. image:: ../images/examples/external-links/wandb.png
   :width: 800
   :alt: W&B run page
+
 

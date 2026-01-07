@@ -801,21 +801,21 @@ To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml
       bucket: s3://xxx
 
 The jobs controller will use a bit of overhead - it reserves an extra 2GB of memory for itself, which may reduce the amount of requests your API server can handle. To counteract, you can increase the amount of CPU and memory allocated to the API server: See :ref:`sky-api-server-resources-tuning`.
-.. _custom-links:
+.. _external-links:
 
-Custom links
-------------
+External links
+--------------
 
-Custom links are URLs associated with your managed jobs that are displayed in the SkyPilot dashboard. This is useful for linking to external dashboards, experiment trackers, or any other relevant resources.
+External links are URLs associated with your managed jobs that are displayed in the SkyPilot dashboard. This is useful for linking to external dashboards, experiment trackers, or any other relevant resources.
 
 SkyPilot automatically detects and displays two types of links:
 
 1. **Instance links**: For jobs running on AWS, GCP, or Azure, SkyPilot automatically adds links to the cloud console for the underlying instance.
-2. **Log-detected links**: The dashboard automatically parses job logs to detect URLs from supported services and displays them as custom links.
+2. **Log-detected links**: The dashboard automatically parses job logs to detect URLs from supported services and displays them as external links.
 
-.. image:: ../images/examples/custom-links/job-page.png
+.. image:: ../images/examples/external-links/job-page.png
   :width: 800
-  :alt: Managed jobs custom links
+  :alt: Managed jobs external links
 
 Supported services
 ~~~~~~~~~~~~~~~~~~
@@ -824,7 +824,7 @@ SkyPilot automatically detects URLs from the following services in your job logs
 
 - **Weights & Biases (W&B)**: Run URLs (e.g., ``https://wandb.ai/<entity>/<project>/runs/<run_id>``)
 
-When your job prints a URL from a supported service to stdout or stderr, the dashboard will automatically extract it and display it in the "Custom Links" section.
+When your job prints a URL from a supported service to stdout or stderr, the dashboard will automatically extract it and display it in the "External Links" section.
 
 Example: Integrating with Weights & Biases
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -862,4 +862,4 @@ Launch the job:
 
   $ sky jobs launch -n wandb-job --secret WANDB_API_KEY=$WANDB_API_KEY wandb_training.yaml
 
-The W&B run URL will automatically appear in the dashboard under "Custom Links" once it's printed to the job logs.
+The W&B run URL will automatically appear in the dashboard under "External Links" once it's printed to the job logs.

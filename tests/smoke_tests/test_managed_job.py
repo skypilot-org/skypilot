@@ -2073,20 +2073,6 @@ def test_large_production_performance(request):
 
 
 @pytest.mark.managed_jobs
-@pytest.mark.no_kubernetes  # Instance links only supported on cloud VMs
-@pytest.mark.no_nebius  # Instance links only for AWS, GCP, Azure
-@pytest.mark.no_lambda_cloud
-@pytest.mark.no_paperspace
-@pytest.mark.no_fluidstack
-@pytest.mark.no_cudo
-@pytest.mark.no_ibm
-@pytest.mark.no_scp
-@pytest.mark.no_oci
-@pytest.mark.no_do
-@pytest.mark.no_runpod
-@pytest.mark.no_vast
-@pytest.mark.no_shadeform
-@pytest.mark.no_hyperbolic
 def test_managed_jobs_instance_links(generic_cloud: str):
     """Test that instance links are auto-generated for managed jobs.
 
@@ -2110,46 +2096,24 @@ def test_managed_jobs_instance_links(generic_cloud: str):
           echo "Job finished"
         """)
 
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+    # Load Jinja template to poll for instance links using Python SDK
+    template_path = pathlib.Path('tests/test_yamls/test_instance_links.py.j2')
+    check_links_template = jinja2.Template(template_path.read_text())
+    check_script = check_links_template.render(
+        name=name,
+        generic_cloud=generic_cloud,
+    )
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f, \
+         tempfile.NamedTemporaryFile(suffix='.py', mode='w', delete=False) as script_f:
         f.write(yaml_content)
         f.flush()
         yaml_path = f.name
 
-        # Command to poll for instance links using Python
-        check_links_cmd = textwrap.dedent(f"""\
-            python3 -c "
-import time
-import sky
-from sky import jobs
-
-name = '{name}'
-generic_cloud = '{generic_cloud}'
-
-for attempt in range(30):
-    req_id = jobs.queue_v2(refresh=True, fields=['links', 'job_name'])
-    job_records, _, _, _ = sky.stream_and_get(req_id)
-
-    for record in job_records:
-        if record.get('job_name') == name:
-            links = record.get('links')
-            print(f'Attempt {{attempt + 1}}: links = {{links}}')
-            if links:
-                if generic_cloud == 'aws' and 'AWS Instances' in links:
-                    print('Found AWS Instances link!')
-                    exit(0)
-                elif generic_cloud == 'gcp' and 'GCP Instances' in links:
-                    print('Found GCP Instances link!')
-                    exit(0)
-                elif generic_cloud == 'azure' and 'Azure Resource Group' in links:
-                    print('Found Azure Resource Group link!')
-                    exit(0)
-            break
-    time.sleep(10)
-
-print('Instance links not found after 5 minutes')
-exit(1)
-"
-            """)
+        # Write rendered script to temp file
+        script_f.write(check_script)
+        script_f.flush()
+        check_links_cmd = f'python3 {script_f.name}'
 
         test = smoke_tests_utils.Test(
             'managed_jobs_instance_links',

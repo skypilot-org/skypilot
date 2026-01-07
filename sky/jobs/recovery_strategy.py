@@ -580,16 +580,10 @@ class StrategyExecutor:
                                         handle, 'cached_cluster_info') and
                                         handle.cached_cluster_info is not None):
                                     cluster_info = handle.cached_cluster_info
-                                    region = (handle.launched_resources.region
-                                              if hasattr(
-                                                  handle.launched_resources,
-                                                  'region') else None)
-                                    instance_links = (
-                                        instance_links_utils.
-                                        generate_instance_links(
-                                            cluster_info,
-                                            region=region,
-                                            cluster_name=self.cluster_name))
+                                    instance_links = (instance_links_utils.
+                                                      generate_instance_links(
+                                                          cluster_info,
+                                                          self.cluster_name))
                                     if instance_links:
                                         # Store instance links directly in
                                         # database
@@ -599,13 +593,27 @@ class StrategyExecutor:
                                         logger.debug(
                                             f'Auto-populated instance links: '
                                             f'{instance_links}')
+                                    else:
+                                        logger.debug('Failed to generate '
+                                                     'instance links')
+                                else:
+                                    logger.debug(
+                                        'Cluster handle not found or '
+                                        'cached cluster info is None so'
+                                        'not populating instance links')
                             except Exception as e:  # pylint: disable=broad-except
                                 # Don't fail the launch if we can't generate
                                 # links
                                 logger.debug(
                                     'Failed to auto-populate instance links: '
                                     f'{e}')
-
+                        else:
+                            if self.pool:
+                                logger.debug('Not populating instance links '
+                                             'since the cluster is for a pool')
+                            else:
+                                logger.debug('Not populating instance links '
+                                             'since the cluster name is None')
                         job_submitted_at = await (
                             self._wait_until_job_starts_on_cluster())
                         if job_submitted_at is not None:
