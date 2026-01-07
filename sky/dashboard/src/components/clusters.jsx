@@ -625,10 +625,14 @@ export function ClusterTable({
 
       // Extract labels - add only key:value pairs
       const labels = cluster.labels || {};
-      Object.entries(labels).forEach(([key, value]) => {
-        // Add key:value pair format only
-        pushWithoutDuplication(optionValues.labels, `${key}:${value}`);
-      });
+      if (labels && typeof labels === 'object') {
+        Object.entries(labels).forEach(([key, value]) => {
+          if (key && value) {
+            // Add key:value pair format only
+            pushWithoutDuplication(optionValues.labels, `${key}:${value}`);
+          }
+        });
+      }
     });
 
     return optionValues;
@@ -1321,6 +1325,12 @@ const FilterDropdown = ({
         case 'infra':
           updatedValueOptions =
             valueList.infra.filter(
+              (value) => !selectedValues.find((val) => val === value)
+            ) || [];
+          break;
+        case 'labels':
+          updatedValueOptions =
+            valueList.labels.filter(
               (value) => !selectedValues.find((val) => val === value)
             ) || [];
           break;
