@@ -863,7 +863,9 @@ class SlurmCodeGen(TaskCodeGen):
                     # the inner srun to the parent step's allocation. This causes
                     # "CPU binding outside of job step allocation" errors.
                     # Unsetting all SLURM_* variables allows this srun to access the full job
-                    # allocation. See: https://support.schedmd.com/show_bug.cgi?id=14298
+                    # allocation. See:
+                    # https://support.schedmd.com/show_bug.cgi?id=14298
+                    # https://github.com/huggingface/datatrove/issues/248
                     srun_cmd = (
                         'unset $(env | awk -F= "/^SLURM_/ {{print $1}}") && '
                         f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid={self._slurm_job_id} '
