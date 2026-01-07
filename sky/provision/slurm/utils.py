@@ -2,6 +2,7 @@
 import math
 import os
 import re
+import shlex
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from paramiko.config import SSHConfig
@@ -642,24 +643,33 @@ def srun_sshd_command(
     # We use ~username to ensure we use the real home of the user ssh'ing in,
     # because we override the home directory in SlurmCommandRunner.run.
     user_home_ssh_dir = f'~{unix_user}/.ssh'
-    return (
-        f'srun '
-        f'--quiet '
-        f'--unbuffered '
-        f'--overlap '
-        f'--jobid {job_id} '
-        f'-w {target_node} '
-        f'/usr/sbin/sshd '
-        f'-i '  # Uses stdin/stdout
-        f'-e '  # Writes errors to stderr
-        f'-f '  # Use /dev/null to avoid reading system sshd_config
-        f'/dev/null '
-        f'-h {user_home_ssh_dir}/{SLURM_SSHD_HOST_KEY_FILENAME} '
-        f'-o AuthorizedKeysFile={user_home_ssh_dir}/authorized_keys '
-        f'-o PasswordAuthentication=no '
-        f'-o PubkeyAuthentication=yes '
+    return shlex.join([
+        'srun',
+        '--quiet',
+        '--unbuffered',
+        '--overlap',
+        '--jobid',
+        job_id,
+        '-w',
+        target_node,
+        '/usr/sbin/sshd',
+        '-i',  # Uses stdin/stdout
+        '-e',  # Writes errors to stderr
+        '-f',  # Use /dev/null to avoid reading system sshd_config
+        '/dev/null',
+        '-h',
+        f'{user_home_ssh_dir}/{SLURM_SSHD_HOST_KEY_FILENAME}',
+        '-o',
+        f'AuthorizedKeysFile={user_home_ssh_dir}/authorized_keys',
+        '-o',
+        'PasswordAuthentication=no',
+        '-o',
+        'PubkeyAuthentication=yes',
         # If UsePAM is enabled, we will not be able to run sshd(8)
         # as a non-root user.
         # See https://man7.org/linux/man-pages/man5/sshd_config.5.html
-        f'-o UsePAM=no '
-        f'-o AcceptEnv={constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}')
+        '-o',
+        'UsePAM=no',
+        '-o',
+        f'AcceptEnv={constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}',
+    ])
