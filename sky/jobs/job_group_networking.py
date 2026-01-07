@@ -23,6 +23,7 @@ Design Goals:
 """
 import asyncio
 import enum
+import shlex
 import textwrap
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
@@ -284,15 +285,33 @@ async def _start_k8s_dns_updater_on_node(
     if not updater_script:
         return True
 
-    # pylint: disable=invalid-string-quote
-    escaped_script = updater_script.replace("'", "'\\''")  # noqa: Q000
-    cmd = f"bash -c '{escaped_script}'"  # noqa: Q000
-    # pylint: enable=invalid-string-quote
+    # Write script to a file to avoid complex quoting issues
+    # Use shlex.quote() pattern from cloud_vm_ray_backend.py
+    script_path = '/tmp/skypilot-jobgroup-dns-updater.sh'
+    log_path = '/tmp/skypilot-jobgroup-dns-updater.log'
+
+    # Use shlex.quote to safely transfer the script content
+    encoded_script = shlex.quote(updater_script)
+    write_cmd = f'{{ echo {encoded_script} > {script_path}; }}'
 
     try:
+        # Write the script file
         returncode, _, stderr = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: runner.run(cmd, stream_logs=False, require_outputs=True))
+            lambda: runner.run(write_cmd, stream_logs=False,
+                               require_outputs=True))
+        if returncode != 0:
+            logger.error(f'Failed to write DNS updater script: {stderr}')
+            return False
+
+        # Make executable and run in background
+        run_cmd = (f'chmod +x {script_path} && '
+                   f'nohup {script_path} > {log_path} 2>&1 & '
+                   f'sleep 1 && test -f {log_path}')
+        returncode, _, stderr = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: runner.run(run_cmd, stream_logs=False,
+                               require_outputs=True))
         if returncode != 0:
             logger.error(f'Failed to start DNS updater: {stderr}')
             return False
@@ -524,7 +543,7 @@ def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]]) -> str:
         dns_mappings: List of (k8s_dns, simple_hostname) tuples.
 
     Returns:
-        Bash script as a string.
+        Bash script as a string (standalone, without nohup wrapper).
     """
     if not dns_mappings:
         return ''
@@ -534,60 +553,53 @@ def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]]) -> str:
         [f'{dns}:{hostname}' for dns, hostname in dns_mappings])
 
     script = textwrap.dedent(f"""
+        #!/bin/bash
         # Background K8s DNS to IP updater for /etc/hosts
-        nohup bash -c '
-          MAPPINGS="{mapping_pairs}"
-          MARKER="# SkyPilot JobGroup K8s entries"
-          LOGFILE="/tmp/skypilot-jobgroup-dns-updater.log"
+        MAPPINGS="{mapping_pairs}"
+        MARKER="# SkyPilot JobGroup K8s entries"
 
-          echo "$(date '\''+%Y-%m-%d %H:%M:%S'\'') [INFO] Starting DNS updater" >> "$LOGFILE"
-          echo "$(date '\''+%Y-%m-%d %H:%M:%S'\'') [INFO] Monitoring mappings: $MAPPINGS" >> "$LOGFILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Starting DNS updater"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Monitoring mappings: $MAPPINGS"
 
-          while true; do
-            # Build new entries
-            new_entries=""
-            needs_update=0
-            for mapping in $MAPPINGS; do
-              k8s_dns="${{mapping%%:*}}"
-              simple_name="${{mapping##*:}}"
-              # Resolve K8s DNS to IP
-              ip=$(getent hosts "$k8s_dns" 2>/dev/null | awk '{{print $1}}')
-              if [ -n "$ip" ]; then
-                new_entries="${{new_entries}}$ip $simple_name  $MARKER"$'\\n'
-                # Check if current IP differs from /etc/hosts
-                current_ip=$(getent hosts "$simple_name" 2>/dev/null | awk '{{print $1}}')
-                if [ "$ip" != "$current_ip" ]; then
-                  needs_update=1
-                  echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] IP changed for $simple_name: $current_ip -> $ip" >> "$LOGFILE"
-                fi
-              else
-                echo "$(date '+%Y-%m-%d %H:%M:%S') [WARN] Failed to resolve $k8s_dns" >> "$LOGFILE"
+        while true; do
+          # Build new entries
+          new_entries=""
+          needs_update=0
+          for mapping in $MAPPINGS; do
+            k8s_dns="${{mapping%%:*}}"
+            simple_name="${{mapping##*:}}"
+            # Resolve K8s DNS to IP
+            ip=$(getent hosts "$k8s_dns" 2>/dev/null | awk '{{print $1}}')
+            if [ -n "$ip" ]; then
+              new_entries="${{new_entries}}$ip $simple_name  $MARKER
+"
+              # Check if current IP differs from /etc/hosts
+              current_ip=$(getent hosts "$simple_name" 2>/dev/null | awk '{{print $1}}')
+              if [ "$ip" != "$current_ip" ]; then
+                needs_update=1
+                echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] IP changed for $simple_name: $current_ip -> $ip"
               fi
-            done
-
-            # Only update /etc/hosts if IPs have changed
-            if [ -n "$new_entries" ] && [ $needs_update -eq 1 ]; then
-              echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Updating /etc/hosts" >> "$LOGFILE"
-              # Create temp file with updated content
-              tmp_file=$(mktemp)
-              # Copy existing /etc/hosts, excluding marked JobGroup entries
-              if ! sudo grep -v "$MARKER" /etc/hosts 2>/dev/null > "$tmp_file"; then
-                echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Failed to read /etc/hosts" >> "$LOGFILE"
-              fi
-              # Append new entries
-              echo -n "$new_entries" >> "$tmp_file"
-              # Set permissions before move to avoid read failures
-              sudo chmod 644 "$tmp_file"
-              # Atomic move (rename is atomic on POSIX)
-              if sudo mv "$tmp_file" /etc/hosts; then
-                echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Successfully updated /etc/hosts" >> "$LOGFILE"
-              else
-                echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Failed to update /etc/hosts" >> "$LOGFILE"
-              fi
+            else
+              echo "$(date '+%Y-%m-%d %H:%M:%S') [WARN] Failed to resolve $k8s_dns"
             fi
-            sleep 5
           done
-        ' > /dev/null 2>&1 &
+
+          # Only update /etc/hosts if IPs have changed
+          if [ -n "$new_entries" ] && [ $needs_update -eq 1 ]; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Updating /etc/hosts"
+            # In K8s, /etc/hosts is mounted by kubelet and cannot be replaced (mv).
+            # Instead, we filter and rewrite in-place using tee.
+            # 1. Read existing content without our markers
+            existing=$(sudo grep -v "$MARKER" /etc/hosts 2>/dev/null || true)
+            # 2. Write back existing + new entries using tee
+            if echo -e "$existing\\n$new_entries" | sudo tee /etc/hosts > /dev/null; then
+              echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Successfully updated /etc/hosts"
+            else
+              echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Failed to update /etc/hosts"
+            fi
+          fi
+          sleep 5
+        done
     """)
     return script.strip()
 
