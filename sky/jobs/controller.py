@@ -876,7 +876,7 @@ class JobController:
         """Prepare a JobGroup task for launch.
 
         This function:
-        1. Injects a wait script to ensure /etc/hosts is ready
+        1. Injects a wait script to ensure networking is ready
         2. Creates the recovery strategy executor
         3. Sets task state to STARTING
 
@@ -892,7 +892,7 @@ class JobController:
         task_name = task.name
         assert task_name is not None, f'Task {task_id} must have a name'
 
-        # Inject wait script to ensure /etc/hosts is ready before task starts
+        # Inject wait script to ensure networking is ready before task starts
         wait_script = job_group_networking.generate_wait_for_networking_script(
             job_group_name, other_job_names)
         if wait_script:

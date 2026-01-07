@@ -150,16 +150,51 @@ def _get_job_address(job_name: str,
 # ============================================================================
 
 
+def _generate_k8s_dns_mappings(
+    job_group_name: str,
+    tasks_handles: List[Tuple['task_lib.Task',
+                              'cloud_vm_ray_backend.CloudVmRayResourceHandle']]
+) -> List[Tuple[str, str]]:
+    """Generate K8s DNS to hostname mappings for background updater.
+
+    Args:
+        job_group_name: Name of the JobGroup.
+        tasks_handles: List of (Task, ResourceHandle) tuples.
+
+    Returns:
+        List of (k8s_dns, simple_hostname) tuples.
+    """
+    mappings = []
+    for task, handle in tasks_handles:
+        if handle is None or not _is_kubernetes(handle):
+            continue
+
+        job_name = task.name
+        cluster_name_on_cloud = handle.cluster_name_on_cloud
+        namespace = _get_k8s_namespace_from_handle(handle)
+        num_nodes = (len(handle.stable_internal_external_ips)
+                     if handle.stable_internal_external_ips else 1)
+
+        for node_idx in range(num_nodes):
+            hostname = f'{job_name}-{node_idx}.{job_group_name}'
+            internal_svc = _construct_k8s_internal_svc(cluster_name_on_cloud,
+                                                       namespace, node_idx)
+            mappings.append((internal_svc, hostname))
+            node_type = 'head' if node_idx == 0 else f'worker{node_idx}'
+            logger.debug(f'K8s DNS mapping ({node_type}): '
+                         f'{internal_svc} -> {hostname}')
+
+    return mappings
+
+
 def _generate_hosts_entries(
     job_group_name: str,
     tasks_handles: List[Tuple['task_lib.Task',
                               'cloud_vm_ray_backend.CloudVmRayResourceHandle']]
 ) -> str:
-    """Generate /etc/hosts entries for all jobs in a JobGroup.
+    """Generate /etc/hosts entries for SSH cloud nodes.
 
-    For SSH clouds: Each node with format {job_name}-{node_idx}.{job_group_name}
-    For K8s: Headless service URLs for head and workers with format
-        {job_name}-{node_idx}.{job_group_name}
+    K8s nodes use a background updater to dynamically resolve IPs.
 
     Args:
         job_group_name: Name of the JobGroup.
@@ -178,27 +213,9 @@ def _generate_hosts_entries(
 
         job_name = task.name
 
-        if _is_kubernetes(handle):
-            # K8s: Inject headless service URLs for head and workers
-            # Construct internal_svc URLs using the guaranteed format
-            cluster_name_on_cloud = handle.cluster_name_on_cloud
-            namespace = _get_k8s_namespace_from_handle(handle)
-
-            # Get number of nodes
-            num_nodes = (len(handle.stable_internal_external_ips)
-                         if handle.stable_internal_external_ips else 1)
-
-            # Generate entries for all nodes (head + workers)
-            for node_idx in range(num_nodes):
-                hostname = f'{job_name}-{node_idx}.{job_group_name}'
-                internal_svc = _construct_k8s_internal_svc(
-                    cluster_name_on_cloud, namespace, node_idx)
-                entries.append(f'{internal_svc} {hostname}')
-                node_type = 'head' if node_idx == 0 else f'worker{node_idx}'
-                logger.debug(f'Host entry (K8s {node_type}): '
-                             f'{internal_svc} -> {hostname}')
-        else:
-            # SSH clouds: Inject all nodes with IPs
+        # Only SSH clouds get static /etc/hosts entries
+        # K8s uses background updater instead
+        if not _is_kubernetes(handle):
             if handle.stable_internal_external_ips is None:
                 logger.warning(f'Skipping job {task.name}: no IP information')
                 continue
@@ -244,6 +261,47 @@ async def _inject_hosts_on_node(
         return False
 
 
+async def _start_k8s_dns_updater_on_node(
+    runner: 'command_runner.CommandRunner',
+    dns_mappings: List[Tuple[str, str]],
+) -> bool:
+    """Start background DNS updater on a K8s node.
+
+    The updater resolves K8s service DNS names to IPs and keeps
+    /etc/hosts updated.
+
+    Args:
+        runner: CommandRunner for the target node.
+        dns_mappings: List of (k8s_dns, simple_hostname) tuples.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    if not dns_mappings:
+        return True
+
+    updater_script = generate_k8s_dns_updater_script(dns_mappings)
+    if not updater_script:
+        return True
+
+    # pylint: disable=invalid-string-quote
+    escaped_script = updater_script.replace("'", "'\\''")  # noqa: Q000
+    cmd = f"bash -c '{escaped_script}'"  # noqa: Q000
+    # pylint: enable=invalid-string-quote
+
+    try:
+        returncode, _, stderr = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: runner.run(cmd, stream_logs=False, require_outputs=True))
+        if returncode != 0:
+            logger.error(f'Failed to start DNS updater: {stderr}')
+            return False
+        return True
+    except Exception as e:
+        logger.error(f'Exception while starting DNS updater: {e}')
+        return False
+
+
 class NetworkConfigurator:
     """Configures network infrastructure for JobGroups.
 
@@ -275,7 +333,8 @@ class NetworkConfigurator:
             return False
 
         # Inject /etc/hosts on all nodes (both K8s and SSH)
-        # This maps the unified hostname format {job_name}-{node_idx}.{job_group_name}
+        # This maps the unified hostname format:
+        # {job_name}-{node_idx}.{job_group_name}
         # to actual addresses (internal_svc URLs for K8s, IPs for SSH)
         success = await NetworkConfigurator._inject_etc_hosts(
             job_group_name, tasks_handles)
@@ -293,8 +352,8 @@ class NetworkConfigurator:
         """Inject /etc/hosts entries for all clusters in the JobGroup.
 
         This maps the unified hostname format to actual addresses:
-        - K8s: internal_svc URLs
-        - SSH: internal IPs
+        - K8s: Start background DNS updater to resolve service DNS to IPs
+        - SSH: Inject static internal IPs
 
         Args:
             job_group_name: Name of the JobGroup.
@@ -303,23 +362,23 @@ class NetworkConfigurator:
         Returns:
             True if all injections succeeded, False otherwise.
         """
-        logger.info(
-            f'Injecting /etc/hosts entries on all {len(tasks_handles)} jobs')
+        logger.info(f'Setting up networking on all {len(tasks_handles)} jobs')
 
-        # Generate hosts content (include all jobs for cross-job resolution)
-        hosts_content = _generate_hosts_entries(job_group_name, tasks_handles)
-        empty_header = f'# JobGroup: {job_group_name}'
-        if not hosts_content or hosts_content == empty_header:
-            logger.warning('No hosts entries to inject')
-            return True
+        # Generate static hosts content for SSH nodes
+        ssh_hosts_content = _generate_hosts_entries(job_group_name,
+                                                    tasks_handles)
 
-        logger.debug(f'Hosts entries:\n{hosts_content}')
+        # Generate K8s DNS mappings for background updater
+        k8s_dns_mappings = _generate_k8s_dns_mappings(job_group_name,
+                                                      tasks_handles)
 
         # Collect all injection tasks (for all nodes: K8s and SSH)
         inject_tasks = []
         for task, handle in tasks_handles:
             if handle is None:
                 continue
+
+            is_k8s = _is_kubernetes(handle)
 
             # Use handle.get_command_runners() (not hardcoded SSHCommandRunner)
             try:
@@ -330,16 +389,25 @@ class NetworkConfigurator:
                 continue
 
             for node_idx, runner in enumerate(runners):
-                inject_tasks.append(_inject_hosts_on_node(
-                    runner, hosts_content))
-                logger.debug(f'Queued injection for {task.name}-{node_idx}')
+                if is_k8s:
+                    # K8s: Start background DNS updater
+                    inject_tasks.append(
+                        _start_k8s_dns_updater_on_node(runner,
+                                                       k8s_dns_mappings))
+                else:
+                    # SSH: Inject static /etc/hosts
+                    if ssh_hosts_content:
+                        inject_tasks.append(
+                            _inject_hosts_on_node(runner, ssh_hosts_content))
+                logger.debug(
+                    f'Queued networking setup for {task.name}-{node_idx}')
 
         if not inject_tasks:
-            logger.warning('No nodes to inject hosts entries')
+            logger.warning('No nodes to set up networking')
             return True
 
         # Execute all injections in parallel
-        logger.info(f'Injecting hosts entries on {len(inject_tasks)} nodes...')
+        logger.info(f'Setting up networking on {len(inject_tasks)} nodes...')
         results = await asyncio.gather(*inject_tasks, return_exceptions=True)
 
         # Check results
@@ -449,9 +517,69 @@ def _make_env_var_name(job_name: str) -> str:
     return f'SKYPILOT_JOBGROUP_{safe_name}_HOST'
 
 
+def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]]) -> str:
+    """Generate background script to update /etc/hosts with K8s DNS IPs.
+
+    Args:
+        dns_mappings: List of (k8s_dns, simple_hostname) tuples.
+
+    Returns:
+        Bash script as a string.
+    """
+    if not dns_mappings:
+        return ''
+
+    # Build mapping pairs for the script
+    mapping_pairs = ' '.join(
+        [f'{dns}:{hostname}' for dns, hostname in dns_mappings])
+
+    script = textwrap.dedent(f"""
+        # Background K8s DNS to IP updater for /etc/hosts
+        (
+          MAPPINGS="{mapping_pairs}"
+          MARKER="# SkyPilot JobGroup K8s entries"
+          while true; do
+            # Build new entries
+            new_entries=""
+            needs_update=0
+            for mapping in $MAPPINGS; do
+              k8s_dns="${{mapping%%:*}}"
+              simple_name="${{mapping##*:}}"
+              # Resolve K8s DNS to IP
+              ip=$(getent hosts "$k8s_dns" 2>/dev/null | awk '{{print $1}}')
+              if [ -n "$ip" ]; then
+                new_entries="${{new_entries}}$ip $simple_name  $MARKER"$'\\n'
+                # Check if current IP differs from /etc/hosts
+                current_ip=$(getent hosts "$simple_name" 2>/dev/null | awk '{{print $1}}')
+                if [ "$ip" != "$current_ip" ]; then
+                  needs_update=1
+                fi
+              fi
+            done
+
+            # Only update /etc/hosts if IPs have changed
+            if [ -n "$new_entries" ] && [ $needs_update -eq 1 ]; then
+              # Create temp file with updated content
+              tmp_file=$(mktemp)
+              # Copy existing /etc/hosts, excluding marked JobGroup entries
+              sudo grep -v "$MARKER" /etc/hosts 2>/dev/null > "$tmp_file" || true
+              # Append new entries
+              echo -n "$new_entries" >> "$tmp_file"
+              # Set permissions before move to avoid read failures
+              sudo chmod 644 "$tmp_file"
+              # Atomic move (rename is atomic on POSIX)
+              sudo mv "$tmp_file" /etc/hosts
+            fi
+            sleep 5
+          done
+        ) &
+    """)
+    return script.strip()
+
+
 def generate_wait_for_networking_script(job_group_name: str,
                                         other_job_names: List[str]) -> str:
-    """Generate a bash script to wait for /etc/hosts injection.
+    """Generate a bash script to wait for network setup.
 
     This script should be prepended to task.setup to ensure networking
     is ready before the task starts.
@@ -472,26 +600,26 @@ def generate_wait_for_networking_script(job_group_name: str,
         # No other jobs to wait for
         return ''
 
-    # Create a script that waits for all hostnames to be resolvable
+    # Wait for hostnames to be resolvable
     hostname_list = ' '.join(hostnames)
-    script = textwrap.dedent(f"""
+    wait_script = textwrap.dedent(f"""
         # Wait for JobGroup networking to be ready
-        echo "[SkyPilot] Waiting for JobGroup networking setup..."
+        echo "[SkyPilot] Waiting for network setup..."
         HOSTNAMES="{hostname_list}"
         MAX_WAIT=300  # 5 minutes
         ELAPSED=0
         for hostname in $HOSTNAMES; do
-          while ! grep -q "$hostname" /etc/hosts 2>/dev/null; do
+          while ! getent hosts "$hostname" >/dev/null 2>&1; do
             if [ $ELAPSED -ge $MAX_WAIT ]; then
-              echo "[SkyPilot] Error: Timed out waiting for $hostname in /etc/hosts"
+              echo "[SkyPilot] Error: Network setup timed out for \\"$hostname\\""
               exit 1
             fi
-            echo "[SkyPilot] Waiting for $hostname to appear in /etc/hosts..."
+            echo "[SkyPilot] Waiting for network to be ready..."
             sleep 2
             ELAPSED=$((ELAPSED + 2))
           done
-          echo "[SkyPilot] Found $hostname in /etc/hosts"
         done
-        echo "[SkyPilot] JobGroup networking is ready!"
+        echo "[SkyPilot] Network is ready!"
     """)
-    return script.strip()
+
+    return wait_script.strip()
