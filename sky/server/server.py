@@ -1,5 +1,4 @@
 """SkyPilot API Server exposing RESTful APIs."""
-
 import argparse
 import asyncio
 import base64
@@ -14,7 +13,6 @@ import os
 import pathlib
 import posixpath
 import re
-import resource
 import shutil
 import socket
 import struct
@@ -33,7 +31,12 @@ import fastapi
 from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
 import starlette.middleware.base
-import uvloop
+
+try:
+    # resource is not available on Windows
+    import resource
+except ImportError:
+    pass
 
 import sky
 from sky import catalog
@@ -2567,7 +2570,11 @@ if __name__ == '__main__':
     # Global background tasks that will be scheduled in a separate event loop.
     global_tasks: List[asyncio.Task] = []
     try:
-        background = uvloop.new_event_loop()
+        if sys.platform != 'win32':
+            import uvloop
+            background = uvloop.new_event_loop()
+        else:
+            background = asyncio.new_event_loop()
         if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
             metrics_server = metrics.build_metrics_server(
                 cmd_args.host, cmd_args.metrics_port)
