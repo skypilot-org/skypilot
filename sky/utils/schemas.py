@@ -1875,6 +1875,25 @@ def get_config_schema():
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA_KUBERNETES)
         else:
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
+
+    data_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'mount_cached': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'sequential_upload': {
+                        'type': 'boolean',
+                    },
+                },
+            },
+        },
+    }
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -1901,6 +1920,7 @@ def get_config_schema():
             'rbac': rbac_schema,
             'logs': logs_schema,
             'daemons': daemon_schema,
+            'data': data_schema,
             **cloud_configs,
         },
     }

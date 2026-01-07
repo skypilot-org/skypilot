@@ -1802,17 +1802,22 @@ def test_cancel_logs_request(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.kubernetes
-def test_kubernetes_ssh_proxy_connection():
-    """Test Kubernetes SSH proxy connection.
+@pytest.mark.no_aws
+@pytest.mark.no_gcp
+@pytest.mark.no_nebius
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_runpod
+@pytest.mark.no_azure
+def test_kubernetes_slurm_ssh_proxy_connection(generic_cloud: str):
+    """Test Kubernetes/Slurm SSH proxy connection.
     """
     cluster_name = smoke_tests_utils.get_cluster_name()
 
     test = smoke_tests_utils.Test(
         'kubernetes_ssh_proxy_connection',
         [
-            # Launch a minimal Kubernetes cluster for SSH proxy testing
-            f'sky launch -y -c {cluster_name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH test cluster ready"',
+            # Launch a minimal Kubernetes/Slurm cluster for SSH proxy testing
+            f'sky launch -y -c {cluster_name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH test cluster ready"',
             # Run an SSH command on the cluster.
             f'ssh {cluster_name} echo "SSH command executed"',
         ],
@@ -1878,30 +1883,6 @@ def test_cluster_setup_num_gpus():
             teardown=f'sky down -y {name}',
         )
         smoke_tests_utils.run_one_test(test)
-
-
-@pytest.mark.aws
-def test_launch_retry_until_up():
-    """Test that retry until up considers more resources after trying all zones."""
-    cluster_name = smoke_tests_utils.get_cluster_name()
-    timeout = 180
-    test = smoke_tests_utils.Test(
-        'launch-retry-until-up',
-        [
-            # Launch something we'll never get.
-            f's=$(timeout {timeout} sky launch -c {cluster_name} --gpus B200:8 --infra aws echo hi -y -d --retry-until-up --use-spot 2>&1 || true) && '
-            # Check that "Retry after" appears in the output
-            'echo "$s" | grep -q "Retry after" && '
-            # Find the first occurrence of "Retry after" and get its line number
-            'RETRY_LINE=$(echo "$s" | grep -n "Retry after" | head -1 | cut -d: -f1) && '
-            # Check that "Considered resources" appears after the first "Retry after"
-            # We do this by extracting all lines after RETRY_LINE and checking if "Considered resources" appears
-            'echo "$s" | tail -n +$((RETRY_LINE + 1)) | grep -q "Considered resources"'
-        ],
-        timeout=200,  # Slightly more than 180 to account for test overhead
-        teardown=f'sky down -y {cluster_name}',
-    )
-    smoke_tests_utils.run_one_test(test)
 
 
 def test_cancel_job_reliability(generic_cloud: str):

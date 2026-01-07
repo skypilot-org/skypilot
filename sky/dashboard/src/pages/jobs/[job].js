@@ -261,6 +261,7 @@ function JobDetails() {
                 pool: detailJobData.pool,
                 userHash: detailJobData.user_hash,
                 infra: detailJobData.full_infra || detailJobData.infra,
+                refreshTrigger: refreshTrigger,
               }}
               wrapperClassName="mt-6"
             />
