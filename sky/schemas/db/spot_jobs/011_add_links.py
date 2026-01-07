@@ -1,8 +1,8 @@
 """Add links column for storing cluster instance links.
 
-Revision ID: 009
-Revises: 008
-Create Date: 2025-12-17
+Revision ID: 011
+Revises: 010
+Create Date: 2026-01-07
 
 """
 # pylint: disable=invalid-name
@@ -14,8 +14,8 @@ import sqlalchemy as sa
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
-revision: str = '009'
-down_revision: Union[str, Sequence[str], None] = '008'
+revision: str = '011'
+down_revision: Union[str, Sequence[str], None] = '010'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -56,6 +56,7 @@ function JobDetails() {
   const [refreshLogsFlag, setRefreshLogsFlag] = useState(0);
   const [refreshControllerLogsFlag, setRefreshControllerLogsFlag] = useState(0);
   const [logExtractedLinks, setLogExtractedLinks] = useState({});
+  const [isLinksExpanded, setIsLinksExpanded] = useState(false);
   const isMobile = useMobile();
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
