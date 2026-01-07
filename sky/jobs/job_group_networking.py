@@ -295,26 +295,35 @@ async def _start_k8s_dns_updater_on_node(
     write_cmd = f'{{ echo {encoded_script} > {script_path}; }}'
 
     try:
+        loop = asyncio.get_running_loop()
+
         # Write the script file
-        returncode, _, stderr = await asyncio.get_event_loop().run_in_executor(
+        logger.debug('Writing DNS updater script...')
+        returncode, _, stderr = await loop.run_in_executor(
             None,
             lambda: runner.run(write_cmd, stream_logs=False,
                                require_outputs=True))
         if returncode != 0:
             logger.error(f'Failed to write DNS updater script: {stderr}')
             return False
+        logger.debug('DNS updater script written successfully')
 
         # Make executable and run in background
+        # Use a subshell with exec to fully detach from kubectl exec:
+        # - The outer shell exits immediately after spawning the subshell
+        # - The subshell runs the script with all FDs redirected
         run_cmd = (f'chmod +x {script_path} && '
-                   f'nohup {script_path} > {log_path} 2>&1 & '
-                   f'sleep 1 && test -f {log_path}')
-        returncode, _, stderr = await asyncio.get_event_loop().run_in_executor(
+                   f'(nohup {script_path} < /dev/null > {log_path} 2>&1 &) && '
+                   f'sleep 0.1')
+        logger.debug('Starting DNS updater in background...')
+        returncode, _, stderr = await loop.run_in_executor(
             None,
             lambda: runner.run(run_cmd, stream_logs=False,
                                require_outputs=True))
         if returncode != 0:
             logger.error(f'Failed to start DNS updater: {stderr}')
             return False
+        logger.debug('DNS updater started successfully')
         return True
     except Exception as e:
         logger.error(f'Exception while starting DNS updater: {e}')
@@ -427,7 +436,16 @@ class NetworkConfigurator:
 
         # Execute all injections in parallel
         logger.info(f'Setting up networking on {len(inject_tasks)} nodes...')
-        results = await asyncio.gather(*inject_tasks, return_exceptions=True)
+        logger.debug(f'Waiting for {len(inject_tasks)} async tasks to complete')
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*inject_tasks, return_exceptions=True),
+                timeout=60.0  # 60 second timeout
+            )
+        except asyncio.TimeoutError:
+            logger.error('Networking setup timed out after 60 seconds')
+            return False
+        logger.debug(f'All {len(inject_tasks)} async tasks completed')
 
         # Check results
         success_count = sum(
