@@ -93,7 +93,7 @@ print(f'Generated dataset: {X.shape}')
         task_config={
             'name': 'train',
             'resources': {
-                'accelerators': 'A10G:1'
+                'accelerators': 'H100:1'
             },
             'setup': 'pip install torch',
             'run': """
@@ -113,7 +113,7 @@ for epoch in range(3):
         task_config={
             'name': 'eval',
             'resources': {
-                'accelerators': 'A10G:1'
+                'accelerators': 'H100:1'
             },
             'setup': 'pip install torch',
             'run': """
