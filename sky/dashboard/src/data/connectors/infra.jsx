@@ -4,6 +4,7 @@ import { CLOUDS_LIST, COMMON_GPUS } from '@/data/connectors/constants';
 import { apiClient } from '@/data/connectors/client';
 import { getErrorMessageFromResponse } from '@/data/utils';
 import dashboardCache from '@/lib/cache';
+import { buildContextStatsKeyFromCloud } from '@/utils/infraUtils';
 
 export async function getCloudInfrastructure(forceRefresh = false) {
   const { getClusters } = await import('@/data/connectors/clusters');
@@ -594,33 +595,12 @@ async function getKubernetesPerNodeGPUs(context) {
 
 export async function getContextJobs(jobs) {
   try {
-    // Count jobs per k8s context/ssh node pool
+    // Count jobs per k8s context/ssh node pool/slurm cluster
     const contextStats = {};
 
     // Process jobs
     jobs.forEach((job) => {
-      let contextKey = null;
-
-      // Check if it's a Kubernetes job
-      if (job.cloud === 'Kubernetes') {
-        // For Kubernetes jobs, the context name is in job.region
-        contextKey = job.region;
-        if (contextKey) {
-          contextKey = `kubernetes/${contextKey}`;
-        }
-      }
-      // Check if it's an SSH Node Pool job
-      else if (job.cloud === 'SSH') {
-        // For SSH jobs, the node pool name is in job.region
-        contextKey = job.region;
-        if (contextKey) {
-          // Remove 'ssh-' prefix if present for display
-          const poolName = contextKey.startsWith('ssh-')
-            ? contextKey.substring(4)
-            : contextKey;
-          contextKey = `ssh/${poolName}`;
-        }
-      }
+      const contextKey = buildContextStatsKeyFromCloud(job.cloud, job.region);
 
       if (contextKey) {
         if (!contextStats[contextKey]) {
@@ -639,31 +619,13 @@ export async function getContextJobs(jobs) {
 
 export async function getContextClusters(clusters) {
   try {
-    // Count clusters per k8s context/ssh node pool
+    // Count clusters per k8s context/ssh node pool/slurm cluster
     const contextStats = {};
     clusters.forEach((cluster) => {
-      let contextKey = null;
-
-      // Check if it's a Kubernetes cluster
-      if (cluster.cloud === 'Kubernetes') {
-        // For Kubernetes clusters, the context name is in cluster.region
-        contextKey = cluster.region;
-        if (contextKey) {
-          contextKey = `kubernetes/${contextKey}`;
-        }
-      }
-      // Check if it's an SSH Node Pool cluster
-      else if (cluster.cloud === 'SSH') {
-        // For SSH clusters, the node pool name is in cluster.region
-        contextKey = cluster.region;
-        if (contextKey) {
-          // Remove 'ssh-' prefix if present for display
-          const poolName = contextKey.startsWith('ssh-')
-            ? contextKey.substring(4)
-            : contextKey;
-          contextKey = `ssh/${poolName}`;
-        }
-      }
+      const contextKey = buildContextStatsKeyFromCloud(
+        cluster.cloud,
+        cluster.region
+      );
 
       if (contextKey) {
         if (!contextStats[contextKey]) {
@@ -977,7 +939,7 @@ async function getSlurmClusterGPUs() {
 
 async function getSlurmPerNodeGPUs() {
   try {
-    const response = await apiClient.get(`/slurm_node_info`);
+    const response = await apiClient.post(`/slurm_node_info`, {});
     if (!response.ok) {
       const msg = `Failed to get slurm node info with status ${response.status}`;
       throw new Error(msg);
