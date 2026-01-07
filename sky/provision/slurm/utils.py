@@ -2,6 +2,7 @@
 import math
 import os
 import re
+import shlex
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from paramiko.config import SSHConfig
@@ -625,7 +626,7 @@ def srun_sshd_command(
     job_id: str,
     target_node: str,
     unix_user: str,
-) -> List[str]:
+) -> str:
     """Build srun command for launching sshd -i inside a Slurm job.
 
     This is used by the API server to proxy SSH connections to Slurm jobs
@@ -642,7 +643,7 @@ def srun_sshd_command(
     # We use ~username to ensure we use the real home of the user ssh'ing in,
     # because we override the home directory in SlurmCommandRunner.run.
     user_home_ssh_dir = f'~{unix_user}/.ssh'
-    return [
+    return shlex.join([
         'srun',
         '--quiet',
         '--unbuffered',
@@ -664,11 +665,11 @@ def srun_sshd_command(
         'PasswordAuthentication=no',
         '-o',
         'PubkeyAuthentication=yes',
-        '-o',
         # If UsePAM is enabled, we will not be able to run sshd(8)
         # as a non-root user.
         # See https://man7.org/linux/man-pages/man5/sshd_config.5.html
+        '-o',
         'UsePAM=no',
         '-o',
         f'AcceptEnv={constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}',
-    ]
+    ])
