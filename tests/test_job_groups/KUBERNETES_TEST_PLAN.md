@@ -922,6 +922,69 @@ sky jobs launch /tmp/k8s_duplicate_names.yaml -y
 
 This phase tests failure handling and recovery mechanisms in JobGroups. These tests are critical for understanding system behavior under adverse conditions.
 
+**Key Features to Test:**
+- **Individual job recovery**: Each job in a JobGroup can recover independently
+- **Networking re-establishment**: After recovery, networking (DNS/hosts) is automatically updated
+- **Network wait script**: Jobs wait for DNS resolution before starting (up to 5 minutes timeout)
+- **K8s DNS updater**: Background script updates `/etc/hosts` with resolved K8s DNS entries
+
+### 6.0 Network Wait Script Verification
+
+Before testing recovery, verify that the network wait script works correctly.
+
+**Test file:** `k8s_network_wait_test.yaml`
+
+```yaml
+---
+name: k8s-network-wait-test
+placement: SAME_INFRA
+execution: parallel
+---
+name: slow-starter
+resources:
+  cpus: 2
+  infra: kubernetes
+setup: |
+  # Simulate slow setup
+  echo "Slow starter setup beginning..."
+  sleep 30
+  echo "Slow starter setup complete"
+run: |
+  echo "Slow starter running"
+  python3 -m http.server 8080 &
+  sleep 60
+---
+name: fast-waiter
+resources:
+  cpus: 2
+  infra: kubernetes
+run: |
+  echo "Fast waiter starting"
+  echo "Checking if slow-starter is reachable..."
+
+  # The network wait script should have already waited for DNS
+  SERVER_HOST="slow-starter-0.${SKYPILOT_JOBGROUP_NAME}"
+  echo "Attempting to reach: $SERVER_HOST"
+
+  # Should be able to reach immediately (after wait script)
+  for i in {1..10}; do
+    if curl -s --connect-timeout 5 http://$SERVER_HOST:8080/ > /dev/null 2>&1; then
+      echo "SUCCESS: Connected to slow-starter on attempt $i"
+      exit 0
+    fi
+    echo "Attempt $i: waiting..."
+    sleep 5
+  done
+  echo "FAILED: Could not connect"
+  exit 1
+```
+
+**Verification:**
+- [ ] `fast-waiter` waits for `slow-starter` DNS to be resolvable before `run` starts
+- [ ] Look for `[SkyPilot] Waiting for network setup...` in logs
+- [ ] Look for `[SkyPilot] Network is ready!` in logs
+- [ ] Connection succeeds even though `slow-starter` has slow setup
+
 ### 6.1 Job Recovery Configuration
 
 **Test file:** `k8s_recovery_test.yaml`
@@ -1024,12 +1087,14 @@ watch -n 5 "sky jobs queue && echo '---' && kubectl get pods -A | grep sky"
 sky jobs logs $JOB_ID
 ```
 
-**Verification checklist:**
-- [ ] Pod deletion is detected by SkyPilot
-- [ ] Job status changes (RECOVERING or FAILED)
-- [ ] Document whether job recovers or fails
-- [ ] Document behavior of other jobs in the group
-- [ ] Check if networking is re-established after recovery
+**Expected behavior (with individual job recovery):**
+- [ ] Pod deletion is detected by SkyPilot within ~30 seconds
+- [ ] Affected job status changes to RECOVERING
+- [ ] **Other jobs in the group continue running unaffected**
+- [ ] Affected job recovers automatically (new pod created)
+- [ ] Networking is re-established after recovery (K8s DNS updater updates `/etc/hosts`)
+- [ ] Recovered job resumes and completes successfully
+- [ ] Look for logs: "Job X cluster preempted or failed... Recovering..."
 
 ### 6.3 Node Drain Simulation
 
@@ -1261,24 +1326,47 @@ watch -n 5 sky jobs queue
 - [ ] Final states are correctly reported
 - [ ] Cleanup handles partial success/failure
 
-### 6.8 Recovery Test Result Template
+### 6.8 K8s DNS Updater Verification
+
+The K8s DNS updater runs in the background and continuously updates `/etc/hosts` with resolved K8s DNS entries. This is critical for networking after recovery.
+
+```bash
+# After launching a JobGroup, check if DNS updater is running
+kubectl exec -it <pod-name> -n <namespace> -- ps aux | grep "DNS updater"
+
+# Check /etc/hosts entries
+kubectl exec -it <pod-name> -n <namespace> -- cat /etc/hosts | grep "SkyPilot JobGroup"
+
+# Monitor DNS updater logs (stored in container)
+kubectl exec -it <pod-name> -n <namespace> -- tail -f /tmp/skypilot_dns_updater.log
+```
+
+**Verification:**
+- [ ] DNS updater process is running in each pod
+- [ ] `/etc/hosts` contains entries for all jobs in the group
+- [ ] After recovery, `/etc/hosts` is updated with new pod IPs
+
+### 6.9 Recovery Test Result Template
 
 | Scenario | Expected Behavior | Actual Behavior | Pass/Fail | Notes |
 |----------|-------------------|-----------------|-----------|-------|
-| Pod deletion | Recovery or FAILED | | | |
-| Node drain | Pods rescheduled or FAILED | | | |
+| Network wait script | Jobs wait for DNS | | | |
+| Pod deletion | **Job recovers independently** | | | |
+| Node drain | **Job recovers on new node** | | | |
 | Resource exhaustion | Queued or clear error | | | |
 | Network partition | Timeout/retry or FAILED | | | |
 | Controller restart | Jobs continue | | | |
-| Partial failure | Other jobs unaffected | | | |
-| Exit code recovery | Job restarts | | | |
+| Partial failure | **Other jobs unaffected** | | | |
+| Exit code recovery | Job restarts per config | | | |
+| DNS updater | IPs updated after recovery | | | |
 
 **Key questions to document:**
-1. Does the JobGroup use all-or-nothing failure semantics?
-2. Are healthy jobs affected when one job fails?
-3. Is networking re-established after pod recovery?
-4. How long does recovery take?
-5. What happens to in-progress work when recovery occurs?
+1. How quickly does recovery start after pod deletion? (Expected: ~30 seconds)
+2. Are healthy jobs affected when one job fails/recovers? (Expected: No)
+3. Is networking re-established after pod recovery? (Expected: Yes, via DNS updater)
+4. How long does full recovery take? (Expected: 2-5 minutes)
+5. What happens to in-progress work when recovery occurs? (Job restarts from beginning)
+6. Does the network wait script timeout correctly? (Expected: 5 minute timeout)
 
 ---
 
@@ -1418,22 +1506,37 @@ sky jobs queue
 
 | Test | Status | Notes |
 |------|--------|-------|
+| **Phase 1: Unit Tests** | | |
 | 1.1 YAML Parsing | | |
 | 1.2 Networking Unit | | |
+| **Phase 2: Basic Integration** | | |
 | 2.1 Minimal JobGroup | | |
 | 2.2 Cross-Job Networking | | |
 | 2.3 Multi-Node Job | | |
+| **Phase 3: Heterogeneous Resources** | | |
 | 3.1 Mixed Resources | | |
 | 3.2 GPU + CPU | | |
+| **Phase 4: RL Architecture** | | |
 | 4.1 RL Architecture | | |
+| **Phase 5: Edge Cases** | | |
 | 5.1 Job Failure | | |
 | 5.2 Resource Unavailable | | |
 | 5.3 Cancellation | | |
 | 5.4 Empty Run | | |
 | 5.5 Duplicate Names | | |
+| **Phase 6: Recovery (NEW)** | | |
+| 6.0 Network Wait Script | | |
 | 6.1 Recovery Config | | |
-| 6.2 Preemption | | |
+| 6.2 Pod Deletion Recovery | | |
+| 6.3 Node Drain Recovery | | |
+| 6.4 Resource Exhaustion | | |
+| 6.5 Network Partition | | |
+| 6.6 Controller Restart | | |
+| 6.7 Partial Failure | | |
+| 6.8 K8s DNS Updater | | |
+| **Phase 7: Shared Storage** | | |
 | 7.1 Shared Volume | | |
+| **Phase 8: Scale** | | |
 | 8.1 Scale (5 jobs) | | |
 | 8.2 Concurrent Groups | | |
 
@@ -1442,8 +1545,9 @@ sky jobs queue
 ## Known Limitations (from PR)
 
 1. **Placement enforcement:** `placement: SAME_INFRA` is parsed but not enforced
-2. **Preemption recovery:** JobGroup jobs may fail rather than recover on preemption
-3. **DAG execution:** Only parallel execution supported, not arbitrary DAG
+2. **DAG execution:** Only parallel execution supported, not arbitrary DAG
+
+**Note:** Individual job recovery IS supported in the latest PR. When a job in a JobGroup is preempted or fails with a recoverable exit code, it will be recovered independently while other jobs continue running. Networking is automatically re-established after recovery.
 
 ---
 
