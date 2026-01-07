@@ -274,24 +274,13 @@ class NetworkConfigurator:
             logger.warning(f'Unsupported placement mode: {placement}')
             return False
 
-        # Separate K8s and SSH handles
-        k8s_handles = [(t, h) for t, h in tasks_handles if _is_kubernetes(h)]
-        ssh_handles = [(t, h)
-                       for t, h in tasks_handles
-                       if h is not None and not _is_kubernetes(h)]
-
-        # K8s: No /etc/hosts injection needed (DNS works automatically)
-        if k8s_handles:
-            logger.info(f'K8s clusters ({len(k8s_handles)} jobs): '
-                        'using native DNS, no /etc/hosts injection needed')
-
-        # SSH clouds: Inject /etc/hosts with entries for ALL jobs (SSH + K8s)
-        # This allows SSH nodes to resolve K8s jobs via headless service URLs
-        if ssh_handles:
-            success = await NetworkConfigurator._inject_etc_hosts(
-                job_group_name, tasks_handles)  # Pass all handles, not just SSH
-            if not success:
-                return False
+        # Inject /etc/hosts on all nodes (both K8s and SSH)
+        # This maps the unified hostname format {job_name}-{node_idx}.{job_group_name}
+        # to actual addresses (internal_svc URLs for K8s, IPs for SSH)
+        success = await NetworkConfigurator._inject_etc_hosts(
+            job_group_name, tasks_handles)
+        if not success:
+            return False
 
         return True
 
@@ -301,21 +290,21 @@ class NetworkConfigurator:
         tasks_handles: List[Tuple[
             'task_lib.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
     ) -> bool:
-        """Inject /etc/hosts entries for SSH cloud clusters.
+        """Inject /etc/hosts entries for all clusters in the JobGroup.
+
+        This maps the unified hostname format to actual addresses:
+        - K8s: internal_svc URLs
+        - SSH: internal IPs
 
         Args:
             job_group_name: Name of the JobGroup.
-            tasks_handles: List of (Task, ResourceHandle) tuples (all jobs, both
-                K8s and SSH). Hosts entries will include all jobs, but injection
-                only happens on SSH nodes.
+            tasks_handles: List of (Task, ResourceHandle) tuples for all jobs.
 
         Returns:
             True if all injections succeeded, False otherwise.
         """
-        # Count SSH jobs for logging
-        ssh_job_count = sum(1 for _, h in tasks_handles
-                            if h is not None and not _is_kubernetes(h))
-        logger.info(f'Injecting /etc/hosts entries on {ssh_job_count} SSH jobs')
+        logger.info(
+            f'Injecting /etc/hosts entries on all {len(tasks_handles)} jobs')
 
         # Generate hosts content (include all jobs for cross-job resolution)
         hosts_content = _generate_hosts_entries(job_group_name, tasks_handles)
@@ -326,11 +315,10 @@ class NetworkConfigurator:
 
         logger.debug(f'Hosts entries:\n{hosts_content}')
 
-        # Collect all injection tasks (only for SSH nodes)
+        # Collect all injection tasks (for all nodes: K8s and SSH)
         inject_tasks = []
         for task, handle in tasks_handles:
-            if handle is None or _is_kubernetes(handle):
-                # Skip K8s jobs (they use native DNS)
+            if handle is None:
                 continue
 
             # Use handle.get_command_runners() (not hardcoded SSHCommandRunner)
