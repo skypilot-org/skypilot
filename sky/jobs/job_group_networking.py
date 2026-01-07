@@ -4,7 +4,7 @@ This module provides functions to set up networking between jobs in a JobGroup.
 
 Architecture:
     Layer 1: User Interface (environment variables)
-        - SKYPILOT_JOBGROUP_{JOB_NAME}_HOST = <address>
+        - SKYPILOT_JOBGROUP_HOST_{JOB_NAME} = <address>
         - SKYPILOT_JOBGROUP_NAME = <job_group_name>
 
     Layer 2: JobAddressResolver
@@ -300,9 +300,8 @@ async def _start_k8s_dns_updater_on_node(
         # Write the script file
         logger.debug('Writing DNS updater script...')
         returncode, _, stderr = await loop.run_in_executor(
-            None,
-            lambda: runner.run(write_cmd, stream_logs=False,
-                               require_outputs=True))
+            None, lambda: runner.run(
+                write_cmd, stream_logs=False, require_outputs=True))
         if returncode != 0:
             logger.error(f'Failed to write DNS updater script: {stderr}')
             return False
@@ -318,8 +317,8 @@ async def _start_k8s_dns_updater_on_node(
         logger.debug('Starting DNS updater in background...')
         returncode, _, stderr = await loop.run_in_executor(
             None,
-            lambda: runner.run(run_cmd, stream_logs=False,
-                               require_outputs=True))
+            lambda: runner.run(run_cmd, stream_logs=False, require_outputs=True)
+        )
         if returncode != 0:
             logger.error(f'Failed to start DNS updater: {stderr}')
             return False
@@ -551,7 +550,7 @@ def _make_env_var_name(job_name: str) -> str:
     """Generate environment variable name for a job's address."""
     # Convert job name to uppercase and replace hyphens with underscores
     safe_name = job_name.upper().replace('-', '_')
-    return f'SKYPILOT_JOBGROUP_{safe_name}_HOST'
+    return f'SKYPILOT_JOBGROUP_HOST_{safe_name}'
 
 
 def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]]) -> str:
