@@ -2458,3 +2458,696 @@ class TestCheckInstanceFits:
             assert fits is False
             assert reason is not None
             assert 'Requested TPU type was not found' in reason
+
+
+class TestNormalizeTpuAcceleratorName:
+    """Tests for normalize_tpu_accelerator_name function."""
+
+    def test_tpu_v6e(self):
+        """Test TPU v6e normalization."""
+        name, count = utils.normalize_tpu_accelerator_name('tpu-v6e-8')
+        assert name == 'tpu-v6e-slice'
+        assert count == 8
+
+    def test_tpu_v5p(self):
+        """Test TPU v5p normalization."""
+        name, count = utils.normalize_tpu_accelerator_name('tpu-v5p-4')
+        assert name == 'tpu-v5p-slice'
+        assert count == 4
+
+    def test_tpu_v5litepod(self):
+        """Test TPU v5litepod normalization."""
+        name, count = utils.normalize_tpu_accelerator_name('tpu-v5litepod-4')
+        assert name == 'tpu-v5-lite-podslice'
+        assert count == 4
+
+    def test_tpu_v5lite(self):
+        """Test TPU v5lite normalization."""
+        name, count = utils.normalize_tpu_accelerator_name('tpu-v5lite-8')
+        assert name == 'tpu-v5-lite-device'
+        assert count == 8
+
+    def test_tpu_v4(self):
+        """Test TPU v4 normalization."""
+        name, count = utils.normalize_tpu_accelerator_name('tpu-v4-16')
+        assert name == 'tpu-v4-podslice'
+        assert count == 16
+
+    def test_unrecognized_tpu(self):
+        """Test unrecognized TPU returns original name with count 1."""
+        name, count = utils.normalize_tpu_accelerator_name('tpu-unknown-type')
+        assert name == 'tpu-unknown-type'
+        assert count == 1
+
+
+class TestKubernetesHighPerformanceNetworkType:
+    """Tests for KubernetesHighPerformanceNetworkType enum."""
+
+    def test_nebius_network_env_vars(self):
+        """Test Nebius network environment variables."""
+        env_vars = utils.KubernetesHighPerformanceNetworkType.NEBIUS.get_network_env_vars(
+        )
+        assert 'NCCL_IB_HCA' in env_vars
+        assert env_vars['NCCL_IB_HCA'] == 'mlx5'
+        assert 'UCX_NET_DEVICES' in env_vars
+
+    def test_coreweave_network_env_vars(self):
+        """Test CoreWeave network environment variables."""
+        env_vars = utils.KubernetesHighPerformanceNetworkType.COREWEAVE.get_network_env_vars(
+        )
+        assert 'NCCL_SOCKET_IFNAME' in env_vars
+        assert 'NCCL_IB_HCA' in env_vars
+        assert 'UCX_TLS' in env_vars
+        assert 'UCX_NET_DEVICES' in env_vars
+
+    def test_gcp_tcpx_returns_empty(self):
+        """Test GCP TCPX returns empty env vars."""
+        env_vars = utils.KubernetesHighPerformanceNetworkType.GCP_TCPX.get_network_env_vars(
+        )
+        assert env_vars == {}
+
+    def test_none_returns_empty(self):
+        """Test NONE type returns empty env vars."""
+        env_vars = utils.KubernetesHighPerformanceNetworkType.NONE.get_network_env_vars(
+        )
+        assert env_vars == {}
+
+    def test_supports_high_performance_networking(self):
+        """Test supports_high_performance_networking method."""
+        assert utils.KubernetesHighPerformanceNetworkType.NEBIUS.supports_high_performance_networking(
+        )
+        assert utils.KubernetesHighPerformanceNetworkType.COREWEAVE.supports_high_performance_networking(
+        )
+        assert utils.KubernetesHighPerformanceNetworkType.GCP_TCPX.supports_high_performance_networking(
+        )
+        assert not utils.KubernetesHighPerformanceNetworkType.NONE.supports_high_performance_networking(
+        )
+
+    def test_supports_gpu_direct(self):
+        """Test supports_gpu_direct method."""
+        assert utils.KubernetesHighPerformanceNetworkType.GCP_TCPX.supports_gpu_direct(
+        )
+        assert utils.KubernetesHighPerformanceNetworkType.GCP_TCPXO.supports_gpu_direct(
+        )
+        assert utils.KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA.supports_gpu_direct(
+        )
+        assert not utils.KubernetesHighPerformanceNetworkType.NEBIUS.supports_gpu_direct(
+        )
+        assert not utils.KubernetesHighPerformanceNetworkType.COREWEAVE.supports_gpu_direct(
+        )
+        assert not utils.KubernetesHighPerformanceNetworkType.NONE.supports_gpu_direct(
+        )
+
+    def test_requires_ipc_lock_capability(self):
+        """Test requires_ipc_lock_capability method."""
+        assert utils.KubernetesHighPerformanceNetworkType.NEBIUS.requires_ipc_lock_capability(
+        )
+        assert utils.KubernetesHighPerformanceNetworkType.COREWEAVE.requires_ipc_lock_capability(
+        )
+        assert not utils.KubernetesHighPerformanceNetworkType.NONE.requires_ipc_lock_capability(
+        )
+
+    def test_requires_tcpxo_daemon(self):
+        """Test requires_tcpxo_daemon method."""
+        assert utils.KubernetesHighPerformanceNetworkType.GCP_TCPXO.requires_tcpxo_daemon(
+        )
+        assert not utils.KubernetesHighPerformanceNetworkType.GCP_TCPX.requires_tcpxo_daemon(
+        )
+        assert not utils.KubernetesHighPerformanceNetworkType.NONE.requires_tcpxo_daemon(
+        )
+
+
+class TestGetGkeAcceleratorName:
+    """Tests for get_gke_accelerator_name function."""
+
+    def test_h100(self):
+        """Test H100 accelerator name."""
+        assert utils.get_gke_accelerator_name('H100') == 'nvidia-h100-80gb'
+
+    def test_a100_80gb(self):
+        """Test A100-80GB accelerator name."""
+        assert utils.get_gke_accelerator_name('A100-80GB') == 'nvidia-a100-80gb'
+
+    def test_l4(self):
+        """Test L4 accelerator name."""
+        assert utils.get_gke_accelerator_name('L4') == 'nvidia-l4'
+
+    def test_h100_mega_80gb(self):
+        """Test H100-MEGA-80GB accelerator name."""
+        assert utils.get_gke_accelerator_name(
+            'H100-MEGA-80GB') == 'nvidia-h100-mega-80gb'
+
+    def test_b200(self):
+        """Test B200 accelerator name."""
+        assert utils.get_gke_accelerator_name('B200') == 'nvidia-b200'
+
+    def test_h200(self):
+        """Test H200 accelerator name."""
+        assert utils.get_gke_accelerator_name('H200') == 'nvidia-h200-141gb'
+
+    def test_tpu_type(self):
+        """Test TPU type keeps its name."""
+        assert utils.get_gke_accelerator_name('tpu-v4-8') == 'tpu-v4-8'
+
+    def test_amd_type(self):
+        """Test AMD type keeps its name."""
+        assert utils.get_gke_accelerator_name('amd-mi250') == 'amd-mi250'
+
+    def test_standard_gpu(self):
+        """Test standard GPU (tesla format)."""
+        assert utils.get_gke_accelerator_name('T4') == 'nvidia-tesla-t4'
+        assert utils.get_gke_accelerator_name('V100') == 'nvidia-tesla-v100'
+        assert utils.get_gke_accelerator_name('P100') == 'nvidia-tesla-p100'
+
+
+class TestLabelFormatters:
+    """Tests for GPU label formatter classes."""
+
+    def test_skypilot_formatter_get_label_key(self):
+        """Test SkyPilotLabelFormatter.get_label_key."""
+        assert utils.SkyPilotLabelFormatter.get_label_key(
+        ) == 'skypilot.co/accelerator'
+        assert utils.SkyPilotLabelFormatter.get_label_key(
+            'V100') == 'skypilot.co/accelerator'
+
+    def test_skypilot_formatter_get_label_values(self):
+        """Test SkyPilotLabelFormatter.get_label_values."""
+        assert utils.SkyPilotLabelFormatter.get_label_values('V100') == ['v100']
+        assert utils.SkyPilotLabelFormatter.get_label_values('A100-80GB') == [
+            'a100-80gb'
+        ]
+
+    def test_skypilot_formatter_match_label_key(self):
+        """Test SkyPilotLabelFormatter.match_label_key."""
+        assert utils.SkyPilotLabelFormatter.match_label_key(
+            'skypilot.co/accelerator')
+        assert not utils.SkyPilotLabelFormatter.match_label_key(
+            'other.label/key')
+
+    def test_skypilot_formatter_get_accelerator_from_label_value(self):
+        """Test SkyPilotLabelFormatter.get_accelerator_from_label_value."""
+        assert utils.SkyPilotLabelFormatter.get_accelerator_from_label_value(
+            'v100') == 'V100'
+        assert utils.SkyPilotLabelFormatter.get_accelerator_from_label_value(
+            'a100-80gb') == 'A100-80GB'
+
+    def test_skypilot_formatter_validate_label_value(self):
+        """Test SkyPilotLabelFormatter.validate_label_value."""
+        is_valid, error = utils.SkyPilotLabelFormatter.validate_label_value(
+            'v100')
+        assert is_valid
+        assert error == ''
+
+        is_valid, error = utils.SkyPilotLabelFormatter.validate_label_value(
+            'V100')
+        assert not is_valid
+        assert 'must be lowercase' in error
+
+    def test_coreweave_formatter_get_label_values(self):
+        """Test CoreWeaveLabelFormatter.get_label_values."""
+        assert utils.CoreWeaveLabelFormatter.get_label_values('h100') == [
+            'H100'
+        ]
+
+    def test_coreweave_formatter_acc_value_mappings(self):
+        """Test CoreWeaveLabelFormatter accelerator value mappings."""
+        assert utils.CoreWeaveLabelFormatter.get_accelerator_from_label_value(
+            'H100_NVLINK_80GB') == 'H100'
+        assert utils.CoreWeaveLabelFormatter.get_accelerator_from_label_value(
+            'V100') == 'V100'  # Not in mapping, returns original
+
+    def test_gke_formatter_get_label_key_for_gpu(self):
+        """Test GKELabelFormatter.get_label_key for GPU."""
+        assert utils.GKELabelFormatter.get_label_key(
+            'V100') == 'cloud.google.com/gke-accelerator'
+        assert utils.GKELabelFormatter.get_label_key(
+            'A100') == 'cloud.google.com/gke-accelerator'
+
+    def test_gke_formatter_get_label_key_for_tpu(self):
+        """Test GKELabelFormatter.get_label_key for TPU."""
+        assert utils.GKELabelFormatter.get_label_key(
+            'tpu-v4-8') == 'cloud.google.com/gke-tpu-accelerator'
+
+    def test_gke_formatter_get_label_values(self):
+        """Test GKELabelFormatter.get_label_values."""
+        assert utils.GKELabelFormatter.get_label_values('V100') == [
+            'nvidia-tesla-v100'
+        ]
+        assert utils.GKELabelFormatter.get_label_values('H100') == [
+            'nvidia-h100-80gb'
+        ]
+
+    def test_gke_formatter_get_accelerator_from_label_value(self):
+        """Test GKELabelFormatter.get_accelerator_from_label_value."""
+        assert utils.GKELabelFormatter.get_accelerator_from_label_value(
+            'nvidia-tesla-v100') == 'V100'
+        assert utils.GKELabelFormatter.get_accelerator_from_label_value(
+            'nvidia-a100-80gb') == 'A100-80GB'
+        assert utils.GKELabelFormatter.get_accelerator_from_label_value(
+            'nvidia-h100-80gb') == 'H100'
+        assert utils.GKELabelFormatter.get_accelerator_from_label_value(
+            'nvidia-h200-141gb') == 'H200'
+        # Empty label value for heterogenous clusters
+        assert utils.GKELabelFormatter.get_accelerator_from_label_value(
+            '') == ''
+
+    def test_gke_formatter_validate_label_value(self):
+        """Test GKELabelFormatter.validate_label_value."""
+        is_valid, _ = utils.GKELabelFormatter.validate_label_value(
+            'nvidia-tesla-v100')
+        assert is_valid
+
+        is_valid, error = utils.GKELabelFormatter.validate_label_value(
+            'invalid-gpu-name')
+        assert not is_valid
+        assert 'Invalid accelerator name' in error
+
+    def test_gke_formatter_tpu_topology_label(self):
+        """Test GKELabelFormatter TPU topology methods."""
+        assert utils.GKELabelFormatter.get_tpu_topology_label_key(
+        ) == 'cloud.google.com/gke-tpu-topology'
+
+        # Test topology values
+        assert utils.GKELabelFormatter.get_tpu_topology_label_value(
+            'tpu-v6e-slice', 8) == '2x4'
+        assert utils.GKELabelFormatter.get_tpu_topology_label_value(
+            'tpu-v5-lite-podslice', 4) == '2x2'
+
+    def test_gke_formatter_tpu_topology_invalid(self):
+        """Test GKELabelFormatter raises error for invalid TPU topology."""
+        with pytest.raises(ValueError) as excinfo:
+            utils.GKELabelFormatter.get_tpu_topology_label_value(
+                'tpu-v6e-slice', 999)
+        assert 'No TPU topology found' in str(excinfo.value)
+
+    def test_gfd_formatter_get_accelerator_from_label_value(self):
+        """Test GFDLabelFormatter.get_accelerator_from_label_value."""
+        assert utils.GFDLabelFormatter.get_accelerator_from_label_value(
+            'NVIDIA-A100-80GB-PCIe') == 'A100-80GB'
+        assert utils.GFDLabelFormatter.get_accelerator_from_label_value(
+            'NVIDIA-H100-80GB-HBM3') == 'H100'
+        assert utils.GFDLabelFormatter.get_accelerator_from_label_value(
+            'NVIDIA-Tesla-V100-SXM2-16GB') == 'V100'
+        # Non-canonical name gets cleaned up
+        assert utils.GFDLabelFormatter.get_accelerator_from_label_value(
+            'NVIDIA-RTX-A6000') == 'RTXA6000'
+
+    def test_gfd_formatter_get_label_values_not_implemented(self):
+        """Test GFDLabelFormatter.get_label_values raises NotImplementedError."""
+        with pytest.raises(NotImplementedError):
+            utils.GFDLabelFormatter.get_label_values('V100')
+
+    def test_karpenter_formatter_inherits_skypilot(self):
+        """Test KarpenterLabelFormatter inherits from SkyPilotLabelFormatter."""
+        assert issubclass(utils.KarpenterLabelFormatter,
+                          utils.SkyPilotLabelFormatter)
+        assert utils.KarpenterLabelFormatter.LABEL_KEY == 'karpenter.k8s.aws/instance-gpu-name'
+
+
+class TestParseMemoryResource:
+    """Tests for parse_memory_resource function."""
+
+    def test_bytes_value(self):
+        """Test parsing byte values."""
+        assert utils.parse_memory_resource('1000', unit='B') == 1000
+        assert utils.parse_memory_resource('1048576', unit='B') == 1048576
+
+    def test_kilobytes(self):
+        """Test parsing kilobyte values."""
+        assert utils.parse_memory_resource('1K', unit='B') == 1024
+        assert utils.parse_memory_resource('1K', unit='K') == 1
+        assert utils.parse_memory_resource('1Ki', unit='K') == 1
+
+    def test_megabytes(self):
+        """Test parsing megabyte values."""
+        assert utils.parse_memory_resource('1M', unit='B') == 2**20
+        assert utils.parse_memory_resource('1M', unit='M') == 1
+        assert utils.parse_memory_resource('1Mi', unit='M') == 1
+
+    def test_gigabytes(self):
+        """Test parsing gigabyte values."""
+        assert utils.parse_memory_resource('16Gi', unit='G') == 16
+        assert utils.parse_memory_resource('32G', unit='G') == 32
+        assert utils.parse_memory_resource('1G', unit='B') == 2**30
+
+    def test_terabytes(self):
+        """Test parsing terabyte values."""
+        assert utils.parse_memory_resource('1T', unit='T') == 1
+        assert utils.parse_memory_resource('1Ti', unit='G') == 1024
+
+    def test_petabytes(self):
+        """Test parsing petabyte values."""
+        assert utils.parse_memory_resource('1P', unit='P') == 1
+        assert utils.parse_memory_resource('1Pi', unit='T') == 1024
+
+    def test_fractional_values(self):
+        """Test parsing fractional values."""
+        assert utils.parse_memory_resource('1.5G', unit='G') == 1.5
+        assert utils.parse_memory_resource('0.5M', unit='M') == 0.5
+
+    def test_invalid_unit(self):
+        """Test invalid unit raises ValueError."""
+        with pytest.raises(ValueError) as excinfo:
+            utils.parse_memory_resource('1G', unit='X')
+        assert 'Invalid unit' in str(excinfo.value)
+
+
+class TestParseCpuOrGpuResource:
+    """Tests for parse_cpu_or_gpu_resource function."""
+
+    def test_whole_numbers(self):
+        """Test parsing whole number CPU values."""
+        assert utils.parse_cpu_or_gpu_resource('1') == 1.0
+        assert utils.parse_cpu_or_gpu_resource('4') == 4.0
+        assert utils.parse_cpu_or_gpu_resource('16') == 16.0
+
+    def test_millicore_values(self):
+        """Test parsing millicore CPU values."""
+        assert utils.parse_cpu_or_gpu_resource('500m') == 1  # Rounds up
+        assert utils.parse_cpu_or_gpu_resource('1000m') == 1
+        assert utils.parse_cpu_or_gpu_resource('1500m') == 2  # Rounds up
+        assert utils.parse_cpu_or_gpu_resource('100m') == 1  # Rounds up
+        assert utils.parse_cpu_or_gpu_resource('1m') == 1  # Rounds up
+
+    def test_fractional_values(self):
+        """Test parsing fractional CPU values."""
+        assert utils.parse_cpu_or_gpu_resource('0.5') == 0.5
+        assert utils.parse_cpu_or_gpu_resource('2.5') == 2.5
+
+
+class TestKubernetesInstanceType:
+    """Tests for KubernetesInstanceType class."""
+
+    def test_name_generation_cpu_only(self):
+        """Test instance name generation for CPU-only."""
+        instance = utils.KubernetesInstanceType(cpus=4, memory=16)
+        assert instance.name == '4CPU--16GB'
+
+    def test_name_generation_with_gpu(self):
+        """Test instance name generation with GPU."""
+        instance = utils.KubernetesInstanceType(cpus=8,
+                                                memory=32,
+                                                accelerator_count=2,
+                                                accelerator_type='V100')
+        assert instance.name == '8CPU--32GB--V100:2'
+
+    def test_name_generation_fractional_cpu(self):
+        """Test instance name generation with fractional CPU."""
+        instance = utils.KubernetesInstanceType(cpus=0.5, memory=1.5)
+        assert instance.name == '0.5CPU--1.5GB'
+
+    def test_is_valid_instance_type(self):
+        """Test is_valid_instance_type method."""
+        assert utils.KubernetesInstanceType.is_valid_instance_type('4CPU--16GB')
+        assert utils.KubernetesInstanceType.is_valid_instance_type(
+            '8CPU--32GB--V100:2')
+        assert utils.KubernetesInstanceType.is_valid_instance_type(
+            '0.5CPU--1.5GB')
+        assert not utils.KubernetesInstanceType.is_valid_instance_type(
+            'invalid')
+        assert not utils.KubernetesInstanceType.is_valid_instance_type(
+            '4CPU-16GB')
+
+    def test_from_instance_type(self):
+        """Test from_instance_type classmethod."""
+        instance = utils.KubernetesInstanceType.from_instance_type('4CPU--16GB')
+        assert instance.cpus == 4.0
+        assert instance.memory == 16.0
+        assert instance.accelerator_count is None
+        assert instance.accelerator_type is None
+
+    def test_from_instance_type_with_gpu(self):
+        """Test from_instance_type with GPU."""
+        instance = utils.KubernetesInstanceType.from_instance_type(
+            '8CPU--32GB--V100:2')
+        assert instance.cpus == 8.0
+        assert instance.memory == 32.0
+        assert instance.accelerator_count == 2
+        assert instance.accelerator_type == 'V100'
+
+    def test_from_instance_type_invalid(self):
+        """Test from_instance_type with invalid name."""
+        with pytest.raises(ValueError):
+            utils.KubernetesInstanceType.from_instance_type('invalid-type')
+
+    def test_from_resources(self):
+        """Test from_resources classmethod."""
+        instance = utils.KubernetesInstanceType.from_resources(cpus=4,
+                                                               memory=16)
+        assert instance.cpus == 4
+        assert instance.memory == 16
+        assert instance.accelerator_count == 0
+
+    def test_from_resources_with_gpu(self):
+        """Test from_resources with GPU."""
+        instance = utils.KubernetesInstanceType.from_resources(
+            cpus=8, memory=32, accelerator_count=2, accelerator_type='V100')
+        assert instance.cpus == 8
+        assert instance.memory == 32
+        assert instance.accelerator_count == 2
+        assert instance.accelerator_type == 'V100'
+
+    def test_from_resources_rounds_up_accelerator_count(self):
+        """Test from_resources rounds up accelerator count."""
+        instance = utils.KubernetesInstanceType.from_resources(
+            cpus=8, memory=32, accelerator_count=1.5, accelerator_type='V100')
+        assert instance.accelerator_count == 2
+
+    def test_str_method(self):
+        """Test __str__ method."""
+        instance = utils.KubernetesInstanceType(cpus=4, memory=16)
+        assert str(instance) == '4CPU--16GB'
+
+
+class TestV1NodeDataclass:
+    """Tests for V1Node dataclass."""
+
+    def test_from_dict(self):
+        """Test V1Node.from_dict method."""
+        node_dict = {
+            'metadata': {
+                'name': 'test-node',
+                'labels': {
+                    'key': 'value'
+                }
+            },
+            'status': {
+                'allocatable': {
+                    'cpu': '4',
+                    'memory': '16Gi'
+                },
+                'capacity': {
+                    'cpu': '4',
+                    'memory': '16Gi'
+                },
+                'addresses': [{
+                    'type': 'InternalIP',
+                    'address': '10.0.0.1'
+                }],
+                'conditions': [{
+                    'type': 'Ready',
+                    'status': 'True'
+                }]
+            }
+        }
+        node = utils.V1Node.from_dict(node_dict)
+        assert node.metadata.name == 'test-node'
+        assert node.metadata.labels == {'key': 'value'}
+        assert node.status.allocatable['cpu'] == '4'
+        assert len(node.status.addresses) == 1
+        assert len(node.status.conditions) == 1
+
+    def test_is_ready_true(self):
+        """Test V1Node.is_ready returns True when Ready condition is True."""
+        node_dict = {
+            'metadata': {
+                'name': 'ready-node',
+                'labels': {}
+            },
+            'status': {
+                'allocatable': {},
+                'capacity': {},
+                'addresses': [],
+                'conditions': [{
+                    'type': 'Ready',
+                    'status': 'True'
+                }]
+            }
+        }
+        node = utils.V1Node.from_dict(node_dict)
+        assert node.is_ready() is True
+
+    def test_is_ready_false(self):
+        """Test V1Node.is_ready returns False when Ready condition is False."""
+        node_dict = {
+            'metadata': {
+                'name': 'not-ready-node',
+                'labels': {}
+            },
+            'status': {
+                'allocatable': {},
+                'capacity': {},
+                'addresses': [],
+                'conditions': [{
+                    'type': 'Ready',
+                    'status': 'False'
+                }]
+            }
+        }
+        node = utils.V1Node.from_dict(node_dict)
+        assert node.is_ready() is False
+
+    def test_is_ready_no_condition(self):
+        """Test V1Node.is_ready returns False when no Ready condition."""
+        node_dict = {
+            'metadata': {
+                'name': 'no-condition-node',
+                'labels': {}
+            },
+            'status': {
+                'allocatable': {},
+                'capacity': {},
+                'addresses': [],
+                'conditions': []
+            }
+        }
+        node = utils.V1Node.from_dict(node_dict)
+        assert node.is_ready() is False
+
+
+class TestV1PodDataclass:
+    """Tests for V1Pod dataclass."""
+
+    def test_from_dict(self):
+        """Test V1Pod.from_dict method."""
+        pod_dict = {
+            'metadata': {
+                'name': 'test-pod',
+                'namespace': 'default',
+                'labels': {
+                    'app': 'test'
+                }
+            },
+            'status': {
+                'phase': 'Running'
+            },
+            'spec': {
+                'nodeName': 'test-node',
+                'containers': [{
+                    'resources': {
+                        'requests': {
+                            'cpu': '1',
+                            'memory': '1Gi'
+                        }
+                    }
+                }]
+            }
+        }
+        pod = utils.V1Pod.from_dict(pod_dict)
+        assert pod.metadata.name == 'test-pod'
+        assert pod.metadata.namespace == 'default'
+        assert pod.status.phase == 'Running'
+        assert pod.spec.node_name == 'test-node'
+        assert len(pod.spec.containers) == 1
+
+    def test_from_dict_no_resources(self):
+        """Test V1Pod.from_dict when container has no resources."""
+        pod_dict = {
+            'metadata': {
+                'name': 'test-pod',
+                'labels': {}
+            },
+            'status': {
+                'phase': 'Pending'
+            },
+            'spec': {
+                'containers': [{}]
+            }
+        }
+        pod = utils.V1Pod.from_dict(pod_dict)
+        assert pod.spec.containers[0].resources.requests is None
+
+
+class TestGetAutoscaler:
+    """Tests for get_autoscaler function."""
+
+    def test_get_gke_autoscaler(self):
+        """Test getting GKE autoscaler."""
+        from sky.utils import kubernetes_enums
+        autoscaler = utils.get_autoscaler(
+            kubernetes_enums.KubernetesAutoscalerType.GKE)
+        assert autoscaler == utils.GKEAutoscaler
+
+    def test_get_karpenter_autoscaler(self):
+        """Test getting Karpenter autoscaler."""
+        from sky.utils import kubernetes_enums
+        autoscaler = utils.get_autoscaler(
+            kubernetes_enums.KubernetesAutoscalerType.KARPENTER)
+        assert autoscaler == utils.KarpenterAutoscaler
+
+    def test_get_coreweave_autoscaler(self):
+        """Test getting CoreWeave autoscaler."""
+        from sky.utils import kubernetes_enums
+        autoscaler = utils.get_autoscaler(
+            kubernetes_enums.KubernetesAutoscalerType.COREWEAVE)
+        assert autoscaler == utils.CoreweaveAutoscaler
+
+    def test_get_generic_autoscaler(self):
+        """Test getting generic autoscaler."""
+        from sky.utils import kubernetes_enums
+        autoscaler = utils.get_autoscaler(
+            kubernetes_enums.KubernetesAutoscalerType.GENERIC)
+        assert autoscaler == utils.GenericAutoscaler
+
+
+class TestGKEAutoscalerValidateContext:
+    """Tests for GKEAutoscaler._validate_context_name."""
+
+    def test_valid_gke_context(self):
+        """Test valid GKE context name."""
+        valid, project, location, cluster = utils.GKEAutoscaler._validate_context_name(
+            'gke_my-project_us-central1_my-cluster')
+        assert valid is True
+        assert project == 'my-project'
+        assert location == 'us-central1'
+        assert cluster == 'my-cluster'
+
+    def test_invalid_context_wrong_prefix(self):
+        """Test invalid context with wrong prefix."""
+        valid, _, _, _ = utils.GKEAutoscaler._validate_context_name(
+            'eks_my-project_us-central1_my-cluster')
+        assert valid is False
+
+    def test_invalid_context_wrong_parts(self):
+        """Test invalid context with wrong number of parts."""
+        valid, _, _, _ = utils.GKEAutoscaler._validate_context_name(
+            'gke_my-project_us-central1')
+        assert valid is False
+
+    def test_invalid_context_too_many_parts(self):
+        """Test invalid context with too many parts."""
+        valid, _, _, _ = utils.GKEAutoscaler._validate_context_name(
+            'gke_my-project_us-central1_my-cluster_extra')
+        assert valid is False
+
+
+class TestGKEAutoscalerTpuChipCount:
+    """Tests for GKEAutoscaler._tpu_chip_count_from_instance_type."""
+
+    def test_valid_tpu_machine_type(self):
+        """Test valid TPU machine type."""
+        count = utils.GKEAutoscaler._tpu_chip_count_from_instance_type(
+            'ct5l-hightpu-8t')
+        assert count == 8
+
+    def test_another_valid_tpu_machine_type(self):
+        """Test another valid TPU machine type."""
+        count = utils.GKEAutoscaler._tpu_chip_count_from_instance_type(
+            'ct5lp-hightpu-4t')
+        assert count == 4
+
+    def test_invalid_machine_type(self):
+        """Test invalid machine type returns 0."""
+        count = utils.GKEAutoscaler._tpu_chip_count_from_instance_type(
+            'n1-standard-4')
+        assert count == 0
