@@ -594,7 +594,7 @@ async function getKubernetesPerNodeGPUs(context) {
 
 export async function getContextJobs(jobs) {
   try {
-    // Count jobs per k8s context/ssh node pool
+    // Count jobs per k8s context/ssh node pool/slurm cluster
     const contextStats = {};
 
     // Process jobs
@@ -621,6 +621,14 @@ export async function getContextJobs(jobs) {
           contextKey = `ssh/${poolName}`;
         }
       }
+      // Check if it's a Slurm job
+      else if (job.cloud.toLowerCase() === 'slurm') {
+        // For Slurm jobs, the cluster name is in job.region
+        contextKey = job.region;
+        if (contextKey) {
+          contextKey = `slurm/${contextKey}`;
+        }
+      }
 
       if (contextKey) {
         if (!contextStats[contextKey]) {
@@ -630,6 +638,7 @@ export async function getContextJobs(jobs) {
       }
     });
 
+    console.log('daniel [CONTEXT_DEBUG] Context stats:', contextStats);
     return contextStats;
   } catch (error) {
     console.error('=== Error in getContextJobs ===', error);
@@ -639,7 +648,7 @@ export async function getContextJobs(jobs) {
 
 export async function getContextClusters(clusters) {
   try {
-    // Count clusters per k8s context/ssh node pool
+    // Count clusters per k8s context/ssh node pool/slurm cluster
     const contextStats = {};
     clusters.forEach((cluster) => {
       let contextKey = null;
@@ -662,6 +671,14 @@ export async function getContextClusters(clusters) {
             ? contextKey.substring(4)
             : contextKey;
           contextKey = `ssh/${poolName}`;
+        }
+      }
+      // Check if it's a Slurm cluster
+      else if (cluster.cloud.toLowerCase() === 'slurm') {
+        // For Slurm clusters, the cluster name is in cluster.region
+        contextKey = cluster.region;
+        if (contextKey) {
+          contextKey = `slurm/${contextKey}`;
         }
       }
 
@@ -977,7 +994,7 @@ async function getSlurmClusterGPUs() {
 
 async function getSlurmPerNodeGPUs() {
   try {
-    const response = await apiClient.get(`/slurm_node_info`);
+    const response = await apiClient.post(`/slurm_node_info`, {});
     if (!response.ok) {
       const msg = `Failed to get slurm node info with status ${response.status}`;
       throw new Error(msg);

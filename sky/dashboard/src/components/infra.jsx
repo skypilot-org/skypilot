@@ -265,7 +265,9 @@ export function InfrastructureSection({
                       // Get cluster and job counts for this context
                       const contextStatsKey = isSSH
                         ? `ssh/${context.replace(/^ssh-/, '')}` // Remove ssh- prefix and add ssh/ prefix
-                        : `kubernetes/${context}`; // Add kubernetes/ prefix
+                        : isSlurm
+                          ? `slurm/${context}` // Add slurm/ prefix for Slurm clusters
+                          : `kubernetes/${context}`; // Add kubernetes/ prefix for Kubernetes contexts
                       const stats = contextStats[contextStatsKey] || {
                         clusters: 0,
                         jobs: 0,
@@ -2428,8 +2430,16 @@ export function GPUs() {
 
   // Render context details
   const renderContextDetails = (contextName) => {
-    const gpusInContext = groupedPerContextGPUs[contextName] || [];
-    const nodesInContext = groupedPerNodeGPUs[contextName] || [];
+    // Check if this is a Slurm cluster
+    const isSlurmCluster = slurmClusters.includes(contextName);
+
+    // Get the appropriate GPU and node data based on context type
+    const gpusInContext = isSlurmCluster
+      ? groupedPerClusterSlurmGPUs[contextName] || []
+      : groupedPerContextGPUs[contextName] || [];
+    const nodesInContext = isSlurmCluster
+      ? groupedPerNodeSlurmGPUs[contextName] || []
+      : groupedPerNodeGPUs[contextName] || [];
 
     if (kubeLoading && !kubeDataLoaded) {
       return (
@@ -2459,7 +2469,7 @@ export function GPUs() {
       );
     }
 
-    // For Kubernetes contexts, show the regular context details
+    // For Kubernetes and Slurm contexts, show the regular context details
     return (
       <ContextDetails
         contextName={contextName}
@@ -2638,9 +2648,9 @@ export function GPUs() {
         groupedPerContextGPUs={groupedPerClusterSlurmGPUs}
         groupedPerNodeGPUs={groupedPerNodeSlurmGPUs}
         handleContextClick={handleContextClick}
-        contextStats={{}}
-        jobsData={{}}
-        isJobsDataLoading={false}
+        contextStats={contextStats}
+        jobsData={sshAndKubeJobsData}
+        isJobsDataLoading={sshAndKubeJobsDataLoading}
         isSSH={false}
         isSlurm={true}
         contextWorkspaceMap={{}}

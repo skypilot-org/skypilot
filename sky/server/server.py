@@ -828,7 +828,7 @@ async def slurm_gpu_availability(
     )
 
 
-@app.get('/slurm_node_info')
+@app.post('/slurm_node_info')
 async def slurm_node_info(
         request: fastapi.Request,
         slurm_node_info_body: payloads.SlurmNodeInfoRequestBody) -> None:

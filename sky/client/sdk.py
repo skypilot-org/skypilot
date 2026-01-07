@@ -2801,7 +2801,7 @@ def slurm_node_info(
     body = payloads.SlurmNodeInfoRequestBody(
         slurm_cluster_name=slurm_cluster_name)
     response = server_common.make_authenticated_request(
-        'GET',
+        'POST',
         '/slurm_node_info',
         json=json.loads(body.model_dump_json()),
     )
