@@ -25,7 +25,7 @@
 </p>
 
 <h3 align="center">
-    Run AI on Any infrastructure
+    Run AI on Any Infrastructure
 </h3>
 
 <div align="center">
