@@ -227,6 +227,10 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             _try_set_basic_auth_user(request)
             return await call_next(request)
 
+        # If a previous middleware already authenticated the user, pass through
+        if request.state.auth_user is not None:
+            return await call_next(request)
+
         auth_header = request.headers.get('authorization')
         if not auth_header:
             return _basic_auth_401_response('Authentication required')
@@ -285,6 +289,10 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         X-Skypilot-Auth-Mode header. The auth proxy should either validate the
         auth or set the header X-Skypilot-Auth-Mode: token.
         """
+        # If a previous middleware already authenticated the user, pass through
+        if request.state.auth_user is not None:
+            return await call_next(request)
+
         has_skypilot_auth_header = (
             request.headers.get('X-Skypilot-Auth-Mode') == 'token')
         auth_header = request.headers.get('authorization')

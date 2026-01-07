@@ -19,16 +19,6 @@ class TestBearerTokenMiddleware:
         return BearerTokenMiddleware(app=mock.Mock())
 
     @pytest.fixture
-    def mock_request(self):
-        """Create a mock request object."""
-        request = mock.Mock(spec=fastapi.Request)
-        request.url.path = '/api/v1/status'
-        request.headers = {'authorization': 'Bearer sky_test_token'}
-        request.state = mock.Mock()
-        request.scope = {'path': '/api/v1/status'}
-        return request
-
-    @pytest.fixture
     def mock_call_next(self):
         """Create a mock call_next function."""
 
@@ -43,6 +33,8 @@ class TestBearerTokenMiddleware:
         """Test that requests without Authorization header bypass the middleware."""
         request = mock.Mock(spec=fastapi.Request)
         request.headers = {}  # No Authorization header
+        request.state = mock.Mock()
+        request.state.auth_user = None
 
         response = await middleware.dispatch(request, mock_call_next)
 
@@ -55,6 +47,8 @@ class TestBearerTokenMiddleware:
         """Test that non-Bearer authorization headers bypass the middleware."""
         request = mock.Mock(spec=fastapi.Request)
         request.headers = {'authorization': 'Basic dXNlcjpwYXNz'}  # Basic auth
+        request.state = mock.Mock()
+        request.state.auth_user = None
 
         response = await middleware.dispatch(request, mock_call_next)
 
@@ -62,13 +56,17 @@ class TestBearerTokenMiddleware:
         assert response.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_service_accounts_disabled(self, middleware, mock_request,
-                                             mock_call_next):
+    async def test_service_accounts_disabled(self, middleware, mock_call_next):
         """Test middleware when service accounts are disabled."""
+        request = mock.Mock(spec=fastapi.Request)
+        request.headers = {'authorization': 'Bearer sky_test_token'}
+        request.state = mock.Mock()
+        request.state.auth_user = None
+
         with mock.patch.dict(
                 os.environ,
             {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'false'}):
-            response = await middleware.dispatch(mock_request, mock_call_next)
+            response = await middleware.dispatch(request, mock_call_next)
 
             # Should return 401 when service accounts are disabled and
             # a SkyPilot token is provided
@@ -84,6 +82,8 @@ class TestBearerTokenMiddleware:
         request.headers = {
             'authorization': 'Bearer oauth_token_123'
         }  # Not sky_ prefix
+        request.state = mock.Mock()
+        request.state.auth_user = None
 
         with mock.patch.dict(
                 os.environ,
@@ -99,6 +99,8 @@ class TestBearerTokenMiddleware:
         """Test middleware with invalid service account token."""
         request = mock.Mock(spec=fastapi.Request)
         request.headers = {'authorization': 'Bearer sky_invalid_token'}
+        request.state = mock.Mock()
+        request.state.auth_user = None
 
         with mock.patch.dict(
                 os.environ,
@@ -120,6 +122,7 @@ class TestBearerTokenMiddleware:
         request = mock.Mock(spec=fastapi.Request)
         request.headers = {'authorization': 'Bearer sky_valid_token'}
         request.state = mock.Mock()
+        request.state.auth_user = None
 
         mock_payload = {
             'sub': 'sa-123456',  # service account user ID
@@ -157,6 +160,8 @@ class TestBearerTokenMiddleware:
         """Test middleware when token payload is missing user_id."""
         request = mock.Mock(spec=fastapi.Request)
         request.headers = {'authorization': 'Bearer sky_invalid_payload_token'}
+        request.state = mock.Mock()
+        request.state.auth_user = None
 
         mock_payload = {
             # Missing 'sub' (user_id)
@@ -181,6 +186,8 @@ class TestBearerTokenMiddleware:
         """Test middleware when token payload is missing token_id."""
         request = mock.Mock(spec=fastapi.Request)
         request.headers = {'authorization': 'Bearer sky_invalid_payload_token'}
+        request.state = mock.Mock()
+        request.state.auth_user = None
 
         mock_payload = {
             'sub': 'sa-123456',
@@ -205,6 +212,8 @@ class TestBearerTokenMiddleware:
         """Test middleware when service account user no longer exists."""
         request = mock.Mock(spec=fastapi.Request)
         request.headers = {'authorization': 'Bearer sky_valid_token'}
+        request.state = mock.Mock()
+        request.state.auth_user = None
 
         mock_payload = {
             'sub': 'sa-deleted-user',
@@ -234,6 +243,7 @@ class TestBearerTokenMiddleware:
         request = mock.Mock(spec=fastapi.Request)
         request.headers = {'authorization': 'Bearer sky_valid_token'}
         request.state = mock.Mock()
+        request.state.auth_user = None
 
         mock_payload = {
             'sub': 'sa-123456',
@@ -268,6 +278,8 @@ class TestBearerTokenMiddleware:
         """Test middleware when token verification raises an exception."""
         request = mock.Mock(spec=fastapi.Request)
         request.headers = {'authorization': 'Bearer sky_problematic_token'}
+        request.state = mock.Mock()
+        request.state.auth_user = None
 
         with mock.patch.dict(
                 os.environ,
@@ -292,6 +304,7 @@ class TestBearerTokenMiddleware:
             'authorization': 'bearer sky_test_token'
         }  # lowercase
         request.state = mock.Mock()
+        request.state.auth_user = None
 
         mock_payload = {
             'sub': 'sa-123456',
@@ -317,3 +330,38 @@ class TestBearerTokenMiddleware:
 
             assert response.status_code == 200
             assert request.state.auth_user.id == 'sa-123456'
+
+    @pytest.mark.asyncio
+    async def test_already_authenticated_user_bypass(self, middleware,
+                                                     mock_call_next):
+        """Test that middleware bypasses when user is already authenticated.
+
+        This ensures consistency with other auth middlewares (OAuth2Proxy,
+        AuthProxy, BasicAuth) - when a previous middleware has authenticated
+        the user, subsequent middlewares should pass through.
+        """
+        request = mock.Mock(spec=fastapi.Request)
+        # Request has a Bearer token header
+        request.headers = {'authorization': 'Bearer sky_some_token'}
+        request.state = mock.Mock()
+        # But user is already authenticated by a previous middleware
+        mock_user = mock.Mock()
+        mock_user.id = 'user-123'
+        mock_user.name = 'basic-auth-user'
+        request.state.auth_user = mock_user
+
+        with mock.patch.dict(
+                os.environ,
+            {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
+                mock.patch('sky.users.token_service.token_service') as mock_token_service:
+
+            # Middleware should bypass without calling token_service
+            response = await middleware.dispatch(request, mock_call_next)
+
+            # Should pass through successfully
+            assert response.status_code == 200
+            # User should remain the same (not overwritten)
+            assert request.state.auth_user.id == 'user-123'
+            assert request.state.auth_user.name == 'basic-auth-user'
+            # Token service should NOT be called
+            mock_token_service.verify_token.assert_not_called()
