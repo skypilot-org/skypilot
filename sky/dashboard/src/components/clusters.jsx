@@ -57,6 +57,7 @@ import cachePreloader from '@/lib/cache-preloader';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import yaml from 'js-yaml';
 import { UserDisplay } from '@/components/elements/UserDisplay';
+import { evaluateCondition } from '@/components/shared/FilterSystem';
 
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
@@ -88,6 +89,10 @@ const PROPERTY_OPTIONS = [
   {
     label: 'Infra',
     value: 'infra',
+  },
+  {
+    label: 'Labels',
+    value: 'labels',
   },
 ];
 
@@ -211,6 +216,7 @@ export function Clusters() {
     user: [],
     workspace: [],
     infra: [],
+    labels: [],
   }); /// Option values for properties
   const [preloadingComplete, setPreloadingComplete] = useState(false);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
@@ -601,6 +607,7 @@ export function ClusterTable({
       user: [],
       workspace: [],
       infra: [],
+      labels: [],
     };
 
     const pushWithoutDuplication = (array, item) => {
@@ -615,6 +622,13 @@ export function ClusterTable({
       pushWithoutDuplication(optionValues.user, cluster.user);
       pushWithoutDuplication(optionValues.workspace, cluster.workspace);
       pushWithoutDuplication(optionValues.infra, cluster.infra);
+
+      // Extract labels - add only key:value pairs
+      const labels = cluster.labels || {};
+      Object.entries(labels).forEach(([key, value]) => {
+        // Add key:value pair format only
+        pushWithoutDuplication(optionValues.labels, `${key}:${value}`);
+      });
     });
 
     return optionValues;
@@ -698,7 +712,26 @@ export function ClusterTable({
       );
     }
 
-    const itemValue = item[property.toLowerCase()]?.toString().toLowerCase();
+    const propertyLower = property.toLowerCase();
+
+    // Special handling for labels filtering
+    if (propertyLower === 'labels') {
+      const labels = item.labels || {};
+      const filterValue = value.toString().toLowerCase();
+
+      // Check if filter is in key:value format
+      if (filterValue.includes(':')) {
+        const [key, val] = filterValue.split(':').map((s) => s.trim());
+        return labels[key] === val;
+      } else {
+        // Match any label value
+        return Object.values(labels).some((val) =>
+          val?.toString().toLowerCase().includes(filterValue)
+        );
+      }
+    }
+
+    const itemValue = item[propertyLower]?.toString().toLowerCase();
     const filterValue = value.toString().toLowerCase();
 
     switch (operator) {

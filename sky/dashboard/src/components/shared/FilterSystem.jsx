@@ -21,7 +21,26 @@ export const evaluateCondition = (item, filter) => {
     );
   }
 
-  const itemValue = item[property.toLowerCase()]?.toString().toLowerCase();
+  const propertyLower = property.toLowerCase();
+
+  // Special handling for labels filtering
+  if (propertyLower === 'labels') {
+    const labels = item.labels || {};
+    const filterValue = value.toString().toLowerCase();
+
+    // Check if filter is in key:value format
+    if (filterValue.includes(':')) {
+      const [key, val] = filterValue.split(':').map((s) => s.trim());
+      return labels[key] === val;
+    } else {
+      // Match any label value
+      return Object.values(labels).some((val) =>
+        val?.toString().toLowerCase().includes(filterValue)
+      );
+    }
+  }
+
+  const itemValue = item[propertyLower]?.toString().toLowerCase();
   const filterValue = value.toString().toLowerCase();
 
   switch (operator) {
