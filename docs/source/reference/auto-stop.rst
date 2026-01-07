@@ -167,7 +167,7 @@ but a warning will be logged.
 **Hook Timeout**
 
 By default, autostop hooks have a **1-hour (3600 seconds) timeout**. If your hook
-takes longer than this, it will be terminated and autostop will proceed. You can
+takes longer than this, it will be killed and autostop will proceed. To
 customize the timeout in your YAML configuration:
 
 .. code-block:: yaml
