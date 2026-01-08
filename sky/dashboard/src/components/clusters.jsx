@@ -702,7 +702,6 @@ export function ClusterTable({
     setIsInitialLoad(false);
   }, [setLoading, showHistory, historyDays, setOptionValues]);
 
-
   // Use useMemo to compute sorted data
   const sortedData = React.useMemo(() => {
     // Main filter function
