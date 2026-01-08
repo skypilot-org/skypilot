@@ -454,10 +454,6 @@ def create_table(cursor, conn):
     cursor.execute(f"""\
         CREATE INDEX IF NOT EXISTS created_at_idx ON {REQUEST_TABLE} (created_at);
     """)
-    # Add an index on user_id to speed up user-filtered queries.
-    cursor.execute(f"""\
-        CREATE INDEX IF NOT EXISTS user_id_idx ON {REQUEST_TABLE} ({COL_USER_ID});
-    """)
 
 
 _DB = None
@@ -720,14 +716,8 @@ def _get_request_no_lock(
         columns_str = ', '.join(fields)
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        # Use exact match for full UUIDs (36 chars) to leverage PRIMARY KEY index,
-        # fall back to LIKE for prefix searches
-        if len(request_id) == 36:
-            cursor.execute((f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-                            'WHERE request_id = ?'), (request_id,))
-        else:
-            cursor.execute((f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-                            'WHERE request_id LIKE ?'), (request_id + '%',))
+        cursor.execute((f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+                        'WHERE request_id LIKE ?'), (request_id + '%',))
         row = cursor.fetchone()
         if row is None:
             return None
@@ -744,17 +734,9 @@ async def _get_request_no_lock_async(
     columns_str = ', '.join(REQUEST_COLUMNS)
     if fields:
         columns_str = ', '.join(fields)
-    # Use exact match for full UUIDs (36 chars) to leverage PRIMARY KEY index,
-    # fall back to LIKE for prefix searches
-    if len(request_id) == 36:
-        query = (f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-                 'WHERE request_id = ?')
-        params = (request_id,)
-    else:
-        query = (f'SELECT {columns_str} FROM {REQUEST_TABLE} '
-                 'WHERE request_id LIKE ?')
-        params = (request_id + '%',)
-    async with _DB.execute_fetchall_async(query, params) as rows:
+    async with _DB.execute_fetchall_async(
+        (f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+         'WHERE request_id LIKE ?'), (request_id + '%',)) as rows:
         row = rows[0] if rows else None
         if row is None:
             return None
