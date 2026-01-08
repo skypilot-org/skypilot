@@ -1,15 +1,20 @@
 """Slurm utilities for SkyPilot."""
+from __future__ import annotations
+
 import json
 import math
 import os
 import re
 import shlex
 import time
+import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from paramiko.config import SSHConfig
-
 from sky import exceptions
+
+if typing.TYPE_CHECKING:
+    from paramiko.config import SSHConfig
+
 from sky import sky_logging
 from sky.adaptors import slurm
 from sky.skylet import constants
@@ -49,8 +54,10 @@ SLURM_SSHD_HOST_KEY_FILENAME = 'skypilot_host_key'
 
 def get_slurm_ssh_config() -> SSHConfig:
     """Get the Slurm SSH config."""
+    # pylint: disable=import-outside-toplevel
+    from paramiko.config import SSHConfig as ParamikoSSHConfig
     slurm_config_path = os.path.expanduser(DEFAULT_SLURM_PATH)
-    slurm_config = SSHConfig.from_path(slurm_config_path)
+    slurm_config = ParamikoSSHConfig.from_path(slurm_config_path)
     return slurm_config
 
 
@@ -608,7 +615,9 @@ def get_partitions(cluster_name: str) -> List[str]:
         and the rest are sorted alphabetically.
     """
     try:
-        slurm_config = SSHConfig.from_path(
+        # pylint: disable=import-outside-toplevel
+        from paramiko.config import SSHConfig as ParamikoSSHConfig
+        slurm_config = ParamikoSSHConfig.from_path(
             os.path.expanduser(DEFAULT_SLURM_PATH))
         slurm_config_dict = slurm_config.lookup(cluster_name)
 
