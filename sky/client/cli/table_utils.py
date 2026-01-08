@@ -11,6 +11,7 @@ from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import status_lib
 from sky.utils import volume
 
 logger = sky_logging.init_logger(__name__)
@@ -172,6 +173,15 @@ class VolumeTable(abc.ABC):
                 usedby_str, constants.USED_BY_TRUNC_LENGTH)
         infra = _get_infra_str(row.get('cloud'), row.get('region'),
                                row.get('zone'))
+
+        # Format status with color
+        status_str = row.get('status', '')
+        try:
+            status_enum = status_lib.VolumeStatus(status_str)
+            status_display = status_enum.colored_str()
+        except ValueError:
+            status_display = status_str
+
         return [
             row.get('name', ''),
             row.get('type', ''),
@@ -180,7 +190,7 @@ class VolumeTable(abc.ABC):
             row.get('user_name', '-'),
             row.get('workspace', '-'),
             log_utils.human_duration(row.get('launched_at', 0)),
-            row.get('status', ''),
+            status_display,
             last_attached_at_str,
             usedby,
         ]
@@ -204,15 +214,23 @@ class VolumeTable(abc.ABC):
 class PVCVolumeTable(VolumeTable):
     """The PVC volume table."""
 
+    def __init__(self,
+                 volumes: List[responses.VolumeRecord],
+                 show_all: bool = False):
+        # Check if any volume has an error before creating the table
+        self._has_errors = any(row.get('error_message') for row in volumes)
+        super().__init__(volumes, show_all)
+
     def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
         """Create the PVC volume table."""
         #  If show_all is False, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
         #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL
+        #   (+ ERROR if any volume has an error)
         #  If show_all is True, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
         #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL, NAME_ON_CLOUD
-        #   STORAGE_CLASS, ACCESS_MODE
+        #   STORAGE_CLASS, ACCESS_MODE, ERROR
 
         columns = _BASIC_COLUMNS + [
             'IS_EPHEMERAL',
@@ -222,7 +240,11 @@ class PVCVolumeTable(VolumeTable):
                 'NAME_ON_CLOUD',
                 'STORAGE_CLASS',
                 'ACCESS_MODE',
+                'ERROR',
             ]
+        elif self._has_errors:
+            # Show ERROR column even without show_all if there are errors
+            columns = columns + ['ERROR']
 
         table = log_utils.create_table(columns)
         return table
@@ -239,6 +261,16 @@ class PVCVolumeTable(VolumeTable):
                 table_row.append(
                     row.get('config', {}).get('storage_class_name', '-'))
                 table_row.append(row.get('config', {}).get('access_mode', ''))
+                # Add error message (truncated)
+                error_msg = row.get('error_message', '')
+                table_row.append(error_msg if error_msg else '-')
+            elif self._has_errors:
+                # Show error message even without show_all if there are errors
+                error_msg = row.get('error_message', '')
+                # Truncate error message for display
+                if error_msg:
+                    error_msg = common_utils.truncate_long_string(error_msg, 60)
+                table_row.append(error_msg if error_msg else '-')
 
             self.table.add_row(table_row)
 
