@@ -1995,24 +1995,18 @@ def test_managed_job_labels_in_queue(generic_cloud: str):
                 break
 
         if job_record is None:
-            yield f'Job {name} not found in queue'
-            return
+            raise Exception(f'Job {name} not found in queue')
 
         if 'labels' not in job_record:
-            yield 'labels field missing from job record'
-            return
+            raise Exception('labels field missing from job record')
 
         if job_record['labels'] is None:
-            yield 'labels field is None'
-            return
+            raise Exception('labels field is None')
 
         if job_record['labels'] != expected_labels:
-            yield (f"Expected labels {expected_labels}, "
-                   f"got {job_record['labels']}")
-            return
+            raise Exception(f"Expected labels {expected_labels}, "
+                            f"got {job_record['labels']}")
 
-        # Success - labels are correct
-        return
 
     # Create YAML with labels
     yaml_content = textwrap.dedent("""\
@@ -2035,6 +2029,7 @@ def test_managed_job_labels_in_queue(generic_cloud: str):
         test = smoke_tests_utils.Test(
             'managed_job_labels_in_queue',
             [
+                test_func,
                 f'sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path} -y -d',
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
