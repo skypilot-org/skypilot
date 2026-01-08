@@ -2125,6 +2125,11 @@ def test_job_group_networking(generic_cloud: str):
     yaml_path = _render_job_group_yaml(
         'tests/test_job_groups/smoke_networking.yaml', name, generic_cloud)
 
+    # NOTE: We use job ID instead of `-n {name}` for `sky jobs logs` because
+    # `sky jobs logs -n <name>` only works for running (non-terminal) jobs.
+    # For completed jobs, we need to use the job ID directly.
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
     test = smoke_tests_utils.Test(
         'job_group_networking',
         [
@@ -2134,7 +2139,8 @@ def test_job_group_networking(generic_cloud: str):
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=360),
-            f'sky jobs logs -n {name} --no-follow | grep "SUCCESS: Connected to server"',
+            f'sky jobs logs $({get_job_id_cmd}) --no-follow | '
+            f'grep "SUCCESS: Connected to server"',
         ],
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
