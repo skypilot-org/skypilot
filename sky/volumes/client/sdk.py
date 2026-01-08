@@ -118,15 +118,27 @@ def validate(volume: volume_lib.Volume) -> None:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ls() -> server_common.RequestId[List[responses.VolumeRecord]]:
+def ls(
+    refresh: bool = False
+) -> server_common.RequestId[List[responses.VolumeRecord]]:
     """Lists all volumes.
+
+    Args:
+        refresh: If True, refresh volume state from cloud APIs before returning.
+            This makes the call slower but returns the most up-to-date data.
+            If False (default), return cached data from the database which is
+            updated periodically by the background daemon.
 
     Returns:
         The request ID of the list request.
     """
+    params = {}
+    if refresh:
+        params['refresh'] = 'true'
     response = server_common.make_authenticated_request(
         'GET',
         '/volumes',
+        params=params,
     )
     return server_common.get_request_id(response)
 
