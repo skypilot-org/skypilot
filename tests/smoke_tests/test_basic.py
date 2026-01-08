@@ -532,6 +532,7 @@ def test_aws_manual_restart_recovery():
                     f'aws ec2 wait instance-running --region {region} '
                     f'--instance-ids $id'),
                 skip_remote_server_check=True),
+            "sleep 30",
             # Status refresh should time out, as the restarted
             # instance would get a new IP address.
             # We should see a warning message on how to recover
