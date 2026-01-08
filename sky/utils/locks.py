@@ -3,21 +3,24 @@
 This module provides an abstraction for locking that can use
 either local file locks or database-based distributed locks.
 """
+from __future__ import annotations
+
 import abc
 import hashlib
 import logging
 import os
 import time
+import typing
 from typing import Any, Optional
 
 import filelock
-import psycopg2
-import sqlalchemy
 
-from sky import global_user_state
 from sky.skylet import runtime_utils
 from sky.utils import common_utils
-from sky.utils.db import db_utils
+
+if typing.TYPE_CHECKING:
+    import psycopg2
+    import sqlalchemy
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +207,9 @@ class PostgresLock(DistributedLock):
 
     def _get_connection(self) -> sqlalchemy.pool.PoolProxiedConnection:
         """Get database connection."""
+        # pylint: disable=import-outside-toplevel
+        from sky import global_user_state
+        from sky.utils.db import db_utils
         engine = global_user_state.initialize_and_get_db()
         if engine.dialect.name != db_utils.SQLAlchemyDialect.POSTGRESQL.value:
             raise ValueError('PostgresLock requires PostgreSQL database. '
@@ -256,6 +262,8 @@ class PostgresLock(DistributedLock):
 
     def release(self) -> None:
         """Release the postgres advisory lock."""
+        # pylint: disable=import-outside-toplevel
+        import psycopg2
         if not self._acquired or not self._connection:
             return
 
@@ -405,6 +413,9 @@ def get_lock(lock_id: str,
 
 def _detect_lock_type() -> str:
     """Auto-detect the appropriate lock type based on configuration."""
+    # pylint: disable=import-outside-toplevel
+    from sky import global_user_state
+    from sky.utils.db import db_utils
     try:
         engine = global_user_state.initialize_and_get_db()
         if engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:

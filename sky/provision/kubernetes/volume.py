@@ -1,7 +1,6 @@
 """Kubernetes pvc provisioning."""
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.adaptors import kubernetes
@@ -149,6 +148,8 @@ def _get_volume_usedby(
 
 def _get_cluster_name_on_cloud_to_cluster_name_map() -> Dict[str, str]:
     """Gets the map from cluster name on cloud to cluster name."""
+    # pylint: disable=import-outside-toplevel
+    from sky import global_user_state
     clusters = global_user_state.get_clusters()
     cloud_to_name_map = {}
     for cluster in clusters:

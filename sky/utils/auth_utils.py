@@ -6,7 +6,6 @@ from typing import Tuple
 
 import filelock
 
-from sky import global_user_state
 from sky import sky_logging
 from sky.utils import common_utils
 
@@ -113,6 +112,8 @@ def _save_key_pair(private_key_path: str, public_key_path: str,
 
 def get_or_generate_keys() -> Tuple[str, str]:
     """Returns the absolute private and public key paths."""
+    # pylint: disable=import-outside-toplevel
+    from sky import global_user_state
     user_hash = common_utils.get_user_hash()
     private_key_path, public_key_path, lock_path = get_ssh_key_and_lock_path(
         user_hash)
@@ -150,6 +151,8 @@ def create_ssh_key_files_from_db(private_key_path: str) -> bool:
     Returns:
         True if the ssh key files are created successfully, False otherwise.
     """
+    # pylint: disable=import-outside-toplevel
+    from sky import global_user_state
     # Assume private key path is in the format of
     # ~/.sky/clients/<user_hash>/ssh/sky-key
     separated_path = os.path.normpath(private_key_path).split(os.path.sep)

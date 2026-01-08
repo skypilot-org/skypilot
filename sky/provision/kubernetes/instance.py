@@ -8,7 +8,6 @@ import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky import exceptions
-from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
@@ -28,7 +27,6 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
-from sky.utils.db import db_utils
 
 POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
@@ -1532,6 +1530,8 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
     Checks both pod conditions (for preemption/disruption) and
     container statuses (for exit codes/errors).
     """
+    # pylint: disable=import-outside-toplevel
+    from sky import global_user_state
     latest_timestamp = pod.status.start_time or datetime.datetime.min
     ready_state = 'Unknown'
     termination_reason = 'Terminated unexpectedly'
@@ -1648,6 +1648,9 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
 def _get_pod_missing_reason(context: Optional[str], namespace: str,
                             cluster_name: str, pod_name: str) -> Optional[str]:
     """Get events for missing pod and write to cluster events."""
+    # pylint: disable=import-outside-toplevel
+    from sky import global_user_state
+    from sky.utils.db import db_utils
     logger.debug(f'Analyzing events for pod {pod_name}')
     pod_events = _get_pod_events(context, namespace, pod_name)
     last_scheduled_node = None

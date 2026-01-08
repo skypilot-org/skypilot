@@ -5,7 +5,6 @@ import time
 from typing import Any, Dict, Optional
 
 from sky import exceptions
-from sky import global_user_state
 from sky import models
 from sky.utils import common_utils
 from sky.utils import resources_utils
@@ -61,6 +60,8 @@ class VolumeMount:
 
     def pre_mount(self) -> None:
         """Update the volume status before actual mounting."""
+        # pylint: disable=import-outside-toplevel
+        from sky import global_user_state
         # Skip pre_mount for ephemeral volumes as they don't exist yet
         if self.is_ephemeral:
             return
@@ -74,6 +75,8 @@ class VolumeMount:
     @classmethod
     def resolve(cls, path: str, volume_name: str) -> 'VolumeMount':
         """Resolve the volume mount by populating metadata of volume."""
+        # pylint: disable=import-outside-toplevel
+        from sky import global_user_state
         record = global_user_state.get_volume_by_name(volume_name)
         if record is None:
             raise exceptions.VolumeNotFoundError(

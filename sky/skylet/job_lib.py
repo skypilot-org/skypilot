@@ -19,7 +19,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import colorama
 import filelock
 
-from sky import global_user_state
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
@@ -27,7 +26,6 @@ from sky.skylet import runtime_utils
 from sky.utils import common_utils
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
-from sky.utils.db import db_utils
 
 if typing.TYPE_CHECKING:
     import psutil
@@ -70,6 +68,8 @@ class JobInfoLoc(enum.IntEnum):
 
 
 def create_table(cursor, conn):
+    # pylint: disable=import-outside-toplevel
+    from sky.utils.db import db_utils
     # Enable WAL mode to avoid locking issues.
     # See: issue #3863, #1441 and PR #1509
     # https://github.com/microsoft/WSL/issues/2395
@@ -139,6 +139,8 @@ def init_db(func):
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
+        # pylint: disable=import-outside-toplevel
+        from sky.utils.db import db_utils
         global _DB
         if _DB is not None:
             return func(*args, **kwargs)
@@ -1021,6 +1023,8 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     Args:
         payload: The encoded payload string to load.
     """
+    # pylint: disable=import-outside-toplevel
+    from sky import global_user_state
     jobs = message_utils.decode_payload(payload)
     for job in jobs:
         job['status'] = JobStatus(job['status'])

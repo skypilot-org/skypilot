@@ -21,7 +21,6 @@ import ijson
 
 from sky import clouds
 from sky import exceptions
-from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
@@ -3390,6 +3389,8 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
                              idle_minutes_to_autostop: Optional[int],
                              down: bool = False) -> None:
     """Adds or removes Annotations of autodown on Kubernetes pods."""
+    # pylint: disable=import-outside-toplevel
+    from sky import global_user_state
     tags = {
         provision_constants.TAG_RAY_CLUSTER_NAME: handle.cluster_name_on_cloud,
     }

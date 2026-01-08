@@ -59,15 +59,24 @@ import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import filelock
-import sqlalchemy
-from sqlalchemy import orm
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.dialects import sqlite
-from sqlalchemy.ext import declarative
 
 from sky import exceptions
-from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+
+# Lazy load SQLAlchemy to speed up import time
+if typing.TYPE_CHECKING:
+    import sqlalchemy
+    from sqlalchemy import orm
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.dialects import sqlite
+    from sqlalchemy.ext import declarative
+else:
+    sqlalchemy = adaptors_common.LazyImport('sqlalchemy')
+    orm = adaptors_common.LazyImport('sqlalchemy.orm')
+    postgresql = adaptors_common.LazyImport('sqlalchemy.dialects.postgresql')
+    sqlite = adaptors_common.LazyImport('sqlalchemy.dialects.sqlite')
+    declarative = adaptors_common.LazyImport('sqlalchemy.ext.declarative')
+from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -75,8 +84,6 @@ from sky.utils import context
 from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
-from sky.utils.db import db_utils
-from sky.utils.db import migration_utils
 from sky.utils.kubernetes import config_map_utils
 
 if typing.TYPE_CHECKING:
@@ -121,17 +128,34 @@ _PROJECT_CONFIG_PATH = '.sky.yaml'
 
 API_SERVER_CONFIG_KEY = 'api_server_config'
 
-_SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
+_SQLALCHEMY_ENGINE: Optional['sqlalchemy.engine.Engine'] = None
 _SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
-Base = declarative.declarative_base()
+# Lazy initialization of SQLAlchemy objects to defer import cost
+_Base = None
+_config_yaml_table = None
 
-config_yaml_table = sqlalchemy.Table(
-    'config_yaml',
-    Base.metadata,
-    sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('value', sqlalchemy.Text),
-)
+
+def _get_base():
+    """Lazily initialize SQLAlchemy declarative base."""
+    global _Base
+    if _Base is None:
+        _Base = declarative.declarative_base()
+    return _Base
+
+
+def _get_config_yaml_table():
+    """Lazily initialize config_yaml_table."""
+    global _config_yaml_table
+    if _config_yaml_table is None:
+        base = _get_base()
+        _config_yaml_table = sqlalchemy.Table(
+            'config_yaml',
+            base.metadata,
+            sqlalchemy.Column('key', sqlalchemy.Text, primary_key=True),
+            sqlalchemy.Column('value', sqlalchemy.Text),
+        )
+    return _config_yaml_table
 
 
 class ConfigContext:
@@ -567,6 +591,8 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
 
 def _create_table(engine: sqlalchemy.engine.Engine):
     """Initialize the config database with migrations."""
+    # pylint: disable=import-outside-toplevel
+    from sky.utils.db import migration_utils
     migration_utils.safe_alembic_upgrade(
         engine, migration_utils.SKYPILOT_CONFIG_DB_NAME,
         migration_utils.SKYPILOT_CONFIG_VERSION)
@@ -578,6 +604,8 @@ def _initialize_and_get_db() -> sqlalchemy.engine.Engine:
     This function should only be called by the API Server during initialization.
     Client-side code should never call this function.
     """
+    # pylint: disable=import-outside-toplevel
+    from sky.utils.db import db_utils
     assert os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None, (
         'initialize_and_get_db() can only be called by the API Server')
 
@@ -624,7 +652,7 @@ def _reload_config_as_server(init_db: bool = False) -> None:
         def _get_config_yaml_from_db(key: str) -> Optional[config_utils.Config]:
             assert _SQLALCHEMY_ENGINE is not None
             with orm.Session(_SQLALCHEMY_ENGINE) as session:
-                row = session.query(config_yaml_table).filter_by(
+                row = session.query(_get_config_yaml_table()).filter_by(
                     key=key).first()
             if row:
                 db_config = config_utils.Config(yaml_utils.safe_load(row.value))
@@ -906,6 +934,8 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
         if existing_db_url:
 
             def _set_config_yaml_to_db(key: str, config: config_utils.Config):
+                # pylint: disable=import-outside-toplevel
+                from sky.utils.db import db_utils
                 # reload_config(init_db=True) is called when this module is
                 # imported, so the database engine must already be initialized.
                 assert _SQLALCHEMY_ENGINE is not None
@@ -919,11 +949,12 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
                         insert_func = postgresql.insert
                     else:
                         raise ValueError('Unsupported database dialect')
-                    insert_stmnt = insert_func(config_yaml_table).values(
+                    table = _get_config_yaml_table()
+                    insert_stmnt = insert_func(table).values(
                         key=key, value=config_str)
                     do_update_stmt = insert_stmnt.on_conflict_do_update(
-                        index_elements=[config_yaml_table.c.key],
-                        set_={config_yaml_table.c.value: config_str})
+                        index_elements=[table.c.key],
+                        set_={table.c.value: config_str})
                     session.execute(do_update_stmt)
                     session.commit()
 

@@ -1,7 +1,6 @@
 """RunPod network volume provisioning."""
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.adaptors import runpod
@@ -143,6 +142,8 @@ def get_volume_usedby(
     usedby_clusters contains SkyPilot cluster display names inferred from
       pod names, which may be wrong.
     """
+    # pylint: disable=import-outside-toplevel
+    from sky import global_user_state
     vol_id = config.id_on_cloud
     name_on_cloud = config.name_on_cloud
     assert name_on_cloud is not None
