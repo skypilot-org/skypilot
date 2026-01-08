@@ -189,6 +189,98 @@ Implement proper pagination instead of rendering all items.
 3. Chrome DevTools Performance: Check for long tasks
 4. Verify no regressions in functionality
 
+## Backend Performance Bottlenecks
+
+Analysis of `sky/server/` revealed several server-side performance issues:
+
+### 1. CRITICAL: 100ms Polling Loop in `/api/get`
+
+**Location:** `sky/server/server.py:1619`
+
+```python
+# Current implementation polls every 100ms
+while True:
+    req_status = await requests_lib.get_request_status_async(request_id)
+    if req_status.status > requests_lib.RequestStatus.RUNNING:
+        break
+    await asyncio.sleep(0.1)  # 100ms polling
+```
+
+**Impact:** Minimum 100ms latency for every async API call, plus DB query overhead.
+
+**Recommendation:** Consider using event-based notification (asyncio.Event) instead of polling.
+
+### 2. LIKE Queries Instead of Indexed Lookups
+
+**Location:** `sky/server/requests/requests.py:720`
+
+```python
+cursor.execute((f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+                'WHERE request_id LIKE ?'), (request_id + '%',))
+```
+
+**Impact:** Full table scan instead of indexed lookup.
+
+**Recommendation:** Use exact match when full request_id is available, only use LIKE for prefix search.
+
+### 3. File Lock Overhead in Async Operations
+
+**Location:** `sky/server/requests/requests.py:776`
+
+```python
+# TODO(aylei): figure out how to remove FileLock here to avoid the overhead
+async with filelock.AsyncFileLock(request_lock_path(request_id)):
+    return await _get_request_no_lock_async(request_id, fields)
+```
+
+**Impact:** File I/O contention on every request access.
+
+**Recommendation:** Use database-level locking or atomic operations instead.
+
+### 4. Missing Database Indexes
+
+The request table appears to lack indexes on frequently queried columns:
+- `request_id` (used for prefix lookup)
+- `status` (heavily filtered)
+- `created_at` (used for sorting)
+
+**Recommendation:** Add indexes:
+```sql
+CREATE INDEX IF NOT EXISTS idx_request_id ON requests(request_id);
+CREATE INDEX IF NOT EXISTS idx_status ON requests(status);
+CREATE INDEX IF NOT EXISTS idx_created_at ON requests(created_at);
+```
+
+### Backend Optimization Priority
+
+1. **Immediate (if causing user complaints):**
+   - Add database indexes
+   - Use exact match when possible
+
+2. **Medium-term:**
+   - Replace polling with event-based notification
+   - Remove file locks in favor of DB transactions
+
+3. **Long-term:**
+   - Consider WebSocket for real-time updates
+   - Implement connection pooling for DB
+
+## Performance Benchmark
+
+A benchmark utility has been added at `src/lib/performance-benchmark.js`.
+
+**Usage in browser console:**
+```javascript
+// Run API latency benchmark
+await window.dashboardPerf.runApiLatencyBenchmark();
+
+// Measure cache effectiveness
+await window.dashboardPerf.measureCacheEffectiveness();
+
+// Start long task observer
+window.dashboardPerf.startLongTaskObserver();
+```
+
 ## Rollback Plan
 
 All changes are additive optimizations using standard React patterns. If issues arise:

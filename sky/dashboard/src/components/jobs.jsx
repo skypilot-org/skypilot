@@ -3,7 +3,7 @@
  * @see https://v0.dev/t/X5tLGA3WPNU
  * Documentation: https://v0.dev/docs#integrating-generated-code-into-your-nextjs-app
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { CircularProgress } from '@mui/material';
@@ -340,6 +340,151 @@ export function ManagedJobs() {
     </>
   );
 }
+
+// Memoized table row component to prevent unnecessary re-renders
+const JobTableRow = memo(function JobTableRow({
+  item,
+  shouldShowWorkspace,
+  shouldShowPool,
+  poolsLoading,
+  poolsData,
+  expandedRowId,
+  setExpandedRowId,
+}) {
+  return (
+    <TableRow>
+      <TableCell>
+        <Link href={`/jobs/${item.id}`} className="text-blue-600">
+          {item.id}
+        </Link>
+      </TableCell>
+      <TableCell>
+        <Link href={`/jobs/${item.id}`} className="text-blue-600">
+          {item.name}
+        </Link>
+      </TableCell>
+      <TableCell>
+        <UserDisplay username={item.user} userHash={item.user_hash} />
+      </TableCell>
+      {shouldShowWorkspace && (
+        <TableCell>
+          <Link
+            href="/workspaces"
+            className="text-gray-700 hover:text-blue-600 hover:underline"
+          >
+            {item.workspace || 'default'}
+          </Link>
+        </TableCell>
+      )}
+      <TableCell>
+        <TimestampWithTooltip
+          date={
+            item.submitted_at instanceof Date
+              ? item.submitted_at
+              : new Date(item.submitted_at * 1000)
+          }
+        />
+      </TableCell>
+      <TableCell>{formatDuration(item.job_duration)}</TableCell>
+      <TableCell>
+        <PluginSlot
+          name="jobs.table.status.badge"
+          context={item}
+          fallback={
+            <StatusBadge status={item.status} statusTooltip={item.statusTooltip} />
+          }
+        />
+      </TableCell>
+      <TableCell>
+        {item.infra && item.infra !== '-' ? (
+          <NonCapitalizedTooltip
+            content={item.full_infra || item.infra}
+            className="text-sm text-muted-foreground"
+          >
+            <span>
+              <Link href="/infra" className="text-blue-600 hover:underline">
+                {item.cloud || item.infra.split('(')[0].trim()}
+              </Link>
+              {item.infra.includes('(') && (
+                <span>
+                  {' ' +
+                    (() => {
+                      const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
+                      const fullRegionPart = item.infra.substring(
+                        item.infra.indexOf('(')
+                      );
+                      const regionContent = fullRegionPart.substring(
+                        1,
+                        fullRegionPart.length - 1
+                      );
+
+                      if (regionContent.length <= NAME_TRUNCATE_LENGTH) {
+                        return fullRegionPart;
+                      }
+
+                      const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+                      return `(${truncatedRegion})`;
+                    })()}
+                </span>
+              )}
+            </span>
+          </NonCapitalizedTooltip>
+        ) : (
+          <span>{item.infra || '-'}</span>
+        )}
+      </TableCell>
+      <TableCell>
+        <NonCapitalizedTooltip
+          content={
+            item.requested_resources ||
+            item.resources_str_full ||
+            item.resources_str ||
+            '-'
+          }
+          className="text-sm text-muted-foreground"
+        >
+          <span>
+            {item.requested_resources || item.resources_str || '-'}
+          </span>
+        </NonCapitalizedTooltip>
+      </TableCell>
+      <TableCell>{item.recoveries}</TableCell>
+      {shouldShowPool && (
+        <TableCell>
+          <div
+            className={
+              poolsLoading ? 'blur-sm transition-all duration-300' : ''
+            }
+          >
+            {poolsLoading
+              ? '-'
+              : renderPoolLink(item.pool, item.pool_hash, poolsData)}
+          </div>
+        </TableCell>
+      )}
+      <TableCell>
+        {item.details ? (
+          <TruncatedDetails
+            text={item.details}
+            rowId={item.id}
+            expandedRowId={expandedRowId}
+            setExpandedRowId={setExpandedRowId}
+          />
+        ) : (
+          '-'
+        )}
+      </TableCell>
+      <TableCell>
+        <Status2Actions
+          jobParent="/jobs"
+          jobId={item.id}
+          managed={true}
+          workspace={item.workspace}
+        />
+      </TableCell>
+    </TableRow>
+  );
+});
 
 export function ManagedJobsTable({
   refreshInterval,
@@ -1110,163 +1255,15 @@ export function ManagedJobsTable({
                 <>
                   {paginatedData.map((item) => (
                     <React.Fragment key={item.task_job_id}>
-                      <TableRow>
-                        <TableCell>
-                          <Link
-                            href={`/jobs/${item.id}`}
-                            className="text-blue-600"
-                          >
-                            {item.id}
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <Link
-                            href={`/jobs/${item.id}`}
-                            className="text-blue-600"
-                          >
-                            {item.name}
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <UserDisplay
-                            username={item.user}
-                            userHash={item.user_hash}
-                          />
-                        </TableCell>
-                        {shouldShowWorkspace && (
-                          <TableCell>
-                            <Link
-                              href="/workspaces"
-                              className="text-gray-700 hover:text-blue-600 hover:underline"
-                            >
-                              {item.workspace || 'default'}
-                            </Link>
-                          </TableCell>
-                        )}
-                        <TableCell>
-                          {formatSubmittedTime(item.submitted_at)}
-                        </TableCell>
-                        <TableCell>
-                          {formatDuration(item.job_duration)}
-                        </TableCell>
-                        <TableCell>
-                          <PluginSlot
-                            name="jobs.table.status.badge"
-                            context={item}
-                            fallback={
-                              <StatusBadge
-                                status={item.status}
-                                statusTooltip={item.statusTooltip}
-                              />
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {item.infra && item.infra !== '-' ? (
-                            <NonCapitalizedTooltip
-                              content={item.full_infra || item.infra}
-                              className="text-sm text-muted-foreground"
-                            >
-                              <span>
-                                <Link
-                                  href="/infra"
-                                  className="text-blue-600 hover:underline"
-                                >
-                                  {item.cloud ||
-                                    item.infra.split('(')[0].trim()}
-                                </Link>
-                                {item.infra.includes('(') && (
-                                  <span>
-                                    {' ' +
-                                      (() => {
-                                        const NAME_TRUNCATE_LENGTH =
-                                          UI_CONFIG.NAME_TRUNCATE_LENGTH;
-                                        const fullRegionPart =
-                                          item.infra.substring(
-                                            item.infra.indexOf('(')
-                                          );
-                                        const regionContent =
-                                          fullRegionPart.substring(
-                                            1,
-                                            fullRegionPart.length - 1
-                                          );
-
-                                        if (
-                                          regionContent.length <=
-                                          NAME_TRUNCATE_LENGTH
-                                        ) {
-                                          return fullRegionPart;
-                                        }
-
-                                        const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
-                                        return `(${truncatedRegion})`;
-                                      })()}
-                                  </span>
-                                )}
-                              </span>
-                            </NonCapitalizedTooltip>
-                          ) : (
-                            <span>{item.infra || '-'}</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <NonCapitalizedTooltip
-                            content={
-                              item.requested_resources ||
-                              item.resources_str_full ||
-                              item.resources_str ||
-                              '-'
-                            }
-                            className="text-sm text-muted-foreground"
-                          >
-                            <span>
-                              {item.requested_resources ||
-                                item.resources_str ||
-                                '-'}
-                            </span>
-                          </NonCapitalizedTooltip>
-                        </TableCell>
-                        <TableCell>{item.recoveries}</TableCell>
-                        {shouldShowPool && (
-                          <TableCell>
-                            <div
-                              className={
-                                poolsLoading
-                                  ? 'blur-sm transition-all duration-300'
-                                  : ''
-                              }
-                            >
-                              {poolsLoading
-                                ? '-'
-                                : renderPoolLink(
-                                    item.pool,
-                                    item.pool_hash,
-                                    poolsData
-                                  )}
-                            </div>
-                          </TableCell>
-                        )}
-                        <TableCell>
-                          {item.details ? (
-                            <TruncatedDetails
-                              text={item.details}
-                              rowId={item.id}
-                              expandedRowId={expandedRowId}
-                              setExpandedRowId={setExpandedRowId}
-                            />
-                          ) : (
-                            '-'
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Status2Actions
-                            jobParent="/jobs"
-                            jobId={item.id}
-                            managed={true}
-                            workspace={item.workspace}
-                          />
-                        </TableCell>
-                      </TableRow>
+                      <JobTableRow
+                        item={item}
+                        shouldShowWorkspace={shouldShowWorkspace}
+                        shouldShowPool={shouldShowPool}
+                        poolsLoading={poolsLoading}
+                        poolsData={poolsData}
+                        expandedRowId={expandedRowId}
+                        setExpandedRowId={setExpandedRowId}
+                      />
                       {expandedRowId === item.id && (
                         <ExpandedDetailsRow
                           text={item.details}
@@ -1883,7 +1880,8 @@ export function ClusterJobs({
   );
 }
 
-function ExpandedDetailsRow({ text, colSpan, innerRef }) {
+// Memoized component for expanded details row
+const ExpandedDetailsRow = memo(function ExpandedDetailsRow({ text, colSpan, innerRef }) {
   return (
     <TableRow className="expanded-details">
       <TableCell colSpan={colSpan}>
@@ -1906,9 +1904,10 @@ function ExpandedDetailsRow({ text, colSpan, innerRef }) {
       </TableCell>
     </TableRow>
   );
-}
+});
 
-function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
+// Memoized component for truncated details with expand/collapse
+const TruncatedDetails = memo(function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
   const safeText = text || '';
   const isTruncated = safeText.length > 50;
   const isExpanded = expandedRowId === rowId;
@@ -1916,11 +1915,11 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
   const displayText = isTruncated ? `${safeText.substring(0, 50)}` : safeText;
   const buttonRef = useRef(null);
 
-  const handleClick = (e) => {
+  const handleClick = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
     setExpandedRowId(isExpanded ? null : rowId);
-  };
+  }, [isExpanded, rowId, setExpandedRowId]);
 
   return (
     <div className="truncated-details relative max-w-full flex items-center">
@@ -1938,7 +1937,7 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
       )}
     </div>
   );
-}
+});
 
 function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
   const [data, setData] = useState([]);

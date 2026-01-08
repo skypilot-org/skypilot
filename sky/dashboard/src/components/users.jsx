@@ -6,6 +6,7 @@ import React, {
   useCallback,
   useMemo,
   useRef,
+  memo,
 } from 'react';
 import PropTypes from 'prop-types';
 import { CircularProgress } from '@mui/material';

@@ -11,6 +11,7 @@ import React, {
   useMemo,
   useCallback,
   useRef,
+  memo,
 } from 'react';
 import { useRouter } from 'next/router';
 import { CircularProgress } from '@mui/material';
@@ -578,6 +579,96 @@ export function Clusters() {
   );
 }
 
+// Memoized table row component to prevent unnecessary re-renders
+const ClusterTableRow = memo(function ClusterTableRow({
+  item,
+  showHistory,
+  onOpenSSHModal,
+  onOpenVSCodeModal,
+}) {
+  return (
+    <TableRow>
+      <TableCell>
+        <PluginSlot
+          name="clusters.table.status.badge"
+          context={item}
+          fallback={
+            <StatusBadge
+              status={item.status}
+              statusTooltip={item.statusTooltip}
+            />
+          }
+        />
+      </TableCell>
+      <TableCell>
+        <Link
+          href={`/clusters/${item.isHistorical ? item.cluster_hash : item.cluster || item.name}`}
+          className="text-blue-600"
+        >
+          {item.cluster || item.name}
+        </Link>
+      </TableCell>
+      <TableCell>
+        <UserDisplay username={item.user} userHash={item.user_hash} />
+      </TableCell>
+      <TableCell>
+        <Link
+          href="/workspaces"
+          className="text-gray-700 hover:text-blue-600 hover:underline"
+        >
+          {item.workspace || 'default'}
+        </Link>
+      </TableCell>
+      <TableCell>
+        <NonCapitalizedTooltip
+          content={item.full_infra || item.infra}
+          className="text-sm text-muted-foreground"
+        >
+          <span>
+            <Link href="/infra" className="text-blue-600 hover:underline">
+              {item.cloud}
+            </Link>
+            {item.infra.includes('(') && (
+              <span>
+                {' ' + item.infra.substring(item.infra.indexOf('('))}
+              </span>
+            )}
+          </span>
+        </NonCapitalizedTooltip>
+      </TableCell>
+      <TableCell>
+        <NonCapitalizedTooltip
+          content={item.resources_str_full || item.resources_str}
+          className="text-sm text-muted-foreground"
+        >
+          <span>{item.resources_str}</span>
+        </NonCapitalizedTooltip>
+      </TableCell>
+      <TableCell>
+        <TimestampWithTooltip date={item.time} />
+      </TableCell>
+      {showHistory && (
+        <TableCell>{formatDuration(item.duration)}</TableCell>
+      )}
+      <TableCell>
+        {item.isHistorical
+          ? '-'
+          : formatAutostop(item.autostop, item.to_down)}
+      </TableCell>
+      <TableCell className="text-left md:sticky md:right-0 md:bg-white">
+        {!item.isHistorical && (
+          <Status2Actions
+            cluster={item.cluster}
+            status={item.status}
+            onOpenSSHModal={onOpenSSHModal}
+            onOpenVSCodeModal={onOpenVSCodeModal}
+          />
+        )}
+      </TableCell>
+    </TableRow>
+  );
+});
+
 export function ClusterTable({
   refreshInterval,
   setLoading,
@@ -889,98 +980,15 @@ export function ClusterTable({
                   </TableCell>
                 </TableRow>
               ) : paginatedData.length > 0 ? (
-                paginatedData.map((item, index) => {
-                  return (
-                    <TableRow key={index}>
-                      <TableCell>
-                        <PluginSlot
-                          name="clusters.table.status.badge"
-                          context={item}
-                          fallback={
-                            <StatusBadge
-                              status={item.status}
-                              statusTooltip={item.statusTooltip}
-                            />
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          href={`/clusters/${item.isHistorical ? item.cluster_hash : item.cluster || item.name}`}
-                          className="text-blue-600"
-                        >
-                          {item.cluster || item.name}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <UserDisplay
-                          username={item.user}
-                          userHash={item.user_hash}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          href="/workspaces"
-                          className="text-gray-700 hover:text-blue-600 hover:underline"
-                        >
-                          {item.workspace || 'default'}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <NonCapitalizedTooltip
-                          content={item.full_infra || item.infra}
-                          className="text-sm text-muted-foreground"
-                        >
-                          <span>
-                            <Link
-                              href="/infra"
-                              className="text-blue-600 hover:underline"
-                            >
-                              {item.cloud}
-                            </Link>
-                            {item.infra.includes('(') && (
-                              <span>
-                                {' ' +
-                                  item.infra.substring(item.infra.indexOf('('))}
-                              </span>
-                            )}
-                          </span>
-                        </NonCapitalizedTooltip>
-                      </TableCell>
-                      <TableCell>
-                        <NonCapitalizedTooltip
-                          content={
-                            item.resources_str_full || item.resources_str
-                          }
-                          className="text-sm text-muted-foreground"
-                        >
-                          <span>{item.resources_str}</span>
-                        </NonCapitalizedTooltip>
-                      </TableCell>
-                      <TableCell>
-                        <TimestampWithTooltip date={item.time} />
-                      </TableCell>
-                      {showHistory && (
-                        <TableCell>{formatDuration(item.duration)}</TableCell>
-                      )}
-                      <TableCell>
-                        {item.isHistorical
-                          ? '-'
-                          : formatAutostop(item.autostop, item.to_down)}
-                      </TableCell>
-                      <TableCell className="text-left md:sticky md:right-0 md:bg-white">
-                        {!item.isHistorical && (
-                          <Status2Actions
-                            cluster={item.cluster}
-                            status={item.status}
-                            onOpenSSHModal={onOpenSSHModal}
-                            onOpenVSCodeModal={onOpenVSCodeModal}
-                          />
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
+                paginatedData.map((item, index) => (
+                  <ClusterTableRow
+                    key={item.cluster_hash || item.cluster || index}
+                    item={item}
+                    showHistory={showHistory}
+                    onOpenSSHModal={onOpenSSHModal}
+                    onOpenVSCodeModal={onOpenVSCodeModal}
+                  />
+                ))
               ) : (
                 <TableRow>
                   <TableCell
@@ -1117,7 +1125,8 @@ const actionIcons = {
   VSCode: <SquareCode className="w-4 h-4 text-gray-500 inline-block" />,
 };
 
-export function Status2Actions({
+// Memoized actions component to prevent unnecessary re-renders
+export const Status2Actions = memo(function Status2Actions({
   withLabel = false,
   cluster,
   status,
@@ -1127,7 +1136,7 @@ export function Status2Actions({
   const actions = enabledActions(status);
   const isMobile = useMobile();
 
-  const handleActionClick = (actionName) => {
+  const handleActionClick = useCallback((actionName) => {
     switch (actionName) {
       case 'connect':
         handleConnect(cluster, onOpenSSHModal);
@@ -1138,7 +1147,7 @@ export function Status2Actions({
       default:
         return;
     }
-  };
+  }, [cluster, onOpenSSHModal, onOpenVSCodeModal]);
 
   return (
     <>
@@ -1196,7 +1205,7 @@ export function Status2Actions({
       </div>
     </>
   );
-}
+});
 
 const FilterDropdown = ({
   propertyList = [],
