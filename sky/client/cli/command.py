@@ -4718,10 +4718,18 @@ def _build_volume_override_config(
               is_flag=True,
               required=False,
               help='Show all information in full.')
+@click.option('--refresh',
+              '-r',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Refresh volume state from cloud APIs before listing. '
+              'Without this flag, cached data is returned which is updated '
+              'periodically by the background daemon.')
 @usage_lib.entrypoint
-def volumes_ls(verbose: bool):
+def volumes_ls(verbose: bool, refresh: bool):
     """List volumes managed by SkyPilot."""
-    request_id = volumes_sdk.ls()
+    request_id = volumes_sdk.ls(refresh=refresh)
     all_volumes = sdk.stream_and_get(request_id)
     volume_table = table_utils.format_volume_table(all_volumes,
                                                    show_all=verbose)

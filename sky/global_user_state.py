@@ -154,6 +154,9 @@ volume_table = sqlalchemy.Table(
     sqlalchemy.Column('status', sqlalchemy.Text),
     sqlalchemy.Column('is_ephemeral', sqlalchemy.Integer, server_default='0'),
     sqlalchemy.Column('error_message', sqlalchemy.Text, server_default=None),
+    # JSON-encoded lists of pods/clusters using the volume
+    sqlalchemy.Column('usedby_pods', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('usedby_clusters', sqlalchemy.Text, server_default=None),
 )
 
 # Table for Cluster History
@@ -2387,6 +2390,10 @@ def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
                 is_ephemeral=int(is_ephemeral)).all()
     records = []
     for row in rows:
+        # Decode JSON-encoded usedby fields
+        usedby_pods = json.loads(row.usedby_pods) if row.usedby_pods else []
+        usedby_clusters = (json.loads(row.usedby_clusters)
+                           if row.usedby_clusters else [])
         records.append({
             'name': row.name,
             'launched_at': row.launched_at,
@@ -2398,6 +2405,8 @@ def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
             'status': status_lib.VolumeStatus[row.status],
             'is_ephemeral': bool(row.is_ephemeral),
             'error_message': row.error_message,
+            'usedby_pods': usedby_pods,
+            'usedby_clusters': usedby_clusters,
         })
     return records
 
@@ -2409,6 +2418,10 @@ def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(volume_table).filter_by(name=name).first()
     if row:
+        # Decode JSON-encoded usedby fields
+        usedby_pods = json.loads(row.usedby_pods) if row.usedby_pods else []
+        usedby_clusters = (json.loads(row.usedby_clusters)
+                           if row.usedby_clusters else [])
         return {
             'name': row.name,
             'launched_at': row.launched_at,
@@ -2419,6 +2432,8 @@ def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
             'last_use': row.last_use,
             'status': status_lib.VolumeStatus[row.status],
             'error_message': row.error_message,
+            'usedby_pods': usedby_pods,
+            'usedby_clusters': usedby_clusters,
         }
     return None
 
@@ -2496,7 +2511,18 @@ def update_volume(name: str, last_attached_at: int,
 @metrics_lib.time_me
 def update_volume_status(name: str,
                          status: status_lib.VolumeStatus,
-                         error_message: Optional[str] = None) -> None:
+                         error_message: Optional[str] = None,
+                         usedby_pods: Optional[List[str]] = None,
+                         usedby_clusters: Optional[List[str]] = None) -> None:
+    """Update volume status and related fields.
+
+    Args:
+        name: Volume name.
+        status: New volume status.
+        error_message: Error message (None clears it).
+        usedby_pods: List of pods using the volume (None keeps existing value).
+        usedby_clusters: List of clusters using the volume (None keeps it).
+    """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         update_dict: Dict[str, Any] = {
@@ -2504,6 +2530,12 @@ def update_volume_status(name: str,
         }
         # Always update error_message (None clears it)
         update_dict[volume_table.c.error_message] = error_message
+        # Update usedby fields if provided (encode as JSON)
+        if usedby_pods is not None:
+            update_dict[volume_table.c.usedby_pods] = json.dumps(usedby_pods)
+        if usedby_clusters is not None:
+            update_dict[volume_table.c.usedby_clusters] = json.dumps(
+                usedby_clusters)
         session.query(volume_table).filter_by(name=name).update(update_dict)
         session.commit()
 

@@ -25,19 +25,22 @@ VOLUME_LOCK_PATH = os.path.expanduser('~/.sky/.{volume_name}.lock')
 VOLUME_LOCK_TIMEOUT_SECONDS = 20
 
 
-def volume_refresh():
-    """Refreshes the volume status.
+def _volume_update(is_ephemeral: Optional[bool] = None) -> None:
+    """Updates volume state by making cloud API calls.
 
-    This function checks:
-    1. Volume errors (e.g., misconfiguration causing pending state)
-    2. Volume usage
+    This is an internal function that:
+    1. Queries cloud APIs for volume errors and usage info
+    2. Updates the database with the latest state
+
+    This should be called by the volume refresh daemon, not directly by users.
+    For listing volumes, use volume_list() which reads from the database.
 
     Status transitions:
     - ERROR: Volume has errors (e.g., pending due to misconfiguration)
     - IN_USE: Volume is healthy and in use
     - READY: Volume is healthy and not in use
     """
-    volumes = global_user_state.get_volumes(is_ephemeral=False)
+    volumes = global_user_state.get_volumes(is_ephemeral=is_ephemeral)
 
     # Group volumes by cloud for batch API calls
     cloud_to_configs: Dict[str, List[models.VolumeConfig]] = {}
@@ -85,7 +88,7 @@ def volume_refresh():
                 config.name for config in configs
             }
 
-    # Update volume statuses
+    # Update volume statuses in database
     for volume in volumes:
         volume_name = volume.get('name')
         config = volume_name_to_config.get(volume_name)
@@ -104,7 +107,7 @@ def volume_refresh():
         volume_error = cloud_to_volume_errors.get(cloud, {}).get(volume_name)
 
         # Get usedby info
-        usedby_pods, _ = provision.map_all_volumes_usedby(
+        usedby_pods, usedby_clusters = provision.map_all_volumes_usedby(
             cloud,
             cloud_to_used_by_pods.get(cloud, {}),
             cloud_to_used_by_clusters.get(cloud, {}),
@@ -119,6 +122,8 @@ def volume_refresh():
 
             current_status = latest_volume.get('status')
             current_error = latest_volume.get('error_message')
+            current_usedby_pods = latest_volume.get('usedby_pods', [])
+            current_usedby_clusters = latest_volume.get('usedby_clusters', [])
 
             # Determine new status and error_message
             if volume_error:
@@ -131,14 +136,23 @@ def volume_refresh():
                 new_status = status_lib.VolumeStatus.READY
                 new_error = None
 
-            # Update if status or error changed
-            if current_status != new_status or current_error != new_error:
+            # Update if anything changed
+            status_changed = current_status != new_status
+            error_changed = current_error != new_error
+            usedby_changed = (
+                set(current_usedby_pods) != set(usedby_pods) or
+                set(current_usedby_clusters) != set(usedby_clusters))
+
+            if status_changed or error_changed or usedby_changed:
                 logger.info(f'Update volume {volume_name} status to '
                             f'{new_status.value}'
                             f'{", error: " + new_error if new_error else ""}')
-                global_user_state.update_volume_status(volume_name,
-                                                       status=new_status,
-                                                       error_message=new_error)
+                global_user_state.update_volume_status(
+                    volume_name,
+                    status=new_status,
+                    error_message=new_error,
+                    usedby_pods=usedby_pods,
+                    usedby_clusters=usedby_clusters)
             volume_config = latest_volume.get('handle')
             if volume_config is None:
                 continue
@@ -156,78 +170,43 @@ def volume_refresh():
                                                        volume_config)
 
 
+def volume_refresh():
+    """Refreshes volume status by querying cloud APIs.
+
+    This is called by the background daemon to update volume state.
+    It updates status, error messages, and usage information in the database.
+    """
+    _volume_update(is_ephemeral=False)
+
 
 def volume_list(
         is_ephemeral: Optional[bool] = None) -> List[responses.VolumeRecord]:
-    """Gets the volumes.
+    """Gets volumes from the database.
+
+    This function reads cached volume information from the database.
+    It does NOT make any cloud API calls - use volume_refresh() to update
+    the cached data.
 
     Args:
         is_ephemeral: Whether to include ephemeral volumes.
 
     Returns:
-        [
-            {
-                'name': str,
-                'type': str,
-                'launched_at': int timestamp of creation,
-                'cloud': str,
-                'region': str,
-                'zone': str,
-                'size': str,
-                'config': Dict[str, Any],
-                'name_on_cloud': str,
-                'user_hash': str,
-                'workspace': str,
-                'last_attached_at': int timestamp of last attachment,
-                'last_use': last command,
-                'status': sky.VolumeStatus,
-                'usedby_pods': List[str],
-                'usedby_clusters': List[str],
-                'usedby_fetch_failed': bool,
-                'is_ephemeral': bool,
-                'error_message': Optional[str],
-            }
-        ]
+        List of VolumeRecord objects with volume information.
     """
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
         volumes = global_user_state.get_volumes(is_ephemeral=is_ephemeral)
-        cloud_to_configs: Dict[str, List[models.VolumeConfig]] = {}
-        for volume in volumes:
-            config = volume.get('handle')
-            if config is None:
-                volume_name = volume.get('name')
-                logger.warning(f'Volume {volume_name} has no handle.')
-                continue
-            cloud = config.cloud
-            if cloud not in cloud_to_configs:
-                cloud_to_configs[cloud] = []
-            cloud_to_configs[cloud].append(config)
-
-        cloud_to_used_by_pods: Dict[str, Dict[str, Any]] = {}
-        cloud_to_used_by_clusters: Dict[str, Dict[str, Any]] = {}
-        cloud_to_failed_volume_names: Dict[str, set] = {}
-        for cloud, configs in cloud_to_configs.items():
-            try:
-                used_by_pods, used_by_clusters, failed_volume_names = (
-                    provision.get_all_volumes_usedby(cloud, configs))
-                cloud_to_used_by_pods[cloud] = used_by_pods
-                cloud_to_used_by_clusters[cloud] = used_by_clusters
-                cloud_to_failed_volume_names[cloud] = failed_volume_names
-            except Exception as e:  # pylint: disable=broad-except
-                logger.warning(
-                    f'Failed to get usedby info for volumes on {cloud}: {e}')
-                cloud_to_used_by_pods[cloud] = {}
-                cloud_to_used_by_clusters[cloud] = {}
-                cloud_to_failed_volume_names[cloud] = {
-                    config.name for config in configs
-                }
-                continue
-
         all_users = global_user_state.get_all_users()
         user_map = {user.id: user.name for user in all_users}
+
         records = []
         for volume in volumes:
             volume_name = volume.get('name')
+            config = volume.get('handle')
+            if config is None:
+                logger.warning(f'Volume {volume_name} has no handle.')
+                continue
+
+            status = volume.get('status')
             record: Dict[str, Any] = {
                 'name': volume_name,
                 'launched_at': volume.get('launched_at'),
@@ -236,41 +215,20 @@ def volume_list(
                 'workspace': volume.get('workspace'),
                 'last_attached_at': volume.get('last_attached_at'),
                 'last_use': volume.get('last_use'),
-                'usedby_pods': [],
-                'usedby_clusters': [],
+                'status': status.value if status is not None else '',
+                'usedby_pods': volume.get('usedby_pods', []),
+                'usedby_clusters': volume.get('usedby_clusters', []),
                 'usedby_fetch_failed': False,
                 'is_ephemeral': volume.get('is_ephemeral', False),
                 'error_message': volume.get('error_message'),
+                'type': config.type,
+                'cloud': config.cloud,
+                'region': config.region,
+                'zone': config.zone,
+                'size': config.size,
+                'config': config.config,
+                'name_on_cloud': config.name_on_cloud,
             }
-            status = volume.get('status')
-            if status is not None:
-                record['status'] = status.value
-            else:
-                record['status'] = ''
-            config = volume.get('handle')
-            if config is None:
-                logger.warning(f'Volume {volume_name} has no handle.')
-                continue
-            cloud = config.cloud
-            if volume_name in cloud_to_failed_volume_names.get(cloud, set()):
-                record['usedby_fetch_failed'] = True
-            else:
-                usedby_pods, usedby_clusters = provision.map_all_volumes_usedby(
-                    cloud,
-                    cloud_to_used_by_pods[cloud],
-                    cloud_to_used_by_clusters[cloud],
-                    config,
-                )
-                record['usedby_pods'] = usedby_pods
-                record['usedby_clusters'] = usedby_clusters
-
-            record['type'] = config.type
-            record['cloud'] = config.cloud
-            record['region'] = config.region
-            record['zone'] = config.zone
-            record['size'] = config.size
-            record['config'] = config.config
-            record['name_on_cloud'] = config.name_on_cloud
             records.append(responses.VolumeRecord(**record))
         return records
 
