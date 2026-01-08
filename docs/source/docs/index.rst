@@ -342,6 +342,7 @@ Read the research:
    :maxdepth: 1
    :caption: User Guides
 
+   Migrating from Slurm <../reference/slurm-migration>
    ../reference/async
    ../running-jobs/environment-variables
    Docker Containers <../examples/docker-containers>
