@@ -2263,7 +2263,13 @@ def api_info() -> responses.APIHealthResponse:
     """
     response = server_common.make_authenticated_request('GET', '/api/health')
     response.raise_for_status()
-    return responses.APIHealthResponse(**response.json())
+    api_health_response = responses.APIHealthResponse(**response.json())
+
+    # Show upgrade hint if available
+    endpoint = server_common.get_server_url()
+    server_common.check_and_print_upgrade_hint(api_health_response, endpoint)
+
+    return api_health_response
 
 
 @usage_lib.entrypoint
@@ -2322,6 +2328,9 @@ def api_start(
                 f'{api_server_url}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'
                 f'View API server logs at: {constants.API_SERVER_LOGS}')
+
+    api_server_info = server_common.get_api_server_status(api_server_url)
+    server_common.check_and_print_upgrade_hint(api_server_info, api_server_url)
 
 
 @usage_lib.entrypoint

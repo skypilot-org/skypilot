@@ -133,8 +133,8 @@ class ApiServerInfo:
     latest_version: Optional[str] = None
 
 
-def _check_and_print_upgrade_hint(api_server_info: ApiServerInfo,
-                                  endpoint: str) -> None:
+def check_and_print_upgrade_hint(api_server_info: ApiServerInfo,
+                                 endpoint: str) -> None:
     """Check for newer SkyPilot version and print upgrade hint if available.
 
     This function checks the API server info for latest_version and prints
@@ -832,9 +832,6 @@ def check_server_healthy(
             logger.warning(_LOCAL_API_SERVER_RESTART_HINT)
 
         hinted_for_server_install_version_mismatch = True
-
-    # Check and print upgrade hint if available
-    _check_and_print_upgrade_hint(api_server_info, endpoint)
 
     return api_server_status, api_server_info
 
