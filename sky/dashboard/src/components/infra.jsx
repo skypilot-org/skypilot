@@ -244,7 +244,7 @@ export function InfrastructureSection({
                       <th className="p-3 text-left font-medium text-gray-600 w-1/6">
                         Memory
                       </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/5">
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/6">
                         GPU Types
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
