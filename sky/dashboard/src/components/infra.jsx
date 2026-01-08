@@ -3,7 +3,7 @@
  * @see https://v0.dev/t/X5tLGA3WPNU
  * Documentation: https://v0.dev/docs#integrating-generated-code-into-your-nextjs-app
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
 import {
@@ -77,6 +77,234 @@ import {
 // Set the refresh interval to align with other pages
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
+
+// Memoized row component for context/cluster table
+const ContextTableRow = memo(function ContextTableRow({
+  context,
+  displayName,
+  workspaceDisplay,
+  stats,
+  hasContextStats,
+  jobsData,
+  contextStatsKey,
+  isJobsDataLoading,
+  nodes,
+  hasNodeData,
+  contextErrors,
+  aggregatedCpu,
+  aggregatedMemory,
+  gpuTypes,
+  totalGpus,
+  hasGpuData,
+  onContextClick,
+}) {
+  return (
+    <tr className="hover:bg-gray-50">
+      <td className="p-3">
+        <NonCapitalizedTooltip
+          content={`${displayName}${workspaceDisplay}`}
+          className="text-sm text-muted-foreground"
+        >
+          <span
+            className="text-blue-600 hover:underline cursor-pointer"
+            onClick={() => onContextClick(context)}
+          >
+            {displayName.length > NAME_TRUNCATE_LENGTH
+              ? `${displayName.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${displayName.substring(displayName.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`
+              : displayName}
+            {workspaceDisplay && (
+              <span className="text-xs text-gray-500 ml-1">
+                {workspaceDisplay}
+              </span>
+            )}
+          </span>
+        </NonCapitalizedTooltip>
+      </td>
+      <td className="p-3">
+        {!hasContextStats ? (
+          <div className="flex items-center justify-center">
+            <CircularProgress size={12} />
+          </div>
+        ) : stats.clusters > 0 ? (
+          <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+            {stats.clusters}
+          </span>
+        ) : (
+          <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+            0
+          </span>
+        )}
+      </td>
+      <td className="p-3">
+        {!isJobsDataLoading ? (
+          jobsData[contextStatsKey]?.jobs > 0 ? (
+            <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+              {jobsData[contextStatsKey]?.jobs}
+            </span>
+          ) : (
+            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+              0
+            </span>
+          )
+        ) : (
+          <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+            <CircularProgress size={12} />
+          </span>
+        )}
+      </td>
+      <td className="p-3">
+        {!hasNodeData ? (
+          <div className="flex items-center justify-center">
+            <CircularProgress size={16} />
+          </div>
+        ) : (
+          <span
+            className={
+              nodes.length === 0 && contextErrors[context]
+                ? 'text-gray-400'
+                : ''
+            }
+            title={
+              nodes.length === 0 && contextErrors[context]
+                ? contextErrors[context]
+                : ''
+            }
+          >
+            {nodes.length === 0 && contextErrors[context]
+              ? '0*'
+              : nodes.length}
+          </span>
+        )}
+      </td>
+      <td className="p-3">
+        {!hasNodeData ? (
+          <div className="flex items-center justify-center">
+            <CircularProgress size={16} />
+          </div>
+        ) : (
+          formatCpu(aggregatedCpu)
+        )}
+      </td>
+      <td className="p-3">
+        {!hasNodeData ? (
+          <div className="flex items-center justify-center">
+            <CircularProgress size={16} />
+          </div>
+        ) : (
+          formatMemory(aggregatedMemory)
+        )}
+      </td>
+      <td className="p-3">
+        {!hasGpuData ? (
+          <div className="flex items-center justify-center">
+            <CircularProgress size={16} />
+          </div>
+        ) : (
+          gpuTypes || '-'
+        )}
+      </td>
+      <td className="p-3">
+        {!hasGpuData ? (
+          <div className="flex items-center justify-center">
+            <CircularProgress size={16} />
+          </div>
+        ) : (
+          totalGpus
+        )}
+      </td>
+    </tr>
+  );
+});
+
+// Memoized row component for node details table
+const NodeTableRow = memo(function NodeTableRow({
+  node,
+  index,
+  cpuDisplay,
+  memoryDisplay,
+  utilizationStr,
+}) {
+  return (
+    <tr className="hover:bg-gray-50">
+      <td className="p-3 whitespace-nowrap text-gray-700">
+        {node.node_name}
+      </td>
+      <td className="p-3 whitespace-nowrap text-gray-700">
+        {node.ip_address || '-'}
+      </td>
+      <td className="p-3 whitespace-nowrap text-gray-700">
+        {cpuDisplay}
+      </td>
+      <td className="p-3 whitespace-nowrap text-gray-700">
+        {memoryDisplay}
+      </td>
+      <td className="p-3 whitespace-nowrap text-gray-700">
+        {node.gpu_name}
+      </td>
+      <td className="p-3 whitespace-nowrap text-gray-700">
+        {utilizationStr}
+      </td>
+    </tr>
+  );
+});
+
+// Memoized row component for cloud infrastructure table
+const CloudTableRow = memo(function CloudTableRow({
+  cloud,
+  hasCompleteData,
+}) {
+  return (
+    <tr className="hover:bg-gray-50">
+      <td className="p-3 font-medium text-gray-700">
+        {cloud.name}
+      </td>
+      <td className="p-3">
+        {!hasCompleteData ? (
+          <div className="flex items-center justify-center">
+            <CircularProgress size={16} />
+          </div>
+        ) : cloud.clusters > 0 ? (
+          <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+            {cloud.clusters}
+          </span>
+        ) : (
+          <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+            0
+          </span>
+        )}
+      </td>
+      <td className="p-3">
+        {!hasCompleteData ? (
+          <div className="flex items-center justify-center">
+            <CircularProgress size={16} />
+          </div>
+        ) : cloud.jobs > 0 ? (
+          <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+            {cloud.jobs}
+          </span>
+        ) : (
+          <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+            0
+          </span>
+        )}
+      </td>
+    </tr>
+  );
+});
+
+// Memoized row component for GPU table
+const GpuTableRow = memo(function GpuTableRow({ gpu, idx }) {
+  return (
+    <tr>
+      <td className="p-2 whitespace-nowrap text-gray-700">
+        {gpu.gpu_name}
+      </td>
+      <td className="p-2 whitespace-nowrap text-gray-700">
+        {gpu.gpu_quantities}
+      </td>
+    </tr>
+  );
+});
 
 // Shared GPU utilization bar to avoid duplicating percentage math and markup
 const GpuUtilizationBar = ({
@@ -326,120 +554,26 @@ export function InfrastructureSection({
                           : '';
 
                       return (
-                        <tr key={context} className="hover:bg-gray-50">
-                          <td className="p-3">
-                            <NonCapitalizedTooltip
-                              content={`${displayName}${workspaceDisplay}`}
-                              className="text-sm text-muted-foreground"
-                            >
-                              <span
-                                className="text-blue-600 hover:underline cursor-pointer"
-                                onClick={() => handleContextClick(context)}
-                              >
-                                {displayName.length > NAME_TRUNCATE_LENGTH
-                                  ? `${displayName.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${displayName.substring(displayName.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`
-                                  : displayName}
-                                {workspaceDisplay && (
-                                  <span className="text-xs text-gray-500 ml-1">
-                                    {workspaceDisplay}
-                                  </span>
-                                )}
-                              </span>
-                            </NonCapitalizedTooltip>
-                          </td>
-                          <td className="p-3">
-                            {!hasContextStats ? (
-                              <div className="flex items-center justify-center">
-                                <CircularProgress size={12} />
-                              </div>
-                            ) : stats.clusters > 0 ? (
-                              <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
-                                {stats.clusters}
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                0
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-3">
-                            {!isJobsDataLoading ? (
-                              jobsData[contextStatsKey]?.jobs || 0 > 0 ? (
-                                <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
-                                  {jobsData[contextStatsKey]?.jobs}
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                  0
-                                </span>
-                              )
-                            ) : (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                <CircularProgress size={12} />
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-3">
-                            {!hasNodeData ? (
-                              <div className="flex items-center justify-center">
-                                <CircularProgress size={16} />
-                              </div>
-                            ) : (
-                              <span
-                                className={
-                                  nodes.length === 0 && contextErrors[context]
-                                    ? 'text-gray-400'
-                                    : ''
-                                }
-                                title={
-                                  nodes.length === 0 && contextErrors[context]
-                                    ? contextErrors[context]
-                                    : ''
-                                }
-                              >
-                                {nodes.length === 0 && contextErrors[context]
-                                  ? '0*'
-                                  : nodes.length}
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-3">
-                            {!hasNodeData ? (
-                              <div className="flex items-center justify-center">
-                                <CircularProgress size={16} />
-                              </div>
-                            ) : (
-                              formatCpu(aggregatedCpu)
-                            )}
-                          </td>
-                          <td className="p-3">
-                            {!hasNodeData ? (
-                              <div className="flex items-center justify-center">
-                                <CircularProgress size={16} />
-                              </div>
-                            ) : (
-                              formatMemory(aggregatedMemory)
-                            )}
-                          </td>
-                          <td className="p-3">
-                            {!hasGpuData ? (
-                              <div className="flex items-center justify-center">
-                                <CircularProgress size={16} />
-                              </div>
-                            ) : (
-                              gpuTypes || '-'
-                            )}
-                          </td>
-                          <td className="p-3">
-                            {!hasGpuData ? (
-                              <div className="flex items-center justify-center">
-                                <CircularProgress size={16} />
-                              </div>
-                            ) : (
-                              totalGpus
-                            )}
-                          </td>
-                        </tr>
+                        <ContextTableRow
+                          key={context}
+                          context={context}
+                          displayName={displayName}
+                          workspaceDisplay={workspaceDisplay}
+                          stats={stats}
+                          hasContextStats={hasContextStats}
+                          jobsData={jobsData}
+                          contextStatsKey={contextStatsKey}
+                          isJobsDataLoading={isJobsDataLoading}
+                          nodes={nodes}
+                          hasNodeData={hasNodeData}
+                          contextErrors={contextErrors}
+                          aggregatedCpu={aggregatedCpu}
+                          aggregatedMemory={aggregatedMemory}
+                          gpuTypes={gpuTypes}
+                          totalGpus={totalGpus}
+                          hasGpuData={hasGpuData}
+                          onContextClick={handleContextClick}
+                        />
                       );
                     })}
                   </tbody>
@@ -769,29 +903,14 @@ export function ContextDetails({
                           : `${node.gpu_free} of ${node.gpu_total} free`;
 
                       return (
-                        <tr
+                        <NodeTableRow
                           key={`${node.node_name}-${index}`}
-                          className="hover:bg-gray-50"
-                        >
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {node.node_name}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {node.ip_address || '-'}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {cpuDisplay}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {memoryDisplay}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {node.gpu_name}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {utilizationStr}
-                          </td>
-                        </tr>
+                          node={node}
+                          index={index}
+                          cpuDisplay={cpuDisplay}
+                          memoryDisplay={memoryDisplay}
+                          utilizationStr={utilizationStr}
+                        />
                       );
                     })}
                   </tbody>
@@ -2529,48 +2648,16 @@ export function GPUs() {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredCloudInfraData.map((cloud) => {
-                    // Check if cloud data is complete
                     const hasCompleteData =
                       cloudDataLoaded &&
                       cloud.clusters !== undefined &&
                       cloud.jobs !== undefined;
-
                     return (
-                      <tr key={cloud.name} className="hover:bg-gray-50">
-                        <td className="p-3 font-medium text-gray-700">
-                          {cloud.name}
-                        </td>
-                        <td className="p-3">
-                          {!hasCompleteData ? (
-                            <div className="flex items-center justify-center">
-                              <CircularProgress size={16} />
-                            </div>
-                          ) : cloud.clusters > 0 ? (
-                            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
-                              {cloud.clusters}
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                              0
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-3">
-                          {!hasCompleteData ? (
-                            <div className="flex items-center justify-center">
-                              <CircularProgress size={16} />
-                            </div>
-                          ) : cloud.jobs > 0 ? (
-                            <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
-                              {cloud.jobs}
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                              0
-                            </span>
-                          )}
-                        </td>
-                      </tr>
+                      <CloudTableRow
+                        key={cloud.name}
+                        cloud={cloud}
+                        hasCompleteData={hasCompleteData}
+                      />
                     );
                   })}
                 </tbody>
@@ -2915,14 +3002,11 @@ function CloudGpuTable({ data, title }) {
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {paginatedData.map((gpu, idx) => (
-              <tr key={`${gpu.gpu_name}-${idx}`}>
-                <td className="p-2 whitespace-nowrap text-gray-700">
-                  {gpu.gpu_name}
-                </td>
-                <td className="p-2 whitespace-nowrap text-gray-700">
-                  {gpu.gpu_quantities}
-                </td>
-              </tr>
+              <GpuTableRow
+                key={`${gpu.gpu_name}-${idx}`}
+                gpu={gpu}
+                idx={idx}
+              />
             ))}
           </tbody>
         </table>
