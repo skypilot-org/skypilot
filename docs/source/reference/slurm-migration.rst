@@ -13,7 +13,7 @@ TODO - isolation, multi-cluster, ...?
 Slurm to SkyPilot
 -----------------
 
-Most slurm concepts map directly to SkyPilot concepts.
+Most Slurm concepts map directly to SkyPilot concepts.
 
 .. list-table::
    :widths: 25 40 35
