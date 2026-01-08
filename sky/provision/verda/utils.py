@@ -4,7 +4,6 @@ import json
 import time
 from typing import List, Optional
 
-
 import requests
 
 from sky.adaptors.verda import get_verda_configuration
@@ -187,11 +186,9 @@ class HTTPClient:
         if not configured or not config:
             raise RuntimeError(f"Can't connect to Verda Cloud: {reason}")
         self._base_url = config.base_url
-        self._auth_service = AuthenticationService(
-            config.client_id,
-            config.client_secret,
-            config.base_url
-        )
+        self._auth_service = AuthenticationService(config.client_id,
+                                                   config.client_secret,
+                                                   config.base_url)
         self._auth_service.authenticate()
 
     def post(self,
@@ -298,10 +295,7 @@ class HTTPClient:
 
         return response
 
-    def patch(self,
-              url: str,
-              body: Optional[dict],
-              params: Optional[dict],
+    def patch(self, url: str, body: Optional[dict], params: Optional[dict],
               **kwargs) -> requests.Response:
         """Sends a PATCH request.
 
@@ -449,6 +443,7 @@ class InstanceStatus:
     def __init__(self):
         return
 
+
 class Instance:
     """Instance model class."""
 
@@ -457,7 +452,8 @@ class Instance:
         self.status = data['status']
         self.ip = data.get('ip')
         self.hostname = data['hostname']
-  
+
+
 class SSHKey:
     """An SSH key model class."""
 
@@ -471,11 +467,12 @@ class SSHKey:
         self.name = data.get('name')
         self.public_key = data.get('public_key')
 
+
 class VerdaClient:
     """A client for the Verda Cloud API."""
 
     def __init__(self) -> None:
-        self.http_client = None
+        self.http_client: Optional[HTTPClient] = None
 
     def instances_get(self) -> List[Instance]:
         """Get all instances."""
