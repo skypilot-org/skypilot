@@ -279,9 +279,9 @@ def map_all_volumes_usedby(
                                                   {}).get(pvc_name, []))
 
 
-def get_all_volumes_pvc_errors(
+def get_all_volumes_errors(
     configs: List[models.VolumeConfig],) -> Dict[str, Optional[str]]:
-    """Gets PVC error messages for all volumes.
+    """Gets error messages for all Kubernetes PVC volumes.
 
     Checks if PVCs are in Pending state and if so, checks for access mode
     mismatches between the PVC and the storage class's allowed access modes.
@@ -341,11 +341,13 @@ def get_all_volumes_pvc_errors(
                         volume_errors[volume_name] = (
                             'PVC is pending. This may be due to '
                             'insufficient storage resources or '
-                            'misconfiguration.')
+                            'misconfiguration. To diagnose, run: '
+                            f'kubectl describe pvc {pvc_name} -n {namespace}')
                 elif pvc_phase == 'Lost':
                     volume_errors[volume_name] = (
                         'PVC is in Lost state. The bound PersistentVolume '
-                        'has been deleted or is unavailable.')
+                        'has been deleted or is unavailable. To diagnose, '
+                        f'run: kubectl describe pvc {pvc_name} -n {namespace}')
                 else:
                     # Other phases (e.g., Terminating)
                     volume_errors[volume_name] = None
@@ -405,10 +407,13 @@ def _check_pvc_access_mode_error(context: Optional[str],
         sorted(
             set(mode for pv in available_pvs
                 for mode in (pv.spec.access_modes or []))))
+    pvc_name = pvc.metadata.name
+    namespace = pvc.metadata.namespace
     return (f'PVC access mode mismatch: PVC requests {pvc_access_mode}, but '
             f'available PersistentVolumes support: {pv_access_modes_str}. '
             f'Update the volume with the correct access_mode '
-            f'(e.g., ReadWriteMany) and recreate it.')
+            f'(e.g., ReadWriteMany) and recreate it. To diagnose, run: '
+            f'kubectl describe pvc {pvc_name} -n {namespace}')
 
 
 def _populate_config_from_pvc(config: models.VolumeConfig,
