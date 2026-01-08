@@ -2025,7 +2025,7 @@ def test_managed_job_labels_in_queue(generic_cloud: str):
 
         run: |
           echo "Hello from labeled job"
-          sleep 10
+          sleep 10000
         """)
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
