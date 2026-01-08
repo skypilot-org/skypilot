@@ -1293,3 +1293,233 @@ class TestVolumeCore:
         # update_volume_config should only be called for volume-1 (need_refresh=True)
         mock_update_config.assert_called_once_with('test-volume-1',
                                                    refreshed_handle1)
+
+    def test_volume_refresh_with_errors(self, monkeypatch):
+        """Test volume_refresh updates status to ERROR with errors."""
+        mock_handle = mock.MagicMock(cloud='kubernetes',
+                                     type='k8s-pvc',
+                                     region='my-context',
+                                     zone=None,
+                                     size='100Gi',
+                                     config={},
+                                     name_on_cloud='test-pvc',
+                                     spec=models.VolumeConfig)
+        mock_handle.name = 'test-volume'
+        mock_volumes = [{
+            'name': 'test-volume',
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock_handle,
+            'status': status_lib.VolumeStatus.READY,
+            'is_ephemeral': False,
+            'error_message': None,
+            'usedby_pods': [],
+            'usedby_clusters': [],
+        }]
+
+        mock_get_volumes = mock.MagicMock(return_value=mock_volumes)
+        monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
+
+        # Mock get_all_volumes_errors to return an error
+        error_msg = 'PVC access mode mismatch: PVC requests ReadWriteOnce'
+        mock_get_errors = mock.MagicMock(
+            return_value={'test-volume': error_msg})
+        monkeypatch.setattr(provision, 'get_all_volumes_errors',
+                            mock_get_errors)
+
+        mock_get_all_usedby = mock.MagicMock(return_value=({}, {}, set()))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock_get_all_usedby)
+
+        mock_map_all_usedby = mock.MagicMock(return_value=([], []))
+        monkeypatch.setattr(provision, 'map_all_volumes_usedby',
+                            mock_map_all_usedby)
+
+        mock_get_volume_by_name = mock.MagicMock(return_value=mock_volumes[0])
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock_get_volume_by_name)
+
+        mock_update_status = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'update_volume_status',
+                            mock_update_status)
+
+        mock_filelock = mock.MagicMock()
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock_filelock)
+
+        core.volume_refresh()
+
+        # Verify update_volume_status was called with ERROR status
+        mock_update_status.assert_called_once()
+        call_kwargs = mock_update_status.call_args[1]
+        assert call_kwargs['status'] == status_lib.VolumeStatus.ERROR
+        assert call_kwargs['error_message'] == error_msg
+
+    def test_volume_list_with_refresh(self, monkeypatch):
+        """Test volume_list with refresh=True calls volume_refresh first."""
+        mock_handle = mock.MagicMock(cloud='kubernetes',
+                                     type='k8s-pvc',
+                                     region='my-context',
+                                     zone=None,
+                                     size='100Gi',
+                                     config={},
+                                     name_on_cloud='test-pvc',
+                                     spec=models.VolumeConfig)
+        mock_handle.name = 'test-volume'
+        mock_volumes = [{
+            'name': 'test-volume',
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock_handle,
+            'status': status_lib.VolumeStatus.READY,
+            'is_ephemeral': False,
+            'error_message': None,
+            'usedby_pods': ['pod-1'],
+            'usedby_clusters': ['cluster-1'],
+        }]
+
+        mock_get_volumes = mock.MagicMock(return_value=mock_volumes)
+        monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
+
+        mock_get_all_users = mock.MagicMock(return_value=[])
+        monkeypatch.setattr(global_user_state, 'get_all_users',
+                            mock_get_all_users)
+
+        # Mock volume_refresh
+        mock_volume_refresh = mock.MagicMock()
+        monkeypatch.setattr(core, 'volume_refresh', mock_volume_refresh)
+
+        # Call with refresh=True
+        result = core.volume_list(refresh=True)
+
+        # Verify volume_refresh was called
+        mock_volume_refresh.assert_called_once()
+
+        # Verify result contains volume data from database
+        assert len(result) == 1
+        assert result[0]['name'] == 'test-volume'
+        assert result[0]['usedby_pods'] == ['pod-1']
+        assert result[0]['usedby_clusters'] == ['cluster-1']
+
+    def test_volume_list_without_refresh(self, monkeypatch):
+        """Test volume_list with refresh=False does not call volume_refresh."""
+        mock_handle = mock.MagicMock(cloud='kubernetes',
+                                     type='k8s-pvc',
+                                     region='my-context',
+                                     zone=None,
+                                     size='100Gi',
+                                     config={},
+                                     name_on_cloud='test-pvc',
+                                     spec=models.VolumeConfig)
+        mock_handle.name = 'test-volume'
+        mock_volumes = [{
+            'name': 'test-volume',
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock_handle,
+            'status': status_lib.VolumeStatus.READY,
+            'is_ephemeral': False,
+            'error_message': None,
+            'usedby_pods': [],
+            'usedby_clusters': [],
+        }]
+
+        mock_get_volumes = mock.MagicMock(return_value=mock_volumes)
+        monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
+
+        mock_get_all_users = mock.MagicMock(return_value=[])
+        monkeypatch.setattr(global_user_state, 'get_all_users',
+                            mock_get_all_users)
+
+        # Mock volume_refresh
+        mock_volume_refresh = mock.MagicMock()
+        monkeypatch.setattr(core, 'volume_refresh', mock_volume_refresh)
+
+        # Call with refresh=False (default)
+        result = core.volume_list(refresh=False)
+
+        # Verify volume_refresh was NOT called
+        mock_volume_refresh.assert_not_called()
+
+        # Verify result
+        assert len(result) == 1
+
+    def test_volume_list_returns_error_message_from_db(self, monkeypatch):
+        """Test volume_list returns error_message stored in database."""
+        mock_handle = mock.MagicMock(cloud='kubernetes',
+                                     type='k8s-pvc',
+                                     region='my-context',
+                                     zone=None,
+                                     size='100Gi',
+                                     config={},
+                                     name_on_cloud='test-pvc',
+                                     spec=models.VolumeConfig)
+        mock_handle.name = 'test-volume'
+        error_msg = 'PVC access mode mismatch'
+        mock_volumes = [{
+            'name': 'test-volume',
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock_handle,
+            'status': status_lib.VolumeStatus.ERROR,
+            'is_ephemeral': False,
+            'error_message': error_msg,
+            'usedby_pods': [],
+            'usedby_clusters': [],
+        }]
+
+        mock_get_volumes = mock.MagicMock(return_value=mock_volumes)
+        monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
+
+        mock_get_all_users = mock.MagicMock(return_value=[])
+        monkeypatch.setattr(global_user_state, 'get_all_users',
+                            mock_get_all_users)
+
+        result = core.volume_list()
+
+        assert len(result) == 1
+        assert result[0]['status'] == 'ERROR'
+        assert result[0]['error_message'] == error_msg
+
+
+class TestVolumeStatus:
+    """Tests for VolumeStatus enum."""
+
+    def test_volume_status_error_exists(self):
+        """Test that ERROR status exists."""
+        assert hasattr(status_lib.VolumeStatus, 'ERROR')
+        assert status_lib.VolumeStatus.ERROR.value == 'ERROR'
+
+    def test_volume_status_colored_str_error(self):
+        """Test that ERROR status is colored red."""
+        error_str = status_lib.VolumeStatus.ERROR.colored_str()
+        # Should contain ANSI escape codes for red
+        assert '\x1b[31m' in error_str  # Red color code
+        assert 'ERROR' in error_str
+        assert '\x1b[0m' in error_str  # Reset code
+
+    def test_volume_status_colored_str_ready_not_colored(self):
+        """Test that READY status is not colored."""
+        ready_str = status_lib.VolumeStatus.READY.colored_str()
+        # Should be just the value, no ANSI codes
+        assert ready_str == 'READY'
+        assert '\x1b[' not in ready_str
+
+    def test_volume_status_colored_str_in_use_not_colored(self):
+        """Test that IN_USE status is not colored."""
+        in_use_str = status_lib.VolumeStatus.IN_USE.colored_str()
+        # Should be just the value, no ANSI codes
+        assert in_use_str == 'IN_USE'
+        assert '\x1b[' not in in_use_str
