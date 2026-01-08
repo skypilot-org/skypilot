@@ -8,6 +8,14 @@ The dashboard UI is experiencing performance issues primarily due to:
 3. **Inefficient list rendering** without virtualization
 4. **Multiple independent polling intervals** that could thrash the cache
 
+## Completed (This PR)
+
+- ✅ Added React.memo to table row components in `jobs.jsx` (JobTableRow, ExpandedDetailsRow, TruncatedDetails)
+- ✅ Added React.memo to table row components in `clusters.jsx` (ClusterTableRow, Status2Actions)
+- ✅ Added useCallback for event handlers in memoized components
+- ✅ Created performance benchmark utility at `src/lib/performance-benchmark.js`
+- ✅ Added memo import to `users.jsx` for future use
+
 ## Current State Analysis
 
 ### Component Sizes and State Management
@@ -287,3 +295,131 @@ All changes are additive optimizations using standard React patterns. If issues 
 1. Revert the specific optimization causing issues
 2. Test in isolation
 3. Re-apply with fixes
+
+---
+
+## Future PR: Event-Based Notification (Backend)
+
+### Problem Statement
+
+The `/api/get` endpoint uses a 100ms polling loop to wait for request completion:
+
+```python
+# sky/server/server.py:1605-1619
+while True:
+    req_status = await requests_lib.get_request_status_async(request_id)
+    if req_status.status > requests_lib.RequestStatus.RUNNING:
+        break
+    await asyncio.sleep(0.1)  # 100ms polling - THE BOTTLENECK
+```
+
+**Impact:**
+- Minimum 100ms latency per API call
+- Unnecessary database queries while waiting
+- CPU overhead from tight polling loop
+
+### Proposed Solution: asyncio.Event-Based Notification
+
+Replace polling with event-based notification where the request executor notifies waiters when a request completes.
+
+#### Implementation Plan
+
+1. **Create an event registry** (`sky/server/request_events.py`):
+   ```python
+   import asyncio
+   from typing import Dict
+
+   class RequestEventRegistry:
+       """Registry for request completion events."""
+
+       def __init__(self):
+           self._events: Dict[str, asyncio.Event] = {}
+           self._lock = asyncio.Lock()
+
+       async def get_or_create_event(self, request_id: str) -> asyncio.Event:
+           """Get or create an event for a request."""
+           async with self._lock:
+               if request_id not in self._events:
+                   self._events[request_id] = asyncio.Event()
+               return self._events[request_id]
+
+       async def notify(self, request_id: str):
+           """Notify that a request has completed."""
+           async with self._lock:
+               if request_id in self._events:
+                   self._events[request_id].set()
+
+       async def cleanup(self, request_id: str):
+           """Clean up event after use."""
+           async with self._lock:
+               if request_id in self._events:
+                   del self._events[request_id]
+
+   # Global singleton
+   request_events = RequestEventRegistry()
+   ```
+
+2. **Modify the request executor** to notify on completion:
+   ```python
+   # In sky/server/requests/executor.py or wherever requests complete
+   async def complete_request(request_id: str, result):
+       # ... existing completion logic ...
+
+       # Notify waiters
+       from sky.server.request_events import request_events
+       await request_events.notify(request_id)
+   ```
+
+3. **Update `/api/get` endpoint** to use event-based waiting:
+   ```python
+   @app.get('/api/get')
+   async def api_get(request_id: str) -> payloads.RequestPayload:
+       request_id = await get_expanded_request_id(request_id)
+
+       # Check if already complete
+       req_status = await requests_lib.get_request_status_async(request_id)
+       if req_status is None:
+           raise fastapi.HTTPException(status_code=404, ...)
+
+       # If still running, wait for event
+       if req_status.status <= requests_lib.RequestStatus.RUNNING:
+           event = await request_events.get_or_create_event(request_id)
+           try:
+               # Wait with timeout to prevent indefinite blocking
+               await asyncio.wait_for(event.wait(), timeout=300)  # 5 min max
+           except asyncio.TimeoutError:
+               raise fastapi.HTTPException(status_code=408, detail='Request timeout')
+           finally:
+               await request_events.cleanup(request_id)
+
+       # ... rest of existing logic ...
+   ```
+
+#### Key Considerations
+
+1. **Memory Management**: Events must be cleaned up after use to prevent memory leaks
+2. **Timeout Handling**: Add reasonable timeouts to prevent indefinite waiting
+3. **Race Conditions**: Handle case where request completes before event is created
+4. **Server Restart**: Consider persistence or fallback for events during restart
+5. **Testing**: Add unit tests for the event registry
+
+#### Files to Modify
+
+- `sky/server/request_events.py` (new file)
+- `sky/server/server.py` (update `/api/get` endpoint)
+- `sky/server/requests/executor.py` (add notification calls)
+
+#### Expected Impact
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Minimum latency | 100ms | ~1ms |
+| DB queries while waiting | 10/sec | 0 |
+| CPU overhead | Moderate | Minimal |
+
+#### Testing Plan
+
+1. Unit tests for RequestEventRegistry
+2. Integration tests for `/api/get` with various request states
+3. Load testing with concurrent requests
+4. Verify no memory leaks with long-running server
