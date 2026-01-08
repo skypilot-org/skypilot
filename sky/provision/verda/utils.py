@@ -117,10 +117,10 @@ class AuthenticationService:
         return auth_data
 
     def refresh(self) -> dict:
-        """Authenticate the client using the refresh token - refresh the access token.
+        """Authenticate the client using the refresh token.
 
-        updates the object's tokens, and:
-        returns an authentication data dictionary with the following schema:
+        updates the object's tokens and returns an authentication 
+        data dictionary with the following schema:
         {
             "access_token": token str,
             "refresh_token": token str,
@@ -178,7 +178,7 @@ class HTTPClient:
     """An http client, a wrapper for the requests library.
 
     For each request, it adds the authentication header with an access token.
-    If the access token is expired it refreshes it before calling the specified API endpoint.
+    If the access token has expired it is refreshed it before calling the API.
     Also checks the response status code and raises an exception if needed.
     """
 
@@ -207,9 +207,9 @@ class HTTPClient:
 
         :param url: relative url of the API endpoint
         :type url: str
-        :param json: A JSON serializable Python object to send in the body of the Request, defaults to None
+        :param json: Python object to send in the body of the Request
         :type json: dict, optional
-        :param params: Dictionary of querystring data to attach to the Request, defaults to None
+        :param params: Dictionary of querystring data to attach to the Request
         :type params: dict, optional
 
         :raises APIException: an api exception with message and error type code
@@ -244,9 +244,9 @@ class HTTPClient:
 
         :param url: relative url of the API endpoint
         :type url: str
-        :param json: A JSON serializable Python object to send in the body of the Request, defaults to None
+        :param json: Python object to send in the body of the Request
         :type json: dict, optional
-        :param params: Dictionary of querystring data to attach to the Request, defaults to None
+        :param params: Dictionary of querystring data to attach to the Request
         :type params: dict, optional
 
         :raises APIException: an api exception with message and error type code
@@ -280,7 +280,7 @@ class HTTPClient:
 
         :param url: relative url of the API endpoint
         :type url: str
-        :param params: Dictionary of querystring data to attach to the Request, defaults to None
+        :param params: Dictionary of querystring data to attach to the Request
         :type params: dict, optional
 
         :raises APIException: an api exception with message and error type code
@@ -311,9 +311,9 @@ class HTTPClient:
 
         :param url: relative url of the API endpoint
         :type url: str
-        :param json: A JSON serializable Python object to send in the body of the Request, defaults to None
+        :param json: Python object to send in the body of the Request
         :type json: dict, optional
-        :param params: Dictionary of querystring data to attach to the Request, defaults to None
+        :param params: Dictionary of querystring data to attach to the Request
         :type params: dict, optional
 
         :raises APIException: an api exception with message and error type code
@@ -348,9 +348,9 @@ class HTTPClient:
 
         :param url: relative url of the API endpoint
         :type url: str
-        :param json: A JSON serializable Python object to send in the body of the Request, defaults to None
+        :param json: Python object to send in the body of the Request
         :type json: dict, optional
-        :param params: Dictionary of querystring data to attach to the Request, defaults to None
+        :param params: Dictionary of querystring data to attach to the Request
         :type params: dict, optional
 
         :raises APIException: an api exception with message and error type code
@@ -375,7 +375,8 @@ class HTTPClient:
     def _refresh_token_if_expired(self) -> None:
         """Refreshes the access token if it expired.
 
-        Uses the refresh token to refresh, and if the refresh token is also expired, uses the client credentials.
+        Uses the refresh token to refresh, and if the refresh token is also 
+        expired, uses the client credentials to authenticate again.
 
         :raises APIException: an api exception with message and error type code
         """
@@ -496,6 +497,14 @@ class VerdaClient:
             self.http_client = HTTPClient()
         response = self.http_client.get('/ssh-keys').json()
         return [SSHKey(o) for o in response]
+
+    def ssh_keys_create(self, name: str, key: str) -> SSHKey:
+        """Create a new ssh key."""
+        if self.http_client is None:
+            self.http_client = HTTPClient()
+        payload = {'name': name, 'key': key}
+        id = self.http_client.post('/ssh-keys', body=payload).text
+        return SSHKey({'id': id, 'name': name, 'key': key})
 
     def instance_create(self, payload: dict) -> Instance:
         if self.http_client is None:

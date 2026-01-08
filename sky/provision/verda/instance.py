@@ -3,7 +3,6 @@
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-
 from sky import exceptions
 from sky import sky_logging
 from sky.provision import common
@@ -28,6 +27,7 @@ SSH_CONN_MAX_RETRIES = 6
 SSH_CONN_RETRY_INTERVAL_SECONDS = 10
 
 verda = VerdaClient()
+
 
 def _filter_instances(
         cluster_name_on_cloud: str,

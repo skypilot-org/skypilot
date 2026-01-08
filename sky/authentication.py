@@ -43,6 +43,7 @@ from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.lambda_cloud import lambda_utils
 from sky.provision.primeintellect import utils as primeintellect_utils
+from sky.provision.verda.utils import VerdaClient
 from sky.utils import auth_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -361,11 +362,12 @@ def setup_verda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         if not verda_config[0]:
             raise Exception(verda_config[1])
 
-        current_key_list = verda_get_ssh_keys(verda_config[2])  # pylint: disable=assignment-from-no-return
+        verda_client = VerdaClient()
+        current_key_list = verda_client.ssh_keys_get()
         # Only add an ssh key if it hasn't already been added
         if not any(ssh_key.public_key == public_key
                    for ssh_key in current_key_list):
-            verda_ssh_keys_create(name='skypilot-key', key=public_key)
+            verda_client.ssh_keys_create(name='skypilot-key', key=public_key)
 
     config['auth']['ssh_public_key'] = public_key_path
     return configure_ssh_info(config)
