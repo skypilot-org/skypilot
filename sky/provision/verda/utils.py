@@ -33,6 +33,7 @@ class APIException(Exception):
     """
 
     def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
         """API Exception.
 
         :param code: error code
@@ -118,7 +119,7 @@ class AuthenticationService:
     def refresh(self) -> dict:
         """Authenticate the client using the refresh token.
 
-        updates the object's tokens and returns an authentication 
+        updates the object's tokens and returns an authentication
         data dictionary with the following schema:
         {
             "access_token": token str,
@@ -158,10 +159,17 @@ class AuthenticationService:
 
         return auth_data
 
-    def _generate_headers(self):
-        # get the first 10 chars of the client id
+    def generate_headers(self):
+        """Generate the headers for the API request.
+
+        :return: headers for the API request
+        :rtype: dict
+        """
         client_id_truncated = self._client_id[:10]
-        headers = {'User-Agent': 'datacrunch-python-' + client_id_truncated}
+        headers = {
+            'User-Agent': f'datacrunch-python-{client_id_truncated}',
+            'Authorization': f'Bearer {self._access_token}'
+        }
         return headers
 
     def is_expired(self) -> bool:
@@ -184,7 +192,7 @@ class HTTPClient:
     def __init__(self) -> None:
         configured, reason, config = get_verda_configuration()
         if not configured or not config:
-            raise RuntimeError(f"Can't connect to Verda Cloud: {reason}")
+            raise RuntimeError(f'Can\'t connect to Verda Cloud: {reason}')
         self._base_url = config.base_url
         self._auth_service = AuthenticationService(config.client_id,
                                                    config.client_secret,
@@ -369,7 +377,7 @@ class HTTPClient:
     def _refresh_token_if_expired(self) -> None:
         """Refreshes the access token if it expired.
 
-        Uses the refresh token to refresh, and if the refresh token is also 
+        Uses the refresh token to refresh, and if the refresh token is also
         expired, uses the client credentials to authenticate again.
 
         :raises APIException: an api exception with message and error type code
@@ -387,30 +395,11 @@ class HTTPClient:
         :return: dict with request headers
         :rtype: dict
         """
-        headers = {
-            'Authorization': self._generate_bearer_header(),
-            'User-Agent': self._generate_user_agent(),
+        headers = self._auth_service.generate_headers()
+        headers.update({
             'Content-Type': 'application/json',
-        }
+        })
         return headers
-
-    def _generate_bearer_header(self) -> str:
-        """Generate the authorization header Bearer string.
-
-        :return: Authorization header Bearer string
-        :rtype: str
-        """
-        return f'Bearer {self._auth_service._access_token}'
-
-    def _generate_user_agent(self) -> str:
-        """Generate the user agent string.
-
-        :return: user agent string
-        :rtype: str
-        """
-        # get the first 10 chars of the client id
-        client_id_truncated = self._auth_service._client_id[:10]
-        return f'skypilot-python-{client_id_truncated}'
 
     def _add_base_url(self, url: str) -> str:
         """Adds the base url to the relative url.
@@ -500,8 +489,8 @@ class VerdaClient:
         if self.http_client is None:
             self.http_client = HTTPClient()
         payload = {'name': name, 'key': key}
-        id = self.http_client.post('/ssh-keys', body=payload).text
-        return SSHKey({'id': id, 'name': name, 'key': key})
+        key_id = self.http_client.post('/ssh-keys', body=payload).text
+        return SSHKey({'id': key_id, 'name': name, 'key': key})
 
     def instance_create(self, payload: dict) -> Instance:
         if self.http_client is None:
@@ -510,9 +499,9 @@ class VerdaClient:
         instance = self.instance_get(instance_id)
         return instance
 
-    def instance_action(self, id, action) -> None:
+    def instance_action(self, instance_id: str, action: str) -> None:
         if self.http_client is None:
             self.http_client = HTTPClient()
-        payload = {'id': [id], 'action': action}
+        payload = {'id': [instance_id], 'action': action}
         self.http_client.put('/instances', body=payload)
         return None
