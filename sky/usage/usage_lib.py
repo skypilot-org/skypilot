@@ -170,9 +170,22 @@ class UsageMessageToReport(MessageToReport):
         self.stacktrace: Optional[str] = None  # entrypoint_context
         self.skypilot_config: Optional[Dict[str, Any]] = None
 
-        # Whether API server is deployed remotely.
-        self.using_remote_api_server: bool = (
-            common_utils.get_using_remote_api_server())
+        # Whether API server is deployed remotely (computed lazily to avoid
+        # circular import at module load time).
+        self._using_remote_api_server: Optional[bool] = None
+
+    @property
+    def using_remote_api_server(self) -> bool:
+        """Lazy property to check if API server is deployed remotely."""
+        if self._using_remote_api_server is None:
+            self._using_remote_api_server = (
+                common_utils.get_using_remote_api_server())
+        return self._using_remote_api_server
+
+    @using_remote_api_server.setter
+    def using_remote_api_server(self, value: bool) -> None:
+        """Setter for using_remote_api_server."""
+        self._using_remote_api_server = value
 
     def update_entrypoint(self, msg: str):
         if self.client_entrypoint is None:

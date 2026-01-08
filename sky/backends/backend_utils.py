@@ -20,9 +20,6 @@ from typing import (Any, Callable, Dict, Iterator, List, Optional, Sequence,
                     Set, Tuple, TypeVar, Union)
 import uuid
 
-import aiohttp
-from aiohttp import ClientTimeout
-from aiohttp import TCPConnector
 import colorama
 from packaging import version
 from typing_extensions import Literal
@@ -73,6 +70,9 @@ from sky.utils.plugin_extensions import ExternalFailureSource
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
+    import aiohttp
+    from aiohttp import ClientTimeout
+    from aiohttp import TCPConnector
     import grpc
     import requests
     from requests import adapters
@@ -85,6 +85,7 @@ if typing.TYPE_CHECKING:
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
 else:
+    aiohttp = adaptors_common.LazyImport('aiohttp')
     yaml = adaptors_common.LazyImport('yaml')
     requests = adaptors_common.LazyImport('requests')
     rich_progress = adaptors_common.LazyImport('rich.progress')
@@ -1880,8 +1881,8 @@ async def async_check_network_connection():
     Uses aiohttp for async HTTP requests.
     """
     # Create a session with retry logic
-    timeout = ClientTimeout(total=15)
-    connector = TCPConnector(limit=1)  # Limit to 1 connection at a time
+    timeout = aiohttp.ClientTimeout(total=15)
+    connector = aiohttp.TCPConnector(limit=1)  # Limit to 1 connection at a time
 
     async with aiohttp.ClientSession(timeout=timeout,
                                      connector=connector) as session:

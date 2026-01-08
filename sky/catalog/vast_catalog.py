@@ -3,18 +3,21 @@
 This module loads the service catalog file and can be used to
 query instance types and pricing information for Vast.ai.
 """
+from __future__ import annotations
 
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-import pandas as pd
-
+from sky.adaptors import common as adaptors_common
 from sky.catalog import common
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import pandas as pd
     from sky.clouds import cloud
+else:
+    pd = adaptors_common.LazyImport('pandas')
 
 _df = common.read_catalog('vast/vms.csv')
 
