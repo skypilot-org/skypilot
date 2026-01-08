@@ -51,16 +51,37 @@ export function VersionDisplay() {
     getVersionAndPlugins();
   }, []);
 
-  // Only show light bulb icon if there's an upgrade available
-  if (!latestVersion) return null;
+  if (!version) return null;
 
-  // Create tooltip content with proper line breaks
+  // Create tooltip content
   const tooltipContent = (
-    <div>
-      <div className="font-semibold">Update Available</div>
-      <br />
-      <div>Current version: {version}</div>
-      <div>New version available: {latestVersion}</div>
+    <div className="flex flex-col gap-0.5">
+      {latestVersion && (
+        <div className="mb-1">
+          <div className="font-bold">Update Available</div>
+          <div>Current version: {version}</div>
+          <div>New version available: {latestVersion}</div>
+        </div>
+      )}
+      {commit && (
+        <div>
+          {plugins.length > 0 ? 'Core commit' : 'Commit'}: {commit}
+        </div>
+      )}
+      {plugins.map((plugin, index) => {
+        const pluginName = plugin.name || 'Unknown Plugin';
+        const parts = [];
+        if (plugin.version) parts.push(plugin.version);
+        if (plugin.commit) parts.push(plugin.commit);
+        return parts.length > 0 ? (
+          <div key={index}>
+            {pluginName}: {parts.join(' - ')}
+          </div>
+        ) : null;
+      })}
+      {!commit && plugins.length === 0 && !latestVersion && (
+        <div>Version information not available</div>
+      )}
     </div>
   );
 
@@ -69,8 +90,16 @@ export function VersionDisplay() {
       content={tooltipContent}
       className="text-sm text-muted-foreground"
     >
-      <div className="inline-flex items-center justify-center p-2 rounded-full transition-colors duration-150 cursor-help text-gray-600 hover:bg-gray-100 hover:text-blue-600">
-        <ArrowUpCircle className="w-5 h-5" />
+      <div className="inline-flex items-center justify-center transition-colors duration-150 cursor-help">
+        {latestVersion ? (
+          <div className="p-2 rounded-full text-gray-600 hover:bg-gray-100 hover:text-blue-600">
+            <ArrowUpCircle className="w-5 h-5" />
+          </div>
+        ) : (
+          <div className="text-sm text-gray-500 border-b border-dotted border-gray-400 hover:text-blue-600 hover:border-blue-600">
+            Version: {version}
+          </div>
+        )}
       </div>
     </NonCapitalizedTooltip>
   );
