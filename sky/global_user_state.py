@@ -153,6 +153,7 @@ volume_table = sqlalchemy.Table(
     sqlalchemy.Column('last_use', sqlalchemy.Text),
     sqlalchemy.Column('status', sqlalchemy.Text),
     sqlalchemy.Column('is_ephemeral', sqlalchemy.Integer, server_default='0'),
+    sqlalchemy.Column('error_message', sqlalchemy.Text, server_default=None),
 )
 
 # Table for Cluster History
@@ -2396,6 +2397,7 @@ def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
             'last_use': row.last_use,
             'status': status_lib.VolumeStatus[row.status],
             'is_ephemeral': bool(row.is_ephemeral),
+            'error_message': row.error_message,
         })
     return records
 
@@ -2416,6 +2418,7 @@ def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
             'last_attached_at': row.last_attached_at,
             'last_use': row.last_use,
             'status': status_lib.VolumeStatus[row.status],
+            'error_message': row.error_message,
         }
     return None
 
@@ -2491,12 +2494,17 @@ def update_volume(name: str, last_attached_at: int,
 
 @_init_db
 @metrics_lib.time_me
-def update_volume_status(name: str, status: status_lib.VolumeStatus) -> None:
+def update_volume_status(name: str,
+                         status: status_lib.VolumeStatus,
+                         error_message: Optional[str] = None) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(volume_table).filter_by(name=name).update({
+        update_dict: Dict[str, Any] = {
             volume_table.c.status: status.value,
-        })
+        }
+        # Always update error_message (None clears it)
+        update_dict[volume_table.c.error_message] = error_message
+        session.query(volume_table).filter_by(name=name).update(update_dict)
         session.commit()
 
 
