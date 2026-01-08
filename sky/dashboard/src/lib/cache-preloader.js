@@ -107,6 +107,25 @@ class CachePreloader {
    */
   async _loadPageData(page, force = false) {
     const requiredFunctions = DASHBOARD_CACHE_FUNCTIONS.pages[page];
+
+    // Quick check: if all base functions have fresh cache, skip preloading entirely
+    // This makes tab switching instant when returning to recently visited pages
+    if (!force) {
+      const baseFunctions = requiredFunctions.filter(
+        (fn) => DASHBOARD_CACHE_FUNCTIONS.base[fn]
+      );
+      const allFresh = baseFunctions.every((functionName) => {
+        const config = DASHBOARD_CACHE_FUNCTIONS.base[functionName];
+        return config && dashboardCache.isFresh(config.fn, config.args);
+      });
+      if (allFresh && baseFunctions.length > 0) {
+        console.log(
+          `[CachePreloader] All data fresh for ${page}, skipping preload`
+        );
+        return;
+      }
+    }
+
     const promises = [];
 
     for (const functionName of requiredFunctions) {

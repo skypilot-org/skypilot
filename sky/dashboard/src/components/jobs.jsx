@@ -3,7 +3,14 @@
  * @see https://v0.dev/t/X5tLGA3WPNU
  * Documentation: https://v0.dev/docs#integrating-generated-code-into-your-nextjs-app
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  memo,
+  useCallback,
+  useMemo,
+} from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { CircularProgress } from '@mui/material';
@@ -1883,7 +1890,11 @@ export function ClusterJobs({
   );
 }
 
-function ExpandedDetailsRow({ text, colSpan, innerRef }) {
+const ExpandedDetailsRow = memo(function ExpandedDetailsRow({
+  text,
+  colSpan,
+  innerRef,
+}) {
   return (
     <TableRow className="expanded-details">
       <TableCell colSpan={colSpan}>
@@ -1906,9 +1917,14 @@ function ExpandedDetailsRow({ text, colSpan, innerRef }) {
       </TableCell>
     </TableRow>
   );
-}
+});
 
-function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
+const TruncatedDetails = memo(function TruncatedDetails({
+  text,
+  rowId,
+  expandedRowId,
+  setExpandedRowId,
+}) {
   const safeText = text || '';
   const isTruncated = safeText.length > 50;
   const isExpanded = expandedRowId === rowId;
@@ -1916,11 +1932,14 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
   const displayText = isTruncated ? `${safeText.substring(0, 50)}` : safeText;
   const buttonRef = useRef(null);
 
-  const handleClick = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setExpandedRowId(isExpanded ? null : rowId);
-  };
+  const handleClick = useCallback(
+    (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setExpandedRowId(isExpanded ? null : rowId);
+    },
+    [isExpanded, rowId, setExpandedRowId]
+  );
 
   return (
     <div className="truncated-details relative max-w-full flex items-center">
@@ -1938,7 +1957,7 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
       )}
     </div>
   );
-}
+});
 
 function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
   const [data, setData] = useState([]);
