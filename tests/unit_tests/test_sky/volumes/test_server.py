@@ -41,13 +41,17 @@ class TestVolumeServer:
             assert response.status_code == 200
 
             # Verify executor was called correctly
-            mock_schedule_async.assert_called_once_with(
-                request_id='test-request-id',
-                request_name='volume_list',
-                request_body=payloads.RequestBody(),
-                func=server.core.volume_list,
-                schedule_type=requests_lib.ScheduleType.SHORT,
-            )
+            mock_schedule_async.assert_called_once()
+            call_args = mock_schedule_async.call_args
+            assert call_args[1]['request_id'] == 'test-request-id'
+            assert call_args[1]['request_name'] == 'volume_list'
+            assert call_args[1]['func'] == server.core.volume_list
+            assert call_args[1][
+                'schedule_type'] == requests_lib.ScheduleType.SHORT
+            # Verify VolumeListBody with refresh=False (default)
+            request_body = call_args[1]['request_body']
+            assert isinstance(request_body, payloads.VolumeListBody)
+            assert request_body.refresh is False
 
     def test_volume_delete_success(self, monkeypatch):
         """Test volume_delete endpoint with successful request."""
