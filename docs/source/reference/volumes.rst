@@ -13,6 +13,34 @@ Benefits of using volumes:
 
 SkyPilot supports creating and managing volumes directly through the ``sky`` CLI and the web dashboard.
 
+.. _volumes-choosing:
+
+Choosing the Right Volume Type
+------------------------------
+
+Use this guide to pick the best volume type for your use case:
+
+.. list-table::
+   :widths: 40 60
+   :header-rows: 1
+
+   * - Use Case
+     - Recommended Approach
+   * - **Shared datasets across multiple clusters/jobs**
+     - Use :ref:`persistent volumes <volumes-on-kubernetes>` with ``ReadWriteMany`` access mode and a distributed filesystem (JuiceFS, NFS, etc.)
+   * - **Long-term storage for checkpoints/results**
+     - Use :ref:`persistent volumes <volumes-on-kubernetes>` for data that should outlive your clusters
+   * - **Temporary cache or scratch space**
+     - Use :ref:`ephemeral volumes <ephemeral-volumes>` that are automatically cleaned up with the cluster
+   * - **Quick experimentation without manual volume management**
+     - Use :ref:`ephemeral volumes <ephemeral-volumes>` for zero-hassle setup
+   * - **Multi-node training with shared data**
+     - Use :ref:`persistent volumes <volumes-on-kubernetes>` with ``ReadWriteMany`` access mode (required for multi-node)
+
+.. tip::
+
+   **Start with ephemeral volumes** if you're experimenting or don't need data persistence. They require no setup and are automatically cleaned up. **Graduate to persistent volumes** when you need to share data across clusters or preserve data beyond cluster lifetime.
+
 Supported volume types:
 
 - Kubernetes: `Persistent Volume Claims (PVCs) <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims/>`_
@@ -42,6 +70,9 @@ SkyPilot supports two types of volumes on Kubernetes:
    * - Feature
      - Persistent Volumes
      - Ephemeral Volumes
+   * - **Recommended for**
+     - Datasets, checkpoints, shared data across jobs
+     - Caches, scratch space, quick experiments
    * - Lifecycle
      - Independent (manually managed)
      - Bound to cluster
@@ -54,9 +85,9 @@ SkyPilot supports two types of volumes on Kubernetes:
    * - Sharing across clusters
      - Yes
      - No (cluster-specific)
-   * - Use case
-     - Long-term data, shared datasets
-     - Temporary storage, caches
+   * - Setup effort
+     - Create volume first, then reference in task
+     - Zero setup—just specify size in task YAML
 
 In addition to the above, you can also mount PVCs, NFS or hostPath with Kubernetes configs. See :ref:`advanced-mount-pvc-with-kubernetes-configs` and :ref:`advanced-mount-nfs-hostpath-with-kubernetes-configs` for details.
 
@@ -326,6 +357,8 @@ This section demonstrates how to configure and use distributed filesystems as Sk
           # Launch the cluster with the Nebius volume
           $ sky launch -c nebius-cluster task.yaml
 
+
+.. _ephemeral-volumes:
 
 Ephemeral volumes
 ~~~~~~~~~~~~~~~~~
