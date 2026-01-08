@@ -42,6 +42,7 @@ def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
         return None, 0
     return match.group('type'), int(match.group('count'))
 
+
 # SSH host key filename for sshd.
 SLURM_SSHD_HOST_KEY_FILENAME = 'skypilot_host_key'
 
