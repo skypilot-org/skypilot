@@ -202,7 +202,7 @@ def check_and_print_upgrade_hint(api_server_info: ApiServerInfo,
         hint_lines.append(
             f'{ux_utils.INDENT_SYMBOL}Note: This is a remote API server. '
             f'Please upgrade SkyPilot on the server side via your deployment '
-            f'method, then restart the API server.'
+            f'method.'
             f'{colorama.Style.RESET_ALL}')
 
     click.echo('\n' + '\n'.join(hint_lines) + '\n', err=True)
