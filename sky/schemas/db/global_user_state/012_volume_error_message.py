@@ -31,4 +31,5 @@ def upgrade():
 
 def downgrade():
     """Remove error_message column from volumes table."""
-    pass
+    with op.get_context().autocommit_block():
+        op.drop_column('volumes', 'error_message')

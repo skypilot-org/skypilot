@@ -40,4 +40,6 @@ def upgrade():
 
 def downgrade():
     """Remove usedby columns from volumes table."""
-    pass
+    with op.get_context().autocommit_block():
+        op.drop_column('volumes', 'usedby_pods')
+        op.drop_column('volumes', 'usedby_clusters')
