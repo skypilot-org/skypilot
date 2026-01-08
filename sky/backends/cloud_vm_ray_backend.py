@@ -916,8 +916,10 @@ class RetryingVmProvisioner(object):
         elif to_provision.region is not None and to_provision.cloud is not None:
             # For public clouds, provision.region is always set.
             if clouds.SSH().is_same_cloud(to_provision.cloud):
+                ssh_node_pool_name = common_utils.removeprefix(
+                    to_provision.region, 'ssh-')
                 message += (
-                    f'in SSH Node Pool ({to_provision.region.lstrip("ssh-")}) '
+                    f'in SSH Node Pool ({ssh_node_pool_name}) '
                     f'for {requested_resources}. The SSH Node Pool may not '
                     'have enough resources.')
             elif clouds.Kubernetes().is_same_cloud(to_provision.cloud):
@@ -1177,7 +1179,9 @@ class RetryingVmProvisioner(object):
                     if isinstance(to_provision.cloud, clouds.Kubernetes):
                         suffix = '.'
                         if region.name.startswith('ssh-'):
-                            suffix = f' ({region.name.lstrip("ssh-")})'
+                            ssh_node_pool_name = common_utils.removeprefix(
+                                region.name, 'ssh-')
+                            suffix = f' ({ssh_node_pool_name})'
                         logger.info(
                             ux_utils.starting_message(
                                 f'Launching{controller_str} on '

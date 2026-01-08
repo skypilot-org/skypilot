@@ -69,6 +69,11 @@ def encode_status(
             response_cluster['last_use'] = ''
         if 'status_updated_at' not in response_cluster:
             response_cluster['status_updated_at'] = 0
+        # Ensure labels is always included, defaulting to empty dict if None
+        # This is needed because exclude_none=True would exclude None labels
+        if 'labels' not in response_cluster or response_cluster.get(
+                'labels') is None:
+            response_cluster['labels'] = {}
         response_cluster['status'] = cluster['status'].value
         handle = serialize_utils.prepare_handle_for_backwards_compatibility(
             cluster['handle'])

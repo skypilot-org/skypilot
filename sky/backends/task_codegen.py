@@ -147,6 +147,7 @@ class TaskCodeGen:
         if [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] && \
            [ -d {constants.RCLONE_MOUNT_CACHED_LOG_DIR} ] && \
            [ "$(ls -A {constants.RCLONE_MOUNT_CACHED_LOG_DIR})" ]; then
+            FLUSH_START_TIME=$(date +%s)
             flushed=0
             # extra second on top of --vfs-cache-poll-interval to
             # avoid race condition between rclone log line creation and this check.
@@ -159,13 +160,32 @@ class TaskCodeGen:
                     exitcode=0
                     tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?
                     if [ $exitcode -ne 0 ]; then
-                        echo "skypilot: cached mount is still uploading to remote"
+                        ELAPSED=$(($(date +%s) - FLUSH_START_TIME))
+                        # Extract the last vfs cache status line to show what we're waiting for
+                        CACHE_STATUS=$(tac $file | grep "vfs cache: cleaned:" -m 1 | sed 's/.*vfs cache: cleaned: //' 2>/dev/null)
+                        # Extract currently uploading files from recent log lines (show up to 2 files)
+                        UPLOADING_FILES=$(tac $file | head -30 | grep -E "queuing for upload" | head -2 | sed 's/.*INFO  : //' | sed 's/: vfs cache:.*//' | tr '\\n' ',' | sed 's/,$//' | sed 's/,/, /g' 2>/dev/null)
+                        # Build status message with available info
+                        if [ -n "$CACHE_STATUS" ] && [ -n "$UPLOADING_FILES" ]; then
+                            echo "skypilot: cached mount is still uploading (elapsed: ${{ELAPSED}}s) [${{CACHE_STATUS}}] uploading: ${{UPLOADING_FILES}}"
+                        elif [ -n "$CACHE_STATUS" ]; then
+                            echo "skypilot: cached mount is still uploading (elapsed: ${{ELAPSED}}s) [${{CACHE_STATUS}}]"
+                        else
+                            # Fallback: show last non-empty line from log
+                            LAST_LINE=$(tac $file | grep -v "^$" | head -1 | sed 's/.*INFO  : //' | sed 's/.*ERROR : //' | sed 's/.*NOTICE: //' 2>/dev/null)
+                            if [ -n "$LAST_LINE" ]; then
+                                echo "skypilot: cached mount is still uploading (elapsed: ${{ELAPSED}}s) ${{LAST_LINE}}"
+                            else
+                                echo "skypilot: cached mount is still uploading (elapsed: ${{ELAPSED}}s)"
+                            fi
+                        fi
                         flushed=0
                         break
                     fi
                 done
             done
-            echo "skypilot: cached mount uploaded complete"
+            TOTAL_FLUSH_TIME=$(($(date +%s) - FLUSH_START_TIME))
+            echo "skypilot: cached mount upload complete (took ${{TOTAL_FLUSH_TIME}}s)"
         fi""")
 
     def add_prologue(self, job_id: int) -> None:

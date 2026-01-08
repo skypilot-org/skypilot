@@ -3,12 +3,12 @@
 Advanced Configuration
 ======================
 
-You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file.
+You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file (for :ref:`local API server <sky-api-server-local>`) or on your SkyPilot API server dashboard (for :ref:`remote API server <sky-api-server-remote>`) at ``http://<api-server-url>/dashboard/config``.
 
 Configuration sources and overrides
 -----------------------------------
 
-SkyPilot allows you to set configuration globally in ``~/.sky/config.yaml``, in your project, or for specific jobs, providing flexibility in how you manage your configurations.
+SkyPilot allows you to set configuration globally in ``~/.sky/config.yaml`` (for :ref:`local API server <sky-api-server-local>`) or on the API server dashboard (for :ref:`remote API server <sky-api-server-remote>`) at ``http://<api-server-url>/dashboard/config``, in your project, or for specific jobs, providing flexibility in how you manage your configurations.
 
 For example, you can have a :ref:`user configuration<config-client-user-config>` to apply globally to all projects, a :ref:`project configuration<config-client-project-config>` storing default values for all jobs in a project, and :ref:`Task YAML overrides<config-client-cli-flag>` for specific jobs.
 
@@ -206,6 +206,10 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`store <config-yaml-logs-store>`: gcp
     gcp:
       project_id: my-project-id
+
+  :ref:`data <config-yaml-data>`:
+    :ref:`mount_cached <config-yaml-data-mount-cached>`:
+      :ref:`sequential_upload <config-yaml-data-mount-cached-sequential-upload>`: false
 
   :ref:`daemons <config-yaml-daemons>`:
     skypilot-status-refresh-daemon:
@@ -1794,6 +1798,46 @@ The type of external logging storage to use. Each logging storage might have its
 
   logs:
     store: gcp
+
+.. _config-yaml-data:
+
+``data``
+~~~~~~~~
+
+Data storage configuration (optional).
+
+.. code-block:: yaml
+
+  data:
+    mount_cached:
+      sequential_upload: false
+
+.. _config-yaml-data-mount-cached:
+
+``data.mount_cached``
+~~~~~~~~~~~~~~~~~~~~~
+
+Configuration for MOUNT_CACHED storage mode.
+
+.. _config-yaml-data-mount-cached-sequential-upload:
+
+``data.mount_cached.sequential_upload``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether to upload files sequentially to the remote storage (default: ``false``).
+
+When set to ``true``, files written to the mounted directory are uploaded one at a time
+in the order they were written. This is useful when your framework relies on the order
+of files being uploaded (e.g., checkpoint files that need to appear in sequence).
+
+When set to ``false`` (default), files are uploaded in parallel for better performance.
+The upload order is not guaranteed, but throughput is significantly higher.
+
+.. code-block:: yaml
+
+  data:
+    mount_cached:
+      sequential_upload: true
 
 .. _config-yaml-daemons:
 

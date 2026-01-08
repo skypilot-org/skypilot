@@ -27,6 +27,7 @@ import {
   formatMemory,
   calculateAggregatedResource,
 } from '@/utils/resourceUtils';
+import { buildContextStatsKey } from '@/utils/infraUtils';
 import {
   getWorkspaceInfrastructure,
   getCloudInfrastructure,
@@ -157,6 +158,7 @@ export function InfrastructureSection({
   actionButton = null, // Optional action button for the header
   contextWorkspaceMap = {}, // Mapping of contexts to workspaces
   contextErrors = {}, // Mapping of contexts to error messages
+  gpuMetricsRefreshTrigger = 0, // Counter for forcing iframe refresh
 }) {
   // Add defensive check for contexts
   const safeContexts = contexts || [];
@@ -239,10 +241,10 @@ export function InfrastructureSection({
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
                         CPU
                       </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/6">
                         Memory
                       </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/4">
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/6">
                         GPU Types
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
@@ -262,9 +264,10 @@ export function InfrastructureSection({
                       );
 
                       // Get cluster and job counts for this context
-                      const contextStatsKey = isSSH
-                        ? `ssh/${context.replace(/^ssh-/, '')}` // Remove ssh- prefix and add ssh/ prefix
-                        : `kubernetes/${context}`; // Add kubernetes/ prefix
+                      const contextStatsKey = buildContextStatsKey(context, {
+                        isSSH,
+                        isSlurm,
+                      });
                       const stats = contextStats[contextStatsKey] || {
                         clusters: 0,
                         jobs: 0,
@@ -526,7 +529,12 @@ export function InfrastructureSection({
 }
 
 // Reusable component for context details
-export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
+export function ContextDetails({
+  contextName,
+  gpusInContext,
+  nodesInContext,
+  gpuMetricsRefreshTrigger = 0,
+}) {
   // Determine if this is an SSH context
   const isSSHContext = contextName.startsWith('ssh-');
   const displayTitle = isSSHContext ? 'Node Pool' : 'Context';
@@ -904,7 +912,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         frameBorder="0"
                         title="GPU Utilization"
                         className="rounded"
-                        key={`gpu-util-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                        key={`gpu-util-${selectedHosts}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger || 0}`}
                       />
                     </div>
                   </div>
@@ -919,7 +927,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         frameBorder="0"
                         title="GPU Memory"
                         className="rounded"
-                        key={`gpu-memory-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                        key={`gpu-memory-${selectedHosts}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger || 0}`}
                       />
                     </div>
                   </div>
@@ -934,7 +942,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         frameBorder="0"
                         title="GPU Power Consumption"
                         className="rounded"
-                        key={`gpu-power-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                        key={`gpu-power-${selectedHosts}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger || 0}`}
                       />
                     </div>
                   </div>
@@ -949,7 +957,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         frameBorder="0"
                         title="GPU Temperature"
                         className="rounded"
-                        key={`gpu-temp-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                        key={`gpu-temp-${selectedHosts}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger || 0}`}
                       />
                     </div>
                   </div>
@@ -964,7 +972,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         frameBorder="0"
                         title="CPU Utilization"
                         className="rounded"
-                        key={`cpu-util-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                        key={`cpu-util-${selectedHosts}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger || 0}`}
                       />
                     </div>
                   </div>
@@ -979,7 +987,7 @@ export function ContextDetails({ contextName, gpusInContext, nodesInContext }) {
                         frameBorder="0"
                         title="Memory Utilization"
                         className="rounded"
-                        key={`memory-util-${selectedHosts}-${timeRange.from}-${timeRange.to}`}
+                        key={`memory-util-${selectedHosts}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger || 0}`}
                       />
                     </div>
                   </div>
@@ -1808,6 +1816,10 @@ export function GPUs() {
   const [sshAndKubeJobsData, setSshAndKubeJobsData] = useState({});
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
+  // Counter incremented on refresh to force GPU metrics iframes to reload.
+  // When this value changes, the iframe key changes, causing React to remount the iframe.
+  const [gpuMetricsRefreshTrigger, setGpuMetricsRefreshTrigger] = useState(0);
+
   // Selected context for subpage view
   const [selectedContext, setSelectedContext] = useState(null);
 
@@ -2144,6 +2156,9 @@ export function GPUs() {
     dashboardCache.invalidate(getCloudInfrastructure, [false]);
     dashboardCache.invalidate(getSSHNodePools);
 
+    // Increment GPU metrics refresh trigger to force iframe reload
+    setGpuMetricsRefreshTrigger((prev) => prev + 1);
+
     if (refreshDataRef.current) {
       await refreshDataRef.current({
         showLoadingIndicators: true,
@@ -2415,8 +2430,16 @@ export function GPUs() {
 
   // Render context details
   const renderContextDetails = (contextName) => {
-    const gpusInContext = groupedPerContextGPUs[contextName] || [];
-    const nodesInContext = groupedPerNodeGPUs[contextName] || [];
+    // Check if this is a Slurm cluster
+    const isSlurmCluster = slurmClusters.includes(contextName);
+
+    // Get the appropriate GPU and node data based on context type
+    const gpusInContext = isSlurmCluster
+      ? groupedPerClusterSlurmGPUs[contextName] || []
+      : groupedPerContextGPUs[contextName] || [];
+    const nodesInContext = isSlurmCluster
+      ? groupedPerNodeSlurmGPUs[contextName] || []
+      : groupedPerNodeGPUs[contextName] || [];
 
     if (kubeLoading && !kubeDataLoaded) {
       return (
@@ -2446,12 +2469,13 @@ export function GPUs() {
       );
     }
 
-    // For Kubernetes contexts, show the regular context details
+    // For Kubernetes and Slurm contexts, show the regular context details
     return (
       <ContextDetails
         contextName={contextName}
         gpusInContext={gpusInContext}
         nodesInContext={nodesInContext}
+        gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
       />
     );
   };
@@ -2575,6 +2599,7 @@ export function GPUs() {
         isSSH={true}
         contextWorkspaceMap={contextWorkspaceMap}
         contextErrors={contextErrors}
+        gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
         actionButton={
           // TODO: Add back when SSH Node Pool add operation is more robust
           // <button
@@ -2607,6 +2632,7 @@ export function GPUs() {
         isSSH={false}
         contextWorkspaceMap={contextWorkspaceMap}
         contextErrors={contextErrors}
+        gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
       />
     );
   };
@@ -2622,9 +2648,9 @@ export function GPUs() {
         groupedPerContextGPUs={groupedPerClusterSlurmGPUs}
         groupedPerNodeGPUs={groupedPerNodeSlurmGPUs}
         handleContextClick={handleContextClick}
-        contextStats={{}}
-        jobsData={{}}
-        isJobsDataLoading={false}
+        contextStats={contextStats}
+        jobsData={sshAndKubeJobsData}
+        isJobsDataLoading={sshAndKubeJobsDataLoading}
         isSSH={false}
         isSlurm={true}
         contextWorkspaceMap={{}}
@@ -2673,23 +2699,23 @@ export function GPUs() {
 
     // Always add all sections (they handle their own loading/empty states)
 
-    // Add Slurm section (always show) - Priority 1 to show at top
-    const slurmHasActivity = slurmClusters.length > 0;
-    sections.push({
-      name: 'Slurm',
-      render: renderSlurmInfrastructure,
-      hasActivity: slurmHasActivity,
-      priority: 1, // Slurm gets priority 1 within same activity level
-    });
-
-    // Add Kubernetes section (always show)
+    // Add Kubernetes section (always show) - Priority 1 to show at top
     // Kubernetes section is active if there are any contexts available (similar to Cloud logic)
     const kubeHasActivity = kubeContexts.length > 0;
     sections.push({
       name: 'Kubernetes',
       render: renderKubernetesInfrastructure,
       hasActivity: kubeHasActivity,
-      priority: 2, // Kubernetes gets priority 2 within same activity level
+      priority: 1, // Kubernetes gets priority 1 within same activity level
+    });
+
+    // Add Slurm section (always show)
+    const slurmHasActivity = slurmClusters.length > 0;
+    sections.push({
+      name: 'Slurm',
+      render: renderSlurmInfrastructure,
+      hasActivity: slurmHasActivity,
+      priority: 2, // Slurm gets priority 2 within same activity level
     });
 
     // Add Cloud section (always show)
@@ -2703,8 +2729,7 @@ export function GPUs() {
     });
 
     // Add SSH section (always show)
-    const sshHasActivity =
-      sshContexts.length > 0 && hasContextActivity(sshContexts, true);
+    const sshHasActivity = sshContexts.length > 0;
     sections.push({
       name: 'SSH Node Pool',
       render: renderSSHNodePoolInfrastructure,
