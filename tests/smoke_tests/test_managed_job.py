@@ -2084,8 +2084,7 @@ def _render_job_group_yaml(yaml_template_path: str, name: str,
     template = jinja2.Template(template_content)
     rendered = template.render(name=name, cloud=cloud)
 
-    with tempfile.NamedTemporaryFile(suffix='.yaml',
-                                     mode='w',
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
                                      delete=False) as f:
         f.write(rendered)
         f.flush()
@@ -2097,8 +2096,8 @@ def _render_job_group_yaml(yaml_template_path: str, name: str,
 def test_job_group_basic(generic_cloud: str):
     """Test basic JobGroup with 2 parallel jobs."""
     name = smoke_tests_utils.get_cluster_name()
-    yaml_path = _render_job_group_yaml(
-        'tests/test_job_groups/smoke_basic.yaml', name, generic_cloud)
+    yaml_path = _render_job_group_yaml('tests/test_job_groups/smoke_basic.yaml',
+                                       name, generic_cloud)
 
     test = smoke_tests_utils.Test(
         'job_group_basic',

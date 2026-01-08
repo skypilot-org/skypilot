@@ -1260,7 +1260,7 @@ class JobController:
             if cluster_name is not None:
                 try:
                     await self._cleanup_cluster(cluster_name)
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-except
                     logger.warning(f'Failed to cleanup {cluster_name}: {e}')
 
     async def run(self):

@@ -17,6 +17,7 @@ from sky import core
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
+from sky import optimizer as optimizer_lib
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
@@ -306,7 +307,6 @@ def launch(
     # Optimize JobGroup placement before sending to controller
     # This pre-determines cloud+region for SAME_INFRA, enabling parallel launch
     if dag.is_job_group():
-        from sky import optimizer as optimizer_lib
         dag = optimizer_lib.Optimizer.optimize_job_group(dag)
 
     # If there is a local postgres db, when the api server tries launching on

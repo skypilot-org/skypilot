@@ -11,6 +11,7 @@ import prettytable
 
 from sky import check as sky_check
 from sky import clouds
+from sky import dag as dag_lib
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
@@ -32,8 +33,6 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import networkx as nx
-
-    from sky import dag as dag_lib
 else:
     nx = adaptors_common.LazyImport('networkx')
 
@@ -1059,8 +1058,6 @@ class Optimizer:
             exceptions.ResourcesUnavailableError: If no common infrastructure
                 can satisfy all tasks.
         """
-        from sky import dag as dag_lib_local
-
         if not dag.is_job_group():
             # Fall back to normal optimization for non-JobGroup DAGs
             return Optimizer.optimize(dag, minimize, blocked_resources, quiet)
@@ -1075,7 +1072,7 @@ class Optimizer:
                 f'Placement: {placement.value if placement else "default"}')
 
         # For SAME_INFRA, find common infrastructure
-        if placement == dag_lib_local.JobGroupPlacement.SAME_INFRA:
+        if placement == dag_lib.JobGroupPlacement.SAME_INFRA:
             return Optimizer._optimize_same_infra(dag, minimize,
                                                   blocked_resources, quiet)
         else:
@@ -1090,11 +1087,9 @@ class Optimizer:
                                   resources_lib.Resources]],
                               quiet: bool) -> 'dag_lib.Dag':
         """Optimize each task in the JobGroup independently."""
-        from sky import dag as dag_lib_local
-
         for task in dag.tasks:
             # Create a temporary single-task DAG for optimization
-            temp_dag = dag_lib_local.Dag()
+            temp_dag = dag_lib.Dag()
             temp_dag.add(task)
             temp_dag.name = task.name
 
@@ -1197,13 +1192,13 @@ class Optimizer:
             return []
 
         # Find intersection of all task infras
-        common = infras_per_task[0]
+        common_infras = infras_per_task[0]
         for infra_set in infras_per_task[1:]:
-            common = common & infra_set
+            common_infras = common_infras & infra_set
 
         # Convert back to (Cloud, region) tuples
         result: List[Tuple[clouds.Cloud, Optional[str]]] = []
-        for cloud_name, region in common:
+        for cloud_name, region in common_infras:
             # Get Cloud object from name
             cloud_obj = None
             for task_cloud_candidates in task_candidates.values():

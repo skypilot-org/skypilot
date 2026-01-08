@@ -77,10 +77,11 @@ def _get_k8s_namespace_from_handle(
     if handle.launched_resources and handle.launched_resources.region:
         # In K8s, region is the context name
         try:
+            # pylint: disable=import-outside-toplevel
             from sky.provision.kubernetes import utils as k8s_utils
             return k8s_utils.get_kube_config_context_namespace(
                 handle.launched_resources.region)
-        except Exception:
+        except Exception:  # pylint: disable=broad-except
             pass
 
     # Fallback to default namespace
@@ -257,7 +258,7 @@ async def _inject_hosts_on_node(
             logger.error(f'Failed to inject /etc/hosts: {stderr}')
             return False
         return True
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Exception while injecting /etc/hosts: {e}')
         return False
 
@@ -324,7 +325,7 @@ async def _start_k8s_dns_updater_on_node(
             return False
         logger.debug('DNS updater started successfully')
         return True
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Exception while starting DNS updater: {e}')
         return False
 
@@ -410,7 +411,7 @@ class NetworkConfigurator:
             # Use handle.get_command_runners() (not hardcoded SSHCommandRunner)
             try:
                 runners = handle.get_command_runners()
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 logger.warning(
                     f'Failed to get command runners for {task.name}: {e}')
                 continue
