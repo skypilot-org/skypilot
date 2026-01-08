@@ -219,6 +219,7 @@ export async function getManagedJobs(options = {}) {
         current_cluster_name: job.current_cluster_name,
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
         accelerators: job.accelerators, // Include accelerators field
+        labels: job.labels || {}, // Include labels field
       };
     });
 
