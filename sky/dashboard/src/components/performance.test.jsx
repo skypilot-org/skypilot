@@ -19,6 +19,7 @@ jest.mock('next/router', () => ({
 
 // Mock next/link
 jest.mock('next/link', () => {
+  // eslint-disable-next-line react/display-name
   return ({ children, href }) => <a href={href}>{children}</a>;
 });
 
@@ -399,6 +400,257 @@ describe('Memoization Performance Tests', () => {
       // Calculate saved renders
       const savedRenders = totalNonMemoRenders - totalMemoRenders;
       expect(savedRenders).toBe(ROW_COUNT * UPDATE_COUNT);
+    });
+  });
+
+  describe('Timing measurements', () => {
+    test('Measures actual time difference for render cycles', () => {
+      const ROW_COUNT = 200; // Larger table for measurable timing
+      const UPDATE_COUNT = 50; // More updates for better timing accuracy
+
+      // Simulate a more realistic row with multiple elements
+      const NonMemoRow = ({ item, onAction }) => {
+        return (
+          <tr>
+            <td>{item.id}</td>
+            <td>{item.name}</td>
+            <td>{item.status}</td>
+            <td>{item.timestamp}</td>
+            <td>
+              <button onClick={() => onAction(item.id)}>Action 1</button>
+              <button onClick={() => onAction(item.id)}>Action 2</button>
+            </td>
+          </tr>
+        );
+      };
+
+      const MemoRow = memo(function MemoRow({ item, onAction }) {
+        return (
+          <tr>
+            <td>{item.id}</td>
+            <td>{item.name}</td>
+            <td>{item.status}</td>
+            <td>{item.timestamp}</td>
+            <td>
+              <button onClick={() => onAction(item.id)}>Action 1</button>
+              <button onClick={() => onAction(item.id)}>Action 2</button>
+            </td>
+          </tr>
+        );
+      });
+
+      const items = Array.from({ length: ROW_COUNT }, (_, i) => ({
+        id: i,
+        name: `Job ${i}`,
+        status: i % 2 === 0 ? 'Running' : 'Completed',
+        timestamp: new Date().toISOString(),
+      }));
+
+      const TableWithTiming = ({ Row }) => {
+        const [tick, setTick] = useState(0);
+        const handleAction = useCallback((id) => {
+          console.log('action', id);
+        }, []);
+
+        return (
+          <div>
+            <button data-testid="tick-timing" onClick={() => setTick((t) => t + 1)}>
+              Tick {tick}
+            </button>
+            <table>
+              <tbody>
+                {items.map((item) => (
+                  <Row key={item.id} item={item} onAction={handleAction} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      };
+
+      // Measure non-memoized timing
+      const { unmount: unmountNonMemo } = render(
+        <TableWithTiming Row={NonMemoRow} />
+      );
+
+      const nonMemoStart = performance.now();
+      for (let i = 0; i < UPDATE_COUNT; i++) {
+        fireEvent.click(screen.getByTestId('tick-timing'));
+      }
+      const nonMemoTime = performance.now() - nonMemoStart;
+      unmountNonMemo();
+
+      // Measure memoized timing
+      render(<TableWithTiming Row={MemoRow} />);
+
+      const memoStart = performance.now();
+      for (let i = 0; i < UPDATE_COUNT; i++) {
+        fireEvent.click(screen.getByTestId('tick-timing'));
+      }
+      const memoTime = performance.now() - memoStart;
+
+      const timeSaved = nonMemoTime - memoTime;
+      const percentFaster = ((timeSaved / nonMemoTime) * 100);
+
+      console.log('\n========================================');
+      console.log('    TIMING COMPARISON (Before vs After)');
+      console.log('========================================');
+      console.log(`Table size: ${ROW_COUNT} rows`);
+      console.log(`Update cycles: ${UPDATE_COUNT}`);
+      console.log('----------------------------------------');
+      console.log(`BEFORE (Non-memoized): ${nonMemoTime.toFixed(2)}ms`);
+      console.log(`AFTER (Memoized):      ${memoTime.toFixed(2)}ms`);
+      console.log('----------------------------------------');
+      console.log(`Time saved: ${timeSaved.toFixed(2)}ms (${percentFaster.toFixed(1)}% faster)`);
+      console.log(`Per update: ${(nonMemoTime / UPDATE_COUNT).toFixed(2)}ms -> ${(memoTime / UPDATE_COUNT).toFixed(2)}ms`);
+      console.log('========================================\n');
+
+      // Memoized should be faster
+      expect(memoTime).toBeLessThan(nonMemoTime);
+    });
+
+    test('Measures time for realistic dashboard scenario', () => {
+      // Simulate a dashboard with multiple tables and state updates
+      const JOB_COUNT = 50;
+      const CLUSTER_COUNT = 20;
+      const POLL_CYCLES = 30; // Simulate 30 polling updates (1 minute at 2s intervals)
+
+      const JobRow = memo(function JobRow({ job }) {
+        return (
+          <tr>
+            <td>{job.id}</td>
+            <td>{job.name}</td>
+            <td>{job.status}</td>
+          </tr>
+        );
+      });
+
+      const ClusterRow = memo(function ClusterRow({ cluster }) {
+        return (
+          <tr>
+            <td>{cluster.id}</td>
+            <td>{cluster.name}</td>
+            <td>{cluster.status}</td>
+          </tr>
+        );
+      });
+
+      const NonMemoJobRow = ({ job }) => {
+        return (
+          <tr>
+            <td>{job.id}</td>
+            <td>{job.name}</td>
+            <td>{job.status}</td>
+          </tr>
+        );
+      };
+
+      const NonMemoClusterRow = ({ cluster }) => {
+        return (
+          <tr>
+            <td>{cluster.id}</td>
+            <td>{cluster.name}</td>
+            <td>{cluster.status}</td>
+          </tr>
+        );
+      };
+
+      const jobs = Array.from({ length: JOB_COUNT }, (_, i) => ({
+        id: i,
+        name: `Job ${i}`,
+        status: 'Running',
+      }));
+
+      const clusters = Array.from({ length: CLUSTER_COUNT }, (_, i) => ({
+        id: i,
+        name: `Cluster ${i}`,
+        status: 'UP',
+      }));
+
+      const Dashboard = ({ JobRowComp, ClusterRowComp }) => {
+        const [pollCount, setPollCount] = useState(0);
+        const [filter, setFilter] = useState('');
+
+        return (
+          <div>
+            <button
+              data-testid="poll"
+              onClick={() => setPollCount((c) => c + 1)}
+            >
+              Poll {pollCount}
+            </button>
+            <input
+              data-testid="filter"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+            <h2>Jobs</h2>
+            <table>
+              <tbody>
+                {jobs.map((job) => (
+                  <JobRowComp key={job.id} job={job} />
+                ))}
+              </tbody>
+            </table>
+            <h2>Clusters</h2>
+            <table>
+              <tbody>
+                {clusters.map((cluster) => (
+                  <ClusterRowComp key={cluster.id} cluster={cluster} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      };
+
+      // Non-memoized dashboard
+      const { unmount: unmountNonMemo } = render(
+        <Dashboard JobRowComp={NonMemoJobRow} ClusterRowComp={NonMemoClusterRow} />
+      );
+
+      const nonMemoStart = performance.now();
+      for (let i = 0; i < POLL_CYCLES; i++) {
+        fireEvent.click(screen.getByTestId('poll'));
+      }
+      // Also simulate some filter typing
+      const filterInput = screen.getByTestId('filter');
+      fireEvent.change(filterInput, { target: { value: 'test' } });
+      fireEvent.change(filterInput, { target: { value: 'test2' } });
+      fireEvent.change(filterInput, { target: { value: '' } });
+      const nonMemoTime = performance.now() - nonMemoStart;
+      unmountNonMemo();
+
+      // Memoized dashboard
+      render(<Dashboard JobRowComp={JobRow} ClusterRowComp={ClusterRow} />);
+
+      const memoStart = performance.now();
+      for (let i = 0; i < POLL_CYCLES; i++) {
+        fireEvent.click(screen.getByTestId('poll'));
+      }
+      const filterInput2 = screen.getByTestId('filter');
+      fireEvent.change(filterInput2, { target: { value: 'test' } });
+      fireEvent.change(filterInput2, { target: { value: 'test2' } });
+      fireEvent.change(filterInput2, { target: { value: '' } });
+      const memoTime = performance.now() - memoStart;
+
+      const timeSaved = nonMemoTime - memoTime;
+      const percentFaster = ((timeSaved / nonMemoTime) * 100);
+
+      console.log('\n================================================');
+      console.log('    DASHBOARD SCENARIO (Before vs After)');
+      console.log('================================================');
+      console.log(`Jobs: ${JOB_COUNT}, Clusters: ${CLUSTER_COUNT}`);
+      console.log(`Poll cycles: ${POLL_CYCLES} + 3 filter changes`);
+      console.log('------------------------------------------------');
+      console.log(`BEFORE (Non-memoized): ${nonMemoTime.toFixed(2)}ms`);
+      console.log(`AFTER (Memoized):      ${memoTime.toFixed(2)}ms`);
+      console.log('------------------------------------------------');
+      console.log(`Time saved: ${timeSaved.toFixed(2)}ms (${percentFaster.toFixed(1)}% faster)`);
+      console.log('================================================\n');
+
+      // Memoized should be faster
+      expect(memoTime).toBeLessThan(nonMemoTime);
     });
   });
 });
