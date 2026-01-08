@@ -76,12 +76,7 @@ class VolumeStatus(enum.Enum):
     ERROR = 'ERROR'
 
     def colored_str(self):
-        color = _VOLUME_STATUS_TO_COLOR[self]
-        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
-
-
-_VOLUME_STATUS_TO_COLOR = {
-    VolumeStatus.READY: colorama.Fore.GREEN,
-    VolumeStatus.IN_USE: colorama.Fore.GREEN,
-    VolumeStatus.ERROR: colorama.Fore.RED,
-}
+        # Only color ERROR status red, others are uncolored
+        if self == VolumeStatus.ERROR:
+            return f'{colorama.Fore.RED}{self.value}{colorama.Style.RESET_ALL}'
+        return self.value
