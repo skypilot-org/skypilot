@@ -3060,6 +3060,8 @@ def is_controller_accessible(
         exceptions.ClusterNotUpError: if the controller is not accessible, or
           failed to be connected.
     """
+    print(
+        f'DEBUG: is_controller_accessible stopped_message={stopped_message!r}')
     if (managed_job_utils.is_consolidation_mode() and
             controller == controller_utils.Controllers.JOBS_CONTROLLER
        ) or (serve_utils.is_consolidation_mode() and

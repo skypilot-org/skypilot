@@ -861,6 +861,7 @@ def queue_v2(
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+    print(f'DEBUG: server queue_v2 refresh={refresh}')
     if limit is not None:
         if limit < 1:
             raise ValueError(f'Limit must be at least 1, got {limit}')

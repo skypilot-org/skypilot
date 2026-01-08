@@ -191,6 +191,7 @@ def queue_v2(
           does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+    print(f'DEBUG: client queue_v2 refresh={refresh}')
     body = payloads.JobsQueueV2Body(
         refresh=refresh,
         skip_finished=skip_finished,
