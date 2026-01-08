@@ -29,13 +29,13 @@ def volume_refresh():
     """Refreshes the volume status.
 
     This function checks:
-    1. PVC errors (e.g., access mode mismatch causing Pending state)
-    2. Volume usage by pods
+    1. Volume errors (e.g., misconfiguration causing pending state)
+    2. Volume usage
 
     Status transitions:
-    - ERROR: PVC has errors (e.g., Pending due to access mode mismatch)
-    - IN_USE: PVC is healthy and used by pods
-    - READY: PVC is healthy and not used by any pods
+    - ERROR: Volume has errors (e.g., pending due to misconfiguration)
+    - IN_USE: Volume is healthy and in use
+    - READY: Volume is healthy and not in use
     """
     volumes = global_user_state.get_volumes(is_ephemeral=False)
 
@@ -54,16 +54,16 @@ def volume_refresh():
         cloud_to_configs[cloud].append(config)
         volume_name_to_config[volume.get('name')] = config
 
-    # Check for PVC errors (e.g., access mode mismatch)
-    cloud_to_pvc_errors: Dict[str, Dict[str, Optional[str]]] = {}
+    # Check for volume errors (e.g., misconfiguration)
+    cloud_to_volume_errors: Dict[str, Dict[str, Optional[str]]] = {}
     for cloud, configs in cloud_to_configs.items():
         try:
-            pvc_errors = provision.get_all_volumes_pvc_errors(cloud, configs)
-            cloud_to_pvc_errors[cloud] = pvc_errors
+            volume_errors = provision.get_all_volumes_errors(cloud, configs)
+            cloud_to_volume_errors[cloud] = volume_errors
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(
-                f'Failed to get PVC errors for volumes on {cloud}: {e}')
-            cloud_to_pvc_errors[cloud] = {}
+                f'Failed to get volume errors for volumes on {cloud}: {e}')
+            cloud_to_volume_errors[cloud] = {}
 
     # Get usedby info for all volumes
     cloud_to_used_by_pods: Dict[str, Dict[str, Any]] = {}
@@ -100,8 +100,8 @@ def volume_refresh():
                          f'due to failed usedby fetch')
             continue
 
-        # Check for PVC errors first
-        pvc_error = cloud_to_pvc_errors.get(cloud, {}).get(volume_name)
+        # Check for volume errors first
+        volume_error = cloud_to_volume_errors.get(cloud, {}).get(volume_name)
 
         # Get usedby info
         usedby_pods, _ = provision.map_all_volumes_usedby(
@@ -121,9 +121,9 @@ def volume_refresh():
             current_error = latest_volume.get('error_message')
 
             # Determine new status and error_message
-            if pvc_error:
+            if volume_error:
                 new_status = status_lib.VolumeStatus.ERROR
-                new_error = pvc_error
+                new_error = volume_error
             elif usedby_pods:
                 new_status = status_lib.VolumeStatus.IN_USE
                 new_error = None
