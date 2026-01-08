@@ -98,6 +98,7 @@ def volume_list(
                 'usedby_clusters': List[str],
                 'usedby_fetch_failed': bool,
                 'is_ephemeral': bool,
+                'error_message': Optional[str],
             }
         ]
     """
@@ -116,7 +117,8 @@ def volume_list(
             cloud_to_configs[cloud].append(config)
 
         cloud_to_used_by_pods, cloud_to_used_by_clusters = {}, {}
-        cloud_to_failed_volume_names = {}
+        cloud_to_failed_volume_names: Dict[str, set] = {}
+        cloud_to_pvc_errors: Dict[str, Dict[str, Optional[str]]] = {}
         for cloud, configs in cloud_to_configs.items():
             try:
                 used_by_pods, used_by_clusters, failed_volume_names = (
@@ -133,13 +135,22 @@ def volume_list(
                     config.name for config in configs
                 }
                 continue
+            # Check for PVC errors (e.g., access mode mismatch)
+            try:
+                pvc_errors = provision.get_all_volumes_pvc_errors(
+                    cloud, configs)
+                cloud_to_pvc_errors[cloud] = pvc_errors
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(
+                    f'Failed to get PVC errors for volumes on {cloud}: {e}')
+                cloud_to_pvc_errors[cloud] = {}
 
         all_users = global_user_state.get_all_users()
         user_map = {user.id: user.name for user in all_users}
         records = []
         for volume in volumes:
             volume_name = volume.get('name')
-            record = {
+            record: Dict[str, Any] = {
                 'name': volume_name,
                 'launched_at': volume.get('launched_at'),
                 'user_hash': volume.get('user_hash'),
@@ -151,6 +162,7 @@ def volume_list(
                 'usedby_clusters': [],
                 'usedby_fetch_failed': False,
                 'is_ephemeral': volume.get('is_ephemeral', False),
+                'error_message': None,
             }
             status = volume.get('status')
             if status is not None:
@@ -162,7 +174,7 @@ def volume_list(
                 logger.warning(f'Volume {volume_name} has no handle.')
                 continue
             cloud = config.cloud
-            if volume_name in cloud_to_failed_volume_names[cloud]:
+            if volume_name in cloud_to_failed_volume_names.get(cloud, set()):
                 record['usedby_fetch_failed'] = True
             else:
                 usedby_pods, usedby_clusters = provision.map_all_volumes_usedby(
@@ -173,6 +185,13 @@ def volume_list(
                 )
                 record['usedby_pods'] = usedby_pods
                 record['usedby_clusters'] = usedby_clusters
+
+            # Check for PVC errors and update status if needed
+            pvc_error = cloud_to_pvc_errors.get(cloud, {}).get(volume_name)
+            if pvc_error:
+                record['status'] = status_lib.VolumeStatus.ERROR.value
+                record['error_message'] = pvc_error
+
             record['type'] = config.type
             record['cloud'] = config.cloud
             record['region'] = config.region

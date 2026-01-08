@@ -192,6 +192,28 @@ def map_all_volumes_usedby(
 
 
 @_route_to_cloud_impl
+def get_all_volumes_pvc_errors(
+        provider_name: str,
+        configs: List[models.VolumeConfig]) -> Dict[str, Optional[str]]:
+    """Get PVC error messages for all volumes.
+
+    Checks if PVCs are in Pending state and if so, checks for access mode
+    mismatches between the PVC and the storage class's allowed access modes.
+
+    Args:
+        provider_name: Name of the provider.
+        configs: List of VolumeConfig objects.
+
+    Returns:
+        Dictionary mapping volume name to error message (None if no error).
+    """
+    # Default implementation returns empty dict (no error checking for
+    # non-Kubernetes providers)
+    del provider_name, configs
+    return {}
+
+
+@_route_to_cloud_impl
 def run_instances(provider_name: str, region: str, cluster_name: str,
                   cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:

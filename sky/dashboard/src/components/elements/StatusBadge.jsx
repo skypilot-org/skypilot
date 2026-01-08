@@ -52,9 +52,13 @@ export const getStatusStyle = (status) => {
     case 'FAILED_CONTROLLER':
       return 'bg-red-50 text-red-700';
 
-    // Serve specific statuses - ReplicaStatus
+    // Volume specific statuses
     case 'READY':
       return 'bg-green-50 text-green-700';
+    case 'ERROR':
+      return 'bg-red-50 text-red-700';
+
+    // Serve specific statuses - ReplicaStatus
     case 'PROVISIONING':
       return 'bg-blue-50 text-blue-700';
     case 'NOT_READY':
@@ -120,6 +124,8 @@ export const getStatusIcon = (status) => {
     case 'REPLICA_INIT':
     case 'NO_REPLICA':
       return <CircleIcon className="w-3 h-3 mr-1" />;
+    case 'ERROR':
+      return <SquareIcon className="w-3 h-3 mr-1" />;
     case 'PROVISIONING':
     case 'SHUTTING_DOWN':
       return <CircularProgress size={12} className="w-3 h-3 mr-1" />;
