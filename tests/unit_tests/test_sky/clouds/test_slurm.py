@@ -61,12 +61,15 @@ class TestCheckInstanceFits:
             ([node_2cpu_8gb_cpus
              ], '2CPU--8GB', 'different_partition', False, 'No nodes found'),
         ])
+    @patch('sky.provision.slurm.utils.kv_cache.get_cache_entry',
+           return_value=None)
     @patch('sky.provision.slurm.utils.get_cluster_default_partition')
     @patch('sky.provision.slurm.utils.slurm.SlurmClient')
     @patch('sky.provision.slurm.utils.SSHConfig.from_path')
     def test_check_instance_fits(self, mock_ssh_config, mock_slurm_client,
-                                 mock_default_partition, nodes, instance_type,
-                                 partition, expected_fits, reason_contains):
+                                 mock_default_partition, mock_kv_cache, nodes,
+                                 instance_type, partition, expected_fits,
+                                 reason_contains):
         """Test various scenarios for instance fitting."""
         mock_default_partition.return_value = 'dev'
         mock_ssh_config_obj = mock.MagicMock()
