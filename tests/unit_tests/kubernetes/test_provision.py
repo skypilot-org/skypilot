@@ -435,7 +435,7 @@ def test_pod_termination_reason_start_error(monkeypatch):
 
     pod.status.container_statuses = [container_status]
 
-    monkeypatch.setattr('sky.provision.kubernetes.instance.global_user_state',
+    monkeypatch.setattr('sky.global_user_state.add_cluster_event',
                         mock.MagicMock())
 
     reason = instance._get_pod_termination_reason(pod, 'test-cluster')
@@ -481,7 +481,7 @@ def test_pod_termination_reason_kueue_preemption(monkeypatch):
     container_status.state.terminated = None
     pod.status.container_statuses = [container_status]
 
-    monkeypatch.setattr('sky.provision.kubernetes.instance.global_user_state',
+    monkeypatch.setattr('sky.global_user_state.add_cluster_event',
                         mock.MagicMock())
 
     reason = instance._get_pod_termination_reason(pod, 'test-cluster')
