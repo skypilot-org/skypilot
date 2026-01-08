@@ -139,11 +139,9 @@ Here's a side-by-side comparison of a typical Slurm script and its SkyPilot equi
      memory: 256+
      image_id: docker:nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
-   setup: |
-     pip install torch transformers
+   setup: pip install torch transformers
 
-   run: |
-     python train.py --epochs 100
+   run: python train.py --epochs 100
 
 .. raw:: html
 
