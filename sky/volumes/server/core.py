@@ -25,22 +25,18 @@ VOLUME_LOCK_PATH = os.path.expanduser('~/.sky/.{volume_name}.lock')
 VOLUME_LOCK_TIMEOUT_SECONDS = 20
 
 
-def _volume_update(is_ephemeral: Optional[bool] = None) -> None:
-    """Updates volume state by making cloud API calls.
+def volume_refresh() -> None:
+    """Refreshes volume status by querying cloud APIs.
 
-    This is an internal function that:
-    1. Queries cloud APIs for volume errors and usage info
-    2. Updates the database with the latest state
-
-    This should be called by the volume refresh daemon, not directly by users.
-    For listing volumes, use volume_list() which reads from the database.
+    This is called by the background daemon to update volume state.
+    It updates status, error messages, and usage information in the database.
 
     Status transitions:
     - ERROR: Volume has errors (e.g., pending due to misconfiguration)
     - IN_USE: Volume is healthy and in use
     - READY: Volume is healthy and not in use
     """
-    volumes = global_user_state.get_volumes(is_ephemeral=is_ephemeral)
+    volumes = global_user_state.get_volumes(is_ephemeral=False)
 
     # Group volumes by cloud for batch API calls
     cloud_to_configs: Dict[str, List[models.VolumeConfig]] = {}
@@ -170,29 +166,43 @@ def _volume_update(is_ephemeral: Optional[bool] = None) -> None:
                                                        volume_config)
 
 
-def volume_refresh():
-    """Refreshes volume status by querying cloud APIs.
-
-    This is called by the background daemon to update volume state.
-    It updates status, error messages, and usage information in the database.
-    """
-    _volume_update(is_ephemeral=False)
-
-
 def volume_list(
-        is_ephemeral: Optional[bool] = None) -> List[responses.VolumeRecord]:
+    is_ephemeral: Optional[bool] = None,
+    refresh: bool = False,
+) -> List[responses.VolumeRecord]:
     """Gets volumes from the database.
-
-    This function reads cached volume information from the database.
-    It does NOT make any cloud API calls - use volume_refresh() to update
-    the cached data.
 
     Args:
         is_ephemeral: Whether to include ephemeral volumes.
+        refresh: If True, refresh volume state from cloud APIs before returning.
 
     Returns:
-        List of VolumeRecord objects with volume information.
+        [
+            {
+                'name': str,
+                'type': str,
+                'launched_at': int timestamp of creation,
+                'cloud': str,
+                'region': str,
+                'zone': str,
+                'size': str,
+                'config': Dict[str, Any],
+                'name_on_cloud': str,
+                'user_hash': str,
+                'workspace': str,
+                'last_attached_at': int timestamp of last attachment,
+                'last_use': last command,
+                'status': sky.VolumeStatus,
+                'usedby_pods': List[str],
+                'usedby_clusters': List[str],
+                'usedby_fetch_failed': bool,
+                'is_ephemeral': bool,
+                'error_message': Optional[str],
+            }
+        ]
     """
+    if refresh:
+        volume_refresh()
     with rich_utils.safe_status(ux_utils.spinner_message('Listing volumes')):
         volumes = global_user_state.get_volumes(is_ephemeral=is_ephemeral)
         all_users = global_user_state.get_all_users()

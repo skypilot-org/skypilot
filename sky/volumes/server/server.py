@@ -18,14 +18,6 @@ logger = sky_logging.init_logger(__name__)
 router = fastapi.APIRouter()
 
 
-def _volume_list_with_refresh(refresh: bool = False):
-    """Wrapper to optionally refresh volume state before listing."""
-    if refresh:
-        # Refresh volume state from cloud APIs
-        core._volume_update()  # pylint: disable=protected-access
-    return core.volume_list()
-
-
 @router.get('')
 async def volume_list(request: fastapi.Request, refresh: bool = False) -> None:
     """Gets the volumes.
@@ -47,7 +39,7 @@ async def volume_list(request: fastapi.Request, refresh: bool = False) -> None:
         request_id=request.state.request_id,
         request_name=request_names.RequestName.VOLUME_LIST,
         request_body=request_body,
-        func=lambda: _volume_list_with_refresh(refresh),
+        func=lambda: core.volume_list(refresh=refresh),
         schedule_type=schedule_type,
     )
 
