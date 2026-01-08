@@ -1978,7 +1978,7 @@ def test_managed_job_labels_in_queue(generic_cloud: str):
     def check_labels_in_queue():
         """Check that labels are present in the job queue."""
         # Get the job queue using SDK
-        queue_request_id = jobs_sdk.queue_v2(refresh=False, all_users=True)
+        queue_request_id = jobs_sdk.queue_v2(refresh=True, all_users=True)
         queue_records = sdk.stream_and_get(queue_request_id)
 
         # Parse the queue response
