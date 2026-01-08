@@ -144,6 +144,29 @@ class DashboardCache {
   }
 
   /**
+   * Get cached data if it exists and is fresh, without triggering a fetch
+   * @param {Function} fetchFunction - The function to check cache for
+   * @param {Array} [args=[]] - Arguments to check cache for
+   * @param {Object} [options={}] - Cache options
+   * @param {number} [options.ttl] - Time to live in milliseconds
+   * @returns {*} - The cached data or null if not cached/stale
+   */
+  getIfCached(fetchFunction, args = [], options = {}) {
+    const ttl = options.ttl || DEFAULT_CACHE_TTL;
+    const key = this._generateKey(fetchFunction, args);
+
+    const cachedItem = this.cache.get(key);
+    const now = Date.now();
+
+    // Return cached data only if it exists and is fresh
+    if (cachedItem && now - cachedItem.lastUpdated < ttl) {
+      return cachedItem.data;
+    }
+
+    return null;
+  }
+
+  /**
    * Invalidate a specific cache entry
    * @param {Function} fetchFunction - The function used to generate the cache key
    * @param {Array} [args=[]] - Arguments used to generate the cache key

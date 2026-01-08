@@ -139,7 +139,41 @@ class JobsCacheManager {
         }
       }
 
-      // 2) No local cache: fetch current page only to keep UI responsive
+      // 2) Check if full dataset is already in dashboardCache (e.g., from preloader)
+      // This avoids unnecessary server requests when data was preloaded
+      const preloadedData = dashboardCache.getIfCached(getManagedJobs, [
+        filterOptions,
+      ]);
+      if (preloadedData && preloadedData.jobs && preloadedData.jobs.length > 0) {
+        // Populate local cache from preloaded data
+        const fullData = {
+          jobs: preloadedData.jobs,
+          total: preloadedData.jobs.length,
+          totalNoFilter:
+            preloadedData.totalNoFilter || preloadedData.jobs.length,
+          controllerStopped: false,
+          statusCounts: preloadedData.statusCounts || {},
+          timestamp: Date.now(),
+        };
+        this.fullDataCache.set(filterKey, fullData);
+
+        // Return paginated result
+        const startIndex = (page - 1) * limit;
+        const endIndex = startIndex + limit;
+        const paginatedJobs = fullData.jobs.slice(startIndex, endIndex);
+
+        return {
+          jobs: paginatedJobs,
+          total: fullData.total,
+          totalNoFilter: fullData.totalNoFilter,
+          controllerStopped: fullData.controllerStopped,
+          statusCounts: fullData.statusCounts,
+          fromCache: true,
+          cacheStatus: 'preloaded_cache_hit',
+        };
+      }
+
+      // 3) No preloaded data: fetch current page only to keep UI responsive
       const pageResponse = await dashboardCache.get(getManagedJobs, [
         {
           ...filterOptions,

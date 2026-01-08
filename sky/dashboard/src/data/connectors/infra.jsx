@@ -152,10 +152,10 @@ export async function getWorkspaceInfrastructure() {
   try {
     console.log('[DEBUG] Starting workspace-aware infrastructure fetch');
 
-    // Step 1: Get all accessible workspaces for the user
+    // Step 1: Get all accessible workspaces for the user (use cache for performance)
     const { getWorkspaces } = await import('@/data/connectors/workspaces');
-    console.log('[DEBUG] About to call getWorkspaces()');
-    const workspacesData = await getWorkspaces();
+    console.log('[DEBUG] About to call getWorkspaces() via cache');
+    const workspacesData = await dashboardCache.get(getWorkspaces);
     console.log('[DEBUG] Workspaces data received:', workspacesData);
     console.log(
       '[DEBUG] Number of accessible workspaces:',
@@ -196,11 +196,14 @@ export async function getWorkspaceInfrastructure() {
           );
 
           try {
-            // Get enabled clouds with expanded infrastructure for this workspace
+            // Get enabled clouds with expanded infrastructure for this workspace (use cache for performance)
             console.log(
-              `[DEBUG] Fetching enabled clouds for workspace: ${workspaceName}`
+              `[DEBUG] Fetching enabled clouds for workspace: ${workspaceName} via cache`
             );
-            const expandedClouds = await getEnabledClouds(workspaceName, true);
+            const expandedClouds = await dashboardCache.get(getEnabledClouds, [
+              workspaceName,
+              true,
+            ]);
             console.log(
               `[DEBUG] Expanded clouds for ${workspaceName}:`,
               expandedClouds
