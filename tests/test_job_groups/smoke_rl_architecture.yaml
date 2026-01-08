@@ -48,10 +48,12 @@ run: |
   echo "Replay buffer starting on $(hostname)"
   echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
   python3 -m http.server 6379 &
+  SERVER_PID=$!
   for i in {1..5}; do
     echo "Replay buffer heartbeat $i"
     sleep 2
   done
+  kill $SERVER_PID 2>/dev/null || true
   echo "Replay buffer done"
 ---
 name: env-worker
