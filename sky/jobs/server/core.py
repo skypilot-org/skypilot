@@ -1115,7 +1115,8 @@ def tail_logs(name: Optional[str],
               follow: bool,
               controller: bool,
               refresh: bool,
-              tail: Optional[int] = None) -> int:
+              tail: Optional[int] = None,
+              task: Optional[str] = None) -> int:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
 
@@ -1159,7 +1160,8 @@ def tail_logs(name: Optional[str],
                                          job_name=name,
                                          follow=follow,
                                          controller=controller,
-                                         tail=tail)
+                                         tail=tail,
+                                         task=task)
 
 
 @usage_lib.entrypoint

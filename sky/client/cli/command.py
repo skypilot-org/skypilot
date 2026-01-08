@@ -5300,10 +5300,16 @@ def jobs_cancel(
               required=False,
               help='Download logs for all jobs shown in the queue.')
 @click.argument('job_id', required=False, type=int)
+@click.argument('task', required=False, type=str, default=None)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool, refresh: bool, sync_down: bool):
-    """Tail or sync down the log of a managed job."""
+              controller: bool, refresh: bool, sync_down: bool,
+              task: Optional[str]):
+    """Tail or sync down the log of a managed job.
+
+    TASK can be a task ID (integer) or task name. Numeric values are treated
+    as task IDs. If not specified, logs for all tasks are shown.
+    """
     try:
         if sync_down:
             with rich_utils.client_status(
@@ -5324,7 +5330,8 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                                                 job_id=job_id,
                                                 follow=follow,
                                                 controller=controller,
-                                                refresh=refresh)
+                                                refresh=refresh,
+                                                task=task)
             sys.exit(returncode)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
