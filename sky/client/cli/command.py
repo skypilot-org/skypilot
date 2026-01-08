@@ -216,45 +216,27 @@ def _get_cluster_records_and_set_ssh_config(
                 f'\"{escaped_executable_path} '
                 f'{escaped_websocket_proxy_path} '
                 f'{server_common.get_server_url()} '
-                f'{handle.cluster_name}\"')
+                f'{handle.cluster_name} '
+                f'kubernetes-pod-ssh-proxy\"')
             credentials['ssh_proxy_command'] = proxy_command
         elif isinstance(handle.launched_resources.cloud, clouds.Slurm):
-            # TODO(kevin): This is a temporary workaround, ideally we want to
-            # get a shell through srun --pty bash on the existing sbatch job.
-
-            # Proxy through the controller/login node to reach the worker node.
-            if (handle.cached_internal_ips is None or
-                    not handle.cached_internal_ips):
-                logger.debug(
-                    f'Cluster {name} does not have cached internal IPs. '
-                    'Skipping SSH config update.')
-                cluster_utils.SSHConfigHelper.remove_cluster(name)
-                continue
-
-            escaped_key_path = shlex.quote(
-                cluster_utils.SSHConfigHelper.generate_local_key_file(
-                    handle.cluster_name, credentials))
-            controller_host = handle.cached_external_ips[0]
-
-            # Build jump proxy: ssh to worker via controller/login node
-            proxy_command = (f'ssh -tt -i {escaped_key_path} '
-                             '-o StrictHostKeyChecking=no '
-                             '-o UserKnownHostsFile=/dev/null '
-                             '-o IdentitiesOnly=yes '
-                             '-W %h:%p '
-                             f'{handle.ssh_user}@{controller_host}')
-            original_proxy = credentials.get('ssh_proxy_command')
-            if original_proxy:
-                proxy_command += (
-                    f' -o ProxyCommand={shlex.quote(original_proxy)}')
-
+            # Replace the proxy command to proxy through the SkyPilot API
+            # server with websocket.
+            escaped_executable_path = shlex.quote(sys.executable)
+            escaped_websocket_proxy_path = shlex.quote(
+                f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
+            # %w is a placeholder for the node index, substituted per-node
+            # in cluster_utils.SSHConfigHelper.add_cluster().
+            proxy_command = (f'{escaped_executable_path} '
+                             f'{escaped_websocket_proxy_path} '
+                             f'{server_common.get_server_url()} '
+                             f'{handle.cluster_name} '
+                             f'slurm-job-ssh-proxy %w')
             credentials['ssh_proxy_command'] = proxy_command
-
-            # For Slurm, use the worker's internal IP as the SSH target
-            ips = handle.cached_internal_ips
 
         cluster_utils.SSHConfigHelper.add_cluster(
             handle.cluster_name,
+            handle.cluster_name_on_cloud,
             ips,
             credentials,
             handle.cached_external_ssh_ports,
@@ -3485,7 +3467,12 @@ def _down_or_stop_clusters(
                     click.echo(f'      {name} ({first})')
 
     if failures:
-        click.echo('Cluster(s) failed. See details above.')
+        failure_str = 'Cluster(s) failed. See details above.'
+        if down:
+            failure_str += (
+                ' If you want to ignore the errors and remove the '
+                'cluster(s) from the status table, use `sky down --purge`.')
+        click.echo(failure_str)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
