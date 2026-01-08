@@ -1,7 +1,9 @@
 """Slurm utilities for SkyPilot."""
+import json
 import math
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from paramiko.config import SSHConfig
@@ -11,6 +13,7 @@ from sky import sky_logging
 from sky.adaptors import slurm
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils.db import kv_cache
 
 logger = sky_logging.init_logger(__name__)
 
@@ -22,6 +25,8 @@ SLURM_MARKER_FILE = '.sky_slurm_cluster'
 # Examples: 'gpu:8', 'gpu:H100:8', 'gpu:nvidia_h100_80gb_hbm3:8(S:0-1)'
 _GRES_GPU_PATTERN = re.compile(r'\bgpu:(?:(?P<type>[^:(]+):)?(?P<count>\d+)',
                                re.IGNORECASE)
+
+_SLURM_NODES_INFO_CACHE_TTL = 30 * 60
 
 
 def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
@@ -44,7 +49,13 @@ def get_slurm_ssh_config() -> SSHConfig:
 
 
 @annotations.lru_cache(scope='request')
-def _get_slurm_node_info(cluster: str) -> List[slurm.NodeInfo]:
+def _get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
+    cache_key = f'slurm:nodes_info:{cluster}'
+    cached = kv_cache.get_cache_entry(cache_key)
+    if cached is not None:
+        logger.debug(f'Slurm nodes info found in cache ({cache_key})')
+        return [slurm.NodeInfo(**item) for item in json.loads(cached)]
+
     ssh_config = get_slurm_ssh_config()
     ssh_config_dict = ssh_config.lookup(cluster)
     client = slurm.SlurmClient(
@@ -55,7 +66,22 @@ def _get_slurm_node_info(cluster: str) -> List[slurm.NodeInfo]:
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
     )
-    return client.info_nodes()
+    nodes_info = client.info_nodes()
+
+    try:
+        # Nodes in a cluster are unlikely to change frequently, so cache
+        # the result for a short period of time.
+        kv_cache.add_or_update_cache_entry(
+            cache_key, json.dumps([n._asdict() for n in nodes_info]),
+            time.time() + _SLURM_NODES_INFO_CACHE_TTL)
+    except Exception as e:  # pylint: disable=broad-except
+        # Catch the error and continue.
+        # Failure to cache the result is not critical to the
+        # success of this function.
+        logger.debug(f'Failed to cache slurm nodes info for {cluster}: '
+                     f'{common_utils.format_exception(e)}')
+
+    return nodes_info
 
 
 class SlurmInstanceType:
@@ -309,7 +335,7 @@ def check_instance_fits(
     """
     # Get Slurm node list in the given cluster (region).
     try:
-        nodes = _get_slurm_node_info(cluster)
+        nodes = _get_slurm_nodes_info(cluster)
     except FileNotFoundError:
         return (False, f'Could not query Slurm cluster {cluster} '
                 f'because the Slurm configuration file '

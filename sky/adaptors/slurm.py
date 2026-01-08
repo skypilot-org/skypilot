@@ -287,15 +287,14 @@ class SlurmClient:
                 continue
             parts = line.split(SEP)
             if len(parts) != 2:
+                # We should never reach here, but just in case.
                 continue
             nodelist_str, gres_str = parts
             if not gres_str or gres_str == 'N/A':
                 continue
 
             for node in hostlist.expand_hostlist(nodelist_str):
-                if node not in nodes_to_gres:
-                    nodes_to_gres[node] = []
-                nodes_to_gres[node].append(gres_str)
+                nodes_to_gres.setdefault(node, []).append(gres_str)
 
         return nodes_to_gres
 
