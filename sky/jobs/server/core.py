@@ -899,8 +899,10 @@ def queue_v2(
         db_fields = fields
         needs_user_name = False
         if fields is not None:
-            # user_name is not a DB field - it's computed from user_hash
-            non_db_fields = {'user_name', 'user_yaml', 'details'}
+            # Non-DB fields include user_name (computed from user_hash),
+            # user_yaml, details, and cluster handle fields (cloud, region,
+            # zone, infra, accelerators, cluster_resources, etc.)
+            non_db_fields = managed_job_utils.get_non_db_fields()
             needs_user_name = 'user_name' in fields
             db_fields = [f for f in fields if f not in non_db_fields]
             # Ensure user_hash is included if we need to populate user_name
