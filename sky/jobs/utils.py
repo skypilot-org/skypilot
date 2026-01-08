@@ -2190,13 +2190,26 @@ class ManagedJobCodeGen:
 
       >> codegen = ManagedJobCodeGen.show_jobs(...)
     """
+    # NOTE: The _PREFIX imports controller_api which is a lightweight module
+    # that lazily imports heavy dependencies. For backward compatibility with
+    # older controllers that don't have controller_api, we fall back to
+    # importing utils and state directly.
+    # We use direct module imports (sky.jobs.controller_api) instead of package
+    # imports (from sky.jobs import controller_api) to avoid triggering
+    # sky.jobs.__init__.py which would load heavy dependencies.
     _PREFIX = textwrap.dedent("""\
         import sys
-        from sky.jobs import utils
-        from sky.jobs import state as managed_job_state
-        from sky.jobs import constants as managed_job_constants
+        from sky.jobs.constants import MANAGED_JOBS_VERSION
+        managed_job_version = MANAGED_JOBS_VERSION
 
-        managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
+        # Use lightweight controller_api module if available (reduces startup time)
+        try:
+            import sky.jobs.controller_api as utils
+            import sky.jobs.controller_api as managed_job_state
+        except ImportError:
+            # Fallback for older controllers without controller_api
+            from sky.jobs import utils
+            from sky.jobs import state as managed_job_state
         """)
 
     @classmethod
