@@ -1967,6 +1967,7 @@ def test_managed_jobs_exit_code_recovery_single(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_remote_server
 @pytest.mark.managed_jobs
 def test_managed_job_labels_in_queue(generic_cloud: str):
     """Test that labels in managed job YAML are stored and returned in queue."""
@@ -2024,7 +2025,7 @@ def test_managed_job_labels_in_queue(generic_cloud: str):
 
         run: |
           echo "Hello from labeled job"
-          sleep 10
+          sleep 10000
         """)
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
