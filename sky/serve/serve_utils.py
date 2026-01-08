@@ -931,6 +931,7 @@ def get_next_cluster_name(
 
     with filelock.FileLock(get_service_filelock_path(service_name)):
         free_resources = get_free_worker_resources(service_name)
+        logger.debug(f'Free resources: {free_resources!r}')
         logger.debug(f'Get next cluster name for pool {service_name!r}')
         ready_replicas = get_ready_replicas(service_name)
 
@@ -951,16 +952,17 @@ def get_next_cluster_name(
         # 1. There are task resources.
         # 2. The first task resource has some resources listed.
         # 3. There are free resources.
-        # 4. The first free resource has some resources listed.
+        # 4. Any free resource has some resources listed.
         resource_aware = len(task_resources_list) > 0
         resource_aware = (resource_aware and
                           not _is_empty_resource(task_resources_list[0]))
         resource_aware = resource_aware and free_resources is not None
         if free_resources is not None:
-            first_free_resource = list(free_resources.values())[0]
-            if first_free_resource is not None:
-                resource_aware = resource_aware and not _is_empty_resource(
-                    first_free_resource)
+            for free_resource in free_resources.values():
+                if free_resource is not None and not _is_empty_resource(
+                        free_resource):
+                    resource_aware = True
+                    break
             else:
                 resource_aware = False
         else:

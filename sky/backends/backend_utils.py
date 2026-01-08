@@ -3454,6 +3454,8 @@ def get_clusters(
             handle = record['handle']
             record['nodes'] = handle.launched_nodes
             if handle.launched_resources is None:
+                # Set default values when launched_resources is None
+                record['labels'] = {}
                 continue
             record['cloud'] = (f'{handle.launched_resources.cloud}'
                                if handle.launched_resources.cloud else None)
@@ -3466,6 +3468,8 @@ def get_clusters(
             record['accelerators'] = (
                 f'{handle.launched_resources.accelerators}'
                 if handle.launched_resources.accelerators else None)
+            record['labels'] = (handle.launched_resources.labels
+                                if handle.launched_resources.labels else {})
             if not include_handle:
                 record.pop('handle', None)
 

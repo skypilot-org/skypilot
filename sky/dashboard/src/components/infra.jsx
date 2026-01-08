@@ -27,6 +27,7 @@ import {
   formatMemory,
   calculateAggregatedResource,
 } from '@/utils/resourceUtils';
+import { buildContextStatsKey } from '@/utils/infraUtils';
 import {
   getWorkspaceInfrastructure,
   getCloudInfrastructure,
@@ -240,10 +241,10 @@ export function InfrastructureSection({
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
                         CPU
                       </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/6">
                         Memory
                       </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/4">
+                      <th className="p-3 text-left font-medium text-gray-600 w-1/6">
                         GPU Types
                       </th>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/8">
@@ -263,9 +264,10 @@ export function InfrastructureSection({
                       );
 
                       // Get cluster and job counts for this context
-                      const contextStatsKey = isSSH
-                        ? `ssh/${context.replace(/^ssh-/, '')}` // Remove ssh- prefix and add ssh/ prefix
-                        : `kubernetes/${context}`; // Add kubernetes/ prefix
+                      const contextStatsKey = buildContextStatsKey(context, {
+                        isSSH,
+                        isSlurm,
+                      });
                       const stats = contextStats[contextStatsKey] || {
                         clusters: 0,
                         jobs: 0,
@@ -2428,8 +2430,16 @@ export function GPUs() {
 
   // Render context details
   const renderContextDetails = (contextName) => {
-    const gpusInContext = groupedPerContextGPUs[contextName] || [];
-    const nodesInContext = groupedPerNodeGPUs[contextName] || [];
+    // Check if this is a Slurm cluster
+    const isSlurmCluster = slurmClusters.includes(contextName);
+
+    // Get the appropriate GPU and node data based on context type
+    const gpusInContext = isSlurmCluster
+      ? groupedPerClusterSlurmGPUs[contextName] || []
+      : groupedPerContextGPUs[contextName] || [];
+    const nodesInContext = isSlurmCluster
+      ? groupedPerNodeSlurmGPUs[contextName] || []
+      : groupedPerNodeGPUs[contextName] || [];
 
     if (kubeLoading && !kubeDataLoaded) {
       return (
@@ -2459,7 +2469,7 @@ export function GPUs() {
       );
     }
 
-    // For Kubernetes contexts, show the regular context details
+    // For Kubernetes and Slurm contexts, show the regular context details
     return (
       <ContextDetails
         contextName={contextName}
@@ -2638,9 +2648,9 @@ export function GPUs() {
         groupedPerContextGPUs={groupedPerClusterSlurmGPUs}
         groupedPerNodeGPUs={groupedPerNodeSlurmGPUs}
         handleContextClick={handleContextClick}
-        contextStats={{}}
-        jobsData={{}}
-        isJobsDataLoading={false}
+        contextStats={contextStats}
+        jobsData={sshAndKubeJobsData}
+        isJobsDataLoading={sshAndKubeJobsDataLoading}
         isSSH={false}
         isSlurm={true}
         contextWorkspaceMap={{}}
@@ -2689,23 +2699,23 @@ export function GPUs() {
 
     // Always add all sections (they handle their own loading/empty states)
 
-    // Add Slurm section (always show) - Priority 1 to show at top
-    const slurmHasActivity = slurmClusters.length > 0;
-    sections.push({
-      name: 'Slurm',
-      render: renderSlurmInfrastructure,
-      hasActivity: slurmHasActivity,
-      priority: 1, // Slurm gets priority 1 within same activity level
-    });
-
-    // Add Kubernetes section (always show)
+    // Add Kubernetes section (always show) - Priority 1 to show at top
     // Kubernetes section is active if there are any contexts available (similar to Cloud logic)
     const kubeHasActivity = kubeContexts.length > 0;
     sections.push({
       name: 'Kubernetes',
       render: renderKubernetesInfrastructure,
       hasActivity: kubeHasActivity,
-      priority: 2, // Kubernetes gets priority 2 within same activity level
+      priority: 1, // Kubernetes gets priority 1 within same activity level
+    });
+
+    // Add Slurm section (always show)
+    const slurmHasActivity = slurmClusters.length > 0;
+    sections.push({
+      name: 'Slurm',
+      render: renderSlurmInfrastructure,
+      hasActivity: slurmHasActivity,
+      priority: 2, // Slurm gets priority 2 within same activity level
     });
 
     // Add Cloud section (always show)
