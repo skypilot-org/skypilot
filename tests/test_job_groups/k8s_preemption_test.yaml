@@ -1,0 +1,34 @@
+# Long-running test for preemption/recovery testing
+# Use this to test pod deletion, node drain, and other failure scenarios
+---
+name: k8s-preemption-test
+placement: SAME_INFRA
+execution: parallel
+---
+name: long-running-a
+resources:
+  cpus: 2
+  infra: kubernetes
+run: |
+  echo "Job A starting at $(date)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Hostname: $(hostname)"
+  for i in {1..60}; do
+    echo "Job A heartbeat $i at $(date)"
+    sleep 10
+  done
+  echo "Job A completed at $(date)"
+---
+name: long-running-b
+resources:
+  cpus: 2
+  infra: kubernetes
+run: |
+  echo "Job B starting at $(date)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Hostname: $(hostname)"
+  for i in {1..60}; do
+    echo "Job B heartbeat $i at $(date)"
+    sleep 10
+  done
+  echo "Job B completed at $(date)"

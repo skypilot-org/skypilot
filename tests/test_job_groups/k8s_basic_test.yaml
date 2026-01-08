@@ -1,0 +1,31 @@
+# Basic 2-job test for quick smoke testing
+---
+name: k8s-basic-test
+placement: SAME_INFRA
+execution: parallel
+---
+name: job-a
+resources:
+  cpus: 2
+  memory: 4+
+  infra: kubernetes
+run: |
+  echo "Job A Starting"
+  echo "SKYPILOT_JOBGROUP_NAME: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Hostname: $(hostname)"
+  date
+  sleep 30
+  echo "Job A Done"
+---
+name: job-b
+resources:
+  cpus: 2
+  memory: 4+
+  infra: kubernetes
+run: |
+  echo "Job B Starting"
+  echo "SKYPILOT_JOBGROUP_NAME: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Hostname: $(hostname)"
+  date
+  sleep 30
+  echo "Job B Done"

@@ -1,0 +1,55 @@
+# Scale test: 5 jobs in a single JobGroup
+---
+name: k8s-scale-test
+placement: SAME_INFRA
+execution: parallel
+---
+name: job-1
+resources:
+  cpus: 1
+  infra: kubernetes
+run: |
+  echo "Job 1 starting on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  sleep 20
+  echo "Job 1 done"
+---
+name: job-2
+resources:
+  cpus: 1
+  infra: kubernetes
+run: |
+  echo "Job 2 starting on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  sleep 20
+  echo "Job 2 done"
+---
+name: job-3
+resources:
+  cpus: 1
+  infra: kubernetes
+run: |
+  echo "Job 3 starting on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  sleep 20
+  echo "Job 3 done"
+---
+name: job-4
+resources:
+  cpus: 1
+  infra: kubernetes
+run: |
+  echo "Job 4 starting on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  sleep 20
+  echo "Job 4 done"
+---
+name: job-5
+resources:
+  cpus: 1
+  infra: kubernetes
+run: |
+  echo "Job 5 starting on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  sleep 20
+  echo "Job 5 done"

@@ -1,0 +1,24 @@
+# Test JobGroup behavior when one job fails
+---
+name: k8s-failure-test
+placement: SAME_INFRA
+execution: parallel
+---
+name: success-job
+resources:
+  cpus: 2
+  infra: kubernetes
+run: |
+  echo "Success job running"
+  sleep 30
+  echo "Success job completed"
+---
+name: failing-job
+resources:
+  cpus: 2
+  infra: kubernetes
+run: |
+  echo "Failing job starting"
+  sleep 10
+  echo "About to fail..."
+  exit 1

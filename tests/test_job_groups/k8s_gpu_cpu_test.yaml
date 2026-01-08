@@ -1,0 +1,43 @@
+# GPU + CPU heterogeneous test
+# Skip if no GPUs available in cluster
+---
+name: k8s-gpu-cpu-group
+placement: SAME_INFRA
+execution: parallel
+---
+name: gpu-trainer
+resources:
+  accelerators: T4:1  # Adjust GPU type based on availability
+  infra: kubernetes
+run: |
+  echo "GPU trainer starting on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+
+  # Check GPU availability
+  echo "Checking GPU..."
+  nvidia-smi || echo "nvidia-smi not available"
+
+  # Simulate GPU training
+  for i in {1..10}; do
+    echo "Training iteration $i"
+    sleep 5
+  done
+
+  echo "GPU trainer done"
+---
+name: cpu-preprocessor
+resources:
+  cpus: 4
+  infra: kubernetes
+run: |
+  echo "CPU preprocessor starting on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Can reach trainer at: gpu-trainer-0.${SKYPILOT_JOBGROUP_NAME}"
+
+  # Simulate data preprocessing
+  for i in {1..10}; do
+    echo "Preprocessing batch $i"
+    sleep 5
+  done
+
+  echo "CPU preprocessor done"
