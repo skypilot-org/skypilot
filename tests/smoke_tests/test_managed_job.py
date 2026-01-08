@@ -2029,7 +2029,6 @@ def test_managed_job_labels_in_queue(generic_cloud: str):
         test = smoke_tests_utils.Test(
             'managed_job_labels_in_queue',
             [
-                test_func,
                 f'sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path} -y -d',
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
