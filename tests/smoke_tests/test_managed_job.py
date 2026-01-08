@@ -1983,3 +1983,101 @@ def test_large_production_performance(request):
         timeout=30 * 60,  # 30 minutes for data injection and testing
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing JobGroups ----------
+
+
+def _render_job_group_yaml(yaml_template_path: str, name: str,
+                           cloud: str) -> str:
+    """Render a JobGroup YAML template with name and cloud substitution."""
+    with open(yaml_template_path, 'r') as f:
+        template_content = f.read()
+
+    template = jinja2.Template(template_content)
+    rendered = template.render(name=name, cloud=cloud)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml',
+                                     mode='w',
+                                     delete=False) as f:
+        f.write(rendered)
+        f.flush()
+        return f.name
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_basic(generic_cloud: str):
+    """Test basic JobGroup with 2 parallel jobs."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_basic.yaml', name, generic_cloud)
+
+    test = smoke_tests_utils.Test(
+        'job_group_basic',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            f'sky jobs queue | grep {name} | grep SUCCEEDED',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_networking(generic_cloud: str):
+    """Test JobGroup cross-job networking via hostname resolution."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_networking.yaml', name, generic_cloud)
+
+    test = smoke_tests_utils.Test(
+        'job_group_networking',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            f'sky jobs logs -n {name} --no-follow | grep "SUCCESS: Connected to server"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_rl_architecture(generic_cloud: str):
+    """Test JobGroup with RL-style heterogeneous architecture (4 components)."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_rl_architecture.yaml', name, generic_cloud)
+
+    test = smoke_tests_utils.Test(
+        'job_group_rl_architecture',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600),
+            f'sky jobs queue | grep {name} | grep SUCCEEDED',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
