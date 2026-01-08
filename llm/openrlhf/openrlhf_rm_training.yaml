@@ -1,5 +1,5 @@
 # Adapted from https://openrlhf.readthedocs.io/en/latest/rl.html#reward-model-training
-# To run simply run the following command in a SkyPilot environment (with GCP configured):
+# Usage:
 # WANDB_TOKEN=xxx sky launch -c open-rlhf-rm open-rlhf-rm-training.yaml --secret WANDB_TOKEN
 
 resources:
