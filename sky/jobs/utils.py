@@ -1560,6 +1560,7 @@ def get_managed_job_queue(
                     handle.launched_resources.region,
                     handle.launched_resources.zone).formatted_str()
                 job['accelerators'] = handle.launched_resources.accelerators
+                job['labels'] = handle.launched_resources.labels
             else:
                 # FIXME(zongheng): display the last cached values for these.
                 job['cluster_resources'] = '-'
@@ -1568,6 +1569,7 @@ def get_managed_job_queue(
                 job['region'] = '-'
                 job['zone'] = '-'
                 job['infra'] = '-'
+                job['labels'] = None
 
         if not fields or 'details' in fields:
             # Add details about schedule state / backoff.
