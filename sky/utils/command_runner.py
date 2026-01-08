@@ -216,10 +216,6 @@ class SshMode(enum.Enum):
     LOGIN = 2
 
 
-def _wrap_command_to_run_in_background(cmd: str) -> str:
-    return f'nohup {cmd} > /dev/null 2>&1 &'
-
-
 class CommandRunner:
     """Runner for commands to be executed on the cluster."""
 
@@ -261,6 +257,7 @@ class CommandRunner:
         skip_num_lines: int,
         source_bashrc: bool = False,
         use_login: bool = True,
+        run_in_background: bool = False,
     ) -> str:
         """Returns the command to run."""
         if isinstance(cmd, list):
@@ -291,7 +288,11 @@ class CommandRunner:
             ]
         if not separate_stderr:
             command.append('2>&1')
+        if run_in_background:
+            command = ['nohup'] + command + ['&']
         if not process_stream and skip_num_lines:
+            assert not run_in_background, (
+                'run_in_background and skip_num_lines cannot be used together')
             command += [
                 # A hack to remove the following bash warnings (twice):
                 #  bash: cannot set terminal process group
@@ -1012,13 +1013,13 @@ class SSHCommandRunner(CommandRunner):
             proc = subprocess_utils.run(command, shell=False, check=False)
             return proc.returncode, '', ''
 
-        command_str = self._get_command_to_run(cmd,
-                                               process_stream,
-                                               separate_stderr,
-                                               skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc)
-        if run_in_background:
-            command_str = _wrap_command_to_run_in_background(command_str)
+        command_str = self._get_command_to_run(
+            cmd,
+            process_stream,
+            separate_stderr,
+            skip_num_lines=skip_num_lines,
+            source_bashrc=source_bashrc,
+            run_in_background=run_in_background)
         command = base_ssh_command + [shlex.quote(command_str)]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
@@ -1281,13 +1282,13 @@ class KubernetesCommandRunner(CommandRunner):
             kubectl_base_command.append('-i')
         kubectl_base_command += [*kubectl_args, '--']
 
-        command_str = self._get_command_to_run(cmd,
-                                               process_stream,
-                                               separate_stderr,
-                                               skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc)
-        if run_in_background:
-            command_str = _wrap_command_to_run_in_background(command_str)
+        command_str = self._get_command_to_run(
+            cmd,
+            process_stream,
+            separate_stderr,
+            skip_num_lines=skip_num_lines,
+            source_bashrc=source_bashrc,
+            run_in_background=run_in_background)
         command = kubectl_base_command + [
             # It is important to use /bin/bash -c here to make sure we quote the
             # command to be run properly. Otherwise, directly appending commands
@@ -1406,14 +1407,14 @@ class LocalProcessCommandRunner(CommandRunner):
         """Use subprocess to run the command."""
         del port_forward, ssh_mode, connect_timeout  # Unused.
 
-        command_str = self._get_command_to_run(cmd,
-                                               process_stream,
-                                               separate_stderr,
-                                               skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc,
-                                               use_login=False)
-        if run_in_background:
-            command_str = _wrap_command_to_run_in_background(command_str)
+        command_str = self._get_command_to_run(
+            cmd,
+            process_stream,
+            separate_stderr,
+            skip_num_lines=skip_num_lines,
+            source_bashrc=source_bashrc,
+            use_login=False,
+            run_in_background=run_in_background)
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
         os.makedirs(log_dir, exist_ok=True)

@@ -1221,8 +1221,9 @@ class JobLibCodeGen:
     @classmethod
     def wait_for_job(cls, job_id: int) -> str:
         code = [
-            ('if hasattr(job_lib, "wait_for_job_completion"):\n'
-             f'  job_lib.wait_for_job_completion({job_id!r})'),
+            # TODO(kevin): backward compatibility, remove in 0.13.0.
+            (f'job_lib.wait_for_job_completion({job_id!r}) if '
+             'hasattr(job_lib, "wait_for_job_completion") else None'),
         ]
         return cls._build(code)
 
