@@ -177,7 +177,7 @@ Resource Requests
      - ``accelerators: H100:8``
      - GPU type and count
    * - ``--time=24:00:00``
-     - ``autostop: {idle_minutes: 60}``
+     - ``autostop: 60m``
      - Idle-based timeout
 
 Example with resource constraints:
