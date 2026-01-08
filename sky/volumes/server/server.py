@@ -32,15 +32,12 @@ async def volume_list(request: fastapi.Request, refresh: bool = False) -> None:
     } if auth_user else {}
     request_body = payloads.VolumeListBody(refresh=refresh,
                                            **auth_user_env_vars_kwargs)
-    # Use LONG schedule type if refreshing to allow time for API calls
-    schedule_type = (requests_lib.ScheduleType.LONG
-                     if refresh else requests_lib.ScheduleType.SHORT)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.VOLUME_LIST,
         request_body=request_body,
-        func=lambda: core.volume_list(refresh=refresh),
-        schedule_type=schedule_type,
+        func=core.volume_list,
+        schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
 

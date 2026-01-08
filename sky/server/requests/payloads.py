@@ -487,8 +487,6 @@ class VolumeDeleteBody(RequestBody):
 
 class VolumeListBody(RequestBody):
     """The request body for the volume list endpoint."""
-    # If True, refresh volume state from cloud APIs before returning.
-    # If False (default), return cached data from the database.
     refresh: bool = False
 
 
