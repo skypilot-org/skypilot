@@ -887,7 +887,7 @@ class SlurmCodeGen(TaskCodeGen):
                     # https://support.schedmd.com/show_bug.cgi?id=14298
                     # https://github.com/huggingface/datatrove/issues/248
                     srun_cmd = (
-                        'unset $(env | awk -F= "/^SLURM_/ {{print $1}}") && '
+                        "unset $(env | awk -F= '/^SLURM_/ {{print $1}}') && "
                         f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid={self._slurm_job_id} '
                         f'--job-name=sky-{self.job_id}{{job_suffix}} --ntasks-per-node=1 {{extra_flags}} '
                         f'{{constants.SKY_SLURM_PYTHON_CMD}} -m sky.skylet.executor.slurm {{runner_args}}'
