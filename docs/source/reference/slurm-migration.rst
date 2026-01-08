@@ -473,8 +473,8 @@ Priorities and Quotas on Kubernetes
 
 For advanced scheduling similar to Slurm's fair-share and priority systems:
 
-- **Kueue integration**: SkyPilot supports :ref:`Kueue <kubernetes-kueue>` for queue-based scheduling and quotas
-- **Dynamic Workload Scheduler (DWS)**: For workloads requiring capacity reservations
+- **Priority classes**: Use Kubernetes :ref:`priority classes <kubernetes-priorities>` for job preemption
+- **Kueue integration**: SkyPilot supports :ref:`Kueue <kubernetes-kueue>` for advanced queuing, quotas and preemption
 
 These features allow cluster admins to implement fair-share policies, user quotas, and priority-based scheduling similar to Slurm.
 
