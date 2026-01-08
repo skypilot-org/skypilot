@@ -218,6 +218,10 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
+        # If a previous middleware already authenticated the user, pass through
+        if request.state.auth_user is not None:
+            return await call_next(request)
+
         if managed_job_utils.is_consolidation_mode(
         ) and loopback.is_loopback_request(request):
             return await call_next(request)
@@ -225,10 +229,6 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if request.url.path.startswith('/api/health'):
             # Try to set the auth user from basic auth
             _try_set_basic_auth_user(request)
-            return await call_next(request)
-
-        # If a previous middleware already authenticated the user, pass through
-        if request.state.auth_user is not None:
             return await call_next(request)
 
         auth_header = request.headers.get('authorization')
