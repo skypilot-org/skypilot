@@ -1477,7 +1477,7 @@ def get_managed_job_queue(
     total_no_filter = managed_job_state.get_managed_jobs_total()
 
     status_counts = managed_job_state.get_status_count_with_filters(
-        fields=fields,
+        fields=updated_fields,
         job_ids=job_ids,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,
