@@ -405,8 +405,8 @@ describe('Memoization Performance Tests', () => {
 
   describe('Timing measurements', () => {
     test('Measures actual time difference for render cycles', () => {
-      const ROW_COUNT = 200; // Larger table for measurable timing
-      const UPDATE_COUNT = 50; // More updates for better timing accuracy
+      const ROW_COUNT = 50; // Realistic: max page size option in dashboard
+      const UPDATE_COUNT = 30; // ~1 minute of polling at 2s intervals
 
       // Simulate a more realistic row with multiple elements
       const NonMemoRow = ({ item, onAction }) => {
