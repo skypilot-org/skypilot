@@ -3,6 +3,12 @@ kind: Deployment
 metadata:
   name: {{ .Release.Name }}-api-server
   namespace: {{ .Release.Namespace }}
+  labels:
+    tier: skypilot
+    component: skypilot-api
+    {{- with .Values.global.labels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   # Note: replicas > 1 is not well tested.
   replicas: {{ .Values.apiService.replicas }}

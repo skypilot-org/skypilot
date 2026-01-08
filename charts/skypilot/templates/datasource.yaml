@@ -7,6 +7,11 @@ metadata:
   labels:
     app: {{ .Release.Name }}-api
     grafana_datasource: "true"
+    tier: skypilot
+    component: skypilot-datasource-cm
+    {{- with .Values.global.labels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
 data:
   prometheus.yaml: |-
     apiVersion: 1

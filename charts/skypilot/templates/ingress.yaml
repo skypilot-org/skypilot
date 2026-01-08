@@ -9,6 +9,12 @@ kind: Ingress
 metadata:
   name: {{ .Release.Name }}-ingress
   namespace: {{ .Release.Namespace }}
+  labels:
+    tier: skypilot
+    component: skypilot-ingress
+    {{- with .Values.global.labels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
   annotations:
     {{- if not $useNewIngressClass }}
     kubernetes.io/ingress.class: {{ .Values.ingress.ingressClassName }}

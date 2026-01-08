@@ -9,7 +9,9 @@ global:
   # Specify extra environment variables to set on all components in the chart.
   # @schema type: [array, null]; item: object
   extraEnvs: null
-
+  # Specify global labels to apply to all objects in the chart
+  # @schema type: [object, null]
+  labels: null
 
 apiService:
   # Docker image to use for the API server. The default value will be updated by the release pipeline to be consistent with the SkyPilot release or nightly build.

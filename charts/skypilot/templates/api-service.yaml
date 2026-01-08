@@ -3,6 +3,12 @@ kind: Service
 metadata:
   name: {{ .Release.Name }}-api-service
   namespace: {{ .Release.Namespace }}
+  labels:
+    tier: skypilot
+    component: skypilot-api-svc
+    {{- with .Values.global.labels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   type: ClusterIP  # Use clusterIP to allow ingress to authenticate
   ports:
