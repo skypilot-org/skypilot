@@ -30,8 +30,9 @@ export const evaluateCondition = (item, filter) => {
 
     // Check if filter is in key:value format
     if (filterValue.includes(':')) {
-      const [key, val] = filterValue.split(':').map((s) => s.trim());
-      return labels[key] === val;
+      const [key, ...valParts] = filterValue.split(':');
+      const val = valParts.join(':').trim();
+      return labels[key.trim()] === val;
     } else {
       // Match any label value
       return Object.values(labels).some((val) =>

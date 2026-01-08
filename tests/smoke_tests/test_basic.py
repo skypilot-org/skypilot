@@ -773,8 +773,8 @@ def test_cluster_labels_in_status(generic_cloud: str):
                     cluster_status=[sky.ClusterStatus.UP],
                     timeout=600),
                 lambda: check_labels_in_status(),
-                f'sky down -y {name}',
             ],
+            teardown=f'sky down -y {name}',
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
             timeout=15 * 60,
         )

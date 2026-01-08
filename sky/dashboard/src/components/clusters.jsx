@@ -702,51 +702,6 @@ export function ClusterTable({
     setIsInitialLoad(false);
   }, [setLoading, showHistory, historyDays, setOptionValues]);
 
-  // Utility: checks a condition based on operator
-  const evaluateCondition = (item, filter) => {
-    const { property, operator, value } = filter;
-
-    if (!value) return true; // skip empty filters
-
-    // Global search: check all values
-    if (!property) {
-      const strValue = value.toLowerCase();
-      return Object.values(item).some((val) =>
-        val?.toString().toLowerCase().includes(strValue)
-      );
-    }
-
-    const propertyLower = property.toLowerCase();
-
-    // Special handling for labels filtering
-    if (propertyLower === 'labels') {
-      const labels = item.labels || {};
-      const filterValue = value.toString().toLowerCase();
-
-      // Check if filter is in key:value format
-      if (filterValue.includes(':')) {
-        const [key, val] = filterValue.split(':').map((s) => s.trim());
-        return labels[key] === val;
-      } else {
-        // Match any label value
-        return Object.values(labels).some((val) =>
-          val?.toString().toLowerCase().includes(filterValue)
-        );
-      }
-    }
-
-    const itemValue = item[propertyLower]?.toString().toLowerCase();
-    const filterValue = value.toString().toLowerCase();
-
-    switch (operator) {
-      case '=':
-        return itemValue === filterValue;
-      case ':':
-        return itemValue?.includes(filterValue);
-      default:
-        return true;
-    }
-  };
 
   // Use useMemo to compute sorted data
   const sortedData = React.useMemo(() => {

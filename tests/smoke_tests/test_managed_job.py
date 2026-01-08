@@ -2046,8 +2046,8 @@ def test_managed_job_labels_in_queue(generic_cloud: str):
                     ],
                     timeout=120),
                 lambda: check_labels_in_queue(),
-                f'sky jobs cancel -y -n {name}',
             ],
+            teardown=f'sky jobs cancel -y -n {name}',
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
             timeout=10 * 60,
         )
