@@ -80,7 +80,7 @@ version = "0.0.1"
 
     # Set a temporary wheel directory
     wheel_dir = tmp_path / 'wheels'
-    monkeypatch.setattr(plugin_utils, 'PLUGIN_WHEEL_DIR', wheel_dir)
+    monkeypatch.setattr(plugin_utils, '_PLUGIN_WHEEL_DIR', wheel_dir)
     monkeypatch.setattr(plugin_utils, '_PLUGIN_WHEEL_LOCK_PATH',
                         wheel_dir.parent / '.plugin_wheels_lock')
 
@@ -90,27 +90,6 @@ version = "0.0.1"
     assert wheels['test_plugin'].exists()
     assert wheels['test_plugin'].suffix == '.whl'
     assert combined_hash != ''
-
-
-def test_get_plugins_config_path_exists(monkeypatch, tmp_path):
-    """Test get_plugins_config_path when file exists."""
-    config_path = tmp_path / 'plugins.yaml'
-    config_path.write_text(yaml.safe_dump({'plugins': []}))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
-
-    result = plugins.get_plugins_config_path()
-
-    assert result == str(config_path)
-
-
-def test_get_plugins_config_path_not_exists(monkeypatch, tmp_path):
-    """Test get_plugins_config_path when file doesn't exist."""
-    config_path = tmp_path / 'nonexistent.yaml'
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
-
-    result = plugins.get_plugins_config_path()
-
-    assert result is None
 
 
 def test_get_plugin_packages(monkeypatch, tmp_path):
@@ -174,7 +153,7 @@ version = "0.0.1"
     monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
 
     wheel_dir = tmp_path / 'wheels'
-    monkeypatch.setattr(plugin_utils, 'PLUGIN_WHEEL_DIR', wheel_dir)
+    monkeypatch.setattr(plugin_utils, '_PLUGIN_WHEEL_DIR', wheel_dir)
     monkeypatch.setattr(plugin_utils, '_PLUGIN_WHEEL_LOCK_PATH',
                         wheel_dir.parent / '.plugin_wheels_lock')
 

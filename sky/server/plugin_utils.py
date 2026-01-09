@@ -19,14 +19,16 @@ from sky.server import plugins
 logger = sky_logging.init_logger(__name__)
 
 # Directory for storing built plugin wheels
-PLUGIN_WHEEL_DIR = pathlib.Path(os.path.expanduser('~/.sky/plugins/wheels'))
-_PLUGIN_WHEEL_LOCK_PATH = PLUGIN_WHEEL_DIR.parent / '.plugin_wheels_lock'
+_PLUGIN_WHEEL_DIR = pathlib.Path(os.path.expanduser('~/.sky/plugins/wheels'))
+_PLUGIN_WHEEL_LOCK_PATH = _PLUGIN_WHEEL_DIR.parent / '.plugin_wheels_lock'
+# Remote directory for plugin wheels
+_REMOTE_PLUGINS_WHEEL_DIR = '~/.sky/plugins/wheels'
 
 
 def _get_package_name_from_path(package_path: str) -> str:
     """Extract package name from package path.
 
-    Looks for the package name in pyproject.toml or setup.py.
+    Looks for the package name in pyproject.toml.
     Falls back to the directory name if not found.
     """
     package_path = os.path.expanduser(package_path)
@@ -60,7 +62,8 @@ def _compute_package_hash(package_path: str) -> str:
         dirs[:] = [
             d for d in dirs
             if d not in ('__pycache__', '.git', '.tox', 'dist', 'build',
-                         '*.egg-info', '.eggs', 'venv', '.venv')
+                         '.eggs', 'venv',
+                         '.venv') and not d.endswith('.egg-info')
         ]
 
         for filename in sorted(files):
@@ -120,7 +123,7 @@ def _build_plugin_wheel(package_path: str) -> pathlib.Path:
         wheel_file = wheel_files[0]
 
         # Create output directory with hash
-        output_dir = PLUGIN_WHEEL_DIR / package_hash
+        output_dir = _PLUGIN_WHEEL_DIR / package_hash
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Copy wheel to output directory
@@ -146,7 +149,7 @@ def _build_plugin_wheels() -> Tuple[Dict[str, pathlib.Path], str]:
         return {}, ''
 
     # Ensure wheel directory exists
-    PLUGIN_WHEEL_DIR.mkdir(parents=True, exist_ok=True)
+    _PLUGIN_WHEEL_DIR.mkdir(parents=True, exist_ok=True)
 
     wheels: Dict[str, pathlib.Path] = {}
     combined_hash = hashlib.md5()
@@ -167,7 +170,7 @@ def _build_plugin_wheels() -> Tuple[Dict[str, pathlib.Path], str]:
             package_hash = _compute_package_hash(package_path)
 
             # Check if we already have a wheel for this hash
-            cached_wheel_dir = PLUGIN_WHEEL_DIR / package_hash
+            cached_wheel_dir = _PLUGIN_WHEEL_DIR / package_hash
             existing_wheels = list(cached_wheel_dir.glob(
                 '*.whl')) if cached_wheel_dir.exists() else []
 
@@ -225,13 +228,13 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
     for _, wheel_path in wheels.items():
         # File mount: upload the wheel directory to the remote cluster
         # Keep ~ in the remote path - file mount system will handle expansion
-        remote_dir = (f'{plugins.REMOTE_PLUGINS_WHEEL_DIR}/'
+        remote_dir = (f'{_REMOTE_PLUGINS_WHEEL_DIR}/'
                       f'{wheel_path.parent.name}')
         file_mounts[remote_dir] = str(wheel_path.parent)
 
         # Installation command: install the wheel on the remote cluster
         # Use ~ which will be expanded by the shell when the command runs.
-        remote_wheel_path = (f'{plugins.REMOTE_PLUGINS_WHEEL_DIR}/'
+        remote_wheel_path = (f'{_REMOTE_PLUGINS_WHEEL_DIR}/'
                              f'{wheel_path.parent.name}/{wheel_path.name}')
         # Install the wheel using uv pip
         # Note: We don't quote the path so that ~ gets expanded by the shell
@@ -249,7 +252,7 @@ def cleanup_stale_plugin_wheels(keep_hashes: Optional[List[str]] = None):
         keep_hashes: List of hash prefixes to keep. If None, keeps all
             wheels for currently configured plugins.
     """
-    if not PLUGIN_WHEEL_DIR.exists():
+    if not _PLUGIN_WHEEL_DIR.exists():
         return
 
     if keep_hashes is None:
@@ -264,7 +267,7 @@ def cleanup_stale_plugin_wheels(keep_hashes: Optional[List[str]] = None):
                     keep_hashes.append(_compute_package_hash(package_path))
 
     with filelock.FileLock(_PLUGIN_WHEEL_LOCK_PATH):
-        for item in PLUGIN_WHEEL_DIR.iterdir():
+        for item in _PLUGIN_WHEEL_DIR.iterdir():
             if item.is_dir() and item.name not in keep_hashes:
                 shutil.rmtree(item, ignore_errors=True)
                 logger.debug(f'Removed stale plugin wheel directory: {item}')
