@@ -7,14 +7,13 @@ import hashlib
 import os
 import pathlib
 import shutil
-import subprocess
-import sys
 import tempfile
 from typing import Dict, List, Optional, Tuple
 
 import filelock
 
 from sky import sky_logging
+from sky.backends import wheel_utils
 from sky.server import plugins
 
 logger = sky_logging.init_logger(__name__)
@@ -109,23 +108,7 @@ def _build_plugin_wheel(package_path: str) -> pathlib.Path:
     package_hash = _compute_package_hash(package_path)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        try:
-            subprocess.run([
-                sys.executable, '-m', 'pip', 'wheel', '--no-deps', package_path,
-                '--wheel-dir', tmp_dir
-            ],
-                           capture_output=True,
-                           check=True,
-                           text=True)
-        except subprocess.CalledProcessError as e:
-            error_msg = e.stderr
-            if 'No module named pip' in error_msg:
-                raise RuntimeError(
-                    f'pip module not found. Please install pip for your '
-                    f'Python environment ({sys.executable}).') from e
-            raise RuntimeError(
-                f'Failed to build wheel for plugin {package_name}. '
-                f'Error: {error_msg}') from e
+        wheel_utils.run_pip_wheel(package_path, tmp_dir, f'plugin {package_name}')
 
         # Find the built wheel
         wheel_files = list(pathlib.Path(tmp_dir).glob('*.whl'))
