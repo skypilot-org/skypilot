@@ -315,6 +315,30 @@ sky api start
 sky api status
 ```
 
+### Dashboard Development
+
+When making changes to the dashboard (`sky/dashboard/`), you must rebuild the dashboard before restarting the API server:
+
+```bash
+# Install dependencies (first time or after package.json changes)
+npm --prefix sky/dashboard install
+
+# Rebuild the dashboard
+npm --prefix sky/dashboard run build
+
+# Then restart the API server
+sky api stop
+sky api start
+```
+
+The dashboard is a Next.js application. For development with hot reloading:
+
+```bash
+# Run dashboard in development mode (separate from API server)
+cd sky/dashboard
+npm run dev
+```
+
 ### Mocking Remote API Server Locally
 
 To test remote API server behavior locally:
