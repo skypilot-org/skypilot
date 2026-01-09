@@ -3,7 +3,11 @@
 
 import dashboardCache from './cache';
 import { getClusters } from '@/data/connectors/clusters';
-import { getManagedJobs, getManagedJobsWithClientPagination, getPoolStatus } from '@/data/connectors/jobs';
+import {
+  getManagedJobs,
+  getManagedJobsWithClientPagination,
+  getPoolStatus,
+} from '@/data/connectors/jobs';
 import { getClusterHistory } from '@/data/connectors/clusters';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
 import {
