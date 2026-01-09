@@ -139,5 +139,4 @@ else:
                     f'Heavy modules imported at startup (should be lazy): '
                     f'{loaded_modules}\n'
                     f'These imports slow down CLI startup time significantly. '
-                    f'Use LazyImport from sky.adaptors.common instead.'
-                )
+                    f'Use LazyImport from sky.adaptors.common instead.')
