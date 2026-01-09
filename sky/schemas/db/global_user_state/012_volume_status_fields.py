@@ -1,7 +1,7 @@
-"""Columns for volume usedby information.
+"""Add volume status fields for error tracking and usage caching.
 
-Revision ID: 013
-Revises: 012
+Revision ID: 012
+Revises: 011
 Create Date: 2025-01-08
 
 """
@@ -14,20 +14,24 @@ import sqlalchemy as sa
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
-revision: str = '013'
-down_revision: Union[str, Sequence[str], None] = '012'
+revision: str = '012'
+down_revision: Union[str, Sequence[str], None] = '011'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    """Add usedby columns to volumes table.
+    """Add error_message and usedby columns to volumes table.
 
-    These columns store JSON-encoded lists of pods/clusters using the volume.
-    This allows volume_list to read from database without making API calls.
+    - error_message: Stores error/status message for NOT_READY volumes
+    - usedby_pods: JSON-encoded list of pods using the volume
+    - usedby_clusters: JSON-encoded list of clusters using the volume
     """
     with op.get_context().autocommit_block():
-        # Store as JSON text: '["pod1", "pod2"]'
+        db_utils.add_column_to_table_alembic('volumes',
+                                             'error_message',
+                                             sa.Text(),
+                                             server_default=None)
         db_utils.add_column_to_table_alembic('volumes',
                                              'usedby_pods',
                                              sa.Text(),
@@ -39,7 +43,8 @@ def upgrade():
 
 
 def downgrade():
-    """Remove usedby columns from volumes table."""
+    """Remove error_message and usedby columns from volumes table."""
     with op.get_context().autocommit_block():
+        op.drop_column('volumes', 'error_message')
         op.drop_column('volumes', 'usedby_pods')
         op.drop_column('volumes', 'usedby_clusters')
