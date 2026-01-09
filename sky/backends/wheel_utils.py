@@ -41,11 +41,11 @@ def run_pip_wheel(package_path: str,
     This is a shared utility function for building wheels using pip.
 
     Args:
-        package_path: Path to the package to build (directory with pyproject.toml
-            or setup.py).
+        package_path: Path to the package to build
+            (directory with pyproject.toml or setup.py)
         output_dir: Directory where the wheel should be placed.
-        package_name: Optional package name for error messages. If not provided,
-            uses "the package" in error messages.
+        package_name: Optional package name for error messages.
+            If not provided, uses "the package" in error messages.
 
     Raises:
         RuntimeError: If wheel building fails.
