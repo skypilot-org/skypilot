@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import termios
+import threading
 import tty
 import typing
 
@@ -20,6 +21,18 @@ else:
     websockets = adaptors_common.LazyImport('websockets')
 
 logger = sky_logging.init_logger(__name__)
+
+_INTERACTIVE_AUTH_LOCK = threading.Lock()
+_INTERACTIVE_AUTH_ASYNC_LOCK: typing.Optional[asyncio.Lock] = None
+
+
+def _get_async_lock() -> asyncio.Lock:
+    """Get or create the async lock for the current event loop."""
+    global _INTERACTIVE_AUTH_ASYNC_LOCK
+    if _INTERACTIVE_AUTH_ASYNC_LOCK is None:
+        _INTERACTIVE_AUTH_ASYNC_LOCK = asyncio.Lock()
+    return _INTERACTIVE_AUTH_ASYNC_LOCK
+
 
 SKY_INTERACTIVE_PATTERN = re.compile(r'<sky-interactive session="([^"]+)"/>')
 
@@ -162,9 +175,10 @@ def handle_interactive_auth(line: str) -> typing.Optional[str]:
         return line
 
     session_id = match.group(1)
-    # Temporarily stop any spinners to allow terminal I/O
-    with rich_utils.safe_logger():
-        asyncio.run(_handle_interactive_auth_websocket(session_id))
+    with _INTERACTIVE_AUTH_LOCK:
+        # Temporarily stop any spinners to allow terminal I/O
+        with rich_utils.safe_logger():
+            asyncio.run(_handle_interactive_auth_websocket(session_id))
 
     return None
 
@@ -184,7 +198,8 @@ async def handle_interactive_auth_async(line: str) -> typing.Optional[str]:
         return line
 
     session_id = match.group(1)
-    with rich_utils.safe_logger():
-        await _handle_interactive_auth_websocket(session_id)
+    async with _get_async_lock():
+        with rich_utils.safe_logger():
+            await _handle_interactive_auth_websocket(session_id)
 
     return None

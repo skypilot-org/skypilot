@@ -930,10 +930,8 @@ class SSHCommandRunner(CommandRunner):
                 fd_server.close()
                 if os.path.exists(fd_socket_path):
                     os.unlink(fd_socket_path)
-                try:
-                    os.close(pty_m_fd)
-                except OSError:
-                    pass  # Already closed by background thread
+                # Note: pty_m_fd is closed by handle_unix_socket_connection.
+                # Do NOT close it here - the FD number may have been reused.
                 os.close(pty_s_fd)
 
     def close_cached_connection(self) -> None:
