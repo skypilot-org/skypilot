@@ -55,6 +55,8 @@ function JobDetails() {
   const [domReady, setDomReady] = useState(false);
   const [refreshLogsFlag, setRefreshLogsFlag] = useState(0);
   const [refreshControllerLogsFlag, setRefreshControllerLogsFlag] = useState(0);
+  const [logExtractedLinks, setLogExtractedLinks] = useState({});
+  const [isLinksExpanded, setIsLinksExpanded] = useState(false);
   const isMobile = useMobile();
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
@@ -246,6 +248,8 @@ function JobDetails() {
                     isLoadingControllerLogs={isLoadingControllerLogs}
                     refreshFlag={0}
                     poolsData={poolsData}
+                    links={detailJobData.links}
+                    logExtractedLinks={logExtractedLinks}
                   />
                 </div>
               </Card>
@@ -265,6 +269,57 @@ function JobDetails() {
               }}
               wrapperClassName="mt-6"
             />
+            {/* Links Section */}
+            <div id="links-section" className="mt-6">
+              <Card>
+                <button
+                  onClick={() => setIsLinksExpanded(!isLinksExpanded)}
+                  className="flex items-center justify-between w-full px-4 py-4 text-left focus:outline-none"
+                >
+                  <div className="flex items-center">
+                    {isLinksExpanded ? (
+                      <ChevronDownIcon className="w-5 h-5 mr-2 text-gray-500" />
+                    ) : (
+                      <ChevronRightIcon className="w-5 h-5 mr-2 text-gray-500" />
+                    )}
+                    <h3 className="text-lg font-semibold">Links</h3>
+                    {detailJobData.links &&
+                      Object.keys(detailJobData.links).length > 0 && (
+                        <span className="ml-2 text-sm text-gray-500">
+                          ({Object.keys(detailJobData.links).length})
+                        </span>
+                      )}
+                  </div>
+                </button>
+                {isLinksExpanded && (
+                  <div className="px-4 pb-4">
+                    {detailJobData.links &&
+                    Object.keys(detailJobData.links).length > 0 ? (
+                      <div className="space-y-4">
+                        {Object.entries(detailJobData.links).map(
+                          ([label, url]) => (
+                            <div key={label}>
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:text-blue-800 hover:underline text-base"
+                              >
+                                {label}
+                              </a>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-gray-500 text-sm">
+                        No links found
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
+            </div>
 
             {/* Logs Section */}
             <div id="logs-section" className="mt-6">
@@ -322,6 +377,7 @@ function JobDetails() {
                     isLoadingControllerLogs={isLoadingControllerLogs}
                     refreshFlag={refreshLogsFlag}
                     poolsData={poolsData}
+                    onLinksExtracted={setLogExtractedLinks}
                   />
                 </div>
               </Card>
@@ -461,6 +517,12 @@ function ControllerLogsSection({
     </div>
   );
 }
+// URL patterns for extracting links from logs
+// Each pattern has a name (used as link label) and a regex to match entire tokens
+// Patterns use ^ and $ anchors for exact token matching
+const URL_PATTERNS = {
+  'W&B Run': /^https:\/\/wandb\.ai\/[^\/]+\/[^\/]+\/runs\/[^\/]+$/,
+};
 
 function JobDetailsContent({
   jobData,
@@ -471,6 +533,9 @@ function JobDetailsContent({
   isLoadingControllerLogs,
   refreshFlag,
   poolsData,
+  links,
+  logExtractedLinks: logExtractedLinksFromParent,
+  onLinksExtracted,
 }) {
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
   const [expandedYamlDocs, setExpandedYamlDocs] = useState({});
@@ -614,6 +679,74 @@ function JobDetailsContent({
   useEffect(() => {
     setIsLoadingControllerLogs(streamingControllerLogsLoading);
   }, [streamingControllerLogsLoading, setIsLoadingControllerLogs]);
+
+  // Persist extracted links across tab changes using a ref
+  const extractedLinksRef = useRef({});
+
+  // Extract URLs from logs using whitelisted patterns
+  // Processes line-by-line with tokenization for exact word-level matching
+  // Updates are accumulated in a ref so they persist when switching tabs
+  const logExtractedLinks = useMemo(() => {
+    // Start with previously found links
+    const extractedLinks = { ...extractedLinksRef.current };
+    const foundPatterns = new Set(Object.keys(extractedLinks));
+
+    // Process line by line to avoid creating one large string
+    for (const line of logs) {
+      // Skip if we've found all patterns
+      if (foundPatterns.size === Object.keys(URL_PATTERNS).length) {
+        break;
+      }
+
+      // Split line into tokens by whitespace and common delimiters
+      // This handles cases like: "URL: https://..." or "(https://...)"
+      const tokens = line.split(/[\s"'<>()[\]{},;]+/);
+
+      for (const token of tokens) {
+        // Clean up trailing punctuation that might be attached
+        const cleanToken = token.replace(/[.,:;!?]+$/, '');
+        if (!cleanToken) continue;
+
+        // Check each pattern against the clean token
+        for (const [linkName, pattern] of Object.entries(URL_PATTERNS)) {
+          if (foundPatterns.has(linkName)) continue;
+
+          if (pattern.test(cleanToken)) {
+            extractedLinks[linkName] = cleanToken;
+            foundPatterns.add(linkName);
+            break;
+          }
+        }
+      }
+    }
+
+    // Persist to ref so links survive tab switches
+    extractedLinksRef.current = extractedLinks;
+    return extractedLinks;
+  }, [logs]);
+
+  // Notify parent when links are extracted (for cross-component sharing)
+  useEffect(() => {
+    if (onLinksExtracted && Object.keys(logExtractedLinks).length > 0) {
+      onLinksExtracted(logExtractedLinks);
+    }
+  }, [logExtractedLinks, onLinksExtracted]);
+
+  // Combine database links with log-extracted links
+  // Use logExtractedLinksFromParent if provided (for info tab), otherwise use local extraction
+  const combinedLinks = useMemo(() => {
+    // Start with database links (they take priority if there's a conflict)
+    const combined = { ...(links || {}) };
+    // Use parent-provided links (for info tab) or locally extracted links (for logs tab)
+    const extractedToUse = logExtractedLinksFromParent || logExtractedLinks;
+    // Add log-extracted links (only if not already present)
+    for (const [key, value] of Object.entries(extractedToUse)) {
+      if (!combined[key]) {
+        combined[key] = value;
+      }
+    }
+    return combined;
+  }, [links, logExtractedLinks, logExtractedLinksFromParent]);
 
   // Auto-scroll to bottom when logs change or tab changes
   useEffect(() => {
@@ -807,7 +940,74 @@ function JobDetailsContent({
         </div>
       </div>
 
-      {/* Entrypoint section - spans both columns */}
+      {/* External Links section - full width row */}
+      <div className="col-span-2">
+        <div className="text-gray-600 font-medium text-base">
+          External Links
+        </div>
+        <div className="text-base mt-1">
+          {combinedLinks && Object.keys(combinedLinks).length > 0 ? (
+            <div className="flex flex-wrap gap-4">
+              {Object.entries(combinedLinks).map(([label, url]) => {
+                // Normalize URL - add https:// if no protocol specified
+                const normalizedUrl =
+                  url.startsWith('http://') || url.startsWith('https://')
+                    ? url
+                    : `https://${url}`;
+
+                // Check if URL points to an image
+                const imageExtensions = [
+                  '.png',
+                  '.jpg',
+                  '.jpeg',
+                  '.gif',
+                  '.webp',
+                  '.svg',
+                  '.bmp',
+                ];
+                const isImage = imageExtensions.some((ext) =>
+                  url.toLowerCase().endsWith(ext)
+                );
+
+                return (
+                  <div key={label} className="flex flex-col">
+                    <a
+                      href={normalizedUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800 hover:underline"
+                    >
+                      {label}
+                    </a>
+                    {isImage && (
+                      <a
+                        href={normalizedUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2"
+                      >
+                        <img
+                          src={normalizedUrl}
+                          alt={label}
+                          className="max-w-full max-h-48 rounded-md border border-gray-200 shadow-sm hover:shadow-md transition-shadow"
+                          onError={(e) => {
+                            // Hide the image if it fails to load
+                            e.target.style.display = 'none';
+                          }}
+                        />
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <span className="text-gray-400">-</span>
+          )}
+        </div>
+      </div>
+
+      {/* Entrypoint section - full width row */}
       {(jobData.entrypoint || jobData.dag_yaml) && (
         <div className="col-span-2">
           <div className="flex items-center">
@@ -973,6 +1173,9 @@ JobDetailsContent.propTypes = {
   isLoadingControllerLogs: PropTypes.bool,
   refreshFlag: PropTypes.number,
   poolsData: PropTypes.array,
+  links: PropTypes.object,
+  logExtractedLinks: PropTypes.object,
+  onLinksExtracted: PropTypes.func,
 };
 
 export default JobDetails;
