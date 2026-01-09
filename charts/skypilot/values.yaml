@@ -10,6 +10,10 @@ global:
   # @schema type: [array, null]; item: object
   extraEnvs: null
 
+# Override the base name of the resources created by this chart.
+# @schema type: [string, null]
+fullnameOverride: null
+
 
 apiService:
   # Docker image to use for the API server. The default value will be updated by the release pipeline to be consistent with the SkyPilot release or nightly build.

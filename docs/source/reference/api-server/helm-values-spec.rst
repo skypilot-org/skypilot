@@ -33,6 +33,7 @@ Below is the available helm value keys and the default value of each key:
 
 .. parsed-literal::
 
+  :ref:`fullnameOverride <helm-values-fullnameOverride>`: null
   :ref:`global <helm-values-global>`:
     :ref:`imageRegistry <helm-values-global-imageRegistry>`: null
     :ref:`imagePullSecrets <helm-values-global-imagePullSecrets>`: null
@@ -262,6 +263,19 @@ Below is the available helm value keys and the default value of each key:
 
 Fields
 ----------
+
+.. _helm-values-fullnameOverride:
+
+``fullnameOverride``
+~~~~~~~~~~~~~~~~~~~~
+
+Override the full name used for all resources created by this chart. By default, names are derived from the Helm release name (``Release.Name``). Set ``fullnameOverride`` to enforce a specific base name when coordinating multiple environments.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  fullnameOverride: custom-name
 
 .. _helm-values-global:
 
