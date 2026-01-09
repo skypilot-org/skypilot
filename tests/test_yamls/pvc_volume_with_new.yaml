@@ -9,6 +9,8 @@ volumes:
     labels:
       key: value
   /mnt/data3: pvc1
+  /mnt/data4:
+    size: 1Gi
 setup: |
   echo "running setup"
 
@@ -29,4 +31,10 @@ run: |
     echo "ERROR: /mnt/data3 should not be mounted!" && exit 1
   else
     echo "Expected: /mnt/data3 is not mounted (as warned)"
+  fi
+  # The following should fail since /mnt/data4 won't be mounted
+  if df -h /mnt/data4 2>/dev/null; then
+    echo "ERROR: /mnt/data4 should not be mounted!" && exit 1
+  else
+    echo "Expected: /mnt/data4 is not mounted (as warned)"
   fi

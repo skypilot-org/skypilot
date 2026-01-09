@@ -5500,20 +5500,33 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  exc_info=True)
 
                 # Check if task has new volumes not in existing cluster
-                new_volumes = []
+                new_ephemeral_volumes = []
+                new_persistent_volumes = []
                 for volume_mount in task.volume_mounts:
                     # Compare using volume_name for user-facing name
                     if volume_mount.is_ephemeral:
                         if volume_mount.path not in existing_volume_names:
-                            new_volumes.append(volume_mount.path)
+                            new_ephemeral_volumes.append(volume_mount.path)
                     elif volume_mount.volume_name not in existing_volume_names:
-                        new_volumes.append(volume_mount.volume_name)
+                        new_persistent_volumes.append(volume_mount.volume_name)
 
-                if new_volumes:
-                    volume_names_str = ', '.join(new_volumes)
+                if new_ephemeral_volumes or new_persistent_volumes:
+                    msg_parts = []
+                    if new_ephemeral_volumes:
+                        msg_parts.append(f'new ephemeral volume(s) with path '
+                                         f'{", ".join(new_ephemeral_volumes)}')
+                    if new_persistent_volumes:
+                        msg_parts.append(
+                            f'new volume(s) {", ".join(new_persistent_volumes)}'
+                        )
+
+                    volume_msg = ' and '.join(msg_parts)
+                    # Capitalize the first letter of the message
+                    volume_msg = volume_msg[0].upper() + volume_msg[1:]
+
                     logger.warning(
-                        f'{colorama.Fore.YELLOW}WARNING: New volume(s) '
-                        f'{volume_names_str} specified in task but not '
+                        f'{colorama.Fore.YELLOW}WARNING: {volume_msg} '
+                        f'specified in task but not '
                         f'mounted to existing cluster "{cluster_name}". '
                         f'These volumes will not be mounted to the cluster. '
                         f'To mount new volumes, either:\n'
