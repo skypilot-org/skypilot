@@ -60,7 +60,7 @@ SkyPilot supports two types of volumes on Kubernetes:
 
 In addition to the above, you can also mount PVCs, NFS or hostPath with Kubernetes configs. See :ref:`advanced-mount-pvc-with-kubernetes-configs` and :ref:`advanced-mount-nfs-hostpath-with-kubernetes-configs` for details.
 
-We use `SkyPilot volumes` in the following documentation to refer to the volumes managed through the ``sky`` CLI and `Kubernetes native volumes` to refer to the volumes in Kubernetes, e.g. NFS, hostPath, etc.
+We use *SkyPilot volumes* in the following documentation to refer to the volumes managed through the ``sky`` CLI and *Kubernetes native volumes* to refer to the volumes in Kubernetes, e.g. NFS, hostPath, etc.
 
 **When to use SkyPilot volumes vs Kubernetes native volumes?**
 
@@ -84,8 +84,8 @@ The choice depends on whether you want to use PVCs (Persistent Volume Claims):
   :header-rows: 1
 
   * - Feature
-    - SkyPilot Volumes (backed by PVCs)
-    - Kubernetes Native Volumes (hostPath/NFS)
+    - SkyPilot volumes (backed by PVCs)
+    - Kubernetes native volumes (hostPath/NFS)
   * - **Backend requirement**
     - ✅ Must use PVCs
     - ❌ No PVCs required
@@ -100,7 +100,7 @@ The choice depends on whether you want to use PVCs (Persistent Volume Claims):
     - ✅ Use hostPath to access storage already mounted on nodes
   * - **Use case: Direct NFS mount**
     - ❌ Not suitable
-    - ✅ Use Kubernetes NFS volume type
+    - ✅ Use Kubernetes NFS volume
 
 Persistent volumes
 ~~~~~~~~~~~~~~~~~~
@@ -612,7 +612,7 @@ Examples:
     .. tab-item:: NVMe using hostPath
       :name: kubernetes-volumes-hostpath-nvme
 
-      Mount local NVMe storage that's already mounted on the Kubernetes nodes using Kubernetes hostPath volume. This is useful for accessing high-performance local storage that's pre-configured on your nodes.
+      Mount local NVMe storage that's already mounted on the Kubernetes nodes using Kubernetes ``hostPath`` volume. This is useful for accessing high-performance local storage that's pre-configured on your nodes.
 
       **Per-task configuration:**
 
