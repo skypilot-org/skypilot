@@ -2,6 +2,7 @@
 import os
 from typing import Any, Dict, Union
 
+from sky.jobs._version import MANAGED_JOBS_VERSION
 from sky.skylet import constants as skylet_constants
 
 JOBS_CONTROLLER_TEMPLATE = 'jobs-controller.yaml.j2'
@@ -48,13 +49,6 @@ CONTROLLER_AUTOSTOP: Dict[str, Any] = {
 # now) to avoid the cluster name being too long and truncated twice during the
 # cluster creation.
 JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
-
-# The version of the lib files that jobs/utils use. Whenever there is an API
-# change for the jobs/utils, we need to bump this version and update
-# job.utils.ManagedJobCodeGen to handle the version update.
-# WARNING: If you update this due to a codegen change, make sure to make the
-# corresponding change in the ManagedJobsService AND bump the SKYLET_VERSION.
-MANAGED_JOBS_VERSION = 12
 
 # The command for setting up the jobs dashboard on the controller. It firstly
 # checks if the systemd services are available, and if not (e.g., Kubernetes

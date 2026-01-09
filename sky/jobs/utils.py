@@ -2199,7 +2199,7 @@ class ManagedJobCodeGen:
     # sky.jobs.__init__.py which would load heavy dependencies.
     _PREFIX = textwrap.dedent("""\
         import sys
-        from sky.jobs.constants import MANAGED_JOBS_VERSION
+        from sky.jobs._version import MANAGED_JOBS_VERSION
         managed_job_version = MANAGED_JOBS_VERSION
 
         # Use lightweight controller_api module if available (reduces startup time)

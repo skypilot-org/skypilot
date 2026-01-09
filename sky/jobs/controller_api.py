@@ -14,9 +14,10 @@ Instead of:
     from sky.jobs import utils  # Heavy imports at module load
     from sky.jobs import state  # SQLAlchemy imports at module load
 """
-# Import directly from the module file to avoid triggering sky.jobs.__init__.py
-# which would load heavy dependencies through sky.jobs.client.sdk
-from sky.jobs.constants import MANAGED_JOBS_VERSION
+# Import from the minimal _version module to avoid triggering heavy imports.
+# sky.jobs.constants imports sky.skylet.constants which imports the full sky
+# package - we avoid that chain by importing directly from _version.
+from sky.jobs._version import MANAGED_JOBS_VERSION
 
 
 # =============================================================================
