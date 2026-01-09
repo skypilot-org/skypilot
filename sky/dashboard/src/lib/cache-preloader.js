@@ -3,7 +3,7 @@
 
 import dashboardCache from './cache';
 import { getClusters } from '@/data/connectors/clusters';
-import { getManagedJobs, getPoolStatus } from '@/data/connectors/jobs';
+import { getManagedJobs, getManagedJobsWithClientPagination, getPoolStatus } from '@/data/connectors/jobs';
 import { getClusterHistory } from '@/data/connectors/clusters';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
 import {
@@ -26,7 +26,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   base: {
     getClusters: { fn: getClusters, args: [] },
     getManagedJobs: {
-      fn: getManagedJobs,
+      fn: getManagedJobsWithClientPagination,
       args: [{ allUsers: true }],
     },
     getWorkspaces: { fn: getWorkspaces, args: [] },
