@@ -1031,7 +1031,7 @@ def stream_logs_by_id(job_id: int,
                                 start_streaming = True
                             if start_streaming:
                                 print(line, end='', flush=True)
-                    # Show task finished message when multiple tasks OR filtering
+                    # Show task finished message for multi-task or filtering
                     if num_tasks > 1 or task is not None:
                         # Add the "Task finished" message for terminal states
                         if task_status.is_terminal():
