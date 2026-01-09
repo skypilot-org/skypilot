@@ -28,13 +28,13 @@ Most Slurm concepts map directly to SkyPilot concepts.
      - Notes
    * - ``salloc --gpus=8``
      - ``sky launch -c dev --gpus H100:8`` then ``ssh dev``
-     - Interactive allocation
+     - Interactive allocation (called a "cluster" in SkyPilot)
    * - ``salloc`` + ``srun``
      - ``sky launch -c dev task.yaml``
      - Allocate then run commands
    * - ``srun <command>``
      - ``sky exec <cluster> <command>``
-     - Run command on existing cluster
+     - Run command on existing allocation/cluster
    * - ``squeue``
      - ``sky status``
      - View running clusters and jobs
