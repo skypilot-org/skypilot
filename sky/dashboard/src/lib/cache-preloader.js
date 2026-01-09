@@ -6,7 +6,6 @@ import { getClusters } from '@/data/connectors/clusters';
 import {
   getManagedJobs,
   getManagedJobsWithClientPagination,
-  getPoolStatus,
 } from '@/data/connectors/jobs';
 import { getClusterHistory } from '@/data/connectors/clusters';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
@@ -48,8 +47,6 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     getVolumes: { fn: getVolumes, args: [] },
     // Cluster history for clusters page (1 day default)
     getClusterHistory: { fn: getClusterHistory, args: [null, 1] },
-    // Pool status for jobs page
-    getPoolStatus: { fn: getPoolStatus, args: [{}] },
     // getManagedJobs variants for different pages (each needs specific fields)
     getManagedJobsForInfra: {
       fn: getManagedJobs,
@@ -101,7 +98,6 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
       'getClusters',
       'getWorkspaces',
       'getUsers',
-      'getPoolStatus',
     ],
     infra: [
       'getClusters',
