@@ -169,7 +169,10 @@ if __name__ == '__main__':
         install_requires=dependencies['install_requires'],
         extras_require=dependencies['extras_require'],
         entry_points={
-            'console_scripts': ['sky = sky.cli:cli'],
+            'console_scripts': [
+                'sky = sky.cli:cli',
+                'skypilot-mcp = sky.mcp.server:main',
+            ],
         },
         include_package_data=True,
         classifiers=[

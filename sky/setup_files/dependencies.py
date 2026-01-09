@@ -270,6 +270,11 @@ cloud_extras = {
     for cloud, dependencies in cloud_dependencies.items()
 }
 
+mcp_dependencies = [
+    # MCP (Model Context Protocol) server dependencies
+    'mcp>=1.0.0',
+]
+
 extras_require: Dict[str, List[str]] = {
     # Include server_dependencies with each cloud.
     **cloud_extras,
@@ -277,4 +282,5 @@ extras_require: Dict[str, List[str]] = {
                ),
     'remote': remote,
     'server': server_dependencies,
+    'mcp': mcp_dependencies,
 }
