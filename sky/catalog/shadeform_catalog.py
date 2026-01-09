@@ -12,6 +12,7 @@ from sky.catalog import common
 
 if typing.TYPE_CHECKING:
     import pandas as pd
+
     from sky.clouds import cloud
 else:
     pd = adaptors_common.LazyImport('pandas')

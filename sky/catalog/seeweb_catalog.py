@@ -14,6 +14,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import pandas as pd
+
     from sky.clouds import cloud
 else:
     pd = adaptors_common.LazyImport('pandas')
@@ -63,8 +64,8 @@ def get_hourly_cost(instance_type: str,
 
 def get_vcpus_mem_from_instance_type(
         instance_type: str) -> Tuple[Optional[float], Optional[float]]:
-    result = common.get_vcpus_mem_from_instance_type_impl(_get_df(),
-                                                          instance_type)
+    result = common.get_vcpus_mem_from_instance_type_impl(
+        _get_df(), instance_type)
     return result
 
 
