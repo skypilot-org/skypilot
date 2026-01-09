@@ -53,12 +53,14 @@ import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
+import { PluginSlot } from '@/plugins/PluginSlot';
 import {
   FilterDropdown,
   Filters,
   updateURLParams as sharedUpdateURLParams,
   updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
   buildFilterUrl,
+  evaluateCondition,
 } from '@/components/shared/FilterSystem';
 
 // Define status groups for active and finished jobs
@@ -99,6 +101,10 @@ const PROPERTY_OPTIONS = [
   {
     label: 'Pool',
     value: 'pool',
+  },
+  {
+    label: 'Labels',
+    value: 'labels',
   },
 ];
 
@@ -185,6 +191,7 @@ export function ManagedJobs() {
     user: [],
     workspace: [],
     pool: [],
+    labels: [],
   });
   const [preloadingComplete, setPreloadingComplete] = useState(false);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
@@ -267,6 +274,7 @@ export function ManagedJobs() {
     propertyMap.set('user', 'User');
     propertyMap.set('workspace', 'Workspace');
     propertyMap.set('pool', 'Pool');
+    propertyMap.set('labels', 'Labels');
 
     const urlFilters = sharedUpdateFiltersByURLParams(router, propertyMap);
     setFilters(urlFilters);
@@ -572,14 +580,15 @@ export function ManagedJobsTable({
   // only trigger on actual user interactions (page change, filter change, etc.)
   const isInitialFetch = React.useRef(true);
 
-  // Initial load - only runs once after preloading is complete
+  // Initial load - runs immediately on mount, don't wait for full preloading
+  // The preloader will warm the cache in background, but we fetch jobs data
+  // right away so the table displays as fast as possible
   React.useEffect(() => {
-    if (preloadingComplete) {
-      fetchData({ includeStatus: true });
-      // Mark that initial fetch is complete so other effects can run
-      isInitialFetch.current = false;
-    }
-  }, [fetchData, preloadingComplete]);
+    fetchData({ includeStatus: true });
+    // Mark that initial fetch is complete so other effects can run
+    isInitialFetch.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch on pagination (page) changes without status request
   // Skip on initial fetch (page defaults to 1)
@@ -653,12 +662,20 @@ export function ManagedJobsTable({
     const users = new Set();
     const workspaces = new Set();
     const pools = new Set();
+    const labels = new Set();
 
     data.forEach((job) => {
       if (job.name) names.add(job.name);
       if (job.user) users.add(job.user);
       if (job.workspace) workspaces.add(job.workspace);
       if (job.pool) pools.add(job.pool);
+
+      // Extract labels - add only key:value pairs
+      const jobLabels = job.labels || {};
+      Object.entries(jobLabels).forEach(([key, value]) => {
+        // Add key:value pair format only
+        labels.add(`${key}:${value}`);
+      });
     });
 
     // Extract pool names from poolsData, but only include pools that:
@@ -694,6 +711,7 @@ export function ManagedJobsTable({
       user: Array.from(users).sort(),
       workspace: Array.from(workspaces).sort(),
       pool: Array.from(pools).sort(),
+      labels: Array.from(labels).sort(),
     });
   }, [data, poolsData, setValueList]);
 
@@ -740,10 +758,24 @@ export function ManagedJobsTable({
     return statusGroups[activeTab].includes(status);
   };
 
-  // Server already applied all filters including status filtering
+  // Server already applied some filters (name, user, workspace, pool, status)
+  // But we need to apply client-side filtering for labels
   const filteredData = React.useMemo(() => {
-    return data;
-  }, [data]);
+    let filtered = data;
+
+    // Apply client-side label filtering if present
+    const labelFilter = filters?.find(
+      (f) => (f.property || '').toLowerCase() === 'labels'
+    );
+
+    if (labelFilter && labelFilter.value) {
+      filtered = filtered.filter((item) => {
+        return evaluateCondition(item, labelFilter);
+      });
+    }
+
+    return filtered;
+  }, [data, filters]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -1036,7 +1068,7 @@ export function ManagedJobsTable({
                   className="sortable whitespace-nowrap"
                   onClick={() => requestSort('cluster')}
                 >
-                  Resources{getSortDirection('cluster')}
+                  Requested Resources{getSortDirection('cluster')}
                 </TableHead>
                 <TableHead
                   className="sortable whitespace-nowrap"
@@ -1058,7 +1090,7 @@ export function ManagedJobsTable({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading || !preloadingComplete ? (
+              {loading && isInitialLoad ? (
                 <TableRow>
                   <TableCell
                     colSpan={
@@ -1118,7 +1150,16 @@ export function ManagedJobsTable({
                           {formatDuration(item.job_duration)}
                         </TableCell>
                         <TableCell>
-                          <StatusBadge status={item.status} />
+                          <PluginSlot
+                            name="jobs.table.status.badge"
+                            context={item}
+                            fallback={
+                              <StatusBadge
+                                status={item.status}
+                                statusTooltip={item.statusTooltip}
+                              />
+                            }
+                          />
                         </TableCell>
                         <TableCell>
                           {item.infra && item.infra !== '-' ? (
@@ -1171,11 +1212,18 @@ export function ManagedJobsTable({
                         <TableCell>
                           <NonCapitalizedTooltip
                             content={
-                              item.resources_str_full || item.resources_str
+                              item.requested_resources ||
+                              item.resources_str_full ||
+                              item.resources_str ||
+                              '-'
                             }
                             className="text-sm text-muted-foreground"
                           >
-                            <span>{item.resources_str}</span>
+                            <span>
+                              {item.requested_resources ||
+                                item.resources_str ||
+                                '-'}
+                            </span>
                           </NonCapitalizedTooltip>
                         </TableCell>
                         <TableCell>{item.recoveries}</TableCell>

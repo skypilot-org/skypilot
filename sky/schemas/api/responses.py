@@ -123,6 +123,7 @@ class StatusResponse(ResponseBaseModel):
     cpus: Optional[str] = None
     memory: Optional[str] = None
     accelerators: Optional[str] = None
+    labels: Optional[Dict[str, str]] = None
     cluster_name_on_cloud: Optional[str] = None
 
 
@@ -203,6 +204,7 @@ class ManagedJobRecord(ResponseBaseModel):
     current_cluster_name: Optional[str] = None
     job_id_on_pool_cluster: Optional[int] = None
     accelerators: Optional[Dict[str, int]] = None
+    labels: Optional[Dict[str, str]] = None
 
 
 class VolumeRecord(ResponseBaseModel):
@@ -225,3 +227,4 @@ class VolumeRecord(ResponseBaseModel):
     usedby_pods: List[str]
     usedby_clusters: List[str]
     is_ephemeral: bool = False
+    usedby_fetch_failed: bool = False

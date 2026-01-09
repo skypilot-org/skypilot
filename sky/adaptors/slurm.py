@@ -7,6 +7,7 @@ import socket
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
+from sky.adaptors import common
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -24,6 +25,11 @@ _PARTITION_NAME_REGEX = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
 
 # Default timeout for waiting for job nodes to be allocated, in seconds.
 _SLURM_DEFAULT_PROVISION_TIMEOUT = 10
+
+_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Slurm. '
+                         'Try running: pip install "skypilot[slurm]"')
+hostlist = common.LazyImport('hostlist',
+                             import_error_message=_IMPORT_ERROR_MESSAGE)
 
 
 class SlurmPartition(NamedTuple):
@@ -50,12 +56,13 @@ class SlurmClient:
 
     def __init__(
         self,
-        ssh_host: str,
-        ssh_port: int,
-        ssh_user: str,
-        ssh_key: Optional[str],
+        ssh_host: Optional[str] = None,
+        ssh_port: Optional[int] = None,
+        ssh_user: Optional[str] = None,
+        ssh_key: Optional[str] = None,
         ssh_proxy_command: Optional[str] = None,
         ssh_proxy_jump: Optional[str] = None,
+        is_inside_slurm_cluster: bool = False,
     ):
         """Initialize SlurmClient.
 
@@ -66,6 +73,8 @@ class SlurmClient:
             ssh_key: Path to SSH private key, or None for keyless SSH.
             ssh_proxy_command: Optional SSH proxy command.
             ssh_proxy_jump: Optional SSH proxy jump destination.
+            is_inside_slurm_cluster: If True, uses local execution mode (for
+            when running on the Slurm cluster itself). Defaults to False.
         """
         self.ssh_host = ssh_host
         self.ssh_port = ssh_port
@@ -74,16 +83,25 @@ class SlurmClient:
         self.ssh_proxy_command = ssh_proxy_command
         self.ssh_proxy_jump = ssh_proxy_jump
 
-        # Internal runner for executing Slurm CLI commands
-        # on the controller node.
-        self._runner = command_runner.SSHCommandRunner(
-            (ssh_host, ssh_port),
-            ssh_user,
-            ssh_key,
-            ssh_proxy_command=ssh_proxy_command,
-            ssh_proxy_jump=ssh_proxy_jump,
-            enable_interactive_auth=True,
-        )
+        self._runner: command_runner.CommandRunner
+
+        if is_inside_slurm_cluster:
+            # Local execution mode - for running on the Slurm cluster itself
+            # (e.g., autodown from skylet).
+            self._runner = command_runner.LocalProcessCommandRunner()
+        else:
+            # Remote execution via SSH
+            assert ssh_host is not None
+            assert ssh_port is not None
+            assert ssh_user is not None
+            self._runner = command_runner.SSHCommandRunner(
+                (ssh_host, ssh_port),
+                ssh_user,
+                ssh_key,
+                ssh_proxy_command=ssh_proxy_command,
+                ssh_proxy_jump=ssh_proxy_jump,
+                enable_interactive_auth=True,
+            )
 
     def _run_slurm_cmd(self, cmd: str) -> Tuple[int, str, str]:
         return self._runner.run(cmd,
@@ -247,6 +265,38 @@ class SlurmClient:
             f'Failed to get jobs for node {node_name}.',
             stderr=f'{stdout}\n{stderr}')
         return stdout.splitlines()
+
+    def get_all_jobs_gres(self) -> Dict[str, List[str]]:
+        """Get GRES allocation for all running jobs, grouped by node.
+
+        Returns:
+            Dict mapping node_name -> list of GRES strings for jobs on that
+            node.
+        """
+        cmd = f'squeue -h --states=running,completing -o "%N{SEP}%b"'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(rc,
+                                           cmd,
+                                           'Failed to get all jobs GRES.',
+                                           stderr=f'{stdout}\n{stderr}')
+
+        nodes_to_gres: Dict[str, List[str]] = {}
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(SEP)
+            if len(parts) != 2:
+                # We should never reach here, but just in case.
+                continue
+            nodelist_str, gres_str = parts
+            if not gres_str or gres_str == 'N/A':
+                continue
+
+            for node in hostlist.expand_hostlist(nodelist_str):
+                nodes_to_gres.setdefault(node, []).append(gres_str)
+
+        return nodes_to_gres
 
     def get_job_state(self, job_id: str) -> Optional[str]:
         """Get the state of a Slurm job.

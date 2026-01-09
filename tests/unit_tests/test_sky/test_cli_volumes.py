@@ -296,7 +296,7 @@ class TestVolumeCommands:
         # Test deleting all volumes
         result = cli_runner.invoke(command.volumes_delete, ['--all'])
         assert not result.exit_code
-        mock_delete.assert_called_once_with(['volume1', 'volume2'])
+        mock_delete.assert_called_once_with(['volume1', 'volume2'], purge=False)
         mock_async_call.assert_called_once_with('delete-request-id', False,
                                                 'sky.volumes.delete')
 

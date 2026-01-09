@@ -49,7 +49,7 @@ repos:
             - types-aiofiles
             - types-PyYAML
             - types-requests<2.31  # Match the condition in requirements.txt
-            - types-setuptools
+            - types-setuptools<80.9  # Match the condition in requirements-dev.txt
             - types-cachetools
             - types-pyvmomi
             - types-paramiko

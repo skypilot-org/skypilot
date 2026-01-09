@@ -728,8 +728,16 @@ export function Workspaces() {
     dashboardCache.invalidateFunction(getWorkspaceClusters); // Invalidate all workspace clusters
     dashboardCache.invalidateFunction(getWorkspaceManagedJobs); // Invalidate all workspace jobs
 
-    await fetchData(true); // Show loading on manual refresh
-    setLastFetchedTime(new Date());
+    setLoading(true);
+    try {
+      await apiClient.fetch('/check', {}, 'POST');
+      await fetchData(false);
+      setLastFetchedTime(new Date());
+    } catch (error) {
+      console.error('Error during sky check refresh:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCancelDelete = () => {

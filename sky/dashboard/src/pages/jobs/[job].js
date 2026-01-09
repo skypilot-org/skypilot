@@ -36,6 +36,7 @@ import { formatJobYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
 import dashboardCache from '@/lib/cache';
+import { PluginSlot } from '@/plugins/PluginSlot';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import PropTypes from 'prop-types';
 
@@ -250,6 +251,21 @@ function JobDetails() {
               </Card>
             </div>
 
+            {/* GPU Metrics Plugin Slot */}
+            <PluginSlot
+              name="jobs.detail.gpu-metrics"
+              context={{
+                jobId: detailJobData.id,
+                jobName: detailJobData.name,
+                jobData: detailJobData,
+                pool: detailJobData.pool,
+                userHash: detailJobData.user_hash,
+                infra: detailJobData.full_infra || detailJobData.infra,
+                refreshTrigger: refreshTrigger,
+              }}
+              wrapperClassName="mt-6"
+            />
+
             {/* Logs Section */}
             <div id="logs-section" className="mt-6">
               <Card>
@@ -311,66 +327,26 @@ function JobDetails() {
               </Card>
             </div>
 
-            {/* Controller Logs Section */}
-            <div id="controller-logs-section" className="mt-6">
-              <Card>
-                <div className="flex items-center justify-between px-4 pt-4">
-                  <div className="flex items-center">
-                    <h3 className="text-lg font-semibold">Controller Logs</h3>
-                    <span className="ml-2 text-xs text-gray-500">
-                      (Logs are not streaming; click refresh to fetch the latest
-                      logs.)
-                    </span>
-                  </div>
-                  <div className="flex items-center space-x-3">
-                    <Tooltip
-                      content="Download full controller logs"
-                      className="text-muted-foreground"
-                    >
-                      <button
-                        onClick={() =>
-                          downloadManagedJobLogs({
-                            jobId: parseInt(
-                              Array.isArray(jobId) ? jobId[0] : jobId
-                            ),
-                            controller: true,
-                          })
-                        }
-                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-                      >
-                        <Download className="w-4 h-4" />
-                      </button>
-                    </Tooltip>
-                    <Tooltip
-                      content="Refresh controller logs"
-                      className="text-muted-foreground"
-                    >
-                      <button
-                        onClick={handleControllerLogsRefresh}
-                        disabled={isLoadingControllerLogs}
-                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-                      >
-                        <RotateCwIcon
-                          className={`w-4 h-4 ${isLoadingControllerLogs ? 'animate-spin' : ''}`}
-                        />
-                      </button>
-                    </Tooltip>
-                  </div>
-                </div>
-                <div className="p-4">
-                  <JobDetailsContent
-                    jobData={detailJobData}
-                    activeTab="controllerlogs"
-                    setIsLoadingLogs={setIsLoadingLogs}
-                    setIsLoadingControllerLogs={setIsLoadingControllerLogs}
-                    isLoadingLogs={isLoadingLogs}
-                    isLoadingControllerLogs={isLoadingControllerLogs}
-                    refreshFlag={refreshControllerLogsFlag}
-                    poolsData={poolsData}
-                  />
-                </div>
-              </Card>
-            </div>
+            {/* Plugin Slot: Job Detail Events */}
+            <PluginSlot
+              name="jobs.detail.events"
+              context={{
+                jobId: detailJobData.id,
+              }}
+              wrapperClassName="mt-6"
+            />
+
+            {/* Controller Logs Section - Collapsible */}
+            <ControllerLogsSection
+              jobId={jobId}
+              detailJobData={detailJobData}
+              isLoadingControllerLogs={isLoadingControllerLogs}
+              handleControllerLogsRefresh={handleControllerLogsRefresh}
+              setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+              setIsLoadingLogs={setIsLoadingLogs}
+              refreshControllerLogsFlag={refreshControllerLogsFlag}
+              poolsData={poolsData}
+            />
           </div>
         ) : (
           <div className="flex items-center justify-center py-32">
@@ -379,6 +355,110 @@ function JobDetails() {
         )}
       </>
     </>
+  );
+}
+
+function ControllerLogsSection({
+  jobId,
+  detailJobData,
+  isLoadingControllerLogs,
+  handleControllerLogsRefresh,
+  setIsLoadingControllerLogs,
+  setIsLoadingLogs,
+  refreshControllerLogsFlag,
+  poolsData,
+}) {
+  const CONTROLLER_LOGS_EXPANDED_KEY = 'skypilot-controller-logs-expanded';
+
+  // Initialize state from localStorage
+  const [isExpanded, setIsExpanded] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(CONTROLLER_LOGS_EXPANDED_KEY);
+      return saved === 'true';
+    }
+    return false;
+  });
+
+  // Persist state to localStorage when it changes
+  const toggleExpanded = () => {
+    const newValue = !isExpanded;
+    setIsExpanded(newValue);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(CONTROLLER_LOGS_EXPANDED_KEY, String(newValue));
+    }
+  };
+
+  return (
+    <div id="controller-logs-section" className="mt-6">
+      <Card>
+        <div
+          className={`flex items-center justify-between px-4 ${isExpanded ? 'pt-4' : 'py-4'}`}
+        >
+          <button
+            onClick={toggleExpanded}
+            className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
+          >
+            {isExpanded ? (
+              <ChevronDownIcon className="w-5 h-5 mr-2" />
+            ) : (
+              <ChevronRightIcon className="w-5 h-5 mr-2" />
+            )}
+            <h3 className="text-lg font-semibold">Controller Logs</h3>
+            <span className="ml-2 text-xs text-gray-500">
+              (Logs are not streaming; click refresh to fetch the latest logs.)
+            </span>
+          </button>
+          {isExpanded && (
+            <div className="flex items-center space-x-3">
+              <Tooltip
+                content="Download full controller logs"
+                className="text-muted-foreground"
+              >
+                <button
+                  onClick={() =>
+                    downloadManagedJobLogs({
+                      jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
+                      controller: true,
+                    })
+                  }
+                  className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                >
+                  <Download className="w-4 h-4" />
+                </button>
+              </Tooltip>
+              <Tooltip
+                content="Refresh controller logs"
+                className="text-muted-foreground"
+              >
+                <button
+                  onClick={handleControllerLogsRefresh}
+                  disabled={isLoadingControllerLogs}
+                  className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                >
+                  <RotateCwIcon
+                    className={`w-4 h-4 ${isLoadingControllerLogs ? 'animate-spin' : ''}`}
+                  />
+                </button>
+              </Tooltip>
+            </div>
+          )}
+        </div>
+        {isExpanded && (
+          <div className="p-4">
+            <JobDetailsContent
+              jobData={detailJobData}
+              activeTab="controllerlogs"
+              setIsLoadingLogs={setIsLoadingLogs}
+              setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+              isLoadingLogs={false}
+              isLoadingControllerLogs={isLoadingControllerLogs}
+              refreshFlag={refreshControllerLogsFlag}
+              poolsData={poolsData}
+            />
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }
 
@@ -618,7 +698,11 @@ function JobDetailsContent({
       <div>
         <div className="text-gray-600 font-medium text-base">Status</div>
         <div className="text-base mt-1">
-          <StatusBadge status={jobData.status} />
+          <PluginSlot
+            name="jobs.detail.status.badge"
+            context={jobData}
+            fallback={<StatusBadge status={jobData.status} />}
+          />
         </div>
       </div>
       <div>
