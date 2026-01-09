@@ -341,17 +341,34 @@ helm repo add skypilot https://helm.skypilot.co
 helm repo update
 helm dependency build ./charts/skypilot
 
-# Build Docker image
-DOCKER_IMAGE=my-repo/skypilot:v1
+# Build and push Docker image to your registry
+DOCKER_IMAGE=<your-registry>/skypilot:<tag>
 docker buildx build --push --platform linux/amd64 -t $DOCKER_IMAGE -f Dockerfile .
 
-# Deploy
+# Deploy to Kubernetes
+# Note: Ensure your kubectl is configured for the target cluster
 NAMESPACE=skypilot
 RELEASE_NAME=skypilot
 helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
     --namespace $NAMESPACE \
     --create-namespace \
-    --set apiService.image=$DOCKER_IMAGE
+    --set apiService.image=$DOCKER_IMAGE \
+    --set ingress.enabled=true
+
+# For resource-constrained clusters, you can reduce resource requests:
+helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
+    --namespace $NAMESPACE \
+    --create-namespace \
+    --set apiService.image=$DOCKER_IMAGE \
+    --set ingress.enabled=true \
+    --set apiService.skipResourceCheck=true \
+    --set apiService.resources.requests.cpu=1 \
+    --set apiService.resources.limits.cpu=2 \
+    --set apiService.resources.requests.memory=2Gi \
+    --set apiService.resources.limits.memory=4Gi
+
+# Get the ingress endpoint
+kubectl get ingress -n $NAMESPACE
 ```
 
 ## Critical Code Paths (Handle with Care)

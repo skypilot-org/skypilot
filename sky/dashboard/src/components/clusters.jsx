@@ -180,6 +180,17 @@ export function Clusters() {
   const [isVSCodeModalOpen, setIsVSCodeModalOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
 
+  // Memoized callbacks for modal handlers to prevent unnecessary re-renders
+  const handleOpenSSHModal = useCallback((cluster) => {
+    setSelectedCluster(cluster);
+    setIsSSHModalOpen(true);
+  }, []);
+
+  const handleOpenVSCodeModal = useCallback((cluster) => {
+    setSelectedCluster(cluster);
+    setIsVSCodeModalOpen(true);
+  }, []);
+
   // Initialize showHistory from URL parameter immediately
   const getInitialShowHistory = () => {
     if (typeof window !== 'undefined' && router.isReady) {
@@ -550,14 +561,8 @@ export function Clusters() {
         filters={filters}
         showHistory={showHistory}
         historyDays={historyDays}
-        onOpenSSHModal={(cluster) => {
-          setSelectedCluster(cluster);
-          setIsSSHModalOpen(true);
-        }}
-        onOpenVSCodeModal={(cluster) => {
-          setSelectedCluster(cluster);
-          setIsVSCodeModalOpen(true);
-        }}
+        onOpenSSHModal={handleOpenSSHModal}
+        onOpenVSCodeModal={handleOpenVSCodeModal}
         setOptionValues={setOptionValues}
         preloadingComplete={preloadingComplete}
       />

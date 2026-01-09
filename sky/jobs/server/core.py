@@ -872,15 +872,8 @@ def queue_v2(
         if page is not None:
             raise ValueError('Limit must be specified when page is specified')
 
-    with metrics_lib.time_it('jobs.queue.restart_controller', group='jobs'):
-        handle = _maybe_restart_controller(refresh,
-                                           stopped_message='No in-progress '
-                                           'managed jobs.',
-                                           spinner_message='Checking '
-                                           'managed jobs')
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
-
+    # Compute user_hashes and accessible_workspaces upfront - used by both
+    # the fast path (consolidation mode) and the normal path.
     user_hashes: Optional[List[Optional[str]]] = None
     show_jobs_without_user_hash = False
     if not all_users:
@@ -896,6 +889,70 @@ def queue_v2(
         user_hashes = [user.id for user in users]
 
     accessible_workspaces = list(workspaces_core.get_workspaces().keys())
+
+    # Fast path for consolidation mode - bypass SSH entirely by querying DB
+    # directly. This only works when refresh=False since refresh needs the
+    # controller to actually refresh job status.
+    if managed_job_utils.is_consolidation_mode() and not refresh:
+        # Filter out non-DB fields from the requested fields. These will be
+        # populated after the query. user_name is looked up from user_hash.
+        db_fields = fields
+        needs_user_name = False
+        if fields is not None:
+            # Non-DB fields include user_name (computed from user_hash),
+            # user_yaml, details, and cluster handle fields (cloud, region,
+            # zone, infra, accelerators, cluster_resources, etc.)
+            non_db_fields = managed_job_utils.get_non_db_fields()
+            needs_user_name = 'user_name' in fields
+            db_fields = [f for f in fields if f not in non_db_fields]
+            # Ensure user_hash is included if we need to populate user_name
+            if needs_user_name and 'user_hash' not in db_fields:
+                db_fields.append('user_hash')
+
+        # Direct DB queries - no SSH needed!
+        jobs, total = managed_job_state.get_managed_jobs_with_filters(
+            fields=db_fields if db_fields else None,
+            job_ids=job_ids,
+            accessible_workspaces=accessible_workspaces,
+            workspace_match=workspace_match,
+            name_match=name_match,
+            pool_match=pool_match,
+            user_hashes=user_hashes,
+            statuses=statuses,
+            skip_finished=skip_finished,
+            page=page,
+            limit=limit,
+        )
+
+        # Populate user_name from user_hash if requested
+        if needs_user_name or fields is None:
+            all_users_list = global_user_state.get_all_users()
+            all_users_map = {user.id: user.name for user in all_users_list}
+            for job in jobs:
+                if 'user_hash' in job and job['user_hash'] is not None:
+                    job['user_name'] = all_users_map.get(job['user_hash'])
+                else:
+                    job['user_name'] = None
+
+        status_counts = managed_job_state.get_status_count_with_filters(
+            accessible_workspaces=accessible_workspaces,
+            workspace_match=workspace_match,
+            name_match=name_match,
+            pool_match=pool_match,
+            user_hashes=user_hashes,
+            skip_finished=skip_finished,
+        )
+        total_no_filter = managed_job_state.get_managed_jobs_total()
+        return jobs, total, status_counts, total_no_filter
+
+    with metrics_lib.time_it('jobs.queue.restart_controller', group='jobs'):
+        handle = _maybe_restart_controller(refresh,
+                                           stopped_message='No in-progress '
+                                           'managed jobs.',
+                                           spinner_message='Checking '
+                                           'managed jobs')
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
 
     if handle.is_grpc_enabled_with_flag:
         try:

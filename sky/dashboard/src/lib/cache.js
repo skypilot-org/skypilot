@@ -229,6 +229,26 @@ class DashboardCache {
   }
 
   /**
+   * Check if cached data for a function is fresh (not stale)
+   * @param {Function} fetchFunction - The function to check cache for
+   * @param {Array} [args=[]] - Arguments used to generate the cache key
+   * @param {Object} [options={}] - Options
+   * @param {number} [options.ttl] - Time to live in milliseconds (default: DEFAULT_CACHE_TTL)
+   * @returns {boolean} - True if cache exists and is fresh
+   */
+  isFresh(fetchFunction, args = [], options = {}) {
+    const ttl = options.ttl || DEFAULT_CACHE_TTL;
+    const key = this._generateKey(fetchFunction, args);
+    const cachedItem = this.cache.get(key);
+
+    if (!cachedItem) {
+      return false;
+    }
+
+    return Date.now() - cachedItem.lastUpdated < ttl;
+  }
+
+  /**
    * Enable or disable debug logging
    */
   setDebugMode(enabled) {

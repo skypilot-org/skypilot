@@ -122,6 +122,16 @@ _CLUSTER_HANDLE_FIELDS = [
 _NON_DB_FIELDS = _CLUSTER_HANDLE_FIELDS + ['user_yaml', 'user_name', 'details']
 
 
+def get_non_db_fields() -> set:
+    """Get the set of fields that are not stored in the database.
+
+    These fields are computed from other data (e.g., user_name from user_hash,
+    cloud/region/zone from cluster handle) and should be filtered out when
+    querying the database directly.
+    """
+    return set(_NON_DB_FIELDS)
+
+
 class ManagedJobQueueResultType(enum.Enum):
     """The type of the managed job queue result."""
     DICT = 'DICT'
@@ -1477,7 +1487,7 @@ def get_managed_job_queue(
     total_no_filter = managed_job_state.get_managed_jobs_total()
 
     status_counts = managed_job_state.get_status_count_with_filters(
-        fields=fields,
+        fields=updated_fields,
         job_ids=job_ids,
         accessible_workspaces=accessible_workspaces,
         workspace_match=workspace_match,

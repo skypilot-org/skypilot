@@ -3,7 +3,10 @@
 
 import dashboardCache from './cache';
 import { getClusters } from '@/data/connectors/clusters';
-import { getManagedJobsWithClientPagination } from '@/data/connectors/jobs';
+import {
+  getManagedJobsWithClientPagination,
+  getPoolStatus,
+} from '@/data/connectors/jobs';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
 import { getVolumes } from '@/data/connectors/volumes';
@@ -21,6 +24,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
       fn: getManagedJobsWithClientPagination,
       args: [{ allUsers: true }],
     },
+    getPoolStatus: { fn: getPoolStatus, args: [{}] },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
     getCloudInfrastructure: {
@@ -39,7 +43,13 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Page-specific function requirements
   pages: {
     clusters: ['getClusters', 'getWorkspaces'],
-    jobs: ['getManagedJobs', 'getClusters', 'getWorkspaces', 'getUsers'],
+    jobs: [
+      'getManagedJobs',
+      'getPoolStatus',
+      'getClusters',
+      'getWorkspaces',
+      'getUsers',
+    ],
     infra: [
       'getClusters',
       'getManagedJobs',
@@ -107,6 +117,25 @@ class CachePreloader {
    */
   async _loadPageData(page, force = false) {
     const requiredFunctions = DASHBOARD_CACHE_FUNCTIONS.pages[page];
+
+    // Quick check: if all base functions have fresh cache, skip preloading entirely
+    // This makes tab switching instant when returning to recently visited pages
+    if (!force) {
+      const baseFunctions = requiredFunctions.filter(
+        (fn) => DASHBOARD_CACHE_FUNCTIONS.base[fn]
+      );
+      const allFresh = baseFunctions.every((functionName) => {
+        const config = DASHBOARD_CACHE_FUNCTIONS.base[functionName];
+        return config && dashboardCache.isFresh(config.fn, config.args);
+      });
+      if (allFresh && baseFunctions.length > 0) {
+        console.log(
+          `[CachePreloader] All data fresh for ${page}, skipping preload`
+        );
+        return;
+      }
+    }
+
     const promises = [];
 
     for (const functionName of requiredFunctions) {

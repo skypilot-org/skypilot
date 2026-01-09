@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, memo, useCallback } from 'react';
 import {
   Select,
   SelectContent,
@@ -152,13 +152,52 @@ export const buildFilterUrl = (basePath, property, operator, value) => {
   return `${basePath}?${params.toString()}`;
 };
 
-export const FilterDropdown = ({
+// Custom comparison for FilterDropdown to handle valueList object comparison
+const filterDropdownPropsAreEqual = (prevProps, nextProps) => {
+  // Compare simple props
+  if (prevProps.placeholder !== nextProps.placeholder) return false;
+  if (prevProps.setFilters !== nextProps.setFilters) return false;
+  if (prevProps.updateURLParams !== nextProps.updateURLParams) return false;
+
+  // Compare propertyList arrays (shallow comparison)
+  if (prevProps.propertyList?.length !== nextProps.propertyList?.length)
+    return false;
+
+  // Compare valueList objects (shallow comparison of keys and values)
+  const prevValueList = prevProps.valueList || {};
+  const nextValueList = nextProps.valueList || {};
+  const prevKeys = Object.keys(prevValueList);
+  const nextKeys = Object.keys(nextValueList);
+  if (prevKeys.length !== nextKeys.length) return false;
+  for (const key of prevKeys) {
+    const prevVal = prevValueList[key];
+    const nextVal = nextValueList[key];
+    // Compare arrays by length and reference (sufficient for most cases)
+    if (Array.isArray(prevVal) && Array.isArray(nextVal)) {
+      if (prevVal.length !== nextVal.length) return false;
+      // For small arrays, check first and last elements for quick comparison
+      if (
+        prevVal.length > 0 &&
+        (prevVal[0] !== nextVal[0] ||
+          prevVal[prevVal.length - 1] !== nextVal[nextVal.length - 1])
+      ) {
+        return false;
+      }
+    } else if (prevVal !== nextVal) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+export const FilterDropdown = memo(function FilterDropdown({
   propertyList = [],
   valueList,
   setFilters,
   updateURLParams,
   placeholder = 'Filter items',
-}) => {
+}) {
   const inputRef = useRef(null);
   const dropdownRef = useRef(null);
 
@@ -370,7 +409,7 @@ export const FilterDropdown = ({
       </div>
     </div>
   );
-};
+}, filterDropdownPropsAreEqual);
 
 export const Filters = ({ filters = [], setFilters, updateURLParams }) => {
   const onRemove = (index) => {
@@ -418,7 +457,7 @@ export const Filters = ({ filters = [], setFilters, updateURLParams }) => {
   );
 };
 
-export const FilterItem = ({ filter, onRemove }) => {
+export const FilterItem = memo(function FilterItem({ filter, onRemove }) {
   return (
     <>
       <div className="flex items-center text-blue-600 bg-blue-100 px-1 py-1 rounded-full text-sm">
@@ -450,4 +489,4 @@ export const FilterItem = ({ filter, onRemove }) => {
       </div>
     </>
   );
-};
+});

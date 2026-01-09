@@ -3,7 +3,7 @@
  * @see https://v0.dev/t/X5tLGA3WPNU
  * Documentation: https://v0.dev/docs#integrating-generated-code-into-your-nextjs-app
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
 import {
@@ -79,11 +79,12 @@ const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
 
 // Shared GPU utilization bar to avoid duplicating percentage math and markup
-const GpuUtilizationBar = ({
+// Memoized to prevent unnecessary re-renders when parent component updates
+const GpuUtilizationBar = memo(function GpuUtilizationBar({
   gpu,
   heightClass = 'h-4',
   wrapperClassName = '',
-}) => {
+}) {
   const total = gpu?.gpu_total || 0;
   const notReady = gpu?.gpu_not_ready || 0;
   const free = gpu?.gpu_free || 0;
@@ -138,10 +139,11 @@ const GpuUtilizationBar = ({
       )}
     </div>
   );
-};
+});
 
 // Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
-export function InfrastructureSection({
+// Memoized to prevent re-renders when parent state changes unrelated to this section
+export const InfrastructureSection = memo(function InfrastructureSection({
   title,
   isLoading,
   isDataLoaded,
@@ -526,10 +528,11 @@ export function InfrastructureSection({
   }
 
   return null;
-}
+});
 
 // Reusable component for context details
-export function ContextDetails({
+// Memoized to prevent re-renders when other contexts are expanded/collapsed
+export const ContextDetails = memo(function ContextDetails({
   contextName,
   gpusInContext,
   nodesInContext,
@@ -998,10 +1001,11 @@ export function ContextDetails({
       </div>
     </div>
   );
-}
+});
 
 // SSH Node Pool Details component
-function SSHNodePoolDetails({
+// Memoized to prevent re-renders when other pools are expanded/collapsed
+const SSHNodePoolDetails = memo(function SSHNodePoolDetails({
   poolName,
   gpusInContext,
   nodesInContext,
@@ -1540,7 +1544,7 @@ function SSHNodePoolDetails({
       </Dialog>
     </div>
   );
-}
+});
 
 // SSH Node Pool Table component with status fetching
 function SSHNodePoolTable({ pools, handleContextClick }) {

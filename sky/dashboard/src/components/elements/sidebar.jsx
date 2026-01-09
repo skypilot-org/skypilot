@@ -148,16 +148,11 @@ export function SideBar({ highlighted = 'clusters' }) {
             <Link
               href="/clusters"
               className={linkStyle(highlighted === 'clusters')}
-              prefetch={false}
             >
               <ServerIcon className="w-5 h-5 min-w-5" />
               <span>Clusters</span>
             </Link>
-            <Link
-              href="/jobs"
-              className={linkStyle(highlighted === 'jobs')}
-              prefetch={false}
-            >
+            <Link href="/jobs" className={linkStyle(highlighted === 'jobs')}>
               <BriefcaseIcon className="w-5 h-5 min-w-5" />
               <span>Jobs</span>
             </Link>
@@ -324,7 +319,6 @@ export function TopBar() {
         key={link.id}
         href={resolvePluginHref(link.href)}
         className={getLinkClasses(link.href)}
-        prefetch={false}
       >
         {renderNavLabel(link)}
       </Link>
@@ -371,7 +365,6 @@ export function TopBar() {
         href={resolvePluginHref(link.href)}
         className={getMobileLinkClasses(link.href)}
         onClick={toggleMobileSidebar}
-        prefetch={false}
       >
         {content}
       </Link>
@@ -415,7 +408,6 @@ export function TopBar() {
                   href={resolvePluginHref(link.href)}
                   className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                   onClick={() => setOpenNavDropdown(null)}
-                  prefetch={false}
                 >
                   <div className="flex items-center gap-2">
                     {link.icon && (
@@ -467,11 +459,7 @@ export function TopBar() {
               </button>
             )}
 
-            <Link
-              href="/"
-              className="flex items-center px-1 pt-1 h-full"
-              prefetch={false}
-            >
+            <Link href="/" className="flex items-center px-1 pt-1 h-full">
               <div className={`h-20 w-20 flex items-center justify-center`}>
                 <Image
                   src={`${BASE_PATH}/skypilot.svg`}
@@ -488,40 +476,24 @@ export function TopBar() {
           {/* Desktop Navigation links */}
           {!isMobile && (
             <div className="flex items-center space-x-2 md:space-x-4 mr-6">
-              <Link
-                href="/clusters"
-                className={getLinkClasses('/clusters')}
-                prefetch={false}
-              >
+              <Link href="/clusters" className={getLinkClasses('/clusters')}>
                 <ServerIcon className="w-4 h-4" />
                 <span>Clusters</span>
               </Link>
 
-              <Link
-                href="/jobs"
-                className={getLinkClasses('/jobs')}
-                prefetch={false}
-              >
+              <Link href="/jobs" className={getLinkClasses('/jobs')}>
                 <BriefcaseIcon className="w-4 h-4" />
                 <span>Jobs</span>
               </Link>
 
-              <Link
-                href="/volumes"
-                className={getLinkClasses('/volumes')}
-                prefetch={false}
-              >
+              <Link href="/volumes" className={getLinkClasses('/volumes')}>
                 <VolumeIcon className="w-4 h-4" />
                 <span>Volumes</span>
               </Link>
 
               <div className="border-l border-gray-200 h-6 mx-1"></div>
 
-              <Link
-                href="/infra"
-                className={getLinkClasses('/infra')}
-                prefetch={false}
-              >
+              <Link href="/infra" className={getLinkClasses('/infra')}>
                 <ChipIcon className="w-4 h-4" />
                 <span>Infra</span>
               </Link>
@@ -529,17 +501,12 @@ export function TopBar() {
               <Link
                 href="/workspaces"
                 className={getLinkClasses('/workspaces')}
-                prefetch={false}
               >
                 <BookDocIcon className="w-4 h-4" />
                 <span>Workspaces</span>
               </Link>
 
-              <Link
-                href="/users"
-                className={getLinkClasses('/users')}
-                prefetch={false}
-              >
+              <Link href="/users" className={getLinkClasses('/users')}>
                 <UsersIcon className="w-4 h-4" />
                 <span>Users</span>
               </Link>
@@ -634,7 +601,6 @@ export function TopBar() {
                         : 'text-gray-600 hover:bg-gray-100'
                     }`}
                     title="Configuration"
-                    prefetch={false}
                   >
                     <Settings className="w-5 h-5" />
                   </Link>
@@ -699,7 +665,6 @@ export function TopBar() {
                       href="/users"
                       className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600"
                       onClick={() => setIsDropdownOpen(false)}
-                      prefetch={false}
                     >
                       See all users
                     </Link>
@@ -739,7 +704,6 @@ export function TopBar() {
                       : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
                   }`}
                   onClick={toggleMobileSidebar}
-                  prefetch={false}
                 >
                   <ServerIcon className="w-5 h-5 mr-3" />
                   Clusters
@@ -753,7 +717,6 @@ export function TopBar() {
                       : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
                   }`}
                   onClick={toggleMobileSidebar}
-                  prefetch={false}
                 >
                   <BriefcaseIcon className="w-5 h-5 mr-3" />
                   Jobs
@@ -767,7 +730,6 @@ export function TopBar() {
                       : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
                   }`}
                   onClick={toggleMobileSidebar}
-                  prefetch={false}
                 >
                   <VolumeIcon className="w-5 h-5 mr-3" />
                   Volumes
@@ -783,7 +745,6 @@ export function TopBar() {
                       : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
                   }`}
                   onClick={toggleMobileSidebar}
-                  prefetch={false}
                 >
                   <ChipIcon className="w-5 h-5 mr-3" />
                   Infra
@@ -797,7 +758,6 @@ export function TopBar() {
                       : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
                   }`}
                   onClick={toggleMobileSidebar}
-                  prefetch={false}
                 >
                   <BookDocIcon className="w-5 h-5 mr-3" />
                   Workspaces
@@ -811,7 +771,6 @@ export function TopBar() {
                       : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
                   }`}
                   onClick={toggleMobileSidebar}
-                  prefetch={false}
                 >
                   <UsersIcon className="w-5 h-5 mr-3" />
                   Users
@@ -878,7 +837,6 @@ export function TopBar() {
                       : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
                   }`}
                   onClick={toggleMobileSidebar}
-                  prefetch={false}
                 >
                   <Settings className="w-5 h-5 mr-3" />
                   Configuration
