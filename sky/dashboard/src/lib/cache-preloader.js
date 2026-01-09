@@ -29,7 +29,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Base functions used across multiple pages (no arguments)
   base: {
     getClusters: { fn: getClusters, args: [] },
-    getManagedJobs: {
+    getManagedJobsWithClientPagination: {
       fn: getManagedJobsWithClientPagination,
       args: [{ allUsers: true }],
     },
@@ -97,7 +97,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   pages: {
     clusters: ['getClusters', 'getWorkspaces', 'getClusterHistory'],
     jobs: [
-      'getManagedJobs',
+      'getManagedJobsWithClientPagination',
       'getClusters',
       'getWorkspaces',
       'getUsers',
