@@ -569,6 +569,7 @@ def _start(
             down = controller_autostop_config.down
             wait_for = controller_autostop_config.wait_for
             hook = controller_autostop_config.hook
+            hook_timeout = controller_autostop_config.hook_timeout
     else:
         # For non-controller clusters, restore autostop configuration from
         # database if not explicitly provided.
@@ -617,12 +618,12 @@ def _start(
         # For controller clusters, hook comes from controller_autostop_config.
         # For regular clusters, hook is None so it will be inherited from the
         # existing config on the remote cluster.
-        hook_to_use = hook
         backend.set_autostop(handle,
                              idle_minutes_to_autostop,
                              wait_for,
                              down,
-                             hook=hook_to_use)
+                             hook=hook,
+                             hook_timeout=hook_timeout)
     return handle
 
 
