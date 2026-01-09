@@ -1125,9 +1125,7 @@ export function ManagedJobsTable({
                             {item.id}
                           </Link>
                         </TableCell>
-                        <TableCell>
-                          {item.task || '-'}
-                        </TableCell>
+                        <TableCell>{item.task || '-'}</TableCell>
                         <TableCell>
                           <Link
                             href={`/jobs/${item.id}`}

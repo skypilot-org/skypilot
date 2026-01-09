@@ -2073,7 +2073,6 @@ def test_large_production_performance(request):
     smoke_tests_utils.run_one_test(test)
 
 
-
 # ---------- Testing JobGroups ----------
 
 
@@ -2281,4 +2280,3 @@ def test_managed_jobs_instance_links(generic_cloud: str):
             timeout=15 * 60,
         )
         smoke_tests_utils.run_one_test(test)
-
