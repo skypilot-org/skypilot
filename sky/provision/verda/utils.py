@@ -386,7 +386,7 @@ class HTTPClient:
             # try to refresh. if refresh token has expired, reauthenticate
             try:
                 self._auth_service.refresh()
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 self._auth_service.authenticate()
 
     def _generate_headers(self) -> dict:
