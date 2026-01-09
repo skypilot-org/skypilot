@@ -5456,8 +5456,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 try:
                     if cluster_yaml_obj is not None:
                         # Extract volume names from existing cluster
-                        # For k8s: volumes in node_config.spec.volumes
                         if isinstance(to_provision.cloud, clouds.Kubernetes):
+                            # For k8s: volumes are in node_config.spec.volumes.
+                            # See sky/templates/kubernetes-ray.yml.j2.
                             node_config = _get_pod_config(cluster_yaml_obj)
                             volumes = node_config.get('spec',
                                                       {}).get('volumes', [])
@@ -5471,9 +5472,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                     vol_name = vol.get('name')
                                     if vol_name:
                                         existing_volume_names.add(vol_name)
+                        elif isinstance(to_provision.cloud, clouds.RunPod):
+                            # For RunPod, volumes are in
+                            # node_config.VolumeMounts.
+                            # See sky/templates/runpod-ray.yml.j2.
+                            node_config = _get_pod_config(cluster_yaml_obj)
+                            volume_mounts_config = node_config.get(
+                                'VolumeMounts', [])
+                            for vol_mount in volume_mounts_config:
+                                vol_name = vol_mount.get('VolumeNameOnCloud')
+                                if vol_name:
+                                    existing_volume_names.add(vol_name)
                         else:
-                            # For other clouds (e.g., RunPod), volumes are in
-                            # node_config.VolumeMounts
+                            # For other clouds, we try to find the volumes in
+                            # node_config.VolumeMounts as a fallback.
                             node_config = _get_pod_config(cluster_yaml_obj)
                             volume_mounts_config = node_config.get(
                                 'VolumeMounts', [])
