@@ -1985,9 +1985,8 @@ export function GPUs() {
     try {
       // Always use cache - it's already invalidated if refreshing
       // Jobs data doesn't depend on sky check, so no need to bypass cache
-      // Use shared cache key (no field filtering) - preloader uses same args
       const jobsData = await dashboardCache.get(getManagedJobs, [
-        { allUsers: true, skipFinished: true },
+        { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
       ]);
       const jobs = jobsData?.jobs || [];
       setSshAndKubeJobsData(await getContextJobs(jobs));
@@ -2196,7 +2195,7 @@ export function GPUs() {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getManagedJobs, [
-      { allUsers: true, skipFinished: true },
+      { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
     ]);
     dashboardCache.invalidate(getWorkspaceInfrastructure);
     dashboardCache.invalidate(getCloudInfrastructure, [false]);

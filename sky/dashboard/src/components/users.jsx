@@ -458,7 +458,18 @@ export function Users() {
     dashboardCache.invalidate(getUsers);
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getManagedJobs, [
-      { allUsers: true, skipFinished: true },
+      {
+        allUsers: true,
+        skipFinished: true,
+        fields: [
+          'user_hash',
+          'status',
+          'accelerators',
+          'job_name',
+          'job_id',
+          'infra',
+        ],
+      },
     ]);
 
     if (refreshDataRef.current) {
@@ -1376,11 +1387,21 @@ function UsersTable({
         let clustersData = [];
         let managedJobsResponse = { jobs: [] };
         try {
-          // Use shared cache key (no field filtering) - preloader uses same args
           [clustersData, managedJobsResponse] = await Promise.all([
             dashboardCache.get(getClusters),
             dashboardCache.get(getManagedJobs, [
-              { allUsers: true, skipFinished: true },
+              {
+                allUsers: true,
+                skipFinished: true,
+                fields: [
+                  'user_hash',
+                  'status',
+                  'accelerators',
+                  'job_name',
+                  'job_id',
+                  'infra',
+                ],
+              },
             ]),
           ]);
         } catch (error) {
@@ -2360,14 +2381,23 @@ function ServiceAccountTokensView({
       setTokens(tokensData || []);
 
       // Step 2: Fetch clusters and jobs data in parallel
-      // Use shared cache key (no field filtering) - preloader uses same args
       let clustersResponse = [];
       let jobsResponse = { jobs: [] };
       try {
         [clustersResponse, jobsResponse] = await Promise.all([
           dashboardCache.get(getClusters),
           dashboardCache.get(getManagedJobs, [
-            { allUsers: true, skipFinished: true },
+            {
+              allUsers: true,
+              skipFinished: true,
+              fields: [
+                'user_hash',
+                'status',
+                'accelerators',
+                'job_id',
+                'infra',
+              ],
+            },
           ]),
         ]);
       } catch (error) {
