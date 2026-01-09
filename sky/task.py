@@ -545,7 +545,6 @@ class Task:
         config: Dict[str, Any],
         env_overrides: Optional[List[Tuple[str, str]]] = None,
         secrets_overrides: Optional[List[Tuple[str, str]]] = None,
-        skip_secrets_validation: bool = False,
     ) -> 'Task':
         user_specified_yaml = config.pop('_user_specified_yaml',
                                          yaml_utils.dump_yaml_str(config))
@@ -594,24 +593,23 @@ class Task:
             new_secrets.update(secrets_overrides)
             config['secrets'] = new_secrets
 
-        if not skip_secrets_validation:
-            for k, v in config.get('envs', {}).items():
-                if v is None:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'Environment variable {k!r} is None. Please set a '
-                            'value for it in task YAML or with --env flag. To '
-                            f'set it to be empty, use an empty string ({k}: "" '
-                            f'in task YAML or --env {k}="" in CLI).')
-            for k, v in config.get('secrets', {}).items():
-                if v is None:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'Secret variable {k!r} is None. Please set a '
-                            'value for it in task YAML or with --secret flag. '
-                            f'To set it to be empty, use an empty string '
-                            f'({k}: "" in task YAML or --secret {k}="" in CLI).'
-                        )
+        for k, v in config.get('envs', {}).items():
+            if v is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Environment variable {k!r} is None. Please set a '
+                        'value for it in task YAML or with --env flag. To '
+                        f'set it to be empty, use an empty string ({k}: "" '
+                        f'in task YAML or --env {k}="" in CLI).')
+        for k, v in config.get('secrets', {}).items():
+            if v is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Secret variable {k!r} is None. Please set a '
+                        'value for it in task YAML or with --secret flag. '
+                        f'To set it to be empty, use an empty string '
+                        f'({k}: "" in task YAML or --secret {k}="" in CLI).'
+                    )
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
@@ -797,8 +795,7 @@ class Task:
             return Task.from_yaml_str(user_specified_yaml)
 
     @staticmethod
-    def from_yaml_str(yaml_str: str,
-                      skip_secrets_validation: bool = False) -> 'Task':
+    def from_yaml_str(yaml_str: str) -> 'Task':
         """Initializes a task from a task YAML string.
 
         Example:
@@ -816,8 +813,7 @@ class Task:
         if config is None:
             config = {}
         config['_user_specified_yaml'] = yaml_str
-        return Task.from_yaml_config(
-            config, skip_secrets_validation=skip_secrets_validation)
+        return Task.from_yaml_config(config)
 
     def resolve_and_validate_volumes(self) -> None:
         """Resolve volumes config to volume mounts and validate them.

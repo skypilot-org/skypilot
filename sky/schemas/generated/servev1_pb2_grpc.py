@@ -69,6 +69,11 @@ class ServeServiceStub(object):
                 request_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceRequest.SerializeToString,
                 response_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceResponse.FromString,
                 _registered_method=True)
+        self.GetYamlContent = channel.unary_unary(
+                '/serve.v1.ServeService/GetYamlContent',
+                request_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.GetYamlContentRequest.SerializeToString,
+                response_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.GetYamlContentResponse.FromString,
+                _registered_method=True)
 
 
 class ServeServiceServicer(object):
@@ -116,6 +121,13 @@ class ServeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetYamlContent(self, request, context):
+        """Get YAML content for a service version.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ServeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -148,6 +160,11 @@ def add_ServeServiceServicer_to_server(servicer, server):
                     servicer.UpdateService,
                     request_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceRequest.FromString,
                     response_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceResponse.SerializeToString,
+            ),
+            'GetYamlContent': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetYamlContent,
+                    request_deserializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.GetYamlContentRequest.FromString,
+                    response_serializer=sky_dot_schemas_dot_generated_dot_servev1__pb2.GetYamlContentResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -311,6 +328,33 @@ class ServeService(object):
             '/serve.v1.ServeService/UpdateService',
             sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceRequest.SerializeToString,
             sky_dot_schemas_dot_generated_dot_servev1__pb2.UpdateServiceResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetYamlContent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/serve.v1.ServeService/GetYamlContent',
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.GetYamlContentRequest.SerializeToString,
+            sky_dot_schemas_dot_generated_dot_servev1__pb2.GetYamlContentResponse.FromString,
             options,
             channel_credentials,
             insecure,

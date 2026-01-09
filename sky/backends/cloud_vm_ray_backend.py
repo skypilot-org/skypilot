@@ -2765,6 +2765,13 @@ class SkyletClient:
     ) -> 'servev1_pb2.AddVersionResponse':
         return self._serve_stub.AddVersion(request, timeout=timeout)
 
+    def get_serve_yaml_content(
+        self,
+        request: 'servev1_pb2.GetYamlContentRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'servev1_pb2.GetYamlContentResponse':
+        return self._serve_stub.GetYamlContent(request, timeout=timeout)
+
     def terminate_services(
         self,
         request: 'servev1_pb2.TerminateServicesRequest',

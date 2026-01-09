@@ -113,3 +113,17 @@ class UpdateServiceRequest(_message.Message):
 class UpdateServiceResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
+
+class GetYamlContentRequest(_message.Message):
+    __slots__ = ("service_name", "version")
+    SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
+    VERSION_FIELD_NUMBER: _ClassVar[int]
+    service_name: str
+    version: int
+    def __init__(self, service_name: _Optional[str] = ..., version: _Optional[int] = ...) -> None: ...
+
+class GetYamlContentResponse(_message.Message):
+    __slots__ = ("yaml_content",)
+    YAML_CONTENT_FIELD_NUMBER: _ClassVar[int]
+    yaml_content: str
+    def __init__(self, yaml_content: _Optional[str] = ...) -> None: ...
