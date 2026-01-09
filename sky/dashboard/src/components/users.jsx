@@ -458,18 +458,7 @@ export function Users() {
     dashboardCache.invalidate(getUsers);
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getManagedJobs, [
-      {
-        allUsers: true,
-        skipFinished: true,
-        fields: [
-          'user_hash',
-          'status',
-          'accelerators',
-          'job_name',
-          'job_id',
-          'infra',
-        ],
-      },
+      { allUsers: true, skipFinished: true },
     ]);
 
     if (refreshDataRef.current) {
@@ -1389,19 +1378,9 @@ function UsersTable({
         try {
           [clustersData, managedJobsResponse] = await Promise.all([
             dashboardCache.get(getClusters),
+            // Use shared cache key (no field filtering) - preloader uses same args
             dashboardCache.get(getManagedJobs, [
-              {
-                allUsers: true,
-                skipFinished: true,
-                fields: [
-                  'user_hash',
-                  'status',
-                  'accelerators',
-                  'job_name',
-                  'job_id',
-                  'infra',
-                ],
-              },
+              { allUsers: true, skipFinished: true },
             ]),
           ]);
         } catch (error) {
@@ -2386,18 +2365,9 @@ function ServiceAccountTokensView({
       try {
         [clustersResponse, jobsResponse] = await Promise.all([
           dashboardCache.get(getClusters),
+          // Use shared cache key (no field filtering) - preloader uses same args
           dashboardCache.get(getManagedJobs, [
-            {
-              allUsers: true,
-              skipFinished: true,
-              fields: [
-                'user_hash',
-                'status',
-                'accelerators',
-                'job_id',
-                'infra',
-              ],
-            },
+            { allUsers: true, skipFinished: true },
           ]),
         ]);
       } catch (error) {

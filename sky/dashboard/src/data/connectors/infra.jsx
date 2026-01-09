@@ -16,10 +16,9 @@ export async function getCloudInfrastructure(forceRefresh = false) {
   try {
     // Fetch jobs, clusters, and workspaces in parallel for better performance
     const [jobsResult, clustersResult, workspacesData] = await Promise.all([
+      // Use shared cache key (no field filtering) - preloader uses same args
       dashboardCache
-        .get(getManagedJobs, [
-          { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
-        ])
+        .get(getManagedJobs, [{ allUsers: true, skipFinished: true }])
         .catch((error) => {
           console.error('Error fetching managed jobs:', error);
           return { jobs: [] };
