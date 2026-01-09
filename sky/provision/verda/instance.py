@@ -37,7 +37,7 @@ def _filter_instances(
     instances = verda.instances_get()
     filtered_instances = {}
     for instance in instances:
-        instance_id = instance.id
+        instance_id = instance.instance_id
         instance_name = instance.hostname
         # Filter by cluster name
         if cluster_name_on_cloud and cluster_name_on_cloud not in instance_name:
@@ -161,7 +161,7 @@ def run_instances(
                 }
             }
             response = verda.instance_create(instance_data)
-            instance_id = response.id
+            instance_id = response.instance_id
         except Exception as e:  # pylint: disable=broad-except
             # API errors - provide specific message
             instance_type = config.node_config['InstanceType']
@@ -288,22 +288,22 @@ def terminate_instances(
 
     # Terminate each instance
     terminated_instances = []
-    for inst_id, inst in non_terminated_instances.items():
+    for instance_id, inst in non_terminated_instances.items():
         status = inst.status
-        logger.debug(f'Terminating instance {inst_id} (status: {status})')
+        logger.debug(f'Terminating instance {instance_id} (status: {status})')
         if worker_only and inst.hostname.endswith('-head'):
             continue
         try:
-            verda.instance_action(id=inst_id, action='delete')
-            terminated_instances.append(inst_id)
+            verda.instance_action(instance_id=instance_id, action='delete')
+            terminated_instances.append(instance_id)
             name = inst.hostname
             logger.info(
-                f'Successfully initiated termination of instance {inst_id} '
-                f'({name})')
+                f'Successfully initiated termination of instance {instance_id}'
+                f' ({name})')
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
-                    f'Failed to terminate instance {inst_id}: '
+                    f'Failed to terminate instance {instance_id}: '
                     f'{common_utils.format_exception(e, use_bracket=False)}'
                 ) from e
 

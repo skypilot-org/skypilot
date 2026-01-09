@@ -33,7 +33,6 @@ class APIException(Exception):
     """
 
     def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
         """API Exception.
 
         :param code: error code
@@ -47,6 +46,7 @@ class APIException(Exception):
         self.message = message
         """Error message
         """
+        super().__init__(message)
 
     def __str__(self) -> str:
         msg = ''
@@ -103,7 +103,7 @@ class AuthenticationService:
 
         response = requests.post(url,
                                  json=payload,
-                                 headers=self._generate_headers(),
+                                 headers=self.generate_headers(),
                                  timeout=30)
         handle_error(response)
 
@@ -141,7 +141,7 @@ class AuthenticationService:
 
         response = requests.post(url,
                                  json=payload,
-                                 headers=self._generate_headers())
+                                 headers=self.generate_headers())
 
         # if refresh token is also expired, authenticate again:
         if response.status_code == 401 or response.status_code == 400:
@@ -437,7 +437,7 @@ class Instance:
     """Instance model class."""
 
     def __init__(self, data) -> None:
-        self.id = data['id']
+        self.instance_id = data['id']
         self.status = data['status']
         self.ip = data.get('ip')
         self.hostname = data['hostname']
@@ -470,11 +470,11 @@ class VerdaClient:
         response = self.http_client.get('/instances').json()
         return [Instance(o) for o in response]
 
-    def instance_get(self, id: str) -> Instance:
+    def instance_get(self, instance_id: str) -> Instance:
         """Get instance."""
         if self.http_client is None:
             self.http_client = HTTPClient()
-        response = self.http_client.get(f'/instances/{id}').json()
+        response = self.http_client.get(f'/instances/{instance_id}').json()
         return Instance(response)
 
     def ssh_keys_get(self) -> List[SSHKey]:
