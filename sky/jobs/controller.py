@@ -101,7 +101,7 @@ def _add_k8s_annotations(task: 'sky.Task', job_id: int) -> None:
     new_resources_list: List['sky.Resources'] = []
     for original_resource in original_resources:
         # Get existing config overrides or create new dict
-        config_overrides = original_resource.cluster_config_overrides
+        config_overrides = original_resource.cluster_config_overrides.copy()
 
         # Initialize nested structure and add annotations
         pod_annotations = config_overrides.setdefault(
