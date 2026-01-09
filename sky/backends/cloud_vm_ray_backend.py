@@ -5456,43 +5456,43 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 try:
                     if cluster_yaml_obj is not None:
                         # Extract volume names from existing cluster
-                        if isinstance(to_provision.cloud, clouds.Kubernetes):
-                            # For k8s: volumes are in node_config.spec.volumes.
-                            # See sky/templates/kubernetes-ray.yml.j2.
-                            node_config = _get_pod_config(cluster_yaml_obj)
-                            volumes = node_config.get('spec',
-                                                      {}).get('volumes', [])
-                            for vol in volumes:
-                                # Volume from PVC has structure:
-                                # - name: <volume_name>
-                                #   persistentVolumeClaim:
-                                #     claimName: <volume_name_on_cloud>
-                                if 'persistentVolumeClaim' in vol:
-                                    # Volume name is user-specified name
-                                    vol_name = vol.get('name')
-                                    if vol_name:
-                                        existing_volume_names.add(vol_name)
-                        elif isinstance(to_provision.cloud, clouds.RunPod):
-                            # For RunPod, volumes are in
-                            # node_config.VolumeMounts.
-                            # See sky/templates/runpod-ray.yml.j2.
-                            node_config = _get_pod_config(cluster_yaml_obj)
-                            volume_mounts_config = node_config.get(
-                                'VolumeMounts', [])
-                            for vol_mount in volume_mounts_config:
-                                vol_name = vol_mount.get('VolumeNameOnCloud')
-                                if vol_name:
-                                    existing_volume_names.add(vol_name)
-                        else:
-                            # For other clouds, we try to find the volumes in
-                            # node_config.VolumeMounts as a fallback.
-                            node_config = _get_pod_config(cluster_yaml_obj)
-                            volume_mounts_config = node_config.get(
-                                'VolumeMounts', [])
-                            for vol_mount in volume_mounts_config:
-                                vol_name = vol_mount.get('VolumeNameOnCloud')
-                                if vol_name:
-                                    existing_volume_names.add(vol_name)
+                        node_config = _get_pod_config(cluster_yaml_obj)
+
+                        # Check for K8s-style persistent volumes (spec.volumes)
+                        # See sky/templates/kubernetes-ray.yml.j2.
+                        volumes = node_config.get('spec', {}).get('volumes', [])
+                        for vol in volumes:
+                            # Volume from PVC has structure:
+                            # - name: <volume_name>
+                            #   persistentVolumeClaim:
+                            #     claimName: <volume_name_on_cloud>
+                            if 'persistentVolumeClaim' in vol:
+                                pvc = vol.get('persistentVolumeClaim', {})
+                                # Use claimName (volume_name_on_cloud) to
+                                # be consistent with RunPod.
+                                vol_name_on_cloud = pvc.get('claimName')
+                                if vol_name_on_cloud:
+                                    existing_volume_names.add(vol_name_on_cloud)
+
+                        # Check for custom VolumeMounts config (e.g. RunPod)
+                        # See sky/templates/runpod-ray.yml.j2.
+                        volume_mounts_config = node_config.get(
+                            'VolumeMounts', [])
+                        for vol_mount in volume_mounts_config:
+                            vol_name = vol_mount.get('VolumeNameOnCloud')
+                            if vol_name:
+                                existing_volume_names.add(vol_name)
+
+                        # Check for K8s ephemeral volumes
+                        # See sky/templates/kubernetes-ray.yml.j2.
+                        provider_config = cluster_yaml_obj.get('provider', {})
+                        ephemeral_specs = provider_config.get(
+                            'ephemeral_volume_specs', [])
+                        for spec in ephemeral_specs:
+                            # For ephemeral volumes, we check the mount path.
+                            mount_path = spec.get('mount_path')
+                            if mount_path:
+                                existing_volume_names.add(mount_path)
                 except Exception as e:  # pylint: disable=broad-except
                     # If we can't get the existing volume mounts, log debug
                     # and skip the warning check
@@ -5503,7 +5503,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 new_volumes = []
                 for volume_mount in task.volume_mounts:
                     # Compare using volume_name for user-facing name
-                    if volume_mount.volume_name not in existing_volume_names:
+                    if volume_mount.is_ephemeral:
+                        if volume_mount.path not in existing_volume_names:
+                            new_volumes.append(volume_mount.path)
+                    elif volume_mount.volume_name not in existing_volume_names:
                         new_volumes.append(volume_mount.volume_name)
 
                 if new_volumes:
