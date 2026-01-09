@@ -66,6 +66,7 @@ function JobDetails() {
   const [refreshControllerLogsFlag, setRefreshControllerLogsFlag] = useState(0);
   const [logExtractedLinks, setLogExtractedLinks] = useState({});
   const [isLinksExpanded, setIsLinksExpanded] = useState(false);
+  const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
   const isMobile = useMobile();
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
@@ -259,6 +260,7 @@ function JobDetails() {
                 <div className="p-4">
                   <JobDetailsContent
                     jobData={detailJobData}
+                    allTasks={allTasks}
                     activeTab="info"
                     setIsLoadingLogs={setIsLoadingLogs}
                     setIsLoadingControllerLogs={setIsLoadingControllerLogs}
@@ -451,6 +453,22 @@ function JobDetails() {
                 <div className="flex items-center justify-between px-4 pt-4">
                   <div className="flex items-center">
                     <h3 className="text-lg font-semibold">Logs</h3>
+                    {isMultiTask && (
+                      <div className="ml-4 flex items-center">
+                        <label className="text-sm text-gray-600 mr-2">Task:</label>
+                        <select
+                          value={selectedTaskIndex}
+                          onChange={(e) => setSelectedTaskIndex(parseInt(e.target.value, 10))}
+                          className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-blue"
+                        >
+                          {allTasks.map((task, index) => (
+                            <option key={task.task_job_id || index} value={index}>
+                              Task {index}{task.task ? `: ${task.task}` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <span className="ml-2 text-xs text-gray-500">
                       (Logs are not streaming; click refresh to fetch the latest
                       logs.)
@@ -458,7 +476,7 @@ function JobDetails() {
                   </div>
                   <div className="flex items-center space-x-3">
                     <Tooltip
-                      content="Download full logs"
+                      content="Download all task logs (zip)"
                       className="text-muted-foreground"
                     >
                       <button
@@ -493,7 +511,7 @@ function JobDetails() {
                 </div>
                 <div className="p-4">
                   <JobDetailsContent
-                    jobData={detailJobData}
+                    jobData={isMultiTask ? allTasks[selectedTaskIndex] : detailJobData}
                     activeTab="logs"
                     setIsLoadingLogs={setIsLoadingLogs}
                     setIsLoadingControllerLogs={setIsLoadingControllerLogs}
@@ -650,6 +668,7 @@ const URL_PATTERNS = {
 
 function JobDetailsContent({
   jobData,
+  allTasks = [],
   activeTab,
   setIsLoadingLogs,
   setIsLoadingControllerLogs,
@@ -992,7 +1011,24 @@ function JobDetailsContent({
           Requested Resources
         </div>
         <div className="text-base mt-1">
-          {jobData.requested_resources || 'N/A'}
+          {allTasks.length > 1 ? (
+            <div>
+              <div className="text-sm text-gray-500 mb-1">
+                Aggregated from {allTasks.length} tasks:
+              </div>
+              <ul className="list-disc list-inside space-y-1">
+                {allTasks.map((task, index) => (
+                  <li key={task.task_job_id || index} className="text-sm">
+                    <span className="font-medium">Task {index}</span>
+                    {task.task && <span className="text-gray-500"> ({task.task})</span>}
+                    : {task.requested_resources || task.resources_str || 'N/A'}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            jobData.requested_resources || 'N/A'
+          )}
         </div>
       </div>
       <div>
@@ -1290,6 +1326,7 @@ JobDetailsContent.propTypes = {
     entrypoint: PropTypes.string,
     dag_yaml: PropTypes.string,
   }),
+  allTasks: PropTypes.array,
   activeTab: PropTypes.string,
   setIsLoadingLogs: PropTypes.func,
   setIsLoadingControllerLogs: PropTypes.func,

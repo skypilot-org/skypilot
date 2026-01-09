@@ -86,6 +86,43 @@ export const statusGroups = {
   ],
 };
 
+// Status priority for aggregation (higher index = worse status)
+const STATUS_PRIORITY = {
+  'SUCCEEDED': 0,
+  'PENDING': 1,
+  'SUBMITTED': 2,
+  'STARTING': 3,
+  'RUNNING': 4,
+  'RECOVERING': 5,
+  'CANCELLING': 6,
+  'CANCELLED': 7,
+  'FAILED_SETUP': 8,
+  'FAILED_PRECHECKS': 9,
+  'FAILED_NO_RESOURCE': 10,
+  'FAILED': 11,
+  'FAILED_CONTROLLER': 12,
+};
+
+// Helper function to aggregate status for a job group
+// Returns the "worst" status based on priority
+export function getAggregatedStatus(tasks) {
+  if (!tasks || tasks.length === 0) return 'PENDING';
+  if (tasks.length === 1) return tasks[0].status;
+
+  let worstStatus = 'SUCCEEDED';
+  let worstPriority = 0;
+
+  for (const task of tasks) {
+    const priority = STATUS_PRIORITY[task.status] ?? 0;
+    if (priority > worstPriority) {
+      worstPriority = priority;
+      worstStatus = task.status;
+    }
+  }
+
+  return worstStatus;
+}
+
 // Define filter options for the filter dropdown
 const PROPERTY_OPTIONS = [
   {
@@ -1381,30 +1418,21 @@ export function ManagedJobsTable({
                             {formatDuration(firstTask.job_duration)}
                           </TableCell>
                           <TableCell>
-                            {/* Show status summary for all tasks */}
-                            <div className="flex flex-wrap gap-1">
-                              {(() => {
-                                const statusCount = {};
-                                tasks.forEach((t) => {
-                                  statusCount[t.status] =
-                                    (statusCount[t.status] || 0) + 1;
-                                });
-                                return Object.entries(statusCount).map(
-                                  ([status, count]) => (
-                                    <div
-                                      key={status}
-                                      className="flex items-center"
-                                    >
-                                      <StatusBadge status={status} />
-                                      {count > 1 && (
-                                        <span className="ml-1 text-xs text-gray-500">
-                                          x{count}
-                                        </span>
-                                      )}
-                                    </div>
-                                  )
-                                );
-                              })()}
+                            {/* Show aggregated status for job group */}
+                            <div className="flex items-center">
+                              <StatusBadge status={getAggregatedStatus(tasks)} />
+                              {tasks.length > 1 && (
+                                <NonCapitalizedTooltip
+                                  content={
+                                    `Task statuses:\n${tasks.map((t, i) => `Task ${i}: ${t.status}`).join('\n')}`
+                                  }
+                                  className="text-sm text-muted-foreground"
+                                >
+                                  <span className="ml-1 text-xs text-gray-500 cursor-help">
+                                    x{tasks.length}
+                                  </span>
+                                </NonCapitalizedTooltip>
+                              )}
                             </div>
                           </TableCell>
                           <TableCell>
@@ -1417,7 +1445,28 @@ export function ManagedJobsTable({
                               <span>-</span>
                             )}
                           </TableCell>
-                          <TableCell>-</TableCell>
+                          <TableCell>
+                            {(() => {
+                              // Aggregate resources from all tasks
+                              const resourcesList = tasks
+                                .map((t) => t.requested_resources || t.resources_str)
+                                .filter(Boolean);
+                              if (resourcesList.length === 0) return '-';
+                              const uniqueResources = [...new Set(resourcesList)];
+                              const displayText = uniqueResources.length === 1
+                                ? uniqueResources[0]
+                                : `${uniqueResources[0]} (+${tasks.length - 1} more)`;
+                              const tooltipText = resourcesList.map((r, i) => `Task ${i}: ${r}`).join('\n');
+                              return (
+                                <NonCapitalizedTooltip
+                                  content={`Aggregated from ${tasks.length} tasks:\n${tooltipText}`}
+                                  className="text-sm text-muted-foreground"
+                                >
+                                  <span>{displayText}</span>
+                                </NonCapitalizedTooltip>
+                              );
+                            })()}
+                          </TableCell>
                           <TableCell>
                             {tasks.reduce(
                               (sum, t) => sum + (t.recoveries || 0),
@@ -1458,9 +1507,12 @@ export function ManagedJobsTable({
                                 </TableCell>
                                 <TableCell>
                                   <div className="pl-2">
-                                    <span className="text-gray-700">
+                                    <Link
+                                      href={`/jobs/${task.id}/${taskIndex}`}
+                                      className="text-blue-600 hover:underline"
+                                    >
                                       {task.task || `Task ${taskIndex}`}
-                                    </span>
+                                    </Link>
                                   </div>
                                 </TableCell>
                                 <TableCell>
@@ -1836,7 +1888,7 @@ export function Status2Actions({
       </Tooltip>
       <Tooltip
         key="downloadlogs"
-        content="Download Job Logs"
+        content="Download All Task Logs (zip)"
         className="capitalize text-sm text-muted-foreground"
       >
         <button
