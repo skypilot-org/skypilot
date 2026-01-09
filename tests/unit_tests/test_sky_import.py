@@ -21,24 +21,22 @@ FORBIDDEN_EAGER_IMPORTS = frozenset({
     'pandas',
     # TODO: Add 'numpy' after fixing sky/optimizer.py to use lazy import
     # Cloud provider SDKs (should only load when that cloud is used)
-    'boto3',  # AWS
-    'botocore',  # AWS
-    'google',  # GCP
-    'googleapiclient',  # GCP
-    'azure',  # Azure
-    'oci',  # Oracle Cloud
-    'ibm_vpc',  # IBM
-    'ibm_cloud_sdk_core',  # IBM
-    'ibm_platform_services',  # IBM
-    'ibm_boto3',  # IBM
-    'ibm_botocore',  # IBM
-    'cudo',  # Cudo
-    'pydo',  # DigitalOcean
-    'runpod',  # RunPod
-    'nebius',  # Nebius
-    # Infrastructure SDKs
-    'kubernetes',  # K8s
-    'docker',  # Docker
+    'kubernetes',
+    'boto3',
+    'botocore',
+    'google',
+    'googleapiclient',
+    'azure',
+    'oci',
+    'ibm_vpc',
+    'ibm_cloud_sdk_core',
+    'ibm_platform_services',
+    'ibm_boto3',
+    'ibm_botocore',
+    'cudo',
+    'pydo',
+    'runpod',
+    'nebius',
 })
 
 
