@@ -1187,8 +1187,12 @@ def test_volumes_on_kubernetes():
             # Test volume mounting warning on relaunch with new volume
             # Create a new volume pvc1
             f'sky volumes apply -y -n pvc1 --type k8s-pvc --size 2GB',
-            # Launch with the new volume - should show warning that pvc1 won't be mounted
-            f's=$(sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume_with_new.yaml 2>&1) && echo "$s" && echo "$s" | grep -i "WARNING.*pvc1.*not mounted"',
+            # Create a yaml with new persistent AND ephemeral volumes
+            f'cat tests/test_yamls/pvc_volume_with_new.yaml > /tmp/pvc_volume_with_new_and_ephemeral.yaml',
+            f'echo "  /mnt/data4:" >> /tmp/pvc_volume_with_new_and_ephemeral.yaml',
+            f'echo "    size: 1Gi" >> /tmp/pvc_volume_with_new_and_ephemeral.yaml',
+            # Launch with the new volume - should show warning that pvc1 and /mnt/data4 won't be mounted
+            f's=$(sky launch -y -c {name} --infra kubernetes /tmp/pvc_volume_with_new_and_ephemeral.yaml 2>&1) && echo "$s" && echo "$s" | grep -i "WARNING.*pvc1.*not mounted" && echo "$s" | grep -i "WARNING.*/mnt/data4.*not mounted"',
             f'sky logs {name} 2 --status',  # Ensure the second job succeeded.
             f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing0 pvc1 -y',
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi',
