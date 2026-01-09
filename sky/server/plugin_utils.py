@@ -108,7 +108,8 @@ def _build_plugin_wheel(package_path: str) -> pathlib.Path:
     package_hash = _compute_package_hash(package_path)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        wheel_utils.run_pip_wheel(package_path, tmp_dir, f'plugin {package_name}')
+        wheel_utils.run_pip_wheel(package_path, tmp_dir,
+                                  f'plugin {package_name}')
 
         # Find the built wheel
         wheel_files = list(pathlib.Path(tmp_dir).glob('*.whl'))
@@ -131,7 +132,7 @@ def _build_plugin_wheel(package_path: str) -> pathlib.Path:
         return dest_path
 
 
-def build_plugin_wheels() -> Tuple[Dict[str, pathlib.Path], str]:
+def _build_plugin_wheels() -> Tuple[Dict[str, pathlib.Path], str]:
     """Build wheels for all plugins that have package paths specified.
 
     Returns:
@@ -180,6 +181,10 @@ def build_plugin_wheels() -> Tuple[Dict[str, pathlib.Path], str]:
             wheels[package_name] = wheel_path
             combined_hash.update(package_hash.encode())
 
+    # Return empty hash if no wheels were built
+    if not wheels:
+        return {}, ''
+
     return wheels, combined_hash.hexdigest()[:16]
 
 
@@ -210,7 +215,7 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
         return {}, ''
 
     # Build wheels once to ensure consistency between file mounts and commands
-    wheels, _ = build_plugin_wheels()
+    wheels, _ = _build_plugin_wheels()
     if not wheels:
         return {}, ''
 
@@ -235,32 +240,6 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
         commands.append(install_cmd)
 
     return file_mounts, ' && '.join(commands)
-
-
-def get_plugin_wheel_file_mounts() -> Dict[str, str]:
-    """Get file mounts for plugin wheels to upload to remote clusters.
-
-    Returns:
-        Dictionary mapping remote paths to local paths for plugin wheels.
-
-    Note: Prefer using get_plugin_mounts_and_commands() to ensure consistency
-    between file mounts and installation commands.
-    """
-    file_mounts, _ = get_plugin_mounts_and_commands()
-    return file_mounts
-
-
-def get_plugin_installation_commands() -> str:
-    """Generate shell commands to install plugin wheels on remote cluster.
-
-    Returns:
-        Shell commands to install all plugin wheels.
-
-    Note: Prefer using get_plugin_mounts_and_commands() to ensure consistency
-    between file mounts and installation commands.
-    """
-    _, commands = get_plugin_mounts_and_commands()
-    return commands
 
 
 def cleanup_stale_plugin_wheels(keep_hashes: Optional[List[str]] = None):
@@ -321,10 +300,9 @@ def get_filtered_plugins_config_path() -> Optional[str]:
 
     # Write to a temporary file
     # Using delete=False so the file persists until the controller upload
-    with tempfile.NamedTemporaryFile(
-            mode='w',
-            suffix='_plugins.yaml',
-            prefix='sky_filtered_',
-            delete=False) as temp_file:
+    with tempfile.NamedTemporaryFile(mode='w',
+                                     suffix='_plugins.yaml',
+                                     prefix='sky_filtered_',
+                                     delete=False) as temp_file:
         yaml_utils.dump_yaml(temp_file.name, filtered_config)
         return temp_file.name

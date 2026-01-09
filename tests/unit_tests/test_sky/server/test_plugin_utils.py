@@ -20,7 +20,7 @@ def test_build_plugin_wheels_empty(monkeypatch, tmp_path):
     config_path.write_text(yaml.safe_dump({'plugins': []}))
     monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
 
-    wheels, combined_hash = plugin_utils.build_plugin_wheels()
+    wheels, combined_hash = plugin_utils._build_plugin_wheels()
 
     assert wheels == {}
     assert combined_hash == ''
@@ -38,7 +38,7 @@ def test_build_plugin_wheels_no_package(monkeypatch, tmp_path):
     config_path.write_text(yaml.safe_dump(config))
     monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
 
-    wheels, combined_hash = plugin_utils.build_plugin_wheels()
+    wheels, combined_hash = plugin_utils._build_plugin_wheels()
 
     assert wheels == {}
     assert combined_hash == ''
@@ -84,7 +84,7 @@ version = "0.0.1"
     monkeypatch.setattr(plugin_utils, '_PLUGIN_WHEEL_LOCK_PATH',
                         wheel_dir.parent / '.plugin_wheels_lock')
 
-    wheels, combined_hash = plugin_utils.build_plugin_wheels()
+    wheels, combined_hash = plugin_utils._build_plugin_wheels()
 
     assert 'test_plugin' in wheels
     assert wheels['test_plugin'].exists()
@@ -221,7 +221,9 @@ def test_get_filtered_plugins_config_path_no_package(monkeypatch, tmp_path):
             },
             {
                 'class': 'module2.Plugin2',
-                'parameters': {'key': 'value'},
+                'parameters': {
+                    'key': 'value'
+                },
             },
         ]
     }
@@ -276,7 +278,9 @@ def test_get_filtered_plugins_config_path_mixed(monkeypatch, tmp_path):
             {
                 'class': 'module3.Plugin3',
                 'package': '/path/to/plugin3',
-                'parameters': {'key': 'value'},
+                'parameters': {
+                    'key': 'value'
+                },
             },
         ]
     }
