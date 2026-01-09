@@ -1357,9 +1357,9 @@ def autostop(
         logger.warning('wait_for is not supported in your API server. '
                        'Please upgrade to a newer API server to use it.')
 
-    # Hook support requires API version 26 or higher
+    # Hook support requires API version 27 or higher
     if hook is not None and (remote_api_version is None or
-                             remote_api_version < 26):
+                             remote_api_version < 27):
         logger.warning('Autostop hook is not supported in your API server. '
                        'Please upgrade to a newer API server to use it.')
 
