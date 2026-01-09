@@ -226,11 +226,11 @@ class PVCVolumeTable(VolumeTable):
         #  If show_all is False, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
         #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL
-        #   (+ ERROR if any volume has an error)
+        #   (+ MESSAGE if any volume is not ready)
         #  If show_all is True, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
         #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL, NAME_ON_CLOUD
-        #   STORAGE_CLASS, ACCESS_MODE, ERROR
+        #   STORAGE_CLASS, ACCESS_MODE, MESSAGE
 
         columns = _BASIC_COLUMNS + [
             'IS_EPHEMERAL',
@@ -240,11 +240,11 @@ class PVCVolumeTable(VolumeTable):
                 'NAME_ON_CLOUD',
                 'STORAGE_CLASS',
                 'ACCESS_MODE',
-                'ERROR',
+                'MESSAGE',
             ]
         elif self._has_errors:
-            # Show ERROR column even without show_all if there are errors
-            columns = columns + ['ERROR']
+            # Show MESSAGE column even without show_all if there are issues
+            columns = columns + ['MESSAGE']
 
         table = log_utils.create_table(columns)
         return table

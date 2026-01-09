@@ -123,7 +123,7 @@ def volume_refresh() -> None:
 
             # Determine new status and error_message
             if volume_error:
-                new_status = status_lib.VolumeStatus.ERROR
+                new_status = status_lib.VolumeStatus.NOT_READY
                 new_error = volume_error
             elif usedby_pods:
                 new_status = status_lib.VolumeStatus.IN_USE

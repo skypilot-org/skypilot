@@ -72,11 +72,9 @@ class VolumeStatus(enum.Enum):
     # Volume is being used
     IN_USE = 'IN_USE'
 
-    # Volume has an error (e.g., PVC is pending due to access mode mismatch)
-    ERROR = 'ERROR'
+    # Volume is not ready (e.g., PVC is pending, may eventually become ready)
+    NOT_READY = 'NOT_READY'
 
     def colored_str(self):
-        # Only color ERROR status red, others are uncolored
-        if self == VolumeStatus.ERROR:
-            return f'{colorama.Fore.RED}{self.value}{colorama.Style.RESET_ALL}'
+        # No coloring for volume statuses
         return self.value
