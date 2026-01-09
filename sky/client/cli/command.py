@@ -2250,7 +2250,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
 @click.option('--autostop',
               is_flag=True,
               default=False,
-              help='Stream the autostop hook logs (autostop_hook.log).')
+              help='Stream the autostop hook logs from the cluster.')
 @click.option('--worker',
               '-w',
               default=None,
