@@ -3,7 +3,7 @@
 External Links
 ==============
 
-External links are URLs associated with your managed jobs that are displayed in the SkyPilot dashboard. This is useful for linking to external dashboards, experiment trackers, or any other relevant resources.
+External links are URLs associated with managed jobs that are displayed in the SkyPilot dashboard. This is useful for linking to external dashboards, experiment trackers, or any other relevant resources.
 
 SkyPilot automatically detects and displays two types of links:
 
