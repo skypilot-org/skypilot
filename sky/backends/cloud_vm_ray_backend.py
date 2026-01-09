@@ -5414,15 +5414,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             for resource in task.resources:
                 assert (resource.cluster_config_overrides ==
                         one_task_resource.cluster_config_overrides)
-            if isinstance(to_provision.cloud, clouds.Kubernetes):
+
+            cluster_yaml_str = global_user_state.get_cluster_yaml_str(
+                cluster_name)
+            cluster_yaml_obj = (yaml_utils.safe_load(cluster_yaml_str)
+                                if cluster_yaml_str is not None else None)
+            if isinstance(to_provision.cloud,
+                          clouds.Kubernetes) and cluster_yaml_obj is not None:
                 # Warn users if the Kubernetes pod config is different
                 # from the existing cluster.
-                cluster_yaml_str = global_user_state.get_cluster_yaml_str(
-                    cluster_name)
-                actual_cluster_yaml_obj = yaml_utils.safe_load(cluster_yaml_str)
                 desired_cluster_yaml_obj = (
                     kubernetes_utils.combine_pod_config_fields_and_metadata(
-                        actual_cluster_yaml_obj,
+                        cluster_yaml_obj,
                         cluster_config_overrides=one_task_resource.
                         cluster_config_overrides,
                         cloud=to_provision.cloud,
@@ -5434,7 +5437,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                  {}).get('node_config', {}))
 
                 if _get_pod_config(desired_cluster_yaml_obj) != _get_pod_config(
-                        actual_cluster_yaml_obj):
+                        cluster_yaml_obj):
                     # pylint: disable=line-too-long
                     logger.warning(
                         f'{colorama.Fore.YELLOW}WARNING: Kubernetes pod config mismatch detected. Task requires different '
@@ -5450,11 +5453,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # Get existing cluster's volume mounts from cluster yaml
                 existing_volume_names = set()
                 try:
-                    cluster_yaml_str = global_user_state.get_cluster_yaml_str(
-                        cluster_name)
-                    if cluster_yaml_str is not None:
-                        cluster_yaml_obj = yaml_utils.safe_load(
-                            cluster_yaml_str)
+                    if cluster_yaml_obj is not None:
                         # Extract volume names from existing cluster
                         # For k8s: volumes in node_config.spec.volumes
                         if isinstance(to_provision.cloud, clouds.Kubernetes):
