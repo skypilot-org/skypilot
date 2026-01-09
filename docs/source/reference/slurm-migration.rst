@@ -76,7 +76,7 @@ SkyPilot also provides features not available in Slurm:
      - :ref:`Mount S3/GCS buckets <sky-storage>` directly to your jobs
 
 
-Login Node
+Login node
 ~~~~~~~~~~
 
 Slurm clusters have login nodes for submitting jobs and accessing shared storage. With SkyPilot:
@@ -86,7 +86,7 @@ Slurm clusters have login nodes for submitting jobs and accessing shared storage
 - **For batch workflows**: Use :ref:`managed jobs <managed-jobs>` (``sky jobs launch``) which don't require a persistent cluster.
 
 
-Environment Variable Mapping
+Environment variable mapping
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 SkyPilot exposes environment variables similar to Slurm for distributed jobs. See :ref:`sky-env-vars` for full details.
@@ -131,7 +131,7 @@ Example usage in a distributed training script:
        echo "I am worker $SKYPILOT_NODE_RANK, connecting to $HEAD_IP"
      fi
 
-Porting sbatch Scripts to SkyPilot YAML
+Porting sbatch scripts to SkyPilot YAML
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Here's a side-by-side comparison of a typical Slurm script and its SkyPilot equivalent:
@@ -191,7 +191,7 @@ Key differences:
 - **Simpler syntax**: Resource requirements are declarative YAML fields
 - **Native container support**: Easily use :ref:`containers <docker-containers>` by setting ``image_id``.
 
-Resource Requests
+Resource requests
 ~~~~~~~~~~~~~~~~~
 
 .. list-table::
@@ -226,7 +226,7 @@ Example with resource constraints:
      autostop:
        idle_minutes: 30
 
-Interactive Jobs
+Interactive jobs
 ~~~~~~~~~~~~~~~~
 
 Slurm's ``salloc`` provides an interactive allocation. In SkyPilot, launch a cluster without a ``run`` command and SSH into it:
@@ -259,7 +259,7 @@ For multi-node interactive clusters:
 
 When done, terminate with ``sky down dev`` or let ``autostop`` clean up idle clusters.
 
-Job Logs
+Job logs
 ~~~~~~~~
 
 Slurm writes job output to ``slurm-<jobid>.out``. SkyPilot provides several ways to access logs:
@@ -286,7 +286,7 @@ Logs are stored at ``~/sky_logs/`` on the cluster, organized by task ID.
 The :ref:`SkyPilot dashboard <dashboard>` provides a web UI to view all logs across clusters and jobs.
 
 
-Job Arrays and Parameter Sweeps
+Job arrays and parameter sweeps
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Slurm job arrays (``sbatch --array=1-100``) allow running many similar jobs with different parameters.
@@ -321,7 +321,7 @@ For hyperparameter sweeps, you can also pass multiple environment variables:
      done
    done
 
-Module System Alternative
+Module system alternative
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Slurm clusters often use environment modules (``module load cuda``). With SkyPilot, you have several alternatives:
@@ -357,7 +357,7 @@ Slurm clusters often use environment modules (``module load cuda``). With SkyPil
      conda activate myenv
      python train.py
 
-Identity and Authentication
+Identity and authentication
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Slurm tracks users by their Unix username. SkyPilot uses :ref:`SSO authentication <api-server-oauth>` (Okta, Google Workspace, Microsoft Entra ID) with the :ref:`SkyPilot API server <sky-api-server>`. User identity is tied to their SSO email, providing:
@@ -366,12 +366,12 @@ Slurm tracks users by their Unix username. SkyPilot uses :ref:`SSO authenticatio
 - Audit logs of who launched what
 - Role-based access control (RBAC)
 
-Backend-specific Notes
+Backend-specific notes
 ----------------------
 
 SkyPilot runs on multiple backends including Kubernetes, cloud VMs, and even Slurm itself. If you're using SkyPilot on Kubernetes, the following sections cover K8s-specific considerations.
 
-Shared Storage on Kubernetes
+Shared storage on Kubernetes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. important::
@@ -462,7 +462,7 @@ For syncing your local code to the cluster, use ``workdir``:
      # Code is synced to ~/sky_workdir/
      python train.py
 
-Partitions and Queues on Kubernetes
+Partitions and queues on Kubernetes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Slurm uses partitions (``--partition=gpu``) to direct jobs to specific resources. In SkyPilot on Kubernetes, you can target specific Kubernetes contexts or namespaces.
@@ -494,22 +494,22 @@ Configure allowed contexts in ``~/.sky/config.yaml``:
 
 Then SkyPilot's optimizer will choose the best context based on your resource requirements.
 
-Priorities and Quotas on Kubernetes
+Priorities and quotas on Kubernetes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For advanced scheduling similar to Slurm's fair-share and priority systems:
 
 - **Priority classes**: Use Kubernetes :ref:`priority classes <kubernetes-priorities>` for job preemption
-- **Kueue integration**: SkyPilot supports :ref:`Kueue <kubernetes-kueue>` for advanced queuing, quotas and preemption
+- **Kueue integration**: SkyPilot supports :ref:`Kueue <kubernetes-example-kueue>` for advanced queuing, quotas and preemption
 
 These features allow cluster admins to implement fair-share policies, user quotas, and priority-based scheduling similar to Slurm.
 
 
-Further Reading
+Further reading
 ---------------
 
 - :ref:`Quickstart <quickstart>`: Get started with SkyPilot
-- :ref:`Interactive development <interactive-development>`: Develop on your laptop and run on the cloud
+- :ref:`Interactive development <dev-cluster>`: Develop on your laptop and run on the cloud
 - :ref:`Distributed jobs <dist-jobs>`: Multi-node training guide
 - :ref:`Managed jobs <managed-jobs>`: Fault-tolerant batch jobs
 
