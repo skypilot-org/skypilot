@@ -13,7 +13,7 @@ Benefits of using volumes:
 
 SkyPilot supports creating and managing volumes directly through the ``sky`` CLI and the web dashboard.
 
-Supported volume types:
+Supported SkyPilot volumes types:
 
 - Kubernetes: `Persistent Volume Claims (PVCs) <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims/>`_
 
@@ -59,6 +59,48 @@ SkyPilot supports two types of volumes on Kubernetes:
      - Temporary storage, caches
 
 In addition to the above, you can also mount PVCs, NFS or hostPath with Kubernetes configs. See :ref:`advanced-mount-pvc-with-kubernetes-configs` and :ref:`advanced-mount-nfs-hostpath-with-kubernetes-configs` for details.
+
+We use `SkyPilot volumes` in the following documentation to refer to the volumes managed through the ``sky`` CLI and `Kubernetes native volumes` to refer to the volumes in Kubernetes, e.g. NFS, hostPath, etc.
+
+**When to use SkyPilot volumes vs Kubernetes native volumes?**
+
+The choice depends on whether you want to use PVCs (Persistent Volume Claims):
+
+* **Use SkyPilot volumes** if you want to use PVCs. SkyPilot volumes in Kubernetes are backed by PVCs and provide lifecycle management through the ``sky`` CLI. This is ideal for managed persistent storage that you want to create, share, and manage through SkyPilot.
+
+  .. note::
+
+     Even if you want to use PVCs, you may need to use Kubernetes native volumes instead of SkyPilot volumes in these cases:
+
+     * You need additional configurations (e.g., security contexts) that aren't supported by SkyPilot volumes yet
+     * You want to automatically mount different PVCs to clusters in different Kubernetes contexts
+
+     See :ref:`advanced-mount-pvc-with-kubernetes-configs` for details on mounting PVCs with Kubernetes configs.
+
+* **Use Kubernetes native volumes** (hostPath, NFS, etc.) if you don't want to use PVCs. This is useful for accessing storage that's already mounted on Kubernetes nodes (e.g., pre-mounted NFS shares, local NVMe drives) or when you need direct NFS mounts without PVCs.
+
+.. list-table::
+  :widths: 30 35 35
+  :header-rows: 1
+
+  * - Feature
+    - SkyPilot Volumes (backed by PVCs)
+    - Kubernetes Native Volumes (hostPath/NFS)
+  * - **Backend requirement**
+    - ✅ Must use PVCs
+    - ❌ No PVCs required
+  * - **Lifecycle management**
+    - ✅ Managed by SkyPilot CLI
+    - ❌ Manual management
+  * - **Configuration complexity**
+    - ✅ Simple YAML syntax
+    - ⚠️ Requires Kubernetes pod_config knowledge
+  * - **Use case: Pre-mounted NFS/local storage**
+    - ❌ Not suitable
+    - ✅ Use hostPath to access storage already mounted on nodes
+  * - **Use case: Direct NFS mount**
+    - ❌ Not suitable
+    - ✅ Use Kubernetes NFS volume type
 
 Persistent volumes
 ~~~~~~~~~~~~~~~~~~
@@ -467,9 +509,9 @@ If you want to mount different PVCs for different Kubernetes contexts, you can s
 Advanced: Mount NFS or hostPath with Kubernetes configs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-`Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ can be attached to your SkyPilot pods using the :ref:`pod_config <kubernetes-custom-pod-config>` field. This is useful for accessing shared storage such as NFS or local high-performance storage like NVMe drives.
+Kubernetes native volume types (such as NFS, hostPath, and other `Kubernetes volume types <https://kubernetes.io/docs/concepts/storage/volumes/>`_) can be attached to your SkyPilot pods using the :ref:`pod_config <kubernetes-custom-pod-config>` field. This is useful for accessing shared storage such as NFS or local high-performance storage like NVMe drives.
 
-Volume mounting can be done directly in the task YAML on a per-task basis, or globally for all tasks in `SkyPilot config <https://docs.skypilot.co/en/latest/reference/config.html>`_.
+Kubernetes native volume mounting can be done directly in the task YAML on a per-task basis, or globally for all tasks in `SkyPilot config <https://docs.skypilot.co/en/latest/reference/config.html>`_.
 
 Examples:
 
@@ -478,7 +520,7 @@ Examples:
     .. tab-item:: NFS using hostPath
       :name: kubernetes-volumes-hostpath-nfs
 
-      Mount a NFS share that's `already mounted on the Kubernetes nodes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_.
+      Mount a NFS share that's already mounted on the Kubernetes nodes using Kubernetes `hostPath <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_ volume. This is useful when NFS is pre-mounted on all nodes and you want to access it from your pods.
 
       **Per-task configuration:**
 
@@ -523,7 +565,7 @@ Examples:
     .. tab-item:: NFS using native volume
       :name: kubernetes-volumes-native-nfs
 
-      Mount a NFS share using Kubernetes' `native NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_ support.
+      Mount a NFS share using Kubernetes' `native NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_. This is useful when you want to mount a NFS share directly from the NFS server without requiring it to be pre-mounted on the nodes.
 
       **Per-task configuration:**
 
@@ -570,7 +612,7 @@ Examples:
     .. tab-item:: NVMe using hostPath
       :name: kubernetes-volumes-hostpath-nvme
 
-      Mount local NVMe storage that's already mounted on the Kubernetes nodes.
+      Mount local NVMe storage that's already mounted on the Kubernetes nodes using Kubernetes hostPath volume. This is useful for accessing high-performance local storage that's pre-configured on your nodes.
 
       **Per-task configuration:**
 
