@@ -8,7 +8,11 @@ This guide helps users familiar with Slurm transition to SkyPilot. It covers com
 Why use SkyPilot instead of Slurm?
 ----------------------------------
 
-TODO - isolation, multi-cluster, ...?
+- **Multi-cluster made easy**: With multiple Slurm clusters, users must manually track resource availability and use different login nodes for managing jobs. SkyPilot provides a single interface across multiple Slurm clusters, Kubernetes clusters, and cloud VMs.
+- **Elasticity**: Slurm clusters are fixed pools. SkyPilot running on the cloud(s) can burst to additional capacity when needed and scale down when idle.
+- **Stronger isolation**: Without cgroups, Slurm cannot enforce resource limits; a runaway job can crash others. SkyPilot provides stronger container-based isolation.
+- **Dependency management**: All Slurm jobs run in an identical environment and having different dependencies per-job can be tricky. SkyPilot provides full isolation for each job's environment.
+- **Unified dashboard**: SkyPilot provides a :ref:`web dashboard <dashboard>` for job management, logs, and monitoring across all infrastructure.
 
 Slurm to SkyPilot
 -----------------
@@ -49,6 +53,38 @@ Most Slurm concepts map directly to SkyPilot concepts.
    * - ``sinfo``
      - ``sky show-gpus``
      - View available resources
+
+SkyPilot also provides features not available in Slurm:
+
+.. list-table::
+   :widths: 35 65
+   :header-rows: 1
+
+   * - Feature
+     - Description
+   * - ``sky serve``
+     - :ref:`Model serving <sky-serve>` with autoscaling and load balancing
+   * - ``sky dashboard``
+     - :ref:`Web UI <dashboard>` for clusters, jobs, logs, and monitoring
+   * - ``sky api login``
+     - :ref:`SSO authentication <api-server-oauth>` (Okta, Google Workspace, etc.)
+   * - ``sky volumes``
+     - :ref:`Managed persistent volumes <volumes-on-kubernetes>` for data and checkpoints
+   * - Auto-failover
+     - :ref:`Automatic failover <auto-failover>` across clouds/regions when resources unavailable
+   * - Object store mounting
+     - :ref:`Mount S3/GCS buckets <sky-storage>` directly to your jobs
+
+
+Login Node
+~~~~~~~~~~
+
+Slurm clusters have login nodes for submitting jobs and accessing shared storage. With SkyPilot:
+
+- **No login node required**: Run ``sky launch`` directly from your laptop.
+- **For interactive work**: SSH into your cluster after launching (``ssh mycluster``).
+- **For batch workflows**: Use :ref:`managed jobs <managed-jobs>` (``sky jobs launch``) which don't require a persistent cluster.
+
 
 Environment Variable Mapping
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -321,16 +357,6 @@ Slurm clusters often use environment modules (``module load cuda``). With SkyPil
      conda activate myenv
      python train.py
 
-Login Node
-~~~~~~~~~~
-
-Slurm clusters have login nodes for submitting jobs and accessing shared storage. With SkyPilot:
-
-- **No login node required**: Run ``sky launch`` directly from your laptop
-- **For interactive work**: SSH into your cluster after launching (``ssh mycluster``)
-- **For batch workflows**: Use :ref:`managed jobs <managed-jobs>` (``sky jobs launch``) which don't require a persistent cluster
-
-
 Identity and Authentication
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -340,10 +366,10 @@ Slurm tracks users by their Unix username. SkyPilot uses :ref:`SSO authenticatio
 - Audit logs of who launched what
 - Role-based access control (RBAC)
 
-Kubernetes-Specific Topics
---------------------------
+Backend-specific Notes
+----------------------
 
-The following sections cover topics specific to running SkyPilot on Kubernetes.
+SkyPilot runs on multiple backends including Kubernetes, cloud VMs, and even Slurm itself. If you're using SkyPilot on Kubernetes, the following sections cover K8s-specific considerations.
 
 Shared Storage on Kubernetes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -430,7 +456,7 @@ For syncing your local code to the cluster, use ``workdir``:
 
 .. code-block:: yaml
 
-   workdir: ./my-project
+   workdir: ./my-project  # Local directory or git repository URL
 
    run: |
      # Code is synced to ~/sky_workdir/
@@ -482,9 +508,8 @@ These features allow cluster admins to implement fair-share policies, user quota
 Further Reading
 ---------------
 
+- :ref:`Quickstart <quickstart>`: Get started with SkyPilot
+- :ref:`Interactive development <interactive-development>`: Develop on your laptop and run on the cloud
 - :ref:`Distributed jobs <dist-jobs>`: Multi-node training guide
 - :ref:`Managed jobs <managed-jobs>`: Fault-tolerant batch jobs
-- :ref:`Volumes <volumes-on-kubernetes>`: Persistent storage on Kubernetes
-- :ref:`Environment variables <sky-env-vars>`: Full list of SkyPilot environment variables
-- :ref:`Training guide <training-guide>`: Best practices for distributed training
 
