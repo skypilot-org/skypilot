@@ -318,70 +318,83 @@ export async function getManagedJobsWithClientPagination(options) {
 
 export async function getPoolStatus() {
   try {
-    const response = await apiClient.post(`/jobs/pool_status`, {
-      pool_names: null, // null means get all pools
-    });
-    if (!response.ok) {
-      const msg = `Initial API request to get pool status failed with status ${response.status}`;
-      throw new Error(msg);
-    }
-    const id = response.headers.get('X-Skypilot-Request-ID');
-    if (!id) {
-      const msg = 'No request ID received from server for getting pool status';
-      throw new Error(msg);
-    }
-    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-    let errorMessage = fetchedData.statusText;
-    if (fetchedData.status === 500) {
-      try {
-        const data = await fetchedData.json();
-        if (data.detail && data.detail.error) {
-          try {
-            const error = JSON.parse(data.detail.error);
-            if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
-              return { pools: [], controllerStopped: true };
-            } else {
-              errorMessage = error.message || String(data.detail.error);
-            }
-          } catch (jsonError) {
-            console.error(
-              'Error parsing JSON from data.detail.error:',
-              jsonError
-            );
-            errorMessage = String(data.detail.error);
-          }
-        }
-      } catch (dataError) {
-        console.error('Error parsing response JSON:', dataError);
-        errorMessage = String(dataError);
+    // Start pool_status API call
+    const poolStatusPromise = (async () => {
+      const response = await apiClient.post(`/jobs/pool_status`, {
+        pool_names: null, // null means get all pools
+      });
+      if (!response.ok) {
+        const msg = `Initial API request to get pool status failed with status ${response.status}`;
+        throw new Error(msg);
       }
-    }
+      const id = response.headers.get('X-Skypilot-Request-ID');
+      if (!id) {
+        const msg = 'No request ID received from server for getting pool status';
+        throw new Error(msg);
+      }
+      const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+      let errorMessage = fetchedData.statusText;
+      if (fetchedData.status === 500) {
+        try {
+          const data = await fetchedData.json();
+          if (data.detail && data.detail.error) {
+            try {
+              const error = JSON.parse(data.detail.error);
+              if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
+                return { controllerStopped: true, poolData: [] };
+              } else {
+                errorMessage = error.message || String(data.detail.error);
+              }
+            } catch (jsonError) {
+              console.error(
+                'Error parsing JSON from data.detail.error:',
+                jsonError
+              );
+              errorMessage = String(data.detail.error);
+            }
+          }
+        } catch (dataError) {
+          console.error('Error parsing response JSON:', dataError);
+          errorMessage = String(dataError);
+        }
+      }
 
-    if (!fetchedData.ok) {
-      const msg = `API request to get pool status result failed with status ${fetchedData.status}, error: ${errorMessage}`;
-      throw new Error(msg);
-    }
+      if (!fetchedData.ok) {
+        const msg = `API request to get pool status result failed with status ${fetchedData.status}, error: ${errorMessage}`;
+        throw new Error(msg);
+      }
 
-    // Parse the pools data from the response
-    const data = await fetchedData.json();
-    const poolData = data.return_value ? JSON.parse(data.return_value) : [];
+      // Parse the pools data from the response
+      const data = await fetchedData.json();
+      const poolData = data.return_value ? JSON.parse(data.return_value) : [];
+      return { controllerStopped: false, poolData };
+    })();
 
-    // Also fetch managed jobs to get job counts by pool
-    let jobsData = { jobs: [] };
-    try {
-      const jobsResponse = await dashboardCache.get(getManagedJobs, [
+    // Start fetching managed jobs in parallel (for job counts by pool)
+    const jobsPromise = dashboardCache
+      .get(getManagedJobs, [
         {
           allUsers: true,
           skipFinished: true,
           fields: ['pool', 'status'],
         },
-      ]);
-      if (!jobsResponse.controllerStopped) {
-        jobsData = jobsResponse;
-      }
-    } catch (jobsError) {
-      console.warn('Failed to fetch jobs for pool job counts:', jobsError);
+      ])
+      .catch((jobsError) => {
+        console.warn('Failed to fetch jobs for pool job counts:', jobsError);
+        return { jobs: [], controllerStopped: false };
+      });
+
+    // Wait for both requests to complete in parallel
+    const [poolResult, jobsData] = await Promise.all([
+      poolStatusPromise,
+      jobsPromise,
+    ]);
+
+    if (poolResult.controllerStopped) {
+      return { pools: [], controllerStopped: true };
     }
+
+    const poolData = poolResult.poolData;
 
     // Process job counts by pool and status
     const jobCountsByPool = {};
@@ -395,7 +408,12 @@ export async function getPoolStatus() {
       'CANCELLED',
     ];
 
-    if (jobsData.jobs && Array.isArray(jobsData.jobs)) {
+    if (
+      jobsData &&
+      !jobsData.controllerStopped &&
+      jobsData.jobs &&
+      Array.isArray(jobsData.jobs)
+    ) {
       jobsData.jobs.forEach((job) => {
         const poolName = job.pool;
         const status = job.status;
