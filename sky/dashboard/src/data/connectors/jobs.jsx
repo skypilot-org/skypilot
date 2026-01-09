@@ -426,6 +426,7 @@ export async function getPoolStatus() {
 }
 
 // Hook for individual job details that reuses the main jobs cache
+// Returns all tasks for a given job_id (supports multi-task jobs)
 export function useSingleManagedJob(jobId, refreshTrigger = 0) {
   const [jobData, setJobData] = useState(null);
   const [loadingJobData, setLoadingJobData] = useState(true);
@@ -444,14 +445,14 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
           { allUsers: true, allFields: true, jobIDs: [jobId] },
         ]);
 
-        // Filter for the specific job client-side
-        const job = allJobsData?.jobs?.find(
-          (j) => String(j.id) === String(jobId)
-        );
+        // Filter for ALL tasks matching this job_id (supports multi-task jobs)
+        const matchingJobs =
+          allJobsData?.jobs?.filter((j) => String(j.id) === String(jobId)) ||
+          [];
 
-        if (job) {
+        if (matchingJobs.length > 0) {
           setJobData({
-            jobs: [job],
+            jobs: matchingJobs,
             controllerStopped: allJobsData.controllerStopped || false,
           });
         } else {

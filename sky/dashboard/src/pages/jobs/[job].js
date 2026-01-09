@@ -8,6 +8,14 @@ import React, {
 import { CircularProgress } from '@mui/material';
 import { useRouter } from 'next/router';
 import { Card } from '@/components/ui/card';
+import {
+  Table,
+  TableHeader,
+  TableRow,
+  TableHead,
+  TableBody,
+  TableCell,
+} from '@/components/ui/table';
 import { useSingleManagedJob, getPoolStatus } from '@/data/connectors/jobs';
 import Link from 'next/link';
 import {
@@ -21,6 +29,7 @@ import {
 import {
   CustomTooltip as Tooltip,
   formatFullTimestamp,
+  formatDuration,
   renderPoolLink,
 } from '@/components/utils';
 import { LogFilter } from '@/components/utils';
@@ -174,9 +183,13 @@ function JobDetails() {
     return <div>Loading...</div>;
   }
 
-  const detailJobData = jobData?.jobs?.find(
-    (item) => String(item.id) === String(jobId)
-  );
+  // Get all tasks for this job (supports multi-task jobs)
+  const allTasks =
+    jobData?.jobs?.filter((item) => String(item.id) === String(jobId)) || [];
+
+  // Use the first task for main details display
+  const detailJobData = allTasks.length > 0 ? allTasks[0] : null;
+  const isMultiTask = allTasks.length > 1;
 
   const title = jobId
     ? `Job: ${jobId} | SkyPilot Dashboard`
@@ -199,6 +212,11 @@ function JobDetails() {
               className="text-sky-blue hover:underline"
             >
               {jobId} {detailJobData?.name ? `(${detailJobData.name})` : ''}
+              {isMultiTask && (
+                <span className="ml-2 text-xs text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded">
+                  {allTasks.length} tasks
+                </span>
+              )}
             </Link>
           </div>
 
@@ -254,6 +272,112 @@ function JobDetails() {
                 </div>
               </Card>
             </div>
+
+            {/* Tasks Section - only show for multi-task jobs */}
+            {isMultiTask && (
+              <div id="tasks-section" className="mt-6">
+                <Card>
+                  <div className="flex items-center justify-between px-4 pt-4">
+                    <h3 className="text-lg font-semibold">
+                      Tasks
+                      <span className="ml-2 text-sm font-normal text-gray-500">
+                        ({allTasks.length} tasks)
+                      </span>
+                    </h3>
+                  </div>
+                  <div className="p-4">
+                    <div className="overflow-x-auto rounded-lg border">
+                      <Table className="min-w-full">
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="whitespace-nowrap">
+                              Task ID
+                            </TableHead>
+                            <TableHead className="whitespace-nowrap">
+                              Task Name
+                            </TableHead>
+                            <TableHead className="whitespace-nowrap">
+                              Status
+                            </TableHead>
+                            <TableHead className="whitespace-nowrap">
+                              Duration
+                            </TableHead>
+                            <TableHead className="whitespace-nowrap">
+                              Infra
+                            </TableHead>
+                            <TableHead className="whitespace-nowrap">
+                              Resources
+                            </TableHead>
+                            <TableHead className="whitespace-nowrap">
+                              Recoveries
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {allTasks.map((task, index) => (
+                            <TableRow key={task.task_job_id}>
+                              <TableCell>{index}</TableCell>
+                              <TableCell>
+                                <span className="text-gray-700">
+                                  {task.task || `Task ${index}`}
+                                </span>
+                              </TableCell>
+                              <TableCell>
+                                <StatusBadge status={task.status} />
+                              </TableCell>
+                              <TableCell>
+                                {formatDuration(task.job_duration)}
+                              </TableCell>
+                              <TableCell>
+                                {task.infra && task.infra !== '-' ? (
+                                  <NonCapitalizedTooltip
+                                    content={task.full_infra || task.infra}
+                                    className="text-sm text-muted-foreground"
+                                  >
+                                    <span>
+                                      {task.cloud ||
+                                        task.infra.split('(')[0].trim()}
+                                      {task.infra.includes('(') && (
+                                        <span className="text-gray-500">
+                                          {' ' +
+                                            task.infra.substring(
+                                              task.infra.indexOf('(')
+                                            )}
+                                        </span>
+                                      )}
+                                    </span>
+                                  </NonCapitalizedTooltip>
+                                ) : (
+                                  <span>-</span>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <NonCapitalizedTooltip
+                                  content={
+                                    task.requested_resources ||
+                                    task.resources_str_full ||
+                                    task.resources_str ||
+                                    '-'
+                                  }
+                                  className="text-sm text-muted-foreground"
+                                >
+                                  <span>
+                                    {task.requested_resources ||
+                                      task.resources_str ||
+                                      '-'}
+                                  </span>
+                                </NonCapitalizedTooltip>
+                              </TableCell>
+                              <TableCell>{task.recoveries || 0}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                </Card>
+              </div>
+            )}
 
             {/* GPU Metrics Plugin Slot */}
             <PluginSlot
