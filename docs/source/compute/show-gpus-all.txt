@@ -1,29 +1,12 @@
-Kubernetes GPUs
-Context: sky-dev
-GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
-H100  1, 2, 4, 8                16 of 16 free
-Kubernetes per-node GPU availability
-CONTEXT  NODE     vCPU             Memory (GB)        GPU   GPU UTILIZATION
-sky-dev  g104842  0 of 128 free    1878 of 2014 free  H100  8 of 8 free
-sky-dev  g466422  380 of 384 free  1498 of 1510 free        0 of 0 free
-sky-dev  g7584a6  195 of 384 free  1300 of 1510 free        0 of 0 free
-sky-dev  g853cc8  1 of 128 free    1878 of 2014 free  H100  8 of 8 free
-
-Note: No GPUs found in any SSH clusters. If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs (e.g., skypilot.co/accelerator) are setup correctly. To further debug, run: sky check
-
-
-
-Cloud GPUs
 COMMON_GPU  AVAILABLE_QUANTITIES
 A10         1, 2, 4
 A10G        1, 4, 8
 A100        1, 2, 4, 8, 16
-A100-80GB   1, 2, 3, 4, 5, 6, 7, 8
-B200        1, 2, 3, 4, 5, 6, 7, 8
-H100        1, 2, 3, 4, 5, 6, 7, 8, 12
-H200        1, 2, 4, 8
-L4          0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
-L40S        1, 2, 3, 4, 5, 6, 7, 8, 10
+A100-80GB   1, 2, 4, 8
+H100        1, 2, 4, 8, 12
+H200        1, 8
+L4          1, 2, 4, 8
+L40S        1, 2, 4, 8
 T4          1, 2, 4, 8
 V100        1, 2, 4, 8
 V100-32GB   1, 2, 4, 8
@@ -45,56 +28,33 @@ tpu-v6e-4        1
 tpu-v6e-8        1
 
 OTHER_GPU          AVAILABLE_QUANTITIES
-A100-80GB-SXM      1, 2, 3, 4, 5, 6, 7, 8
-A16                1, 2, 4, 8
-A30                1
-A40                1, 2, 3, 4, 5, 6, 7, 8, 9, 10
-A4000              1, 2, 4, 8, 10
-A5000              1, 2, 4, 8
-A6000              1, 2, 4, 8
-A800               1, 2, 4, 8
-B300               1, 2, 4, 8
+A100-80GB-SXM      1, 2, 4, 8
+A40                1, 2, 4, 8
+A4000              1, 2, 4
+A6000              1, 2, 4
 GH200              1
 Gaudi HL-205       8
 H100-MEGA          8
-H100-NVL           1, 2, 3, 4, 5, 6, 7, 8, 9, 10
-H100-NVLINK        8
-H100-SXM           1, 2, 3, 4, 5, 6, 7, 8
-H200-SXM           1, 2, 3, 4, 5, 6, 7, 8
-Inferentia         1, 4, 16
-Inferentia2        1, 6, 12
-K80                1, 2, 4
-L40                1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+H100-SXM           1, 2, 4, 8
+K80                1, 2, 4, 8, 16
+L40                1, 2, 4, 8
 M4000              1
 M60                1, 2, 4
-MI300X             1, 2, 3, 4, 5, 6, 7, 8
 P100               1, 2, 4
 P4                 1, 2, 4
 P4000              1, 2
-RTX2000-Ada        1, 2, 3, 4, 5, 6, 7, 8
-RTX3060            1, 4
-RTX3090            1, 2, 3, 4, 5, 6, 7, 8
-RTX4000-Ada        1, 2, 3, 4, 5, 6, 7, 8
-RTX4060            4
-RTX4070            4
-RTX4090            1, 2, 3, 4, 5, 6, 7, 8
-RTX5070            4
-RTX5090            1, 2, 3, 4, 5, 6, 7, 8
-RTX5880-Ada        1
+RTX3060            1, 2
+RTX3080            1
+RTX3090            1, 2, 4, 8
+RTX4000-Ada        1, 2, 4, 8
+RTX4090            1, 2, 3, 4, 6, 8, 12
 RTX6000            1
-RTX6000-Ada        1, 2, 3, 4, 5, 6, 7, 8
-RTX6000Ada         1, 2, 4, 8
-RTXA4000           1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
-RTXA4500           1, 2, 3, 4
-RTXA5000           1, 2, 3, 4, 5, 6, 7, 8, 9, 10
-RTXA6000           1, 2, 3, 4, 5, 6, 7, 8, 9, 10
-RTXPRO6000         1, 2, 3, 4, 5, 6, 7, 8, 9
-RTXPRO6000-WK      1, 2, 3, 4
-RTXPRO6000WS       1, 2
-RTXPro6000         1, 2, 4, 8
+RTX6000-Ada        1, 2, 4, 8
+RTXA4000           1, 2, 4, 8
+RTXA4500           1, 2, 4, 8
+RTXA5000           1, 2, 4, 8
+RTXA6000           1, 2, 4, 8
 Radeon MI25        1
 Radeon Pro V520    1, 2, 4
 T4g                1, 2
-Trainium           1, 16
-Trainium2          1, 16
 ... [omitted long outputs] ...
