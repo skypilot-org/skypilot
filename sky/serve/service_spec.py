@@ -85,9 +85,9 @@ class SkyServiceSpec:
 
             # Validate queue_length_threshold if provided
             if queue_length_threshold is not None:
-                if queue_length_threshold < 1:
+                if queue_length_threshold <= 0:
                     with ux_utils.print_exception_no_traceback():
-                        raise ValueError('queue_length_threshold must be >= 1. '
+                        raise ValueError('queue_length_threshold must be > 0. '
                                          f'Got: {queue_length_threshold}')
                 # If queue_length_threshold is set, max_workers (max_replicas)
                 # must also be set.
@@ -113,8 +113,7 @@ class SkyServiceSpec:
         else:
             # Allow different min/max replicas for pools with queue-length
             # autoscaling
-            if (max_replicas is not None and max_replicas != min_replicas and
-                    not (pool and queue_length_threshold is not None)):
+            if max_replicas is not None and max_replicas != min_replicas:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Detected different min_replicas and max_replicas '
@@ -292,7 +291,8 @@ class SkyServiceSpec:
             # For pools with autoscaling (max_workers specified), use
             # min_workers if set, otherwise use workers
             # (simplified_policy_section) as min_replicas
-            if pool_config is not None and pool_max_workers is not None:
+            if (pool_config is not None and pool_max_workers is not None and
+                    pool_min_workers is not None):
                 if pool_min_workers is not None:
                     min_replicas = pool_min_workers
                 # If min_workers is not set, use workers
@@ -346,21 +346,6 @@ class SkyServiceSpec:
 
         # Set queue_length_threshold from pool config
         service_config['queue_length_threshold'] = queue_length_threshold
-
-        # Ensure max_replicas is set if queue_length_threshold is set (for
-        # queue-length autoscaling)
-        # This should already be handled by the logic above, but double-check
-        # for consistency
-        if service_config.get('pool') and queue_length_threshold is not None:
-            if service_config.get('max_replicas') is None:
-                # This should not happen - validation should have caught this
-                # But if it does, it means queue_length_threshold was set
-                # without max_workers
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'max_replicas must be set when queue_length_threshold '
-                        'is set. This indicates max_workers was not set in the '
-                        'pool config.')
 
         service_config['load_balancing_policy'] = config.get(
             'load_balancing_policy', None)
