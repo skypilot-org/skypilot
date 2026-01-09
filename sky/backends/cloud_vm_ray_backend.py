@@ -5419,6 +5419,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 cluster_name)
             cluster_yaml_obj = (yaml_utils.safe_load(cluster_yaml_str)
                                 if cluster_yaml_str is not None else None)
+
+            def _get_pod_config(yaml_obj: Dict[str, Any]) -> Dict[str, Any]:
+                return (yaml_obj.get('available_node_types',
+                                     {}).get('ray_head_default',
+                                             {}).get('node_config', {}))
+
             if isinstance(to_provision.cloud,
                           clouds.Kubernetes) and cluster_yaml_obj is not None:
                 # Warn users if the Kubernetes pod config is different
@@ -5430,11 +5436,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         cluster_config_overrides,
                         cloud=to_provision.cloud,
                         context=to_provision.region))
-
-                def _get_pod_config(yaml_obj: Dict[str, Any]) -> Dict[str, Any]:
-                    return (yaml_obj.get('available_node_types',
-                                         {}).get('ray_head_default',
-                                                 {}).get('node_config', {}))
 
                 if _get_pod_config(desired_cluster_yaml_obj) != _get_pod_config(
                         cluster_yaml_obj):
@@ -5457,10 +5458,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         # Extract volume names from existing cluster
                         # For k8s: volumes in node_config.spec.volumes
                         if isinstance(to_provision.cloud, clouds.Kubernetes):
-                            node_config = cluster_yaml_obj.get(
-                                'available_node_types',
-                                {}).get('ray_head_default',
-                                        {}).get('node_config', {})
+                            node_config = _get_pod_config(cluster_yaml_obj)
                             volumes = node_config.get('spec',
                                                       {}).get('volumes', [])
                             for vol in volumes:
@@ -5476,10 +5474,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         else:
                             # For other clouds (e.g., RunPod), volumes are in
                             # node_config.VolumeMounts
-                            node_config = cluster_yaml_obj.get(
-                                'available_node_types',
-                                {}).get('ray_head_default',
-                                        {}).get('node_config', {})
+                            node_config = _get_pod_config(cluster_yaml_obj)
                             volume_mounts_config = node_config.get(
                                 'VolumeMounts', [])
                             for vol_mount in volume_mounts_config:
