@@ -106,13 +106,13 @@ jobs:
           # PEP440 .post means "after release", but SemVer build metadata has same precedence.
           # TODO(romilb): If both 0.11.0 and 0.11.0+post.1 exist, Helm's "latest" behavior is undefined - some sources claim the newer one wins. Need to verify this.
           semversion=$(echo "$semversion" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)\.post([0-9]+)/\1+post.\2/')
-          
+
           # Update the version and name in the main skypilot chart
           sed -i "s/^version:.*$/version: ${semversion}/" src/charts/skypilot/Chart.yaml
           sed -i "s/^appVersion:.*$/appVersion: ${version}/" src/charts/skypilot/Chart.yaml
           sed -i "s/^name:.*$/name: ${{ inputs.package_name }}/" src/charts/skypilot/Chart.yaml
           # Copy the non-HTML content from the README.md of root directory to the skypilot chart
-          line=$(grep -n "^----$" src/README.md | cut -d: -f1 | head -n 1)
+          line=$(grep -n "^-----*$" src/README.md | cut -d: -f1 | head -n 1)
           tail -n +$line src/README.md >> src/charts/skypilot/README.md
 
           # Update the version in the external-metrics chart (prometheus server)
