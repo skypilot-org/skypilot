@@ -207,10 +207,10 @@ class CachePreloader {
   }
 
   /**
-   * Load enabled clouds for all workspaces
+   * Generic helper to load data for all workspaces for a dynamic function.
    * @private
    */
-  async _loadEnabledCloudsForAllWorkspaces(force = false) {
+  async _loadDataForAllWorkspaces(dynamicFunction, force = false) {
     try {
       // First get workspaces
       if (force) {
@@ -219,18 +219,29 @@ class CachePreloader {
       const workspacesData = await dashboardCache.get(getWorkspaces);
       const workspaceNames = Object.keys(workspacesData || {});
 
-      // Then load enabled clouds for each workspace
+      // Then load data for each workspace
       const promises = workspaceNames.map((wsName) => {
         if (force) {
-          dashboardCache.invalidate(getEnabledClouds, [wsName]);
+          dashboardCache.invalidate(dynamicFunction, [wsName]);
         }
-        return dashboardCache.get(getEnabledClouds, [wsName]);
+        return dashboardCache.get(dynamicFunction, [wsName]);
       });
 
       await Promise.allSettled(promises);
     } catch (error) {
-      console.error('[CachePreloader] Error loading enabled clouds:', error);
+      console.error(
+        `[CachePreloader] Error loading ${dynamicFunction.name} for all workspaces:`,
+        error
+      );
     }
+  }
+
+  /**
+   * Load enabled clouds for all workspaces
+   * @private
+   */
+  async _loadEnabledCloudsForAllWorkspaces(force = false) {
+    await this._loadDataForAllWorkspaces(getEnabledClouds, force);
   }
 
   /**
@@ -238,29 +249,7 @@ class CachePreloader {
    * @private
    */
   async _loadWorkspaceClustersForAllWorkspaces(force = false) {
-    try {
-      // First get workspaces
-      if (force) {
-        dashboardCache.invalidate(getWorkspaces);
-      }
-      const workspacesData = await dashboardCache.get(getWorkspaces);
-      const workspaceNames = Object.keys(workspacesData || {});
-
-      // Then load workspace clusters for each workspace
-      const promises = workspaceNames.map((wsName) => {
-        if (force) {
-          dashboardCache.invalidate(getWorkspaceClusters, [wsName]);
-        }
-        return dashboardCache.get(getWorkspaceClusters, [wsName]);
-      });
-
-      await Promise.allSettled(promises);
-    } catch (error) {
-      console.error(
-        '[CachePreloader] Error loading workspace clusters:',
-        error
-      );
-    }
+    await this._loadDataForAllWorkspaces(getWorkspaceClusters, force);
   }
 
   /**
@@ -268,29 +257,7 @@ class CachePreloader {
    * @private
    */
   async _loadWorkspaceManagedJobsForAllWorkspaces(force = false) {
-    try {
-      // First get workspaces
-      if (force) {
-        dashboardCache.invalidate(getWorkspaces);
-      }
-      const workspacesData = await dashboardCache.get(getWorkspaces);
-      const workspaceNames = Object.keys(workspacesData || {});
-
-      // Then load workspace managed jobs for each workspace
-      const promises = workspaceNames.map((wsName) => {
-        if (force) {
-          dashboardCache.invalidate(getWorkspaceManagedJobs, [wsName]);
-        }
-        return dashboardCache.get(getWorkspaceManagedJobs, [wsName]);
-      });
-
-      await Promise.allSettled(promises);
-    } catch (error) {
-      console.error(
-        '[CachePreloader] Error loading workspace managed jobs:',
-        error
-      );
-    }
+    await this._loadDataForAllWorkspaces(getWorkspaceManagedJobs, force);
   }
 
   /**
