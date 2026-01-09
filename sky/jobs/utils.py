@@ -998,7 +998,8 @@ def stream_logs_by_id(job_id: int,
                         continue
                     task_str = (f'Task {task_name}({task_id})'
                                 if task_name else f'Task {task_id}')
-                    if num_tasks > 1:
+                    # Show task header when multiple tasks OR when filtering
+                    if num_tasks > 1 or task is not None:
                         print(f'=== {task_str} ===')
                     with open(os.path.expanduser(log_file),
                               'r',
@@ -1023,7 +1024,8 @@ def stream_logs_by_id(job_id: int,
                                 start_streaming = True
                             if start_streaming:
                                 print(line, end='', flush=True)
-                    if num_tasks > 1:
+                    # Show task finished message when multiple tasks OR filtering
+                    if num_tasks > 1 or task is not None:
                         # Add the "Task finished" message for terminal states
                         if task_status.is_terminal():
                             print(ux_utils.finishing_message(
