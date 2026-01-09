@@ -1373,7 +1373,7 @@ class TestVolumeCore:
         # Verify update_volume_status was called with ERROR status
         mock_update_status.assert_called_once()
         call_kwargs = mock_update_status.call_args[1]
-        assert call_kwargs['status'] == status_lib.VolumeStatus.ERROR
+        assert call_kwargs['status'] == status_lib.VolumeStatus.NOT_READY
         assert call_kwargs['error_message'] == error_msg
 
     def test_volume_list_with_refresh(self, monkeypatch):
@@ -1491,7 +1491,7 @@ class TestVolumeCore:
             'last_attached_at': None,
             'last_use': None,
             'handle': mock_handle,
-            'status': status_lib.VolumeStatus.ERROR,
+            'status': status_lib.VolumeStatus.NOT_READY,
             'is_ephemeral': False,
             'error_message': error_msg,
             'usedby_pods': [],
@@ -1508,25 +1508,24 @@ class TestVolumeCore:
         result = core.volume_list()
 
         assert len(result) == 1
-        assert result[0]['status'] == 'ERROR'
+        assert result[0]['status'] == 'NOT_READY'
         assert result[0]['error_message'] == error_msg
 
 
 class TestVolumeStatus:
     """Tests for VolumeStatus enum."""
 
-    def test_volume_status_error_exists(self):
-        """Test that ERROR status exists."""
-        assert hasattr(status_lib.VolumeStatus, 'ERROR')
-        assert status_lib.VolumeStatus.ERROR.value == 'ERROR'
+    def test_volume_status_not_ready_exists(self):
+        """Test that NOT_READY status exists."""
+        assert hasattr(status_lib.VolumeStatus, 'NOT_READY')
+        assert status_lib.VolumeStatus.NOT_READY.value == 'NOT_READY'
 
-    def test_volume_status_colored_str_error(self):
-        """Test that ERROR status is colored red."""
-        error_str = status_lib.VolumeStatus.ERROR.colored_str()
-        # Should contain ANSI escape codes for red
-        assert '\x1b[31m' in error_str  # Red color code
-        assert 'ERROR' in error_str
-        assert '\x1b[0m' in error_str  # Reset code
+    def test_volume_status_colored_str_not_ready_no_color(self):
+        """Test that NOT_READY status is not colored."""
+        not_ready_str = status_lib.VolumeStatus.NOT_READY.colored_str()
+        # Should be just the value, no ANSI codes
+        assert not_ready_str == 'NOT_READY'
+        assert '\x1b[' not in not_ready_str
 
     def test_volume_status_colored_str_ready_not_colored(self):
         """Test that READY status is not colored."""
