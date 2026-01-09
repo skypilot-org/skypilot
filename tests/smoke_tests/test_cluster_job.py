@@ -1165,6 +1165,7 @@ def test_volumes_on_kubernetes():
             smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
+                f'kubectl delete pvc existing0 --ignore-not-found && '
                 f'kubectl create -f - <<EOF\n'
                 f'apiVersion: v1\n'
                 f'kind: PersistentVolumeClaim\n'
