@@ -1258,7 +1258,7 @@ Default: ``true``
 ``ingress.unified``
 ^^^^^^^^^^^^^^^^^^^
 
-Use a single ingress resource for the API server and auxiliary services. When set to ``true``, the main ingress will also route ``/grafana`` to the Grafana service if ``grafana.enabled`` is ``true``, and ``/oauth2`` to the OAuth2 Proxy service if ``ingress.oauth2-proxy.enabled`` is ``true``. Dedicated ingresses for Grafana and OAuth2 Proxy will be skipped.
+Use a single ingress resource for the API server and other auxiliary services. Dedicated ingresses for these services will be skipped, e.g. grafana and oauth2-proxy.
 
 Default: ``false``
 
