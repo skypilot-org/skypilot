@@ -7,7 +7,6 @@ import {
   getManagedJobs,
   getManagedJobsWithClientPagination,
 } from '@/data/connectors/jobs';
-import { getClusterHistory } from '@/data/connectors/clusters';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
 import {
   getWorkspaceClusters,
@@ -28,7 +27,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Base functions used across multiple pages (no arguments)
   base: {
     getClusters: { fn: getClusters, args: [] },
-    // Jobs page uses this key - keep as 'getManagedJobs' for compatibility
+    // Jobs page uses this key - uses client-side pagination wrapper
     getManagedJobs: {
       fn: getManagedJobsWithClientPagination,
       args: [{ allUsers: true }],
@@ -46,35 +45,11 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     },
     getSSHNodePools: { fn: getSSHNodePools, args: [] },
     getVolumes: { fn: getVolumes, args: [] },
-    // Cluster history for clusters page (1 day default)
-    getClusterHistory: { fn: getClusterHistory, args: [null, 1] },
-    // getManagedJobs variants for different pages (each needs specific fields)
-    getManagedJobsForInfra: {
-      fn: getManagedJobs,
-      args: [
-        { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
-      ],
-    },
-    getManagedJobsForWorkspaces: {
+    // ONE shared call for infra/workspaces/users pages (no field filtering)
+    // This consolidates what was previously 3 separate calls with different field filters
+    getManagedJobsForOtherPages: {
       fn: getManagedJobs,
       args: [{ allUsers: true, skipFinished: true }],
-    },
-    getManagedJobsForUsers: {
-      fn: getManagedJobs,
-      args: [
-        {
-          allUsers: true,
-          skipFinished: true,
-          fields: [
-            'user_hash',
-            'status',
-            'accelerators',
-            'job_name',
-            'job_id',
-            'infra',
-          ],
-        },
-      ],
     },
   },
 
@@ -93,12 +68,12 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
 
   // Page-specific function requirements
   pages: {
-    clusters: ['getClusters', 'getWorkspaces', 'getClusterHistory'],
-    // Jobs page stays exactly as master - don't change this list
-    jobs: ['getManagedJobs', 'getClusters', 'getWorkspaces', 'getUsers'],
+    clusters: ['getClusters', 'getWorkspaces'],
+    // Jobs page only preloads getManagedJobs - filters (clusters, workspaces, users) load async
+    jobs: ['getManagedJobs'],
     infra: [
       'getClusters',
-      'getManagedJobsForInfra',
+      'getManagedJobsForOtherPages',
       'getCloudInfrastructure',
       'getWorkspaceInfrastructure',
       'getSSHNodePools',
@@ -106,7 +81,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     workspaces: [
       'getWorkspaces',
       'getClusters',
-      'getManagedJobsForWorkspaces',
+      'getManagedJobsForOtherPages',
       'getEnabledClouds',
       'getWorkspaceClusters',
       'getWorkspaceManagedJobs',
@@ -114,7 +89,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     users: [
       'getUsers',
       'getClusters',
-      'getManagedJobsForUsers',
+      'getManagedJobsForOtherPages',
       'getServiceAccountTokens',
     ],
     volumes: ['getVolumes'],
