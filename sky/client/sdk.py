@@ -1330,11 +1330,10 @@ def autostop(
         hook: optional script to execute on the remote cluster before autostop.
             The script runs before the cluster is stopped or torn down. If the
             hook fails, autostop will still proceed but a warning will be
-            logged. Requires API server version 26 or higher.
+            logged.
         hook_timeout: timeout in seconds for hook execution. If None, uses
             DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
-            be terminated if it exceeds this timeout. Requires API server
-            version 27 or higher.
+            be terminated if it exceeds this timeout.
 
     Returns:
         The request ID of the autostop request.
