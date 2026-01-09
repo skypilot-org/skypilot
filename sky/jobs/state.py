@@ -2353,32 +2353,44 @@ async def update_links_async(job_id: int, task_id: int,
 
     Links are stored as JSON in the database. SQLAlchemy handles
     serialization/deserialization automatically.
+
+    Uses a transaction to ensure atomicity. For PostgreSQL, we use row-level
+    locking (SELECT FOR UPDATE). For SQLite, row-level locking is not
+    supported, so we rely on SQLite's database-level write locking which
+    provides serializable isolation for write transactions.
     """
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     logger.info(f'Updating external links with: {links}')
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        # Get existing links with row lock and merge with new links
-        result = await session.execute(
-            sqlalchemy.select(spot_table.c.links).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id)).with_for_update())
-        existing_links_row = result.fetchone()
-        existing_links = {}
-        if existing_links_row and existing_links_row[0]:
-            existing_links = existing_links_row[0]
-
-        # Merge new links into existing
-        existing_links.update(links)
-
-        # Update the database (SQLAlchemy JSON type handles serialization)
-        await session.execute(
-            sqlalchemy.update(spot_table).where(
+        async with session.begin():
+            # Build the select query
+            select_query = sqlalchemy.select(spot_table.c.links).where(
                 sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
-                                spot_table.c.task_id == task_id)).values({
-                                    spot_table.c.links: existing_links,
-                                }))
-        await session.commit()
+                                spot_table.c.task_id == task_id))
+
+            # Use row-level locking for PostgreSQL; SQLite doesn't support
+            # SELECT FOR UPDATE but provides database-level write locking
+            if (_SQLALCHEMY_ENGINE_ASYNC.dialect.name ==
+                    db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+                select_query = select_query.with_for_update()
+
+            result = await session.execute(select_query)
+            existing_links_row = result.fetchone()
+            existing_links = {}
+            if existing_links_row and existing_links_row[0]:
+                existing_links = existing_links_row[0]
+
+            # Merge new links into existing
+            existing_links.update(links)
+
+            # Update the database (SQLAlchemy JSON type handles serialization)
+            await session.execute(
+                sqlalchemy.update(spot_table).where(
+                    sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                    spot_table.c.task_id == task_id)).values({
+                                        spot_table.c.links: existing_links,
+                                    }))
+            # Transaction commits automatically when exiting the context
 
 
 @_init_db_async

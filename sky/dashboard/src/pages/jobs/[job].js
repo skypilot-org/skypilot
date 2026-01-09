@@ -297,52 +297,18 @@ function JobDetails() {
                     Object.keys(detailJobData.links).length > 0 ? (
                       <div className="space-y-4">
                         {Object.entries(detailJobData.links).map(
-                          ([label, url]) => {
-                            // Check if URL points to an image
-                            const imageExtensions = [
-                              '.png',
-                              '.jpg',
-                              '.jpeg',
-                              '.gif',
-                              '.webp',
-                              '.svg',
-                              '.bmp',
-                            ];
-                            const isImage = imageExtensions.some((ext) =>
-                              url.toLowerCase().includes(ext)
-                            );
-
-                            return (
-                              <div key={label} className="flex flex-col">
-                                <a
-                                  href={url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 hover:text-blue-800 hover:underline text-base"
-                                >
-                                  {label}
-                                </a>
-                                {isImage && (
-                                  <a
-                                    href={url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="mt-2"
-                                  >
-                                    <img
-                                      src={url}
-                                      alt={label}
-                                      className="max-w-md max-h-64 rounded-md border border-gray-200 shadow-sm hover:shadow-md transition-shadow"
-                                      onError={(e) => {
-                                        // Hide the image if it fails to load
-                                        e.target.style.display = 'none';
-                                      }}
-                                    />
-                                  </a>
-                                )}
-                              </div>
-                            );
-                          }
+                          ([label, url]) => (
+                            <div key={label}>
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:text-blue-800 hover:underline text-base"
+                              >
+                                {label}
+                              </a>
+                            </div>
+                          )
                         )}
                       </div>
                     ) : (

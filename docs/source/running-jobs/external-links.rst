@@ -3,18 +3,25 @@
 External Links
 ==============
 
-External links allow you to view URLs associated with your managed jobs directly in the SkyPilot dashboard. This is useful for quickly accessing experiment trackers, dashboards, or any other external resources related to your jobs.
+External links are URLs associated with your managed jobs that are displayed in the SkyPilot dashboard. This is useful for linking to external dashboards, experiment trackers, or any other relevant resources.
+
+SkyPilot automatically detects and displays two types of links:
+
+1. **Instance links**: For jobs running on AWS, GCP, or Azure, SkyPilot automatically adds links to the cloud console for the underlying instance.
+2. **Log-detected links**: The dashboard automatically parses job logs to detect URLs from supported services and displays them as external links.
+
+.. image:: ../images/examples/external-links/job-page-wandb.png
+  :width: 800
+  :alt: Managed jobs external links
 
 Supported services
-------------------
+~~~~~~~~~~~~~~~~~~
 
-SkyPilot automatically supports the following URLs for your job:
+SkyPilot automatically detects URLs from the following services in your job logs:
 
 - **Weights & Biases (W&B)**: Run URLs (e.g., ``https://wandb.ai/<entity>/<project>/runs/<run_id>``)
-- **Instance Links**: URLs to the cloud console for jobs running on AWS, GCP, or Azure.
 
-
-When your job prints a URL from a supported service (currently only W&B is supported) to stdout or stderr, the dashboard will automatically extract it and display it in the "External Links" section of the job details page.
+When your job prints a URL from a supported service to stdout or stderr, the dashboard will automatically extract it and display it in the "External Links" section.
 
 Example: Using Weights & Biases
 -------------------------------
@@ -29,7 +36,7 @@ Here's an example training job:
   name: wandb-training
 
   envs:
-    WANDB_API_KEY:  # Set via --env
+    WANDB_API_KEY: null # Set via --secret
 
   setup: |
     pip install wandb torch
