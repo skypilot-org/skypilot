@@ -22,17 +22,9 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+# Global lock to serialize interactive auth on the client side.
+# Prevents multiple threads from simultaneously manipulating terminal I/O.
 _INTERACTIVE_AUTH_LOCK = threading.Lock()
-_INTERACTIVE_AUTH_ASYNC_LOCK: typing.Optional[asyncio.Lock] = None
-
-
-def _get_async_lock() -> asyncio.Lock:
-    """Get or create the async lock for the current event loop."""
-    global _INTERACTIVE_AUTH_ASYNC_LOCK
-    if _INTERACTIVE_AUTH_ASYNC_LOCK is None:
-        _INTERACTIVE_AUTH_ASYNC_LOCK = asyncio.Lock()
-    return _INTERACTIVE_AUTH_ASYNC_LOCK
-
 
 SKY_INTERACTIVE_PATTERN = re.compile(r'<sky-interactive session="([^"]+)"/>')
 
@@ -198,8 +190,12 @@ async def handle_interactive_auth_async(line: str) -> typing.Optional[str]:
         return line
 
     session_id = match.group(1)
-    async with _get_async_lock():
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _INTERACTIVE_AUTH_LOCK.acquire)
+    try:
         with rich_utils.safe_logger():
             await _handle_interactive_auth_websocket(session_id)
+    finally:
+        _INTERACTIVE_AUTH_LOCK.release()
 
     return None
