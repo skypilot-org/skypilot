@@ -549,8 +549,10 @@ def shared_controller_vars_to_fill(
         local_user_config_path = temp_file.name
 
     # Get plugins config and wheel file mounts/commands together to ensure
-    # consistency between the uploaded wheel paths and installation commands
-    local_plugins_config_path = plugins.get_plugins_config_path()
+    # consistency between the uploaded wheel paths and installation commands.
+    # Only upload plugins that have 'package' specified - plugins without
+    # 'package' are intended for local API server use only.
+    local_plugins_config_path = plugin_utils.get_filtered_plugins_config_path()
     plugin_wheel_file_mounts, plugins_wheel_install_commands = (
         plugin_utils.get_plugin_mounts_and_commands())
 

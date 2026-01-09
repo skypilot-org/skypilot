@@ -306,3 +306,42 @@ def cleanup_stale_plugin_wheels(keep_hashes: Optional[List[str]] = None):
             if item.is_dir() and item.name not in keep_hashes:
                 shutil.rmtree(item, ignore_errors=True)
                 logger.debug(f'Removed stale plugin wheel directory: {item}')
+
+
+def get_filtered_plugins_config_path() -> Optional[str]:
+    """Create a filtered plugins.yaml with only plugins that have `package`.
+
+    The controller should only attempt to load plugins that have their packages
+    uploaded. Plugins without `package` specified are intended for API
+    server use only and should not be loaded on the controller.
+
+    Returns:
+        Path to a temporary file containing the filtered plugins config,
+        or None if no plugins have `package` specified.
+    """
+    # pylint: disable-next=import-outside-toplevel
+    from sky.utils import yaml_utils
+
+    plugin_packages = plugins.get_plugin_packages()
+    if not plugin_packages:
+        return None
+
+    # Filter to only include plugins with 'package' specified
+    plugins_with_package = [p for p in plugin_packages if p.get('package')]
+
+    if not plugins_with_package:
+        # No plugins with package specified - don't upload any config
+        return None
+
+    # Create a filtered config
+    filtered_config = {'plugins': plugins_with_package}
+
+    # Write to a temporary file
+    # Using delete=False so the file persists until the controller upload
+    with tempfile.NamedTemporaryFile(
+            mode='w',
+            suffix='_plugins.yaml',
+            prefix='sky_filtered_',
+            delete=False) as temp_file:
+        yaml_utils.dump_yaml(temp_file.name, filtered_config)
+        return temp_file.name
