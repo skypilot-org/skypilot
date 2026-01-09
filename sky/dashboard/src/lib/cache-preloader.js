@@ -3,11 +3,22 @@
 
 import dashboardCache from './cache';
 import { getClusters } from '@/data/connectors/clusters';
-import { getManagedJobsWithClientPagination } from '@/data/connectors/jobs';
+import {
+  getManagedJobs,
+  getManagedJobsWithClientPagination,
+} from '@/data/connectors/jobs';
+import { getClusterHistory } from '@/data/connectors/clusters';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
-import { getUsers } from '@/data/connectors/users';
+import {
+  getWorkspaceClusters,
+  getWorkspaceManagedJobs,
+} from '@/components/workspaces';
+import { getUsers, getServiceAccountTokens } from '@/data/connectors/users';
 import { getVolumes } from '@/data/connectors/volumes';
-import { getCloudInfrastructure } from '@/data/connectors/infra';
+import {
+  getCloudInfrastructure,
+  getWorkspaceInfrastructure,
+} from '@/data/connectors/infra';
 import { getSSHNodePools } from '@/data/connectors/ssh-node-pools';
 
 /**
@@ -17,42 +28,95 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Base functions used across multiple pages (no arguments)
   base: {
     getClusters: { fn: getClusters, args: [] },
+    // Jobs page uses this key - keep as 'getManagedJobs' for compatibility
     getManagedJobs: {
       fn: getManagedJobsWithClientPagination,
       args: [{ allUsers: true }],
     },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
+    getServiceAccountTokens: { fn: getServiceAccountTokens, args: [] },
     getCloudInfrastructure: {
       fn: getCloudInfrastructure,
       args: [false],
     },
+    getWorkspaceInfrastructure: {
+      fn: getWorkspaceInfrastructure,
+      args: [],
+    },
     getSSHNodePools: { fn: getSSHNodePools, args: [] },
     getVolumes: { fn: getVolumes, args: [] },
+    // Cluster history for clusters page (1 day default)
+    getClusterHistory: { fn: getClusterHistory, args: [null, 1] },
+    // getManagedJobs variants for different pages (each needs specific fields)
+    getManagedJobsForInfra: {
+      fn: getManagedJobs,
+      args: [
+        { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
+      ],
+    },
+    getManagedJobsForWorkspaces: {
+      fn: getManagedJobs,
+      args: [{ allUsers: true, skipFinished: true }],
+    },
+    getManagedJobsForUsers: {
+      fn: getManagedJobs,
+      args: [
+        {
+          allUsers: true,
+          skipFinished: true,
+          fields: [
+            'user_hash',
+            'status',
+            'accelerators',
+            'job_name',
+            'job_id',
+            'infra',
+          ],
+        },
+      ],
+    },
   },
 
-  // Functions with arguments (require dynamic data)
+  // Functions with arguments (require dynamic data - workspace names)
   dynamic: {
     getEnabledClouds: { fn: getEnabledClouds, requiresWorkspaces: true },
+    getWorkspaceClusters: {
+      fn: getWorkspaceClusters,
+      requiresWorkspaces: true,
+    },
+    getWorkspaceManagedJobs: {
+      fn: getWorkspaceManagedJobs,
+      requiresWorkspaces: true,
+    },
   },
 
   // Page-specific function requirements
   pages: {
-    clusters: ['getClusters', 'getWorkspaces'],
+    clusters: ['getClusters', 'getWorkspaces', 'getClusterHistory'],
+    // Jobs page stays exactly as master - don't change this list
     jobs: ['getManagedJobs', 'getClusters', 'getWorkspaces', 'getUsers'],
     infra: [
       'getClusters',
-      'getManagedJobs',
+      'getManagedJobsForInfra',
       'getCloudInfrastructure',
+      'getWorkspaceInfrastructure',
       'getSSHNodePools',
     ],
     workspaces: [
       'getWorkspaces',
       'getClusters',
-      'getManagedJobs',
+      'getManagedJobsForWorkspaces',
       'getEnabledClouds',
+      'getWorkspaceClusters',
+      'getWorkspaceManagedJobs',
     ],
-    users: ['getUsers', 'getClusters', 'getManagedJobs'],
+    users: [
+      'getUsers',
+      'getClusters',
+      'getManagedJobsForUsers',
+      'getServiceAccountTokens',
+    ],
     volumes: ['getVolumes'],
   },
 };
@@ -126,6 +190,12 @@ class CachePreloader {
       } else if (functionName === 'getEnabledClouds') {
         // Dynamic function that requires workspace data
         promises.push(this._loadEnabledCloudsForAllWorkspaces(force));
+      } else if (functionName === 'getWorkspaceClusters') {
+        // Dynamic function that requires workspace data
+        promises.push(this._loadWorkspaceClustersForAllWorkspaces(force));
+      } else if (functionName === 'getWorkspaceManagedJobs') {
+        // Dynamic function that requires workspace data
+        promises.push(this._loadWorkspaceManagedJobsForAllWorkspaces(force));
       }
     }
 
@@ -134,10 +204,10 @@ class CachePreloader {
   }
 
   /**
-   * Load enabled clouds for all workspaces
+   * Generic helper to load data for all workspaces for a dynamic function.
    * @private
    */
-  async _loadEnabledCloudsForAllWorkspaces(force = false) {
+  async _loadDataForAllWorkspaces(dynamicFunction, force = false) {
     try {
       // First get workspaces
       if (force) {
@@ -146,18 +216,45 @@ class CachePreloader {
       const workspacesData = await dashboardCache.get(getWorkspaces);
       const workspaceNames = Object.keys(workspacesData || {});
 
-      // Then load enabled clouds for each workspace
+      // Then load data for each workspace
       const promises = workspaceNames.map((wsName) => {
         if (force) {
-          dashboardCache.invalidate(getEnabledClouds, [wsName]);
+          dashboardCache.invalidate(dynamicFunction, [wsName]);
         }
-        return dashboardCache.get(getEnabledClouds, [wsName]);
+        return dashboardCache.get(dynamicFunction, [wsName]);
       });
 
       await Promise.allSettled(promises);
     } catch (error) {
-      console.error('[CachePreloader] Error loading enabled clouds:', error);
+      console.error(
+        `[CachePreloader] Error loading ${dynamicFunction.name} for all workspaces:`,
+        error
+      );
     }
+  }
+
+  /**
+   * Load enabled clouds for all workspaces
+   * @private
+   */
+  async _loadEnabledCloudsForAllWorkspaces(force = false) {
+    await this._loadDataForAllWorkspaces(getEnabledClouds, force);
+  }
+
+  /**
+   * Load workspace clusters for all workspaces
+   * @private
+   */
+  async _loadWorkspaceClustersForAllWorkspaces(force = false) {
+    await this._loadDataForAllWorkspaces(getWorkspaceClusters, force);
+  }
+
+  /**
+   * Load workspace managed jobs for all workspaces
+   * @private
+   */
+  async _loadWorkspaceManagedJobsForAllWorkspaces(force = false) {
+    await this._loadDataForAllWorkspaces(getWorkspaceManagedJobs, force);
   }
 
   /**
@@ -205,6 +302,12 @@ class CachePreloader {
           } else if (functionName === 'getEnabledClouds') {
             // Dynamic function that requires workspace data
             await this._loadEnabledCloudsForAllWorkspaces(false);
+          } else if (functionName === 'getWorkspaceClusters') {
+            // Dynamic function that requires workspace data
+            await this._loadWorkspaceClustersForAllWorkspaces(false);
+          } else if (functionName === 'getWorkspaceManagedJobs') {
+            // Dynamic function that requires workspace data
+            await this._loadWorkspaceManagedJobsForAllWorkspaces(false);
           }
           console.log(
             `[CachePreloader] Background loaded function: ${functionName}`
