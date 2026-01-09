@@ -144,7 +144,11 @@ class JobsCacheManager {
       const preloadedData = dashboardCache.getIfCached(getManagedJobs, [
         filterOptions,
       ]);
-      if (preloadedData && preloadedData.jobs && preloadedData.jobs.length > 0) {
+      if (
+        preloadedData &&
+        preloadedData.jobs &&
+        preloadedData.jobs.length > 0
+      ) {
         // Populate local cache from preloaded data
         const fullData = {
           jobs: preloadedData.jobs,

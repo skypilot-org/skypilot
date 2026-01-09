@@ -3,10 +3,7 @@
 
 import dashboardCache from './cache';
 import { getClusters } from '@/data/connectors/clusters';
-import {
-  getManagedJobs,
-  getPoolStatus,
-} from '@/data/connectors/jobs';
+import { getManagedJobs, getPoolStatus } from '@/data/connectors/jobs';
 import { getClusterHistory } from '@/data/connectors/clusters';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
 import {
@@ -52,7 +49,9 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     // getManagedJobs variants for different pages (each needs specific fields)
     getManagedJobsForInfra: {
       fn: getManagedJobs,
-      args: [{ allUsers: true, skipFinished: true, fields: ['cloud', 'region'] }],
+      args: [
+        { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
+      ],
     },
     getManagedJobsForWorkspaces: {
       fn: getManagedJobs,
@@ -64,7 +63,14 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
         {
           allUsers: true,
           skipFinished: true,
-          fields: ['user_hash', 'status', 'accelerators', 'job_name', 'job_id', 'infra'],
+          fields: [
+            'user_hash',
+            'status',
+            'accelerators',
+            'job_name',
+            'job_id',
+            'infra',
+          ],
         },
       ],
     },
@@ -73,14 +79,26 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Functions with arguments (require dynamic data - workspace names)
   dynamic: {
     getEnabledClouds: { fn: getEnabledClouds, requiresWorkspaces: true },
-    getWorkspaceClusters: { fn: getWorkspaceClusters, requiresWorkspaces: true },
-    getWorkspaceManagedJobs: { fn: getWorkspaceManagedJobs, requiresWorkspaces: true },
+    getWorkspaceClusters: {
+      fn: getWorkspaceClusters,
+      requiresWorkspaces: true,
+    },
+    getWorkspaceManagedJobs: {
+      fn: getWorkspaceManagedJobs,
+      requiresWorkspaces: true,
+    },
   },
 
   // Page-specific function requirements
   pages: {
     clusters: ['getClusters', 'getWorkspaces', 'getClusterHistory'],
-    jobs: ['getManagedJobs', 'getClusters', 'getWorkspaces', 'getUsers', 'getPoolStatus'],
+    jobs: [
+      'getManagedJobs',
+      'getClusters',
+      'getWorkspaces',
+      'getUsers',
+      'getPoolStatus',
+    ],
     infra: [
       'getClusters',
       'getManagedJobsForInfra',
@@ -96,7 +114,12 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
       'getWorkspaceClusters',
       'getWorkspaceManagedJobs',
     ],
-    users: ['getUsers', 'getClusters', 'getManagedJobsForUsers', 'getServiceAccountTokens'],
+    users: [
+      'getUsers',
+      'getClusters',
+      'getManagedJobsForUsers',
+      'getServiceAccountTokens',
+    ],
     volumes: ['getVolumes'],
   },
 };
@@ -233,7 +256,10 @@ class CachePreloader {
 
       await Promise.allSettled(promises);
     } catch (error) {
-      console.error('[CachePreloader] Error loading workspace clusters:', error);
+      console.error(
+        '[CachePreloader] Error loading workspace clusters:',
+        error
+      );
     }
   }
 
@@ -260,7 +286,10 @@ class CachePreloader {
 
       await Promise.allSettled(promises);
     } catch (error) {
-      console.error('[CachePreloader] Error loading workspace managed jobs:', error);
+      console.error(
+        '[CachePreloader] Error loading workspace managed jobs:',
+        error
+      );
     }
   }
 
