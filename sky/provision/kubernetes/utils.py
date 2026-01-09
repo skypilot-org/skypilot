@@ -144,6 +144,7 @@ DEFAULT_NAMESPACE = 'default'
 DEFAULT_SERVICE_ACCOUNT_NAME = 'skypilot-service-account'
 
 MEMORY_SIZE_UNITS = {
+    'm': 0.001,
     'B': 1,
     'K': 2**10,
     'M': 2**20,
@@ -2366,7 +2367,7 @@ def parse_memory_resource(resource_qty_str: str,
     try:
         bytes_value = int(resource_str)
     except ValueError:
-        memory_size = re.sub(r'([KMGTPB]+)', r' \1', resource_str)
+        memory_size = re.sub(r'([KMGTPBm]+)', r' \1', resource_str)
         number, unit_index = [item.strip() for item in memory_size.split()]
         unit_index = unit_index[0]
         bytes_value = float(number) * MEMORY_SIZE_UNITS[unit_index]
