@@ -170,6 +170,11 @@ def _format_accelerator_name(gpu_model: str, gpu_memory_gb: float) -> str:
     # Normalize GPU model name for catalog format
     accelerator_name = gpu_model.replace(' ', '-')
 
+    # No need of "Tesla-" prefix for Tesla GPUs,
+    # as SkyPilot assumes all Tesla GPUs are named as "V100"
+    if accelerator_name.upper().startswith('TESLA-'):
+        accelerator_name = accelerator_name.replace('TESLA-', '')
+
     # Only A100 needs memory suffix since there are two types (40GB and 80GB)
     # Other models (B200, B300, H100, etc.) should not include memory
     if accelerator_name.upper().startswith('A100') and gpu_memory_gb > 0:
