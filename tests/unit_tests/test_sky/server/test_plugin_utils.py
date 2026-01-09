@@ -199,3 +199,118 @@ version = "0.0.1"
     mount_hash = remote_path.split('/')[-1]
     assert mount_hash in commands, (
         f'Hash mismatch: mount hash {mount_hash} not found in commands')
+
+
+def test_get_filtered_plugins_config_path_empty(monkeypatch, tmp_path):
+    """Test get_filtered_plugins_config_path with no plugins."""
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(yaml.safe_dump({'plugins': []}))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+
+    result = plugin_utils.get_filtered_plugins_config_path()
+
+    assert result is None
+
+
+def test_get_filtered_plugins_config_path_no_package(monkeypatch, tmp_path):
+    """Test get_filtered_plugins_config_path with plugins without package."""
+    config = {
+        'plugins': [
+            {
+                'class': 'module1.Plugin1',
+            },
+            {
+                'class': 'module2.Plugin2',
+                'parameters': {'key': 'value'},
+            },
+        ]
+    }
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(yaml.safe_dump(config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+
+    result = plugin_utils.get_filtered_plugins_config_path()
+
+    # No plugins with package - should return None
+    assert result is None
+
+
+def test_get_filtered_plugins_config_path_with_package(monkeypatch, tmp_path):
+    """Test get_filtered_plugins_config_path with plugins that have package."""
+    config = {
+        'plugins': [{
+            'class': 'test_plugin.TestPlugin',
+            'package': '/path/to/plugin',
+        }]
+    }
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(yaml.safe_dump(config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+
+    result = plugin_utils.get_filtered_plugins_config_path()
+
+    assert result is not None
+    assert os.path.exists(result)
+
+    # Read and verify the filtered config
+    with open(result) as f:
+        filtered_config = yaml.safe_load(f)
+
+    assert len(filtered_config['plugins']) == 1
+    assert filtered_config['plugins'][0]['class'] == 'test_plugin.TestPlugin'
+    assert filtered_config['plugins'][0]['package'] == '/path/to/plugin'
+
+
+def test_get_filtered_plugins_config_path_mixed(monkeypatch, tmp_path):
+    """Test get_filtered_plugins_config_path with mixed plugins."""
+    config = {
+        'plugins': [
+            {
+                'class': 'module1.Plugin1',
+                'package': '/path/to/plugin1',
+            },
+            {
+                # Plugin without package - should NOT be included
+                'class': 'module2.Plugin2',
+            },
+            {
+                'class': 'module3.Plugin3',
+                'package': '/path/to/plugin3',
+                'parameters': {'key': 'value'},
+            },
+        ]
+    }
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(yaml.safe_dump(config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+
+    result = plugin_utils.get_filtered_plugins_config_path()
+
+    assert result is not None
+    assert os.path.exists(result)
+
+    # Read and verify the filtered config
+    with open(result) as f:
+        filtered_config = yaml.safe_load(f)
+
+    # Should only contain plugins with 'package' specified
+    assert len(filtered_config['plugins']) == 2
+    assert filtered_config['plugins'][0]['class'] == 'module1.Plugin1'
+    assert filtered_config['plugins'][0]['package'] == '/path/to/plugin1'
+    assert filtered_config['plugins'][1]['class'] == 'module3.Plugin3'
+    assert filtered_config['plugins'][1]['package'] == '/path/to/plugin3'
+    assert filtered_config['plugins'][1]['parameters'] == {'key': 'value'}
+
+    # Verify Plugin2 (without package) is NOT in the filtered config
+    for plugin in filtered_config['plugins']:
+        assert plugin['class'] != 'module2.Plugin2'
+
+
+def test_get_filtered_plugins_config_path_no_config(monkeypatch, tmp_path):
+    """Test get_filtered_plugins_config_path when no config file exists."""
+    config_path = tmp_path / 'nonexistent.yaml'
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+
+    result = plugin_utils.get_filtered_plugins_config_path()
+
+    assert result is None
