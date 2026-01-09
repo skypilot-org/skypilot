@@ -329,7 +329,8 @@ export async function getPoolStatus() {
       }
       const id = response.headers.get('X-Skypilot-Request-ID');
       if (!id) {
-        const msg = 'No request ID received from server for getting pool status';
+        const msg =
+          'No request ID received from server for getting pool status';
         throw new Error(msg);
       }
       const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
