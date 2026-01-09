@@ -14,70 +14,68 @@ export async function getCloudInfrastructure(forceRefresh = false) {
   );
 
   try {
-    let jobsData = { jobs: [] };
-    try {
-      jobsData = await dashboardCache.get(getManagedJobs, [
-        { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
-      ]);
-    } catch (error) {
-      console.error('Error fetching managed jobs:', error);
-    }
-    const jobs = jobsData?.jobs || [];
-    let clustersData = [];
-    try {
-      clustersData = await dashboardCache.get(getClusters);
-    } catch (error) {
-      console.error('Error fetching clusters:', error);
-    }
-    const clusters = clustersData || [];
+    // Fetch jobs, clusters, and workspaces in parallel for better performance
+    const [jobsResult, clustersResult, workspacesData] = await Promise.all([
+      dashboardCache
+        .get(getManagedJobs, [
+          { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
+        ])
+        .catch((error) => {
+          console.error('Error fetching managed jobs:', error);
+          return { jobs: [] };
+        }),
+      dashboardCache.get(getClusters).catch((error) => {
+        console.error('Error fetching clusters:', error);
+        return [];
+      }),
+      dashboardCache.get(getWorkspaces).catch((error) => {
+        console.error('Error fetching workspaces:', error);
+        return {};
+      }),
+    ]);
+
+    const jobs = jobsResult?.jobs || [];
+    const clusters = clustersResult || [];
 
     // Get enabled clouds by aggregating across all workspaces
     let enabledCloudsList = [];
-    try {
-      // Get all accessible workspaces
-      const workspacesData = await dashboardCache.get(getWorkspaces);
-      const workspaceNames = Object.keys(workspacesData || {});
+    const workspaceNames = Object.keys(workspacesData || {});
 
-      if (workspaceNames.length === 0) {
-        console.warn('No accessible workspaces found');
-        enabledCloudsList = [];
-      } else {
-        // Fetch enabled clouds for each workspace and aggregate
-        const enabledCloudsSet = new Set();
-
-        await Promise.all(
-          workspaceNames.map(async (workspaceName) => {
-            try {
-              const workspaceClouds = await dashboardCache.get(
-                getEnabledClouds,
-                [workspaceName, false]
-              );
-              if (Array.isArray(workspaceClouds)) {
-                workspaceClouds.forEach((cloud) => {
-                  if (cloud) {
-                    enabledCloudsSet.add(cloud.toLowerCase());
-                  }
-                });
-              }
-            } catch (error) {
-              console.error(
-                `Error fetching enabled clouds for workspace ${workspaceName}:`,
-                error
-              );
-            }
-          })
-        );
-
-        enabledCloudsList = Array.from(enabledCloudsSet);
-        console.log(
-          'Aggregated enabled clouds across all workspaces:',
-          enabledCloudsList
-        );
-      }
-    } catch (error) {
-      console.error('Error fetching enabled clouds:', error);
-      // If there's an error, we'll use clusters and jobs to determine enabled clouds
+    if (workspaceNames.length === 0) {
+      console.warn('No accessible workspaces found');
       enabledCloudsList = [];
+    } else {
+      // Fetch enabled clouds for each workspace and aggregate
+      const enabledCloudsSet = new Set();
+
+      await Promise.all(
+        workspaceNames.map(async (workspaceName) => {
+          try {
+            const workspaceClouds = await dashboardCache.get(getEnabledClouds, [
+              workspaceName,
+              false,
+            ]);
+            if (Array.isArray(workspaceClouds)) {
+              workspaceClouds.forEach((cloud) => {
+                if (cloud) {
+                  enabledCloudsSet.add(cloud.toLowerCase());
+                }
+              });
+            }
+          } catch (error) {
+            console.error(
+              `Error fetching enabled clouds for workspace ${workspaceName}:`,
+              error
+            );
+          }
+        })
+      );
+
+      enabledCloudsList = Array.from(enabledCloudsSet);
+      console.log(
+        'Aggregated enabled clouds across all workspaces:',
+        enabledCloudsList
+      );
     }
 
     // Create a map to store cloud data
@@ -307,18 +305,8 @@ export async function getWorkspaceInfrastructure() {
       console.error('Error fetching Kubernetes GPUs:', error);
     }
 
-    // Get Slurm GPU data
-    let slurmGpuData = {
-      allSlurmGPUs: [],
-      perClusterSlurmGPUs: [],
-      perNodeSlurmGPUs: [],
-    };
-    try {
-      slurmGpuData = await getSlurmServiceGPUs();
-      console.log('[DEBUG] Slurm GPU data in infra.jsx:', slurmGpuData);
-    } catch (error) {
-      console.error('Error fetching Slurm GPUs:', error);
-    }
+    // Note: Slurm GPU data is now fetched separately via getSlurmInfrastructure()
+    // This allows Slurm to load in parallel with Kubernetes/SSH data
 
     const finalResult = {
       workspaces: workspaceInfraData,
@@ -326,9 +314,6 @@ export async function getWorkspaceInfrastructure() {
       allGPUs: gpuData.allGPUs || [],
       perContextGPUs: gpuData.perContextGPUs || [],
       perNodeGPUs: gpuData.perNodeGPUs || [],
-      allSlurmGPUs: slurmGpuData.allSlurmGPUs || [],
-      perClusterSlurmGPUs: slurmGpuData.perClusterSlurmGPUs || [],
-      perNodeSlurmGPUs: slurmGpuData.perNodeSlurmGPUs || [],
       contextStats: contextStats,
       contextWorkspaceMap: contextWorkspaceMap,
       contextErrors: gpuData.contextErrors || {},
@@ -990,10 +975,18 @@ async function getSlurmPerNodeGPUs() {
   }
 }
 
+// Export Slurm infrastructure fetching for parallel loading
+export async function getSlurmInfrastructure() {
+  return await getSlurmServiceGPUs();
+}
+
 async function getSlurmServiceGPUs() {
   try {
-    const clusterGPUsRaw = await getSlurmClusterGPUs();
-    const nodeGPUsRaw = await getSlurmPerNodeGPUs();
+    // Fetch cluster GPUs and node GPUs in parallel for better performance
+    const [clusterGPUsRaw, nodeGPUsRaw] = await Promise.all([
+      getSlurmClusterGPUs(),
+      getSlurmPerNodeGPUs(),
+    ]);
 
     const allSlurmGPUs = {};
     const perClusterSlurmGPUs = {}; // Similar to perContextGPUs for Kubernetes

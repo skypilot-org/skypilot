@@ -13,7 +13,7 @@ import {
   getWorkspaceClusters,
   getWorkspaceManagedJobs,
 } from '@/components/workspaces';
-import { getUsers } from '@/data/connectors/users';
+import { getUsers, getServiceAccountTokens } from '@/data/connectors/users';
 import { getVolumes } from '@/data/connectors/volumes';
 import {
   getCloudInfrastructure,
@@ -34,6 +34,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
+    getServiceAccountTokens: { fn: getServiceAccountTokens, args: [] },
     getCloudInfrastructure: {
       fn: getCloudInfrastructure,
       args: [false],
@@ -95,7 +96,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
       'getWorkspaceClusters',
       'getWorkspaceManagedJobs',
     ],
-    users: ['getUsers', 'getClusters', 'getManagedJobsForUsers'],
+    users: ['getUsers', 'getClusters', 'getManagedJobsForUsers', 'getServiceAccountTokens'],
     volumes: ['getVolumes'],
   },
 };
