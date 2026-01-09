@@ -1022,6 +1022,12 @@ export function ManagedJobsTable({
                 </TableHead>
                 <TableHead
                   className="sortable whitespace-nowrap"
+                  onClick={() => requestSort('task')}
+                >
+                  Task{getSortDirection('task')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap"
                   onClick={() => requestSort('name')}
                 >
                   Name{getSortDirection('name')}
@@ -1094,7 +1100,7 @@ export function ManagedJobsTable({
                 <TableRow>
                   <TableCell
                     colSpan={
-                      11 +
+                      12 +
                       (shouldShowWorkspace ? 1 : 0) +
                       (shouldShowPool ? 1 : 0)
                     }
@@ -1118,6 +1124,9 @@ export function ManagedJobsTable({
                           >
                             {item.id}
                           </Link>
+                        </TableCell>
+                        <TableCell>
+                          {item.task || '-'}
                         </TableCell>
                         <TableCell>
                           <Link
@@ -1285,7 +1294,7 @@ export function ManagedJobsTable({
                 <TableRow>
                   <TableCell
                     colSpan={
-                      11 +
+                      12 +
                       (shouldShowWorkspace ? 1 : 0) +
                       (shouldShowPool ? 1 : 0)
                     }
