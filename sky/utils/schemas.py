@@ -1487,6 +1487,9 @@ def get_config_schema():
                 'datacenter_only': {
                     'type': 'boolean',
                 },
+                'create_instance_kwargs': {
+                    'type': 'object',
+                },
             }
         },
         'nebius': {
