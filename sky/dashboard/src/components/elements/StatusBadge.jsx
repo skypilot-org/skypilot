@@ -1,6 +1,6 @@
 import React from 'react';
 import { CircularProgress } from '@mui/material';
-import { CustomTooltip as Tooltip } from '@/components/utils';
+import { NonCapitalizedTooltip as Tooltip } from '@/components/utils';
 import {
   FilledCircleIcon,
   SquareIcon,
@@ -158,7 +158,7 @@ export const StatusBadge = ({ status, statusTooltip }) => {
   const tooltipContent = statusTooltip || status;
 
   return (
-    <Tooltip content={tooltipContent} className="text-muted-foreground text-sm">
+    <Tooltip content={tooltipContent}>
       <span>{status2Badge(status)}</span>
     </Tooltip>
   );
