@@ -64,6 +64,7 @@ class CommandRunner:
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> int:
         ...
 
@@ -79,6 +80,7 @@ class CommandRunner:
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -94,6 +96,7 @@ class CommandRunner:
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
@@ -167,6 +170,7 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> int:
         ...
 
@@ -184,6 +188,7 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -201,6 +206,7 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
@@ -256,6 +262,7 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> int:
         ...
 
@@ -273,6 +280,7 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -290,6 +298,7 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
@@ -352,6 +361,7 @@ class LocalProcessCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> int:
         ...
 
@@ -369,6 +379,7 @@ class LocalProcessCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -386,5 +397,6 @@ class LocalProcessCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...

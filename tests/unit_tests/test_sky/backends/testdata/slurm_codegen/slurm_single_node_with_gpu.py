@@ -479,7 +479,18 @@ if script or True:
         # $HOME/.local/bin/env (non-executable, from uv installation)
         # shadows /usr/bin/env.
         job_suffix = '-setup' if is_setup else ''
+        # Unset SLURM_* environment variables before running srun.
+        # When this srun runs inside another srun (from
+        # SlurmCommandRunner.run), inherited variables like
+        # SLURM_CPU_BIND, SLURM_NNODES, and SLURM_NODELIST constrain
+        # the inner srun to the parent step's allocation. This causes
+        # "CPU binding outside of job step allocation" errors.
+        # Unsetting all SLURM_* variables allows this srun to access the full job
+        # allocation. See:
+        # https://support.schedmd.com/show_bug.cgi?id=14298
+        # https://github.com/huggingface/datatrove/issues/248
         srun_cmd = (
+            "unset $(env | awk -F= '/^SLURM_/ {print $1}') && "
             f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid=12345 '
             f'--job-name=sky-2{job_suffix} --ntasks-per-node=1 {extra_flags} '
             f'{constants.SKY_SLURM_PYTHON_CMD} -m sky.skylet.executor.slurm {runner_args}'
