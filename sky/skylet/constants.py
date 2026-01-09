@@ -340,14 +340,6 @@ SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
     'exit 1; }; ')
 
-# Remote path for plugins configuration
-REMOTE_PLUGINS_CONFIG_PATH = '~/.sky/plugins.yaml'
-# Remote directory for plugin wheels
-REMOTE_PLUGINS_WHEEL_DIR = '~/.sky/plugins/wheels'
-# File to track the current plugins wheel hash
-PLUGINS_WHEEL_HASH_FILE = '~/.sky/plugins/current_plugins_wheel_hash'
-
-
 # Install ray and skypilot on the remote cluster if they are not already
 # installed. {var} will be replaced with the actual value in
 # backend_utils.write_cluster_config.
