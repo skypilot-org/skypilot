@@ -155,7 +155,7 @@ class JobsCacheManager {
           : pageJobs.length;
       const controllerStopped = !!pageResponse?.controllerStopped;
 
-      // 3) Kick off background prefetch of full dataset
+      // 3) Kick off background prefetch of full dataset (now that we have no cache yet)
       if (!this.prefetching.has(filterKey)) {
         const prefetchPromise = this._loadFullDataset(filterOptions, filterKey)
           .catch((e) => {
