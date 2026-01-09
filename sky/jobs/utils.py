@@ -968,6 +968,13 @@ def stream_logs_by_id(job_id: int,
                managed_job_state.get_status(job_id)) is None:
             time.sleep(1)
 
+        # Show hint about per-task filtering when there are multiple tasks
+        if num_tasks > 1 and task is None:
+            print(f'{colorama.Fore.CYAN}Hint: This job has {num_tasks} tasks. '
+                  f'Use \'sky jobs logs {job_id} TASK\' to view logs for a '
+                  f'specific task (TASK can be task ID or name).'
+                  f'{colorama.Style.RESET_ALL}')
+
         if not should_keep_logging(managed_job_status):
             job_msg = ''
             if managed_job_status.is_failed():
