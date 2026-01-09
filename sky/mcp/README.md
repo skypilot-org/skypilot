@@ -85,13 +85,26 @@ The server uses stdio transport by default. Configure your MCP client to run `sk
 | `skypilot_down` | Tear down a cluster completely |
 | `skypilot_autostop` | Configure auto-stop settings |
 
-### Job Management
+### Cluster Job Management
+
+Jobs running on a specific cluster:
 
 | Tool | Description |
 |------|-------------|
-| `skypilot_queue` | View the job queue for a cluster |
-| `skypilot_cancel` | Cancel running or pending jobs |
-| `skypilot_logs` | Get logs from a job |
+| `skypilot_cluster_queue` | View jobs on a specific cluster |
+| `skypilot_cluster_cancel` | Cancel jobs on a cluster |
+| `skypilot_cluster_logs` | Get logs from a cluster job |
+
+### Managed Jobs
+
+SkyPilot managed jobs with automatic recovery, spot instance support, and lifecycle management:
+
+| Tool | Description |
+|------|-------------|
+| `skypilot_jobs_launch` | Launch a managed job with auto-recovery |
+| `skypilot_jobs_queue` | View all managed jobs |
+| `skypilot_jobs_cancel` | Cancel managed jobs |
+| `skypilot_jobs_logs` | Get logs from a managed job |
 
 ### Resource Queries
 
@@ -125,8 +138,14 @@ Here are some example prompts you can use with an AI assistant connected to this
 **Launch a GPU cluster:**
 > "Launch a cluster with 4 A100 GPUs on AWS"
 
-**Run a training job:**
+**Run a training job on a cluster:**
 > "Execute this training script on my cluster: python train.py --epochs 100"
+
+**Launch a managed job (with auto-recovery):**
+> "Launch a managed job to train my model with automatic spot instance recovery"
+
+**Check managed jobs:**
+> "Show me all my managed jobs and their status"
 
 **Check costs:**
 > "Show me my cloud costs for the last 7 days"
