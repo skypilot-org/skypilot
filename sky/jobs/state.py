@@ -1921,7 +1921,7 @@ def get_nonterminal_job_ids_by_pool(pool: str,
         return job_ids
 
 
-def _is_any_of(resource_config: Dict[str, Any]) -> bool:
+def _is_any_of_or_ordered(resource_config: Dict[str, Any]) -> bool:
     """Check if resource config is heterogeneous (any_of or ordered).
 
     Args:
@@ -1977,7 +1977,7 @@ def get_pool_worker_used_resources(
     # full_resources is now stored as JSON dict from to_yaml_config()
     for resource_config in resource_configs:
         # Check if this is an unresolved heterogeneous config (any_of/ordered)
-        if _is_any_of(resource_config):
+        if _is_any_of_or_ordered(resource_config):
             # Can't determine usage for heterogeneous unresolved configs.
             # Return None to fall back to non-resource-aware scheduling.
             return None
