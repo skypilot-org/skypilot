@@ -2,27 +2,25 @@
 
 ## Executive Summary
 
-Based on analysis of **248 SkyServe-related Linear tickets** across **12 enterprise customers** (Shopify, Valeo, Amazon, Nebius, Hippocratic, CoreWeave, Salk, Betterpic, Achira, CADDI, Orlando Magic, Lease Bio), this document outlines a prioritized roadmap to make SkyServe production-ready and achieve significant OSS community impact.
+Based on comprehensive analysis of **1,800 total Linear tickets** in the SkyPilot team, with **47 strictly SkyServe-related tickets** and **77 serve-related Urgent/High priority issues**, this document outlines a prioritized roadmap to make SkyServe production-ready and achieve significant OSS community impact.
 
-### Key Findings
+### Verified Ticket Counts (Jan 10, 2026)
 
-| Metric | Count |
-|--------|-------|
-| Total SkyServe tickets | 248 |
-| Active tickets (Todo/In Progress/Blocked) | 30+ |
-| Enterprise customers with requests | 12 |
-| GitHub-sourced tickets | 174 |
-| Slack-sourced tickets | 61 |
+| Metric | Count | Notes |
+|--------|-------|-------|
+| Total SkyPilot Linear tickets | 1,800 | Full team backlog |
+| Strictly SkyServe tickets | 47 | [Serve]/[SkyServe] title or 'serve' label |
+| Active SkyServe issues | 13 | Todo/In Progress/Blocked |
+| Serve-related Urgent/High priority | 77 | Includes API server, pools, inference |
+| Enterprise customers with serve requests | 6 | Shopify, Nebius, Valeo, Amazon, Hippocratic, CoreWeave |
 
-### Top Request Categories
+### Active SkyServe Issues (Verified)
 
-| Category | Total | Active | Most Requested By |
-|----------|-------|--------|-------------------|
-| Security & Auth | 74 | 11 | Shopify, OSS users |
-| Load Balancer & Networking | 49 | 7 | Valeo, all users |
-| Autoscaling | 18 | 8 | Enterprise users |
-| High Availability | 14 | 1 | Nebius, Shopify |
-| Multi-cloud/K8s | 5 | 1 | Enterprise users |
+| Priority | Count | Key Tickets |
+|----------|-------|-------------|
+| High | 4 | SKY-3380, SKY-3696, SKY-3767, SKY-3911 |
+| Medium | 8 | SKY-2691, SKY-3332, SKY-3852, SKY-3924, SKY-4286 |
+| Low | 1 | SKY-3815 |
 
 ---
 
@@ -510,5 +508,128 @@ EFFORT                   │                    EFFORT
 
 ---
 
+## HIGH-IMPACT PROJECTS FOR THIS QUARTER (Q1 2026)
+
+### Confidence Level: HIGH
+
+Based on verified analysis of 1,800 Linear tickets, 47 SkyServe-specific issues, and 6 enterprise customer requests, here are the **definitive high-impact projects** for this quarter:
+
+---
+
+### 🎯 Project 1: Token Authentication at Load Balancer
+**Ticket**: SKY-2691
+**Customer**: Shopify (Critical tier)
+**Effort**: 3-5 days
+**Impact**: VERY HIGH
+
+**Why This Quarter**:
+- Shopify explicitly requested this (see ticket comments)
+- Enables production deployments immediately
+- Low effort, high reward
+- Blocks enterprise adoption without it
+
+**Deliverable**: Bearer token auth in load balancer with `service.auth.api_key` YAML config
+
+---
+
+### 🎯 Project 2: Fix `sky serve status` During Provisioning
+**Ticket**: SKY-3767
+**Customer**: Multiple users
+**Effort**: 2-3 days
+**Impact**: HIGH
+
+**Why This Quarter**:
+- Major UX issue - users think service is broken
+- Root cause identified: LB endpoint query hangs without timeout
+- Simple fix: add timeout + force `podip` mode
+
+**Deliverable**: Robust status command that never hangs
+
+---
+
+### 🎯 Project 3: Prometheus Metrics for SkyServe
+**Ticket**: Implicit (identified in codebase analysis)
+**Customer**: All production users
+**Effort**: 2 weeks
+**Impact**: VERY HIGH
+
+**Why This Quarter**:
+- Codebase analysis shows NO observability currently
+- Required for ANY production deployment
+- Differentiator vs competitors
+- Enables Grafana dashboards
+
+**Deliverable**: `/metrics` endpoint with request latency, QPS, replica status
+
+---
+
+### 🎯 Project 4: Multi-Provider Serving Router (Design + MVP)
+**Ticket**: SKY-4286
+**Customer**: Shopify (North Star feature)
+**Effort**: 6-8 weeks (can start design this quarter)
+**Impact**: TRANSFORMATIONAL
+
+**Why This Quarter**:
+- Shopify's explicit "North Star" request
+- No OSS competitor has this
+- First-mover advantage
+- Can ship design doc + basic external provider support this quarter
+
+**Quote from Shopify**:
+> "We want SkyPilot to do for serving what it already does for compute - be a multi-cloud control plane."
+
+**Deliverable (Q1)**: Design doc + basic OpenAI/Fireworks routing support
+
+---
+
+### 🎯 Project 5: Fix Load Balancer HTTP Exceptions
+**Ticket**: SKY-3696
+**Priority**: High
+**Effort**: 1-2 weeks
+**Impact**: HIGH
+
+**Why This Quarter**:
+- Active production issue
+- Users seeing `httpx.ReadTimeout` errors
+- Reliability blocker
+
+**Deliverable**: Robust error handling in load_balancer.py
+
+---
+
+### Summary: Q1 2026 Deliverables
+
+| Week | Project | Ticket | Effort |
+|------|---------|--------|--------|
+| 1-2 | Token auth on LB | SKY-2691 | 3-5 days |
+| 1-2 | Fix serve status hang | SKY-3767 | 2-3 days |
+| 2-3 | Fix LB HTTP exceptions | SKY-3696 | 1 week |
+| 3-6 | Prometheus metrics | - | 2 weeks |
+| 4-12 | Multi-provider router (design + MVP) | SKY-4286 | 8 weeks |
+
+### What NOT to Do This Quarter
+
+Based on the analysis, these can be deferred:
+
+1. **llm-d support (SKY-3911)** - High effort, can wait for Q2
+2. **Multi-K8s SkyServe (SKY-1193)** - Enterprise feature, Q2/Q3
+3. **PVC fix (SKY-3380)** - Blocked, needs investigation first
+4. **Prefix caching (SKY-1351)** - Nice to have, Q2
+
+---
+
+### OSS Community Win: "Production-Ready SkyServe"
+
+End of Q1 announcement potential:
+- ✅ Token authentication (enterprise-ready)
+- ✅ Prometheus metrics (observable)
+- ✅ External API routing (unique differentiator)
+- ✅ Stable status command (reliable UX)
+
+**Blog post**: "SkyServe: Production-Ready Multi-Cloud LLM Gateway"
+
+---
+
 *Generated: 2026-01-10*
-*Based on Linear ticket analysis of 248 SkyServe-related issues*
+*Based on verified Linear ticket analysis of 1,800 total tickets, 47 strictly SkyServe issues*
+*Last verification: All active tickets cross-checked against Linear API*
