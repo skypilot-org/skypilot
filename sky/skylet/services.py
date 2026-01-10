@@ -161,7 +161,8 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
 
     def GetYamlContent(  # type: ignore[return]
             self, request: servev1_pb2.GetYamlContentRequest,
-            context: grpc.ServicerContext) -> servev1_pb2.GetYamlContentResponse:
+            context: grpc.ServicerContext
+    ) -> servev1_pb2.GetYamlContentResponse:
         """Get YAML content for a service version"""
         try:
             service_name = request.service_name

@@ -1,20 +1,18 @@
 """Rpc Utilities for SkyServe"""
 
 import typing
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Tuple
 
+from sky import backends
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.serve import serve_utils
 
-if TYPE_CHECKING:
-    from sky import backends
+if typing.TYPE_CHECKING:
     from sky.schemas.generated import servev1_pb2
 else:
     servev1_pb2 = adaptors_common.LazyImport(
         'sky.schemas.generated.servev1_pb2')
-    # Lazy import backends to avoid circular dependency
-    backends = adaptors_common.LazyImport('sky.backends')
 
 # ======================= gRPC Converters for Sky Serve =======================
 
@@ -95,14 +93,16 @@ class GetYamlContentRequestConverter:
     """Converter for GetYamlContentRequest"""
 
     @classmethod
-    def to_proto(cls, service_name: str, version: int) -> 'servev1_pb2.GetYamlContentRequest':
+    def to_proto(cls, service_name: str,
+                 version: int) -> 'servev1_pb2.GetYamlContentRequest':
         request = servev1_pb2.GetYamlContentRequest()
         request.service_name = service_name
         request.version = version
         return request
 
     @classmethod
-    def from_proto(cls, proto: 'servev1_pb2.GetYamlContentRequest') -> Tuple[str, int]:
+    def from_proto(
+            cls, proto: 'servev1_pb2.GetYamlContentRequest') -> Tuple[str, int]:
         return proto.service_name, proto.version
 
 
@@ -110,7 +110,8 @@ class GetYamlContentResponseConverter:
     """Converter for GetYamlContentResponse"""
 
     @classmethod
-    def to_proto(cls, yaml_content: str) -> 'servev1_pb2.GetYamlContentResponse':
+    def to_proto(cls,
+                 yaml_content: str) -> 'servev1_pb2.GetYamlContentResponse':
         response = servev1_pb2.GetYamlContentResponse()
         response.yaml_content = yaml_content
         return response
@@ -138,7 +139,7 @@ class RpcRunner:
     """
 
     @classmethod
-    def get_service_status(cls, handle: 'backends.CloudVmRayResourceHandle',
+    def get_service_status(cls, handle: backends.CloudVmRayResourceHandle,
                            service_names: Optional[List[str]],
                            pool: bool) -> List[Dict[str, Any]]:
         assert handle.is_grpc_enabled_with_flag
@@ -150,7 +151,7 @@ class RpcRunner:
         return serve_utils.unpickle_service_status(pickled)
 
     @classmethod
-    def add_version(cls, handle: 'backends.CloudVmRayResourceHandle',
+    def add_version(cls, handle: backends.CloudVmRayResourceHandle,
                     service_name: str) -> int:
         assert handle.is_grpc_enabled_with_flag
         request = servev1_pb2.AddVersionRequest(service_name=service_name)
@@ -160,7 +161,7 @@ class RpcRunner:
         return response.version
 
     @classmethod
-    def get_yaml_content(cls, handle: 'backends.CloudVmRayResourceHandle',
+    def get_yaml_content(cls, handle: backends.CloudVmRayResourceHandle,
                          service_name: str, version: int) -> str:
         assert handle.is_grpc_enabled_with_flag
         request = GetYamlContentRequestConverter.to_proto(service_name, version)
@@ -170,7 +171,7 @@ class RpcRunner:
         return GetYamlContentResponseConverter.from_proto(response)
 
     @classmethod
-    def terminate_services(cls, handle: 'backends.CloudVmRayResourceHandle',
+    def terminate_services(cls, handle: backends.CloudVmRayResourceHandle,
                            service_names: Optional[List[str]], purge: bool,
                            pool: bool) -> str:
         assert handle.is_grpc_enabled_with_flag
@@ -182,7 +183,7 @@ class RpcRunner:
         return response.message
 
     @classmethod
-    def terminate_replica(cls, handle: 'backends.CloudVmRayResourceHandle',
+    def terminate_replica(cls, handle: backends.CloudVmRayResourceHandle,
                           service_name: str, replica_id: int,
                           purge: bool) -> str:
         assert handle.is_grpc_enabled_with_flag
@@ -196,7 +197,7 @@ class RpcRunner:
 
     @classmethod
     def wait_service_registration(cls,
-                                  handle: 'backends.CloudVmRayResourceHandle',
+                                  handle: backends.CloudVmRayResourceHandle,
                                   service_name: str, job_id: int,
                                   pool: bool) -> int:
         assert handle.is_grpc_enabled_with_flag
@@ -208,9 +209,9 @@ class RpcRunner:
         return response.lb_port
 
     @classmethod
-    def update_service(cls, handle: 'backends.CloudVmRayResourceHandle',
+    def update_service(cls, handle: backends.CloudVmRayResourceHandle,
                        service_name: str, version: int,
-                       mode: 'serve_utils.UpdateMode', pool: bool) -> None:
+                       mode: serve_utils.UpdateMode, pool: bool) -> None:
         assert handle.is_grpc_enabled_with_flag
         request = servev1_pb2.UpdateServiceRequest(service_name=service_name,
                                                    version=version,

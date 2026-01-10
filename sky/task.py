@@ -598,18 +598,18 @@ class Task:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'Environment variable {k!r} is None. Please set a '
-                        'value for it in task YAML or with --env flag. To '
-                        f'set it to be empty, use an empty string ({k}: "" '
+                        'value for it in task YAML or with --env flag. '
+                        f'To set it to be empty, use an empty string ({k}: "" '
                         f'in task YAML or --env {k}="" in CLI).')
+
         for k, v in config.get('secrets', {}).items():
             if v is None:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'Secret variable {k!r} is None. Please set a '
                         'value for it in task YAML or with --secret flag. '
-                        f'To set it to be empty, use an empty string '
-                        f'({k}: "" in task YAML or --secret {k}="" in CLI).'
-                    )
+                        f'To set it to be empty, use an empty string ({k}: "" '
+                        f'in task YAML or --secret {k}="" in CLI).')
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
