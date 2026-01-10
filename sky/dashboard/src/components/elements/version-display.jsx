@@ -54,11 +54,18 @@ export function useVersionInfo() {
   return { version, latestVersion, commit, plugins };
 }
 
-function VersionTooltip({ children, version, latestVersion, commit, plugins }) {
+function VersionTooltip({
+  children,
+  version,
+  latestVersion,
+  commit,
+  plugins,
+  showUpdateInfo = true,
+}) {
   // Create tooltip content
   const tooltipContent = (
     <div className="flex flex-col gap-0.5">
-      {latestVersion && (
+      {showUpdateInfo && latestVersion && (
         <div className="mb-1">
           <div className="font-bold">Update Available</div>
           <div>Current version: {version}</div>
@@ -81,7 +88,7 @@ function VersionTooltip({ children, version, latestVersion, commit, plugins }) {
           </div>
         ) : null;
       })}
-      {!commit && plugins.length === 0 && !latestVersion && (
+      {!commit && plugins.length === 0 && (!latestVersion || !showUpdateInfo) && (
         <div>Version information not available</div>
       )}
     </div>
@@ -118,6 +125,21 @@ export function UpgradeHint() {
   );
 }
 
+export function NewVersionAvailable() {
+  const { latestVersion } = useVersionInfo();
+
+  if (!latestVersion) return null;
+
+  return (
+    <div className="flex items-center mr-4 text-amber-600 animate-pulse">
+      <ArrowUpCircle className="w-4 h-4 mr-1.5" />
+      <span className="text-sm font-medium">
+        New version available: {latestVersion}
+      </span>
+    </div>
+  );
+}
+
 export function VersionDisplay() {
   const { version, latestVersion, commit, plugins } = useVersionInfo();
 
@@ -129,6 +151,7 @@ export function VersionDisplay() {
       latestVersion={latestVersion}
       commit={commit}
       plugins={plugins}
+      showUpdateInfo={false}
     >
       <div className="inline-flex items-center justify-center transition-colors duration-150 cursor-help">
         <div className="text-sm text-gray-500 border-b border-dotted border-gray-400 hover:text-blue-600 hover:border-blue-600">
