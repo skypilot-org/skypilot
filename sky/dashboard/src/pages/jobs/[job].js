@@ -218,8 +218,11 @@ function JobDetails() {
   const storedExecution =
     allTasks.find((t) => t.execution)?.execution || detailJobData?.execution;
   // Default execution to 'parallel' for multi-task jobs without stored value
-  const jobPlacement = storedPlacement || null;
   const jobExecution = storedExecution || (isMultiTask ? 'parallel' : null);
+
+  // For job groups, default to SAME_INFRA since that's the most common placement mode
+  // Only show the badge if this is actually a job group (multi-task job)
+  const jobPlacement = storedPlacement || (jobIsJobGroup ? 'SAME_INFRA' : null);
 
   // Enhanced job data with fields from any task
   const enhancedJobData = detailJobData
@@ -320,11 +323,21 @@ function JobDetails() {
               <div id="tasks-section" className="mt-6">
                 <Card>
                   <div className="flex items-center justify-between px-4 pt-4">
-                    <h3 className="text-lg font-semibold">
+                    <h3 className="text-lg font-semibold flex items-center">
                       Tasks
                       <span className="ml-2 text-sm font-normal text-gray-500">
                         ({allTasks.length} tasks)
                       </span>
+                      {jobPlacement === 'SAME_INFRA' && (
+                        <Tooltip
+                          content="All tasks in this job group are co-located on the same infrastructure"
+                          className="text-muted-foreground"
+                        >
+                          <span className="ml-3 px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 cursor-help">
+                            Same Infra
+                          </span>
+                        </Tooltip>
+                      )}
                     </h3>
                   </div>
                   <div className="p-4">

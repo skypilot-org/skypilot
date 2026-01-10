@@ -1491,21 +1491,16 @@ export function ManagedJobsTable({
                           </TableCell>
                           <TableCell>
                             {/* Show aggregated status for job group */}
-                            <div className="flex items-center">
-                              <StatusBadge
-                                status={aggregates.aggregatedStatus}
-                              />
-                              {tasks.length > 1 && (
-                                <NonCapitalizedTooltip
-                                  content={aggregates.statusTooltip}
-                                  className="text-sm text-muted-foreground"
-                                >
-                                  <span className="ml-1 text-xs text-gray-500 cursor-help">
-                                    x{tasks.length}
-                                  </span>
-                                </NonCapitalizedTooltip>
-                              )}
-                            </div>
+                            <NonCapitalizedTooltip
+                              content={aggregates.statusTooltip}
+                              className="text-sm text-muted-foreground"
+                            >
+                              <span>
+                                <StatusBadge
+                                  status={aggregates.aggregatedStatus}
+                                />
+                              </span>
+                            </NonCapitalizedTooltip>
                           </TableCell>
                           <TableCell>
                             {firstTask.infra && firstTask.infra !== '-' ? (
@@ -1556,9 +1551,10 @@ export function ManagedJobsTable({
                         {isExpanded &&
                           tasks.map((task, taskIndex) => (
                             <React.Fragment key={task.task_job_id}>
-                              <TableRow className="bg-white border-l-4 border-blue-200">
-                                <TableCell className="whitespace-nowrap">
-                                  <span className="text-gray-500 pl-7">
+                              <TableRow className="bg-gray-50/50">
+                                <TableCell className="whitespace-nowrap relative">
+                                  <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-300"></div>
+                                  <span className="text-gray-500 pl-6">
                                     {taskIndex}
                                   </span>
                                 </TableCell>
