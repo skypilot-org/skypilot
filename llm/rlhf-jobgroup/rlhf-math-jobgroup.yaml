@@ -1,0 +1,149 @@
+# RLHF Math Training with Job Groups
+#
+# This example demonstrates a distributed RLHF architecture using SkyPilot job groups.
+# It trains an LLM on mathematical reasoning using GRPO (Group Relative Policy Optimization)
+# with verifiable rewards.
+#
+# Architecture:
+#   - data-server: Serves GSM8K math prompts
+#   - rollout-server: vLLM for generating responses
+#   - reward-server: Verifies math answers against ground truth
+#   - ppo-trainer: Orchestrates GRPO training across multiple nodes
+#
+# Usage:
+#   sky jobs launch llm/rlhf-jobgroup/rlhf-math-jobgroup.yaml
+#
+# The components communicate over the job group network using DNS names:
+#   - data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000
+#   - rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001
+#   - reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002
+---
+name: rlhf-math
+placement: SAME_INFRA
+execution: parallel
+
+---
+# Data Server: Serves math prompts from GSM8K dataset
+name: data-server
+resources:
+  cpus: 4
+  memory: 16+
+  infra: kubernetes/coreweave
+
+file_mounts:
+  /code: llm/rlhf-jobgroup/code
+
+setup: |
+  pip install fastapi uvicorn datasets
+
+run: |
+  echo "Starting data server..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "This server provides math prompts at http://data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000"
+
+  cd /code
+  python data_server.py --port 8000
+
+---
+# Rollout Server: vLLM for generating model responses
+name: rollout-server
+resources:
+  accelerators: H100:1
+  memory: 32+
+  infra: kubernetes/coreweave
+
+envs:
+  MODEL_NAME: Qwen/Qwen2.5-0.5B-Instruct
+
+setup: |
+  pip install vllm
+
+run: |
+  echo "Starting rollout server with vLLM..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Model: ${MODEL_NAME}"
+  echo "API available at http://rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001/v1"
+
+  vllm serve ${MODEL_NAME} \
+    --host 0.0.0.0 \
+    --port 8001 \
+    --max-model-len 2048 \
+    --gpu-memory-utilization 0.8
+
+---
+# Reward Server: Verifies math answers against ground truth
+name: reward-server
+resources:
+  cpus: 4
+  memory: 8+
+  infra: kubernetes/coreweave
+
+file_mounts:
+  /code: llm/rlhf-jobgroup/code
+
+setup: |
+  pip install fastapi uvicorn
+
+run: |
+  echo "Starting reward server..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Reward API at http://reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002"
+
+  cd /code
+  python reward_server.py --port 8002
+
+---
+# PPO Trainer: Multi-node GRPO training
+name: ppo-trainer
+resources:
+  accelerators: H100:1
+  memory: 32+
+  infra: kubernetes/coreweave
+num_nodes: 2
+
+envs:
+  MODEL_NAME: Qwen/Qwen2.5-0.5B-Instruct
+  NUM_EPOCHS: 3
+  BATCH_SIZE: 4
+
+file_mounts:
+  /code: llm/rlhf-jobgroup/code
+
+setup: |
+  pip install torch transformers accelerate httpx
+
+run: |
+  echo "Starting GRPO trainer..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Node rank: ${SKYPILOT_NODE_RANK} / ${SKYPILOT_NUM_NODES}"
+
+  # Service discovery via job group DNS
+  DATA_SERVER="data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000"
+  ROLLOUT_SERVER="rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001"
+  REWARD_SERVER="reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002"
+
+  echo "Data server: ${DATA_SERVER}"
+  echo "Rollout server: ${ROLLOUT_SERVER}"
+  echo "Reward server: ${REWARD_SERVER}"
+
+  # Wait for services to be ready
+  echo "Waiting for services to be available..."
+  sleep 30
+
+  # Only run training on rank 0 (coordinator)
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+    echo "Starting training on coordinator node..."
+    cd /code
+    python trainer.py \
+      --data-server ${DATA_SERVER} \
+      --rollout-server ${ROLLOUT_SERVER} \
+      --reward-server ${REWARD_SERVER} \
+      --model ${MODEL_NAME} \
+      --batch-size ${BATCH_SIZE} \
+      --num-epochs ${NUM_EPOCHS}
+  else
+    echo "Worker node ${SKYPILOT_NODE_RANK} ready for distributed training"
+    # In a full implementation, worker nodes would join distributed training
+    # For this demo, they just wait
+    sleep infinity
+  fi

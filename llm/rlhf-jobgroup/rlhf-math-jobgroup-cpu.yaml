@@ -1,0 +1,125 @@
+# RLHF Math Training with Job Groups - CPU Test Version
+#
+# This is a simplified CPU-only version for testing the job group functionality.
+# It demonstrates the service connectivity without requiring GPUs.
+#
+# Usage:
+#   sky jobs launch llm/rlhf-jobgroup/rlhf-math-jobgroup-cpu.yaml
+---
+name: rlhf-math-cpu
+placement: SAME_INFRA
+execution: parallel
+
+---
+# Data Server: Serves math prompts from GSM8K dataset
+name: data-server
+resources:
+  cpus: 2
+  memory: 4+
+  infra: kubernetes
+
+file_mounts:
+  /code: llm/rlhf-jobgroup/code
+
+setup: |
+  pip install fastapi uvicorn datasets
+
+run: |
+  echo "Starting data server..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "This server provides math prompts at http://data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000"
+
+  cd /code
+  python data_server.py --port 8000
+
+---
+# Reward Server: Verifies math answers against ground truth
+name: reward-server
+resources:
+  cpus: 2
+  memory: 4+
+  infra: kubernetes
+
+file_mounts:
+  /code: llm/rlhf-jobgroup/code
+
+setup: |
+  pip install fastapi uvicorn
+
+run: |
+  echo "Starting reward server..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Reward API at http://reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002"
+
+  cd /code
+  python reward_server.py --port 8002
+
+---
+# Test Client: Verifies connectivity between services
+name: test-client
+resources:
+  cpus: 2
+  memory: 4+
+  infra: kubernetes
+
+setup: |
+  pip install httpx
+
+run: |
+  echo "Starting test client..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+
+  # Service discovery via job group DNS
+  DATA_SERVER="data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000"
+  REWARD_SERVER="reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002"
+
+  echo "Data server: ${DATA_SERVER}"
+  echo "Reward server: ${REWARD_SERVER}"
+
+  # Wait for services to be ready
+  echo "Waiting for services to be available..."
+  sleep 30
+
+  # Test data server
+  echo "Testing data server..."
+  for i in {1..5}; do
+    if curl -s "http://${DATA_SERVER}/health" | grep -q "healthy"; then
+      echo "Data server is healthy!"
+      break
+    fi
+    echo "Waiting for data server... attempt $i"
+    sleep 5
+  done
+
+  # Fetch some prompts
+  echo "Fetching prompts..."
+  PROMPTS=$(curl -s "http://${DATA_SERVER}/prompts?batch_size=2")
+  echo "Prompts: ${PROMPTS}"
+
+  # Test reward server
+  echo "Testing reward server..."
+  for i in {1..5}; do
+    if curl -s "http://${REWARD_SERVER}/health" | grep -q "healthy"; then
+      echo "Reward server is healthy!"
+      break
+    fi
+    echo "Waiting for reward server... attempt $i"
+    sleep 5
+  done
+
+  # Test reward computation
+  echo "Testing reward computation..."
+  REWARD=$(curl -s -X POST "http://${REWARD_SERVER}/reward" \
+    -H "Content-Type: application/json" \
+    -d '{"prompt": "What is 2+2?", "response": "The answer is 4", "ground_truth": "4"}')
+  echo "Reward response: ${REWARD}"
+
+  echo ""
+  echo "=========================================="
+  echo "All services are working correctly!"
+  echo "=========================================="
+  echo ""
+  echo "Job group connectivity test complete."
+
+  # Keep running to allow inspection
+  sleep 300

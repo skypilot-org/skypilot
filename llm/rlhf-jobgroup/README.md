@@ -1,0 +1,149 @@
+# RLHF Math Training with Job Groups
+
+This example demonstrates a distributed RLHF (Reinforcement Learning from Human Feedback) architecture using SkyPilot job groups. It trains an LLM on mathematical reasoning tasks using GRPO (Group Relative Policy Optimization) with verifiable rewards.
+
+## Architecture
+
+The example consists of 4 separate components that communicate over HTTP:
+
+```
+┌─────────────────────┐
+│    data-server      │  Serves GSM8K math prompts
+│      (CPU)          │  HTTP API on port 8000
+└──────────┬──────────┘
+           │ GET /prompts
+           ▼
+┌─────────────────────┐      ┌─────────────────────┐
+│   rollout-server    │      │   reward-server     │
+│      (1 GPU)        │─────▶│      (CPU)          │
+│  vLLM inference     │      │  Math verification  │
+│  Port 8001          │      │  Port 8002          │
+└──────────┬──────────┘      └──────────┬──────────┘
+           │                            │
+           │  generated responses       │ reward scores
+           └────────────┬───────────────┘
+                        ▼
+           ┌─────────────────────┐
+           │    ppo-trainer      │
+           │   (2 nodes x GPU)   │
+           │  Policy gradient    │
+           │  Weight sync        │
+           └─────────────────────┘
+```
+
+### Components
+
+1. **data-server**: FastAPI server that serves math prompts from the GSM8K dataset. Provides batches of problems with ground truth answers.
+
+2. **rollout-server**: vLLM inference server that generates responses from the current policy. Exposes OpenAI-compatible API.
+
+3. **reward-server**: Verifies mathematical answers by comparing model outputs against ground truth. Returns binary rewards (1.0 for correct, 0.0 for incorrect).
+
+4. **ppo-trainer**: Multi-node training orchestrator that implements GRPO. Coordinates with all other services to fetch prompts, generate responses, compute rewards, and update the policy.
+
+## Usage
+
+### Prerequisites
+
+- SkyPilot configured with a Kubernetes cluster
+- GPU nodes available (L4 or better recommended)
+
+### Launch Training
+
+```bash
+# Connect to API server (if using remote)
+sky api login -e http://jobgroup:skypilot@35.224.123.34
+
+# Launch the job group
+sky jobs launch llm/rlhf-jobgroup/rlhf-math-jobgroup.yaml
+```
+
+### Monitor Training
+
+```bash
+# Check job status
+sky jobs queue
+
+# View logs for specific components
+sky jobs logs <job-id> --task data-server
+sky jobs logs <job-id> --task rollout-server
+sky jobs logs <job-id> --task reward-server
+sky jobs logs <job-id> --task ppo-trainer
+```
+
+Or use the dashboard at http://35.224.123.34 (login: jobgroup/skypilot).
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MODEL_NAME` | `Qwen/Qwen2.5-0.5B-Instruct` | Model to train |
+| `NUM_EPOCHS` | `3` | Number of training epochs |
+| `BATCH_SIZE` | `4` | Training batch size |
+
+### Customizing Resources
+
+Edit the YAML to adjust resources per component:
+
+```yaml
+# For larger models, increase GPU memory
+resources:
+  accelerators: H100:1  # or A100:1
+  memory: 64+
+```
+
+## Service Discovery
+
+Components discover each other using job group DNS names:
+
+- `data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000`
+- `rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001`
+- `reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002`
+
+This allows components to communicate without hardcoded IP addresses.
+
+## GRPO Algorithm
+
+GRPO (Group Relative Policy Optimization) is a simplified variant of PPO that:
+- Doesn't require a critic/value model
+- Uses group-relative advantages (compares rewards within a batch)
+- Works well with verifiable rewards (math, code)
+
+The training loop:
+1. Fetch batch of prompts from data-server
+2. Generate responses using rollout-server
+3. Compute rewards using reward-server
+4. Calculate group-relative advantages
+5. Update policy with clipped surrogate loss
+
+## Extending This Example
+
+### Using a Reward Model
+
+Replace the reward-server with a neural reward model:
+
+```python
+# In reward_server.py, load a reward model
+from transformers import AutoModelForSequenceClassification
+model = AutoModelForSequenceClassification.from_pretrained("Skywork/Skywork-Reward-Llama-3.1-8B-v0.2")
+```
+
+### Scaling Up
+
+For larger models:
+1. Increase vLLM tensor parallelism
+2. Use multiple GPUs per trainer node
+3. Enable gradient checkpointing
+
+### Adding a Critic
+
+For full PPO, add a critic-server component that estimates value functions.
+
+## References
+
+- [OpenRLHF](https://github.com/OpenRLHF/OpenRLHF) - Distributed RLHF framework
+- [VeRL](https://github.com/volcengine/verl) - Hybrid flow RLHF framework
+- [GRPO Paper](https://arxiv.org/abs/2402.03300) - Group Relative Policy Optimization
+- [GSM8K Dataset](https://huggingface.co/datasets/openai/gsm8k) - Math reasoning benchmark
