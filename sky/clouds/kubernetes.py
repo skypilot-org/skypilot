@@ -452,6 +452,7 @@ class Kubernetes(clouds.Cloud):
         num_nodes: int,
         volume_mounts: Optional[List['volume_lib.VolumeMount']],
         enable_flex_start: bool,
+        is_using_kueue: bool,
     ) -> int:
         """Calculate provision timeout based on number of nodes.
 
@@ -466,6 +467,10 @@ class Kubernetes(clouds.Cloud):
         Returns:
             Timeout in seconds
         """
+        if is_using_kueue:
+            # Return a large timeout to let kueue handle the provisioning
+            return 24 * 60 * 60  # 24 hours
+
         base_timeout = 10  # Base timeout for single node
         per_node_timeout = 0.2  # Additional seconds per node
         max_timeout = 60  # Cap at 1 minute
@@ -669,7 +674,7 @@ class Kubernetes(clouds.Cloud):
                 default_value=None))
 
         k8s_kueue_local_queue_name = (
-            skypilot_config.get_effective_region_config(
+            skypilot_config.get_effective_workspace_region_config(
                 # TODO(kyuds): Support SSH node pools as well.
                 cloud='kubernetes',
                 region=context,
@@ -705,10 +710,10 @@ class Kubernetes(clouds.Cloud):
         # scheduling 100s of pods.
         # We use a linear scaling formula to determine the timeout based on the
         # number of nodes.
-
+        is_using_kueue = k8s_kueue_local_queue_name is not None
         timeout = self._calculate_provision_timeout(
             num_nodes, volume_mounts, enable_flex_start or
-            enable_flex_start_queued_provisioning)
+            enable_flex_start_queued_provisioning, is_using_kueue)
 
         # Use _REPR, instead of directly using 'kubernetes' as the config key,
         # because it could be SSH node pool as well.

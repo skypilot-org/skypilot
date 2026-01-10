@@ -462,52 +462,54 @@ def cost_report(
         cluster_reports = subprocess_utils.run_in_parallel(
             _process_cluster_report, cluster_reports)
 
-    def _update_record_with_resources(record: Dict[str, Any]) -> None:
-        """Add resource fields for dashboard compatibility."""
-        if record is None:
-            return
-        resources = record.get('resources')
-        if resources is None:
-            return
-        if not dashboard_summary_response:
-            fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
-        else:
-            fields = ['cloud']
-        for field in fields:
-            try:
-                record[field] = str(getattr(resources, field))
-            except Exception as e:  # pylint: disable=broad-except
-                # Ok to skip the fields as this is just for display
-                # purposes.
-                logger.debug(f'Failed to get resources.{field} for cluster '
-                             f'{record["name"]}: {str(e)}')
-                record[field] = None
-
-        # Add resources_str and resources_str_full for dashboard
-        # compatibility
-        num_nodes = record.get('num_nodes', 1)
-        try:
-            resource_str_simple, resource_str_full = (
-                resources_utils.format_resource(resources,
-                                                simplified_only=False))
-            record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
-            record['resources_str_full'] = f'{num_nodes}x{resource_str_full}'
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to get resources_str for cluster '
-                         f'{record["name"]}: {str(e)}')
-            for field in fields:
-                record[field] = None
-            record['resources_str'] = '-'
-            record['resources_str_full'] = '-'
-
     for report in cluster_reports:
-        _update_record_with_resources(report)
+        _update_record_with_resources(report, dashboard_summary_response)
         if dashboard_summary_response:
             report.pop('usage_intervals')
             report.pop('user_hash')
             report.pop('resources')
 
     return cluster_reports
+
+
+def _update_record_with_resources(
+        record: Dict[str, Any],
+        dashboard_summary_response: bool = False) -> None:
+    """Add resource fields for dashboard compatibility."""
+    if record is None:
+        return
+    resources = record.get('resources')
+    if resources is None:
+        return
+    if not dashboard_summary_response:
+        fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
+    else:
+        fields = ['cloud']
+    for field in fields:
+        try:
+            record[field] = str(getattr(resources, field))
+        except Exception as e:  # pylint: disable=broad-except
+            # Ok to skip the fields as this is just for display
+            # purposes.
+            logger.debug(f'Failed to get resources.{field} for cluster '
+                         f'{record["name"]}: {str(e)}')
+            record[field] = None
+
+    # Add resources_str and resources_str_full for dashboard
+    # compatibility
+    num_nodes = record.get('num_nodes', 1)
+    try:
+        resource_str_simple, resource_str_full = (
+            resources_utils.format_resource(resources, simplified_only=False))
+        record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
+        record['resources_str_full'] = f'{num_nodes}x{resource_str_full}'
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to get resources_str for cluster '
+                     f'{record["name"]}: {str(e)}')
+        for field in fields:
+            record[field] = None
+        record['resources_str'] = '-'
+        record['resources_str_full'] = '-'
 
 
 def _start(
