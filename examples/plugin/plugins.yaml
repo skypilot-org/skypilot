@@ -1,8 +1,17 @@
 plugins:
+# When 'package' is specified, the plugin package will be built as a wheel
+# and automatically uploaded to remote clusters (jobs controller, serve
+# controller). If 'package' is not specified, the plugin must be installed
+# manually on the cluster.
 - class: example_plugin.ExamplePlugin
+  package: ~/path/to/skypilot/examples/plugin
 - class: example_plugin.ExampleParameterizedPlugin
+  package: ~/path/to/skypilot/examples/plugin
   parameters:
     message: "Message from parameters"
 - class: example_plugin.ExampleMiddlewarePlugin
+  package: ~/path/to/skypilot/examples/plugin
 - class: example_plugin.ExampleBackgroundTaskPlugin
+  package: ~/path/to/skypilot/examples/plugin
 - class: example_plugin.ExamplePatchPlugin
+  package: ~/path/to/skypilot/examples/plugin
