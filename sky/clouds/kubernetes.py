@@ -599,7 +599,8 @@ class Kubernetes(clouds.Cloud):
             cloud='kubernetes',
             region=context,
             keys=('remote_identity',),
-            default_value=schemas.get_default_remote_identity('kubernetes'))
+            default_value=schemas.get_default_remote_identity('kubernetes'),
+            override_configs=resources.cluster_config_overrides)
 
         if isinstance(remote_identity, dict):
             # If remote_identity is a dict, use the service account for the
