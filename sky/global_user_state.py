@@ -58,6 +58,7 @@ _SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 24.0
 DEBUG_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
+TERMINAL_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
 MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS = 3600
 
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS = [
@@ -201,7 +202,7 @@ cluster_history_table = sqlalchemy.Table(
 class ClusterEventType(enum.Enum):
     """Type of cluster event."""
     DEBUG = 'DEBUG'
-    """Used to denote events that are not related to cluster status."""
+    """Detailed debugging information from the cloud"""
 
     STATUS_CHANGE = 'STATUS_CHANGE'
     """Used to denote events that modify cluster status."""
@@ -970,8 +971,9 @@ def get_terminal_or_last_status_change_event(
     return row.reason
 
 
-def _get_last_cluster_event_multiple(
+def _get_last_or_terminal_cluster_event_multiple(
         cluster_hashes: Set[str]) -> Dict[str, str]:
+    """Returns the last or terminal cluster event for each cluster."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Create a priority expression: TERMINAL (0) before STATUS_CHANGE (1)
@@ -994,10 +996,8 @@ def _get_last_cluster_event_multiple(
             cluster_event_table.c.cluster_hash, cluster_event_table.c.reason,
             row_number).filter(
                 cluster_event_table.c.cluster_hash.in_(cluster_hashes),
-                cluster_event_table.c.type.in_([
-                    ClusterEventType.TERMINAL.value,
-                    ClusterEventType.STATUS_CHANGE.value
-                ])).subquery()
+                cluster_event_table.c.type !=
+                ClusterEventType.DEBUG.value).subquery()
 
         # Select only the top-ranked event for each cluster
         rows = session.query(
@@ -1033,6 +1033,9 @@ async def cluster_event_retention_daemon():
         debug_retention_hours = skypilot_config.get_nested(
             ('api_server', 'cluster_debug_event_retention_hours'),
             DEBUG_CLUSTER_EVENT_RETENTION_HOURS)
+        terminal_retention_hours = skypilot_config.get_nested(
+            ('api_server', 'cluster_terminal_event_retention_hours'),
+            TERMINAL_CLUSTER_EVENT_RETENTION_HOURS)
         try:
             if retention_hours >= 0:
                 logger.debug('Cleaning up cluster events with retention '
@@ -1044,6 +1047,12 @@ async def cluster_event_retention_daemon():
                              f'{debug_retention_hours} hours.')
                 cleanup_cluster_events_with_retention(debug_retention_hours,
                                                       ClusterEventType.DEBUG)
+            if terminal_retention_hours >= 0:
+                logger.debug(
+                    'Cleaning up terminal cluster events with retention '
+                    f'{terminal_retention_hours} hours.')
+                cleanup_cluster_events_with_retention(terminal_retention_hours,
+                                                      ClusterEventType.TERMINAL)
         except asyncio.CancelledError:
             logger.info('Cluster event retention daemon cancelled')
             break
@@ -1888,7 +1897,7 @@ def get_clusters(
     # get last cluster event for each row
     if not summary_response:
         cluster_hashes = {row.cluster_hash for row in rows}
-        last_cluster_event_dict = _get_last_cluster_event_multiple(
+        last_cluster_event_dict = _get_last_or_terminal_cluster_event_multiple(
             cluster_hashes)
 
     for row in rows:
@@ -2035,7 +2044,8 @@ def get_clusters_from_history(
     user_hashes = set(row_to_user_hash.values())
     user_hash_to_user = get_users(user_hashes)
     cluster_hashes = set(row_to_user_hash.keys())
-    last_cluster_event_dict = _get_last_cluster_event_multiple(cluster_hashes)
+    last_cluster_event_dict = _get_last_or_terminal_cluster_event_multiple(
+        cluster_hashes)
 
     records = []
     for row in rows:

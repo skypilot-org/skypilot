@@ -96,7 +96,12 @@ def _get_dag(job_id: int) -> 'sky.Dag':
 
 
 def _add_k8s_annotations(task: 'sky.Task', job_id: int) -> None:
-    # Add Kubernetes pod config annotation before launch
+    """Adds Kubernetes pod config annotations to the task resources.
+
+    This function is a NOP for non-Kubernetes resources, as
+    the kubernetes specific config is not used when launching
+    a cluster on other clouds.
+    """
     original_resources = task.resources
     new_resources_list: List['sky.Resources'] = []
     for original_resource in original_resources:

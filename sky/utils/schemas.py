@@ -1650,6 +1650,9 @@ def get_config_schema():
             'cluster_debug_event_retention_hours': {
                 'type': 'number',
             },
+            'cluster_terminal_event_retention_hours': {
+                'type': 'number',
+            },
         }
     }
 
