@@ -206,7 +206,7 @@ def check_and_print_upgrade_hint(api_server_info: ApiServerInfo,
             f'method.'
             f'{colorama.Style.RESET_ALL}')
 
-    click.echo('\n'.join(hint_lines) + '\n', err=True)
+    click.echo('\n'.join(hint_lines), err=True)
 
 
 def get_api_cookie_jar_path() -> pathlib.Path:
