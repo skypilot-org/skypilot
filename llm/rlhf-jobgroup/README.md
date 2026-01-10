@@ -17,12 +17,12 @@ The example consists of 5 task types that communicate over HTTP, with built-in l
 │           rollout-server                │
 │  ┌─────────────────────────────────┐    │
 │  │ Head Node (rollout-server-0)    │    │
-│  │  - vLLM on port 8001            │    │
-│  │  - Router on port 8010 ◄────────┼────┼─── Trainer connects here
+│  │  - SGLang on port 30001         │    │
+│  │  - Router on port 30000 ◄───────┼────┼─── Trainer connects here
 │  └─────────────────────────────────┘    │
 │  ┌─────────────────────────────────┐    │
 │  │ Worker Node (rollout-server-1)  │    │
-│  │  - vLLM on port 8001            │    │
+│  │  - SGLang on port 30001         │    │
 │  └─────────────────────────────────┘    │
 └──────────┬──────────────────────────────┘
            │ generated responses (load balanced)
@@ -48,10 +48,10 @@ The example consists of 5 task types that communicate over HTTP, with built-in l
 
 1. **data-server**: FastAPI server that serves math prompts from the GSM8K dataset. Provides batches of problems with ground truth answers.
 
-2. **rollout-server** (x2): vLLM inference servers with built-in load balancing:
+2. **rollout-server** (x2): SGLang inference servers with native load balancing:
    - Using `num_nodes: 2` creates two GPU instances for higher throughput
-   - Head node (rank 0) runs both vLLM and a router on port 8010
-   - Router distributes requests across all vLLM instances using round-robin
+   - Head node (rank 0) runs both SGLang server and SGLang router on port 30000
+   - SGLang router provides cache-aware load balancing for optimal KV cache reuse
 
 3. **reward-server**: Verifies mathematical answers by comparing model outputs against ground truth. Returns binary rewards (1.0 for correct, 0.0 for incorrect).
 
@@ -118,9 +118,9 @@ resources:
 Components discover each other using job group DNS names:
 
 - `data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000`
-- `rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8010` (load-balanced endpoint)
-- `rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001` (vLLM backend 1)
-- `rollout-server-1.${SKYPILOT_JOBGROUP_NAME}:8001` (vLLM backend 2)
+- `rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:30000` (SGLang router endpoint)
+- `rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:30001` (SGLang backend 1)
+- `rollout-server-1.${SKYPILOT_JOBGROUP_NAME}:30001` (SGLang backend 2)
 - `reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002`
 - `replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:8003`
 
@@ -128,11 +128,11 @@ This allows components to communicate without hardcoded IP addresses.
 
 ## Load Balancing
 
-The example demonstrates how to scale inference servers horizontally using the head node pattern:
+The example uses [SGLang's native router](https://docs.sglang.ai/advanced_features/router.html) for load balancing:
 
-1. **Multiple rollout servers**: Using `num_nodes: 2` creates two vLLM instances
-2. **Head node router**: The head node (rank 0) runs both vLLM and a router on port 8010
-3. **Automatic discovery**: The router dynamically builds the backend list from `SKYPILOT_NUM_NODES`
+1. **Multiple rollout servers**: Using `num_nodes: 2` creates two SGLang instances
+2. **Head node router**: The head node (rank 0) runs both SGLang server and SGLang router on port 30000
+3. **Automatic discovery**: The router is configured with worker URLs from `SKYPILOT_NUM_NODES`
 4. **Transparent to clients**: The trainer only needs to know the head node endpoint
 
 ### Scaling to More Servers
@@ -147,17 +147,17 @@ num_nodes: 4  # Scale to 4 servers
 The router on the head node automatically discovers all workers using:
 ```bash
 for i in $(seq 0 $((SKYPILOT_NUM_NODES - 1))); do
-  BACKENDS="${BACKENDS},rollout-server-${i}.${SKYPILOT_JOBGROUP_NAME}:8001"
+  WORKER_URLS="${WORKER_URLS} http://rollout-server-${i}.${SKYPILOT_JOBGROUP_NAME}:30001"
 done
 ```
 
-### Router Features
+### SGLang Router Features
 
-The rollout router (`rollout_router.py`) provides:
-- Round-robin load balancing
+SGLang's native router (`sglang_router`) provides:
+- **Cache-aware routing**: Routes requests to maximize KV cache reuse
 - Health checking with automatic failover
-- Request statistics at `/stats`
 - OpenAI-compatible API passthrough
+- Built-in Rust implementation for high performance
 
 ## GRPO Algorithm
 
@@ -190,7 +190,7 @@ model = AutoModelForSequenceClassification.from_pretrained("Skywork/Skywork-Rewa
 ### Scaling Up
 
 For larger models:
-1. Increase vLLM tensor parallelism
+1. Increase SGLang tensor parallelism
 2. Use multiple GPUs per trainer node
 3. Enable gradient checkpointing
 

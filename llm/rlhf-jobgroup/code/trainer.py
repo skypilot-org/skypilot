@@ -3,7 +3,7 @@
 
 This trainer orchestrates the RLHF pipeline by:
 1. Fetching prompts from data-server
-2. Generating responses via rollout-server (vLLM)
+2. Generating responses via rollout-server (SGLang)
 3. Computing rewards via reward-server
 4. Storing experiences in replay-buffer
 5. Updating the policy using GRPO (Group Relative Policy Optimization)
@@ -129,7 +129,7 @@ class RLHFTrainer:
         return data["prompts"]
 
     def generate_responses(self, prompts: List[str]) -> List[str]:
-        """Generate responses using the rollout server (vLLM)."""
+        """Generate responses using the rollout server (SGLang)."""
         url = f"http://{self.config.rollout_server}/v1/completions"
 
         responses = []
