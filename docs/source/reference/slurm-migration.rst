@@ -366,10 +366,10 @@ Slurm tracks users by their Unix username. SkyPilot uses :ref:`SSO authenticatio
 - Audit logs of who launched what
 - Role-based access control (RBAC)
 
-Backend-specific notes
-----------------------
+Migrating to SkyPilot on Kubernetes
+-----------------------------------
 
-SkyPilot runs on multiple backends including Kubernetes, cloud VMs, and even Slurm itself. If you're using SkyPilot on Kubernetes, the following sections cover K8s-specific considerations.
+SkyPilot runs on multiple backends including Kubernetes, cloud VMs, and even Slurm itself. If you're using SkyPilot on Kubernetes, the following sections cover K8s-specific considerations for users migrating from Slurm.
 
 Shared storage on Kubernetes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
