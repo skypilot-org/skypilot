@@ -575,6 +575,8 @@ class JobsLogsBody(RequestBody):
     controller: bool = False
     refresh: bool = False
     tail: Optional[int] = None
+    # Task identifier (can be task_id as int string or task_name as string)
+    task: Optional[str] = None
 
 
 class RequestCancelBody(RequestBody):
