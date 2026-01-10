@@ -195,7 +195,7 @@ def check_and_print_upgrade_hint(api_server_info: ApiServerInfo,
             f'{colorama.Fore.CYAN}{upgrade_command}'
             f'{colorama.Style.RESET_ALL}',
             f'{ux_utils.INDENT_LAST_SYMBOL}'
-            'After upgrading, restart the API server: ',
+            'After upgrading, restart the API server: '
             f'{colorama.Fore.CYAN}sky api stop && sky api start'
             f'{colorama.Style.RESET_ALL}',
         ])
