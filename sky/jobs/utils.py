@@ -962,6 +962,10 @@ def stream_logs_by_id(job_id: int,
     status_display = rich_utils.safe_status(msg)
     num_tasks = managed_job_state.get_num_tasks(job_id)
 
+    # Check if job exists - if num_tasks is 0, the job doesn't exist
+    if num_tasks == 0:
+        return (f'Job {job_id} not found.', exceptions.JobExitCode.NOT_FOUND)
+
     # Resolve task filter to a specific task_id if provided
     # This is used for running jobs to stream logs from the correct task
     filtered_task_id: Optional[int] = None
