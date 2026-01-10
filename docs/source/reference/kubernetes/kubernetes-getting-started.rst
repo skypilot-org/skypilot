@@ -384,7 +384,7 @@ For example, to set custom environment variables and use GPUDirect RDMA, you can
 
 .. _kubernetes-using-volumes:
 
-Mounting volumes
+Mounting NFS and other volumes
 ------------------------------
 
 SkyPilot supports mounting various types of volumes to your pods on Kubernetes:
