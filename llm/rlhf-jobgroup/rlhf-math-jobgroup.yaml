@@ -6,17 +6,24 @@
 #
 # Architecture:
 #   - data-server: Serves GSM8K math prompts
-#   - rollout-server: vLLM for generating responses
+#   - rollout-server (x2): vLLM instances + load balancer on head node
 #   - reward-server: Verifies math answers against ground truth
 #   - replay-buffer: Stores experience tuples for sampling
 #   - ppo-trainer: Orchestrates GRPO training across multiple nodes
+#
+# Load Balancing:
+#   The head node of rollout-server runs both vLLM and a router that
+#   load-balances requests across all vLLM instances using round-robin.
+#   The trainer connects to the router endpoint on port 8010.
 #
 # Usage:
 #   sky jobs launch llm/rlhf-jobgroup/rlhf-math-jobgroup.yaml
 #
 # The components communicate over the job group network using DNS names:
 #   - data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000
-#   - rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001
+#   - rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8010 (load balanced endpoint)
+#   - rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001 (vLLM backend 1)
+#   - rollout-server-1.${SKYPILOT_JOBGROUP_NAME}:8001 (vLLM backend 2)
 #   - reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002
 #   - replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:8003
 ---
@@ -47,30 +54,71 @@ run: |
   python data_server.py --port 8000
 
 ---
-# Rollout Server: vLLM for generating model responses
+# Rollout Servers: Multiple vLLM instances with load balancer on head node
+# Using num_nodes=2 to create rollout-server-0 and rollout-server-1
+# Head node (rank 0) runs both vLLM and the router for load balancing
 name: rollout-server
+num_nodes: 2
 resources:
   accelerators: H100:1
   memory: 32+
   infra: kubernetes/coreweave
+
+file_mounts:
+  /code: llm/rlhf-jobgroup/code
 
 envs:
   MODEL_NAME: Qwen/Qwen2.5-0.5B-Instruct
 
 setup: |
   pip install vllm
+  # Router dependencies (only needed on head node but installed everywhere for simplicity)
+  pip install fastapi uvicorn httpx
 
 run: |
   echo "Starting rollout server with vLLM..."
   echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Node rank: ${SKYPILOT_NODE_RANK} / ${SKYPILOT_NUM_NODES}"
   echo "Model: ${MODEL_NAME}"
-  echo "API available at http://rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001/v1"
+  echo "vLLM API available at http://rollout-server-${SKYPILOT_NODE_RANK}.${SKYPILOT_JOBGROUP_NAME}:8001/v1"
 
+  # Start vLLM in background
   vllm serve ${MODEL_NAME} \
     --host 0.0.0.0 \
     --port 8001 \
     --max-model-len 2048 \
-    --gpu-memory-utilization 0.8
+    --gpu-memory-utilization 0.8 &
+  VLLM_PID=$!
+
+  # On head node, also run the router for load balancing
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+    echo "Head node: starting load balancer router..."
+
+    # Build backend list for all rollout servers
+    BACKENDS=""
+    for i in $(seq 0 $((SKYPILOT_NUM_NODES - 1))); do
+      if [ -n "$BACKENDS" ]; then
+        BACKENDS="${BACKENDS},"
+      fi
+      BACKENDS="${BACKENDS}rollout-server-${i}.${SKYPILOT_JOBGROUP_NAME}:8001"
+    done
+
+    echo "Load balancing across: ${BACKENDS}"
+    echo "Router API available at http://rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8010/v1"
+
+    # Wait for vLLM backends to start
+    sleep 60
+
+    cd /code
+    python rollout_router.py --port 8010 --backends "${BACKENDS}" &
+    ROUTER_PID=$!
+
+    # Wait for both processes
+    wait $VLLM_PID $ROUTER_PID
+  else
+    # Worker nodes just run vLLM
+    wait $VLLM_PID
+  fi
 
 ---
 # Reward Server: Verifies math answers against ground truth
@@ -142,13 +190,14 @@ run: |
   echo "Node rank: ${SKYPILOT_NODE_RANK} / ${SKYPILOT_NUM_NODES}"
 
   # Service discovery via job group DNS
+  # The rollout head node provides load balancing across all vLLM instances
   DATA_SERVER="data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000"
-  ROLLOUT_SERVER="rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001"
+  ROLLOUT_SERVER="rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8010"
   REWARD_SERVER="reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002"
   REPLAY_BUFFER="replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:8003"
 
   echo "Data server: ${DATA_SERVER}"
-  echo "Rollout server: ${ROLLOUT_SERVER}"
+  echo "Rollout server (load balanced): ${ROLLOUT_SERVER}"
   echo "Reward server: ${REWARD_SERVER}"
   echo "Replay buffer: ${REPLAY_BUFFER}"
 

@@ -4,7 +4,7 @@ This example demonstrates a distributed RLHF (Reinforcement Learning from Human 
 
 ## Architecture
 
-The example consists of 5 separate components that communicate over HTTP:
+The example consists of 5 task types that communicate over HTTP, with built-in load balancing for scaling inference:
 
 ```
 ┌─────────────────────┐
@@ -13,29 +13,45 @@ The example consists of 5 separate components that communicate over HTTP:
 └──────────┬──────────┘
            │ GET /prompts
            ▼
+┌─────────────────────────────────────────┐
+│           rollout-server                │
+│  ┌─────────────────────────────────┐    │
+│  │ Head Node (rollout-server-0)    │    │
+│  │  - vLLM on port 8001            │    │
+│  │  - Router on port 8010 ◄────────┼────┼─── Trainer connects here
+│  └─────────────────────────────────┘    │
+│  ┌─────────────────────────────────┐    │
+│  │ Worker Node (rollout-server-1)  │    │
+│  │  - vLLM on port 8001            │    │
+│  └─────────────────────────────────┘    │
+└──────────┬──────────────────────────────┘
+           │ generated responses (load balanced)
+           ▼
 ┌─────────────────────┐      ┌─────────────────────┐
-│   rollout-server    │      │   reward-server     │
-│      (1 GPU)        │─────▶│      (CPU)          │
-│  vLLM inference     │      │  Math verification  │
-│  Port 8001          │      │  Port 8002          │
+│   reward-server     │      │   replay-buffer     │
+│      (CPU)          │      │      (CPU)          │
+│  Math verification  │      │  Experience storage │
+│  Port 8002          │      │  Port 8003          │
 └──────────┬──────────┘      └──────────┬──────────┘
-           │                            │
-           │  generated responses       │ reward scores
-           └────────────┬───────────────┘
+           │ reward scores               │ experience replay
+           └────────────┬────────────────┘
                         ▼
-           ┌─────────────────────┐      ┌─────────────────────┐
-           │    ppo-trainer      │◀────▶│   replay-buffer     │
-           │   (2 nodes x GPU)   │      │      (CPU)          │
-           │  Policy gradient    │      │  Experience storage │
-           │  Weight sync        │      │  Port 8003          │
-           └─────────────────────┘      └─────────────────────┘
+           ┌─────────────────────┐
+           │    ppo-trainer      │
+           │   (2 nodes x GPU)   │
+           │  Policy gradient    │
+           │  Weight sync        │
+           └─────────────────────┘
 ```
 
 ### Components
 
 1. **data-server**: FastAPI server that serves math prompts from the GSM8K dataset. Provides batches of problems with ground truth answers.
 
-2. **rollout-server**: vLLM inference server that generates responses from the current policy. Exposes OpenAI-compatible API.
+2. **rollout-server** (x2): vLLM inference servers with built-in load balancing:
+   - Using `num_nodes: 2` creates two GPU instances for higher throughput
+   - Head node (rank 0) runs both vLLM and a router on port 8010
+   - Router distributes requests across all vLLM instances using round-robin
 
 3. **reward-server**: Verifies mathematical answers by comparing model outputs against ground truth. Returns binary rewards (1.0 for correct, 0.0 for incorrect).
 
@@ -102,11 +118,46 @@ resources:
 Components discover each other using job group DNS names:
 
 - `data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000`
-- `rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001`
+- `rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8010` (load-balanced endpoint)
+- `rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001` (vLLM backend 1)
+- `rollout-server-1.${SKYPILOT_JOBGROUP_NAME}:8001` (vLLM backend 2)
 - `reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002`
 - `replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:8003`
 
 This allows components to communicate without hardcoded IP addresses.
+
+## Load Balancing
+
+The example demonstrates how to scale inference servers horizontally using the head node pattern:
+
+1. **Multiple rollout servers**: Using `num_nodes: 2` creates two vLLM instances
+2. **Head node router**: The head node (rank 0) runs both vLLM and a router on port 8010
+3. **Automatic discovery**: The router dynamically builds the backend list from `SKYPILOT_NUM_NODES`
+4. **Transparent to clients**: The trainer only needs to know the head node endpoint
+
+### Scaling to More Servers
+
+To scale up, simply increase `num_nodes`:
+
+```yaml
+name: rollout-server
+num_nodes: 4  # Scale to 4 servers
+```
+
+The router on the head node automatically discovers all workers using:
+```bash
+for i in $(seq 0 $((SKYPILOT_NUM_NODES - 1))); do
+  BACKENDS="${BACKENDS},rollout-server-${i}.${SKYPILOT_JOBGROUP_NAME}:8001"
+done
+```
+
+### Router Features
+
+The rollout router (`rollout_router.py`) provides:
+- Round-robin load balancing
+- Health checking with automatic failover
+- Request statistics at `/stats`
+- OpenAI-compatible API passthrough
 
 ## GRPO Algorithm
 
