@@ -32,7 +32,6 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import context_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
 from sky.utils.plugin_extensions import ExternalClusterFailure
@@ -277,7 +276,7 @@ def _init_db_async(func):
             # this may happen multiple times since there is no locking
             # here but thats fine, this is just a short circuit for the
             # common case.
-            await context_utils.to_thread(initialize_and_get_db_async)
+            await asyncio.to_thread(initialize_and_get_db_async)
 
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=5)
         last_exc = None

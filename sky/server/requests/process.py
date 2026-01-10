@@ -37,7 +37,7 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         #    currently idle.
         self.running: atomic.AtomicInt = atomic.AtomicInt(0)
 
-    def submit(self, fn, *args, **kwargs) -> concurrent.futures.Future:
+    def submit(self, fn, /, *args, **kwargs) -> concurrent.futures.Future:
         """Submit a task for execution.
 
         If reuse_worker is False, wraps the function to exit after completion.
@@ -51,7 +51,10 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         """Check if there are any idle workers."""
         return self.running.get() < self.max_workers
 
-    def shutdown(self, wait: bool = True) -> None:
+    def shutdown(self,
+                 wait: bool = True,
+                 *,
+                 cancel_futures: bool = False) -> None:
         """Shutdown the executor."""
         # Here wait means wait for the proactive cancellation complete.
         # TODO(aylei): we may support wait=True in the future if needed.

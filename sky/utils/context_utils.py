@@ -218,17 +218,6 @@ P = ParamSpec('P')
 T = TypeVar('T')
 
 
-# TODO(aylei): replace this with asyncio.to_thread once we drop support for
-# python 3.8
-def to_thread(func: Callable[P, T], /, *args: P.args,
-              **kwargs: P.kwargs) -> 'asyncio.Future[T]':
-    """Asynchronously run function *func* in a separate thread.
-
-    This is same as asyncio.to_thread added in python 3.9
-    """
-    return to_thread_with_executor(None, func, *args, **kwargs)
-
-
 def to_thread_with_executor(executor: Optional[concurrent.futures.Executor],
                             func: Callable[P, T], /, *args: P.args,
                             **kwargs: P.kwargs) -> 'asyncio.Future[T]':

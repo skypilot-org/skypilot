@@ -40,7 +40,6 @@ from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common_utils
-from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import infra_utils
 from sky.utils import log_utils
@@ -344,7 +343,7 @@ async def get_job_status(
     # TODO(zhwu, cooperc): Make this get job status aware of cluster status, so
     # that it can exit retry early if the cluster is down.
     # TODO(luca) make this async
-    handle = await context_utils.to_thread(
+    handle = await asyncio.to_thread(
         global_user_state.get_handle_from_cluster_name, cluster_name)
     if handle is None:
         # This can happen if the cluster was preempted and background status
@@ -356,10 +355,10 @@ async def get_job_status(
     try:
         logger.info('=== Checking the job status... ===')
         statuses = await asyncio.wait_for(
-            context_utils.to_thread(backend.get_job_status,
-                                    handle,
-                                    job_ids=job_ids,
-                                    stream_logs=False),
+            asyncio.to_thread(backend.get_job_status,
+                              handle,
+                              job_ids=job_ids,
+                              stream_logs=False),
             timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
         status = list(statuses.values())[0]
         if status is None:
@@ -774,7 +773,7 @@ def event_callback_func(
         logger.info(f'=== END: event callback for {status!r} ===')
 
     async def async_callback_func(status: str):
-        return await context_utils.to_thread(callback_func, status)
+        return await asyncio.to_thread(callback_func, status)
 
     return async_callback_func
 
