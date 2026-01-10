@@ -988,6 +988,13 @@ def stream_logs_by_id(job_id: int,
                managed_job_state.get_status(job_id)) is None:
             time.sleep(1)
 
+        # Show hint about per-task filtering when there are multiple tasks
+        if num_tasks > 1 and task is None:
+            print(f'{colorama.Fore.CYAN}Hint: This job has {num_tasks} tasks. '
+                  f'Use \'sky jobs logs {job_id} TASK\' to view logs for a '
+                  f'specific task (TASK can be task ID or name).'
+                  f'{colorama.Style.RESET_ALL}')
+
         if not should_keep_logging(managed_job_status):
             job_msg = ''
             if managed_job_status.is_failed():
@@ -1005,7 +1012,7 @@ def stream_logs_by_id(job_id: int,
                 ]
                 if not task_info:
                     valid_range = f'0-{total_tasks - 1}' if total_tasks > 1 else '0'
-                    return (f'No task (ID: {task}) in job {job_id}. '
+                    return (f'No task found matching {task!r} in job {job_id}. '
                             f'Valid task IDs are {valid_range}.',
                             exceptions.JobExitCode.NOT_FOUND)
             num_tasks = len(task_info)
@@ -1021,7 +1028,8 @@ def stream_logs_by_id(job_id: int,
                         continue
                     task_str = (f'Task {task_name}({task_id})'
                                 if task_name else f'Task {task_id}')
-                    if num_tasks > 1:
+                    # Show task header when multiple tasks OR when filtering
+                    if num_tasks > 1 or task is not None:
                         print(f'=== {task_str} ===')
                     with open(os.path.expanduser(log_file),
                               'r',
@@ -1046,7 +1054,8 @@ def stream_logs_by_id(job_id: int,
                                 start_streaming = True
                             if start_streaming:
                                 print(line, end='', flush=True)
-                    if num_tasks > 1:
+                    # Show task finished message for multi-task or filtering
+                    if num_tasks > 1 or task is not None:
                         # Add the "Task finished" message for terminal states
                         if task_status.is_terminal():
                             print(ux_utils.finishing_message(
