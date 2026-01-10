@@ -254,10 +254,22 @@ function TaskDetailsContent({ taskData, taskIndex, poolsData }) {
       <div>
         <div className="text-gray-600 font-medium text-base">Task</div>
         <div className="text-base mt-1">
-          Task {taskIndex}
+          {taskIndex}
           {taskData.task && (
             <span className="text-gray-500"> ({taskData.task})</span>
           )}
+        </div>
+      </div>
+      <div>
+        <div className="text-gray-600 font-medium text-base">Job</div>
+        <div className="text-base mt-1">
+          <Link
+            href={`/jobs/${taskData.id}`}
+            className="text-sky-blue hover:text-sky-blue-bright hover:underline"
+          >
+            {taskData.id}
+            {taskData.name ? ` (${taskData.name})` : ''}
+          </Link>
         </div>
       </div>
       <div>
@@ -311,7 +323,8 @@ function TaskDetailsContent({ taskData, taskIndex, poolsData }) {
                 </Link>
                 {taskData.infra.includes('(') && (
                   <span>
-                    {' ' + taskData.infra.substring(taskData.infra.indexOf('('))}
+                    {' ' +
+                      taskData.infra.substring(taskData.infra.indexOf('('))}
                   </span>
                 )}
               </span>

@@ -31,6 +31,11 @@ const DEFAULT_FIELDS = [
   'pool_hash',
   'details',
   'failure_reason',
+  'user_yaml',
+  'entrypoint',
+  'is_job_group',
+  'placement',
+  'execution',
   // Note: 'links' field removed - it may not exist in older database schemas
 ];
 
@@ -222,6 +227,10 @@ export async function getManagedJobs(options = {}) {
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
         accelerators: job.accelerators, // Include accelerators field
         labels: job.labels || {}, // Include labels field
+        // JobGroup fields
+        is_job_group: job.is_job_group,
+        placement: job.placement,
+        execution: job.execution,
       };
     });
 
