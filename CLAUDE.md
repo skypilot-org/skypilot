@@ -371,13 +371,40 @@ helm dependency build ./charts/skypilot
 DOCKER_IMAGE=my-repo/skypilot:v1
 docker buildx build --push --platform linux/amd64 -t $DOCKER_IMAGE -f Dockerfile .
 
-# Deploy
+# Deploy (NEW installation)
 NAMESPACE=skypilot
 RELEASE_NAME=skypilot
 helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
     --namespace $NAMESPACE \
     --create-namespace \
     --set apiService.image=$DOCKER_IMAGE
+```
+
+#### Upgrading Existing Deployments
+
+**CRITICAL:** Always use `--reuse-values` to preserve database/credential config:
+
+```bash
+# Upgrade existing deployment (keeps PostgreSQL, auth, etc.)
+helm upgrade skypilot ./charts/skypilot -n skypilot --reuse-values \
+    --set apiService.image=$DOCKER_IMAGE
+
+# Check current values / rollback if needed
+helm get values skypilot -n skypilot
+helm rollback skypilot <revision> -n skypilot
+```
+
+#### PostgreSQL Backend
+
+```bash
+# Create connection secret
+kubectl create secret generic db-uri -n skypilot \
+    --from-literal=uri="postgresql://user:pass@host:5432/db"
+
+# Deploy with PostgreSQL
+helm upgrade --install skypilot ./charts/skypilot -n skypilot \
+    --set apiService.dbConnectionSecretName=db-uri \
+    --set storage.enabled=false
 ```
 
 ## Critical Code Paths (Handle with Care)
