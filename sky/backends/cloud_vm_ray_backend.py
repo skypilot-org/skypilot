@@ -916,8 +916,10 @@ class RetryingVmProvisioner(object):
         elif to_provision.region is not None and to_provision.cloud is not None:
             # For public clouds, provision.region is always set.
             if clouds.SSH().is_same_cloud(to_provision.cloud):
+                ssh_node_pool_name = common_utils.removeprefix(
+                    to_provision.region, 'ssh-')
                 message += (
-                    f'in SSH Node Pool ({to_provision.region.lstrip("ssh-")}) '
+                    f'in SSH Node Pool ({ssh_node_pool_name}) '
                     f'for {requested_resources}. The SSH Node Pool may not '
                     'have enough resources.')
             elif clouds.Kubernetes().is_same_cloud(to_provision.cloud):
@@ -1177,7 +1179,9 @@ class RetryingVmProvisioner(object):
                     if isinstance(to_provision.cloud, clouds.Kubernetes):
                         suffix = '.'
                         if region.name.startswith('ssh-'):
-                            suffix = f' ({region.name.lstrip("ssh-")})'
+                            ssh_node_pool_name = common_utils.removeprefix(
+                                region.name, 'ssh-')
+                            suffix = f' ({ssh_node_pool_name})'
                         logger.info(
                             ux_utils.starting_message(
                                 f'Launching{controller_str} on '
@@ -3459,7 +3463,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ssh_user=handle.ssh_user,
                 docker_user=handle.docker_user)
             cluster_utils.SSHConfigHelper.add_cluster(
-                handle.cluster_name, handle.cached_external_ips, auth_config,
+                handle.cluster_name, handle.cluster_name_on_cloud,
+                handle.cached_external_ips, auth_config,
                 handle.cached_external_ssh_ports, handle.docker_user,
                 handle.ssh_user)
 
@@ -3812,6 +3817,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Note that the order of ">filename 2>&1" matters.
             f'> {remote_log_path} 2>&1')
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
+
+        # For Slurm, we need to wait for the job to complete before exiting,
+        # because Slurm's proctrack/cgroup kills all processes when the srun
+        # job step ends, including child processes launched as a separate
+        # process group.
+        # So this keeps srun alive so the job driver process that was spawned
+        # (and runs in the background) by job_lib.JobScheduler.schedule_step()
+        # does not get killed.
+        # Note: proctrack/cgroup is enabled by default on Nebius' Managed
+        # Soperator.
+        is_slurm = isinstance(handle.launched_resources.cloud, clouds.Slurm)
+        if is_slurm:
+            wait_code = job_lib.JobLibCodeGen.wait_for_job(job_id)
+            code = code + ' && ' + wait_code
+
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
 
         # Should also be ealier than is_command_length_over_limit
@@ -3896,10 +3916,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
 
-            returncode, stdout, stderr = self.run_on_head(handle,
-                                                          job_submit_cmd,
-                                                          stream_logs=False,
-                                                          require_outputs=True)
+            # For Slurm, run in background so that SSH returns immediately.
+            # This is needed because we add the wait_for_job code above which
+            # makes the command block until the job completes.
+            returncode, stdout, stderr = self.run_on_head(
+                handle,
+                job_submit_cmd,
+                stream_logs=False,
+                require_outputs=True,
+                run_in_background=is_slurm)
             # Happens when someone calls `sky exec` but remote is outdated for
             # running a job. Necessitating calling `sky launch`.
             backend_utils.check_stale_runtime_on_remote(returncode, stderr,
@@ -3916,11 +3941,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'
                 job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
+                # See comment above for why run_in_background=is_slurm.
                 returncode, stdout, stderr = self.run_on_head(
                     handle,
                     job_submit_cmd,
                     stream_logs=False,
-                    require_outputs=True)
+                    require_outputs=True,
+                    run_in_background=is_slurm)
 
             subprocess_utils.handle_returncode(
                 returncode,
@@ -4979,6 +5006,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     ports_cleaned_up = True
                 except exceptions.PortDoesNotExistError:
                     logger.debug('Ports do not exist. Skipping cleanup.')
+                    ports_cleaned_up = True
                 except Exception as e:  # pylint: disable=broad-except
                     if purge:
                         msg = common_utils.format_exception(e, use_bracket=True)
@@ -5051,11 +5079,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     config['provider'],
                     non_terminated_only=False)
 
-                unexpected_node_state: Optional[Tuple[str, str]] = None
+                unexpected_nodes = []
                 for node_id, node_status_tuple in node_status_dict.items():
                     node_status, reason = node_status_tuple
-                    reason = '' if reason is None else f' ({reason})'
-                    logger.debug(f'{node_id} status: {node_status}{reason}')
+                    reason_str = '' if reason is None else f' ({reason})'
+                    logger.debug(f'{node_id} status: {node_status}{reason_str}')
                     # FIXME(cooperc): Some clouds (e.g. GCP) do not distinguish
                     # between "stopping/stopped" and "terminating/terminated",
                     # so we allow for either status instead of casing on
@@ -5063,19 +5091,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     if node_status not in [
                             None, status_lib.ClusterStatus.STOPPED
                     ]:
-                        unexpected_node_state = (node_id, node_status)
-                        break
+                        unexpected_nodes.append((node_id, node_status, reason))
 
-                if unexpected_node_state is None:
+                if not unexpected_nodes:
                     break
 
                 attempts += 1
                 if attempts < _TEARDOWN_WAIT_MAX_ATTEMPTS:
                     time.sleep(_TEARDOWN_WAIT_BETWEEN_ATTEMPS_SECONDS)
                 else:
-                    (node_id, node_status) = unexpected_node_state
-                    raise RuntimeError(f'Instance {node_id} in unexpected '
-                                       f'state {node_status}.')
+                    unexpected_nodes_str = '\n'.join([
+                        f'  - {node_id}: {node_status}' +
+                        (f' ({reason})' if reason else '')
+                        for node_id, node_status, reason in unexpected_nodes
+                    ])
+                    raise RuntimeError(f'Instances in unexpected state:\n'
+                                       f'{unexpected_nodes_str}')
 
         # If cluster_yaml is None, the cluster should ensured to be terminated,
         # so we don't need to do the double check.
