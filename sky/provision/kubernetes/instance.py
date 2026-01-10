@@ -1124,6 +1124,33 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 ('podAntiAffinity',
                  'preferredDuringSchedulingIgnoredDuringExecution'),
                 existing_rules)
+
+            # CoreWeave NVL72 (GB200/GB300) requires all pods from the same job
+            # to be scheduled on nodes with the same NVLink domain for optimal
+            # performance across the shared NVLink fabric.
+            # See: https://docs.coreweave.com/docs/platform/instances/nvl72
+            if provider_config.get('coreweave_nvlink_affinity', False):
+                nvlink_affinity_rules = pod_spec_config.get_nested(
+                    ('podAffinity',
+                     'requiredDuringSchedulingIgnoredDuringExecution'), [])
+                nvlink_affinity_rules.append({
+                    'labelSelector': {
+                        'matchExpressions': [{
+                            'key': constants.TAG_SKYPILOT_CLUSTER_NAME,
+                            'operator': 'In',
+                            'values': [cluster_name_on_cloud]
+                        }]
+                    },
+                    # Use NVLink domain as topology key to ensure all pods
+                    # from the same job are scheduled on the same rack
+                    'topologyKey':
+                        kubernetes_utils.COREWEAVE_NVLINK_DOMAIN_LABEL
+                })
+                pod_spec_config.set_nested(
+                    ('podAffinity',
+                     'requiredDuringSchedulingIgnoredDuringExecution'),
+                    nvlink_affinity_rules)
+
             pod_spec_copy['spec']['affinity'] = pod_spec_config
 
         # TPU slice nodes are given a taint, google.com/tpu=present:NoSchedule.
