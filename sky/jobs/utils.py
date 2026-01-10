@@ -962,6 +962,22 @@ def stream_logs_by_id(job_id: int,
     status_display = rich_utils.safe_status(msg)
     num_tasks = managed_job_state.get_num_tasks(job_id)
 
+    # Resolve task filter to a specific task_id if provided
+    # This is used for running jobs to stream logs from the correct task
+    filtered_task_id: Optional[int] = None
+    if task is not None:
+        task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
+            job_id)
+        for t_id, t_name, _, _, _ in task_info:
+            if matches_task_filter(t_id, t_name, task):
+                filtered_task_id = t_id
+                break
+        if filtered_task_id is None:
+            valid_range = f'0-{num_tasks - 1}' if num_tasks > 1 else '0'
+            return (f'No task (ID: {task}) in job {job_id}. '
+                    f'Valid task IDs are {valid_range}.',
+                    exceptions.JobExitCode.NOT_FOUND)
+
     with status_display:
         prev_msg = msg
         while (managed_job_status :=
@@ -1053,6 +1069,12 @@ def stream_logs_by_id(job_id: int,
         task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))
 
+        # If a task filter was specified, use the filtered task_id instead of
+        # the latest task_id. This allows viewing logs for a specific task in
+        # a JobGroup with parallel execution.
+        if filtered_task_id is not None:
+            task_id = filtered_task_id
+
         # We wait for managed_job_status to be not None above. Once we see that
         # it's not None, we don't expect it to every become None again.
         assert managed_job_status is not None, (job_id, task_id,
@@ -1095,6 +1117,9 @@ def stream_logs_by_id(job_id: int,
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                 task_id, managed_job_status = (
                     managed_job_state.get_latest_task_id_status(job_id))
+                # Preserve filtered task_id if specified
+                if filtered_task_id is not None:
+                    task_id = filtered_task_id
                 assert managed_job_status is not None, (job_id, task_id,
                                                         managed_job_status)
                 continue
@@ -1161,6 +1186,11 @@ def stream_logs_by_id(job_id: int,
                         continue
 
                     if task_id == num_tasks - 1:
+                        break
+
+                    # If a task filter was specified, we're done with the
+                    # specific task - don't wait for other tasks.
+                    if filtered_task_id is not None:
                         break
 
                     # The log for the current job is finished. We need to

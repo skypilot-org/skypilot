@@ -317,7 +317,7 @@ sky api status
 
 ### Dashboard Development
 
-When making changes to the dashboard (`sky/dashboard/`), you must rebuild the dashboard before restarting the API server:
+**For local API server development**, rebuild the dashboard before restarting:
 
 ```bash
 # Install dependencies (first time or after package.json changes)
@@ -330,6 +330,8 @@ npm --prefix sky/dashboard run build
 sky api stop
 sky api start
 ```
+
+**For remote API server (Docker/Kubernetes)**, the Dockerfile automatically builds the dashboard - no manual build needed before `docker build`.
 
 The dashboard is a Next.js application. For development with hot reloading:
 
