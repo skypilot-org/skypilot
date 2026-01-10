@@ -1923,3 +1923,79 @@ def test_pool_resource_fallback_to_unaware(generic_cloud: str):
                 )
 
                 smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.resource_heavy
+@pytest.mark.gcp
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_fractional_gpu_scheduling(generic_cloud: str):
+    """Test that 6 jobs requesting 0.5 L4 each can run on a pool with 3 workers each with 1 L4."""
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+
+    # Pool with 3 workers, each with 1 L4 GPU
+    pool_config = basic_pool_conf(
+        num_workers=3,
+        infra=generic_cloud,
+        accelerator_string='{L4:1}',
+    )
+
+    # Create 6 jobs, each requesting 0.5 L4 and sleeping for 10000 seconds
+    job_configs = []
+    job_names = []
+    for i in range(6):
+        job_name = f'{name}-job-{i+1}'
+        job_names.append(job_name)
+        job_config = textwrap.dedent(f"""
+        name: {job_name}
+        resources:
+            accelerators: {{L4:0.5}}
+        run: |
+            sleep 10000
+        """)
+        job_configs.append(job_config)
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True, suffix='.yaml') as job_yaml_1, \
+             tempfile.NamedTemporaryFile(delete=True, suffix='.yaml') as job_yaml_2, \
+             tempfile.NamedTemporaryFile(delete=True, suffix='.yaml') as job_yaml_3, \
+             tempfile.NamedTemporaryFile(delete=True, suffix='.yaml') as job_yaml_4, \
+             tempfile.NamedTemporaryFile(delete=True, suffix='.yaml') as job_yaml_5, \
+             tempfile.NamedTemporaryFile(delete=True, suffix='.yaml') as job_yaml_6:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml_1, job_configs[0])
+            write_yaml(job_yaml_2, job_configs[1])
+            write_yaml(job_yaml_3, job_configs[2])
+            write_yaml(job_yaml_4, job_configs[3])
+            write_yaml(job_yaml_5, job_configs[4])
+            write_yaml(job_yaml_6, job_configs[5])
+
+            test = smoke_tests_utils.Test(
+                'test_pool_fractional_gpu_scheduling',
+                [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
+                    wait_until_pool_ready(pool_name, timeout=timeout),
+                    # Launch all 6 jobs
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, job_yaml=job_yaml_1.name),
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, job_yaml=job_yaml_2.name),
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, job_yaml=job_yaml_3.name),
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, job_yaml=job_yaml_4.name),
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, job_yaml=job_yaml_5.name),
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, job_yaml=job_yaml_6.name),
+                    # Verify all 6 jobs reach RUNNING status
+                    check_num_running_jobs(
+                        job_names, expected_count=6, timeout=timeout),
+                ],
+                timeout=timeout,
+                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+            )
+
+            smoke_tests_utils.run_one_test(test)

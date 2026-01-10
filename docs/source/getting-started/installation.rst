@@ -86,6 +86,10 @@ SkyPilot supports installation with ``uv`` or ``pip``.
 
           uv pip install skypilot-nightly
 
+          # Build the dashboard (requires Node.js and npm)
+          npm --prefix sky/dashboard install
+          npm --prefix sky/dashboard run build
+
       .. tab-item:: uv tool
         :sync: uv-tool-tab
 
@@ -94,6 +98,10 @@ SkyPilot supports installation with ``uv`` or ``pip``.
           # Install as a globally available tool with pip included
           # SkyPilot requires 3.7 <= python <= 3.13.
           uv tool install --with pip skypilot-nightly
+
+          # Build the dashboard (requires Node.js and npm)
+          npm --prefix sky/dashboard install
+          npm --prefix sky/dashboard run build
 
       .. tab-item:: pip
         :sync: pip-tab
@@ -106,6 +114,10 @@ SkyPilot supports installation with ``uv`` or ``pip``.
           conda activate sky
 
           pip install skypilot-nightly
+
+          # Build the dashboard (requires Node.js and npm)
+          npm --prefix sky/dashboard install
+          npm --prefix sky/dashboard run build
 
     **Install from source:**
 

@@ -286,7 +286,7 @@ jobs:
       skip_test_pypi: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_test_pypi || false }}
     secrets: inherit
 
-  trigger-helm-release:
+  trigger-docker-and-helm-release:
     needs: [publish-and-validate-both]
     # Allow helm release for manual dispatch or the original nightly cron; skip for the 5PM PT preflight
     if: ${{ always() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '35 8 * * *')) && needs.publish-and-validate-both.result == 'success' }}
@@ -361,8 +361,8 @@ jobs:
 
   notify-slack-failure:
     runs-on: ubuntu-latest
-    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-shared-gke-api-server, smoke-tests-lambda-job-queue, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-helm-release]
-    # needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-shared-gke-api-server, smoke-tests-lambda-job-queue, smoke-tests-runpod-minimal, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-helm-release]
+    needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-shared-gke-api-server, smoke-tests-lambda-job-queue, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-docker-and-helm-release]
+    # needs: [check-date, nightly-build-pypi, smoke-tests-aws, smoke-tests-kubernetes-resource-heavy, smoke-tests-kubernetes-no-resource-heavy, smoke-tests-kubernetes-no-resource-heavy-limit-deps, smoke-tests-remote-server-kubernetes, smoke-tests-shared-gke-api-server, smoke-tests-lambda-job-queue, smoke-tests-runpod-minimal, backward-compat-test-nightly, backward-compat-test-stable, publish-and-validate-both, trigger-docker-and-helm-release]
     # Only run this job if any of the previous jobs failed
     if: failure()
     steps:
