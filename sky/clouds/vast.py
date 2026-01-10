@@ -2,7 +2,7 @@
 
 import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
@@ -185,7 +185,7 @@ class Vast(clouds.Cloud):
         num_nodes: int,
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Any]:
         del zones, dryrun, cluster_name, num_nodes  # unused
 
         resources = resources.assert_launchable()
@@ -208,6 +208,13 @@ class Vast(clouds.Cloud):
             default_value=False,
             override_configs=resources.cluster_config_overrides,
         )
+        create_instance_kwargs = skypilot_config.get_effective_region_config(
+            cloud='vast',
+            region=region.name,
+            keys=('create_instance_kwargs',),
+            default_value={},
+            override_configs=resources.cluster_config_overrides,
+        )
 
         return {
             'instance_type': resources.instance_type,
@@ -215,6 +222,7 @@ class Vast(clouds.Cloud):
             'region': region.name,
             'image_id': image_id,
             'secure_only': secure_only,
+            'create_instance_kwargs': create_instance_kwargs or {},
         }
 
     def _get_feasible_launchable_resources(
