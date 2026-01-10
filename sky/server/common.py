@@ -194,13 +194,14 @@ def check_and_print_upgrade_hint(api_server_info: ApiServerInfo,
             f'{ux_utils.INDENT_SYMBOL}Upgrade with: '
             f'{colorama.Fore.CYAN}{upgrade_command}'
             f'{colorama.Style.RESET_ALL}',
-            f'{ux_utils.INDENT_SYMBOL}After upgrading, restart the API server: '
+            f'{ux_utils.INDENT_LAST_SYMBOL}'
+            'After upgrading, restart the API server: ',
             f'{colorama.Fore.CYAN}sky api stop && sky api start'
             f'{colorama.Style.RESET_ALL}',
         ])
     else:
         hint_lines.append(
-            f'{ux_utils.INDENT_SYMBOL}Note: This is a remote API server. '
+            f'{ux_utils.INDENT_LAST_SYMBOL}Note: This is a remote API server. '
             f'Please upgrade SkyPilot on the server side via your deployment '
             f'method.'
             f'{colorama.Style.RESET_ALL}')
