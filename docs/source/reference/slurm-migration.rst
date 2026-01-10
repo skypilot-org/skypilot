@@ -71,7 +71,7 @@ SkyPilot also provides features not available in Slurm:
    * - ``sky volumes``
      - :ref:`Managed persistent volumes <volumes-on-kubernetes>` for data and checkpoints
    * - Auto-failover
-     - :ref:`Automatic failover <auto-failover>` across clouds/regions when resources unavailable
+     - :ref:`Automatic failover <auto-failover>` across clusters/clouds for higher GPU capacity
    * - Object store mounting
      - :ref:`Mount S3/GCS buckets <sky-storage>` directly to your jobs
 
@@ -369,7 +369,7 @@ Slurm tracks users by their Unix username. SkyPilot uses :ref:`SSO authenticatio
 Migrating to SkyPilot on Kubernetes
 -----------------------------------
 
-SkyPilot runs on multiple backends including Kubernetes, cloud VMs, and even Slurm itself. If you're using SkyPilot on Kubernetes, the following sections cover K8s-specific considerations for users migrating from Slurm.
+SkyPilot runs on multiple backends including Kubernetes, cloud VMs, and even Slurm itself. If you're migrating from Slurm to use SkyPilot on Kubernetes, the following sections cover K8s-specific considerations.
 
 Shared storage on Kubernetes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
