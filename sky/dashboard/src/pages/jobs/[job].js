@@ -75,6 +75,7 @@ function JobDetails() {
   const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
   const [selectedNode, setSelectedNode] = useState('all');
   const [logNodes, setLogNodes] = useState([]);
+  const [logExtractedLinks, setLogExtractedLinks] = useState({});
   const isMobile = useMobile();
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
@@ -1213,49 +1214,16 @@ function JobDetailsContent({
                     ? url
                     : `https://${url}`;
 
-                // Check if URL points to an image
-                const imageExtensions = [
-                  '.png',
-                  '.jpg',
-                  '.jpeg',
-                  '.gif',
-                  '.webp',
-                  '.svg',
-                  '.bmp',
-                ];
-                const isImage = imageExtensions.some((ext) =>
-                  url.toLowerCase().endsWith(ext)
-                );
-
                 return (
-                  <div key={label} className="flex flex-col">
-                    <a
-                      href={normalizedUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-800 hover:underline"
-                    >
-                      {label}
-                    </a>
-                    {isImage && (
-                      <a
-                        href={normalizedUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-2"
-                      >
-                        <img
-                          src={normalizedUrl}
-                          alt={label}
-                          className="max-w-full max-h-48 rounded-md border border-gray-200 shadow-sm hover:shadow-md transition-shadow"
-                          onError={(e) => {
-                            // Hide the image if it fails to load
-                            e.target.style.display = 'none';
-                          }}
-                        />
-                      </a>
-                    )}
-                  </div>
+                  <a
+                    key={label}
+                    href={normalizedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                  >
+                    {label}
+                  </a>
                 );
               })}
             </div>
