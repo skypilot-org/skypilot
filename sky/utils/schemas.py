@@ -386,6 +386,9 @@ def _get_single_resources_schema():
             '_cluster_config_overrides': {
                 'type': 'object',
             },
+            'custom_resources': {
+                'type': 'object',
+            },
         }
     }
 

@@ -166,6 +166,7 @@ class Resources:
         _requires_fuse: Optional[bool] = None,
         _cluster_config_overrides: Optional[Dict[str, Any]] = None,
         _no_missing_accel_warnings: Optional[bool] = None,
+        custom_resources: Optional[Dict[str, Any]] = None,
     ):
         """Initialize a Resources object.
 
@@ -394,6 +395,7 @@ class Resources:
         self._cluster_config_overrides = _cluster_config_overrides
         self._cached_repr: Optional[str] = None
         self._no_missing_accel_warnings = _no_missing_accel_warnings
+        self._custom_resources = custom_resources
 
         # Initialize _priority before calling the setter
         self._priority: Optional[int] = None
@@ -684,6 +686,11 @@ class Resources:
         if self._no_missing_accel_warnings is None:
             return False
         return self._no_missing_accel_warnings
+
+    @property
+    def custom_resources(self) -> Optional[Dict[str, Any]]:
+        """Returns custom resources specified by the user."""
+        return self._custom_resources
 
     def set_requires_fuse(self, value: bool) -> None:
         """Sets whether this resource requires FUSE mounting support.
@@ -1955,6 +1962,8 @@ class Resources:
             _cluster_config_overrides=override_configs,
             _no_missing_accel_warnings=override.pop(
                 'no_missing_accel_warnings', self._no_missing_accel_warnings),
+            custom_resources=override.pop('custom_resources',
+                                          self._custom_resources),
         )
         assert not override
         return resources
@@ -2290,6 +2299,9 @@ class Resources:
         resources_fields['_no_missing_accel_warnings'] = config.pop(
             '_no_missing_accel_warnings', None)
 
+        resources_fields['custom_resources'] = config.pop(
+            'custom_resources', None)
+
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
 
@@ -2355,6 +2367,8 @@ class Resources:
             config['_is_image_managed'] = self._is_image_managed
         if self._requires_fuse is not None:
             config['_requires_fuse'] = self._requires_fuse
+        if self._custom_resources is not None:
+            config['custom_resources'] = self._custom_resources
         return config
 
     def __setstate__(self, state):
@@ -2517,6 +2531,10 @@ class Resources:
         if version < 28:
             self._no_missing_accel_warnings = state.get(
                 '_no_missing_accel_warnings', None)
+
+        # Initialize custom_resources for backward compatibility
+        if '_custom_resources' not in state:
+            self._custom_resources = None
 
         self.__dict__.update(state)
 
