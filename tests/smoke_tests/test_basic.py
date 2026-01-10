@@ -532,11 +532,12 @@ def test_aws_manual_restart_recovery():
                     f'aws ec2 wait instance-running --region {region} '
                     f'--instance-ids $id'),
                 skip_remote_server_check=True),
+            "sleep 30",
             # Status refresh should time out, as the restarted
             # instance would get a new IP address.
             # We should see a warning message on how to recover
             # from this state.
-            f'sky status -r {name} | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."',
+            f's=$(sky status -r {name}); echo "$s"; echo "$s" | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."',
             # Recover the cluster.
             f'sky start -y {name}',
             # Wait for the cluster to be up.
