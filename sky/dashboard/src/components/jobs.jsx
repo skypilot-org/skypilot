@@ -852,6 +852,54 @@ export function ManagedJobsTable({
     return groups;
   }, [paginatedData]);
 
+  // Pre-compute aggregated data for job groups to avoid inline computations during render
+  const jobGroupAggregates = React.useMemo(() => {
+    const aggregates = new Map();
+    groupedJobs.forEach((tasks, jobId) => {
+      if (tasks.length > 1) {
+        // Compute aggregated status
+        const aggregatedStatus = getAggregatedStatus(tasks);
+
+        // Compute status tooltip
+        const statusTooltip = `Task statuses:\n${tasks.map((t, i) => `Task ${i}: ${t.status}`).join('\n')}`;
+
+        // Compute aggregated resources
+        const resourcesList = tasks
+          .map((t) => t.requested_resources || t.resources_str)
+          .filter(Boolean);
+        const uniqueResources = [...new Set(resourcesList)];
+        const resourcesDisplay = resourcesList.length === 0
+          ? '-'
+          : uniqueResources.length === 1
+            ? uniqueResources[0]
+            : `${uniqueResources[0]} (+${tasks.length - 1} more)`;
+        const resourcesTooltip = resourcesList.length === 0
+          ? null
+          : `Aggregated from ${tasks.length} tasks:\n${resourcesList.map((r, i) => `Task ${i}: ${r}`).join('\n')}`;
+
+        // Compute total recoveries
+        const totalRecoveries = tasks.reduce((sum, t) => sum + (t.recoveries || 0), 0);
+
+        aggregates.set(jobId, {
+          aggregatedStatus,
+          statusTooltip,
+          resourcesDisplay,
+          resourcesTooltip,
+          totalRecoveries,
+        });
+      }
+    });
+    return aggregates;
+  }, [groupedJobs]);
+
+  // Check if there are any job groups (multi-task jobs) on the current page
+  const hasJobGroups = React.useMemo(() => {
+    for (const [, tasks] of groupedJobs) {
+      if (tasks.length > 1) return true;
+    }
+    return false;
+  }, [groupedJobs]);
+
   // Toggle expand/collapse for a job group
   const toggleJobGroup = (jobId) => {
     setExpandedJobGroups((prev) => {
@@ -1083,6 +1131,8 @@ export function ManagedJobsTable({
           <Table className="min-w-full">
             <TableHeader>
               <TableRow>
+                {/* Narrow column for expand/collapse control - only shown when there are job groups */}
+                {hasJobGroups && <TableHead className="w-8 p-0" />}
                 <TableHead
                   className="sortable whitespace-nowrap"
                   onClick={() => requestSort('id')}
@@ -1164,6 +1214,7 @@ export function ManagedJobsTable({
                   <TableCell
                     colSpan={
                       11 +
+                      (hasJobGroups ? 1 : 0) +
                       (shouldShowWorkspace ? 1 : 0) +
                       (shouldShowPool ? 1 : 0)
                     }
@@ -1188,6 +1239,8 @@ export function ManagedJobsTable({
                       return (
                         <React.Fragment key={item.task_job_id}>
                           <TableRow>
+                            {/* Empty cell for expand column - only when job groups exist */}
+                            {hasJobGroups && <TableCell className="w-8 p-0" />}
                             <TableCell>
                               <Link
                                 href={`/jobs/${item.id}`}
@@ -1196,7 +1249,7 @@ export function ManagedJobsTable({
                                 {item.id}
                               </Link>
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="whitespace-nowrap">
                               <Link
                                 href={`/jobs/${item.id}`}
                                 className="text-blue-600"
@@ -1360,40 +1413,49 @@ export function ManagedJobsTable({
                     }
 
                     // For multi-task jobs, render parent row with expand toggle
+                    // Get pre-computed aggregates for this job group
+                    const aggregates = jobGroupAggregates.get(jobId) || {};
+
                     return (
                       <React.Fragment key={`group-${jobId}`}>
                         {/* Parent row for job group */}
                         <TableRow className="bg-gray-50 hover:bg-gray-100">
-                          <TableCell>
-                            <div className="flex items-center">
-                              <button
-                                onClick={() => toggleJobGroup(jobId)}
-                                className="mr-2 p-0.5 hover:bg-gray-200 rounded"
-                              >
-                                {isExpanded ? (
-                                  <ChevronDownIcon className="w-4 h-4 text-gray-500" />
-                                ) : (
-                                  <ChevronRightIcon className="w-4 h-4 text-gray-500" />
-                                )}
-                              </button>
-                              <Link
-                                href={`/jobs/${jobId}`}
-                                className="text-blue-600"
-                              >
-                                {jobId}
-                              </Link>
-                            </div>
+                          {/* Expand/collapse control cell */}
+                          <TableCell className="w-8 p-0 text-center">
+                            <button
+                              onClick={() => toggleJobGroup(jobId)}
+                              className="p-1 hover:bg-gray-200 rounded"
+                            >
+                              {isExpanded ? (
+                                <ChevronDownIcon className="w-4 h-4 text-gray-500" />
+                              ) : (
+                                <ChevronRightIcon className="w-4 h-4 text-gray-500" />
+                              )}
+                            </button>
                           </TableCell>
                           <TableCell>
                             <Link
                               href={`/jobs/${jobId}`}
                               className="text-blue-600"
                             >
-                              {firstTask.name}
-                              <span className="ml-2 text-xs text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded">
-                                {tasks.length} tasks
-                              </span>
+                              {jobId}
                             </Link>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            <div className="flex items-center">
+                              <Link
+                                href={`/jobs/${jobId}`}
+                                className="text-blue-600"
+                              >
+                                {firstTask.name}
+                              </Link>
+                              <button
+                                onClick={() => toggleJobGroup(jobId)}
+                                className="ml-2 text-xs text-gray-500 bg-gray-200 hover:bg-gray-300 px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
+                              >
+                                {tasks.length} tasks
+                              </button>
+                            </div>
                           </TableCell>
                           <TableCell>
                             <UserDisplay
@@ -1420,12 +1482,10 @@ export function ManagedJobsTable({
                           <TableCell>
                             {/* Show aggregated status for job group */}
                             <div className="flex items-center">
-                              <StatusBadge status={getAggregatedStatus(tasks)} />
+                              <StatusBadge status={aggregates.aggregatedStatus} />
                               {tasks.length > 1 && (
                                 <NonCapitalizedTooltip
-                                  content={
-                                    `Task statuses:\n${tasks.map((t, i) => `Task ${i}: ${t.status}`).join('\n')}`
-                                  }
+                                  content={aggregates.statusTooltip}
                                   className="text-sm text-muted-foreground"
                                 >
                                   <span className="ml-1 text-xs text-gray-500 cursor-help">
@@ -1446,32 +1506,19 @@ export function ManagedJobsTable({
                             )}
                           </TableCell>
                           <TableCell>
-                            {(() => {
-                              // Aggregate resources from all tasks
-                              const resourcesList = tasks
-                                .map((t) => t.requested_resources || t.resources_str)
-                                .filter(Boolean);
-                              if (resourcesList.length === 0) return '-';
-                              const uniqueResources = [...new Set(resourcesList)];
-                              const displayText = uniqueResources.length === 1
-                                ? uniqueResources[0]
-                                : `${uniqueResources[0]} (+${tasks.length - 1} more)`;
-                              const tooltipText = resourcesList.map((r, i) => `Task ${i}: ${r}`).join('\n');
-                              return (
-                                <NonCapitalizedTooltip
-                                  content={`Aggregated from ${tasks.length} tasks:\n${tooltipText}`}
-                                  className="text-sm text-muted-foreground"
-                                >
-                                  <span>{displayText}</span>
-                                </NonCapitalizedTooltip>
-                              );
-                            })()}
+                            {aggregates.resourcesTooltip ? (
+                              <NonCapitalizedTooltip
+                                content={aggregates.resourcesTooltip}
+                                className="text-sm text-muted-foreground"
+                              >
+                                <span>{aggregates.resourcesDisplay}</span>
+                              </NonCapitalizedTooltip>
+                            ) : (
+                              <span>{aggregates.resourcesDisplay}</span>
+                            )}
                           </TableCell>
                           <TableCell>
-                            {tasks.reduce(
-                              (sum, t) => sum + (t.recoveries || 0),
-                              0
-                            )}
+                            {aggregates.totalRecoveries}
                           </TableCell>
                           {shouldShowPool && (
                             <TableCell>
@@ -1500,20 +1547,20 @@ export function ManagedJobsTable({
                           tasks.map((task, taskIndex) => (
                             <React.Fragment key={task.task_job_id}>
                               <TableRow className="bg-white border-l-4 border-blue-200">
-                                <TableCell>
-                                  <div className="pl-6 text-gray-500 text-sm">
-                                    Task {taskIndex}
-                                  </div>
+                                {/* Empty cell for expand column */}
+                                <TableCell className="w-8 p-0" />
+                                <TableCell className="whitespace-nowrap">
+                                  <span className="text-gray-500">
+                                    {taskIndex}
+                                  </span>
                                 </TableCell>
-                                <TableCell>
-                                  <div className="pl-2">
-                                    <Link
-                                      href={`/jobs/${task.id}/${taskIndex}`}
-                                      className="text-blue-600 hover:underline"
-                                    >
-                                      {task.task || `Task ${taskIndex}`}
-                                    </Link>
-                                  </div>
+                                <TableCell className="whitespace-nowrap">
+                                  <Link
+                                    href={`/jobs/${task.id}/${taskIndex}`}
+                                    className="text-blue-600 hover:underline"
+                                  >
+                                    {task.task || `Task ${taskIndex}`}
+                                  </Link>
                                 </TableCell>
                                 <TableCell>
                                   <UserDisplay
@@ -1657,6 +1704,7 @@ export function ManagedJobsTable({
                   <TableCell
                     colSpan={
                       11 +
+                      (hasJobGroups ? 1 : 0) +
                       (shouldShowWorkspace ? 1 : 0) +
                       (shouldShowPool ? 1 : 0)
                     }

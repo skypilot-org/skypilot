@@ -31,7 +31,7 @@ const DEFAULT_FIELDS = [
   'pool_hash',
   'details',
   'failure_reason',
-  'links',
+  // Note: 'links' field removed - it may not exist in older database schemas
 ];
 
 export async function getManagedJobs(options = {}) {
@@ -440,9 +440,9 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
       try {
         setLoadingJobData(true);
 
-        // Always get all jobs data (cache handles freshness automatically)
+        // Fetch the specific job by ID (don't use allFields to avoid missing column errors)
         const allJobsData = await dashboardCache.get(getManagedJobs, [
-          { allUsers: true, allFields: true, jobIDs: [jobId] },
+          { allUsers: true, jobIDs: [jobId] },
         ]);
 
         // Filter for ALL tasks matching this job_id (supports multi-task jobs)
@@ -478,6 +478,7 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
 
 export async function streamManagedJobLogs({
   jobId,
+  task = null,
   controller = false,
   signal,
   onNewLog,
@@ -518,6 +519,7 @@ export async function streamManagedJobLogs({
         follow: false,
         job_id: jobId,
         tail: DEFAULT_TAIL_LINES,
+        task: task,
       };
 
       const response = await apiClient.fetchImmediate(

@@ -359,9 +359,10 @@ function TaskLogsContent({
   const logStreamArgs = React.useMemo(
     () => ({
       jobId: taskData.id,
+      task: String(taskIndex),
       controller: false,
     }),
-    [taskData.id]
+    [taskData.id, taskIndex]
   );
 
   const handleLogsError = React.useCallback((error) => {

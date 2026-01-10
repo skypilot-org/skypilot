@@ -2237,3 +2237,46 @@ def test_job_group_rl_architecture(generic_cloud: str):
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_task_logs(generic_cloud: str):
+    """Test task-specific log viewing for JobGroups."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml('tests/test_job_groups/smoke_basic.yaml',
+                                       name, generic_cloud)
+
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        'job_group_task_logs',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            # Test default behavior - should show all tasks
+            f'sky jobs logs $({get_job_id_cmd}) --no-follow | grep "Job A" && '
+            f'sky jobs logs $({get_job_id_cmd}) --no-follow | grep "Job B"',
+            # Test viewing logs by task ID - should only show job-a
+            f'sky jobs logs $({get_job_id_cmd}) 0 --no-follow | '
+            f'grep "Job A" && ! sky jobs logs $({get_job_id_cmd}) 0 '
+            f'--no-follow | grep "Job B"',
+            # Test viewing logs by task name - should only show job-b
+            f'sky jobs logs $({get_job_id_cmd}) job-b --no-follow | '
+            f'grep "Job B" && ! sky jobs logs $({get_job_id_cmd}) job-b '
+            f'--no-follow | grep "Job A"',
+            # Test invalid task ID/name - should show error
+            f'sky jobs logs $({get_job_id_cmd}) 999 --no-follow 2>&1 | '
+            f'grep "No task found matching"',
+            f'sky jobs logs $({get_job_id_cmd}) nonexistent --no-follow 2>&1 | '
+            f'grep "No task found matching"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)

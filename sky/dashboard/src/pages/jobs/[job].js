@@ -16,6 +16,13 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useSingleManagedJob, getPoolStatus } from '@/data/connectors/jobs';
 import Link from 'next/link';
 import {
@@ -64,8 +71,6 @@ function JobDetails() {
   const [domReady, setDomReady] = useState(false);
   const [refreshLogsFlag, setRefreshLogsFlag] = useState(0);
   const [refreshControllerLogsFlag, setRefreshControllerLogsFlag] = useState(0);
-  const [logExtractedLinks, setLogExtractedLinks] = useState({});
-  const [isLinksExpanded, setIsLinksExpanded] = useState(false);
   const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
   const isMobile = useMobile();
   // Update isInitialLoad when data is first loaded
@@ -269,7 +274,6 @@ function JobDetails() {
                     refreshFlag={0}
                     poolsData={poolsData}
                     links={detailJobData.links}
-                    logExtractedLinks={logExtractedLinks}
                   />
                 </div>
               </Card>
@@ -313,16 +317,29 @@ function JobDetails() {
                             <TableHead className="whitespace-nowrap">
                               Recoveries
                             </TableHead>
+                            <TableHead className="whitespace-nowrap">
+                              Logs
+                            </TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {allTasks.map((task, index) => (
-                            <TableRow key={task.task_job_id}>
-                              <TableCell>{index}</TableCell>
+                            <TableRow key={task.task_job_id} className="hover:bg-gray-50">
                               <TableCell>
-                                <span className="text-gray-700">
+                                <Link
+                                  href={`/jobs/${jobId}/${index}`}
+                                  className="text-blue-600 hover:underline"
+                                >
+                                  {index}
+                                </Link>
+                              </TableCell>
+                              <TableCell>
+                                <Link
+                                  href={`/jobs/${jobId}/${index}`}
+                                  className="text-blue-600 hover:underline"
+                                >
                                   {task.task || `Task ${index}`}
-                                </span>
+                                </Link>
                               </TableCell>
                               <TableCell>
                                 <StatusBadge status={task.status} />
@@ -371,6 +388,24 @@ function JobDetails() {
                                 </NonCapitalizedTooltip>
                               </TableCell>
                               <TableCell>{task.recoveries || 0}</TableCell>
+                              <TableCell>
+                                <Tooltip
+                                  content="Download task logs"
+                                  className="text-muted-foreground"
+                                >
+                                  <button
+                                    onClick={() =>
+                                      downloadManagedJobLogs({
+                                        jobId: parseInt(jobId),
+                                        controller: false,
+                                      })
+                                    }
+                                    className="text-sky-blue hover:text-sky-blue-bright"
+                                  >
+                                    <Download className="w-4 h-4" />
+                                  </button>
+                                </Tooltip>
+                              </TableCell>
                             </TableRow>
                           ))}
                         </TableBody>
@@ -395,57 +430,6 @@ function JobDetails() {
               }}
               wrapperClassName="mt-6"
             />
-            {/* Links Section */}
-            <div id="links-section" className="mt-6">
-              <Card>
-                <button
-                  onClick={() => setIsLinksExpanded(!isLinksExpanded)}
-                  className="flex items-center justify-between w-full px-4 py-4 text-left focus:outline-none"
-                >
-                  <div className="flex items-center">
-                    {isLinksExpanded ? (
-                      <ChevronDownIcon className="w-5 h-5 mr-2 text-gray-500" />
-                    ) : (
-                      <ChevronRightIcon className="w-5 h-5 mr-2 text-gray-500" />
-                    )}
-                    <h3 className="text-lg font-semibold">Links</h3>
-                    {detailJobData.links &&
-                      Object.keys(detailJobData.links).length > 0 && (
-                        <span className="ml-2 text-sm text-gray-500">
-                          ({Object.keys(detailJobData.links).length})
-                        </span>
-                      )}
-                  </div>
-                </button>
-                {isLinksExpanded && (
-                  <div className="px-4 pb-4">
-                    {detailJobData.links &&
-                    Object.keys(detailJobData.links).length > 0 ? (
-                      <div className="space-y-4">
-                        {Object.entries(detailJobData.links).map(
-                          ([label, url]) => (
-                            <div key={label}>
-                              <a
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:text-blue-800 hover:underline text-base"
-                              >
-                                {label}
-                              </a>
-                            </div>
-                          )
-                        )}
-                      </div>
-                    ) : (
-                      <div className="text-gray-500 text-sm">
-                        No links found
-                      </div>
-                    )}
-                  </div>
-                )}
-              </Card>
-            </div>
 
             {/* Logs Section */}
             <div id="logs-section" className="mt-6">
@@ -454,19 +438,25 @@ function JobDetails() {
                   <div className="flex items-center">
                     <h3 className="text-lg font-semibold">Logs</h3>
                     {isMultiTask && (
-                      <div className="ml-4 flex items-center">
-                        <label className="text-sm text-gray-600 mr-2">Task:</label>
-                        <select
-                          value={selectedTaskIndex}
-                          onChange={(e) => setSelectedTaskIndex(parseInt(e.target.value, 10))}
-                          className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-blue"
+                      <div className="ml-4">
+                        <Select
+                          onValueChange={(value) => setSelectedTaskIndex(parseInt(value, 10))}
+                          value={String(selectedTaskIndex)}
                         >
-                          {allTasks.map((task, index) => (
-                            <option key={task.task_job_id || index} value={index}>
-                              Task {index}{task.task ? `: ${task.task}` : ''}
-                            </option>
-                          ))}
-                        </select>
+                          <SelectTrigger
+                            aria-label="Task"
+                            className="focus:ring-0 focus:ring-offset-0 w-auto min-w-[150px]"
+                          >
+                            <SelectValue placeholder="Select Task" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {allTasks.map((task, index) => (
+                              <SelectItem key={task.task_job_id || index} value={String(index)}>
+                                Task {index}{task.task ? `: ${task.task}` : ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                     )}
                     <span className="ml-2 text-xs text-gray-500">
@@ -519,7 +509,6 @@ function JobDetails() {
                     isLoadingControllerLogs={isLoadingControllerLogs}
                     refreshFlag={refreshLogsFlag}
                     poolsData={poolsData}
-                    onLinksExtracted={setLogExtractedLinks}
                   />
                 </div>
               </Card>
@@ -682,6 +671,7 @@ function JobDetailsContent({
 }) {
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
   const [expandedYamlDocs, setExpandedYamlDocs] = useState({});
+  const [showFullYaml, setShowFullYaml] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [isCommandCopied, setIsCommandCopied] = useState(false);
 
@@ -1012,20 +1002,26 @@ function JobDetailsContent({
         </div>
         <div className="text-base mt-1">
           {allTasks.length > 1 ? (
-            <div>
-              <div className="text-sm text-gray-500 mb-1">
-                Aggregated from {allTasks.length} tasks:
-              </div>
-              <ul className="list-disc list-inside space-y-1">
-                {allTasks.map((task, index) => (
-                  <li key={task.task_job_id || index} className="text-sm">
-                    <span className="font-medium">Task {index}</span>
-                    {task.task && <span className="text-gray-500"> ({task.task})</span>}
-                    : {task.requested_resources || task.resources_str || 'N/A'}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <NonCapitalizedTooltip
+              content={
+                `Aggregated from ${allTasks.length} tasks:\n${allTasks.map((task, index) =>
+                  `Task ${index}${task.task ? ` (${task.task})` : ''}: ${task.requested_resources || task.resources_str || 'N/A'}`
+                ).join('\n')}`
+              }
+              className="text-sm text-muted-foreground"
+            >
+              <span className="cursor-help border-b border-dotted border-gray-400">
+                {(() => {
+                  const resourcesList = allTasks
+                    .map((t) => t.requested_resources || t.resources_str)
+                    .filter(Boolean);
+                  const uniqueResources = [...new Set(resourcesList)];
+                  return uniqueResources.length === 1
+                    ? `${uniqueResources[0]} (x${allTasks.length} tasks)`
+                    : `${resourcesList[0]} (+${allTasks.length - 1} more)`;
+                })()}
+              </span>
+            </NonCapitalizedTooltip>
           ) : (
             jobData.requested_resources || 'N/A'
           )}
@@ -1254,38 +1250,62 @@ function JobDetailsContent({
                           </YamlHighlighter>
                         );
                       } else {
-                        // Multiple documents - show with collapsible sections
+                        // Multiple documents - show toggle and content
                         return (
                           <div className="space-y-4">
-                            {yamlDocs.map((doc, index) => (
-                              <div
-                                key={index}
-                                className="border-b border-gray-200 pb-4 last:border-b-0"
+                            {/* Toggle for Full YAML vs Per-Task */}
+                            <div className="flex items-center space-x-4 pb-2 border-b border-gray-200">
+                              <button
+                                onClick={() => setShowFullYaml(false)}
+                                className={`text-sm px-2 py-1 rounded ${!showFullYaml ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:text-gray-800'}`}
                               >
-                                <button
-                                  onClick={() => toggleYamlDocExpanded(index)}
-                                  className="flex items-center justify-between w-full text-left focus:outline-none"
+                                By Task
+                              </button>
+                              <button
+                                onClick={() => setShowFullYaml(true)}
+                                className={`text-sm px-2 py-1 rounded ${showFullYaml ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:text-gray-800'}`}
+                              >
+                                Full YAML
+                              </button>
+                            </div>
+
+                            {showFullYaml ? (
+                              // Show full YAML
+                              <YamlHighlighter className="whitespace-pre-wrap">
+                                {yamlDocs.map((doc) => doc.content).join('\n---\n')}
+                              </YamlHighlighter>
+                            ) : (
+                              // Show per-task YAMLs
+                              yamlDocs.map((doc, index) => (
+                                <div
+                                  key={index}
+                                  className="border-b border-gray-200 pb-4 last:border-b-0"
                                 >
-                                  <div className="flex items-center">
-                                    {expandedYamlDocs[index] ? (
-                                      <ChevronDownIcon className="w-4 h-4 mr-2" />
-                                    ) : (
-                                      <ChevronRightIcon className="w-4 h-4 mr-2" />
-                                    )}
-                                    <span className="text-sm font-medium text-gray-700">
-                                      Task {index + 1}: {doc.preview}
-                                    </span>
-                                  </div>
-                                </button>
-                                {expandedYamlDocs[index] && (
-                                  <div className="mt-3 ml-6">
-                                    <YamlHighlighter className="whitespace-pre-wrap">
-                                      {doc.content}
-                                    </YamlHighlighter>
-                                  </div>
-                                )}
-                              </div>
-                            ))}
+                                  <button
+                                    onClick={() => toggleYamlDocExpanded(index)}
+                                    className="flex items-center justify-between w-full text-left focus:outline-none"
+                                  >
+                                    <div className="flex items-center">
+                                      {expandedYamlDocs[index] ? (
+                                        <ChevronDownIcon className="w-4 h-4 mr-2" />
+                                      ) : (
+                                        <ChevronRightIcon className="w-4 h-4 mr-2" />
+                                      )}
+                                      <span className="text-sm font-medium text-gray-700">
+                                        Task {index + 1}: {doc.preview}
+                                      </span>
+                                    </div>
+                                  </button>
+                                  {expandedYamlDocs[index] && (
+                                    <div className="mt-3 ml-6">
+                                      <YamlHighlighter className="whitespace-pre-wrap">
+                                        {doc.content}
+                                      </YamlHighlighter>
+                                    </div>
+                                  )}
+                                </div>
+                              ))
+                            )}
                           </div>
                         );
                       }
