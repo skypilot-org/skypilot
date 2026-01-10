@@ -212,12 +212,7 @@ class Autoscaler:
     def from_spec(cls, service_name: str,
                   spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
         # TODO(MaoZiming): use NAME to get the class.
-        # Check for pool autoscaling first
-        # Use queue length autoscaler if it's a pool and max_replicas is set
-        # (max_replicas is set from max_workers in from_yaml_config, and we
-        # ensure it's set if queue_length_threshold is set)
-        if spec.pool and spec.max_replicas is not None:
-            # Pool with max_workers specified - use queue length autoscaler
+        if spec.pool:
             return QueueLengthAutoscaler(service_name, spec)
         elif spec.use_ondemand_fallback:
             return FallbackRequestRateAutoscaler(service_name, spec)
@@ -1095,10 +1090,7 @@ class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
         """
         super().__init__(service_name, spec)
         # Use default threshold if not specified
-        self.queue_length_threshold: int = (
-            spec.queue_length_threshold
-            if spec.queue_length_threshold is not None else
-            constants.AUTOSCALER_DEFAULT_QUEUE_LENGTH_THRESHOLD)
+        self.queue_length_threshold: int = spec.queue_length_threshold
         self._service_name: str = service_name
         logger.info(f'QueueLengthAutoscaler for pool "{service_name}": '
                     f'min_replicas={self.min_replicas}, '

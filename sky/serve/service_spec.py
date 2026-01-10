@@ -61,10 +61,6 @@ class SkyServiceSpec:
                 'tls_credential',
                 'readiness_headers',
             ]
-            # Disallow max_replicas only if queue_length_threshold is not set
-            # (meaning max_replicas was not set from max_workers)
-            if queue_length_threshold is None:
-                unsupported_fields.append('max_replicas')
             # Only restrict delay fields if autoscaling is not enabled
             # Autoscaling is enabled when max_replicas (from max_workers) is set
             if max_replicas is None:
