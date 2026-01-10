@@ -5487,7 +5487,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             for spec in ephemeral_specs:
                                 # For ephemeral volumes, we check the mount
                                 # path.
-                                mount_path = spec.get('mount_path')
+                                mount_path = spec.get('path')
                                 if mount_path:
                                     existing_volume_names.add(mount_path)
 
@@ -5515,7 +5515,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     if volume_mount.is_ephemeral:
                         if volume_mount.path not in existing_volume_names:
                             new_ephemeral_volumes.append(volume_mount.path)
-                    elif volume_mount.volume_name not in existing_volume_names:
+                    elif (volume_mount.volume_name not in existing_volume_names
+                          and volume_mount.volume_config.name_on_cloud
+                          not in existing_volume_names):
                         new_persistent_volumes.append(volume_mount.volume_name)
 
                 if new_ephemeral_volumes or new_persistent_volumes:
