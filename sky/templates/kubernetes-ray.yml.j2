@@ -38,6 +38,19 @@ provider:
 
     timeout: {{timeout}}
 
+    # For Kubernetes, we directly set the image in the pod spec, not through
+    # Ray's docker runner. The docker_login_config is used to create a
+    # Kubernetes imagePullSecret for private registry authentication.
+    {%- if docker_login_config is not none %}
+    docker_login_config:
+      username: |-
+        {{docker_login_config.username}}
+      password: |-
+        {{docker_login_config.password | indent(8) }}
+      server: |-
+        {{docker_login_config.server}}
+    {%- endif %}
+
     # Namespace used to host SkyPilot system components, such as fuse device
     # manager.
     skypilot_system_namespace: {{k8s_skypilot_system_namespace}}
