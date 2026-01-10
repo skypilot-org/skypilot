@@ -5300,7 +5300,7 @@ def jobs_cancel(
               required=False,
               help='Download logs for all jobs shown in the queue.')
 @click.option('--task',
-              'task_option',
+              'task_name',
               required=False,
               type=str,
               default=None,
@@ -5311,7 +5311,7 @@ def jobs_cancel(
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
               controller: bool, refresh: bool, sync_down: bool,
-              task_option: Optional[str], task: Optional[str]):
+              task_name: Optional[str], task: Optional[str]):
     """Tail or sync down the log of a managed job.
 
     TASK can be a task ID (integer) or task name. Numeric values are treated
@@ -5333,10 +5333,10 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     sky jobs logs -n my-job --task eval
     """
     # Merge task from option and positional argument
-    if task_option is not None and task is not None:
+    if task_name is not None and task is not None:
         raise click.UsageError(
             'Cannot specify both --task option and TASK positional argument.')
-    task = task_option if task_option is not None else task
+    task = task_name if task_name is not None else task
     try:
         if sync_down:
             with rich_utils.client_status(
