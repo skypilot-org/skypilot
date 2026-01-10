@@ -419,9 +419,10 @@ def test_process_mounts_removes_file_mounts_mapping(tmp_path, monkeypatch):
     monkeypatch.setattr('sky.server.common.API_SERVER_CLIENT_DIR',
                         api_server_dir)
 
-    # Create a task YAML with file_mounts_mapping
+    # Create a task YAML with file_mounts_mapping and upload_id
     task_yaml = '''
 name: test-task
+upload_id: sky-2024-01-01-12-00-00-000000-abc12345
 resources:
   cloud: aws
 workdir: /local/workdir
