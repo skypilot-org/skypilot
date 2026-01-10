@@ -125,6 +125,10 @@ Install SkyPilot using pip:
 
           pip install -e ".[all]"
 
+          # Build the dashboard (requires Node.js and npm)
+          npm --prefix sky/dashboard install
+          npm --prefix sky/dashboard run build
+
 To use more than one cloud, combine the pip extras:
 
 .. tab-set::

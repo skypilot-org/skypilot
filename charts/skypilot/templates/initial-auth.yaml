@@ -1,8 +1,9 @@
 {{- if and (not (index .Values.ingress "oauth2-proxy" "enabled")) .Values.apiService.enableUserManagement (not .Values.apiService.initialBasicAuthSecret) .Values.apiService.initialBasicAuthCredentials }}
+{{- $fullName := include "skypilot.fullname" . -}}
 apiVersion: v1
 kind: Secret
 metadata:
-  name: {{ .Release.Name }}-initial-basic-auth
+  name: {{ $fullName }}-initial-basic-auth
   namespace: {{ .Release.Namespace }}
 type: Opaque
 stringData:

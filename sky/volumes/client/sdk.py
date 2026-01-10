@@ -1,4 +1,4 @@
-"""SDK functions for managed jobs."""
+"""SDK functions for volumes."""
 import json
 import typing
 from typing import List
@@ -135,16 +135,19 @@ def ls() -> server_common.RequestId[List[responses.VolumeRecord]]:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def delete(names: List[str]) -> server_common.RequestId[None]:
+def delete(names: List[str],
+           purge: bool = False) -> server_common.RequestId[None]:
     """Deletes volumes.
 
     Args:
         names: List of volume names to delete.
+        purge: If True, delete the volume from the database even if the
+          deletion API fails.
 
     Returns:
         The request ID of the delete request.
     """
-    body = payloads.VolumeDeleteBody(names=names)
+    body = payloads.VolumeDeleteBody(names=names, purge=purge)
     response = server_common.make_authenticated_request(
         'POST', '/volumes/delete', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)

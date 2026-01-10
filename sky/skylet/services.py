@@ -502,7 +502,8 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     entrypoint=job.get('entrypoint'),
                     metadata=converted_metadata,
                     pool=job.get('pool'),
-                    pool_hash=job.get('pool_hash'))
+                    pool_hash=job.get('pool_hash'),
+                    links=job.get('links'))
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(

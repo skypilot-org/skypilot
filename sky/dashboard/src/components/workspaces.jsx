@@ -53,46 +53,19 @@ import {
   CLOUD_CANONICALIZATIONS,
   CLUSTER_NOT_UP_ERROR,
 } from '@/data/connectors/constants';
+import { getClusters } from '@/data/connectors/clusters';
+import { getManagedJobs } from '@/data/connectors/jobs';
 import Link from 'next/link';
 
-// Workspace-aware API functions (cacheable)
+// Workspace-aware API functions - use cached global data and filter by workspace
+// This avoids making separate API calls per workspace
 export async function getWorkspaceClusters(workspaceName) {
   try {
-    const clusters = await apiClient.fetch('/status', {
-      cluster_names: null,
-      all_users: true,
-      include_credentials: false,
-      include_handle: false,
-      override_skypilot_config: { active_workspace: workspaceName },
-    });
-
-    const mappedClusters = clusters.map((cluster) => ({
-      status:
-        cluster.status === 'UP'
-          ? 'RUNNING'
-          : cluster.status === 'STOPPED'
-            ? 'STOPPED'
-            : cluster.status === 'INIT'
-              ? 'LAUNCHING'
-              : 'TERMINATED',
-      cluster: cluster.name,
-      user: cluster.user_name,
-      user_hash: cluster.user_hash,
-      cluster_hash: cluster.cluster_hash,
-      cloud: cluster.cloud,
-      region: cluster.region,
-      zone: cluster.zone,
-      launched_at: cluster.launched_at,
-      handle: cluster.handle,
-      last_use: cluster.last_use,
-      autostop: cluster.autostop,
-      to_down: cluster.to_down,
-      resources_str: cluster.resources_str,
-      workspace: cluster.workspace || 'default', // Preserve workspace info
-    }));
+    // Use cached global clusters data and filter by workspace
+    const allClusters = await dashboardCache.get(getClusters);
 
     // Filter clusters to only include those that belong to the requested workspace
-    const filteredClusters = mappedClusters.filter(
+    const filteredClusters = (allClusters || []).filter(
       (cluster) => cluster.workspace === workspaceName
     );
     return filteredClusters;
@@ -105,77 +78,20 @@ export async function getWorkspaceClusters(workspaceName) {
 
 export async function getWorkspaceManagedJobs(workspaceName) {
   try {
-    const response = await apiClient.post('/jobs/queue/v2', {
-      all_users: true,
-      verbose: true,
-      skip_finished: true,
-      workspace_match: workspaceName,
-      fields: ['workspace', 'status'],
-      override_skypilot_config: { active_workspace: workspaceName },
-    });
+    // Use cached global managed jobs data and filter by workspace
+    // This avoids making separate API calls per workspace
+    const allJobsData = await dashboardCache.get(getManagedJobs, [
+      { allUsers: true, skipFinished: true },
+    ]);
 
-    // Check if initial request succeeded
-    if (!response.ok) {
-      const msg = `Initial API request to get managed jobs failed with status ${response.status} for workspace ${workspaceName}`;
-      throw new Error(msg);
-    }
+    const allJobs = allJobsData?.jobs || [];
 
-    const id = response.headers.get('X-Skypilot-Request-ID');
-    // Handle empty request ID
-    if (!id) {
-      const msg = `No request ID received from server for getting managed jobs for workspace ${workspaceName}`;
-      throw new Error(msg);
-    }
-    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-    let errorMessage = fetchedData.statusText;
-    if (fetchedData.status === 500) {
-      try {
-        const data = await fetchedData.json();
-        if (data.detail && data.detail.error) {
-          try {
-            const error = JSON.parse(data.detail.error);
-            // Handle specific error types
-            if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
-              return { jobs: [] };
-            } else {
-              errorMessage = error.message || String(data.detail.error);
-            }
-          } catch (jsonError) {
-            console.error(
-              'Error parsing JSON from data.detail.error:',
-              jsonError
-            );
-            errorMessage = String(data.detail.error);
-          }
-        }
-      } catch (parseError) {
-        console.error('Error parsing response JSON:', parseError);
-        errorMessage = String(parseError);
-      }
-    }
-    if (!fetchedData.ok) {
-      const msg = `API request to get managed jobs result failed with status ${fetchedData.status}, error: ${errorMessage} for workspace ${workspaceName}`;
-      throw new Error(msg);
-    }
-    const data = await fetchedData.json();
-    const jobsData = data.return_value
-      ? JSON.parse(data.return_value)
-      : { jobs: [] };
+    // Filter jobs to only include those that belong to the requested workspace
+    const filteredJobs = allJobs.filter(
+      (job) => job.workspace === workspaceName
+    );
 
-    // Ensure workspace information is preserved and filter by workspace
-    if (jobsData.jobs) {
-      jobsData.jobs = jobsData.jobs.map((job) => ({
-        ...job,
-        workspace: job.workspace || 'default',
-      }));
-
-      // Filter jobs to only include those that belong to the requested workspace
-      jobsData.jobs = jobsData.jobs.filter(
-        (job) => job.workspace === workspaceName
-      );
-    }
-
-    return jobsData;
+    return { jobs: filteredJobs };
   } catch (error) {
     const msg = `Error fetching managed jobs for workspace ${workspaceName}: ${error}`;
     console.error(msg);
@@ -728,8 +644,16 @@ export function Workspaces() {
     dashboardCache.invalidateFunction(getWorkspaceClusters); // Invalidate all workspace clusters
     dashboardCache.invalidateFunction(getWorkspaceManagedJobs); // Invalidate all workspace jobs
 
-    await fetchData(true); // Show loading on manual refresh
-    setLastFetchedTime(new Date());
+    setLoading(true);
+    try {
+      await apiClient.fetch('/check', {}, 'POST');
+      await fetchData(false);
+      setLastFetchedTime(new Date());
+    } catch (error) {
+      console.error('Error during sky check refresh:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCancelDelete = () => {

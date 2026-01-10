@@ -58,6 +58,8 @@ SkyPilot supports two types of volumes on Kubernetes:
      - Long-term data, shared datasets
      - Temporary storage, caches
 
+In addition to the above, you can also mount PVCs, NFS or hostPath with Kubernetes configs. See :ref:`advanced-mount-pvc-with-kubernetes-configs` and :ref:`advanced-mount-nfs-hostpath-with-kubernetes-configs` for details.
+
 Persistent volumes
 ~~~~~~~~~~~~~~~~~~
 
@@ -174,33 +176,77 @@ This section demonstrates how to configure and use distributed filesystems as Sk
 
         1. **Install the JuiceFS CSI driver** on your Kubernetes cluster. Follow the official `installation guide <https://juicefs.com/docs/csi/getting_started>`_ for detailed instructions.
 
-        2. **Verify the driver installation** - Confirm that the ``juicefs-sc`` storage class has been created successfully:
+        2. **Verify the driver installation** - Confirm that the JuiceFS CSI Driver pods are running:
 
         .. code-block:: console
 
-          $ kubectl get storageclass
-          NAME           PROVISIONER         RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
-          juicefs-sc     csi.juicefs.com     Retain          Immediate           false                  10m
+          $ kubectl -n kube-system get pod -l app.kubernetes.io/name=juicefs-csi-driver
+          NAME                       READY   STATUS    RESTARTS   AGE
+          juicefs-csi-controller-0   2/2     Running   0          10m
+          juicefs-csi-node-8rd96     3/3     Running   0          10m
 
-        .. note::
-           If the ``juicefs-sc`` storage class is not available, refer to the `JuiceFS storage class creation guide <https://juicefs.com/docs/csi/guide/pv/#create-storage-class>`_ to set it up.
+        3. **Set up JuiceFS storage and create a SkyPilot volume** - You can use either dynamic provisioning (with a StorageClass) or static provisioning (with a pre-created PV):
 
-        3. **Create a SkyPilot volume for JuiceFS** with a volume YAML:
+        .. tab-set::
 
-        .. code-block:: yaml
+            .. tab-item:: Dynamic Provisioning (StorageClass)
+                :sync: dynamic-tab
 
-          # juicefs-volume.yaml
-          name: juicefs-pvc
-          type: k8s-pvc
-          infra: k8s
-          size: 100Gi
-          config:
-            storage_class_name: juicefs-sc
-            access_mode: ReadWriteMany
+                Create a StorageClass for dynamic provisioning. Refer to the `JuiceFS StorageClass guide <https://juicefs.com/docs/csi/guide/pv/#create-storage-class>`_ for details.
 
-        .. code-block:: console
+                .. code-block:: console
 
-          $ sky volumes apply juicefs-volume.yaml
+                  $ kubectl get storageclass juicefs-sc
+                  NAME         PROVISIONER       RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
+                  juicefs-sc   csi.juicefs.com   Retain          Immediate           false                  10m
+
+                Create a SkyPilot volume YAML referencing the StorageClass:
+
+                .. code-block:: yaml
+
+                  # juicefs-volume.yaml
+                  name: juicefs-volume
+                  type: k8s-pvc
+                  infra: k8s
+                  size: 100Gi
+                  config:
+                    storage_class_name: juicefs-sc
+                    access_mode: ReadWriteMany
+
+                .. code-block:: console
+
+                  $ sky volumes apply juicefs-volume.yaml
+
+            .. tab-item:: Static Provisioning (PV)
+                :sync: static-tab
+
+                Create a PersistentVolume and PVC manually. Refer to the `JuiceFS static provisioning guide <https://juicefs.com/docs/csi/guide/pv/#static-provisioning>`_ for details.
+
+                .. code-block:: console
+
+                  $ kubectl get pv juicefs-pv
+                  NAME         CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                 STORAGECLASS   AGE
+                  juicefs-pv   100Gi      RWX            Retain           Bound    default/juicefs-pvc                  10m
+
+                  $ kubectl get pvc juicefs-pvc
+                  NAME          STATUS   VOLUME       CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+                  juicefs-pvc   Bound    juicefs-pv   100Gi      RWX                           10m
+
+                Create a SkyPilot volume YAML with ``use_existing: true`` to reference the existing PVC:
+
+                .. code-block:: yaml
+
+                  # juicefs-volume.yaml
+                  name: juicefs-volume
+                  type: k8s-pvc
+                  infra: k8s
+                  use_existing: true
+                  config:
+                    access_mode: ReadWriteMany
+
+                .. code-block:: console
+
+                  $ sky volumes apply juicefs-volume.yaml
 
         4. **Mount the volume to SkyPilot task** in your SkyPilot YAML:
 
@@ -211,7 +257,7 @@ This section demonstrates how to configure and use distributed filesystems as Sk
 
           volumes:
             # Mount the JuiceFS volume to /mnt/data across all nodes
-            /mnt/data: juicefs-pvc
+            /mnt/data: juicefs-volume
 
           run: |
             # Verify the volume is mounted and accessible
@@ -338,6 +384,8 @@ When you terminate the cluster, the ephemeral volumes are automatically deleted:
   $ sky down my-cluster
   # Cluster and its ephemeral volumes are deleted
 
+.. _advanced-mount-pvc-with-kubernetes-configs:
+
 Advanced: Mount PVCs with Kubernetes configs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -413,6 +461,216 @@ If you want to mount different PVCs for different Kubernetes contexts, you can s
                 - name: my-pvc
                   persistentVolumeClaim:
                     claimName: pvc2
+
+.. _advanced-mount-nfs-hostpath-with-kubernetes-configs:
+
+Advanced: Mount NFS or hostPath with Kubernetes configs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+`Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ can be attached to your SkyPilot pods using the :ref:`pod_config <kubernetes-custom-pod-config>` field. This is useful for accessing shared storage such as NFS or local high-performance storage like NVMe drives.
+
+Volume mounting can be done directly in the task YAML on a per-task basis, or globally for all tasks in `SkyPilot config <https://docs.skypilot.co/en/latest/reference/config.html>`_.
+
+Examples:
+
+.. tab-set::
+
+    .. tab-item:: NFS using hostPath
+      :name: kubernetes-volumes-hostpath-nfs
+
+      Mount a NFS share that's `already mounted on the Kubernetes nodes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_.
+
+      **Per-task configuration:**
+
+      .. code-block:: yaml
+
+          # task.yaml
+          run: |
+            echo "Hello, world!" > /mnt/nfs/hello.txt
+            ls -la /mnt/nfs
+          config:
+            kubernetes:
+              pod_config:
+                spec:
+                  containers:
+                    - volumeMounts:
+                        - mountPath: /mnt/nfs
+                          name: my-host-nfs
+                  volumes:
+                    - name: my-host-nfs
+                      hostPath:
+                        path: /path/on/host/nfs
+                        type: Directory
+
+      **Global configuration:**
+
+      .. code-block:: yaml
+
+          # SkyPilot config
+          kubernetes:
+            pod_config:
+              spec:
+                containers:
+                  - volumeMounts:
+                      - mountPath: /mnt/nfs
+                        name: my-host-nfs
+                volumes:
+                  - name: my-host-nfs
+                    hostPath:
+                      path: /path/on/host/nfs
+                      type: Directory
+
+    .. tab-item:: NFS using native volume
+      :name: kubernetes-volumes-native-nfs
+
+      Mount a NFS share using Kubernetes' `native NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_ support.
+
+      **Per-task configuration:**
+
+      .. code-block:: yaml
+
+          # task.yaml
+          run: |
+            echo "Hello, world!" > /mnt/nfs/hello.txt
+            ls -la /mnt/nfs
+          config:
+            kubernetes:
+              pod_config:
+                spec:
+                  containers:
+                    - volumeMounts:
+                        - mountPath: /mnt/nfs
+                          name: nfs-volume
+                  volumes:
+                    - name: nfs-volume
+                      nfs:
+                        server: nfs.example.com
+                        path: /shared
+                        readOnly: false
+
+      **Global configuration:**
+
+      .. code-block:: yaml
+
+          # SkyPilot config
+          kubernetes:
+            pod_config:
+              spec:
+                containers:
+                  - volumeMounts:
+                      - mountPath: /mnt/nfs
+                        name: nfs-volume
+                volumes:
+                  - name: nfs-volume
+                    nfs:
+                      server: nfs.example.com
+                      path: /shared
+                      readOnly: false
+
+    .. tab-item:: NVMe using hostPath
+      :name: kubernetes-volumes-hostpath-nvme
+
+      Mount local NVMe storage that's already mounted on the Kubernetes nodes.
+
+      **Per-task configuration:**
+
+      .. code-block:: yaml
+
+          # task.yaml
+          run: |
+            echo "Hello, world!" > /mnt/nvme/hello.txt
+            ls -la /mnt/nvme
+          config:
+            kubernetes:
+              pod_config:
+                spec:
+                  containers:
+                    - volumeMounts:
+                        - mountPath: /mnt/nvme
+                          name: nvme
+                  volumes:
+                    - name: nvme
+                      hostPath:
+                        path: /path/on/host/nvme
+                        type: Directory
+
+      **Global configuration:**
+
+      .. code-block:: yaml
+
+          # SkyPilot config
+          kubernetes:
+            pod_config:
+              spec:
+                containers:
+                  - volumeMounts:
+                      - mountPath: /mnt/nvme
+                        name: nvme
+                volumes:
+                  - name: nvme
+                    hostPath:
+                      path: /path/on/host/nvme
+                      type: Directory
+
+    .. tab-item:: Nebius shared filesystem
+      :name: kubernetes-volumes-nebius-shared-filesystem
+
+      When creating a node group on the Nebius console, attach your desired shared file system to the node group (``Create Node Group`` -> ``Attach shared filesystem``):
+
+      * Ensure ``Auto mount`` is enabled.
+      * Note the ``Mount tag`` (e.g. ``filesystem-d0``).
+
+      .. image:: ../images/screenshots/nebius/nebius-k8s-attach-fs.png
+        :width: 50%
+        :align: center
+
+      Nebius will automatically mount the shared filesystem to hosts in the node group. You can then use a ``hostPath`` volume to mount the shared filesystem to your SkyPilot pods.
+
+      **Per-task configuration:**
+
+      .. code-block:: yaml
+
+          # task.yaml
+          run: |
+            echo "Hello, world!" > /mnt/nfs/hello.txt
+            ls -la /mnt/nfs
+          config:
+            kubernetes:
+              pod_config:
+                spec:
+                  containers:
+                    - volumeMounts:
+                        - mountPath: /mnt/nfs
+                          name: nebius-sharedfs
+                  volumes:
+                    - name: nebius-sharedfs
+                      hostPath:
+                        path: /mnt/<mount_tag> # e.g. /mnt/filesystem-d0
+                        type: Directory
+
+      **Global configuration:**
+
+      .. code-block:: yaml
+
+          # SkyPilot config
+          kubernetes:
+            pod_config:
+              spec:
+                containers:
+                  - volumeMounts:
+                      - mountPath: /mnt/nfs
+                        name: nebius-sharedfs
+                volumes:
+                  - name: nebius-sharedfs
+                    hostPath:
+                      path: /mnt/<mount_tag> # e.g. /mnt/filesystem-d0
+                      type: Directory
+
+.. note::
+
+  When using `hostPath volumes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_, the specified paths must already exist on the Kubernetes node where the pod is scheduled.
+
+  For NFS mounts using hostPath, ensure the NFS mount is already configured on all Kubernetes nodes.
 
 .. _volumes-on-runpod:
 

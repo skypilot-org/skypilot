@@ -7,6 +7,7 @@ import socket
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
+from sky.adaptors import common
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -24,6 +25,11 @@ _PARTITION_NAME_REGEX = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
 
 # Default timeout for waiting for job nodes to be allocated, in seconds.
 _SLURM_DEFAULT_PROVISION_TIMEOUT = 10
+
+_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Slurm. '
+                         'Try running: pip install "skypilot[slurm]"')
+hostlist = common.LazyImport('hostlist',
+                             import_error_message=_IMPORT_ERROR_MESSAGE)
 
 
 class SlurmPartition(NamedTuple):
@@ -259,6 +265,38 @@ class SlurmClient:
             f'Failed to get jobs for node {node_name}.',
             stderr=f'{stdout}\n{stderr}')
         return stdout.splitlines()
+
+    def get_all_jobs_gres(self) -> Dict[str, List[str]]:
+        """Get GRES allocation for all running jobs, grouped by node.
+
+        Returns:
+            Dict mapping node_name -> list of GRES strings for jobs on that
+            node.
+        """
+        cmd = f'squeue -h --states=running,completing -o "%N{SEP}%b"'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(rc,
+                                           cmd,
+                                           'Failed to get all jobs GRES.',
+                                           stderr=f'{stdout}\n{stderr}')
+
+        nodes_to_gres: Dict[str, List[str]] = {}
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(SEP)
+            if len(parts) != 2:
+                # We should never reach here, but just in case.
+                continue
+            nodelist_str, gres_str = parts
+            if not gres_str or gres_str == 'N/A':
+                continue
+
+            for node in hostlist.expand_hostlist(nodelist_str):
+                nodes_to_gres.setdefault(node, []).append(gres_str)
+
+        return nodes_to_gres
 
     def get_job_state(self, job_id: str) -> Optional[str]:
         """Get the state of a Slurm job.

@@ -536,4 +536,4 @@ fi
 python3 "$SCRIPT_DIR/okta_auto_login.py" sky-api --endpoint "$ENDPOINT" --username "$OKTA_TEST_USERNAME" --password "$OKTA_TEST_PASSWORD" || (echo "❌ Failed: sky api login" && exit 1)
 
 # run basic k8s ssh test
-pytest tests/smoke_tests/test_basic.py::test_kubernetes_ssh_proxy_connection --kubernetes || (echo "❌ Failed: basic k8s ssh test" && exit 1)
+pytest tests/smoke_tests/test_basic.py::test_kubernetes_slurm_ssh_proxy_connection --kubernetes || (echo "❌ Failed: basic k8s ssh test" && exit 1)
