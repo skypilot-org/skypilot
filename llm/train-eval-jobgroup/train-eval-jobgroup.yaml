@@ -1,0 +1,81 @@
+# Parallel Training and Evaluation with Shared Storage
+#
+# This example demonstrates a job group with parallel training and evaluation
+# tasks that share a storage volume for checkpoints. The evaluator monitors
+# the checkpoint directory and evaluates models as training produces them.
+#
+# Architecture:
+#   - trainer: Trains ResNet-18 on CIFAR-10, saves checkpoints to shared storage
+#   - evaluator: Watches for new checkpoints, evaluates and reports accuracy
+#
+# Usage:
+#   sky jobs launch llm/train-eval-jobgroup/train-eval-jobgroup.yaml
+#
+# The components share storage via:
+#   /checkpoints - Shared mount for checkpoint files
+---
+name: train-eval
+placement: SAME_INFRA
+execution: parallel
+
+---
+# Trainer: Trains ResNet-18 on CIFAR-10 and saves checkpoints
+name: trainer
+resources:
+  accelerators: L4:1
+  memory: 16+
+  infra: kubernetes
+
+file_mounts:
+  /code: llm/train-eval-jobgroup/code
+  /checkpoints:
+    name: train-eval-checkpoints
+    mode: MOUNT
+
+envs:
+  CHECKPOINT_DIR: /checkpoints
+  NUM_EPOCHS: 10
+  SAVE_EVERY: 2
+
+setup: |
+  pip install torch torchvision
+
+run: |
+  echo "Starting trainer..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Checkpoints will be saved to ${CHECKPOINT_DIR}"
+
+  cd /code
+  python trainer.py \
+    --checkpoint-dir ${CHECKPOINT_DIR} \
+    --num-epochs ${NUM_EPOCHS} \
+    --save-every ${SAVE_EVERY}
+
+---
+# Evaluator: Watches for checkpoints and evaluates them
+name: evaluator
+resources:
+  accelerators: L4:1
+  memory: 16+
+  infra: kubernetes
+
+file_mounts:
+  /code: llm/train-eval-jobgroup/code
+  /checkpoints:
+    name: train-eval-checkpoints
+    mode: MOUNT
+
+envs:
+  CHECKPOINT_DIR: /checkpoints
+
+setup: |
+  pip install torch torchvision
+
+run: |
+  echo "Starting evaluator..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Watching for checkpoints in ${CHECKPOINT_DIR}"
+
+  cd /code
+  python evaluator.py \
+    --checkpoint-dir ${CHECKPOINT_DIR}
