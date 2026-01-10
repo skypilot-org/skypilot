@@ -342,6 +342,7 @@ Read the research:
    :maxdepth: 1
    :caption: User Guides
 
+   Migrating from Slurm <../reference/slurm-migration>
    External Links <../running-jobs/external-links>
    ../reference/async
    ../running-jobs/environment-variables
