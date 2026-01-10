@@ -34,6 +34,10 @@ from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
 
+# Global lock to serialize interactive SSH auth attempts from multiple
+# threads in a single request.
+_INTERACTIVE_AUTH_LOCK = threading.Lock()
+
 # Pattern to extract home directory from command output
 _HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
 
@@ -826,108 +830,109 @@ class SSHCommandRunner(CommandRunner):
 
         See ssh_options_list for when ControlMaster is not enabled.
         """
-        extra_options = [
-            # Override ControlPersist to reduce frequency of manual user
-            # intervention. The default from ssh_options_list is only 5m.
-            #
-            # NOTE: When used with ProxyJump, the connection can die
-            # earlier than expected, so it is recommended to also enable
-            # ControlMaster on the jump host's SSH config. It is hard to
-            # tell why exactly, because enabling -v makes this problem
-            # disappear for some reasons.
-            '-o',
-            'ControlPersist=1d',
-        ]
-        if self._ssh_proxy_jump is not None:
-            logger.warning(f'{colorama.Fore.YELLOW}When using ProxyJump, it is '
-                           'recommended to also enable ControlMaster on the '
-                           'jump host\'s SSH config to keep the authenticated '
-                           f'connection alive for longer.{colorama.Fore.RESET}')
-        command = command[:1] + extra_options + command[1:]
+        with _INTERACTIVE_AUTH_LOCK:
+            extra_options = [
+                # Override ControlPersist to reduce frequency of manual user
+                # intervention. The default from ssh_options_list is only 5m.
+                #
+                # NOTE: When used with ProxyJump, the connection can die
+                # earlier than expected, so it is recommended to also enable
+                # ControlMaster on the jump host's SSH config. It is hard to
+                # tell why exactly, because enabling -v makes this problem
+                # disappear for some reasons.
+                '-o',
+                'ControlPersist=1d',
+            ]
+            if self._ssh_proxy_jump is not None:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}When using ProxyJump, it is '
+                    'recommended to also enable ControlMaster on the '
+                    'jump host\'s SSH config to keep the authenticated '
+                    f'connection alive for longer.{colorama.Fore.RESET}')
+            command = command[:1] + extra_options + command[1:]
 
-        # Create PTY for SSH. PTY slave for stdin from user, PTY master
-        # for password/auth prompts from SSH.
-        pty_m_fd, pty_s_fd = pty.openpty()
+            # Create PTY for SSH. PTY slave for stdin from user, PTY master
+            # for password/auth prompts from SSH.
+            pty_m_fd, pty_s_fd = pty.openpty()
 
-        # Create Unix socket to pass PTY master fd to websocket handler
-        fd_socket_path = interactive_utils.get_pty_socket_path(session_id)
-        if os.path.exists(fd_socket_path):
-            os.unlink(fd_socket_path)
-        fd_server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        fd_server.bind(fd_socket_path)
-        fd_server.listen(1)
-        fd_server.settimeout(60)
-
-        # Signal client to initiate websocket for interactive auth
-        interactive_signal = f'<sky-interactive session="{session_id}"/>'
-        print(interactive_signal, flush=True)
-
-        def handle_unix_socket_connection():
-            """Background thread to handle Unix socket connection."""
-            conn = None
-            try:
-                # Wait for websocket handler to connect.
-                conn, _ = fd_server.accept()
-                # Send PTY master fd through Unix socket.
-                interactive_utils.send_fd(conn, pty_m_fd)
-                # We don't need to block here to wait for the websocket
-                # handler, as SSH will continue by itself once auth
-                # is complete.
-            except socket.timeout:
-                logger.debug('Timeout waiting for interactive auth connection')
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Error in Unix socket connection: '
-                             f'{common_utils.format_exception(e)}')
-            finally:
-                if conn is not None:
-                    try:
-                        conn.close()
-                    except Exception:  # pylint: disable=broad-except
-                        pass
-                try:
-                    os.close(pty_m_fd)
-                except Exception:  # pylint: disable=broad-except
-                    pass
-
-        unix_sock_thread = threading.Thread(
-            target=handle_unix_socket_connection, daemon=True)
-        unix_sock_thread.start()
-
-        try:
-
-            def setup_pty_session():
-                # Set PTY as controlling terminal so SSH can access /dev/tty
-                # for keyboard-interactive auth. Without this:
-                # "can't open /dev/tty: Device not configured"
-                fcntl.ioctl(pty_s_fd, termios.TIOCSCTTY, 0)
-                # Ignore SIGHUP so ControlMaster survives when PTY closes.
-                signal.signal(signal.SIGHUP, signal.SIG_IGN)
-                # Ignore SIGTERM so ControlMaster survives subprocess_daemon
-                # killing the process group.
-                if self._ssh_proxy_jump is not None:
-                    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-
-            return log_lib.run_with_log(' '.join(command),
-                                        log_path,
-                                        require_outputs=require_outputs,
-                                        stream_logs=stream_logs,
-                                        process_stream=process_stream,
-                                        shell=True,
-                                        executable=executable,
-                                        preexec_fn=setup_pty_session,
-                                        **kwargs)
-        except Exception as e:
-            raise RuntimeError(f'Exception in setup: {e}') from e
-        finally:
-            # Clean up PTY fds and sockets.
-            fd_server.close()
+            # Create Unix socket to pass PTY master fd to websocket handler
+            fd_socket_path = interactive_utils.get_pty_socket_path(session_id)
             if os.path.exists(fd_socket_path):
                 os.unlink(fd_socket_path)
+            fd_server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            fd_server.bind(fd_socket_path)
+            fd_server.listen(1)
+            fd_server.settimeout(60)
+
+            # Signal client to initiate websocket for interactive auth
+            interactive_signal = f'<sky-interactive session="{session_id}"/>'
+            print(interactive_signal, flush=True)
+
+            def handle_unix_socket_connection():
+                """Background thread to handle Unix socket connection."""
+                conn = None
+                try:
+                    # Wait for websocket handler to connect.
+                    conn, _ = fd_server.accept()
+                    # Send PTY master fd through Unix socket.
+                    interactive_utils.send_fd(conn, pty_m_fd)
+                    # We don't need to block here to wait for the websocket
+                    # handler, as SSH will continue by itself once auth
+                    # is complete.
+                except socket.timeout:
+                    logger.debug(
+                        'Timeout waiting for interactive auth connection')
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.error(f'Error in Unix socket connection: '
+                                 f'{common_utils.format_exception(e)}')
+                finally:
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:  # pylint: disable=broad-except
+                            pass
+                    try:
+                        os.close(pty_m_fd)
+                    except Exception:  # pylint: disable=broad-except
+                        pass
+
+            unix_sock_thread = threading.Thread(
+                target=handle_unix_socket_connection, daemon=True)
+            unix_sock_thread.start()
+
             try:
-                os.close(pty_m_fd)
-            except OSError:
-                pass  # Already closed by background thread
-            os.close(pty_s_fd)
+
+                def setup_pty_session():
+                    # Set PTY as controlling terminal so SSH can access /dev/tty
+                    # for keyboard-interactive auth. Without this:
+                    # "can't open /dev/tty: Device not configured"
+                    fcntl.ioctl(pty_s_fd, termios.TIOCSCTTY, 0)
+                    # Ignore SIGHUP so ControlMaster survives when PTY closes.
+                    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+                    # Ignore SIGTERM so ControlMaster survives subprocess_daemon
+                    # killing the process group.
+                    if self._ssh_proxy_jump is not None:
+                        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+                return log_lib.run_with_log(' '.join(command),
+                                            log_path,
+                                            require_outputs=require_outputs,
+                                            stream_logs=stream_logs,
+                                            process_stream=process_stream,
+                                            shell=True,
+                                            executable=executable,
+                                            preexec_fn=setup_pty_session,
+                                            **kwargs)
+            except Exception as e:
+                raise RuntimeError(f'Exception in setup: {e}') from e
+            finally:
+                # Clean up PTY fds and sockets.
+                fd_server.close()
+                if os.path.exists(fd_socket_path):
+                    os.unlink(fd_socket_path)
+                # Note: pty_m_fd is closed by handle_unix_socket_connection.
+                # Do NOT close it here - the FD number may have been reused.
+                os.close(pty_s_fd)
 
     def close_cached_connection(self) -> None:
         """Close the cached connection to the remote machine.
