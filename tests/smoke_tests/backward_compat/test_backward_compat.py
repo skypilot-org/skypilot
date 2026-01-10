@@ -315,6 +315,52 @@ class TestBackwardCompatibility:
         teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name}* -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
 
+    @pytest.mark.no_kubernetes
+    def test_autostop_hook_backward_compat(self, generic_cloud: str):
+        """Test autostop hook status backward compatibility.
+
+        1. Launch cluster with hook in NEW version.
+        2. Wait for AUTOSTOPPING status.
+        3. Verify status in OLD version (should be UP or not crash).
+        4. Launch job in OLD version during AUTOSTOPPING (should not crash).
+        """
+        cluster_name = smoke_tests_utils.get_cluster_name()
+        # Create a task with a long-running hook
+        task_yaml = textwrap.dedent("""\
+            resources:
+              autostop:
+                idle_minutes: 1
+                hook: |
+                  echo "Autostop hook running..."
+                  sleep 600
+        """)
+
+        with tempfile.NamedTemporaryFile(prefix='autostop_hook_',
+                                         delete=False,
+                                         mode='w') as f:
+            f.write(task_yaml)
+            yaml_path = f.name
+
+        commands = [
+            # 1. Launch with NEW version
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -c {cluster_name} {yaml_path}',
+            # 2. Wait for autostop to trigger (idle 1m).
+            # We wait for AUTOSTOPPING status using CURRENT version.
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(cluster_name=cluster_name, cluster_status=[sky.ClusterStatus.AUTOSTOPPING], timeout=240)}',
+            # 3. Check status in OLD version
+            # This expects the old version to NOT crash and show UP.
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && sky status {cluster_name} | grep UP',
+            # 4. Try to submit a job in OLD version (sky launch again on autostopped state)
+            # It should ideally work (interrupt hook) or fail gracefully, but definitely not crash.
+            f'{self.ACTIVATE_BASE} && sky launch -y -c {cluster_name} {yaml_path}',
+            # 5. Verify the new job is running or succeeded.
+            f'{self.ACTIVATE_BASE} && sky logs {cluster_name} 2 --status | grep -E "RUNNING|SUCCEEDED"',
+        ]
+
+        teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name}* -y'
+        self.run_compatibility_test(cluster_name, commands, teardown)
+
     def test_single_node_operations(self, generic_cloud: str):
         """Test single node operations (launch, stop, restart, logs)"""
         cluster_name = smoke_tests_utils.get_cluster_name()

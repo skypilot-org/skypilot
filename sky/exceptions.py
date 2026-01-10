@@ -144,6 +144,11 @@ class InvalidSkyPilotConfigError(ValueError):
     pass
 
 
+class ArgumentValidationError(ValueError):
+    """Raised when the arguments are invalid."""
+    pass
+
+
 class ResourcesUnavailableError(Exception):
     """Raised when resources are unavailable.
 

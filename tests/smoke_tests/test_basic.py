@@ -305,37 +305,188 @@ def test_launch_fast(generic_cloud: str):
 @pytest.mark.no_hyperbolic
 @pytest.mark.no_shadeform
 @pytest.mark.no_seeweb
-def test_launch_fast_with_autostop(generic_cloud: str):
+def test_launch_fast_with_autostop_hook(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
     # the VM is stopped.
     autostop_timeout = 600 if generic_cloud == 'azure' else 250
-    test = smoke_tests_utils.Test(
-        'test_launch_fast_with_autostop',
-        [
-            # First launch to create the cluster with a short autostop
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} --fast -i 1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            f'sky logs {name} 1 --status',
-            f'sky status -r {name} | grep UP',
+    special_str = f'hook-executed-{time.time()}'
+    # Use a long-running hook to ensure we can catch the AUTOSTOPPING state
+    hook_duration = 60  # seconds
 
-            # Ensure cluster is stopped
-            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-                cluster_name=name,
-                cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=autostop_timeout),
-            # Even the cluster is stopped, cloud platform may take a while to
-            # delete the VM.
-            # FIXME(aylei): this can be flaky, sleep longer for now.
-            f'sleep 60',
-            # Launch again. Do full output validation - we expect the cluster to re-launch
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
-            f'sky logs {name} 2 --status',
-            f'sky status -r {name} | grep UP',
-        ],
-        f'sky down -y {name}',
-        timeout=smoke_tests_utils.get_timeout(generic_cloud) + autostop_timeout,
-    )
-    smoke_tests_utils.run_one_test(test)
+    # Load the existing minimal.yaml and add resources section with autostop hook
+    minimal_yaml_path = 'tests/test_yamls/minimal.yaml'
+    yaml_config = yaml_utils.read_yaml(minimal_yaml_path)
+    yaml_config['resources'] = {
+        'autostop': {
+            'idle_minutes': 1,
+            'hook': f'echo {special_str} && sleep {hook_duration} && echo "Hook completed"'
+        }
+    }
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+        yaml_utils.dump_yaml(f.name, yaml_config)
+        f.flush()
+
+        test = smoke_tests_utils.Test(
+            'test_launch_fast_with_autostop_hook',
+            [
+                # First launch to create the cluster with a short autostop and a hook from YAML
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} --fast {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+                f'sky logs {name} 1 --status',
+                f'sky status -r {name} | grep UP',
+
+                # Wait until cluster enters AUTOSTOPPING state (after idle_minutes + hook starts)
+                # The long-running hook ensures we can catch the AUTOSTOPPING state
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=name,
+                    cluster_status=[sky.ClusterStatus.AUTOSTOPPING],
+                    timeout=autostop_timeout),
+
+                # Ensure cluster eventually stops after hook completes
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=name,
+                    cluster_status=[sky.ClusterStatus.STOPPED],
+                    timeout=autostop_timeout),
+                # Even the cluster is stopped, cloud platform may take a while to
+                # delete the VM.
+                # FIXME(aylei): this can be flaky, sleep longer for now.
+                f'sleep 60',
+
+                # Launch again. Do full output validation - we expect the cluster to re-launch
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+                f'sky logs {name} 2 --status',
+                f'sky status -r {name} | grep UP',
+
+                # Verify the hook was executed by checking the autostop hook log and skylet logs
+                f'hook_log_output=$(sky logs {name} --autostop --no-follow) && echo "$hook_log_output" | grep "{special_str}"',
+                f'hook_log_output=$(sky logs {name} --autostop --no-follow) && echo "$hook_log_output" | grep "Hook completed"',
+                f'skylet_log_output=$(sky exec {name} "cat ~/{constants.SKYLET_LOG_FILE}") && echo "$skylet_log_output" | grep "Autostop hook executed successfully"',
+            ],
+            f'sky down -y {name}',
+            timeout=smoke_tests_utils.get_timeout(generic_cloud) +
+            autostop_timeout,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# See cloud exclusion explanations in test_autostop
+@pytest.mark.no_fluidstack
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_ibm
+@pytest.mark.no_kubernetes
+@pytest.mark.no_slurm
+@pytest.mark.no_hyperbolic
+@pytest.mark.no_shadeform
+@pytest.mark.no_seeweb
+def test_launch_interruption_on_autostopping(generic_cloud: str):
+    """Test launching a new job while cluster is autostopping.
+
+    This verifies that a new launch request can successfully interrupt the
+    autostop process and bring the cluster back to UP state.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+    # Use a long-running hook to ensure we can catch the AUTOSTOPPING state
+    hook_duration = 300  # 5 minutes
+
+    # Load the existing minimal.yaml and add resources section with autostop hook
+    minimal_yaml_path = 'tests/test_yamls/minimal.yaml'
+    yaml_config = yaml_utils.read_yaml(minimal_yaml_path)
+    yaml_config['resources'] = {
+        'autostop': {
+            'idle_minutes': 1,
+            'hook': f'echo "Hook running" && sleep {hook_duration}'
+        }
+    }
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+        yaml_utils.dump_yaml(f.name, yaml_config)
+        f.flush()
+
+        test = smoke_tests_utils.Test(
+            'test_launch_interruption_on_autostopping',
+            [
+                # Launch cluster
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+                f'sky status -r {name} | grep UP',
+
+                # Wait until cluster enters AUTOSTOPPING state
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=name,
+                    cluster_status=[sky.ClusterStatus.AUTOSTOPPING],
+                    timeout=autostop_timeout),
+
+                # Interrupt with a new launch
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo interrupted") && '
+                'echo "$s" && echo "$s" | grep "Restarting."',
+
+                # Verify cluster is UP and job ran
+                f'sky logs {name} 2 --status',
+                f'sky status -r {name} | grep UP',
+            ],
+            f'sky down -y {name}',
+            timeout=smoke_tests_utils.get_timeout(generic_cloud) +
+            autostop_timeout,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# See cloud exclusion explanations in test_autostop
+@pytest.mark.no_fluidstack
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_ibm
+@pytest.mark.no_kubernetes
+@pytest.mark.no_slurm
+@pytest.mark.no_hyperbolic
+@pytest.mark.no_shadeform
+@pytest.mark.no_seeweb
+def test_stop_on_autostopping(generic_cloud: str):
+    """Test stopping a cluster while it is autostopping."""
+    name = smoke_tests_utils.get_cluster_name()
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+    hook_duration = 300
+
+    minimal_yaml_path = 'tests/test_yamls/minimal.yaml'
+    yaml_config = yaml_utils.read_yaml(minimal_yaml_path)
+    yaml_config['resources'] = {
+        'autostop': {
+            'idle_minutes': 1,
+            'hook': f'echo "Hook running" && sleep {hook_duration}'
+        }
+    }
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+        yaml_utils.dump_yaml(f.name, yaml_config)
+        f.flush()
+
+        test = smoke_tests_utils.Test(
+            'test_stop_on_autostopping',
+            [
+                # Launch cluster
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+                f'sky status -r {name} | grep UP',
+
+                # Wait until cluster enters AUTOSTOPPING state
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=name,
+                    cluster_status=[sky.ClusterStatus.AUTOSTOPPING],
+                    timeout=autostop_timeout),
+
+                # Stop the cluster manually
+                f'sky stop -y {name}',
+
+                # Verify cluster is STOPPED
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=name,
+                    cluster_status=[sky.ClusterStatus.STOPPED],
+                    timeout=autostop_timeout),
+            ],
+            f'sky down -y {name}',
+            timeout=smoke_tests_utils.get_timeout(generic_cloud) +
+            autostop_timeout,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 # See cloud exclusion explanations in test_autostop
