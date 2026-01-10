@@ -48,6 +48,7 @@ from sky.server import plugins
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
+from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
 from sky.server.requests import threads
 from sky.server.requests.queues import local_queue
@@ -724,7 +725,7 @@ async def _execute_request_coroutine(request: api_requests.Request):
 
 async def prepare_request_async(
     request_id: str,
-    request_name: str,
+    request_name: request_names.RequestName,
     request_body: payloads.RequestBody,
     func: Callable[P, Any],
     request_cluster_name: Optional[str] = None,
@@ -757,7 +758,7 @@ async def prepare_request_async(
 
 
 async def schedule_request_async(request_id: str,
-                                 request_name: str,
+                                 request_name: request_names.RequestName,
                                  request_body: payloads.RequestBody,
                                  func: Callable[P, Any],
                                  request_cluster_name: Optional[str] = None,
