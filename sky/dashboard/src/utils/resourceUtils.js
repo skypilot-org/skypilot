@@ -3,23 +3,50 @@
  */
 
 /**
+ * Format CPU value for display, matching CLI format_float with precision=0
+ * Rounds to 0 decimal places (removes .0 for whole numbers, rounds non-whole numbers to integers)
+ * @param {number|null|undefined} cpu - CPU count value
+ * @returns {string} - Formatted CPU string (e.g., "16" or "256" or "-")
+ */
+export function formatCpuValue(cpu) {
+  if (cpu === null || cpu === undefined) return '-';
+  // Round to 0 decimal places, matching CLI format_float with precision=0
+  // This removes .0 for whole numbers and rounds non-whole numbers to integers
+  return Math.round(cpu).toString();
+}
+
+/**
  * Format CPU count for display
  * @param {number|null|undefined} cpu - CPU count value
- * @returns {string} - Formatted CPU string (integer if whole, 1 decimal otherwise, or '-')
+ * @returns {string} - Formatted CPU string (e.g., "16" or "256" or "-")
  */
 export function formatCpu(cpu) {
   if (cpu === null || cpu === undefined) return '-';
-  return cpu === Math.floor(cpu) ? Math.floor(cpu).toString() : cpu.toFixed(1);
+  return formatCpuValue(cpu);
+}
+
+/**
+ * Format memory value (without unit) for display, matching CLI format_float with precision=0
+ * Rounds to 0 decimal places (removes .0 for whole numbers, rounds non-whole numbers to integers)
+ * @param {number|null|undefined} memory - Memory value in GB
+ * @returns {string} - Formatted memory string (e.g., "16" or "2000" or "-")
+ */
+export function formatMemoryValue(memory) {
+  if (memory === null || memory === undefined) return '-';
+  // Round to 0 decimal places, matching CLI format_float with precision=0
+  // This removes .0 for whole numbers and rounds non-whole numbers to integers
+  return Math.round(memory).toString();
 }
 
 /**
  * Format memory in GB for display
  * @param {number|null|undefined} memory - Memory value in GB
- * @returns {string} - Formatted memory string (e.g., "16.0 GB" or "-")
+ * @returns {string} - Formatted memory string (e.g., "16 GB" or "2000 GB" or "-")
  */
 export function formatMemory(memory) {
   if (memory === null || memory === undefined) return '-';
-  return `${memory.toFixed(1)} GB`;
+  const formatted = formatMemoryValue(memory);
+  return formatted === '-' ? '-' : `${formatted} GB`;
 }
 
 /**
