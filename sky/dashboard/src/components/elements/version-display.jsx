@@ -88,9 +88,11 @@ function VersionTooltip({
           </div>
         ) : null;
       })}
-      {!commit && plugins.length === 0 && (!latestVersion || !showUpdateInfo) && (
-        <div>Version information not available</div>
-      )}
+      {!commit &&
+        plugins.length === 0 &&
+        (!latestVersion || !showUpdateInfo) && (
+          <div>Version information not available</div>
+        )}
     </div>
   );
 
