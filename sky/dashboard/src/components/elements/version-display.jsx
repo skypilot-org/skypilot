@@ -3,7 +3,7 @@ import { ArrowUpCircle } from 'lucide-react';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { apiClient } from '@/data/connectors/client';
 
-export function VersionDisplay() {
+export function useVersionInfo() {
   const [version, setVersion] = useState(null);
   const [latestVersion, setLatestVersion] = useState(null);
   const [commit, setCommit] = useState(null);
@@ -51,8 +51,10 @@ export function VersionDisplay() {
     getVersionAndPlugins();
   }, []);
 
-  if (!version) return null;
+  return { version, latestVersion, commit, plugins };
+}
 
+function VersionTooltip({ children, version, latestVersion, commit, plugins }) {
   // Create tooltip content
   const tooltipContent = (
     <div className="flex flex-col gap-0.5">
@@ -90,17 +92,49 @@ export function VersionDisplay() {
       content={tooltipContent}
       className="text-sm text-muted-foreground"
     >
-      <div className="inline-flex items-center justify-center transition-colors duration-150 cursor-help">
-        {latestVersion ? (
-          <div className="p-2 rounded-full text-gray-600 hover:bg-gray-100 hover:text-blue-600">
-            <ArrowUpCircle className="w-5 h-5" />
-          </div>
-        ) : (
-          <div className="text-sm text-gray-500 border-b border-dotted border-gray-400 hover:text-blue-600 hover:border-blue-600">
-            Version: {version}
-          </div>
-        )}
-      </div>
+      {children}
     </NonCapitalizedTooltip>
+  );
+}
+
+export function UpgradeHint() {
+  const { version, latestVersion, commit, plugins } = useVersionInfo();
+
+  if (!version || !latestVersion) return null;
+
+  return (
+    <VersionTooltip
+      version={version}
+      latestVersion={latestVersion}
+      commit={commit}
+      plugins={plugins}
+    >
+      <div className="inline-flex items-center justify-center transition-colors duration-150 cursor-help">
+        <div className="p-2 rounded-full text-gray-600 hover:bg-gray-100 hover:text-blue-600">
+          <ArrowUpCircle className="w-5 h-5" />
+        </div>
+      </div>
+    </VersionTooltip>
+  );
+}
+
+export function VersionDisplay() {
+  const { version, latestVersion, commit, plugins } = useVersionInfo();
+
+  if (!version) return null;
+
+  return (
+    <VersionTooltip
+      version={version}
+      latestVersion={latestVersion}
+      commit={commit}
+      plugins={plugins}
+    >
+      <div className="inline-flex items-center justify-center transition-colors duration-150 cursor-help">
+        <div className="text-sm text-gray-500 border-b border-dotted border-gray-400 hover:text-blue-600 hover:border-blue-600">
+          Version: {version}
+        </div>
+      </div>
+    </VersionTooltip>
   );
 }
