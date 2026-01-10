@@ -4,6 +4,7 @@
 {{- $useNewIngressClass := or (gt ($kubeVersion | int) 1) (and (eq ($kubeVersion | int) 1) (ge $kubeMinorVersion 18)) -}}
 {{- $enableBasicAuthInAPIServer := include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" -}}
 {{- $fullName := include "skypilot.fullname" . -}}
+{{- $unifiedIngress := .Values.ingress.unified | default false -}}
 
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -82,4 +83,22 @@ spec:
             name: {{ $fullName }}-api-service
             port:
               number: 80
+      {{- if and $unifiedIngress .Values.grafana.enabled }}
+      - pathType: Prefix
+        path: /grafana
+        backend:
+          service:
+            name: {{ $fullName }}-grafana
+            port:
+              number: 80
+      {{- end }}
+      {{- if and $unifiedIngress (index .Values.ingress "oauth2-proxy" "enabled") }}
+      - pathType: Prefix
+        path: /oauth2
+        backend:
+          service:
+            name: {{ $fullName }}-oauth2-proxy
+            port:
+              number: 4180
+      {{- end }}
 {{- end }}

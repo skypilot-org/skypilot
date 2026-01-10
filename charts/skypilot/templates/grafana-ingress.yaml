@@ -1,4 +1,4 @@
-{{- if and .Values.grafana.enabled .Values.grafana.ingress.enableAuthedIngress }}
+{{- if and (not .Values.ingress.unified) .Values.grafana.enabled .Values.grafana.ingress.enableAuthedIngress }}
 {{- $fullName := include "skypilot.fullname" . -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
