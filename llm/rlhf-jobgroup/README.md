@@ -4,7 +4,7 @@ This example demonstrates a distributed RLHF (Reinforcement Learning from Human 
 
 ## Architecture
 
-The example consists of 4 separate components that communicate over HTTP:
+The example consists of 5 separate components that communicate over HTTP:
 
 ```
 ┌─────────────────────┐
@@ -23,12 +23,12 @@ The example consists of 4 separate components that communicate over HTTP:
            │  generated responses       │ reward scores
            └────────────┬───────────────┘
                         ▼
-           ┌─────────────────────┐
-           │    ppo-trainer      │
-           │   (2 nodes x GPU)   │
-           │  Policy gradient    │
-           │  Weight sync        │
-           └─────────────────────┘
+           ┌─────────────────────┐      ┌─────────────────────┐
+           │    ppo-trainer      │◀────▶│   replay-buffer     │
+           │   (2 nodes x GPU)   │      │      (CPU)          │
+           │  Policy gradient    │      │  Experience storage │
+           │  Weight sync        │      │  Port 8003          │
+           └─────────────────────┘      └─────────────────────┘
 ```
 
 ### Components
@@ -39,7 +39,9 @@ The example consists of 4 separate components that communicate over HTTP:
 
 3. **reward-server**: Verifies mathematical answers by comparing model outputs against ground truth. Returns binary rewards (1.0 for correct, 0.0 for incorrect).
 
-4. **ppo-trainer**: Multi-node training orchestrator that implements GRPO. Coordinates with all other services to fetch prompts, generate responses, compute rewards, and update the policy.
+4. **replay-buffer**: Stores experience tuples (prompt, response, reward) for sampling during training. Supports priority-based sampling where high-reward experiences are sampled more frequently.
+
+5. **ppo-trainer**: Multi-node training orchestrator that implements GRPO. Coordinates with all other services to fetch prompts, generate responses, compute rewards, store experiences, and update the policy.
 
 ## Usage
 
@@ -68,6 +70,7 @@ sky jobs queue
 sky jobs logs <job-id> --task data-server
 sky jobs logs <job-id> --task rollout-server
 sky jobs logs <job-id> --task reward-server
+sky jobs logs <job-id> --task replay-buffer
 sky jobs logs <job-id> --task ppo-trainer
 ```
 
@@ -101,6 +104,7 @@ Components discover each other using job group DNS names:
 - `data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000`
 - `rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001`
 - `reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002`
+- `replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:8003`
 
 This allows components to communicate without hardcoded IP addresses.
 
@@ -115,8 +119,10 @@ The training loop:
 1. Fetch batch of prompts from data-server
 2. Generate responses using rollout-server
 3. Compute rewards using reward-server
-4. Calculate group-relative advantages
-5. Update policy with clipped surrogate loss
+4. Store experiences in replay-buffer
+5. Calculate group-relative advantages
+6. Update policy with clipped surrogate loss
+7. Sample from replay-buffer for additional updates (experience replay)
 
 ## Extending This Example
 

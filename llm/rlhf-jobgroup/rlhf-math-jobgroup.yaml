@@ -8,6 +8,7 @@
 #   - data-server: Serves GSM8K math prompts
 #   - rollout-server: vLLM for generating responses
 #   - reward-server: Verifies math answers against ground truth
+#   - replay-buffer: Stores experience tuples for sampling
 #   - ppo-trainer: Orchestrates GRPO training across multiple nodes
 #
 # Usage:
@@ -17,6 +18,7 @@
 #   - data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000
 #   - rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001
 #   - reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002
+#   - replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:8003
 ---
 name: rlhf-math
 placement: SAME_INFRA
@@ -93,6 +95,28 @@ run: |
   python reward_server.py --port 8002
 
 ---
+# Replay Buffer: Stores experience tuples for training
+name: replay-buffer
+resources:
+  cpus: 4
+  memory: 16+
+  infra: kubernetes/coreweave
+
+file_mounts:
+  /code: llm/rlhf-jobgroup/code
+
+setup: |
+  pip install fastapi uvicorn
+
+run: |
+  echo "Starting replay buffer server..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Replay Buffer API at http://replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:8003"
+
+  cd /code
+  python replay_buffer.py --port 8003 --capacity 10000
+
+---
 # PPO Trainer: Multi-node GRPO training
 name: ppo-trainer
 resources:
@@ -121,10 +145,12 @@ run: |
   DATA_SERVER="data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000"
   ROLLOUT_SERVER="rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001"
   REWARD_SERVER="reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002"
+  REPLAY_BUFFER="replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:8003"
 
   echo "Data server: ${DATA_SERVER}"
   echo "Rollout server: ${ROLLOUT_SERVER}"
   echo "Reward server: ${REWARD_SERVER}"
+  echo "Replay buffer: ${REPLAY_BUFFER}"
 
   # Wait for services to be ready
   echo "Waiting for services to be available..."
@@ -138,6 +164,7 @@ run: |
       --data-server ${DATA_SERVER} \
       --rollout-server ${ROLLOUT_SERVER} \
       --reward-server ${REWARD_SERVER} \
+      --replay-buffer ${REPLAY_BUFFER} \
       --model ${MODEL_NAME} \
       --batch-size ${BATCH_SIZE} \
       --num-epochs ${NUM_EPOCHS}

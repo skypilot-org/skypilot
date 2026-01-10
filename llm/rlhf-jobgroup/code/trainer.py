@@ -5,7 +5,8 @@ This trainer orchestrates the RLHF pipeline by:
 1. Fetching prompts from data-server
 2. Generating responses via rollout-server (vLLM)
 3. Computing rewards via reward-server
-4. Updating the policy using GRPO (Group Relative Policy Optimization)
+4. Storing experiences in replay-buffer
+5. Updating the policy using GRPO (Group Relative Policy Optimization)
 
 GRPO is a simplified variant of PPO that doesn't require a critic model,
 making it popular for math/code tasks with verifiable rewards.
@@ -15,6 +16,7 @@ Usage:
         --data-server localhost:8000 \
         --rollout-server localhost:8001 \
         --reward-server localhost:8002 \
+        --replay-buffer localhost:8003 \
         --num-epochs 3
 """
 
@@ -37,6 +39,7 @@ class TrainingConfig:
     data_server: str
     rollout_server: str
     reward_server: str
+    replay_buffer: Optional[str] = None
     model_name: str = "Qwen/Qwen2.5-0.5B-Instruct"
     batch_size: int = 4
     num_epochs: int = 3
@@ -46,6 +49,7 @@ class TrainingConfig:
     num_samples_per_prompt: int = 4  # For GRPO, generate multiple samples
     kl_coef: float = 0.01
     clip_range: float = 0.2
+    use_replay_buffer: bool = True  # Whether to use replay buffer for training
 
 
 class RLHFTrainer:
@@ -94,6 +98,8 @@ class RLHFTrainer:
             ("rollout-server", f"http://{self.config.rollout_server}/health"),
             ("reward-server", f"http://{self.config.reward_server}/health"),
         ]
+        if self.config.replay_buffer:
+            services.append(("replay-buffer", f"http://{self.config.replay_buffer}/health"))
 
         for name, url in services:
             if self.accelerator.is_main_process:
@@ -162,6 +168,61 @@ class RLHFTrainer:
         data = response.json()
 
         return [r["reward"] for r in data["rewards"]]
+
+    def store_experiences(self, prompts: List[str], responses: List[str],
+                         rewards: List[float], ground_truths: List[str]):
+        """Store experiences in the replay buffer."""
+        if not self.config.replay_buffer:
+            return
+
+        url = f"http://{self.config.replay_buffer}/add"
+        experiences = [
+            {
+                "prompt": p,
+                "response": r,
+                "reward": rw,
+                "ground_truth": gt
+            }
+            for p, r, rw, gt in zip(prompts, responses, rewards, ground_truths)
+        ]
+
+        try:
+            response = self.http_client.post(url, json={"experiences": experiences})
+            response.raise_for_status()
+        except Exception as e:
+            print(f"Warning: Failed to store experiences in replay buffer: {e}")
+
+    def sample_from_replay_buffer(self, batch_size: int) -> Optional[List[dict]]:
+        """Sample experiences from the replay buffer."""
+        if not self.config.replay_buffer:
+            return None
+
+        url = f"http://{self.config.replay_buffer}/sample"
+        try:
+            response = self.http_client.post(
+                url,
+                json={"batch_size": batch_size, "prioritized": True}
+            )
+            response.raise_for_status()
+            data = response.json()
+            if data["experiences"]:
+                return data["experiences"]
+        except Exception as e:
+            print(f"Warning: Failed to sample from replay buffer: {e}")
+        return None
+
+    def get_replay_buffer_stats(self) -> Optional[dict]:
+        """Get replay buffer statistics."""
+        if not self.config.replay_buffer:
+            return None
+
+        url = f"http://{self.config.replay_buffer}/stats"
+        try:
+            response = self.http_client.get(url)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            return None
 
     def compute_grpo_loss(self, prompts: List[str], responses: List[str],
                          rewards: List[float]) -> torch.Tensor:
@@ -237,24 +298,46 @@ class RLHFTrainer:
         # 3. Compute rewards
         rewards = self.compute_rewards(prompts, responses, ground_truths)
 
-        # 4. Compute loss and update
+        # 4. Store experiences in replay buffer
+        self.store_experiences(prompts, responses, rewards, ground_truths)
+
+        # 5. Compute loss and update with fresh experiences
         loss = self.compute_grpo_loss(prompts, responses, rewards)
 
         self.optimizer.zero_grad()
         self.accelerator.backward(loss)
         self.optimizer.step()
 
+        # 6. Optionally do additional update with replay buffer samples
+        replay_loss = None
+        if self.config.use_replay_buffer and self.config.replay_buffer:
+            replay_experiences = self.sample_from_replay_buffer(self.config.batch_size)
+            if replay_experiences and len(replay_experiences) >= 2:
+                replay_prompts = [e["prompt"] for e in replay_experiences]
+                replay_responses = [e["response"] for e in replay_experiences]
+                replay_rewards = [e["reward"] for e in replay_experiences]
+
+                replay_loss = self.compute_grpo_loss(
+                    replay_prompts, replay_responses, replay_rewards
+                )
+                self.optimizer.zero_grad()
+                self.accelerator.backward(replay_loss)
+                self.optimizer.step()
+
         # Update statistics
         self.total_steps += 1
         mean_reward = sum(rewards) / len(rewards)
         self.total_rewards += mean_reward
 
-        return {
+        result = {
             "loss": loss.item(),
             "mean_reward": mean_reward,
             "accuracy": sum(1 for r in rewards if r > 0) / len(rewards),
             "num_samples": len(prompts)
         }
+        if replay_loss is not None:
+            result["replay_loss"] = replay_loss.item()
+        return result
 
     def train(self):
         """Run the full training loop."""
@@ -295,7 +378,15 @@ class RLHFTrainer:
                 mean_epoch_loss = sum(epoch_losses) / len(epoch_losses)
                 print(f"\n=== Epoch {epoch+1} Complete ===")
                 print(f"Mean Reward: {mean_epoch_reward:.4f}")
-                print(f"Mean Loss: {mean_epoch_loss:.4f}\n")
+                print(f"Mean Loss: {mean_epoch_loss:.4f}")
+
+                # Print replay buffer stats
+                buffer_stats = self.get_replay_buffer_stats()
+                if buffer_stats:
+                    print(f"Replay Buffer: {buffer_stats['size']}/{buffer_stats['capacity']} "
+                          f"(avg_reward: {buffer_stats['avg_reward']:.4f}, "
+                          f"positive_ratio: {buffer_stats['positive_ratio']:.2%})")
+                print()
 
         if self.accelerator.is_main_process:
             print("=" * 60)
@@ -313,6 +404,8 @@ def main():
                        help="Rollout server address (host:port)")
     parser.add_argument("--reward-server", type=str, required=True,
                        help="Reward server address (host:port)")
+    parser.add_argument("--replay-buffer", type=str, default=None,
+                       help="Replay buffer address (host:port)")
     parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-0.5B-Instruct",
                        help="Model name or path")
     parser.add_argument("--batch-size", type=int, default=4,
@@ -327,6 +420,7 @@ def main():
         data_server=args.data_server,
         rollout_server=args.rollout_server,
         reward_server=args.reward_server,
+        replay_buffer=args.replay_buffer,
         model_name=args.model,
         batch_size=args.batch_size,
         num_epochs=args.num_epochs,
