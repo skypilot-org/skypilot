@@ -351,6 +351,13 @@ def validate_service_task(task: 'sky.Task', pool: bool) -> None:
                              f'file does not match the pool argument. '
                              f'To fix, add a valid `{field_name}` field.')
 
+    # Validate that pools do not use ordered resources
+    if pool and isinstance(task.resources, list):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Ordered resources are not supported for pools. '
+                'Use `any_of` instead, or specify a single resource.')
+
     policy_description = ('on-demand'
                           if task.service.dynamic_ondemand_fallback else 'spot')
     for resource in list(task.resources):
