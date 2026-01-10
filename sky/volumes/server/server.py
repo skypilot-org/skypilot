@@ -19,13 +19,19 @@ router = fastapi.APIRouter()
 
 
 @router.get('')
-async def volume_list(request: fastapi.Request) -> None:
-    """Gets the volumes."""
+async def volume_list(request: fastapi.Request, refresh: bool = False) -> None:
+    """Gets the volumes.
+
+    Args:
+        refresh: If True, refresh volume state from cloud APIs before returning.
+            If False (default), return cached data from the database.
+    """
     auth_user = request.state.auth_user
     auth_user_env_vars_kwargs = {
         'env_vars': auth_user.to_env_vars()
     } if auth_user else {}
-    request_body = payloads.RequestBody(**auth_user_env_vars_kwargs)
+    request_body = payloads.VolumeListBody(refresh=refresh,
+                                           **auth_user_env_vars_kwargs)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.VOLUME_LIST,
