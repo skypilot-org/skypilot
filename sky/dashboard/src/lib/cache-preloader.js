@@ -3,7 +3,10 @@
 
 import dashboardCache from './cache';
 import { getClusters } from '@/data/connectors/clusters';
-import { getManagedJobsWithClientPagination } from '@/data/connectors/jobs';
+import {
+  getManagedJobs,
+  getManagedJobsWithClientPagination,
+} from '@/data/connectors/jobs';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
 import { getVolumes } from '@/data/connectors/volumes';
@@ -17,9 +20,15 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Base functions used across multiple pages (no arguments)
   base: {
     getClusters: { fn: getClusters, args: [] },
+    // For jobs page - uses client-side pagination wrapper
     getManagedJobs: {
       fn: getManagedJobsWithClientPagination,
       args: [{ allUsers: true }],
+    },
+    // For infra/users/workspaces pages - shared cache entry
+    getManagedJobsForOtherPages: {
+      fn: getManagedJobs,
+      args: [{ allUsers: true, skipFinished: true }],
     },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
@@ -42,17 +51,17 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     jobs: ['getManagedJobs', 'getClusters', 'getWorkspaces', 'getUsers'],
     infra: [
       'getClusters',
-      'getManagedJobs',
+      'getManagedJobsForOtherPages',
       'getCloudInfrastructure',
       'getSSHNodePools',
     ],
     workspaces: [
       'getWorkspaces',
       'getClusters',
-      'getManagedJobs',
+      'getManagedJobsForOtherPages',
       'getEnabledClouds',
     ],
-    users: ['getUsers', 'getClusters', 'getManagedJobs'],
+    users: ['getUsers', 'getClusters', 'getManagedJobsForOtherPages'],
     volumes: ['getVolumes'],
   },
 };

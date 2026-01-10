@@ -20,7 +20,7 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { getUsers } from '@/data/connectors/users';
+import { getUsers, getServiceAccountTokens } from '@/data/connectors/users';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import dashboardCache from '@/lib/cache';
@@ -458,13 +458,32 @@ export function Users() {
     dashboardCache.invalidate(getUsers);
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getManagedJobs, [
-      { allUsers: true, skipFinished: true, fields: ['user_hash', 'status'] },
+      { allUsers: true, skipFinished: true },
     ]);
 
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
   };
+
+  // Effect for keyboard shortcut (Cmd+R / Ctrl+R) to trigger in-page refresh
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      // Check for Cmd+R (Mac) or Ctrl+R (Windows/Linux)
+      if ((event.metaKey || event.ctrlKey) && event.key === 'r') {
+        event.preventDefault(); // Prevent browser refresh
+        event.stopPropagation(); // Stop event from bubbling
+        handleRefresh(); // Trigger our in-page refresh
+      }
+    };
+
+    // Use capture: true to intercept the event before browser handles it
+    document.addEventListener('keydown', handleKeyDown, true);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, []);
 
   const handleCreateUser = async () => {
     if (!newUser.username || !newUser.password) {
@@ -1359,19 +1378,9 @@ function UsersTable({
         try {
           [clustersData, managedJobsResponse] = await Promise.all([
             dashboardCache.get(getClusters),
+            // Use shared cache key (no field filtering) - preloader uses same args
             dashboardCache.get(getManagedJobs, [
-              {
-                allUsers: true,
-                skipFinished: true,
-                fields: [
-                  'user_hash',
-                  'status',
-                  'accelerators',
-                  'job_name',
-                  'job_id',
-                  'infra',
-                ],
-              },
+              { allUsers: true, skipFinished: true },
             ]),
           ]);
         } catch (error) {
@@ -2165,9 +2174,8 @@ function UsersTable({
                 </TableCell>
                 <TableCell>
                   {user.gpuCount === -1 ? (
-                    <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-xs font-medium flex items-center">
-                      <CircularProgress size={10} className="mr-1" />
-                      Loading...
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                      <CircularProgress size={12} />
                     </span>
                   ) : (
                     <span
@@ -2184,9 +2192,8 @@ function UsersTable({
                 </TableCell>
                 <TableCell>
                   {user.clusterCount === -1 ? (
-                    <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-xs font-medium flex items-center">
-                      <CircularProgress size={10} className="mr-1" />
-                      Loading...
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                      <CircularProgress size={12} />
                     </span>
                   ) : (
                     <Link
@@ -2204,9 +2211,8 @@ function UsersTable({
                 </TableCell>
                 <TableCell>
                   {user.jobCount === -1 ? (
-                    <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-xs font-medium flex items-center">
-                      <CircularProgress size={10} className="mr-1" />
-                      Loading...
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                      <CircularProgress size={12} />
                     </span>
                   ) : (
                     <Link
@@ -2340,22 +2346,17 @@ function ServiceAccountTokensView({
   const [tokensWithCounts, setTokensWithCounts] = useState([]);
 
   // Fetch tokens and related data
-  const fetchTokensAndCounts = async () => {
+  const fetchTokensAndCounts = async (forceRefresh = false) => {
     try {
       setLoading(true);
 
-      // Step 1: Fetch service account tokens
-      const tokensResponse = await apiClient.get(
-        '/users/service-account-tokens'
-      );
-      if (!tokensResponse.ok) {
-        console.error('Failed to fetch tokens');
-        setTokens([]);
-        setTokensWithCounts([]);
-        return;
+      // Invalidate cache if force refresh requested (after mutations)
+      if (forceRefresh) {
+        dashboardCache.invalidate(getServiceAccountTokens);
       }
 
-      const tokensData = await tokensResponse.json();
+      // Step 1: Fetch service account tokens (using cache)
+      const tokensData = await dashboardCache.get(getServiceAccountTokens);
       setTokens(tokensData || []);
 
       // Step 2: Fetch clusters and jobs data in parallel
@@ -2364,18 +2365,9 @@ function ServiceAccountTokensView({
       try {
         [clustersResponse, jobsResponse] = await Promise.all([
           dashboardCache.get(getClusters),
+          // Use shared cache key (no field filtering) - preloader uses same args
           dashboardCache.get(getManagedJobs, [
-            {
-              allUsers: true,
-              skipFinished: true,
-              fields: [
-                'user_hash',
-                'status',
-                'accelerators',
-                'job_id',
-                'infra',
-              ],
-            },
+            { allUsers: true, skipFinished: true },
           ]),
         ]);
       } catch (error) {
@@ -2488,7 +2480,7 @@ function ServiceAccountTokensView({
       }
 
       setCreateSuccess('Service account role updated successfully!');
-      await fetchTokensAndCounts(); // Refresh data
+      await fetchTokensAndCounts(true); // Refresh data (force refresh after mutation)
       handleCancelEdit(); // Exit edit mode
     } catch (error) {
       console.error('Failed to update service account role:', error);
@@ -2533,7 +2525,7 @@ function ServiceAccountTokensView({
         const data = await response.json();
         setCreatedTokenInDialog(data.token);
         setNewToken({ token_name: '', expires_in_days: 30 });
-        await fetchTokensAndCounts();
+        await fetchTokensAndCounts(true); // Force refresh after creation
       } else {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to create token');
@@ -2566,7 +2558,7 @@ function ServiceAccountTokensView({
         setShowDeleteDialog(false);
         setTokenToDelete(null);
         setDeleteError(null);
-        await fetchTokensAndCounts();
+        await fetchTokensAndCounts(true); // Force refresh after deletion
       } else {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to delete service account');
@@ -2602,7 +2594,7 @@ function ServiceAccountTokensView({
       if (response.ok) {
         const data = await response.json();
         setRotatedTokenInDialog(data.token);
-        await fetchTokensAndCounts();
+        await fetchTokensAndCounts(true); // Force refresh after rotation
       } else {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to rotate token');

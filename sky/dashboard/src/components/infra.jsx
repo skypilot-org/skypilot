@@ -32,7 +32,10 @@ import {
   getWorkspaceInfrastructure,
   getCloudInfrastructure,
   getContextJobs,
+  getContextClusters,
+  getSlurmInfrastructure,
 } from '@/data/connectors/infra';
+import { runSkyCheck } from '@/data/connectors/workspaces';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { apiClient } from '@/data/connectors/client';
@@ -153,6 +156,7 @@ export function InfrastructureSection({
   contextStats = {},
   jobsData = {},
   isJobsDataLoading = true,
+  isClusterDataLoading = true, // Loading state for cluster data
   isSSH = false, // To differentiate between SSH and Kubernetes
   isSlurm = false, // To differentiate Slurm clusters
   actionButton = null, // Optional action button for the header
@@ -273,12 +277,6 @@ export function InfrastructureSection({
                         jobs: 0,
                       };
 
-                      // Check if contextStats data is available for this context
-                      const hasContextStats =
-                        (Object.keys(contextStats).length > 0 &&
-                          contextStats[contextStatsKey]) ||
-                        isDataLoaded;
-
                       // Check if GPU/Node data is available for this context
                       const hasGpuData =
                         (groupedPerContextGPUs &&
@@ -348,10 +346,10 @@ export function InfrastructureSection({
                             </NonCapitalizedTooltip>
                           </td>
                           <td className="p-3">
-                            {!hasContextStats ? (
-                              <div className="flex items-center justify-center">
+                            {isClusterDataLoading ? (
+                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 <CircularProgress size={12} />
-                              </div>
+                              </span>
                             ) : stats.clusters > 0 ? (
                               <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
                                 {stats.clusters}
@@ -1811,9 +1809,13 @@ export function GPUs() {
   const [editingPool, setEditingPool] = useState(null);
   const [sshLoading, setSshLoading] = useState(false);
 
+  // Slurm loading state (separate from Kubernetes/SSH for parallel loading)
+  const [slurmLoading, setSlurmLoading] = useState(true);
+
   const [sshAndKubeJobsDataLoading, setSshAndKubeJobsDataLoading] =
     useState(true);
   const [sshAndKubeJobsData, setSshAndKubeJobsData] = useState({});
+  const [clusterDataLoading, setClusterDataLoading] = useState(true);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
   // Counter incremented on refresh to force GPU metrics iframes to reload.
@@ -1830,30 +1832,34 @@ export function GPUs() {
         setKubeLoading(true);
         setCloudLoading(true);
         setSshLoading(true);
+        setSlurmLoading(true);
         setSshAndKubeJobsDataLoading(true);
+        setClusterDataLoading(true);
+        // Note: Don't reset kubeDataLoaded/cloudDataLoaded here - that would cause
+        // the entire panel to show a loading spinner. Instead, keep the table visible
+        // and just show inline spinners on the counts via sshAndKubeJobsDataLoading/clusterDataLoading.
       }
 
       try {
-        if (forceRefresh) {
-          try {
-            await apiClient.fetch('/check', {}, 'POST');
-          } catch (error) {
-            console.error('Error during sky check refresh:', error);
-          }
-        }
+        // Run sky check in parallel with data fetches (not blocking)
+        // Sky check refreshes cloud credentials but shouldn't delay data display
+        const skyCheckPromise = forceRefresh
+          ? runSkyCheck().catch((error) => {
+              console.error('Error during sky check refresh:', error);
+            })
+          : Promise.resolve();
 
-        async function fetchKubeAndSshData(forceRefresh) {
-          await fetchKubernetesData(forceRefresh);
-          // Fetch SSH Node Pools after Kubernetes data is loaded
-          // because it relies on it for gpu info.
-          await fetchSSHNodePools(forceRefresh);
-        }
-
-        // Fetch all data in parallel
+        // Fetch all data in parallel (including sky check)
+        // SSH Node Pools are fetched independently - they don't depend on Kubernetes data.
+        // The SSH GPU info comes from getWorkspaceInfrastructure() which handles both K8s and SSH contexts.
         await Promise.all([
-          fetchKubeAndSshData(forceRefresh),
+          skyCheckPromise,
+          fetchKubernetesData(forceRefresh),
+          fetchSSHNodePools(forceRefresh),
           fetchCloudData(forceRefresh),
-          fetchManagedJobsData(forceRefresh),
+          fetchManagedJobsData(),
+          fetchClusterStatsData(),
+          fetchSlurmData(),
         ]);
       } catch (error) {
         console.error('Error in fetchData:', error);
@@ -1869,12 +1875,17 @@ export function GPUs() {
         setAvailableWorkspaces([]);
         setKubeDataLoaded(true);
         setKubeLoading(false);
+        setClusterDataLoading(false);
         setCloudInfraData([]);
         setTotalClouds(0);
         setEnabledClouds(0);
         setCloudDataLoaded(true);
         setSshNodePools({});
         setSshLoading(false);
+        setSlurmLoading(false);
+        setAllSlurmGPUs([]);
+        setPerClusterSlurmGPUs([]);
+        setPerNodeSlurmGPUs([]);
         setSshAndKubeJobsData({});
         setSshAndKubeJobsDataLoading(false);
       } finally {
@@ -1884,7 +1895,9 @@ export function GPUs() {
           setKubeLoading(false);
           setCloudLoading(false);
           setSshLoading(false);
+          setSlurmLoading(false);
           setSshAndKubeJobsDataLoading(false);
+          setClusterDataLoading(false);
         }
 
         // Set isInitialLoad to false only after the first fetch cycle initiated with showLoadingIndicators:true
@@ -1910,9 +1923,7 @@ export function GPUs() {
           allGPUs: fetchedAllGPUs,
           perContextGPUs: fetchedPerContextGPUs,
           perNodeGPUs: fetchedPerNodeGPUs,
-          allSlurmGPUs: fetchedAllSlurmGPUs,
-          perClusterSlurmGPUs: fetchedPerClusterSlurmGPUs,
-          perNodeSlurmGPUs: fetchedPerNodeSlurmGPUs,
+          // Note: Slurm data is now fetched separately via fetchSlurmData
           contextStats: fetchedContextStats,
           contextWorkspaceMap: fetchedContextWorkspaceMap,
           contextErrors: fetchedContextErrors,
@@ -1923,9 +1934,7 @@ export function GPUs() {
         setAllGPUs(fetchedAllGPUs || []);
         setPerContextGPUs(fetchedPerContextGPUs || []);
         setPerNodeGPUs(fetchedPerNodeGPUs || []);
-        setAllSlurmGPUs(fetchedAllSlurmGPUs || []);
-        setPerClusterSlurmGPUs(fetchedPerClusterSlurmGPUs || []);
-        setPerNodeSlurmGPUs(fetchedPerNodeSlurmGPUs || []);
+        // Note: Slurm state is handled by fetchSlurmData
         setContextStats(fetchedContextStats || {});
         setContextWorkspaceMap(fetchedContextWorkspaceMap || {});
         setContextErrors(fetchedContextErrors || {});
@@ -1938,21 +1947,21 @@ export function GPUs() {
 
         setKubeDataLoaded(true);
         setKubeLoading(false);
+        // Note: setClusterDataLoading is handled by fetchClusterStatsData
       } else if (infraData === null) {
         setWorkspaceInfrastructure({});
         setAllKubeContextNames([]);
         setAllGPUs([]);
         setPerContextGPUs([]);
         setPerNodeGPUs([]);
-        setAllSlurmGPUs([]);
-        setPerClusterSlurmGPUs([]);
-        setPerNodeSlurmGPUs([]);
-        setContextStats({});
+        // Note: Slurm state is handled by fetchSlurmData
+        // Note: Don't set contextStats here - handled by fetchClusterStatsData
         setContextWorkspaceMap({});
         setContextErrors({});
         setAvailableWorkspaces([]);
         setKubeDataLoaded(true);
         setKubeLoading(false);
+        // Note: setClusterDataLoading is handled by fetchClusterStatsData
       }
     } catch (error) {
       console.error('Error in fetchKubernetesData:', error);
@@ -1961,29 +1970,25 @@ export function GPUs() {
       setAllGPUs([]);
       setPerContextGPUs([]);
       setPerNodeGPUs([]);
-      setAllSlurmGPUs([]);
-      setPerClusterSlurmGPUs([]);
-      setPerNodeSlurmGPUs([]);
-      setContextStats({});
+      // Note: Slurm state is handled by fetchSlurmData
+      // Note: Don't set contextStats here - handled by fetchClusterStatsData
       setContextWorkspaceMap({});
       setContextErrors({});
       setAvailableWorkspaces([]);
       setKubeDataLoaded(true);
       setKubeLoading(false);
+      // Note: setClusterDataLoading is handled by fetchClusterStatsData
     }
   };
 
-  const fetchManagedJobsData = async (forceRefresh) => {
+  const fetchManagedJobsData = async () => {
     try {
-      const jobsData = forceRefresh
-        ? await getManagedJobs({
-            allUsers: true,
-            skipFinished: true,
-            fields: ['cloud', 'region'],
-          })
-        : await dashboardCache.get(getManagedJobs, [
-            { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
-          ]);
+      // Always use cache - it's already invalidated if refreshing
+      // Jobs data doesn't depend on sky check, so no need to bypass cache
+      // Use shared cache key (no field filtering) - preloader uses same args
+      const jobsData = await dashboardCache.get(getManagedJobs, [
+        { allUsers: true, skipFinished: true },
+      ]);
       const jobs = jobsData?.jobs || [];
       setSshAndKubeJobsData(await getContextJobs(jobs));
       setSshAndKubeJobsDataLoading(false);
@@ -1991,6 +1996,42 @@ export function GPUs() {
       console.error('Error in fetchManagedJobsData:', error);
       setSshAndKubeJobsData({});
       setSshAndKubeJobsDataLoading(false);
+    }
+  };
+
+  // Fetch cluster stats separately for fast loading (similar to jobs)
+  const fetchClusterStatsData = async () => {
+    try {
+      // Get clusters from cache (fast - already cached)
+      const clustersData = await dashboardCache.get(getClusters);
+      const clusters = clustersData || [];
+      // Compute cluster stats per context (fast - local computation)
+      const clusterStats = await getContextClusters(clusters);
+      setContextStats(clusterStats);
+      setClusterDataLoading(false);
+    } catch (error) {
+      console.error('Error in fetchClusterStatsData:', error);
+      setContextStats({});
+      setClusterDataLoading(false);
+    }
+  };
+
+  // Fetch Slurm data separately for parallel loading with Kubernetes/SSH
+  const fetchSlurmData = async () => {
+    try {
+      const slurmData = await dashboardCache.get(getSlurmInfrastructure);
+      if (slurmData) {
+        setAllSlurmGPUs(slurmData.allSlurmGPUs || []);
+        setPerClusterSlurmGPUs(slurmData.perClusterSlurmGPUs || []);
+        setPerNodeSlurmGPUs(slurmData.perNodeSlurmGPUs || []);
+      }
+      setSlurmLoading(false);
+    } catch (error) {
+      console.error('Error in fetchSlurmData:', error);
+      setAllSlurmGPUs([]);
+      setPerClusterSlurmGPUs([]);
+      setPerNodeSlurmGPUs([]);
+      setSlurmLoading(false);
     }
   };
 
@@ -2013,12 +2054,15 @@ export function GPUs() {
         setEnabledClouds(0);
         setCloudDataLoaded(true);
       }
+      // Clear loading state as soon as Cloud data is ready (for inline spinners)
+      setCloudLoading(false);
     } catch (error) {
       console.error('Error in fetchCloudData:', error);
       setCloudInfraData([]);
       setTotalClouds(0);
       setEnabledClouds(0);
       setCloudDataLoaded(true);
+      setCloudLoading(false);
     }
   };
 
@@ -2141,8 +2185,10 @@ export function GPUs() {
       setKubeDataLoaded(false);
       setCloudDataLoaded(false);
       setSshLoading(false);
+      setSlurmLoading(false);
       setIsInitialLoad(true);
       setSshAndKubeJobsDataLoading(false);
+      setClusterDataLoading(false);
     };
   }, []);
 
@@ -2150,11 +2196,12 @@ export function GPUs() {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getClusters);
     dashboardCache.invalidate(getManagedJobs, [
-      { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
+      { allUsers: true, skipFinished: true },
     ]);
     dashboardCache.invalidate(getWorkspaceInfrastructure);
     dashboardCache.invalidate(getCloudInfrastructure, [false]);
     dashboardCache.invalidate(getSSHNodePools);
+    dashboardCache.invalidate(getSlurmInfrastructure);
 
     // Increment GPU metrics refresh trigger to force iframe reload
     setGpuMetricsRefreshTrigger((prev) => prev + 1);
@@ -2529,9 +2576,10 @@ export function GPUs() {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredCloudInfraData.map((cloud) => {
-                    // Check if cloud data is complete
+                    // Check if cloud data is complete - use cloudLoading instead of cloudDataLoaded
+                    // so that inline spinners show during refresh while keeping the table visible
                     const hasCompleteData =
-                      cloudDataLoaded &&
+                      !cloudLoading &&
                       cloud.clusters !== undefined &&
                       cloud.jobs !== undefined;
 
@@ -2542,9 +2590,9 @@ export function GPUs() {
                         </td>
                         <td className="p-3">
                           {!hasCompleteData ? (
-                            <div className="flex items-center justify-center">
-                              <CircularProgress size={16} />
-                            </div>
+                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                              <CircularProgress size={12} />
+                            </span>
                           ) : cloud.clusters > 0 ? (
                             <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
                               {cloud.clusters}
@@ -2557,9 +2605,9 @@ export function GPUs() {
                         </td>
                         <td className="p-3">
                           {!hasCompleteData ? (
-                            <div className="flex items-center justify-center">
-                              <CircularProgress size={16} />
-                            </div>
+                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                              <CircularProgress size={12} />
+                            </span>
                           ) : cloud.jobs > 0 ? (
                             <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
                               {cloud.jobs}
@@ -2596,6 +2644,7 @@ export function GPUs() {
         contextStats={contextStats}
         jobsData={sshAndKubeJobsData}
         isJobsDataLoading={sshAndKubeJobsDataLoading}
+        isClusterDataLoading={clusterDataLoading}
         isSSH={true}
         contextWorkspaceMap={contextWorkspaceMap}
         contextErrors={contextErrors}
@@ -2629,6 +2678,7 @@ export function GPUs() {
         contextStats={contextStats}
         jobsData={sshAndKubeJobsData}
         isJobsDataLoading={sshAndKubeJobsDataLoading}
+        isClusterDataLoading={clusterDataLoading}
         isSSH={false}
         contextWorkspaceMap={contextWorkspaceMap}
         contextErrors={contextErrors}
@@ -2641,8 +2691,8 @@ export function GPUs() {
     return (
       <InfrastructureSection
         title="Slurm"
-        isLoading={kubeLoading}
-        isDataLoaded={kubeDataLoaded}
+        isLoading={slurmLoading}
+        isDataLoaded={!slurmLoading}
         contexts={slurmClusters}
         gpus={allSlurmGPUs}
         groupedPerContextGPUs={groupedPerClusterSlurmGPUs}
@@ -2651,6 +2701,7 @@ export function GPUs() {
         contextStats={contextStats}
         jobsData={sshAndKubeJobsData}
         isJobsDataLoading={sshAndKubeJobsDataLoading}
+        isClusterDataLoading={clusterDataLoading}
         isSSH={false}
         isSlurm={true}
         contextWorkspaceMap={{}}
