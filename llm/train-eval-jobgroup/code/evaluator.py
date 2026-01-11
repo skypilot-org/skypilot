@@ -81,7 +81,9 @@ def get_checkpoint_files(checkpoint_dir):
 
 def load_checkpoint(checkpoint_path, model, device):
     """Load checkpoint and return metadata."""
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path,
+                            map_location=device,
+                            weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     return {
         'epoch': checkpoint['epoch'],
@@ -133,7 +135,8 @@ def main():
     print("Waiting for checkpoints...")
     print("-" * 60)
 
-    while True:
+    no_new_count = 0
+    while no_new_count < 24:  # Exit after ~120 seconds with no new checkpoints
         # Get current checkpoint files
         current_checkpoints = get_checkpoint_files(args.checkpoint_dir)
 
@@ -141,6 +144,8 @@ def main():
         new_checkpoints = current_checkpoints - evaluated_checkpoints
 
         if new_checkpoints:
+            no_new_count = 0  # Reset counter
+
             # Sort by epoch number
             sorted_checkpoints = sorted(
                 new_checkpoints,
@@ -171,24 +176,26 @@ def main():
                     print(f"Error evaluating {checkpoint_path}: {e}")
                     # Don't mark as evaluated, will retry next poll
                     continue
+        else:
+            no_new_count += 1
 
-        # Check if training is complete (look for final epoch or latest.json)
+        # Check if training is complete (look for latest.json)
         latest_path = os.path.join(args.checkpoint_dir, 'latest.json')
-        if os.path.exists(latest_path):
+        if os.path.exists(latest_path) and no_new_count >= 2:
             try:
                 import json
                 with open(latest_path, 'r') as f:
                     latest = json.load(f)
-                # Check if we've evaluated all checkpoints up to and including the latest
-                latest_checkpoint = os.path.join(args.checkpoint_dir,
-                                                 latest['checkpoint'])
-                if latest_checkpoint in evaluated_checkpoints:
-                    # Check if there are no more new checkpoints
-                    time.sleep(args.poll_interval * 2)  # Wait a bit longer
+                # Check if we've evaluated the latest checkpoint
+                latest_ckpt = os.path.join(args.checkpoint_dir,
+                                           latest['checkpoint'])
+                if latest_ckpt in evaluated_checkpoints:
+                    # Wait a bit more to ensure no more checkpoints
+                    time.sleep(args.poll_interval * 2)
                     if get_checkpoint_files(
                             args.checkpoint_dir) == evaluated_checkpoints:
                         break
-            except:
+            except Exception:
                 pass
 
         time.sleep(args.poll_interval)
@@ -204,15 +211,13 @@ def main():
         print(f"{'Epoch':>6} | {'Train Loss':>12} | {'Test Accuracy':>14}")
         print("-" * 60)
         for r in results:
-            print(
-                f"{r['epoch']:>6} | {r['train_loss']:>12.4f} | {r['test_accuracy']:>13.2f}%"
-            )
+            print(f"{r['epoch']:>6} | {r['train_loss']:>12.4f} | "
+                  f"{r['test_accuracy']:>13.2f}%")
         print("-" * 60)
 
         best = max(results, key=lambda x: x['test_accuracy'])
-        print(
-            f"\nBest: Epoch {best['epoch']} with {best['test_accuracy']:.2f}% accuracy"
-        )
+        print(f"\nBest: Epoch {best['epoch']} with "
+              f"{best['test_accuracy']:.2f}% accuracy")
 
     print("=" * 60)
 

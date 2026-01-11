@@ -43,7 +43,7 @@ file_mounts:
   /code: llm/rlhf-jobgroup/code
 
 setup: |
-  pip install fastapi uvicorn datasets
+  uv pip install fastapi uvicorn datasets --system
 
 run: |
   echo "Starting data server..."
@@ -70,7 +70,7 @@ envs:
 setup: |
   # Install system dependencies (libnuma is required by SGLang kernel)
   sudo apt-get update && sudo apt-get install -y libnuma-dev
-  pip install "sglang[all]" sglang-router
+  uv pip install "sglang[all]" sglang-router --system
 
 run: |
   echo "Starting rollout server with SGLang..."
@@ -127,7 +127,7 @@ file_mounts:
   /code: llm/rlhf-jobgroup/code
 
 setup: |
-  pip install fastapi uvicorn
+  uv pip install fastapi uvicorn --system
 
 run: |
   echo "Starting reward server..."
@@ -149,7 +149,7 @@ file_mounts:
   /code: llm/rlhf-jobgroup/code
 
 setup: |
-  pip install fastapi uvicorn
+  uv pip install fastapi uvicorn --system
 
 run: |
   echo "Starting replay buffer server..."
@@ -177,7 +177,7 @@ file_mounts:
   /code: llm/rlhf-jobgroup/code
 
 setup: |
-  pip install torch transformers accelerate httpx
+  uv pip install torch transformers accelerate httpx --system
 
 run: |
   echo "Starting GRPO trainer..."
