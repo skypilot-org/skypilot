@@ -1011,7 +1011,8 @@ def stream_logs_by_id(job_id: int,
                     if matches_task_filter(t[0], t[1], task)
                 ]
                 if not task_info:
-                    valid_range = f'0-{total_tasks - 1}' if total_tasks > 1 else '0'
+                    valid_range = (f'0-{total_tasks - 1}'
+                                   if total_tasks > 1 else '0')
                     return (f'No task found matching {task!r} in job {job_id}. '
                             f'Valid task IDs are {valid_range}.',
                             exceptions.JobExitCode.NOT_FOUND)

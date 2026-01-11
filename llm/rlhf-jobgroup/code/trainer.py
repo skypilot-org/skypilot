@@ -21,16 +21,17 @@ Usage:
 """
 
 import argparse
+from dataclasses import dataclass
 import os
 import time
-from dataclasses import dataclass
 from typing import List, Optional
 
+from accelerate import Accelerator
 import httpx
 import torch
 from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from accelerate import Accelerator
+from transformers import AutoModelForCausalLM
+from transformers import AutoTokenizer
 
 
 @dataclass
@@ -71,27 +72,23 @@ class RLHFTrainer:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
         self.model = AutoModelForCausalLM.from_pretrained(
-            config.model_name,
-            torch_dtype=torch.bfloat16,
-            device_map="auto"
-        )
+            config.model_name, torch_dtype=torch.bfloat16, device_map="auto")
 
         # Optimizer
-        self.optimizer = torch.optim.AdamW(
-            self.model.parameters(),
-            lr=config.learning_rate
-        )
+        self.optimizer = torch.optim.AdamW(self.model.parameters(),
+                                           lr=config.learning_rate)
 
         # Prepare with accelerator
         self.model, self.optimizer = self.accelerator.prepare(
-            self.model, self.optimizer
-        )
+            self.model, self.optimizer)
 
         # Statistics
         self.total_steps = 0
         self.total_rewards = 0.0
 
-    def wait_for_services(self, max_retries: int = 30, retry_interval: int = 10):
+    def wait_for_services(self,
+                          max_retries: int = 30,
+                          retry_interval: int = 10):
         """Wait for all services to be available."""
         services = [
             ("data-server", f"http://{self.config.data_server}/health"),
@@ -99,7 +96,8 @@ class RLHFTrainer:
             ("reward-server", f"http://{self.config.reward_server}/health"),
         ]
         if self.config.replay_buffer:
-            services.append(("replay-buffer", f"http://{self.config.replay_buffer}/health"))
+            services.append(
+                ("replay-buffer", f"http://{self.config.replay_buffer}/health"))
 
         for name, url in services:
             if self.accelerator.is_main_process:
@@ -118,7 +116,8 @@ class RLHFTrainer:
                 if attempt < max_retries - 1:
                     time.sleep(retry_interval)
             else:
-                raise RuntimeError(f"Service {name} not available after {max_retries} retries")
+                raise RuntimeError(
+                    f"Service {name} not available after {max_retries} retries")
 
     def fetch_prompts(self, batch_size: int) -> List[dict]:
         """Fetch a batch of prompts from data server."""
@@ -154,14 +153,15 @@ class RLHFTrainer:
         return responses
 
     def compute_rewards(self, prompts: List[str], responses: List[str],
-                       ground_truths: List[str]) -> List[float]:
+                        ground_truths: List[str]) -> List[float]:
         """Compute rewards using the reward server."""
         url = f"http://{self.config.reward_server}/batch_reward"
 
-        items = [
-            {"prompt": p, "response": r, "ground_truth": gt}
-            for p, r, gt in zip(prompts, responses, ground_truths)
-        ]
+        items = [{
+            "prompt": p,
+            "response": r,
+            "ground_truth": gt
+        } for p, r, gt in zip(prompts, responses, ground_truths)]
 
         response = self.http_client.post(url, json={"items": items})
         response.raise_for_status()
@@ -170,39 +170,39 @@ class RLHFTrainer:
         return [r["reward"] for r in data["rewards"]]
 
     def store_experiences(self, prompts: List[str], responses: List[str],
-                         rewards: List[float], ground_truths: List[str]):
+                          rewards: List[float], ground_truths: List[str]):
         """Store experiences in the replay buffer."""
         if not self.config.replay_buffer:
             return
 
         url = f"http://{self.config.replay_buffer}/add"
-        experiences = [
-            {
-                "prompt": p,
-                "response": r,
-                "reward": rw,
-                "ground_truth": gt
-            }
-            for p, r, rw, gt in zip(prompts, responses, rewards, ground_truths)
-        ]
+        experiences = [{
+            "prompt": p,
+            "response": r,
+            "reward": rw,
+            "ground_truth": gt
+        } for p, r, rw, gt in zip(prompts, responses, rewards, ground_truths)]
 
         try:
-            response = self.http_client.post(url, json={"experiences": experiences})
+            response = self.http_client.post(url,
+                                             json={"experiences": experiences})
             response.raise_for_status()
         except Exception as e:
             print(f"Warning: Failed to store experiences in replay buffer: {e}")
 
-    def sample_from_replay_buffer(self, batch_size: int) -> Optional[List[dict]]:
+    def sample_from_replay_buffer(self,
+                                  batch_size: int) -> Optional[List[dict]]:
         """Sample experiences from the replay buffer."""
         if not self.config.replay_buffer:
             return None
 
         url = f"http://{self.config.replay_buffer}/sample"
         try:
-            response = self.http_client.post(
-                url,
-                json={"batch_size": batch_size, "prioritized": True}
-            )
+            response = self.http_client.post(url,
+                                             json={
+                                                 "batch_size": batch_size,
+                                                 "prioritized": True
+                                             })
             response.raise_for_status()
             data = response.json()
             if data["experiences"]:
@@ -225,7 +225,7 @@ class RLHFTrainer:
             return None
 
     def compute_grpo_loss(self, prompts: List[str], responses: List[str],
-                         rewards: List[float]) -> torch.Tensor:
+                          rewards: List[float]) -> torch.Tensor:
         """Compute GRPO loss for policy update.
 
         GRPO uses group-relative advantages: for each prompt, we compare
@@ -234,22 +234,18 @@ class RLHFTrainer:
         """
         # Tokenize prompts and responses together
         full_texts = [p + r for p, r in zip(prompts, responses)]
-        encodings = self.tokenizer(
-            full_texts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=1024
-        ).to(self.accelerator.device)
+        encodings = self.tokenizer(full_texts,
+                                   return_tensors="pt",
+                                   padding=True,
+                                   truncation=True,
+                                   max_length=1024).to(self.accelerator.device)
 
         # Get prompt lengths for masking
-        prompt_encodings = self.tokenizer(
-            prompts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=512
-        )
+        prompt_encodings = self.tokenizer(prompts,
+                                          return_tensors="pt",
+                                          padding=True,
+                                          truncation=True,
+                                          max_length=512)
         prompt_lengths = prompt_encodings.attention_mask.sum(dim=1)
 
         # Forward pass
@@ -259,19 +255,22 @@ class RLHFTrainer:
         logits = outputs.logits[:, :-1, :]
         labels = encodings.input_ids[:, 1:]
         log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
-        token_log_probs = torch.gather(log_probs, 2, labels.unsqueeze(-1)).squeeze(-1)
+        token_log_probs = torch.gather(log_probs, 2,
+                                       labels.unsqueeze(-1)).squeeze(-1)
 
         # Mask out prompt tokens (only count response tokens)
         response_mask = torch.zeros_like(token_log_probs)
         for i, plen in enumerate(prompt_lengths):
-            response_mask[i, plen-1:] = 1.0
+            response_mask[i, plen - 1:] = 1.0
         response_mask = response_mask * encodings.attention_mask[:, 1:]
 
         # Sum log probs for each response
         response_log_probs = (token_log_probs * response_mask).sum(dim=1)
 
         # Convert rewards to tensor and compute advantages
-        rewards_tensor = torch.tensor(rewards, device=self.accelerator.device, dtype=torch.float32)
+        rewards_tensor = torch.tensor(rewards,
+                                      device=self.accelerator.device,
+                                      dtype=torch.float32)
 
         # GRPO: normalize rewards within batch (group-relative)
         mean_reward = rewards_tensor.mean()
@@ -311,15 +310,16 @@ class RLHFTrainer:
         # 6. Optionally do additional update with replay buffer samples
         replay_loss = None
         if self.config.use_replay_buffer and self.config.replay_buffer:
-            replay_experiences = self.sample_from_replay_buffer(self.config.batch_size)
+            replay_experiences = self.sample_from_replay_buffer(
+                self.config.batch_size)
             if replay_experiences and len(replay_experiences) >= 2:
                 replay_prompts = [e["prompt"] for e in replay_experiences]
                 replay_responses = [e["response"] for e in replay_experiences]
                 replay_rewards = [e["reward"] for e in replay_experiences]
 
-                replay_loss = self.compute_grpo_loss(
-                    replay_prompts, replay_responses, replay_rewards
-                )
+                replay_loss = self.compute_grpo_loss(replay_prompts,
+                                                     replay_responses,
+                                                     replay_rewards)
                 self.optimizer.zero_grad()
                 self.accelerator.backward(replay_loss)
                 self.optimizer.step()
@@ -383,37 +383,56 @@ class RLHFTrainer:
                 # Print replay buffer stats
                 buffer_stats = self.get_replay_buffer_stats()
                 if buffer_stats:
-                    print(f"Replay Buffer: {buffer_stats['size']}/{buffer_stats['capacity']} "
-                          f"(avg_reward: {buffer_stats['avg_reward']:.4f}, "
-                          f"positive_ratio: {buffer_stats['positive_ratio']:.2%})")
+                    print(
+                        f"Replay Buffer: {buffer_stats['size']}/{buffer_stats['capacity']} "
+                        f"(avg_reward: {buffer_stats['avg_reward']:.4f}, "
+                        f"positive_ratio: {buffer_stats['positive_ratio']:.2%})"
+                    )
                 print()
 
         if self.accelerator.is_main_process:
             print("=" * 60)
             print("Training Complete!")
             print(f"Total steps: {self.total_steps}")
-            print(f"Average reward: {self.total_rewards / self.total_steps:.4f}")
+            print(
+                f"Average reward: {self.total_rewards / self.total_steps:.4f}")
             print("=" * 60)
 
 
 def main():
     parser = argparse.ArgumentParser(description="GRPO Trainer for RLHF")
-    parser.add_argument("--data-server", type=str, required=True,
-                       help="Data server address (host:port)")
-    parser.add_argument("--rollout-server", type=str, required=True,
-                       help="Rollout server address (host:port)")
-    parser.add_argument("--reward-server", type=str, required=True,
-                       help="Reward server address (host:port)")
-    parser.add_argument("--replay-buffer", type=str, default=None,
-                       help="Replay buffer address (host:port)")
-    parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-0.5B-Instruct",
-                       help="Model name or path")
-    parser.add_argument("--batch-size", type=int, default=4,
-                       help="Training batch size")
-    parser.add_argument("--num-epochs", type=int, default=3,
-                       help="Number of training epochs")
-    parser.add_argument("--learning-rate", type=float, default=1e-6,
-                       help="Learning rate")
+    parser.add_argument("--data-server",
+                        type=str,
+                        required=True,
+                        help="Data server address (host:port)")
+    parser.add_argument("--rollout-server",
+                        type=str,
+                        required=True,
+                        help="Rollout server address (host:port)")
+    parser.add_argument("--reward-server",
+                        type=str,
+                        required=True,
+                        help="Reward server address (host:port)")
+    parser.add_argument("--replay-buffer",
+                        type=str,
+                        default=None,
+                        help="Replay buffer address (host:port)")
+    parser.add_argument("--model",
+                        type=str,
+                        default="Qwen/Qwen2.5-0.5B-Instruct",
+                        help="Model name or path")
+    parser.add_argument("--batch-size",
+                        type=int,
+                        default=4,
+                        help="Training batch size")
+    parser.add_argument("--num-epochs",
+                        type=int,
+                        default=3,
+                        help="Number of training epochs")
+    parser.add_argument("--learning-rate",
+                        type=float,
+                        default=1e-6,
+                        help="Learning rate")
     args = parser.parse_args()
 
     config = TrainingConfig(

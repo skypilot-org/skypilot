@@ -973,9 +973,9 @@ class JobController:
                     callback_func=callback_func)
 
                 try:
-                    await context_utils.to_thread(
-                        self._download_log_and_stream, task_id, handle,
-                        job_id_on_cluster)
+                    await context_utils.to_thread(self._download_log_and_stream,
+                                                  task_id, handle,
+                                                  job_id_on_cluster)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.warning(f'Failed to download logs: {e}')
 
@@ -1006,9 +1006,9 @@ class JobController:
                     callback_func=callback_func)
 
                 try:
-                    await context_utils.to_thread(
-                        self._download_log_and_stream, task_id, handle,
-                        job_id_on_cluster)
+                    await context_utils.to_thread(self._download_log_and_stream,
+                                                  task_id, handle,
+                                                  job_id_on_cluster)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.warning(f'Failed to download logs: {e}')
 

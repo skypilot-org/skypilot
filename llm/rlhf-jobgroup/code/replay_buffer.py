@@ -18,14 +18,16 @@ API Endpoints:
 """
 
 import argparse
+from collections import deque
+from dataclasses import dataclass
+from dataclasses import field
 import random
 import threading
 import time
-from collections import deque
-from dataclasses import dataclass, field
 from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
+from fastapi import HTTPException
 from pydantic import BaseModel
 import uvicorn
 
@@ -70,7 +72,9 @@ class ReplayBuffer:
                 self.total_added += 1
         return len(experiences)
 
-    def sample(self, batch_size: int, prioritized: bool = False) -> List[Experience]:
+    def sample(self,
+               batch_size: int,
+               prioritized: bool = False) -> List[Experience]:
         """Sample a batch of experiences."""
         with self.lock:
             if len(self.buffer) == 0:
@@ -84,13 +88,12 @@ class ReplayBuffer:
                 total_priority = sum(priorities)
                 if total_priority > 0:
                     probs = [p / total_priority for p in priorities]
-                    indices = random.choices(
-                        range(len(self.buffer)),
-                        weights=probs,
-                        k=actual_size
-                    )
+                    indices = random.choices(range(len(self.buffer)),
+                                             weights=probs,
+                                             k=actual_size)
                 else:
-                    indices = random.sample(range(len(self.buffer)), actual_size)
+                    indices = random.sample(range(len(self.buffer)),
+                                            actual_size)
             else:
                 # Uniform random sampling
                 indices = random.sample(range(len(self.buffer)), actual_size)
@@ -116,15 +119,14 @@ class ReplayBuffer:
                 "avg_reward": sum(rewards) / len(rewards) if rewards else 0,
                 "min_reward": min(rewards) if rewards else 0,
                 "max_reward": max(rewards) if rewards else 0,
-                "positive_ratio": sum(1 for r in rewards if r > 0) / len(rewards) if rewards else 0,
+                "positive_ratio": sum(1 for r in rewards if r > 0) /
+                                  len(rewards) if rewards else 0,
             }
 
 
 # Initialize FastAPI app
-app = FastAPI(
-    title="Replay Buffer Server",
-    description="Experience replay buffer for RLHF training"
-)
+app = FastAPI(title="Replay Buffer Server",
+              description="Experience replay buffer for RLHF training")
 
 # Global buffer instance
 buffer: Optional[ReplayBuffer] = None
@@ -141,7 +143,10 @@ async def startup():
 @app.get("/health")
 async def health():
     """Health check endpoint."""
-    return {"status": "healthy", "buffer_size": len(buffer.buffer) if buffer else 0}
+    return {
+        "status": "healthy",
+        "buffer_size": len(buffer.buffer) if buffer else 0
+    }
 
 
 @app.post("/add")
@@ -164,16 +169,14 @@ async def add_experiences(request: AddExperienceRequest):
             response=exp_dict.get("response", ""),
             reward=exp_dict.get("reward", 0.0),
             ground_truth=exp_dict.get("ground_truth"),
-            priority=abs(exp_dict.get("reward", 0.0)) + 0.1  # Higher reward = higher priority
+            priority=abs(exp_dict.get("reward", 0.0)) +
+            0.1  # Higher reward = higher priority
         )
         experiences.append(exp)
 
     added = buffer.add(experiences)
 
-    return {
-        "added": added,
-        "buffer_size": len(buffer.buffer)
-    }
+    return {"added": added, "buffer_size": len(buffer.buffer)}
 
 
 @app.post("/sample")
@@ -193,16 +196,13 @@ async def sample_experiences(request: SampleRequest):
     samples = buffer.sample(request.batch_size, request.prioritized)
 
     return {
-        "experiences": [
-            {
-                "prompt": exp.prompt,
-                "response": exp.response,
-                "reward": exp.reward,
-                "ground_truth": exp.ground_truth,
-                "timestamp": exp.timestamp
-            }
-            for exp in samples
-        ],
+        "experiences": [{
+            "prompt": exp.prompt,
+            "response": exp.response,
+            "reward": exp.reward,
+            "ground_truth": exp.ground_truth,
+            "timestamp": exp.timestamp
+        } for exp in samples],
         "sampled": len(samples),
         "buffer_size": len(buffer.buffer)
     }
@@ -230,8 +230,14 @@ async def clear_buffer():
 def main():
     parser = argparse.ArgumentParser(description="Replay Buffer Server")
     parser.add_argument("--port", type=int, default=8003, help="Port to run on")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind to")
-    parser.add_argument("--capacity", type=int, default=10000, help="Buffer capacity")
+    parser.add_argument("--host",
+                        type=str,
+                        default="0.0.0.0",
+                        help="Host to bind to")
+    parser.add_argument("--capacity",
+                        type=int,
+                        default=10000,
+                        help="Buffer capacity")
     args = parser.parse_args()
 
     # Update global capacity

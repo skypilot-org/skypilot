@@ -12,11 +12,13 @@ import argparse
 import random
 from typing import List, Optional
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI
+from fastapi import Query
 from pydantic import BaseModel
 import uvicorn
 
-app = FastAPI(title="RLHF Data Server", description="Serves math prompts for training")
+app = FastAPI(title="RLHF Data Server",
+              description="Serves math prompts for training")
 
 # Global state
 prompts_data: List[dict] = []
@@ -77,11 +79,31 @@ Solution:"""
         print(f"Error loading dataset: {e}")
         # Fallback to simple math problems for testing
         prompts_data = [
-            {"id": 0, "prompt": "What is 2 + 2?", "ground_truth": "4"},
-            {"id": 1, "prompt": "What is 10 * 5?", "ground_truth": "50"},
-            {"id": 2, "prompt": "What is 100 / 4?", "ground_truth": "25"},
-            {"id": 3, "prompt": "What is 7 + 8?", "ground_truth": "15"},
-            {"id": 4, "prompt": "What is 9 * 9?", "ground_truth": "81"},
+            {
+                "id": 0,
+                "prompt": "What is 2 + 2?",
+                "ground_truth": "4"
+            },
+            {
+                "id": 1,
+                "prompt": "What is 10 * 5?",
+                "ground_truth": "50"
+            },
+            {
+                "id": 2,
+                "prompt": "What is 100 / 4?",
+                "ground_truth": "25"
+            },
+            {
+                "id": 3,
+                "prompt": "What is 7 + 8?",
+                "ground_truth": "15"
+            },
+            {
+                "id": 4,
+                "prompt": "What is 9 * 9?",
+                "ground_truth": "81"
+            },
         ]
         print(f"Using {len(prompts_data)} fallback prompts")
 
@@ -100,9 +122,12 @@ async def health():
 
 @app.get("/prompts", response_model=PromptBatch)
 async def get_prompts(
-    batch_size: int = Query(default=8, ge=1, le=256, description="Number of prompts to return"),
-    shuffle: bool = Query(default=True, description="Whether to shuffle prompts")
-):
+        batch_size: int = Query(default=8,
+                                ge=1,
+                                le=256,
+                                description="Number of prompts to return"),
+        shuffle: bool = Query(default=True,
+                              description="Whether to shuffle prompts")):
     """Get a batch of prompts for training."""
     global current_index
 
@@ -142,8 +167,14 @@ async def reset_index():
 
 def main():
     parser = argparse.ArgumentParser(description="RLHF Data Server")
-    parser.add_argument("--port", type=int, default=8000, help="Port to run server on")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--port",
+                        type=int,
+                        default=8000,
+                        help="Port to run server on")
+    parser.add_argument("--host",
+                        type=str,
+                        default="0.0.0.0",
+                        help="Host to bind to")
     args = parser.parse_args()
 
     print(f"Starting data server on {args.host}:{args.port}")

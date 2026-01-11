@@ -24,7 +24,12 @@ def get_model():
     """Create a ResNet-18 model for CIFAR-10."""
     model = torchvision.models.resnet18(weights=None)
     # Modify for CIFAR-10 (32x32 images, 10 classes)
-    model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+    model.conv1 = nn.Conv2d(3,
+                            64,
+                            kernel_size=3,
+                            stride=1,
+                            padding=1,
+                            bias=False)
     model.maxpool = nn.Identity()
     model.fc = nn.Linear(model.fc.in_features, 10)
     return model
@@ -34,12 +39,18 @@ def get_test_dataloader(batch_size=128):
     """Create test dataloader for CIFAR-10."""
     transform_test = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        transforms.Normalize((0.4914, 0.4822, 0.4465),
+                             (0.2023, 0.1994, 0.2010)),
     ])
 
-    testset = torchvision.datasets.CIFAR10(
-        root='./data', train=False, download=True, transform=transform_test)
-    testloader = DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=2)
+    testset = torchvision.datasets.CIFAR10(root='./data',
+                                           train=False,
+                                           download=True,
+                                           transform=transform_test)
+    testloader = DataLoader(testset,
+                            batch_size=batch_size,
+                            shuffle=False,
+                            num_workers=2)
 
     return testloader
 
@@ -80,12 +91,19 @@ def load_checkpoint(checkpoint_path, model, device):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Evaluate checkpoints as they appear')
-    parser.add_argument('--checkpoint-dir', type=str, required=True,
+    parser = argparse.ArgumentParser(
+        description='Evaluate checkpoints as they appear')
+    parser.add_argument('--checkpoint-dir',
+                        type=str,
+                        required=True,
                         help='Directory to watch for checkpoints')
-    parser.add_argument('--poll-interval', type=int, default=5,
+    parser.add_argument('--poll-interval',
+                        type=int,
+                        default=5,
                         help='Seconds between polling for new checkpoints')
-    parser.add_argument('--batch-size', type=int, default=128,
+    parser.add_argument('--batch-size',
+                        type=int,
+                        default=128,
                         help='Evaluation batch size')
     args = parser.parse_args()
 
@@ -124,8 +142,10 @@ def main():
 
         if new_checkpoints:
             # Sort by epoch number
-            sorted_checkpoints = sorted(new_checkpoints,
-                key=lambda x: int(os.path.basename(x).split('_')[-1].replace('.pt', '')))
+            sorted_checkpoints = sorted(
+                new_checkpoints,
+                key=lambda x: int(
+                    os.path.basename(x).split('_')[-1].replace('.pt', '')))
 
             for checkpoint_path in sorted_checkpoints:
                 try:
@@ -160,11 +180,13 @@ def main():
                 with open(latest_path, 'r') as f:
                     latest = json.load(f)
                 # Check if we've evaluated all checkpoints up to and including the latest
-                latest_checkpoint = os.path.join(args.checkpoint_dir, latest['checkpoint'])
+                latest_checkpoint = os.path.join(args.checkpoint_dir,
+                                                 latest['checkpoint'])
                 if latest_checkpoint in evaluated_checkpoints:
                     # Check if there are no more new checkpoints
                     time.sleep(args.poll_interval * 2)  # Wait a bit longer
-                    if get_checkpoint_files(args.checkpoint_dir) == evaluated_checkpoints:
+                    if get_checkpoint_files(
+                            args.checkpoint_dir) == evaluated_checkpoints:
                         break
             except:
                 pass
@@ -182,11 +204,15 @@ def main():
         print(f"{'Epoch':>6} | {'Train Loss':>12} | {'Test Accuracy':>14}")
         print("-" * 60)
         for r in results:
-            print(f"{r['epoch']:>6} | {r['train_loss']:>12.4f} | {r['test_accuracy']:>13.2f}%")
+            print(
+                f"{r['epoch']:>6} | {r['train_loss']:>12.4f} | {r['test_accuracy']:>13.2f}%"
+            )
         print("-" * 60)
 
         best = max(results, key=lambda x: x['test_accuracy'])
-        print(f"\nBest: Epoch {best['epoch']} with {best['test_accuracy']:.2f}% accuracy")
+        print(
+            f"\nBest: Epoch {best['epoch']} with {best['test_accuracy']:.2f}% accuracy"
+        )
 
     print("=" * 60)
 

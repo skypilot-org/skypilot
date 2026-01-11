@@ -16,7 +16,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import uvicorn
 
-app = FastAPI(title="RLHF Reward Server", description="Computes rewards for math responses")
+app = FastAPI(title="RLHF Reward Server",
+              description="Computes rewards for math responses")
 
 
 class RewardRequest(BaseModel):
@@ -63,12 +64,15 @@ def extract_answer(response: str) -> Optional[str]:
         return match.group(1).replace(',', '')
 
     # Pattern 2: "The answer is <answer>"
-    match = re.search(r'[Tt]he\s+(?:final\s+)?answer\s+is[:\s]*([+-]?\d+(?:,\d{3})*(?:\.\d+)?)', response)
+    match = re.search(
+        r'[Tt]he\s+(?:final\s+)?answer\s+is[:\s]*([+-]?\d+(?:,\d{3})*(?:\.\d+)?)',
+        response)
     if match:
         return match.group(1).replace(',', '')
 
     # Pattern 3: "= <answer>" at the end of a line
-    match = re.search(r'=\s*([+-]?\d+(?:,\d{3})*(?:\.\d+)?)\s*$', response, re.MULTILINE)
+    match = re.search(r'=\s*([+-]?\d+(?:,\d{3})*(?:\.\d+)?)\s*$', response,
+                      re.MULTILINE)
     if match:
         return match.group(1).replace(',', '')
 
@@ -97,7 +101,8 @@ def normalize_answer(answer: str) -> str:
         return answer
 
 
-def compute_reward(prompt: str, response: str, ground_truth: str) -> RewardResponse:
+def compute_reward(prompt: str, response: str,
+                   ground_truth: str) -> RewardResponse:
     """Compute reward by comparing extracted answer to ground truth."""
     extracted = extract_answer(response)
     normalized_extracted = normalize_answer(extracted)
@@ -109,12 +114,10 @@ def compute_reward(prompt: str, response: str, ground_truth: str) -> RewardRespo
     # Binary reward: 1.0 for correct, 0.0 for incorrect
     reward = 1.0 if correct else 0.0
 
-    return RewardResponse(
-        reward=reward,
-        extracted_answer=extracted,
-        ground_truth=ground_truth,
-        correct=correct
-    )
+    return RewardResponse(reward=reward,
+                          extracted_answer=extracted,
+                          ground_truth=ground_truth,
+                          correct=correct)
 
 
 @app.get("/health")
@@ -126,14 +129,17 @@ async def health():
 @app.post("/reward", response_model=RewardResponse)
 async def get_reward(request: RewardRequest):
     """Compute reward for a single response."""
-    return compute_reward(request.prompt, request.response, request.ground_truth)
+    return compute_reward(request.prompt, request.response,
+                          request.ground_truth)
 
 
 @app.post("/batch_reward", response_model=BatchRewardResponse)
 async def get_batch_reward(request: BatchRewardRequest):
     """Compute rewards for a batch of responses."""
-    rewards = [compute_reward(item.prompt, item.response, item.ground_truth)
-               for item in request.items]
+    rewards = [
+        compute_reward(item.prompt, item.response, item.ground_truth)
+        for item in request.items
+    ]
 
     total_reward = sum(r.reward for r in rewards)
     correct_count = sum(1 for r in rewards if r.correct)
@@ -141,14 +147,19 @@ async def get_batch_reward(request: BatchRewardRequest):
     return BatchRewardResponse(
         rewards=rewards,
         mean_reward=total_reward / len(rewards) if rewards else 0.0,
-        accuracy=correct_count / len(rewards) if rewards else 0.0
-    )
+        accuracy=correct_count / len(rewards) if rewards else 0.0)
 
 
 def main():
     parser = argparse.ArgumentParser(description="RLHF Reward Server")
-    parser.add_argument("--port", type=int, default=8002, help="Port to run server on")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--port",
+                        type=int,
+                        default=8002,
+                        help="Port to run server on")
+    parser.add_argument("--host",
+                        type=str,
+                        default="0.0.0.0",
+                        help="Host to bind to")
     args = parser.parse_args()
 
     print(f"Starting reward server on {args.host}:{args.port}")

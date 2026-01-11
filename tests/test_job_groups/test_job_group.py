@@ -271,9 +271,7 @@ class TestOptimizerSelectBestInfra:
         mock_res.get_cost = mock.MagicMock(return_value=cost)
         return mock_res
 
-    def _create_mock_task(self,
-                          name: str,
-                          num_nodes: int = 1) -> task_lib.Task:
+    def _create_mock_task(self, name: str, num_nodes: int = 1) -> task_lib.Task:
         """Create a mock task object."""
         mock_task = mock.MagicMock(spec=task_lib.Task)
         mock_task.name = name
@@ -389,12 +387,7 @@ class TestOptimizerSelectBestInfra:
         res_aws = self._create_mock_resources('us-east-1', cost=10.0)
         res_gcp = self._create_mock_resources('us-central1', cost=5.0)
 
-        task_candidates = {
-            task1: {
-                cloud_aws: [res_aws],
-                cloud_gcp: [res_gcp]
-            }
-        }
+        task_candidates = {task1: {cloud_aws: [res_aws], cloud_gcp: [res_gcp]}}
 
         common_infras = [(cloud_aws, 'us-east-1'), (cloud_gcp, 'us-central1')]
 
@@ -455,6 +448,7 @@ class TestControllerAsyncPatterns:
         """
         import ast
         import inspect
+
         from sky.jobs import controller
 
         # Get the source code of JobController
@@ -488,8 +482,9 @@ class TestDocstringQuality:
 
     def test_no_typos_in_controller_docstrings(self):
         """Verify common typos are not present in controller module."""
-        from sky.jobs import controller
         import inspect
+
+        from sky.jobs import controller
 
         source = inspect.getsource(controller)
 
