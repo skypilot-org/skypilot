@@ -308,6 +308,21 @@ def launch(
     # This pre-determines cloud+region for SAME_INFRA, enabling parallel launch
     if dag.is_job_group():
         dag = optimizer_lib.Optimizer.optimize_job_group(dag)
+        # Apply optimized cloud/region to task resources so they persist
+        # through serialization. Without this, each task would be re-optimized
+        # independently on the controller, potentially ending up on different
+        # infras even with SAME_INFRA placement.
+        for task_ in dag.tasks:
+            if task_.best_resources is not None:
+                best_cloud = task_.best_resources.cloud
+                best_region = task_.best_resources.region
+                if best_cloud is not None or best_region is not None:
+                    override_params: Dict[str, Any] = {}
+                    if best_cloud is not None:
+                        override_params['cloud'] = best_cloud
+                    if best_region is not None:
+                        override_params['region'] = best_region
+                    task_.set_resources_override(override_params)
 
     # If there is a local postgres db, when the api server tries launching on
     # the remote jobs controller it will fail. therefore, we should remove this

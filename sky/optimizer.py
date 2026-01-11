@@ -1111,13 +1111,14 @@ class Optimizer:
         tasks = dag.tasks
 
         # Step 1: Get feasible resources for each task
-        task_candidates: Dict[task_lib.Task, _PerCloudCandidates] = {}
+        # Use launchable_resources (with regions) instead of cloud_candidates
+        # (without regions) to ensure proper region constraints.
+        task_launchables: Dict[task_lib.Task, _PerCloudCandidates] = {}
 
         for task in tasks:
             # Get launchable resources for this task
-            launchable_resources, cloud_candidates, _, _ = (
-                _fill_in_launchable_resources(
-                    task, blocked_resources=blocked_resources, quiet=quiet))
+            launchable_resources, _, _, _ = (_fill_in_launchable_resources(
+                task, blocked_resources=blocked_resources, quiet=quiet))
 
             if not any(launchable_resources.values()):
                 with ux_utils.print_exception_no_traceback():
@@ -1125,10 +1126,17 @@ class Optimizer:
                         f'No resources available for job "{task.name}" '
                         f'in JobGroup "{dag.name}"')
 
-            task_candidates[task] = cloud_candidates
+            # Build cloud -> launchable resources mapping (with regions)
+            cloud_launchables: _PerCloudCandidates = collections.defaultdict(
+                list)
+            for launchable_list in launchable_resources.values():
+                for res in launchable_list:
+                    if res.cloud is not None:
+                        cloud_launchables[res.cloud].append(res)
+            task_launchables[task] = cloud_launchables
 
         # Step 2: Find common cloud+region combinations
-        common_infras = Optimizer._find_common_infras(task_candidates)
+        common_infras = Optimizer._find_common_infras(task_launchables)
 
         if not common_infras:
             # If no common infra, fallback to independent optimization
@@ -1140,7 +1148,7 @@ class Optimizer:
 
         # Step 3: Select best infra based on minimize target
         best_infra = Optimizer._select_best_infra(
-            common_infras, task_candidates, tasks,
+            common_infras, task_launchables, tasks,
             minimize == common.OptimizeTarget.COST)
 
         if not quiet:
@@ -1150,13 +1158,13 @@ class Optimizer:
         # Step 4: Assign resources for each task on the selected infra
         cloud, region = best_infra
         for task in tasks:
-            candidates = task_candidates[task]
+            candidates = task_launchables[task]
             if cloud not in candidates:
                 continue
 
             # Find resources in this cloud+region
             for resources in candidates[cloud]:
-                if resources.region == region or resources.region is None:
+                if resources.region == region:
                     # Set best_resources on the task
                     task.best_resources = resources
                     break

@@ -433,6 +433,125 @@ class TestOptimizerSelectBestInfra:
         assert result == common_infras[0]
 
 
+class TestOptimizeSameInfraRegion:
+    """Tests for SAME_INFRA optimizer region handling.
+
+    These tests verify that _optimize_same_infra correctly uses launchable
+    resources (with regions) instead of cloud candidates (without regions).
+    This is critical for multi-cluster environments like Kubernetes where
+    each cluster/context is represented as a region.
+    """
+
+    def test_find_common_infras_with_regions(self):
+        """Test that _find_common_infras correctly identifies region-specific infras."""
+        from sky.optimizer import Optimizer
+
+        # Create mock clouds
+        k8s = mock.MagicMock(spec=clouds.Cloud)
+        k8s.__str__ = mock.MagicMock(return_value='Kubernetes')
+        k8s.__hash__ = mock.MagicMock(return_value=hash('Kubernetes'))
+        k8s.__eq__ = lambda self, other: str(self) == str(other)
+
+        # Create mock tasks
+        task1 = mock.MagicMock(spec=task_lib.Task)
+        task2 = mock.MagicMock(spec=task_lib.Task)
+
+        # Create resources WITH specific regions (like launchable_resources)
+        res_cluster1_t1 = mock.MagicMock(spec=resources_lib.Resources)
+        res_cluster1_t1.region = 'kind-cluster-1'
+        res_cluster2_t1 = mock.MagicMock(spec=resources_lib.Resources)
+        res_cluster2_t1.region = 'kind-cluster-2'
+
+        res_cluster1_t2 = mock.MagicMock(spec=resources_lib.Resources)
+        res_cluster1_t2.region = 'kind-cluster-1'
+        res_cluster2_t2 = mock.MagicMock(spec=resources_lib.Resources)
+        res_cluster2_t2.region = 'kind-cluster-2'
+
+        # Task candidates with region-specific resources
+        task_candidates = {
+            task1: {
+                k8s: [res_cluster1_t1, res_cluster2_t1]
+            },
+            task2: {
+                k8s: [res_cluster1_t2, res_cluster2_t2]
+            }
+        }
+
+        common_infras = Optimizer._find_common_infras(task_candidates)
+
+        # Should find both clusters as common infras
+        infra_set = {(str(cloud), region) for cloud, region in common_infras}
+        assert ('Kubernetes', 'kind-cluster-1') in infra_set
+        assert ('Kubernetes', 'kind-cluster-2') in infra_set
+        # Should NOT have None region
+        assert ('Kubernetes', None) not in infra_set
+
+    def test_find_common_infras_without_regions_returns_none_region(self):
+        """Test that cloud_candidates (without regions) result in None region.
+
+        This demonstrates the bug that was fixed: when using cloud_candidates
+        directly, regions are None, leading to invalid SAME_INFRA selection.
+        """
+        from sky.optimizer import Optimizer
+
+        k8s = mock.MagicMock(spec=clouds.Cloud)
+        k8s.__str__ = mock.MagicMock(return_value='Kubernetes')
+        k8s.__hash__ = mock.MagicMock(return_value=hash('Kubernetes'))
+        k8s.__eq__ = lambda self, other: str(self) == str(other)
+
+        task1 = mock.MagicMock(spec=task_lib.Task)
+
+        # Resources WITHOUT regions (like cloud_candidates)
+        res_no_region = mock.MagicMock(spec=resources_lib.Resources)
+        res_no_region.region = None
+
+        task_candidates = {task1: {k8s: [res_no_region]}}
+
+        common_infras = Optimizer._find_common_infras(task_candidates)
+
+        # With cloud_candidates (no region), we get (Kubernetes, None)
+        infra_set = {(str(cloud), region) for cloud, region in common_infras}
+        assert ('Kubernetes', None) in infra_set
+
+    def test_find_common_infras_partial_overlap(self):
+        """Test finding common infras when tasks have partial overlap."""
+        from sky.optimizer import Optimizer
+
+        k8s = mock.MagicMock(spec=clouds.Cloud)
+        k8s.__str__ = mock.MagicMock(return_value='Kubernetes')
+        k8s.__hash__ = mock.MagicMock(return_value=hash('Kubernetes'))
+        k8s.__eq__ = lambda self, other: str(self) == str(other)
+
+        task1 = mock.MagicMock(spec=task_lib.Task)
+        task2 = mock.MagicMock(spec=task_lib.Task)
+
+        # Task1 can run on cluster-1 and cluster-2
+        res_cluster1_t1 = mock.MagicMock(spec=resources_lib.Resources)
+        res_cluster1_t1.region = 'cluster-1'
+        res_cluster2_t1 = mock.MagicMock(spec=resources_lib.Resources)
+        res_cluster2_t1.region = 'cluster-2'
+
+        # Task2 can only run on cluster-1 (e.g., due to GPU availability)
+        res_cluster1_t2 = mock.MagicMock(spec=resources_lib.Resources)
+        res_cluster1_t2.region = 'cluster-1'
+
+        task_candidates = {
+            task1: {
+                k8s: [res_cluster1_t1, res_cluster2_t1]
+            },
+            task2: {
+                k8s: [res_cluster1_t2]
+            }
+        }
+
+        common_infras = Optimizer._find_common_infras(task_candidates)
+
+        # Only cluster-1 should be common
+        infra_set = {(str(cloud), region) for cloud, region in common_infras}
+        assert ('Kubernetes', 'cluster-1') in infra_set
+        assert ('Kubernetes', 'cluster-2') not in infra_set
+
+
 class TestControllerAsyncPatterns:
     """Tests to verify async patterns are used correctly in controller.
 
