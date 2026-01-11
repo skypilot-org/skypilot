@@ -263,7 +263,11 @@ auth:
 storage:
   # Enable/disable persistent storage
   # With this enabled, SkyPilot will use a PV to persist the internal data like states, logs, lock files, catalog, etc.
-  # This includes file mounts uploaded during managed job submission and API server logs.
+  # Persisted data includes:
+  # - Managed job logs (accessible via `sky jobs logs <job_id>` and `sky jobs logs --controller <job_id>`)
+  # - File mounts uploaded during managed job submission
+  # - API server state and configuration
+  # Note: Transient cluster logs (sky-*) and api_server logs are NOT persisted to minimize storage usage.
   # Refer to https://docs.skypilot.co/en/latest/reference/architecture/state.html for more details.
   #
   # IMPORTANT: When using RollingUpdate upgrade strategy with an external database:

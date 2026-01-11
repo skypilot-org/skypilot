@@ -206,6 +206,40 @@ tests:
           path: spec.strategy.rollingUpdate.maxUnavailable
           value: 0
 
+  - it: should mount managed job log directories when storage is enabled
+    set:
+      storage.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/sky_logs/jobs_controller
+            subPath: sky_logs/jobs_controller
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/sky_logs/managed_jobs
+            subPath: sky_logs/managed_jobs
+
+  - it: should not mount managed job log directories when storage is disabled
+    set:
+      storage.enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/sky_logs/jobs_controller
+            subPath: sky_logs/jobs_controller
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/sky_logs/managed_jobs
+            subPath: sky_logs/managed_jobs
+
   - it: should honor fullnameOverride for deployment names and labels
     set:
       fullnameOverride: custom-fullname

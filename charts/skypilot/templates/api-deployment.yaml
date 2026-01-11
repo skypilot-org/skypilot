@@ -263,6 +263,14 @@ spec:
         - name: state-volume
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
           subPath: .ssh
+        # Mount only the specific subdirectories needed for managed job logs, not the entire sky_logs folder
+        # This avoids persisting transient cluster logs (sky-*) and api_server logs
+        - name: state-volume
+          mountPath: /root/sky_logs/jobs_controller # Controller logs for `sky jobs logs --controller`
+          subPath: sky_logs/jobs_controller
+        - name: state-volume
+          mountPath: /root/sky_logs/managed_jobs # Task execution logs for managed jobs
+          subPath: sky_logs/managed_jobs
         {{- end }}
         - name: skypilot-config
           mountPath: /var/skypilot/config
