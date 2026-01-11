@@ -37,7 +37,7 @@ name: data-server
 resources:
   cpus: 4
   memory: 16+
-  infra: kubernetes/coreweave
+  infra: kubernetes
 
 file_mounts:
   /code: llm/rlhf-jobgroup/code
@@ -62,7 +62,7 @@ num_nodes: 2
 resources:
   accelerators: H100:1
   memory: 32+
-  infra: kubernetes/coreweave
+  infra: kubernetes
 
 envs:
   MODEL_NAME: Qwen/Qwen2.5-0.5B-Instruct
@@ -121,7 +121,7 @@ name: reward-server
 resources:
   cpus: 4
   memory: 8+
-  infra: kubernetes/coreweave
+  infra: kubernetes
 
 file_mounts:
   /code: llm/rlhf-jobgroup/code
@@ -143,7 +143,7 @@ name: replay-buffer
 resources:
   cpus: 4
   memory: 16+
-  infra: kubernetes/coreweave
+  infra: kubernetes
 
 file_mounts:
   /code: llm/rlhf-jobgroup/code
@@ -165,7 +165,7 @@ name: ppo-trainer
 resources:
   accelerators: H100:1
   memory: 32+
-  infra: kubernetes/coreweave
+  infra: kubernetes
 num_nodes: 2
 
 envs:
