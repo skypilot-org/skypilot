@@ -9,6 +9,10 @@
 #   - evaluator: Watches for new checkpoints, evaluates and reports accuracy
 #
 # Usage:
+#   # First, create the shared volume:
+#   sky volume apply llm/train-eval-jobgroup/train-eval-ckpts-volume.yaml
+#
+#   # Then launch the job group:
 #   sky jobs launch llm/train-eval-jobgroup/train-eval-jobgroup.yaml
 #
 # The components share storage via a Kubernetes PVC:
