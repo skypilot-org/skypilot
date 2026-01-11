@@ -1,11 +1,11 @@
-"""Add cluster_name column to spot table for JobGroup per-task tracking.
+"""Add job group columns for spot table and job_info table.
 
 Adds:
-- cluster_name (TEXT) to spot table for per-task cluster tracking in JobGroups
+- cluster_name (TEXT) to spot table for per-task cluster tracking
+- execution (TEXT) to job_info: 'parallel', 'sequential', or NULL
+- placement (TEXT) to job_info: 'SAME_INFRA', 'ANY', or NULL
 
-Note: JobGroup config (is_job_group, placement, execution) is derived from the
-dag_yaml_content already stored in job_info table, so no additional columns
-are needed there.
+Note: is_job_group is derived from execution == 'parallel' at query time.
 
 Revision ID: 012
 Revises: 011
@@ -28,12 +28,24 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    """Add cluster_name column to spot table for JobGroup per-task tracking."""
+    """Add job group columns to spot and job_info tables."""
     with op.get_context().autocommit_block():
         # Add cluster_name column to spot table for per-task cluster tracking
         # in JobGroups (each task may run on a different cluster)
         db_utils.add_column_to_table_alembic('spot',
                                              'cluster_name',
+                                             sa.Text(),
+                                             server_default=None)
+        # Add execution column to job_info table
+        # Values: 'parallel' (job group), 'sequential' (chain), or NULL
+        db_utils.add_column_to_table_alembic('job_info',
+                                             'execution',
+                                             sa.Text(),
+                                             server_default=None)
+        # Add placement column to job_info table
+        # Values: 'SAME_INFRA', 'ANY', or NULL
+        db_utils.add_column_to_table_alembic('job_info',
+                                             'placement',
                                              sa.Text(),
                                              server_default=None)
 

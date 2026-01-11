@@ -217,10 +217,15 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 # Add the managed job to job queue database.
                 user_id = managed_job.user_id if managed_job.HasField(
                     'user_id') else None
+                execution = managed_job.execution if managed_job.HasField(
+                    'execution') else None
+                placement = managed_job.placement if managed_job.HasField(
+                    'placement') else None
                 managed_job_state.set_job_info(job_id, managed_job.name,
                                                managed_job.workspace,
                                                managed_job.entrypoint, pool,
-                                               pool_hash, user_id)
+                                               pool_hash, user_id, execution,
+                                               placement)
                 # Set the managed job to PENDING state to make sure that
                 # this managed job appears in the `sky jobs queue`, even
                 # if it needs to wait to be submitted.

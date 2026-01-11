@@ -353,6 +353,21 @@ def is_job_group_yaml_str(yaml_str: str) -> bool:
     return _is_job_group_configs(configs)
 
 
+def get_job_group_config_from_yaml_str(yaml_str: str) -> Dict[str, Any]:
+    """Get the JobGroup config (header) from a YAML string.
+
+    Returns the header config dict containing fields like 'placement',
+    'execution', 'name', etc. Returns empty dict if not a JobGroup YAML.
+    """
+    configs = yaml_utils.read_yaml_all_str(yaml_str)
+    if not _is_job_group_configs(configs):
+        return {}
+    header = configs[0]
+    if header is None:
+        return {}
+    return header
+
+
 def _is_job_group_configs(configs: List[Dict[str, Any]]) -> bool:
     """Check if configs represent a JobGroup."""
     if not configs or len(configs) < 2:

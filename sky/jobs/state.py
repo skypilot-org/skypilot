@@ -155,6 +155,10 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('controller_logs_cleaned_at',
                       sqlalchemy.Float,
                       server_default=None),
+    # DAG execution mode: 'parallel' (job group), 'sequential' (chain), or None
+    sqlalchemy.Column('execution', sqlalchemy.Text, server_default=None),
+    # Placement mode: 'SAME_INFRA', 'ANY', or None
+    sqlalchemy.Column('placement', sqlalchemy.Text, server_default=None),
 )
 
 # TODO(cooperc): drop the table in a migration
@@ -753,9 +757,14 @@ ControllerPidRecord = collections.namedtuple('ControllerPidRecord', [
 
 # === Status transition functions ===
 @_init_db
-def set_job_info_without_job_id(name: str, workspace: str, entrypoint: str,
-                                pool: Optional[str], pool_hash: Optional[str],
-                                user_hash: Optional[str]) -> int:
+def set_job_info_without_job_id(name: str,
+                                workspace: str,
+                                entrypoint: str,
+                                pool: Optional[str],
+                                pool_hash: Optional[str],
+                                user_hash: Optional[str],
+                                execution: Optional[str] = None,
+                                placement: Optional[str] = None) -> int:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -775,6 +784,8 @@ def set_job_info_without_job_id(name: str, workspace: str, entrypoint: str,
             pool=pool,
             pool_hash=pool_hash,
             user_hash=user_hash,
+            execution=execution,
+            placement=placement,
         )
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -2603,7 +2614,9 @@ def set_job_info(job_id: int,
                  entrypoint: str,
                  pool: Optional[str],
                  pool_hash: Optional[str],
-                 user_hash: Optional[str] = None):
+                 user_hash: Optional[str] = None,
+                 execution: Optional[str] = None,
+                 placement: Optional[str] = None):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -2623,6 +2636,8 @@ def set_job_info(job_id: int,
             pool=pool,
             pool_hash=pool_hash,
             user_hash=user_hash,
+            execution=execution,
+            placement=placement,
         )
         session.execute(insert_stmt)
         session.commit()

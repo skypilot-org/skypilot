@@ -119,7 +119,13 @@ _CLUSTER_HANDLE_FIELDS = [
 
 # The response fields for managed jobs that are not stored in the database
 # These fields will be mapped to the DB fields in the `_update_fields`.
-_NON_DB_FIELDS = _CLUSTER_HANDLE_FIELDS + ['user_yaml', 'user_name', 'details']
+_NON_DB_FIELDS = _CLUSTER_HANDLE_FIELDS + [
+    'user_yaml',
+    'user_name',
+    'details',
+    # is_job_group is derived from execution column (execution == 'parallel')
+    'is_job_group',
+]
 
 
 class ManagedJobQueueResultType(enum.Enum):
@@ -1496,6 +1502,10 @@ def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
             new_fields.append('original_user_yaml_path')
         if 'original_user_yaml_content' not in new_fields:
             new_fields.append('original_user_yaml_content')
+    # is_job_group is derived from execution column
+    if 'is_job_group' in fields:
+        if 'execution' not in new_fields:
+            new_fields.append('execution')
     if cluster_handle_required:
         if 'task_name' not in new_fields:
             new_fields.append('task_name')
@@ -1684,6 +1694,10 @@ def get_managed_job_queue(
                 job['details'] = f'Failure: {job["failure_reason"]}'
             else:
                 job['details'] = None
+
+        # Derive is_job_group from execution column
+        # execution == 'parallel' means it's a job group
+        job['is_job_group'] = job.get('execution') == 'parallel'
 
     return {
         'jobs': jobs,
@@ -2446,6 +2460,11 @@ class ManagedJobCodeGen:
                     user_hash: Optional[str] = None) -> str:
         dag_name = managed_job_dag.name
         pool = managed_job_dag.pool
+        # Get execution and placement from the dag (JobGroup fields)
+        execution = (managed_job_dag.execution.value
+                     if managed_job_dag.execution else None)
+        placement = (managed_job_dag.placement.value
+                     if managed_job_dag.placement else None)
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
             set_job_info_kwargs = {{'workspace': {workspace!r}}}
@@ -2462,6 +2481,9 @@ class ManagedJobCodeGen:
                 set_job_info_kwargs['pool_hash'] = pool_hash
             if managed_job_version >= 11:
                 set_job_info_kwargs['user_hash'] = {user_hash!r}
+            if managed_job_version >= 13:
+                set_job_info_kwargs['execution'] = {execution!r}
+                set_job_info_kwargs['placement'] = {placement!r}
             managed_job_state.set_job_info(
                 {job_id}, {dag_name!r}, **set_job_info_kwargs)
             """)

@@ -221,6 +221,9 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
         # each job and then give it a unique name (e.g. append job id after
         # the task name). The name of the dag also needs to be aligned with
         # the task name.
+        # Get execution and placement from the dag (JobGroup fields)
+        execution_mode = dag.execution.value if dag.execution else None
+        placement_mode = dag.placement.value if dag.placement else None
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
                 dag.name,
@@ -229,7 +232,9 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
                 entrypoint=common_utils.get_current_command(),
                 pool=pool,
                 pool_hash=pool_hash,
-                user_hash=common_utils.get_user_hash()))
+                user_hash=common_utils.get_user_hash(),
+                execution=execution_mode,
+                placement=placement_mode))
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)

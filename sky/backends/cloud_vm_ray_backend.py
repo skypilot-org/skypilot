@@ -3859,13 +3859,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 resources_str=resources_str,
                                 metadata_json=task.metadata_json))
 
+                    # Get execution and placement from the dag (JobGroup fields)
+                    execution = (managed_job_dag.execution.value
+                                 if managed_job_dag.execution else None)
+                    placement = (managed_job_dag.placement.value
+                                 if managed_job_dag.placement else None)
                     managed_job_info = jobsv1_pb2.ManagedJobInfo(
                         name=managed_job_dag.name,
                         pool=managed_job_dag.pool,
                         workspace=workspace,
                         entrypoint=entrypoint,
                         tasks=managed_job_tasks,
-                        user_id=managed_job_user_id)
+                        user_id=managed_job_user_id,
+                        execution=execution,
+                        placement=placement)
 
                 if backend_utils.is_command_length_over_limit(codegen):
                     _dump_code_to_file(codegen)
