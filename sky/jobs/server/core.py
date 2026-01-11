@@ -17,6 +17,7 @@ from sky import core
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
+from sky import optimizer as optimizer_lib
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
@@ -294,14 +295,34 @@ def launch(
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH)
     dag.resolve_and_validate_volumes()
-    if not dag.is_chain():
+    if not dag.is_chain() and not dag.is_job_group():
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Only single-task or chain DAG is '
+            raise ValueError('Only single-task, chain DAG, or JobGroup is '
                              f'allowed for job_launch. Dag: {dag}')
     dag.validate()
     # TODO(aylei): use consolidated job controller instead of performing
     # pre-mount operations when submitting jobs.
     dag.pre_mount_volumes()
+
+    # Optimize JobGroup placement before sending to controller
+    # This pre-determines cloud+region for SAME_INFRA, enabling parallel launch
+    if dag.is_job_group():
+        dag = optimizer_lib.Optimizer.optimize_job_group(dag)
+        # Apply optimized cloud/region to task resources so they persist
+        # through serialization. Without this, each task would be re-optimized
+        # independently on the controller, potentially ending up on different
+        # infras even with SAME_INFRA placement.
+        for task_ in dag.tasks:
+            if task_.best_resources is not None:
+                best_cloud = task_.best_resources.cloud
+                best_region = task_.best_resources.region
+                if best_cloud is not None or best_region is not None:
+                    override_params: Dict[str, Any] = {}
+                    if best_cloud is not None:
+                        override_params['cloud'] = best_cloud
+                    if best_region is not None:
+                        override_params['region'] = best_region
+                    task_.set_resources_override(override_params)
 
     # If there is a local postgres db, when the api server tries launching on
     # the remote jobs controller it will fail. therefore, we should remove this
@@ -318,7 +339,7 @@ def launch(
                  ipaddress.ip_address(parsed.hostname).is_loopback)):
                 mutated_user_config.pop('db', None)
 
-    user_dag_str_user_specified = dag_utils.dump_chain_dag_to_yaml_str(
+    user_dag_str_user_specified = dag_utils.dump_dag_to_yaml_str(
         dag, use_user_specified_yaml=True)
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
@@ -455,7 +476,7 @@ def launch(
                 if num_jobs is not None:
                     task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
-            dag_utils.dump_chain_dag_to_yaml(dag_copy, f.name)
+            dag_utils.dump_dag_to_yaml(dag_copy, f.name)
 
             vars_to_fill = {
                 'remote_original_user_yaml_path':
@@ -1109,7 +1130,8 @@ def tail_logs(name: Optional[str],
               follow: bool,
               controller: bool,
               refresh: bool,
-              tail: Optional[int] = None) -> int:
+              tail: Optional[int] = None,
+              task: Optional[str] = None) -> int:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
 
@@ -1153,7 +1175,8 @@ def tail_logs(name: Optional[str],
                                          job_name=name,
                                          follow=follow,
                                          controller=controller,
-                                         tail=tail)
+                                         tail=tail,
+                                         task=task)
 
 
 @usage_lib.entrypoint

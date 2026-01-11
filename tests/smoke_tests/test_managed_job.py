@@ -2134,3 +2134,149 @@ def test_managed_jobs_instance_links(generic_cloud: str):
             timeout=15 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing JobGroups ----------
+
+
+def _render_job_group_yaml(yaml_template_path: str, name: str,
+                           cloud: str) -> str:
+    """Render a JobGroup YAML template with name and cloud substitution."""
+    with open(yaml_template_path, 'r') as f:
+        template_content = f.read()
+
+    template = jinja2.Template(template_content)
+    rendered = template.render(name=name, cloud=cloud)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as f:
+        f.write(rendered)
+        f.flush()
+        return f.name
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_basic(generic_cloud: str):
+    """Test basic JobGroup with 2 parallel jobs."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml('tests/test_job_groups/smoke_basic.yaml',
+                                       name, generic_cloud)
+
+    test = smoke_tests_utils.Test(
+        'job_group_basic',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            f'sky jobs queue | grep {name} | grep SUCCEEDED',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_networking(generic_cloud: str):
+    """Test JobGroup cross-job networking via hostname resolution."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_networking.yaml', name, generic_cloud)
+
+    # NOTE: We use job ID instead of `-n {name}` for `sky jobs logs` because
+    # `sky jobs logs -n <name>` only works for running (non-terminal) jobs.
+    # For completed jobs, we need to use the job ID directly.
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        'job_group_networking',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            f'sky jobs logs $({get_job_id_cmd}) --no-follow | '
+            f'grep "SUCCESS: Connected to server"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_rl_architecture(generic_cloud: str):
+    """Test JobGroup with RL-style heterogeneous architecture (4 components)."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_rl_architecture.yaml', name, generic_cloud)
+
+    test = smoke_tests_utils.Test(
+        'job_group_rl_architecture',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600),
+            f'sky jobs queue | grep {name} | grep SUCCEEDED',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_task_logs(generic_cloud: str):
+    """Test task-specific log viewing for JobGroups."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml('tests/test_job_groups/smoke_basic.yaml',
+                                       name, generic_cloud)
+
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        'job_group_task_logs',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            # Test default behavior - should show all tasks
+            f'sky jobs logs $({get_job_id_cmd}) --no-follow | grep "Job A" && '
+            f'sky jobs logs $({get_job_id_cmd}) --no-follow | grep "Job B"',
+            # Test viewing logs by task ID - should only show job-a
+            f'sky jobs logs $({get_job_id_cmd}) 0 --no-follow | '
+            f'grep "Job A" && ! sky jobs logs $({get_job_id_cmd}) 0 '
+            f'--no-follow | grep "Job B"',
+            # Test viewing logs by task name - should only show job-b
+            f'sky jobs logs $({get_job_id_cmd}) job-b --no-follow | '
+            f'grep "Job B" && ! sky jobs logs $({get_job_id_cmd}) job-b '
+            f'--no-follow | grep "Job A"',
+            # Test invalid task ID/name - should show error
+            f'sky jobs logs $({get_job_id_cmd}) 999 --no-follow 2>&1 | '
+            f'grep "No task found matching"',
+            f'sky jobs logs $({get_job_id_cmd}) nonexistent --no-follow 2>&1 | '
+            f'grep "No task found matching"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)

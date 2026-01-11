@@ -31,7 +31,12 @@ const DEFAULT_FIELDS = [
   'pool_hash',
   'details',
   'failure_reason',
-  'links',
+  'user_yaml',
+  'entrypoint',
+  'is_job_group',
+  'placement',
+  'execution',
+  // Note: 'links' field removed - it may not exist in older database schemas
 ];
 
 export async function getManagedJobs(options = {}) {
@@ -222,6 +227,10 @@ export async function getManagedJobs(options = {}) {
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
         accelerators: job.accelerators, // Include accelerators field
         labels: job.labels || {}, // Include labels field
+        // JobGroup fields
+        is_job_group: job.is_job_group,
+        placement: job.placement,
+        execution: job.execution,
       };
     });
 
@@ -426,6 +435,7 @@ export async function getPoolStatus() {
 }
 
 // Hook for individual job details that reuses the main jobs cache
+// Returns all tasks for a given job_id (supports multi-task jobs)
 export function useSingleManagedJob(jobId, refreshTrigger = 0) {
   const [jobData, setJobData] = useState(null);
   const [loadingJobData, setLoadingJobData] = useState(true);
@@ -439,19 +449,19 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
       try {
         setLoadingJobData(true);
 
-        // Always get all jobs data (cache handles freshness automatically)
+        // Fetch the specific job by ID (don't use allFields to avoid missing column errors)
         const allJobsData = await dashboardCache.get(getManagedJobs, [
-          { allUsers: true, allFields: true, jobIDs: [jobId] },
+          { allUsers: true, jobIDs: [jobId] },
         ]);
 
-        // Filter for the specific job client-side
-        const job = allJobsData?.jobs?.find(
-          (j) => String(j.id) === String(jobId)
-        );
+        // Filter for ALL tasks matching this job_id (supports multi-task jobs)
+        const matchingJobs =
+          allJobsData?.jobs?.filter((j) => String(j.id) === String(jobId)) ||
+          [];
 
-        if (job) {
+        if (matchingJobs.length > 0) {
           setJobData({
-            jobs: [job],
+            jobs: matchingJobs,
             controllerStopped: allJobsData.controllerStopped || false,
           });
         } else {
@@ -477,6 +487,7 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
 
 export async function streamManagedJobLogs({
   jobId,
+  task = null,
   controller = false,
   signal,
   onNewLog,
@@ -517,6 +528,7 @@ export async function streamManagedJobLogs({
         follow: false,
         job_id: jobId,
         tail: DEFAULT_TAIL_LINES,
+        task: task,
       };
 
       const response = await apiClient.fetchImmediate(

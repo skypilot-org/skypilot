@@ -919,8 +919,17 @@ def controller_log_file_for_job(job_id: int,
 
 def stream_logs_by_id(job_id: int,
                       follow: bool = True,
-                      tail: Optional[int] = None) -> Tuple[str, int]:
+                      tail: Optional[int] = None,
+                      task: Optional[str] = None) -> Tuple[str, int]:
     """Stream logs by job id.
+
+    Args:
+        job_id: The job ID to stream logs for.
+        follow: Whether to follow the logs.
+        tail: Number of lines to tail from the end of the log file.
+        task: Task identifier to view logs for a specific task in a JobGroup.
+            Can be a task ID (integer as string) or task name. If None, logs
+            for all tasks are shown.
 
     Returns:
         A tuple containing the log message and an exit code based on success or
@@ -934,15 +943,57 @@ def stream_logs_by_id(job_id: int,
         return (not status.is_terminal() and
                 status != managed_job_state.ManagedJobStatus.CANCELLING)
 
+    def matches_task_filter(task_id: int, task_name: str,
+                            task_filter: Optional[str]) -> bool:
+        """Check if a task matches the task filter.
+
+        The filter can be either a task ID (if it's a numeric string) or a
+        task name (if it's a non-numeric string).
+        """
+        if task_filter is None:
+            return True
+        # Try to match as task ID first (if filter is numeric)
+        if task_filter.isdigit():
+            return task_id == int(task_filter)
+        # Otherwise match by task name
+        return task_name == task_filter
+
     msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='', job_id=job_id)
     status_display = rich_utils.safe_status(msg)
     num_tasks = managed_job_state.get_num_tasks(job_id)
+
+    # Check if job exists - if num_tasks is 0, the job doesn't exist
+    if num_tasks == 0:
+        return (f'Job {job_id} not found.', exceptions.JobExitCode.NOT_FOUND)
+
+    # Resolve task filter to a specific task_id if provided
+    # This is used for running jobs to stream logs from the correct task
+    filtered_task_id: Optional[int] = None
+    if task is not None:
+        task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
+            job_id)
+        for t_id, t_name, _, _, _ in task_info:
+            if matches_task_filter(t_id, t_name, task):
+                filtered_task_id = t_id
+                break
+        if filtered_task_id is None:
+            valid_range = f'0-{num_tasks - 1}' if num_tasks > 1 else '0'
+            return (f'No task found matching {task!r} in job {job_id}. '
+                    f'Valid task IDs are {valid_range}.',
+                    exceptions.JobExitCode.NOT_FOUND)
 
     with status_display:
         prev_msg = msg
         while (managed_job_status :=
                managed_job_state.get_status(job_id)) is None:
             time.sleep(1)
+
+        # Show hint about per-task filtering when there are multiple tasks
+        if num_tasks > 1 and task is None:
+            print(f'{colorama.Fore.CYAN}Hint: This job has {num_tasks} tasks. '
+                  f'Use \'sky jobs logs {job_id} TASK\' to view logs for a '
+                  f'specific task (TASK can be task ID or name).'
+                  f'{colorama.Style.RESET_ALL}')
 
         if not should_keep_logging(managed_job_status):
             job_msg = ''
@@ -952,6 +1003,19 @@ def stream_logs_by_id(job_id: int,
             log_file_ever_existed = False
             task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
                 job_id)
+            total_tasks = len(task_info)
+            # Filter tasks if task filter is specified
+            if task is not None:
+                task_info = [
+                    t for t in task_info
+                    if matches_task_filter(t[0], t[1], task)
+                ]
+                if not task_info:
+                    valid_range = (f'0-{total_tasks - 1}'
+                                   if total_tasks > 1 else '0')
+                    return (f'No task found matching {task!r} in job {job_id}. '
+                            f'Valid task IDs are {valid_range}.',
+                            exceptions.JobExitCode.NOT_FOUND)
             num_tasks = len(task_info)
             for (task_id, task_name, task_status, log_file,
                  logs_cleaned_at) in task_info:
@@ -965,7 +1029,8 @@ def stream_logs_by_id(job_id: int,
                         continue
                     task_str = (f'Task {task_name}({task_id})'
                                 if task_name else f'Task {task_id}')
-                    if num_tasks > 1:
+                    # Show task header when multiple tasks OR when filtering
+                    if num_tasks > 1 or task is not None:
                         print(f'=== {task_str} ===')
                     with open(os.path.expanduser(log_file),
                               'r',
@@ -990,7 +1055,8 @@ def stream_logs_by_id(job_id: int,
                                 start_streaming = True
                             if start_streaming:
                                 print(line, end='', flush=True)
-                    if num_tasks > 1:
+                    # Show task finished message for multi-task or filtering
+                    if num_tasks > 1 or task is not None:
                         # Add the "Task finished" message for terminal states
                         if task_status.is_terminal():
                             print(ux_utils.finishing_message(
@@ -1016,6 +1082,12 @@ def stream_logs_by_id(job_id: int,
         backend = backends.CloudVmRayBackend()
         task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))
+
+        # If a task filter was specified, use the filtered task_id instead of
+        # the latest task_id. This allows viewing logs for a specific task in
+        # a JobGroup with parallel execution.
+        if filtered_task_id is not None:
+            task_id = filtered_task_id
 
         # We wait for managed_job_status to be not None above. Once we see that
         # it's not None, we don't expect it to every become None again.
@@ -1059,6 +1131,9 @@ def stream_logs_by_id(job_id: int,
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                 task_id, managed_job_status = (
                     managed_job_state.get_latest_task_id_status(job_id))
+                # Preserve filtered task_id if specified
+                if filtered_task_id is not None:
+                    task_id = filtered_task_id
                 assert managed_job_status is not None, (job_id, task_id,
                                                         managed_job_status)
                 continue
@@ -1125,6 +1200,11 @@ def stream_logs_by_id(job_id: int,
                         continue
 
                     if task_id == num_tasks - 1:
+                        break
+
+                    # If a task filter was specified, we're done with the
+                    # specific task - don't wait for other tasks.
+                    if filtered_task_id is not None:
                         break
 
                     # The log for the current job is finished. We need to
@@ -1209,8 +1289,19 @@ def stream_logs(job_id: Optional[int],
                 job_name: Optional[str],
                 controller: bool = False,
                 follow: bool = True,
-                tail: Optional[int] = None) -> Tuple[str, int]:
+                tail: Optional[int] = None,
+                task: Optional[str] = None) -> Tuple[str, int]:
     """Stream logs by job id or job name.
+
+    Args:
+        job_id: The job ID to stream logs for.
+        job_name: The job name to stream logs for.
+        controller: Whether to stream controller logs.
+        follow: Whether to follow the logs.
+        tail: Number of lines to tail from the end of the log file.
+        task: Task identifier to view logs for a specific task in a JobGroup.
+            Can be a task ID (integer as string) or task name. If None, logs
+            for all tasks are shown.
 
     Returns:
         A tuple containing the log message and the exit code based on success
@@ -1336,7 +1427,7 @@ def stream_logs(job_id: Optional[int],
                 f'Multiple running jobs found with name {job_name!r}.')
         job_id = job_ids[0]
 
-    return stream_logs_by_id(job_id, follow, tail)
+    return stream_logs_by_id(job_id, follow, tail, task)
 
 
 def dump_managed_job_queue(
@@ -2319,15 +2410,21 @@ class ManagedJobCodeGen:
                     job_id: Optional[int],
                     follow: bool = True,
                     controller: bool = False,
-                    tail: Optional[int] = None) -> str:
+                    tail: Optional[int] = None,
+                    task: Optional[str] = None) -> str:
         code = textwrap.dedent(f"""\
         if managed_job_version < 6:
-            # Versions before 5 did not support tail parameter
+            # Versions before 6 did not support tail parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller})
-        else:
+        elif managed_job_version < 13:
+            # Versions before 13 did not support task parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r})
+        else:
+            result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
+                                    follow={follow}, controller={controller}, tail={tail!r},
+                                    task={task!r})
         if managed_job_version < 3:
             # Versions 2 and older did not return a retcode, so we just print
             # the result.

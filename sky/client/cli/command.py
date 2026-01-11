@@ -801,6 +801,20 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if is_yaml:
         assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
+
+        # Check if this is a JobGroup YAML
+        if dag_utils.is_job_group_yaml(entrypoint):
+            click.secho('Detected JobGroup YAML', fg='cyan')
+            dag = dag_utils.load_job_group_from_yaml(entrypoint,
+                                                     env_overrides=env,
+                                                     secrets_overrides=secret)
+            if override_params:
+                click.secho(
+                    f'WARNING: override params {override_params} are ignored '
+                    'for JobGroup YAML.',
+                    fg='yellow')
+            return dag
+
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint,
                                                  env_overrides=env,
                                                  secret_overrides=secret)
@@ -5285,11 +5299,44 @@ def jobs_cancel(
               is_flag=True,
               required=False,
               help='Download logs for all jobs shown in the queue.')
+@click.option('--task',
+              'task_name',
+              required=False,
+              type=str,
+              default=None,
+              help=('Task ID (integer) or task name to view logs for a '
+                    'specific task in a chain DAG. Use with -n/--name.'))
 @click.argument('job_id', required=False, type=int)
+@click.argument('task', required=False, type=str, default=None)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool, refresh: bool, sync_down: bool):
-    """Tail or sync down the log of a managed job."""
+              controller: bool, refresh: bool, sync_down: bool,
+              task_name: Optional[str], task: Optional[str]):
+    """Tail or sync down the log of a managed job.
+
+    TASK can be a task ID (integer) or task name. Numeric values are treated
+    as task IDs. If not specified, logs for all tasks are shown.
+
+
+    Examples:
+
+    \b
+    # View logs for job ID 1, task 0
+    sky jobs logs 1 0
+
+    \b
+    # View logs for job named 'my-job', task 'train'
+    sky jobs logs -n my-job --task train
+
+    \b
+    # View logs for job named 'my-job', task 'eval'
+    sky jobs logs -n my-job --task eval
+    """
+    # Merge task from option and positional argument
+    if task_name is not None and task is not None:
+        raise click.UsageError(
+            'Cannot specify both --task option and TASK positional argument.')
+    task = task_name if task_name is not None else task
     try:
         if sync_down:
             with rich_utils.client_status(
@@ -5310,7 +5357,8 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                                                 job_id=job_id,
                                                 follow=follow,
                                                 controller=controller,
-                                                refresh=refresh)
+                                                refresh=refresh,
+                                                task=task)
             sys.exit(returncode)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
