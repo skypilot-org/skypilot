@@ -6,6 +6,7 @@ import click
 import colorama
 
 from sky import backends
+from sky import sky_logging
 from sky.schemas.api import responses
 from sky.utils import common_utils
 from sky.utils import log_utils
@@ -18,11 +19,14 @@ if typing.TYPE_CHECKING:
 
 COMMAND_TRUNC_LENGTH = 25
 NUM_COST_REPORT_LINES = 5
+PRICE_UNAVAILABLE = '[Price unavailable]'
 
 # A record in global_user_state's 'clusters' table.
 _ClusterRecord = Dict[str, Any]
 # A record returned by core.cost_report(); see its docstr for all fields.
 _ClusterCostReportRecord = Dict[str, Any]
+
+logger = sky_logging.init_logger(__name__)
 
 
 class StatusColumn:
@@ -198,6 +202,9 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
         cluster_table.add_row(row)
 
     if cluster_records:
+        has_missing_instance_types = any(
+            _get_price_for_cost_report(record) == PRICE_UNAVAILABLE
+            for record in cluster_records[:num_lines_to_display])
         controller_record = cluster_records[0]
         if controller_name is not None:
             autostop = controller_record.get('autostop', None)
@@ -214,6 +221,13 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Clusters{days_str}'
                        f'{colorama.Style.RESET_ALL}')
+
+        if has_missing_instance_types:
+            click.echo(f'{colorama.Fore.YELLOW}WARNING: Pricing is not '
+                       f'available for some clusters. Some instance '
+                       f'types may be missing from the catalog.'
+                       f'{colorama.Style.RESET_ALL}')
+
         click.echo(cluster_table)
 
 
@@ -398,7 +412,12 @@ def _get_resources_for_cost_report(
     launched_nodes = cluster_cost_report_record['num_nodes']
     launched_resources = cluster_cost_report_record['resources']
 
-    launched_resource_str = str(launched_resources)
+    try:
+        launched_resource_str = str(launched_resources)
+    except ValueError as e:
+        logger.debug(f'Failed to get resources string: {e}')
+        launched_resource_str = (f'{launched_resources.cloud}'
+                                 f'({launched_resources.instance_type})')
     resources_str = (f'{launched_nodes}x '
                      f'{launched_resource_str}')
 
@@ -412,8 +431,12 @@ def _get_price_for_cost_report(
     launched_nodes = cluster_cost_report_record['num_nodes']
     launched_resources = cluster_cost_report_record['resources']
 
-    hourly_cost = (launched_resources.get_cost(3600) * launched_nodes)
-    price_str = f'$ {hourly_cost:.2f}'
+    try:
+        hourly_cost = (launched_resources.get_cost(3600) * launched_nodes)
+        price_str = f'$ {hourly_cost:.2f}'
+    except ValueError as e:
+        logger.debug(f'Failed to get price: {e}')
+        price_str = PRICE_UNAVAILABLE
     return price_str
 
 
