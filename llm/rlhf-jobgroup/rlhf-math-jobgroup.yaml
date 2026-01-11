@@ -68,6 +68,8 @@ envs:
   MODEL_NAME: Qwen/Qwen2.5-0.5B-Instruct
 
 setup: |
+  # Install system dependencies (libnuma is required by SGLang kernel)
+  sudo apt-get update && sudo apt-get install -y libnuma-dev
   pip install "sglang[all]" sglang-router
 
 run: |
