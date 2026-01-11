@@ -25,7 +25,7 @@ Common use cases include:
    :backlinks: none
 
 
-Creating a Job Group
+Creating a job group
 --------------------
 
 A Job Group is defined using a multi-document YAML file. The first document is the
@@ -60,7 +60,7 @@ Launch the Job Group with:
 
     $ sky jobs launch job-group.yaml
 
-Header Fields
+Header fields
 ~~~~~~~~~~~~~
 
 The header document supports the following fields:
@@ -90,13 +90,13 @@ Each job document after the header follows the standard :ref:`SkyPilot task YAML
     service discovery and log viewing.
 
 
-Service Discovery
+Service discovery
 -----------------
 
 Jobs in a Job Group can discover each other using hostnames. SkyPilot automatically
 configures networking so that jobs can communicate.
 
-Hostname Format
+Hostname format
 ~~~~~~~~~~~~~~~
 
 Each job's head node is accessible via the hostname:
@@ -116,7 +116,7 @@ For example, in a Job Group named ``rlhf-experiment`` with a 2-node ``trainer`` 
 - ``trainer-0.rlhf-experiment`` - Head node (rank 0)
 - ``trainer-1.rlhf-experiment`` - Worker node (rank 1)
 
-Environment Variables
+Environment variables
 ~~~~~~~~~~~~~~~~~~~~~
 
 SkyPilot injects the following environment variables into all jobs:
@@ -143,7 +143,7 @@ Example usage in a job:
     curl http://trainer-0.${SKYPILOT_JOBGROUP_NAME}:8000/status
 
 
-Viewing Logs
+Viewing logs
 ------------
 
 View logs for a specific job within a Job Group:
@@ -170,7 +170,7 @@ When viewing logs for a multi-task job, SkyPilot displays a hint:
 Examples
 --------
 
-Train-Eval with Shared Storage
+Train-eval with shared storage
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This example runs training and evaluation in parallel, sharing checkpoints via
@@ -200,7 +200,7 @@ a Kubernetes PVC volume:
 
 See the full example at ``llm/train-eval-jobgroup/`` in the SkyPilot repository.
 
-RLHF Training Architecture
+RLHF training architecture
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This example demonstrates a distributed RLHF architecture with 5 components:
@@ -250,7 +250,7 @@ This example demonstrates a distributed RLHF architecture with 5 components:
 See the full example at ``llm/rlhf-jobgroup/`` in the SkyPilot repository.
 
 
-Current Limitations
+Current limitations
 -------------------
 
 - **Placement**: Only ``SAME_INFRA`` is currently supported. All jobs must run on
@@ -267,4 +267,4 @@ Current Limitations
 
    :ref:`managed-jobs` for single jobs or sequential pipelines.
 
-   :ref:`distributed-jobs` for multi-node jobs within a single task.
+   :ref:`dist-jobs` for multi-node jobs within a single task.
