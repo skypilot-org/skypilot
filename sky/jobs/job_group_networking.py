@@ -252,7 +252,8 @@ async def _inject_hosts_on_node(
     # pylint: enable=invalid-string-quote
 
     try:
-        returncode, _, stderr = await asyncio.get_event_loop().run_in_executor(
+        loop = asyncio.get_running_loop()
+        returncode, _, stderr = await loop.run_in_executor(
             None,
             lambda: runner.run(cmd, stream_logs=False, require_outputs=True))
         if returncode != 0:
