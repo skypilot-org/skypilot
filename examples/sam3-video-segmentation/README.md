@@ -1,6 +1,6 @@
 # Scaling Video Segmentation with SAM3 and SkyPilot Pools
 
-This example demonstrates how to use [SAM3 (Segment Anything 3)](https://huggingface.co/facebook/sam3) with SkyPilot's pools feature to process large volumes of videos in parallel.
+This example demonstrates how to use [SAM3 (Segment Anything 3)](https://huggingface.co/facebook/sam3) with SkyPilot's pools feature to process a [soccer video dataset](https://www.kaggle.com/datasets/shreyamainkar/football-soccer-videos-dataset) in parallel across multiple GPU workers.
 
 <video src="https://i.imgur.com/xw1koxh.mp4" controls="controls"></video>
 
@@ -9,22 +9,18 @@ SAM3 is Meta's unified foundation model for promptable segmentation in images an
 - Handle open-vocabulary concepts specified by text phrases
 - Process videos with state-of-the-art accuracy
 
-This example shows how to scale SAM3 video segmentation across multiple GPU workers using SkyPilot pools to process a [soccer video dataset](https://www.kaggle.com/datasets/shreyamainkar/football-soccer-videos-dataset).
-
 ## Prerequisites
 
 1. [Kaggle API credentials](https://www.kaggle.com/docs/api) (`~/.kaggle/kaggle.json`)
 2. S3 bucket for output storage
 
-> **Note**: Remember to replace `s3://my-skypilot-bucket` in `pool.yaml` and `test-single.yaml` with your actual S3 bucket URI.
-
 ## Quick start: Single-node testing
 
-For quick testing on a single node without pools, use `test-single.yaml` which combines setup and run in a single task:
+For quick testing on a single node without pools, use `sam3-test-single.yaml` which combines setup and run in a single task:
 
 ```bash
-export HF_TOKEN=... # SAM3 is a gated model; set your Hugging Face token here
-sky launch -c sam3-test test-single.yaml --secret HF_TOKEN
+sky launch -c sam3-test sam3-test-single.yaml \
+  --env OUTPUT_BUCKET_NAME=my-bucket --secret HF_TOKEN
 ```
 
 Note: Processing the entire dataset on a single node will be slow. Use pools (below) for production workloads.
@@ -41,12 +37,12 @@ Why use pools for video segmentation?
 
 For more details, see the [SkyPilot Pools documentation](https://docs.skypilot.co/en/latest/examples/pools.html).
 
-![SkyPilot Pools with SAM3 Video Segmentation](https://i.imgur.com/2RWomcO.png)
+![SkyPilot Pools with SAM3 Video Segmentation](https://i.imgur.com/dJEzdZp.png)
 
 ### Step 1: Create the pool
 
 ```bash
-sky jobs pool apply -p sam3-pool pool.yaml
+sky jobs pool apply -p sam3-pool sam3-pool.yaml --env OUTPUT_BUCKET_NAME=my-bucket
 ```
 
 This spins up 3 GPU workers (`workers: 3`) with SAM3 and the dataset pre-loaded.
@@ -62,7 +58,7 @@ Wait for all workers to show `READY` status.
 ### Step 3: Submit batch jobs
 
 ```bash
-sky jobs launch --pool sam3-pool --num-jobs 10 --secret HF_TOKEN job.yaml
+sky jobs launch --pool sam3-pool --num-jobs 10 --secret HF_TOKEN sam3-job.yaml
 ```
 
 This submits 10 parallel jobs to process the entire dataset. Three will start immediately (one per worker), and the rest will queue up.
@@ -104,7 +100,7 @@ sky jobs logs <job-id>
 To process faster, scale up the pool:
 ```bash
 sky jobs pool apply --pool sam3-pool --workers 10
-sky jobs launch --pool sam3-pool --num-jobs 20 job.yaml
+sky jobs launch --pool sam3-pool --num-jobs 20 sam3-job.yaml
 ```
 
 ### Step 6: Cleanup
@@ -116,7 +112,7 @@ sky jobs pool down sam3-pool
 
 ## How it works
 
-### Pool configuration (`pool.yaml`)
+### Pool configuration (`sam3-pool.yaml`)
 
 The pool YAML defines the worker infrastructure:
 - **Workers**: Number of GPU instances
@@ -124,7 +120,7 @@ The pool YAML defines the worker infrastructure:
 - **File mounts**: Kaggle credentials and S3 output bucket
 - **Setup**: Runs once per worker to install dependencies and download the dataset
 
-### Job configuration (`job.yaml`)
+### Job configuration (`sam3-job.yaml`)
 
 The job YAML defines the workload:
 - **Resources**: Must match pool resources (L40S GPU)
@@ -151,9 +147,9 @@ The `process_segmentation.py` script:
 ![Example Segmentation Output 2](https://i.imgur.com/5y5iSP1.png)
 ### Output
 
-Results are synced to the S3 bucket specified in `file_mounts`:
+Results are synced to the S3 bucket specified via `OUTPUT_BUCKET_NAME`:
 ```
-$ aws s3 ls s3://my-skypilot-bucket/segmentation_results/ --recursive
+$ aws s3 ls s3://my-bucket/segmentation_results/ --recursive
 2025-12-22 08:53:37          0 segmentation_results/
 2025-12-22 08:54:22          0 segmentation_results/1/
 2025-12-22 08:54:23        231 segmentation_results/1/1_metadata.json
@@ -202,7 +198,7 @@ PROMPTS = ["person", "ball", "goal", "referee"]
 
 ### Use different GPU
 
-Update `pool.yaml` and `job.yaml` to use a different accelerator:
+Update `sam3-pool.yaml` and `sam3-job.yaml` to use a different accelerator:
 ```yaml
 resources:
   accelerators: H100:1

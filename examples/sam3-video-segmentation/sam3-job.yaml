@@ -1,3 +1,12 @@
+# Job configuration for SAM3 video segmentation.
+# Processes a chunk of videos based on SKYPILOT_JOB_RANK.
+#
+# Usage (requires a pool to be created first with sam3-pool.yaml):
+#
+#  sky jobs launch --pool sam3-pool --num-jobs 10 --secret HF_TOKEN sam3-job.yaml
+#
+# Each job processes a subset of videos based on its rank.
+
 name: sam3-segmentation-job
 
 resources:
