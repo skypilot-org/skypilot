@@ -210,7 +210,7 @@ class TestJobGroupNetworking:
         assert 'SKYPILOT_JOBGROUP_NAME' in env_vars
         assert env_vars['SKYPILOT_JOBGROUP_NAME'] == 'test-group'
 
-    def test_get_k8s_namespace_logs_on_exception(self, caplog):
+    def test_get_k8s_namespace_logs_on_exception(self):
         """Test that _get_k8s_namespace_from_handle logs debug message on error.
 
         This test verifies the fix for silent exception handling - exceptions
@@ -223,21 +223,24 @@ class TestJobGroupNetworking:
         mock_handle.launched_resources = mock.MagicMock()
         mock_handle.launched_resources.region = 'test-context'
 
-        # Mock the k8s_utils to raise an exception
+        # Mock the k8s_utils to raise an exception and patch the logger
         with mock.patch(
                 'sky.provision.kubernetes.utils.get_kube_config_context_namespace'
-        ) as mock_get_ns:
+        ) as mock_get_ns, mock.patch.object(job_group_networking,
+                                            'logger') as mock_logger:
             mock_get_ns.side_effect = Exception('Test K8s error')
 
-            with caplog.at_level(logging.DEBUG):
-                result = job_group_networking._get_k8s_namespace_from_handle(
-                    mock_handle)
+            result = job_group_networking._get_k8s_namespace_from_handle(
+                mock_handle)
 
             # Should fall back to default
             assert result == 'default'
+
             # Should have logged the exception at debug level
-            assert 'Failed to get K8s namespace from handle' in caplog.text
-            assert 'Test K8s error' in caplog.text
+            mock_logger.debug.assert_called_once()
+            log_message = mock_logger.debug.call_args[0][0]
+            assert 'Failed to get K8s namespace from handle' in log_message
+            assert 'Test K8s error' in log_message
 
     def test_get_k8s_namespace_returns_default_for_none_handle(self):
         """Test that _get_k8s_namespace_from_handle returns 'default' for None."""
@@ -245,6 +248,59 @@ class TestJobGroupNetworking:
 
         result = job_group_networking._get_k8s_namespace_from_handle(None)
         assert result == 'default'
+
+    def test_generate_wait_for_networking_script_with_hostnames(self):
+        """Test wait script generation with multiple job names."""
+        from sky.jobs import job_group_networking
+
+        script = job_group_networking.generate_wait_for_networking_script(
+            'my-job-group', ['trainer', 'evaluator'])
+
+        # Verify script contains expected hostnames
+        assert 'trainer-0.my-job-group' in script
+        assert 'evaluator-0.my-job-group' in script
+
+        # Verify script has required structure
+        assert 'HOSTNAMES=' in script
+        assert 'MAX_WAIT=300' in script
+        assert 'getent hosts' in script
+        assert '[SkyPilot]' in script
+
+    def test_generate_wait_for_networking_script_empty(self):
+        """Test wait script returns empty for no other jobs."""
+        from sky.jobs import job_group_networking
+
+        script = job_group_networking.generate_wait_for_networking_script(
+            'my-job-group', [])
+
+        assert script == ''
+
+    def test_generate_k8s_dns_updater_script_content(self):
+        """Test DNS updater script structure."""
+        from sky.jobs import job_group_networking
+
+        dns_mappings = [('trainer-0.ns.svc.cluster.local',
+                         'trainer-0.my-group'),
+                        ('eval-0.ns.svc.cluster.local', 'eval-0.my-group')]
+
+        script = job_group_networking.generate_k8s_dns_updater_script(
+            dns_mappings)
+
+        # Verify script contains required elements
+        assert 'MAPPINGS=' in script
+        assert 'trainer-0.ns.svc.cluster.local:trainer-0.my-group' in script
+        assert 'eval-0.ns.svc.cluster.local:eval-0.my-group' in script
+        assert 'getent hosts' in script
+        assert '/etc/hosts' in script
+        assert 'SkyPilot JobGroup K8s entries' in script
+        assert 'while true' in script  # Background loop
+
+    def test_generate_k8s_dns_updater_script_empty_mappings(self):
+        """Test DNS updater returns empty for no mappings."""
+        from sky.jobs import job_group_networking
+
+        script = job_group_networking.generate_k8s_dns_updater_script([])
+        assert script == ''
 
 
 class TestOptimizerSelectBestInfra:

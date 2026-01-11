@@ -471,7 +471,6 @@ async def setup_job_group_networking(
     job_group_name: str,
     tasks_handles: List[Tuple['task_lib.Task',
                               'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
-    ssh_credentials: Optional[Dict[str, str]] = None,
     placement: PlacementMode = PlacementMode.SAME_INFRA,
 ) -> bool:
     """Set up networking for all jobs in a JobGroup.
@@ -481,15 +480,11 @@ async def setup_job_group_networking(
     Args:
         job_group_name: Name of the JobGroup.
         tasks_handles: List of (Task, ResourceHandle) tuples for each job.
-        ssh_credentials: Optional SSH credentials (for backward compatibility,
-            now uses handle.get_command_runners() instead).
         placement: Placement mode (default: SAME_INFRA).
 
     Returns:
         True if setup succeeded, False otherwise.
     """
-    del ssh_credentials  # Now using handle.get_command_runners()
-
     logger.info(f'Setting up networking for JobGroup: {job_group_name}')
 
     # Configure network infrastructure (e.g., /etc/hosts)

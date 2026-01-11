@@ -930,7 +930,6 @@ class JobController:
         executor: recovery_strategy.StrategyExecutor,
         job_group_name: str,
         all_tasks_handles: List[Tuple['sky.Task', typing.Any]],
-        ssh_credentials: Optional[Dict[str, str]],
     ) -> bool:
         """Monitor a single job in a JobGroup until completion.
 
@@ -1085,7 +1084,7 @@ class JobController:
                 updated_handles.append((t, t_handle))
 
             await job_group_networking.setup_job_group_networking(
-                job_group_name, updated_handles, ssh_credentials)
+                job_group_name, updated_handles)
 
             logger.info(f'Job {task.name} recovered, continuing monitoring')
 
@@ -1201,16 +1200,10 @@ class JobController:
         # Phase 3: Set up networking
         logger.info('Phase 3: Setting up JobGroup networking...')
         tasks_handles = list(zip(tasks, handles))
-        ssh_credentials = None
-        if handles and handles[0] is not None:
-            ssh_credentials = backend_utils.ssh_credential_from_yaml(
-                handles[0].cluster_yaml,
-                docker_user=handles[0].docker_user,
-                ssh_user=handles[0].ssh_user)
 
         networking_success = await (
             job_group_networking.setup_job_group_networking(
-                job_group_name, tasks_handles, ssh_credentials))
+                job_group_name, tasks_handles))
         if not networking_success:
             logger.warning('Some networking setup failed, continuing anyway')
 
@@ -1226,8 +1219,7 @@ class JobController:
             monitor_tasks.append(
                 self._monitor_job_group_task(task_id, task, handle,
                                              cluster_name, executor,
-                                             job_group_name, tasks_handles,
-                                             ssh_credentials))
+                                             job_group_name, tasks_handles))
 
         try:
             results = await asyncio.gather(*monitor_tasks,
