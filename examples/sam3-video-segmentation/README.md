@@ -4,8 +4,6 @@ This example demonstrates how to use [SAM3 (Segment Anything 3)](https://hugging
 
 <video src="https://i.imgur.com/xw1koxh.mp4" controls="controls"></video>
 
-## Use case
-
 SAM3 is Meta's unified foundation model for promptable segmentation in images and videos. It can:
 - Detect, segment, and track objects using text or visual prompts
 - Handle open-vocabulary concepts specified by text phrases
