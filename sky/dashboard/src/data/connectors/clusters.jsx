@@ -9,6 +9,23 @@ import dashboardCache from '@/lib/cache';
 const DEFAULT_TAIL_LINES = 5000;
 
 /**
+ * Get the plugin data fetcher for a given resource type if available.
+ * Returns null if no plugin has registered a fetcher for this resource.
+ */
+function getPluginDataFetcher(resourceType) {
+  if (typeof window === 'undefined') return null;
+  const api = window.SkyDashboardPluginAPI;
+  if (!api) return null;
+  // Check if plugins have registered a data fetcher via PluginProvider state
+  // The fetcher is accessed through the global API or plugin state
+  const pluginState = window.__SKYDASHBOARD_PLUGIN_STATE__;
+  if (pluginState && pluginState.dataFetchers && pluginState.dataFetchers[resourceType]) {
+    return pluginState.dataFetchers[resourceType];
+  }
+  return null;
+}
+
+/**
  * Truncates a string in the middle, preserving parts from beginning and end.
  * @param {string} str - The string to truncate
  * @param {number} maxLength - Maximum length of the truncated string
@@ -47,15 +64,50 @@ const clusterStatusMap = {
   null: 'TERMINATED',
 };
 
-export async function getClusters({ clusterNames = null } = {}) {
+/**
+ * Normalize cluster status to just the status name (e.g., 'UP', 'STOPPED').
+ * Handles formats like 'ClusterStatus.UP' or 'UP'.
+ */
+function normalizeStatus(status) {
+  if (!status) return null;
+  const str = String(status);
+  // Handle "ClusterStatus.UP" format
+  if (str.startsWith('ClusterStatus.')) {
+    return str.replace('ClusterStatus.', '');
+  }
+  return str;
+}
+
+export async function getClusters({ clusterNames = null, filters = {}, page, limit } = {}) {
   try {
-    const clusters = await apiClient.fetch('/status', {
-      cluster_names: clusterNames,
-      all_users: true,
-      include_credentials: false,
-      include_handle: false,
-      summary_response: clusterNames == null,
-    });
+    // Check if a plugin data fetcher is available
+    const pluginFetcher = getPluginDataFetcher('clusters');
+    let clusters;
+    let paginationMeta = null;
+
+    if (pluginFetcher && pluginFetcher.fetch && !clusterNames) {
+      // Use plugin data fetcher for paginated requests
+      console.log('[getClusters] Using plugin data fetcher');
+      const result = await pluginFetcher.fetch({ filters, page, limit });
+      clusters = result.items || [];
+      paginationMeta = {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        total_pages: result.total_pages,
+        has_next: result.has_next,
+        has_prev: result.has_prev,
+      };
+    } else {
+      // Fall back to default /status endpoint
+      clusters = await apiClient.fetch('/status', {
+        cluster_names: clusterNames,
+        all_users: true,
+        include_credentials: false,
+        include_handle: false,
+        summary_response: clusterNames == null,
+      });
+    }
 
     const clusterData = clusters.map((cluster) => {
       // Use cluster_hash for lookup, assuming it's directly in cluster.cluster_hash
@@ -77,7 +129,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         region_or_zone = truncateMiddle(region_or_zone, 25);
       }
       return {
-        status: clusterStatusMap[cluster.status],
+        status: clusterStatusMap[normalizeStatus(cluster.status)],
         cluster: cluster.name,
         user: cluster.user_name,
         user_hash: cluster.user_hash,
@@ -114,6 +166,12 @@ export async function getClusters({ clusterNames = null } = {}) {
         ],
       };
     });
+
+    // If we have pagination metadata, attach it to the result
+    if (paginationMeta) {
+      clusterData._pagination = paginationMeta;
+    }
+
     return clusterData;
   } catch (error) {
     console.error('Error fetching clusters:', error);

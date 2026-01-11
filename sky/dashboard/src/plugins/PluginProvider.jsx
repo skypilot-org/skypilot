@@ -404,6 +404,18 @@ function createPluginApi(dispatch) {
 export function PluginProvider({ children }) {
   const [state, dispatch] = useReducer(pluginReducer, initialState);
 
+  // Expose plugin state on window for non-React code (e.g., data connectors)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.__SKYDASHBOARD_PLUGIN_STATE__ = state;
+    }
+    return () => {
+      if (typeof window !== 'undefined' && window.__SKYDASHBOARD_PLUGIN_STATE__ === state) {
+        delete window.__SKYDASHBOARD_PLUGIN_STATE__;
+      }
+    };
+  }, [state]);
+
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
