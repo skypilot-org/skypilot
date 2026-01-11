@@ -1154,6 +1154,17 @@ class Optimizer:
         if not quiet:
             cloud, region = best_infra
             logger.info(f'Selected infrastructure: {cloud} / {region}')
+            # Hint user about other available infras
+            other_infras = [(c, r)
+                            for c, r in common_infras
+                            if not (str(c) == str(cloud) and r == region)]
+            if other_infras:
+                other_infras_str = ', '.join(
+                    [f'{c} / {r}' for c, r in other_infras[:3]])
+                if len(other_infras) > 3:
+                    other_infras_str += f', ... ({len(other_infras) - 3} more)'
+                logger.info(
+                    f'Other available common infras: {other_infras_str}')
 
         # Step 4: Assign resources for each task on the selected infra
         cloud, region = best_infra
@@ -1167,6 +1178,17 @@ class Optimizer:
                 if resources.region == region:
                     # Set best_resources on the task
                     task.best_resources = resources
+                    # Also set resources override to ensure the constraint
+                    # persists through YAML serialization to the controller.
+                    # Without this, the controller would re-optimize each
+                    # task independently, placing them on different infras.
+                    override_params: Dict[str, Any] = {}
+                    if resources.cloud is not None:
+                        override_params['cloud'] = resources.cloud
+                    if resources.region is not None:
+                        override_params['region'] = resources.region
+                    if override_params:
+                        task.set_resources_override(override_params)
                     break
 
         return dag
