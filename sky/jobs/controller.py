@@ -211,7 +211,7 @@ class JobController:
         """Downloads and streams the logs of the current job with given task ID.
 
         We do not stream the logs from the cluster directly, as the
-        donwload and stream should be faster, and more robust against
+        download and stream should be faster, and more robust against
         preemptions or ssh disconnection during the streaming.
         """
         if handle is None:
@@ -973,8 +973,9 @@ class JobController:
                     callback_func=callback_func)
 
                 try:
-                    self._download_log_and_stream(task_id, handle,
-                                                  job_id_on_cluster)
+                    await context_utils.to_thread(
+                        self._download_log_and_stream, task_id, handle,
+                        job_id_on_cluster)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.warning(f'Failed to download logs: {e}')
 
@@ -1005,8 +1006,9 @@ class JobController:
                     callback_func=callback_func)
 
                 try:
-                    self._download_log_and_stream(task_id, handle,
-                                                  job_id_on_cluster)
+                    await context_utils.to_thread(
+                        self._download_log_and_stream, task_id, handle,
+                        job_id_on_cluster)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.warning(f'Failed to download logs: {e}')
 

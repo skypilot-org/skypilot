@@ -81,8 +81,9 @@ def _get_k8s_namespace_from_handle(
             from sky.provision.kubernetes import utils as k8s_utils
             return k8s_utils.get_kube_config_context_namespace(
                 handle.launched_resources.region)
-        except Exception:  # pylint: disable=broad-except
-            pass
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to get K8s namespace from handle, '
+                         f'falling back to default: {e}')
 
     # Fallback to default namespace
     return 'default'

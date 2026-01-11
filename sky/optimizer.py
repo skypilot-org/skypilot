@@ -1239,11 +1239,14 @@ class Optimizer:
 
         for cloud, region in common_infras:
             total_score = 0.0
+            all_tasks_valid = True
 
             for task in tasks:
                 candidates = task_candidates.get(task, {})
                 if cloud not in candidates:
-                    continue
+                    # Task cannot run on this cloud - skip this infra
+                    all_tasks_valid = False
+                    break
 
                 # Find cheapest/fastest resources in this infra
                 best_task_score = float('inf')
@@ -1265,8 +1268,12 @@ class Optimizer:
 
                 if best_task_score < float('inf'):
                     total_score += best_task_score
+                else:
+                    # No valid resources found for this task on this infra
+                    all_tasks_valid = False
+                    break
 
-            if total_score < best_score:
+            if all_tasks_valid and total_score < best_score:
                 best_score = total_score
                 best_infra = (cloud, region)
 
