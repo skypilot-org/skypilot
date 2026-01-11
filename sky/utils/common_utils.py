@@ -23,7 +23,6 @@ import uuid
 import jsonschema
 
 from sky import exceptions
-from sky import models
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
@@ -36,6 +35,8 @@ from sky.utils import validator
 if typing.TYPE_CHECKING:
     import jinja2
     import psutil
+
+    from sky import models
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     psutil = adaptors_common.LazyImport('psutil')
@@ -342,10 +343,13 @@ def get_current_command() -> str:
 
 def get_current_user() -> 'models.User':
     """Returns the user in current server session."""
+    # NOTE: Deferred import to reduce sky package import time. The models
+    # module pulls in heavy dependencies like pydantic and numpy.
+    from sky import models as sky_models  # pylint: disable=import-outside-toplevel
     value = context.get_context_var(_USER_KEY)
     if value is not None:
         return value
-    return models.User.get_current_user()
+    return sky_models.User.get_current_user()
 
 
 def get_current_user_name() -> str:

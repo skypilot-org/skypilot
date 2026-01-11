@@ -9,7 +9,6 @@ import pydantic
 
 import sky
 from sky import exceptions
-from sky import models
 from sky.adaptors import common as adaptors_common
 from sky.server.requests import request_names
 from sky.utils import common_utils
@@ -19,6 +18,8 @@ from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import requests
+
+    from sky import models
 else:
     requests = adaptors_common.LazyImport('requests')
 
@@ -102,10 +103,13 @@ class UserRequest:
 
     @classmethod
     def decode(cls, body: str) -> 'UserRequest':
+        # NOTE: Deferred import to reduce sky package import time. The models
+        # module pulls in heavy dependencies like pydantic and numpy.
+        from sky import models as sky_models  # pylint: disable=import-outside-toplevel
         user_request_body = _UserRequestBody.model_validate_json(body)
         user_dict = yaml_utils.read_yaml_str(
             user_request_body.user) if user_request_body.user != '' else None
-        user = models.User(
+        user = sky_models.User(
             id=user_dict['id'],
             name=user_dict['name']) if user_dict is not None else None
         return cls(

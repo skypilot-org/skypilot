@@ -1,8 +1,13 @@
 """Kubernetes pvc provisioning."""
+from __future__ import annotations
+
+import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from sky import models
 from sky import sky_logging
+
+if typing.TYPE_CHECKING:
+    from sky import models
 from sky.adaptors import kubernetes
 from sky.provision import constants
 from sky.provision.kubernetes import config as config_lib

@@ -1,12 +1,16 @@
 """Volume functions for provisioning and deleting ephemeral volumes."""
+from __future__ import annotations
 
 import copy
+import typing
 from typing import Any, Dict, Optional
 
 from sky import clouds
 from sky import global_user_state
-from sky import models
 from sky import sky_logging
+
+if typing.TYPE_CHECKING:
+    from sky import models
 from sky.provision import common as provision_common
 from sky.provision import constants as provision_constants
 from sky.provision.kubernetes import utils as kubernetes_utils

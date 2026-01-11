@@ -1,4 +1,6 @@
 """Kubernetes utilities for SkyPilot."""
+from __future__ import annotations
+
 import collections
 import copy
 import dataclasses
@@ -21,7 +23,6 @@ import ijson
 
 from sky import clouds
 from sky import exceptions
-from sky import models
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -47,6 +48,7 @@ if typing.TYPE_CHECKING:
     import yaml
 
     from sky import backends
+    from sky import models
     from sky import resources as resources_lib
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
@@ -3096,6 +3098,9 @@ def get_kubernetes_node_info(
         KubernetesNodesInfo: A model that contains the node info map and other
             information.
     """
+    # NOTE: Deferred import to reduce sky package import time. The models
+    # module pulls in heavy dependencies like pydantic and numpy.
+    from sky import models as sky_models  # pylint: disable=import-outside-toplevel
     nodes = get_kubernetes_nodes(context=context)
 
     lf, _ = detect_gpu_label_formatter(context)
@@ -3207,7 +3212,7 @@ def get_kubernetes_node_info(
         node_is_ready = node.is_ready()
 
         if accelerator_count == 0:
-            node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
+            node_info_dict[node.metadata.name] = sky_models.KubernetesNodeInfo(
                 name=node.metadata.name,
                 accelerator_type=accelerator_name,
                 total={'accelerator_count': 0},
@@ -3236,7 +3241,7 @@ def get_kubernetes_node_info(
             has_multi_host_tpu = True
             continue
 
-        node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
+        node_info_dict[node.metadata.name] = sky_models.KubernetesNodeInfo(
             name=node.metadata.name,
             accelerator_type=accelerator_name,
             total={'accelerator_count': int(accelerator_count)},
@@ -3252,7 +3257,7 @@ def get_kubernetes_node_info(
         hint = ('(Note: Multi-host TPUs are detected and excluded from the '
                 'display as multi-host TPUs are not supported.)')
 
-    return models.KubernetesNodesInfo(
+    return sky_models.KubernetesNodesInfo(
         node_info_dict=node_info_dict,
         hint=hint,
     )

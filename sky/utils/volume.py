@@ -1,12 +1,17 @@
 """Volume utilities."""
+from __future__ import annotations
+
 from dataclasses import dataclass
 import enum
 import time
+import typing
 from typing import Any, Dict, Optional
 
 from sky import exceptions
-from sky import models
 from sky.utils import common_utils
+
+if typing.TYPE_CHECKING:
+    from sky import models
 from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import status_lib
@@ -87,13 +92,16 @@ class VolumeMount:
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, Any]) -> 'VolumeMount':
+        # NOTE: Deferred import to reduce sky package import time. The models
+        # module pulls in heavy dependencies like pydantic and numpy.
+        from sky import models as sky_models  # pylint: disable=import-outside-toplevel
         common_utils.validate_schema(config, schemas.get_volume_mount_schema(),
                                      'Invalid volume mount config: ')
 
         path = config.pop('path', None)
         volume_name = config.pop('volume_name', None)
         is_ephemeral = config.pop('is_ephemeral', False)
-        volume_config: models.VolumeConfig = models.VolumeConfig.model_validate(
+        volume_config: models.VolumeConfig = sky_models.VolumeConfig.model_validate(
             config.pop('volume_config', None))
         return cls(path, volume_name, volume_config, is_ephemeral)
 
@@ -110,6 +118,9 @@ class VolumeMount:
         Returns:
             A VolumeMount instance for the ephemeral volume.
         """
+        # NOTE: Deferred import to reduce sky package import time. The models
+        # module pulls in heavy dependencies like pydantic and numpy.
+        from sky import models as sky_models  # pylint: disable=import-outside-toplevel
         volume_type = config.get('type')
         if volume_type and volume_type.lower() not in EPHEMERAL_VOLUME_TYPES:
             raise ValueError(f'Unsupported ephemeral volume type: '
@@ -131,7 +142,7 @@ class VolumeMount:
 
         # Create VolumeConfig for ephemeral volume
         # Note: the empty fields will be populated during provisioning
-        volume_config = models.VolumeConfig(
+        volume_config = sky_models.VolumeConfig(
             name='',
             type=config.get('type', ''),
             # Default to kubernetes cloud here for backward compatibility,

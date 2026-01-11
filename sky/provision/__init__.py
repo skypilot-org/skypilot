@@ -3,12 +3,13 @@
 This module provides a standard low-level interface that all
 providers supported by SkyPilot need to follow.
 """
+from __future__ import annotations
+
 import functools
 import inspect
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
-from sky import models
 from sky import sky_logging
 # These provision.<cloud> modules should never fail even if underlying cloud SDK
 # dependencies are not installed. This is ensured by using sky.adaptors inside
@@ -37,6 +38,7 @@ from sky.utils import command_runner
 from sky.utils import timeline
 
 if typing.TYPE_CHECKING:
+    from sky import models
     from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
