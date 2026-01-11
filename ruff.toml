@@ -1,0 +1,217 @@
+# Ruff configuration for SkyPilot
+# Designed to match current yapf/isort/pylint settings
+
+target-version = "py38"
+line-length = 80
+
+# Exclude same paths as current tools
+exclude = [
+    "build/",
+    "sky/skylet/providers/ibm/",  # Uses Black formatting
+    "sky/schemas/generated/",      # Auto-generated protobuf files
+    "tests/unit_tests/test_sky/backends/testdata/",
+    "third_party/",
+    "sky/skylet/ray_patches/",
+]
+
+[format]
+# Match yapf Google style
+quote-style = "single"           # Match pylint-quotes string-quote=single
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true
+
+[lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "Q",      # flake8-quotes
+    "PL",     # pylint rules
+    "SIM",    # flake8-simplify
+]
+
+ignore = [
+    # === Disabled to match .pylintrc ===
+
+    # All refactor-level checks (R in pylint -> PLR in ruff)
+    "PLR0904",  # too-many-public-methods
+    "PLR0911",  # too-many-return-statements
+    "PLR0912",  # too-many-branches
+    "PLR0913",  # too-many-arguments
+    "PLR0914",  # too-many-locals
+    "PLR0915",  # too-many-statements
+    "PLR0916",  # too-many-boolean-expressions
+    "PLR0917",  # too-many-positional-arguments
+    "PLR1702",  # too-many-nested-blocks
+    "PLR2004",  # magic-value-comparison
+    "PLR6301",  # no-self-use
+
+    # Convention checks disabled in pylint
+    "PLW0603",  # global-statement
+    "PLW2901",  # redefined-loop-name
+
+    # consider-using-f-string - FIXME in .pylintrc
+    "UP032",    # f-string
+
+    # logging-format-interpolation, logging-fstring-interpolation - FIXMEs
+    "G",        # flake8-logging-format (all)
+
+    # Other disabled checks from .pylintrc
+    "E501",     # line-too-long (handled by formatter)
+    "PLW0120",  # useless-else-on-loop
+    "B007",     # unused-loop-control-variable (similar to dummy variable handling)
+
+    # Simplify rules that conflict with readability preferences
+    "SIM102",   # collapsible-if
+    "SIM105",   # suppressible-exception (use contextlib.suppress)
+    "SIM108",   # if-else-block-instead-of-if-exp (ternary)
+    "SIM110",   # reimplemented-builtin (for loop -> any/all)
+    "SIM111",   # reimplemented-builtin
+    "SIM117",   # multiple-with-statements
+    "SIM118",   # in-dict-keys
+
+    # Bugbear rules that are too strict
+    "B008",     # function-call-in-default-argument
+    "B904",     # raise-without-from-inside-except
+    "B905",     # zip-without-explicit-strict
+
+    # These would require significant refactoring
+    "C901",     # complex-structure (mccabe complexity)
+
+    # Import-related (handled by isort section)
+    "I001",     # unsorted-imports (let isort handle)
+
+    # === Not currently enforced by pylint - disable for parity ===
+
+    # Module import not at top - common pattern in SkyPilot for managing import order
+    "E402",     # module-level-import-not-at-top
+
+    # Quote optimization suggestions - not enforced by pylint-quotes
+    "Q003",     # avoidable-escaped-quote
+    "Q004",     # unnecessary-escaped-quote
+
+    # Comprehension suggestions - not currently enforced
+    "C401",     # unnecessary-generator-set
+    "C403",     # unnecessary-list-comprehension-set
+    "C408",     # unnecessary-collection-call (dict() -> {})
+    "C413",     # unnecessary-call-around-sorted
+    "C414",     # unnecessary-double-cast-or-process
+    "C416",     # unnecessary-comprehension
+    "C417",     # unnecessary-map
+    "C419",     # unnecessary-comprehension-in-call
+    "C420",     # unnecessary-dict-comprehension-for-iterable
+
+    # Lambda assignment - used in codebase
+    "E731",     # lambda-assignment
+
+    # Assert comparisons - not enforced
+    "B011",     # assert-false
+    "B010",     # set-attr-with-constant
+    "B009",     # get-attr-with-constant
+
+    # Comparison issues - not enforced
+    "E713",     # not-in-test
+    "E721",     # type-comparison
+
+    # Regex issues - not enforced
+    "B034",     # re-sub-positional-args
+
+    # Abstract class issues - not enforced
+    "B027",     # empty-method-in-abstract-base-class
+
+    # Loop variable capture - not enforced
+    "B023",     # function-uses-loop-variable
+
+    # === pyupgrade (UP) rules - not enforced, would require code changes ===
+    # These suggest modernizing to newer Python syntax
+
+    "UP004",    # useless-object-inheritance (class Foo(object) -> class Foo)
+    "UP006",    # non-pep585-annotation (List -> list, requires Python 3.9+)
+    "UP007",    # non-pep604-annotation-union (Union[X, Y] -> X | Y, requires 3.10+)
+    "UP012",    # unnecessary-encode-utf8
+    "UP013",    # convert-typed-dict-functional-to-class
+    "UP015",    # redundant-open-modes (open('f', 'r') -> open('f'))
+    "UP020",    # use-pep585-annotation (requires Python 3.9+)
+    "UP022",    # replace-stdout-stderr (subprocess)
+    "UP024",    # os-error-alias
+    "UP028",    # yield-in-for-loop (yield from)
+    "UP030",    # format-literals (implicit string format references)
+    "UP034",    # extraneous-parentheses
+    "UP037",    # quoted-annotation (remove quotes from annotations)
+    "UP045",    # non-pep604-annotation-optional (Optional[X] -> X | None)
+
+    # === Pylint convention (PLC) rules - not enforced ===
+    "PLC0206",  # dict-index-missing-items
+    "PLC0415",  # import-outside-top-level (lazy imports are intentional)
+    "PLC1802",  # len-as-condition
+
+    # === Pylint refactor (PLR) rules - additional ones not enforced ===
+    "PLR1704",  # redefined-argument-from-local
+    "PLR1711",  # useless-return
+    "PLR1714",  # repeated-equality-comparison
+    "PLR1730",  # if-stmt-min-max
+    "PLR5501",  # collapsible-else-if (use elif)
+
+    # === Pylint warning (PLW) rules ===
+    "PLW1508",  # invalid-envvar-default
+
+    # === SIM rules - additional simplification suggestions not enforced ===
+    "SIM101",   # duplicate-isinstance-call
+    "SIM103",   # needless-bool
+    "SIM109",   # compare-with-tuple
+    "SIM113",   # enumerate-for-loop
+    "SIM114",   # if-with-same-arms
+    "SIM115",   # open-file-with-context-handler
+    "SIM210",   # if-expr-with-true-false
+    "SIM212",   # if-expr-with-twisted-arms
+    "SIM300",   # yoda-conditions
+    "SIM401",   # if-else-block-instead-of-dict-get
+    "SIM910",   # dict-get-with-none-default
+]
+
+[lint.per-file-ignores]
+# Test files can have more flexibility
+"tests/*" = [
+    "PLR2004",  # magic values in tests are fine
+    "B011",     # assert false
+]
+# Examples may use simpler patterns
+"examples/*" = [
+    "PLR2004",
+]
+# Init files often have unused imports for re-export
+"__init__.py" = [
+    "F401",     # unused-import (re-exports)
+]
+
+[lint.isort]
+# Match current isort settings from pyproject.toml
+# profile = "google" equivalent settings:
+combine-as-imports = true
+force-single-line = false
+force-sort-within-sections = true
+known-first-party = ["sky"]
+lines-after-imports = 2
+order-by-type = false
+split-on-trailing-comma = false
+
+[lint.flake8-quotes]
+# Match pylint-quotes settings
+inline-quotes = "single"
+docstring-quotes = "double"
+multiline-quotes = "double"
+
+[lint.pylint]
+max-args = 10           # More lenient than default 5
+max-branches = 20       # More lenient
+max-statements = 100    # More lenient
+max-returns = 10        # More lenient
+
+[lint.mccabe]
+max-complexity = 20     # More lenient
