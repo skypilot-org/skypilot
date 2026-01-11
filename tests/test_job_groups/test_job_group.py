@@ -1,8 +1,7 @@
 """Tests for JobGroup functionality."""
-import logging
 import os
 import tempfile
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 from unittest import mock
 
 import pytest
@@ -225,9 +224,10 @@ class TestJobGroupNetworking:
 
         # Mock the k8s_utils to raise an exception and patch the logger
         with mock.patch(
-                'sky.provision.kubernetes.utils.get_kube_config_context_namespace'
-        ) as mock_get_ns, mock.patch.object(job_group_networking,
-                                            'logger') as mock_logger:
+                'sky.provision.kubernetes.utils.'
+                'get_kube_config_context_namespace') as mock_get_ns, \
+                mock.patch.object(job_group_networking,
+                                  'logger') as mock_logger:
             mock_get_ns.side_effect = Exception('Test K8s error')
 
             result = job_group_networking._get_k8s_namespace_from_handle(
@@ -243,7 +243,7 @@ class TestJobGroupNetworking:
             assert 'Test K8s error' in log_message
 
     def test_get_k8s_namespace_returns_default_for_none_handle(self):
-        """Test that _get_k8s_namespace_from_handle returns 'default' for None."""
+        """Test _get_k8s_namespace_from_handle returns 'default' for None."""
         from sky.jobs import job_group_networking
 
         result = job_group_networking._get_k8s_namespace_from_handle(None)
@@ -432,7 +432,7 @@ class TestOptimizerSelectBestInfra:
         assert result == common_infras[0]
 
     def test_select_best_infra_chooses_cheapest(self):
-        """Test that cheapest valid infra is selected when minimize_cost=True."""
+        """Test cheapest valid infra is selected when minimize_cost=True."""
         from sky.optimizer import Optimizer
 
         cloud_aws = self._create_mock_cloud('aws')
@@ -630,7 +630,8 @@ class TestControllerAsyncPatterns:
         source = inspect.getsource(controller.JobController)
 
         # Parse the source to check for the pattern
-        # We're looking for: await context_utils.to_thread(..._download_log_and_stream...)
+        # We're looking for:
+        #   await context_utils.to_thread(..._download_log_and_stream...)
         tree = ast.parse(source)
 
         # Find all function definitions
@@ -643,9 +644,9 @@ class TestControllerAsyncPatterns:
                     async_methods_with_download.append(node.name)
                     # Verify it's called via to_thread
                     assert 'to_thread' in method_source, (
-                        f'Async method {node.name} calls _download_log_and_stream '
-                        f'but does not use to_thread - this will block the event loop!'
-                    )
+                        f'Async method {node.name} calls '
+                        f'_download_log_and_stream but does not use '
+                        f'to_thread - this will block the event loop!')
 
         # Ensure we found the relevant methods
         assert len(async_methods_with_download) > 0, (
