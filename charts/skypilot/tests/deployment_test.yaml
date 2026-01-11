@@ -179,14 +179,32 @@ tests:
       - failedTemplate:
           errorMessage: "External database must be configured via .apiService.dbConnectionSecretName or .apiService.dbConnectionString when using RollingUpdate strategy"
 
-  - it: should fail RollingUpdate strategy with local storage enabled
+  - it: should fail RollingUpdate strategy with local storage enabled using ReadWriteOnce
     set:
       apiService.upgradeStrategy: RollingUpdate
       apiService.dbConnectionSecretName: test-db-secret
       storage.enabled: true
+      storage.accessMode: ReadWriteOnce
     asserts:
       - failedTemplate:
-          errorMessage: "Local storage is not supported when using RollingUpdate strategy. Use recreate upgrade strategy or set storage.enabled to false."
+          errorMessage: "Local storage with ReadWriteOnce access mode is not supported when using RollingUpdate strategy. Either use Recreate upgrade strategy, set storage.enabled to false, or use ReadWriteMany access mode with a compatible storage class (e.g., NFS-backed storage like Google Filestore)."
+
+  - it: should allow RollingUpdate strategy with local storage enabled using ReadWriteMany
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: true
+      storage.accessMode: ReadWriteMany
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: RollingUpdate
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 1
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 0
 
   - it: should honor fullnameOverride for deployment names and labels
     set:

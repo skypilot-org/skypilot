@@ -11,8 +11,8 @@ spec:
   {{- if and (not .Values.apiService.dbConnectionSecretName) (not .Values.apiService.dbConnectionString) }}
   {{- fail "External database must be configured via .apiService.dbConnectionSecretName or .apiService.dbConnectionString when using RollingUpdate strategy" }}
   {{- end }}
-  {{- if .Values.storage.enabled }}
-  {{- fail "Local storage is not supported when using RollingUpdate strategy. Use recreate upgrade strategy or set storage.enabled to false." }}
+  {{- if and .Values.storage.enabled (ne .Values.storage.accessMode "ReadWriteMany") }}
+  {{- fail "Local storage with ReadWriteOnce access mode is not supported when using RollingUpdate strategy. Either use Recreate upgrade strategy, set storage.enabled to false, or use ReadWriteMany access mode with a compatible storage class (e.g., NFS-backed storage like Google Filestore)." }}
   {{- end }}
   strategy:
     type: RollingUpdate
