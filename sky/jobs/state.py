@@ -155,10 +155,6 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('controller_logs_cleaned_at',
                       sqlalchemy.Float,
                       server_default=None),
-    # JobGroup columns
-    sqlalchemy.Column('is_job_group', sqlalchemy.Boolean, server_default='0'),
-    sqlalchemy.Column('placement', sqlalchemy.Text, server_default=None),
-    sqlalchemy.Column('execution', sqlalchemy.Text, server_default=None),
 )
 
 # TODO(cooperc): drop the table in a migration
@@ -414,10 +410,6 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'current_cluster_name': r.get('current_cluster_name'),
         'job_id_on_pool_cluster': r.get('job_id_on_pool_cluster'),
         'pool_hash': r.get('pool_hash'),
-        # JobGroup columns
-        'is_job_group': r.get('is_job_group'),
-        'placement': r.get('placement'),
-        'execution': r.get('execution'),
         # Per-task cluster name for JobGroups
         'cluster_name': r.get('cluster_name'),
     }
@@ -2984,97 +2976,6 @@ async def job_event_retention_daemon():
 
 
 # === JobGroup functions ===
-
-
-@_init_db
-def set_job_group_info(job_id: int, is_job_group: bool,
-                       placement: Optional[str],
-                       execution: Optional[str]) -> None:
-    """Set JobGroup metadata for a job.
-
-    Args:
-        job_id: The spot_job_id of the managed job.
-        is_job_group: Whether this job is a JobGroup.
-        placement: The placement mode (e.g., 'SAME_INFRA').
-        execution: The execution mode (e.g., 'parallel').
-    """
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(job_info_table).filter(
-            job_info_table.c.spot_job_id == job_id).update({
-                job_info_table.c.is_job_group: is_job_group,
-                job_info_table.c.placement: placement,
-                job_info_table.c.execution: execution,
-            })
-        session.commit()
-
-
-@_init_db_async
-async def set_job_group_info_async(job_id: int, is_job_group: bool,
-                                   placement: Optional[str],
-                                   execution: Optional[str]) -> None:
-    """Set JobGroup metadata for a job (async version).
-
-    Args:
-        job_id: The spot_job_id of the managed job.
-        is_job_group: Whether this job is a JobGroup.
-        placement: The placement mode (e.g., 'SAME_INFRA').
-        execution: The execution mode (e.g., 'parallel').
-    """
-    assert _SQLALCHEMY_ENGINE_ASYNC is not None
-    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        await session.execute(
-            sqlalchemy.update(job_info_table).where(
-                job_info_table.c.spot_job_id == job_id).values({
-                    job_info_table.c.is_job_group: is_job_group,
-                    job_info_table.c.placement: placement,
-                    job_info_table.c.execution: execution,
-                }))
-        await session.commit()
-
-
-@_init_db
-def get_job_group_info(job_id: int) -> Optional[Dict[str, Any]]:
-    """Get JobGroup metadata for a job.
-
-    Args:
-        job_id: The spot_job_id of the managed job.
-
-    Returns:
-        Dict with 'is_job_group', 'placement', 'execution' keys, or None if
-        job not found.
-    """
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.select(
-                job_info_table.c.is_job_group,
-                job_info_table.c.placement,
-                job_info_table.c.execution,
-            ).where(job_info_table.c.spot_job_id == job_id)).fetchone()
-        if result is None:
-            return None
-        return {
-            'is_job_group': result[0],
-            'placement': result[1],
-            'execution': result[2],
-        }
-
-
-@_init_db
-def check_is_job_group(job_id: int) -> bool:
-    """Check if a job is a JobGroup.
-
-    Args:
-        job_id: The spot_job_id of the managed job.
-
-    Returns:
-        True if the job is a JobGroup, False otherwise.
-    """
-    info = get_job_group_info(job_id)
-    if info is None:
-        return False
-    return bool(info.get('is_job_group', False))
 
 
 @_init_db

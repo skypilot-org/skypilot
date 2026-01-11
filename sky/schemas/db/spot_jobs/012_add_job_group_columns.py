@@ -1,10 +1,11 @@
-"""Add JobGroup columns to job_info and spot tables.
+"""Add cluster_name column to spot table for JobGroup per-task tracking.
 
 Adds:
-- is_job_group (BOOLEAN) to job_info table
-- placement (TEXT) to job_info table
-- execution (TEXT) to job_info table
-- cluster_name (TEXT) to spot table for per-task cluster tracking
+- cluster_name (TEXT) to spot table for per-task cluster tracking in JobGroups
+
+Note: JobGroup config (is_job_group, placement, execution) is derived from the
+dag_yaml_content already stored in job_info table, so no additional columns
+are needed there.
 
 Revision ID: 012
 Revises: 011
@@ -27,24 +28,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    """Add JobGroup columns to job_info and spot tables."""
+    """Add cluster_name column to spot table for JobGroup per-task tracking."""
     with op.get_context().autocommit_block():
-        # Add is_job_group column to job_info table
-        db_utils.add_column_to_table_alembic('job_info',
-                                             'is_job_group',
-                                             sa.Boolean(),
-                                             server_default='0')
-        # Add placement column to job_info table
-        db_utils.add_column_to_table_alembic('job_info',
-                                             'placement',
-                                             sa.Text(),
-                                             server_default=None)
-        # Add execution column to job_info table
-        db_utils.add_column_to_table_alembic('job_info',
-                                             'execution',
-                                             sa.Text(),
-                                             server_default=None)
         # Add cluster_name column to spot table for per-task cluster tracking
+        # in JobGroups (each task may run on a different cluster)
         db_utils.add_column_to_table_alembic('spot',
                                              'cluster_name',
                                              sa.Text(),

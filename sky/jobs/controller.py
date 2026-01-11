@@ -1106,16 +1106,6 @@ class JobController:
         logger.info(f'Starting JobGroup "{job_group_name}" with '
                     f'{len(tasks)} jobs: {[t.name for t in tasks]}')
 
-        # Register JobGroup in database for scheduler bypass
-        placement_str = (self._dag.placement.value
-                         if self._dag.placement is not None else None)
-        execution_str = (self._dag.execution.value
-                         if self._dag.execution is not None else None)
-        managed_job_state.set_job_group_info(self._job_id,
-                                             is_job_group=True,
-                                             placement=placement_str,
-                                             execution=execution_str)
-
         # Inject JobGroup environment variables into all tasks
         # Use pre-launch prediction mode with tasks and job_id
         job_group_env_vars = job_group_networking.get_job_group_env_vars(
