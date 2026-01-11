@@ -22,12 +22,18 @@ const initialState = {
   topNavLinks: [],
   routes: [],
   components: {}, // Map of slot name → array of component configs
+  dataFetchers: {}, // Map of resource type → fetcher object
+  features: {}, // Map of feature name → feature config
+  dataProviders: {}, // Map of provider id → provider config
 };
 
 const actions = {
   REGISTER_TOP_NAV_LINK: 'REGISTER_TOP_NAV_LINK',
   REGISTER_ROUTE: 'REGISTER_ROUTE',
   REGISTER_COMPONENT: 'REGISTER_COMPONENT',
+  REGISTER_DATA_FETCHER: 'REGISTER_DATA_FETCHER',
+  REGISTER_FEATURE: 'REGISTER_FEATURE',
+  REGISTER_DATA_PROVIDER: 'REGISTER_DATA_PROVIDER',
 };
 
 function pluginReducer(state, action) {
@@ -53,6 +59,36 @@ function pluginReducer(state, action) {
         components: {
           ...state.components,
           [slot]: updated,
+        },
+      };
+    }
+    case actions.REGISTER_DATA_FETCHER: {
+      const { resourceType, fetcher } = action.payload;
+      return {
+        ...state,
+        dataFetchers: {
+          ...state.dataFetchers,
+          [resourceType]: fetcher,
+        },
+      };
+    }
+    case actions.REGISTER_FEATURE: {
+      const { name, config } = action.payload;
+      return {
+        ...state,
+        features: {
+          ...state.features,
+          [name]: config,
+        },
+      };
+    }
+    case actions.REGISTER_DATA_PROVIDER: {
+      const { id } = action.payload;
+      return {
+        ...state,
+        dataProviders: {
+          ...state.dataProviders,
+          [id]: action.payload,
         },
       };
     }
@@ -308,6 +344,60 @@ function createPluginApi(dispatch) {
         },
       };
     },
+    registerDataFetcher(resourceType, fetcher) {
+      if (!resourceType || typeof resourceType !== 'string') {
+        console.warn(
+          '[SkyDashboardPlugin] Invalid data fetcher registration: missing resourceType'
+        );
+        return null;
+      }
+      if (!fetcher || typeof fetcher !== 'object') {
+        console.warn(
+          '[SkyDashboardPlugin] Invalid data fetcher registration: fetcher must be an object'
+        );
+        return null;
+      }
+      dispatch({
+        type: actions.REGISTER_DATA_FETCHER,
+        payload: { resourceType, fetcher },
+      });
+      console.log('[SkyDashboardPlugin] Registered data fetcher:', resourceType);
+      return resourceType;
+    },
+    getDefaultFetcher(resourceType) {
+      // Return null - plugins can use this as fallback
+      // In the future, this could return the default fetcher for clusters/jobs
+      return null;
+    },
+    registerFeature(name, config) {
+      if (!name || typeof name !== 'string') {
+        console.warn(
+          '[SkyDashboardPlugin] Invalid feature registration: missing name'
+        );
+        return null;
+      }
+      dispatch({
+        type: actions.REGISTER_FEATURE,
+        payload: { name, config: config || {} },
+      });
+      console.log('[SkyDashboardPlugin] Registered feature:', name);
+      return name;
+    },
+    registerDataProvider(providerConfig) {
+      if (!providerConfig || typeof providerConfig !== 'object' || !providerConfig.id) {
+        console.warn(
+          '[SkyDashboardPlugin] Invalid data provider registration:',
+          providerConfig
+        );
+        return null;
+      }
+      dispatch({
+        type: actions.REGISTER_DATA_PROVIDER,
+        payload: providerConfig,
+      });
+      console.log('[SkyDashboardPlugin] Registered data provider:', providerConfig.id);
+      return providerConfig.id;
+    },
   };
 }
 
@@ -431,4 +521,39 @@ export function usePluginComponents(slot) {
       return true;
     });
   }, [slot, components]);
+}
+
+export function useDataFetcher(resourceType) {
+  const { dataFetchers } = usePluginState();
+  return useMemo(() => {
+    if (!resourceType) {
+      return null;
+    }
+    return dataFetchers[resourceType] || null;
+  }, [resourceType, dataFetchers]);
+}
+
+export function useFeature(featureName) {
+  const { features } = usePluginState();
+  return useMemo(() => {
+    if (!featureName) {
+      return null;
+    }
+    return features[featureName] || null;
+  }, [featureName, features]);
+}
+
+export function useDataProvider(providerId) {
+  const { dataProviders } = usePluginState();
+  return useMemo(() => {
+    if (!providerId) {
+      return null;
+    }
+    return dataProviders[providerId] || null;
+  }, [providerId, dataProviders]);
+}
+
+export function useAllDataProviders() {
+  const { dataProviders } = usePluginState();
+  return dataProviders;
 }
