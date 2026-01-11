@@ -383,6 +383,7 @@ export function ManagedJobsTable({
   const isMobile = useMobile();
   // Guards multiple concurrent fetches: only latest response should commit
   const requestSeqRef = useRef(0);
+  const [fetchError, setFetchError] = useState(null);
 
   // Determine if we should show the Workspace column
   // Only show if there are multiple workspaces or a workspace other than 'default'
@@ -521,6 +522,8 @@ export function ManagedJobsTable({
           setControllerLaunching(!!isLaunching);
           setApiStatusCounts(statusCounts);
           setIsInitialLoad(false);
+          // Clear any previous error on successful fetch
+          setFetchError(null);
         }
 
         // Log cache status for debugging
@@ -541,6 +544,8 @@ export function ManagedJobsTable({
           setData([]);
           setControllerStopped(false);
           setIsInitialLoad(false);
+          // Set error state to display to user
+          setFetchError(err.message || 'Failed to fetch jobs data');
         }
       } finally {
         if (version === requestSeqRef.current) {
@@ -1281,6 +1286,33 @@ export function ManagedJobsTable({
                     </React.Fragment>
                   ))}
                 </>
+              ) : fetchError ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={
+                      11 +
+                      (shouldShowWorkspace ? 1 : 0) +
+                      (shouldShowPool ? 1 : 0)
+                    }
+                    className="text-center py-6"
+                  >
+                    <div className="flex flex-col items-center justify-center text-red-600">
+                      <svg
+                        className="h-6 w-6 mb-2"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                      <span className="font-medium">Failed to load jobs</span>
+                      <span className="text-sm text-red-500 mt-1">{fetchError}</span>
+                    </div>
+                  </TableCell>
+                </TableRow>
               ) : (
                 <TableRow>
                   <TableCell
@@ -1950,6 +1982,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [fetchError, setFetchError] = useState(null);
 
   const fetchData = React.useCallback(async () => {
     setLocalLoading(true);
@@ -1959,10 +1992,14 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
       const { pools = [] } = poolsResponse || {};
       setData(pools);
       setIsInitialLoad(false);
+      // Clear any previous error on successful fetch
+      setFetchError(null);
     } catch (err) {
       console.error('Error fetching pools data:', err);
       setData([]);
       setIsInitialLoad(false);
+      // Set error state to display to user
+      setFetchError(err.message || 'Failed to fetch pools data');
     } finally {
       setLocalLoading(false);
       setLoading(false);
@@ -2144,6 +2181,29 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                   <TableCell>{pool.requested_resources_str || '-'}</TableCell>
                 </TableRow>
               ))
+            ) : fetchError ? (
+              <TableRow>
+                <TableCell
+                  colSpan={5}
+                  className="text-center py-6"
+                >
+                  <div className="flex flex-col items-center justify-center text-red-600">
+                    <svg
+                      className="h-6 w-6 mb-2"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    <span className="font-medium">Failed to load pools</span>
+                    <span className="text-sm text-red-500 mt-1">{fetchError}</span>
+                  </div>
+                </TableCell>
+              </TableRow>
             ) : (
               <TableRow>
                 <TableCell

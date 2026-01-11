@@ -599,6 +599,7 @@ export function ClusterTable({
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [fetchError, setFetchError] = useState(null);
 
   const fetchOptionValuesFromClusters = (clusters) => {
     let optionValues = {
@@ -691,10 +692,14 @@ export function ClusterTable({
 
         setData(markedActiveClusters);
       }
+      // Clear any previous error on successful fetch
+      setFetchError(null);
     } catch (error) {
       console.error('Error fetching cluster data:', error);
       setOptionValues(fetchOptionValuesFromClusters([]));
       setData([]);
+      // Set error state to display to user
+      setFetchError(error.message || 'Failed to fetch cluster data');
     }
 
     setLoading(false);
@@ -981,6 +986,29 @@ export function ClusterTable({
                     </TableRow>
                   );
                 })
+              ) : fetchError ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={9}
+                    className="text-center py-6"
+                  >
+                    <div className="flex flex-col items-center justify-center text-red-600">
+                      <svg
+                        className="h-6 w-6 mb-2"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                      <span className="font-medium">Failed to load clusters</span>
+                      <span className="text-sm text-red-500 mt-1">{fetchError}</span>
+                    </div>
+                  </TableCell>
+                </TableRow>
               ) : (
                 <TableRow>
                   <TableCell
