@@ -159,6 +159,20 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
+    def GetYamlContent(  # type: ignore[return]
+            self, request: servev1_pb2.GetYamlContentRequest,
+            context: grpc.ServicerContext
+    ) -> servev1_pb2.GetYamlContentResponse:
+        """Get YAML content for a service version"""
+        try:
+            service_name = request.service_name
+            version = request.version
+            # Get YAML content directly (no encoding needed for gRPC)
+            yaml_content = serve_utils.get_yaml_content(service_name, version)
+            return servev1_pb2.GetYamlContentResponse(yaml_content=yaml_content)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
 
 class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
     """Implementation of the JobsService gRPC service."""

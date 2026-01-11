@@ -89,6 +89,38 @@ class TerminateServicesRequestConverter:
         return service_names, purge, pool
 
 
+class GetYamlContentRequestConverter:
+    """Converter for GetYamlContentRequest"""
+
+    @classmethod
+    def to_proto(cls, service_name: str,
+                 version: int) -> 'servev1_pb2.GetYamlContentRequest':
+        request = servev1_pb2.GetYamlContentRequest()
+        request.service_name = service_name
+        request.version = version
+        return request
+
+    @classmethod
+    def from_proto(
+            cls, proto: 'servev1_pb2.GetYamlContentRequest') -> Tuple[str, int]:
+        return proto.service_name, proto.version
+
+
+class GetYamlContentResponseConverter:
+    """Converter for GetYamlContentResponse"""
+
+    @classmethod
+    def to_proto(cls,
+                 yaml_content: str) -> 'servev1_pb2.GetYamlContentResponse':
+        response = servev1_pb2.GetYamlContentResponse()
+        response.yaml_content = yaml_content
+        return response
+
+    @classmethod
+    def from_proto(cls, proto: 'servev1_pb2.GetYamlContentResponse') -> str:
+        return proto.yaml_content
+
+
 # ========================= gRPC Runner for Sky Serve =========================
 
 
@@ -127,6 +159,16 @@ class RpcRunner:
             lambda: backends.SkyletClient(handle.get_grpc_channel()
                                          ).add_serve_version(request))
         return response.version
+
+    @classmethod
+    def get_yaml_content(cls, handle: backends.CloudVmRayResourceHandle,
+                         service_name: str, version: int) -> str:
+        assert handle.is_grpc_enabled_with_flag
+        request = GetYamlContentRequestConverter.to_proto(service_name, version)
+        response = backend_utils.invoke_skylet_with_retries(
+            lambda: backends.SkyletClient(handle.get_grpc_channel()
+                                         ).get_serve_yaml_content(request))
+        return GetYamlContentResponseConverter.from_proto(response)
 
     @classmethod
     def terminate_services(cls, handle: backends.CloudVmRayResourceHandle,

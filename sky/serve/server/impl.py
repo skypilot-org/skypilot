@@ -516,10 +516,12 @@ def update(
                     'Non-pool service, trying to update replicas to '
                     f'{workers} is not supported. Ignoring the update.')
 
-        # Load the existing task configuration from the service's YAML file
-        yaml_content = service_record['pool_yaml']
-
-        # Load the existing task configuration
+        # Load the existing task configuration from the deployed YAML file
+        # Use the deployed YAML (which has secrets) instead of pool_yaml
+        # (which is the original user YAML without CLI overrides)
+        version = service_record['version']
+        yaml_content = serve_utils.get_yaml_content_with_fallback(
+            service_name, version, handle, backend, pool)
         task = task_lib.Task.from_yaml_str(yaml_content)
 
         if task.service is None:

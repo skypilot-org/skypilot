@@ -41,6 +41,7 @@ from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
 
@@ -51,9 +52,11 @@ if typing.TYPE_CHECKING:
 
     import sky
     from sky.serve import replica_managers
+    from sky.serve import serve_rpc_utils
 else:
     psutil = adaptors_common.LazyImport('psutil')
     requests = adaptors_common.LazyImport('requests')
+    serve_rpc_utils = adaptors_common.LazyImport('sky.serve.serve_rpc_utils')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -652,6 +655,70 @@ def get_yaml_content(service_name: str, version: int) -> str:
         return f.read()
 
 
+def get_yaml_content_with_fallback(
+    service_name: str,
+    version: int,
+    handle: Optional['backends.CloudVmRayResourceHandle'] = None,
+    backend: Optional['backends.CloudVmRayBackend'] = None,
+    pool: bool = False,
+) -> str:
+    """Get YAML content for a service version with fallback logic.
+
+    In consolidation mode, uses direct database access.
+    In normal mode, uses RPC/codegen to get YAML from the controller.
+
+    Args:
+        service_name: Name of the service
+        version: Version number
+        handle: Controller handle (required in non-consolidation mode)
+        backend: Controller backend (required in non-consolidation mode)
+        pool: Whether this is a pool
+
+    Returns:
+        YAML content as string
+    """
+    if not is_consolidation_mode(pool):
+        # In normal mode, use RPC/codegen to get YAML from controller
+        assert handle is not None, (
+            'handle is required in non-consolidation mode')
+        assert backend is not None, (
+            'backend is required in non-consolidation mode')
+        assert isinstance(handle, backends.CloudVmRayResourceHandle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
+
+        use_legacy = not handle.is_grpc_enabled_with_flag
+
+        if not use_legacy:
+            try:
+                yaml_content = serve_rpc_utils.RpcRunner.get_yaml_content(
+                    handle, service_name, version)
+                return yaml_content
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
+            code = ServeCodeGen.get_yaml_content(service_name, version)
+            returncode, yaml_content_payload, stderr = backend.run_on_head(
+                handle,
+                code,
+                require_outputs=True,
+                stream_logs=False,
+                separate_stderr=True)
+            try:
+                subprocess_utils.handle_returncode(returncode,
+                                                   code,
+                                                   'Failed to get YAML content',
+                                                   stderr,
+                                                   stream_logs=True)
+            except exceptions.CommandError as e:
+                raise RuntimeError(e.error_msg) from e
+            return message_utils.decode_payload(yaml_content_payload)
+
+    # Final fallback to local file method if RPC/codegen fails or if we are in
+    # consolidation mode.
+    return get_yaml_content(service_name, version)
+
+
 def _get_service_status(
         service_name: str,
         pool: bool,
@@ -786,6 +853,21 @@ def load_service_status(payload: str) -> List[Dict[str, Any]]:
 def add_version_encoded(service_name: str) -> str:
     new_version = serve_state.add_version(service_name)
     return message_utils.encode_payload(new_version)
+
+
+# TODO (lloyd-brown): remove when serve codegen is removed
+def get_yaml_content_encoded(service_name: str, version: int) -> str:
+    """Get YAML content for a service version from the database.
+
+    This function runs on the controller where the database is accessible.
+    Returns an encoded payload that can be sent over RPC.
+    """
+    try:
+        yaml_content = get_yaml_content(service_name, version)
+    except Exception as e:  # pylint: disable=broad-except
+        raise ValueError(f'YAML content not found for service {service_name} '
+                         f'version {version} locally: {e}') from e
+    return message_utils.encode_payload(yaml_content)
 
 
 # TODO (kyuds): remove when serve codegen is removed
@@ -1805,6 +1887,14 @@ class ServeCodeGen:
         code = [
             f'msg = serve_utils.add_version_encoded({service_name!r})',
             'print(msg, end="", flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def get_yaml_content(cls, service_name: str, version: int) -> str:
+        code = [
+            f'msg = serve_utils.get_yaml_content_encoded({service_name!r}, '
+            f'{version})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
