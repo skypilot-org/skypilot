@@ -6,13 +6,35 @@ This document outlines a phased migration strategy for transitioning SkyPilot's 
 
 This section contains concrete findings from running ruff on the SkyPilot codebase (January 2025).
 
+### Configuration: Google Python Style Guide Aligned
+
+The `ruff.toml` configuration has been aligned with the [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html):
+
+| Setting | Value | Google Style Reference |
+|---------|-------|------------------------|
+| Line length | 80 | Section 3.2 |
+| Indent | 4 spaces | Section 3.4 |
+| Quote style | Double quotes | Section 3.10 (consistency) |
+| Docstrings | `"""` (triple double) | Section 3.8 |
+| Trailing commas | When closing bracket on separate line | Section 3.4 |
+| Import order | stdlib → third-party → first-party | Section 3.13 |
+
 ### Formatting Differences (ruff format vs yapf)
 
-**Files affected:** 729 out of 805 Python files would be reformatted
+**Files affected:** 418 out of 474 Python files in `sky/` would be reformatted
 
 **Key style differences identified:**
 
-1. **Trailing commas on multi-line structures:**
+1. **Quote style (major change):**
+   ```python
+   # Current (single quotes)
+   message = 'Hello, world'
+
+   # Google style (double quotes)
+   message = "Hello, world"
+   ```
+
+2. **Trailing commas on multi-line structures:**
    ```python
    # yapf style
    return optimizer.Optimizer.optimize(dag=dag,
@@ -20,7 +42,7 @@ This section contains concrete findings from running ruff on the SkyPilot codeba
                                        blocked_resources=blocked_resources,
                                        quiet=quiet)
 
-   # ruff style
+   # ruff style (Google-compliant)
    return optimizer.Optimizer.optimize(
        dag=dag,
        minimize=minimize,
@@ -29,11 +51,11 @@ This section contains concrete findings from running ruff on the SkyPilot codeba
    )
    ```
 
-2. **Argument indentation:**
+3. **Argument indentation:**
    - yapf: aligns arguments with opening parenthesis
    - ruff: uses hanging indent (4 spaces from function call)
 
-3. **Multi-line imports:**
+4. **Multi-line imports:**
    ```python
    # yapf/isort style (grid mode)
    from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
@@ -53,50 +75,48 @@ This section contains concrete findings from running ruff on the SkyPilot codeba
    )
    ```
 
-4. **Blank line after module docstrings:**
-   - ruff adds a blank line after module-level docstrings
-
-5. **Return type annotations:**
-   - ruff formats multi-line return types differently
-
 ### Import Sorting (ruff isort vs isort)
 
 **No differences found.** The ruff isort configuration successfully matches the current isort Google profile settings.
 
 ### Linting Differences (ruff check vs pylint)
 
-**With proper configuration (see `ruff.toml`):**
+**With Google-aligned configuration:**
 
-| Scope | Errors Found | Auto-fixable |
-|-------|--------------|--------------|
-| `sky/` only | 22 | 14 |
-| Full codebase | 3,731 | 3,459 (93%) |
+| Scope | Total Errors | Auto-fixable | Manual Fix Required |
+|-------|--------------|--------------|---------------------|
+| `sky/` only | 33,110 | 33,102 (99.9%) | 8 |
+| Main change | 33,088 Q000 | All auto-fixable | Quote style migration |
 
-**Remaining errors in `sky/` directory (22 total):**
+**Non-quote errors requiring manual review (8 total):**
 
 | Code | Count | Description | Action |
 |------|-------|-------------|--------|
-| F401 | 10 | Unused imports (mostly in TYPE_CHECKING blocks) | Review each |
+| F401 | 10 | Unused imports | Review each (some are TYPE_CHECKING) |
 | W605 | 4 | Invalid escape sequences | Fix (real bugs) |
 | E101 | 3 | Mixed tabs/spaces | Fix (real issues) |
 | F841 | 2 | Unused variables | Review each |
 | F821 | 2 | Undefined names | Fix (real bugs) |
 | W291 | 1 | Trailing whitespace | Fix |
 
-**Conclusion:** With the provided `ruff.toml` configuration, ruff catches the same issues as pylint plus a few additional real bugs (escape sequences, undefined names).
+### Google Style Additions (Disabled for Gradual Adoption)
 
-### Quote Consistency
+The following Google style checks are **configured but disabled** for gradual adoption:
 
-- **3,022 Q000 violations** (double quotes where single preferred) across full codebase
-- All are auto-fixable with `ruff check --fix`
-- This is enforcement of the existing pylint-quotes rule, but with auto-fix capability
+1. **Docstring rules (D\*)**: Google-style docstring formatting
+   - Can be enabled per-module as docstrings are updated
+2. **Annotation rules (ANN\*)**: Type hint requirements
+   - Can be enabled as type coverage improves
+3. **Naming rules (N\*)**: PEP 8 naming conventions
+   - Some flexibility needed for existing patterns
 
 ### Configuration Created
 
 A complete `ruff.toml` has been created that:
-- Matches yapf Google style
-- Matches isort Google profile
-- Disables 60+ rules to match current pylint disabled checks
+- Aligns with Google Python Style Guide
+- Uses double quotes (Google standard)
+- Enables Google-style docstring convention (`convention = "google"`)
+- Disables docstring/annotation enforcement for gradual adoption
 - Handles per-file exceptions (tests, examples, __init__.py)
 - Excludes the same paths as current tools
 

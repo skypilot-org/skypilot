@@ -1,8 +1,10 @@
 # Ruff configuration for SkyPilot
-# Designed to match current yapf/isort/pylint settings
+# Aligned with Google Python Style Guide
+# https://google.github.io/styleguide/pyguide.html
 
 target-version = "py38"
 line-length = 80
+indent-width = 4
 
 # Exclude same paths as current tools
 exclude = [
@@ -15,31 +17,112 @@ exclude = [
 ]
 
 [format]
-# Match yapf Google style
-quote-style = "single"           # Match pylint-quotes string-quote=single
-indent-style = "space"
-skip-magic-trailing-comma = false
+# Google Style Guide formatting options
+quote-style = "double"          # Google: Use """ for docstrings, be consistent for strings
+indent-style = "space"          # Google: 4 spaces, never tabs
+skip-magic-trailing-comma = false  # Google: trailing commas when closing bracket on separate line
 line-ending = "auto"
-docstring-code-format = true
+docstring-code-format = true    # Format code examples in docstrings
+docstring-code-line-length = 80
 
 [lint]
 select = [
+    # Core Python errors and warnings
     "E",      # pycodestyle errors
     "W",      # pycodestyle warnings
     "F",      # pyflakes
+
+    # Import management
     "I",      # isort
-    "UP",     # pyupgrade
+
+    # Code quality
     "B",      # flake8-bugbear
     "C4",     # flake8-comprehensions
-    "Q",      # flake8-quotes
     "PL",     # pylint rules
     "SIM",    # flake8-simplify
+
+    # Google style specific
+    "G",      # flake8-logging-format (Google recommends % formatting for logging)
+    "N",      # pep8-naming
+    "D",      # pydocstyle (docstring conventions)
+    "ANN",    # flake8-annotations (type hints)
+
+    # Modern Python
+    "UP",     # pyupgrade
+
+    # Quote consistency
+    "Q",      # flake8-quotes
 ]
 
 ignore = [
-    # === Disabled to match .pylintrc ===
+    # === Line length handled by formatter ===
+    "E501",     # line-too-long
 
-    # All refactor-level checks (R in pylint -> PLR in ruff)
+    # === Docstring rules - disabled for now, enable gradually ===
+    # Google style docstring enforcement requires significant codebase changes
+    # These are organized by category for future enabling
+
+    # Missing docstrings (enable these first for new code)
+    "D100",     # missing-docstring-in-public-module
+    "D101",     # missing-docstring-in-public-class
+    "D102",     # missing-docstring-in-public-method
+    "D103",     # missing-docstring-in-public-function
+    "D104",     # missing-docstring-in-public-package
+    "D105",     # missing-docstring-in-magic-method
+    "D106",     # missing-docstring-in-public-nested-class
+    "D107",     # missing-docstring-in-__init__
+
+    # Docstring formatting (these require reformatting existing docstrings)
+    "D200",     # one-line-docstring-should-fit-on-one-line
+    "D202",     # no-blank-line-after-function-docstring
+    "D203",     # one-blank-line-before-class (conflicts with D211)
+    "D205",     # blank-line-after-summary
+    "D207",     # under-indentation
+    "D208",     # over-indentation
+    "D209",     # new-line-after-last-paragraph
+    "D210",     # no-surrounding-whitespace
+    "D212",     # multi-line-docstring-summary-should-start-at-first-line
+    "D214",     # section-not-over-indented
+    "D301",     # escape-sequence-in-docstring (use raw string)
+
+    # Docstring content rules
+    "D400",     # first-line-should-end-with-period
+    "D401",     # first-line-should-be-imperative
+    "D402",     # first-line-should-not-be-signature
+    "D403",     # first-word-should-be-capitalized
+    "D405",     # capitalize-section-name
+    "D410",     # missing-blank-line-after-section
+    "D411",     # missing-blank-line-before-section
+    "D412",     # no-blank-lines-between-header-and-content
+    "D415",     # first-line-should-end-with-punctuation
+    "D417",     # missing-argument-description
+    "D416",     # section-name-should-end-with-colon
+    "D206",     # indent-with-spaces
+
+    # === Annotation rules - enable gradually ===
+    "ANN001",   # missing-type-function-argument
+    "ANN002",   # missing-type-args
+    "ANN003",   # missing-type-kwargs
+    "ANN101",   # missing-type-self
+    "ANN102",   # missing-type-cls
+    "ANN201",   # missing-return-type-public-function
+    "ANN202",   # missing-return-type-private-function
+    "ANN204",   # missing-return-type-special-method
+    "ANN205",   # missing-return-type-static-method
+    "ANN206",   # missing-return-type-class-method
+    "ANN401",   # any-type (disallows Any)
+
+    # === Naming - some flexibility needed ===
+    "N801",     # invalid-class-name (some edge cases)
+    "N802",     # invalid-function-name (callbacks, etc.)
+    "N803",     # invalid-argument-name
+    "N806",     # non-lowercase-variable-in-function
+    "N812",     # lowercase-imported-as-non-lowercase
+    "N815",     # mixed-case-variable-in-class-scope
+    "N816",     # mixed-case-variable-in-global-scope
+    "N818",     # error-suffix-on-exception-name
+
+    # === Complexity limits - more lenient for large codebase ===
     "PLR0904",  # too-many-public-methods
     "PLR0911",  # too-many-return-statements
     "PLR0912",  # too-many-branches
@@ -51,117 +134,46 @@ ignore = [
     "PLR1702",  # too-many-nested-blocks
     "PLR2004",  # magic-value-comparison
     "PLR6301",  # no-self-use
-
-    # Convention checks disabled in pylint
-    "PLW0603",  # global-statement
-    "PLW2901",  # redefined-loop-name
-
-    # consider-using-f-string - FIXME in .pylintrc
-    "UP032",    # f-string
-
-    # logging-format-interpolation, logging-fstring-interpolation - FIXMEs
-    "G",        # flake8-logging-format (all)
-
-    # Other disabled checks from .pylintrc
-    "E501",     # line-too-long (handled by formatter)
-    "PLW0120",  # useless-else-on-loop
-    "B007",     # unused-loop-control-variable (similar to dummy variable handling)
-
-    # Simplify rules that conflict with readability preferences
-    "SIM102",   # collapsible-if
-    "SIM105",   # suppressible-exception (use contextlib.suppress)
-    "SIM108",   # if-else-block-instead-of-if-exp (ternary)
-    "SIM110",   # reimplemented-builtin (for loop -> any/all)
-    "SIM111",   # reimplemented-builtin
-    "SIM117",   # multiple-with-statements
-    "SIM118",   # in-dict-keys
-
-    # Bugbear rules that are too strict
-    "B008",     # function-call-in-default-argument
-    "B904",     # raise-without-from-inside-except
-    "B905",     # zip-without-explicit-strict
-
-    # These would require significant refactoring
     "C901",     # complex-structure (mccabe complexity)
 
-    # Import-related (handled by isort section)
-    "I001",     # unsorted-imports (let isort handle)
-
-    # === Not currently enforced by pylint - disable for parity ===
-
-    # Module import not at top - common pattern in SkyPilot for managing import order
-    "E402",     # module-level-import-not-at-top
-
-    # Quote optimization suggestions - not enforced by pylint-quotes
-    "Q003",     # avoidable-escaped-quote
-    "Q004",     # unnecessary-escaped-quote
-
-    # Comprehension suggestions - not currently enforced
-    "C401",     # unnecessary-generator-set
-    "C403",     # unnecessary-list-comprehension-set
-    "C408",     # unnecessary-collection-call (dict() -> {})
-    "C413",     # unnecessary-call-around-sorted
-    "C414",     # unnecessary-double-cast-or-process
-    "C416",     # unnecessary-comprehension
-    "C417",     # unnecessary-map
-    "C419",     # unnecessary-comprehension-in-call
-    "C420",     # unnecessary-dict-comprehension-for-iterable
-
-    # Lambda assignment - used in codebase
-    "E731",     # lambda-assignment
-
-    # Assert comparisons - not enforced
-    "B011",     # assert-false
-    "B010",     # set-attr-with-constant
-    "B009",     # get-attr-with-constant
-
-    # Comparison issues - not enforced
-    "E713",     # not-in-test
-    "E721",     # type-comparison
-
-    # Regex issues - not enforced
-    "B034",     # re-sub-positional-args
-
-    # Abstract class issues - not enforced
-    "B027",     # empty-method-in-abstract-base-class
-
-    # Loop variable capture - not enforced
-    "B023",     # function-uses-loop-variable
-
-    # === pyupgrade (UP) rules - not enforced, would require code changes ===
-    # These suggest modernizing to newer Python syntax
-
-    "UP004",    # useless-object-inheritance (class Foo(object) -> class Foo)
-    "UP006",    # non-pep585-annotation (List -> list, requires Python 3.9+)
-    "UP007",    # non-pep604-annotation-union (Union[X, Y] -> X | Y, requires 3.10+)
-    "UP012",    # unnecessary-encode-utf8
-    "UP013",    # convert-typed-dict-functional-to-class
-    "UP015",    # redundant-open-modes (open('f', 'r') -> open('f'))
-    "UP020",    # use-pep585-annotation (requires Python 3.9+)
-    "UP022",    # replace-stdout-stderr (subprocess)
-    "UP024",    # os-error-alias
-    "UP028",    # yield-in-for-loop (yield from)
-    "UP030",    # format-literals (implicit string format references)
-    "UP034",    # extraneous-parentheses
-    "UP037",    # quoted-annotation (remove quotes from annotations)
-    "UP045",    # non-pep604-annotation-optional (Optional[X] -> X | None)
-
-    # === Pylint convention (PLC) rules - not enforced ===
+    # === Pylint convention/warning rules ===
+    "PLW0603",  # global-statement
+    "PLW2901",  # redefined-loop-name
+    "PLW0120",  # useless-else-on-loop
+    "PLW1508",  # invalid-envvar-default
     "PLC0206",  # dict-index-missing-items
     "PLC0415",  # import-outside-top-level (lazy imports are intentional)
     "PLC1802",  # len-as-condition
-
-    # === Pylint refactor (PLR) rules - additional ones not enforced ===
     "PLR1704",  # redefined-argument-from-local
     "PLR1711",  # useless-return
     "PLR1714",  # repeated-equality-comparison
     "PLR1730",  # if-stmt-min-max
-    "PLR5501",  # collapsible-else-if (use elif)
+    "PLR5501",  # collapsible-else-if
 
-    # === Pylint warning (PLW) rules ===
-    "PLW1508",  # invalid-envvar-default
+    # === Logging - Google recommends % formatting but codebase uses f-strings ===
+    # Enable these if you want to enforce % formatting in logging calls
+    "G001",     # logging-string-format
+    "G002",     # logging-percent-format
+    "G003",     # logging-string-concat
+    "G004",     # logging-f-string
+    "G010",     # logging-warn
+    "G101",     # logging-extra-attr-clash
+    "G201",     # logging-exc-info
+    "G202",     # logging-redundant-exc-info
 
-    # === SIM rules - additional simplification suggestions not enforced ===
+    # === Import order handled by isort section ===
+    "I001",     # unsorted-imports
+
+    # === Module import position - common pattern for managing import order ===
+    "E402",     # module-level-import-not-at-top
+
+    # === Simplification rules - some conflict with readability ===
+    "SIM102",   # collapsible-if
+    "SIM105",   # suppressible-exception
+    "SIM108",   # if-else-block-instead-of-if-exp
+    "SIM110",   # reimplemented-builtin
+    "SIM117",   # multiple-with-statements
+    "SIM118",   # in-dict-keys
     "SIM101",   # duplicate-isinstance-call
     "SIM103",   # needless-bool
     "SIM109",   # compare-with-tuple
@@ -173,6 +185,56 @@ ignore = [
     "SIM300",   # yoda-conditions
     "SIM401",   # if-else-block-instead-of-dict-get
     "SIM910",   # dict-get-with-none-default
+
+    # === Bugbear rules - some too strict ===
+    "B007",     # unused-loop-control-variable
+    "B008",     # function-call-in-default-argument
+    "B009",     # get-attr-with-constant
+    "B010",     # set-attr-with-constant
+    "B011",     # assert-false
+    "B023",     # function-uses-loop-variable
+    "B027",     # empty-method-in-abstract-base-class
+    "B034",     # re-sub-positional-args
+    "B904",     # raise-without-from-inside-except
+    "B905",     # zip-without-explicit-strict
+
+    # === Comprehension suggestions ===
+    "C401",     # unnecessary-generator-set
+    "C403",     # unnecessary-list-comprehension-set
+    "C408",     # unnecessary-collection-call
+    "C413",     # unnecessary-call-around-sorted
+    "C414",     # unnecessary-double-cast-or-process
+    "C416",     # unnecessary-comprehension
+    "C417",     # unnecessary-map
+    "C419",     # unnecessary-comprehension-in-call
+    "C420",     # unnecessary-dict-comprehension-for-iterable
+
+    # === Other ===
+    "E731",     # lambda-assignment
+    "E713",     # not-in-test
+    "E721",     # type-comparison
+    "Q003",     # avoidable-escaped-quote
+    "Q004",     # unnecessary-escaped-quote
+
+    # === pyupgrade - Python version compatibility ===
+    # SkyPilot supports Python 3.8+, so some modern syntax isn't available
+    "UP006",    # non-pep585-annotation (List -> list, requires Python 3.9+)
+    "UP007",    # non-pep604-annotation-union (Union[X, Y] -> X | Y, requires 3.10+)
+    "UP037",    # quoted-annotation (some needed for forward refs in 3.8)
+    "UP045",    # non-pep604-annotation-optional (Optional[X] -> X | None)
+
+    # === pyupgrade - style preferences ===
+    "UP004",    # useless-object-inheritance
+    "UP012",    # unnecessary-encode-utf8
+    "UP013",    # convert-typed-dict-functional-to-class
+    "UP015",    # redundant-open-modes
+    "UP020",    # use-pep585-annotation
+    "UP022",    # replace-stdout-stderr
+    "UP024",    # os-error-alias
+    "UP028",    # yield-in-for-loop
+    "UP030",    # format-literals
+    "UP032",    # f-string (prefer explicit .format() in some cases)
+    "UP034",    # extraneous-parentheses
 ]
 
 [lint.per-file-ignores]
@@ -180,38 +242,60 @@ ignore = [
 "tests/*" = [
     "PLR2004",  # magic values in tests are fine
     "B011",     # assert false
+    "D",        # docstrings not required in tests
+    "ANN",      # type annotations not required in tests
 ]
 # Examples may use simpler patterns
 "examples/*" = [
     "PLR2004",
+    "D",        # docstrings not required in examples
+    "ANN",      # type annotations not required in examples
+]
+# LLM examples
+"llm/*" = [
+    "D",
+    "ANN",
 ]
 # Init files often have unused imports for re-export
 "__init__.py" = [
     "F401",     # unused-import (re-exports)
+    "D104",     # missing-docstring-in-public-package
 ]
 
 [lint.isort]
-# Match current isort settings from pyproject.toml
-# profile = "google" equivalent settings:
-combine-as-imports = true
-force-single-line = false
+# Google Style Guide: imports should be on separate lines, sorted lexicographically
+# https://google.github.io/styleguide/pyguide.html#313-imports-formatting
+combine-as-imports = true       # Combine "from X import a, b" style
+force-single-line = false       # Allow multi-line imports for long lists
 force-sort-within-sections = true
 known-first-party = ["sky"]
-lines-after-imports = 2
-order-by-type = false
+lines-after-imports = 2         # Google style: two blank lines after imports
+order-by-type = false           # Don't separate by type (TYPE_CHECKING, etc.)
 split-on-trailing-comma = false
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+
+[lint.pydocstyle]
+# Use Google-style docstrings
+convention = "google"
 
 [lint.flake8-quotes]
-# Match pylint-quotes settings
-inline-quotes = "single"
+# Google Style: be consistent, prefer double quotes for docstrings
+inline-quotes = "double"
 docstring-quotes = "double"
 multiline-quotes = "double"
 
 [lint.pylint]
-max-args = 10           # More lenient than default 5
-max-branches = 20       # More lenient
-max-statements = 100    # More lenient
-max-returns = 10        # More lenient
+# More lenient limits for a large codebase
+max-args = 10
+max-branches = 20
+max-statements = 100
+max-returns = 10
+max-public-methods = 30
 
 [lint.mccabe]
-max-complexity = 20     # More lenient
+max-complexity = 20
+
+[lint.flake8-annotations]
+# Allow some flexibility in annotations
+allow-star-arg-any = true
+suppress-none-returning = true
