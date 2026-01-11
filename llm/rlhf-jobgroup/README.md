@@ -64,15 +64,11 @@ The example consists of 5 task types that communicate over HTTP, with built-in l
 ### Prerequisites
 
 - SkyPilot configured with a Kubernetes cluster
-- GPU nodes available (L4 or better recommended)
+- GPU nodes available (H100 recommended for optimal performance)
 
 ### Launch Training
 
 ```bash
-# Connect to API server (if using remote)
-sky api login -e http://jobgroup:skypilot@35.224.123.34
-
-# Launch the job group
 sky jobs launch llm/rlhf-jobgroup/rlhf-math-jobgroup.yaml
 ```
 
@@ -90,7 +86,7 @@ sky jobs logs <job-id> --task replay-buffer
 sky jobs logs <job-id> --task ppo-trainer
 ```
 
-Or use the dashboard at http://35.224.123.34 (login: jobgroup/skypilot).
+Or use the SkyPilot dashboard to monitor jobs.
 
 ## Configuration
 

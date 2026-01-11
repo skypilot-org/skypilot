@@ -1,6 +1,6 @@
-# Parallel Training and Evaluation with Shared Storage
+# Parallel Training and Evaluation with Shared Volume
 
-This example demonstrates SkyPilot job groups with parallel training and evaluation tasks that share storage for checkpoints. The evaluator monitors the checkpoint directory and evaluates models "on the fly" as training produces them.
+This example demonstrates SkyPilot job groups with parallel training and evaluation tasks that share a Kubernetes PVC volume for checkpoints. The evaluator monitors the checkpoint directory and evaluates models "on the fly" as training produces them.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ This example demonstrates SkyPilot job groups with parallel training and evaluat
            └───────────┬───────────────┘
                        ▼
               ┌─────────────────┐
-              │   Shared NFS    │
+              │  SkyPilot Volume│
               │   /checkpoints  │
               └─────────────────┘
 ```
@@ -27,6 +27,14 @@ This example demonstrates SkyPilot job groups with parallel training and evaluat
 2. **evaluator**: Watches the checkpoint directory, evaluates new checkpoints as they appear, reports test accuracy
 
 ## Usage
+
+### Create the Shared Volume
+
+First, create the shared volume that both tasks will use:
+
+```bash
+sky volume apply llm/train-eval-jobgroup/train-eval-ckpts-volume.yaml
+```
 
 ### Launch the Job Group
 
@@ -91,18 +99,16 @@ resources:
 
 ## How It Works
 
-### Shared Storage
+### Shared Volume
 
-Both tasks mount the same storage volume at `/checkpoints`:
+Both tasks mount the same SkyPilot volume at `/checkpoints`:
 
 ```yaml
-file_mounts:
-  /checkpoints:
-    name: train-eval-checkpoints
-    mode: MOUNT
+volumes:
+  /checkpoints: train-eval-ckpts
 ```
 
-This creates a shared filesystem that both tasks can access.
+This creates a shared Kubernetes PVC that both tasks can access. The volume must be created before launching the job group.
 
 ### Checkpoint Format
 
