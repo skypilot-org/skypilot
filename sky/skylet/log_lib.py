@@ -307,13 +307,6 @@ def run_with_log(
             except subprocess.TimeoutExpired:
                 # Kill the process and all its children
                 subprocess_utils.kill_children_processes(proc.pid)
-                # Wait for the process to be cleaned up
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    # Force kill if still not dead
-                    proc.kill()
-                    proc.wait()
                 logger.error(
                     f'Command timed out after {timeout} seconds: {cmd}')
                 raise
