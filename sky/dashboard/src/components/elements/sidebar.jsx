@@ -21,6 +21,7 @@ import {
   UsersIcon,
   StarIcon,
   VolumeIcon,
+  KueueIcon,
   KeyIcon,
 } from '@/components/elements/icons';
 import { Settings, User } from 'lucide-react';
@@ -34,6 +35,7 @@ const ICON_MAP = {
   book: BookDocIcon,
   users: UsersIcon,
   volume: VolumeIcon,
+  kueue: KueueIcon,
 };
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
