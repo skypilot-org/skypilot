@@ -70,7 +70,7 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
-    'sqlalchemy',
+    'sqlalchemy>=2.0.0',
     'psycopg2-binary',
     'aiosqlite',
     'asyncpg',
