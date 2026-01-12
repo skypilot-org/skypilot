@@ -222,9 +222,8 @@ class AutostopEvent(SkyletEvent):
 
     def _execute_hook_if_present(self, autostop_config) -> None:
         """Execute autostop hook if present in the config."""
-        hook = getattr(autostop_config, 'hook', None)
-        hook_timeout = getattr(autostop_config, 'hook_timeout',
-                               constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS)
+        hook = autostop_config.hook
+        hook_timeout = autostop_config.hook_timeout
         if hook:
             logger.info(f'Executing autostop hook before stopping cluster '
                         f'(timeout: {hook_timeout}s)...')
