@@ -33,11 +33,17 @@ import {
   getWorkspaceContexts,
   getContextGPUData,
   getCloudInfrastructure,
+  getEnabledCloudsList,
   getContextJobs,
   getContextClusters,
   getSlurmInfrastructure,
 } from '@/data/connectors/infra';
-import { runSkyCheck } from '@/data/connectors/workspaces';
+import { CLOUDS_LIST } from '@/data/connectors/constants';
+import {
+  runSkyCheck,
+  getWorkspaces,
+  getEnabledClouds,
+} from '@/data/connectors/workspaces';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { apiClient } from '@/data/connectors/client';
@@ -191,7 +197,12 @@ export function InfrastructureSection({
 
   // Show panel-level loading spinner ONLY during initial load
   // On subsequent refreshes, show the table with cell-level spinners instead
-  if (isInitialLoad && isLoading && !isDataLoaded && safeContexts.length === 0) {
+  if (
+    isInitialLoad &&
+    isLoading &&
+    !isDataLoaded &&
+    safeContexts.length === 0
+  ) {
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
@@ -1811,6 +1822,9 @@ export function GPUs() {
   const [cloudInfraData, setCloudInfraData] = useState([]);
   const [totalClouds, setTotalClouds] = useState(0);
   const [enabledClouds, setEnabledClouds] = useState(0);
+  // Separate cluster/job counts for Cloud panel (for progressive loading)
+  const [cloudClusterCounts, setCloudClusterCounts] = useState({});
+  const [cloudJobCounts, setCloudJobCounts] = useState({});
   const [contextStats, setContextStats] = useState({});
   const [contextWorkspaceMap, setContextWorkspaceMap] = useState({});
   const [contextErrors, setContextErrors] = useState({});
@@ -1917,6 +1931,8 @@ export function GPUs() {
         setCloudInfraData([]);
         setTotalClouds(0);
         setEnabledClouds(0);
+        setCloudClusterCounts({});
+        setCloudJobCounts({});
         setCloudDataLoaded(true);
         setSshNodePools({});
         setSshLoading(false);
@@ -2116,10 +2132,21 @@ export function GPUs() {
       ]);
       const jobs = jobsData?.jobs || [];
       setSshAndKubeJobsData(await getContextJobs(jobs));
+
+      // Also compute cloud job counts for the Cloud panel (progressive loading)
+      const cloudCounts = {};
+      jobs.forEach((job) => {
+        if (job.cloud) {
+          cloudCounts[job.cloud] = (cloudCounts[job.cloud] || 0) + 1;
+        }
+      });
+      setCloudJobCounts(cloudCounts);
+
       setSshAndKubeJobsDataLoading(false);
     } catch (error) {
       console.error('Error in fetchManagedJobsData:', error);
       setSshAndKubeJobsData({});
+      setCloudJobCounts({});
       setSshAndKubeJobsDataLoading(false);
     }
   };
@@ -2133,10 +2160,21 @@ export function GPUs() {
       // Compute cluster stats per context (fast - local computation)
       const clusterStats = await getContextClusters(clusters);
       setContextStats(clusterStats);
+
+      // Also compute cloud cluster counts for the Cloud panel (progressive loading)
+      const cloudCounts = {};
+      clusters.forEach((cluster) => {
+        if (cluster.cloud) {
+          cloudCounts[cluster.cloud] = (cloudCounts[cluster.cloud] || 0) + 1;
+        }
+      });
+      setCloudClusterCounts(cloudCounts);
+
       setClusterDataLoading(false);
     } catch (error) {
       console.error('Error in fetchClusterStatsData:', error);
       setContextStats({});
+      setCloudClusterCounts({});
       setClusterDataLoading(false);
     }
   };
@@ -2162,11 +2200,14 @@ export function GPUs() {
     }
   };
 
+  // Fetch enabled clouds list fast (without counts) for progressive loading
+  // Counts come from cloudClusterCounts and cloudJobCounts (computed separately)
   const fetchCloudData = async (forceRefresh) => {
     try {
+      // Use fast function that only gets enabled cloud names (no counts)
       const cloudData = forceRefresh
-        ? await getCloudInfrastructure(true)
-        : await dashboardCache.get(getCloudInfrastructure, [forceRefresh]);
+        ? await getEnabledCloudsList()
+        : await dashboardCache.get(getEnabledCloudsList);
 
       // Set cloud data with defensive checks
       if (cloudData) {
@@ -2181,7 +2222,7 @@ export function GPUs() {
         setEnabledClouds(0);
         setCloudDataLoaded(true);
       }
-      // Clear loading state as soon as Cloud data is ready (for inline spinners)
+      // Clear loading state as soon as Cloud list is ready
       setCloudLoading(false);
     } catch (error) {
       console.error('Error in fetchCloudData:', error);
@@ -2327,7 +2368,8 @@ export function GPUs() {
     ]);
     dashboardCache.invalidate(getWorkspaceContexts);
     dashboardCache.invalidate(getWorkspaceInfrastructure); // Keep for backwards compatibility
-    dashboardCache.invalidate(getCloudInfrastructure, [false]);
+    dashboardCache.invalidate(getEnabledCloudsList);
+    dashboardCache.invalidate(getCloudInfrastructure, [false]); // Keep for backwards compatibility
     dashboardCache.invalidate(getSSHNodePools);
     dashboardCache.invalidate(getSlurmInfrastructure);
 
@@ -2708,11 +2750,11 @@ export function GPUs() {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredCloudInfraData.map((cloud) => {
-                    // Show spinner if cloud data is loading or data not yet available
-                    const isLoading =
-                      cloudLoading ||
-                      cloud.clusters === undefined ||
-                      cloud.jobs === undefined;
+                    // Use separate loading states for progressive loading
+                    // Clusters and jobs load independently (clusters often ready first)
+                    const clusterCount =
+                      cloudClusterCounts[cloud.name] ?? cloud.clusters;
+                    const jobCount = cloudJobCounts[cloud.name] ?? cloud.jobs;
 
                     return (
                       <tr key={cloud.name} className="hover:bg-gray-50">
@@ -2720,24 +2762,24 @@ export function GPUs() {
                           {cloud.name}
                         </td>
                         <td className="p-3">
-                          {isLoading ? (
+                          {clusterDataLoading ? (
                             <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                               <CircularProgress size={12} />
                             </span>
                           ) : (
                             <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                              {cloud.clusters}
+                              {clusterCount ?? 0}
                             </span>
                           )}
                         </td>
                         <td className="p-3">
-                          {isLoading ? (
+                          {sshAndKubeJobsDataLoading ? (
                             <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                               <CircularProgress size={12} />
                             </span>
                           ) : (
                             <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                              {cloud.jobs}
+                              {jobCount ?? 0}
                             </span>
                           )}
                         </td>

@@ -11,7 +11,7 @@ import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
 import { getVolumes } from '@/data/connectors/volumes';
 import {
-  getCloudInfrastructure,
+  getEnabledCloudsList,
   getWorkspaceContexts,
   getContextGPUData,
   getSlurmInfrastructure,
@@ -37,9 +37,9 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
-    getCloudInfrastructure: {
-      fn: getCloudInfrastructure,
-      args: [false],
+    getEnabledCloudsList: {
+      fn: getEnabledCloudsList,
+      args: [],
     },
     getWorkspaceContexts: { fn: getWorkspaceContexts, args: [] },
     getSlurmInfrastructure: { fn: getSlurmInfrastructure, args: [] },
@@ -250,7 +250,7 @@ class CachePreloader {
       // Base functions for infra
       allOtherFunctions.add('getClusters');
       allOtherFunctions.add('getManagedJobsForOtherPages');
-      allOtherFunctions.add('getCloudInfrastructure');
+      allOtherFunctions.add('getEnabledCloudsList');
       allOtherFunctions.add('getWorkspaceContexts');
       allOtherFunctions.add('getSlurmInfrastructure');
       allOtherFunctions.add('getSSHNodePools');

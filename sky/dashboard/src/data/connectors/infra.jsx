@@ -6,6 +6,71 @@ import { getErrorMessageFromResponse } from '@/data/utils';
 import dashboardCache from '@/lib/cache';
 import { buildContextStatsKeyFromCloud } from '@/utils/infraUtils';
 
+/**
+ * Fast function to get just the list of enabled clouds (without counts).
+ * Used for progressive loading - display cloud rows immediately, then overlay counts.
+ */
+export async function getEnabledCloudsList() {
+  const { getWorkspaces, getEnabledClouds } = await import(
+    '@/data/connectors/workspaces'
+  );
+
+  try {
+    // Get workspaces (fast - cached)
+    const workspacesData = await dashboardCache
+      .get(getWorkspaces)
+      .catch(() => ({}));
+    const workspaceNames = Object.keys(workspacesData || {});
+
+    if (workspaceNames.length === 0) {
+      return { clouds: [], totalClouds: CLOUDS_LIST.length, enabledClouds: 0 };
+    }
+
+    // Fetch enabled clouds for each workspace and aggregate
+    const enabledCloudsSet = new Set();
+
+    await Promise.all(
+      workspaceNames.map(async (workspaceName) => {
+        try {
+          const workspaceClouds = await dashboardCache.get(getEnabledClouds, [
+            workspaceName,
+            false,
+          ]);
+          if (Array.isArray(workspaceClouds)) {
+            workspaceClouds.forEach((cloud) => {
+              if (cloud) {
+                enabledCloudsSet.add(cloud.toLowerCase());
+              }
+            });
+          }
+        } catch (error) {
+          console.error(
+            `Error fetching enabled clouds for workspace ${workspaceName}:`,
+            error
+          );
+        }
+      })
+    );
+
+    // Build cloud objects with just name and enabled status (no counts)
+    const enabledCloudsList = Array.from(enabledCloudsSet);
+    const clouds = CLOUDS_LIST.filter((cloud) =>
+      enabledCloudsList.includes(cloud.toLowerCase())
+    )
+      .map((name) => ({ name, enabled: true }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return {
+      clouds,
+      totalClouds: CLOUDS_LIST.length,
+      enabledClouds: clouds.length,
+    };
+  } catch (error) {
+    console.error('Error fetching enabled clouds list:', error);
+    return { clouds: [], totalClouds: CLOUDS_LIST.length, enabledClouds: 0 };
+  }
+}
+
 export async function getCloudInfrastructure(forceRefresh = false) {
   const { getClusters } = await import('@/data/connectors/clusters');
   const { getManagedJobs } = await import('@/data/connectors/jobs');
