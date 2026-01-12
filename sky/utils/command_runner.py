@@ -62,6 +62,16 @@ RSYNC_NO_OWNER_NO_GROUP_OPTION = '--no-owner --no-group'
 _HASH_MAX_LENGTH = 10
 _DEFAULT_CONNECT_TIMEOUT = 30
 
+# SSH authentication failure patterns to detect when interactive auth retry
+# is needed.
+_SSH_AUTH_FAILURE_PATTERNS = [
+    # https://github.com/openssh/openssh-portable/blob/master/sshconnect2.c#L542
+    # https://github.com/openssh/openssh-portable/blob/master/sshconnect2.c#L1047
+    'Permission denied',
+    # https://github.com/openssh/openssh-portable/blob/master/sshconnect2.c#L479
+    'Authentication failed',
+]
+
 
 def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     """Returns a temporary path to be used as the ssh control path."""
@@ -1060,30 +1070,25 @@ class SSHCommandRunner(CommandRunner):
         if not self.enable_interactive_auth:
             return result
 
+        stdout: Optional[str] = None
         stderr: Optional[str] = None
         if require_outputs:
-            returncode, _, stderr = result
+            returncode, stdout, stderr = result
         else:
             returncode = result
 
         if returncode != 255:
             return result
 
-        if stderr is not None:
-            auth_failure_patterns = [
-                # https://github.com/openssh/openssh-portable/blob/master/sshconnect2.c#L542
-                # https://github.com/openssh/openssh-portable/blob/master/sshconnect2.c#L1047
-                'Permission denied',
-                # https://github.com/openssh/openssh-portable/blob/master/sshconnect2.c#L479
-                'Authentication failed',
-            ]
-            has_auth_failure = any(
-                pattern in stderr for pattern in auth_failure_patterns)
+        output_to_check = stderr if separate_stderr else stdout
+        if output_to_check is not None:
+            has_auth_failure = any(pattern in output_to_check
+                                   for pattern in _SSH_AUTH_FAILURE_PATTERNS)
             if not has_auth_failure:
                 # No auth failure detected; don't attempt interactive auth.
                 return result
-        # if stderr is None, err on the side of caution and retry with
-        # interactive auth.
+        # if output_to_check is None (i.e. require_outputs=False), err on the
+        # side of caution and retry with interactive auth.
 
         session_id = str(uuid.uuid4())
         return self._retry_with_interactive_auth(session_id, command, log_path,
