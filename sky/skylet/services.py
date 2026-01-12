@@ -43,9 +43,9 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
         try:
             wait_for = autostop_lib.AutostopWaitFor.from_protobuf(
                 request.wait_for)
-            hook = request.hook if request.hook else None
+            hook = request.hook if request.HasField('hook') else None
             hook_timeout = (request.hook_timeout
-                            if request.hook_timeout else None)
+                            if request.HasField('hook_timeout') else None)
             autostop_lib.set_autostop(
                 idle_minutes=request.idle_minutes,
                 backend=request.backend,

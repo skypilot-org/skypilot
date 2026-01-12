@@ -78,8 +78,9 @@ def _test_autostop(
                 idle_minutes=30,
                 backend=cloud_vm_ray_backend.CloudVmRayBackend.NAME,
                 wait_for=autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS_AND_SSH,
-                down=True,
-                hook=hook if hook is not None else '')
+                down=True)
+            if hook is not None:
+                request.hook = hook
             backend_utils.invoke_skylet_with_retries(
                 lambda: cloud_vm_ray_backend.SkyletClient(
                     handle.get_grpc_channel()).set_autostop(request))

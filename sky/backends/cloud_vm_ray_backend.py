@@ -5224,11 +5224,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     wait_for=wait_for.to_protobuf() if wait_for is not None else
                     autostopv1_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED,
                     down=down,
-                    hook=hook if hook else '',
-                    hook_timeout=(
-                        hook_timeout if hook_timeout is not None else
-                        constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS),
                 )
+                if hook:
+                    request.hook = hook
+                if hook_timeout is not None:
+                    request.hook_timeout = hook_timeout
+
                 backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
                     handle.get_grpc_channel()).set_autostop(request))
             else:
