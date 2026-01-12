@@ -5338,8 +5338,8 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                 log_local_path_dict = managed_jobs.download_logs(
                     name=name,
                     job_id=job_id,
-                    system=system,
                     controller=controller,
+                    system=system,
                     refresh=refresh)
             style = colorama.Style
             fore = colorama.Fore
@@ -5353,9 +5353,9 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
         else:
             returncode = managed_jobs.tail_logs(name=name,
                                                 job_id=job_id,
-                                                system=system,
                                                 follow=follow,
                                                 controller=controller,
+                                                system=system,
                                                 refresh=refresh)
             sys.exit(returncode)
     except exceptions.ClusterNotUpError:
