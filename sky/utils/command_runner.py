@@ -848,11 +848,11 @@ class SSHCommandRunner(CommandRunner):
         See ssh_options_list for when ControlMaster is not enabled.
         """
         # Remove -v flag to prevent hang when ControlMaster forks to background.
-        # With -v, SSH outputs verbose logs to stderr. When ControlMaster uses
-        # ControlPersist, it forks a background process that inherits stderr.
+        # With -v, SSH outputs verbose logs to stderr. When ControlMaster is
+        # enabled, it forks a background process that inherits stderr.
         # This keeps the pipe open, blocking the stream reader forever.
         # The -v flag was needed to detect auth failures in the initial attempt,
-        # but now we no longer need it.
+        # but here we no longer need it.
         command = [arg for arg in command if arg != '-v']
 
         extra_options = [
