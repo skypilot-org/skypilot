@@ -324,32 +324,26 @@ class TestGetJobNodes:
             ssh_key=None,
         )
 
-        getent_batched = ('10.20.30.40       STREAM worker-alpha.internal\n'
-                          '10.20.30.40       DGRAM  \n'
-                          '10.20.30.40       RAW    \n'
-                          '10.20.30.41       STREAM worker-beta.internal\n'
-                          '10.20.30.41       DGRAM  \n'
-                          '10.20.30.41       RAW')
-
         with mock.patch.object(client, 'wait_for_job_nodes'), \
              mock.patch.object(client._runner, 'run') as mock_run:
             mock_run.side_effect = [
                 # First call: squeue output with hostnames
-                (0, 'worker-alpha worker-alpha\nworker-beta worker-beta', ''),
-                # Second call: batched getent for all hostnames
-                (0, getent_batched, ''),
+                (0, 'worker-1 worker-1\nworker-10 worker-10', ''),
+                # Second call: resolve loop output (hostname ip per line)
+                (0, 'worker-1 10.20.30.1\nworker-10 10.20.30.10', ''),
             ]
 
             nodes, node_ips = client.get_job_nodes('12345', wait=False)
 
-            assert nodes == ['worker-alpha', 'worker-beta']
-            assert node_ips == ['10.20.30.40', '10.20.30.41']
+            assert nodes == ['worker-1', 'worker-10']
+            assert node_ips == ['10.20.30.1', '10.20.30.10']
 
             # Verify only 2 SSH calls were made (not 1 + N)
             assert mock_run.call_count == 2
-            # Verify the batched getent command was called
+            # Verify the resolve command was called with both hostnames
             second_call = mock_run.call_args_list[1][0][0]
-            assert 'getent ahostsv4 worker-alpha worker-beta' in second_call
+            assert 'for h in worker-1 worker-10' in second_call
+            assert 'getent ahostsv4' in second_call
 
     def test_get_job_nodes_hostname_resolution_failure(self):
         """Test error handling when hostname resolution fails."""
@@ -361,16 +355,20 @@ class TestGetJobNodes:
             ssh_key=None,
         )
 
+        # One hostname resolves, one fails (getent returns empty)
+        resolve_output = (f'worker-1 10.20.30.1\n'
+                          f'worker-10 {slurm._UNRESOLVED_HOSTNAME_MARKER}')
+
         with mock.patch.object(client, 'wait_for_job_nodes'), \
              mock.patch.object(client._runner, 'run') as mock_run:
             mock_run.side_effect = [
                 # First call: squeue output with hostnames
-                (0, 'worker-alpha worker-alpha\nworker-beta worker-beta', ''),
-                # Second call: getent fails
-                (2, '', ''),
+                (0, 'worker-1 worker-1\nworker-10 worker-10', ''),
+                # Second call: resolve loop output with one UNRESOLVED
+                (0, resolve_output, ''),
             ]
 
-            with pytest.raises(exceptions.CommandError,
+            with pytest.raises(RuntimeError,
                                match='Failed to resolve hostnames'):
                 client.get_job_nodes('12345', wait=False)
 

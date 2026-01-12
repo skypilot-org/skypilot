@@ -29,6 +29,8 @@ _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Slurm. '
 hostlist = common.LazyImport('hostlist',
                              import_error_message=_IMPORT_ERROR_MESSAGE)
 
+_UNRESOLVED_HOSTNAME_MARKER = 'UNRESOLVED'
+
 
 class SlurmPartition(NamedTuple):
     """Information about the Slurm partitions."""
@@ -461,27 +463,38 @@ class SlurmClient:
 
         if nodes_to_resolve:
             hostnames = [h for _, h in nodes_to_resolve]
-            resolve_cmd = f'getent ahostsv4 {" ".join(hostnames)}'
-            rc, resolve_stdout, stderr = self._run_slurm_cmd(resolve_cmd)
+            # The output of `getent ahostsv4` is as follows:
+            # 10.0.0.0     STREAM worker-0
+            # 10.0.0.0     DGRAM
+            # 10.0.0.0     RAW
+            resolve_ip_cmd = (
+                f'for h in {" ".join(hostnames)}; do '
+                f'ip=$(getent ahostsv4 "$h" | head -1 | awk \'{{print $1}}\'); '
+                f'if [ -n "$ip" ]; then echo "$h $ip"; '
+                f'else echo "$h {_UNRESOLVED_HOSTNAME_MARKER}"; fi; '
+                f'done')
+            rc, resolve_stdout, stderr = self._run_slurm_cmd(resolve_ip_cmd)
             subprocess_utils.handle_returncode(
                 rc,
-                resolve_cmd,
-                f'Failed to resolve hostnames: {hostnames}',
+                resolve_ip_cmd,
+                f'Failed to resolve hostnames for: {hostnames}',
                 stderr=f'{resolve_stdout}\n{stderr}')
 
-            # Parse output format:
-            # "10.3.0.0     STREAM node-10-3-0-0"
             hostname_to_ip = {}
+            unresolved = []
             for line in resolve_stdout.strip().splitlines():
                 parts = line.split()
-                if len(parts) >= 3:
-                    ip = parts[0]
-                    fqdn = parts[2]
-                    # Match hostname (may be prefix of fqdn)
-                    for _, hostname in nodes_to_resolve:
-                        if fqdn.startswith(hostname):
-                            hostname_to_ip[hostname] = ip
-                            break
+                if len(parts) >= 2:
+                    hostname = parts[0]
+                    ip = parts[1]
+                    if ip == _UNRESOLVED_HOSTNAME_MARKER:
+                        unresolved.append(hostname)
+                    else:
+                        hostname_to_ip[hostname] = ip
+
+            if unresolved:
+                raise RuntimeError(
+                    f'Failed to resolve hostnames for: {unresolved}')
 
             for node_name, hostname in nodes_to_resolve:
                 if hostname not in hostname_to_ip:
