@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 
 const FIRST_VISIT_KEY = 'skypilot-dashboard-first-visit';
 const TOUR_COMPLETED_KEY = 'skypilot-dashboard-tour-completed';
@@ -25,17 +25,17 @@ export function useFirstVisit() {
     }
   }, []);
 
-  const markTourCompleted = useCallback(() => {
+  const markTourCompleted = () => {
     localStorage.setItem(TOUR_COMPLETED_KEY, 'true');
     setTourCompleted(true);
-  }, []);
+  };
 
-  const resetFirstVisit = useCallback(() => {
+  const resetFirstVisit = () => {
     localStorage.removeItem(FIRST_VISIT_KEY);
     localStorage.removeItem(TOUR_COMPLETED_KEY);
     setIsFirstVisit(true);
     setTourCompleted(false);
-  }, []);
+  };
 
   const shouldShowTourPrompt = isClient && isFirstVisit && !tourCompleted;
   const shouldPulseHelpButton = isClient && isFirstVisit && !tourCompleted;

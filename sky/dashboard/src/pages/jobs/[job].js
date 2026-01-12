@@ -934,7 +934,6 @@ function JobDetailsContent({
                         rel="noopener noreferrer"
                         className="mt-2"
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={normalizedUrl}
                           alt={label}

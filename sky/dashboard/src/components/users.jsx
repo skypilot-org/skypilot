@@ -1651,7 +1651,7 @@ function UsersTable({
         if (setLastFetchedTime) setLastFetchedTime(new Date());
       }
     },
-    [setLoading, setLastFetchedTime, setValueList]
+    [setLoading, setLastFetchedTime]
   );
 
   useEffect(() => {

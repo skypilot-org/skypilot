@@ -139,11 +139,7 @@ function ClusterDetails() {
     } finally {
       setIsLoadingClusterMatch(false);
     }
-  }, [
-    clusterData?.cluster,
-    clusterData?.cluster_name_on_cloud,
-    isGrafanaAvailable,
-  ]);
+  }, [clusterData?.cluster, isGrafanaAvailable]);
 
   // Fetch matching cluster when component mounts and Grafana is available
   useEffect(() => {

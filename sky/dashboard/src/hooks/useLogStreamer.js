@@ -45,7 +45,7 @@ export function useLogStreamer({
 
   const displayLines = useMemo(
     () => [...logLines, ...Array.from(progressMapRef.current.values())],
-    [logLines, progressTick] // eslint-disable-line react-hooks/exhaustive-deps
+    [logLines, progressTick]
   );
 
   const flushBufferedLines = useCallback(() => {
