@@ -59,7 +59,9 @@ export function VersionProvider({ children }) {
   }, []);
 
   return (
-    <VersionContext.Provider value={{ version, latestVersion, commit, plugins }}>
+    <VersionContext.Provider
+      value={{ version, latestVersion, commit, plugins }}
+    >
       {children}
     </VersionContext.Provider>
   );
