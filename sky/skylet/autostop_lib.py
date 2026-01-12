@@ -173,22 +173,11 @@ def set_autostop(idle_minutes: int,
         backend: Backend name.
         wait_for: Condition for resetting idleness timer.
         down: Whether to tear down (autodown) instead of stop.
-        hook: Hook script to execute before autostop. If None, the existing
-            hook will be inherited from current config.
+        hook: Hook script to execute before autostop.
         hook_timeout: Timeout in seconds for hook execution. If None, uses
             DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour).
     """
     boot_time = psutil.boot_time()
-
-    # If hook is None, inherit existing hook from current config
-    existing_config = get_autostop_config()
-    if hook is None:
-        hook = existing_config.hook
-
-    # If hook_timeout is None, inherit from existing config or use default
-    if hook_timeout is None:
-        hook_timeout = getattr(existing_config, 'hook_timeout',
-                               constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS)
 
     autostop_config = AutostopConfig(idle_minutes, boot_time, backend, wait_for,
                                      down, hook, hook_timeout)
