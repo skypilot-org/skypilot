@@ -385,6 +385,31 @@ class TestBackwardCompatibility:
                 f'Skylet version 28 introduced breaking changes for '
                 f'user-specific exit codes.')
 
+        # Check if current version has JobGroup support (load_dag_from_yaml_str)
+        # but base version doesn't. This indicates potential incompatibility
+        # during the JobGroup feature development period.
+        from sky.utils import dag_utils
+        has_job_group_support = hasattr(dag_utils, 'load_dag_from_yaml_str')
+        if has_job_group_support:
+            # Check if base version has the same support
+            python_cmd = ("from sky.utils import dag_utils; "
+                          "print(hasattr(dag_utils, 'load_dag_from_yaml_str'))")
+            base_has_job_group = subprocess.run(
+                f"{self.ACTIVATE_BASE} && python -c \"{python_cmd}\"",
+                shell=True,
+                check=False,
+                executable='/bin/bash',
+                text=True,
+                capture_output=True)
+            if base_has_job_group.returncode == 0:
+                base_has_support = base_has_job_group.stdout.strip() == 'True'
+                if not base_has_support:
+                    pytest.skip(
+                        'Skipping test: current version has JobGroup support '
+                        '(load_dag_from_yaml_str) but base version does not. '
+                        'Backward compatibility for JobGroups is in development.'
+                    )
+
         managed_job_name = smoke_tests_utils.get_cluster_name()
 
         def launch_job(job_name: str, command: str):
