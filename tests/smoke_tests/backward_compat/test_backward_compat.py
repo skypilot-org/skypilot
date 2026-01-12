@@ -394,10 +394,11 @@ class TestBackwardCompatibility:
         has_job_group_support = hasattr(dag_utils, 'load_dag_from_yaml_str')
         if has_job_group_support:
             # Check if base version has the same support
-            python_cmd = ('from sky.utils import dag_utils; '
-                          'print(hasattr(dag_utils, "load_dag_from_yaml_str"))')
+            # Use single quotes for the python command to avoid escaping issues
+            python_cmd = ("from sky.utils import dag_utils; "
+                          "print(hasattr(dag_utils, 'load_dag_from_yaml_str'))")
             base_has_job_group = subprocess.run(
-                f'{self.ACTIVATE_BASE} && python -c "{python_cmd}"',
+                f"{self.ACTIVATE_BASE} && python -c '{python_cmd}'",
                 shell=True,
                 check=False,
                 executable='/bin/bash',
