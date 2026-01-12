@@ -1555,19 +1555,23 @@ exec {ssh_command} srun --unbuffered --quiet --overlap \
     --jobid="$job_id" --nodelist="$node_list" --nodes=1 --ntasks=1 "$@"
 """
         encoded_info = f'{self.job_id}+{self.slurm_node}'
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh') as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh',
+                                         delete=False) as f:
             f.write(script_content)
-            f.flush()
-            os.chmod(f.name, 0o755)
+            rsh_script_path = f.name
+        os.chmod(rsh_script_path, 0o755)
+        try:
             self._rsync(source,
                         target,
                         node_destination=encoded_info,
                         up=up,
-                        rsh_option=f.name,
+                        rsh_option=rsh_script_path,
                         log_path=log_path,
                         stream_logs=stream_logs,
                         max_retry=max_retry,
                         get_remote_home_dir=lambda: self.sky_dir)
+        finally:
+            os.unlink(rsh_script_path)
 
     @timeline.event
     @context_utils.cancellation_guard
