@@ -250,14 +250,6 @@ class SkyServiceSpec:
             pool_upscale_delay = pool_config.get('upscale_delay_seconds', None)
             pool_downscale_delay = pool_config.get('downscale_delay_seconds',
                                                    None)
-            # Set the simplified policy section to the min_workers if set,
-            # otherwise use the workers config. If we don't do this here then
-            # we will get set to the default min_replicas value of 1.
-            if simplified_policy_section is None:
-                if pool_min_workers is not None:
-                    simplified_policy_section = pool_min_workers
-                else:
-                    simplified_policy_section = workers_config
             # Validate: if queue_length_threshold is set, max_workers must also
             # be set
             if queue_length_threshold is not None and pool_max_workers is None:
@@ -284,15 +276,8 @@ class SkyServiceSpec:
                 min_replicas = simplified_policy_section
             else:
                 min_replicas = constants.DEFAULT_MIN_REPLICAS
-            service_config['min_replicas'] = min_replicas
-            # For pools with autoscaling (max_workers specified), use
-            # max_workers from pool config
+            # For pools with autoscaling set the relevant config values.
             if pool_config is not None and pool_max_workers is not None:
-                service_config['max_replicas'] = pool_max_workers
-                service_config['upscale_delay_seconds'] = pool_upscale_delay
-                service_config['downscale_delay_seconds'] = pool_downscale_delay
-                # Set default threshold if max_workers is set but threshold is
-                # not
                 if queue_length_threshold is None:
                     queue_length_threshold = (
                         constants.AUTOSCALER_DEFAULT_QUEUE_LENGTH_THRESHOLD)
@@ -300,10 +285,12 @@ class SkyServiceSpec:
                         'Set default queue_length_threshold='
                         f'{queue_length_threshold} for pool with max_workers='
                         f'{pool_max_workers}')
-            else:
-                service_config['max_replicas'] = None
-                service_config['upscale_delay_seconds'] = None
-                service_config['downscale_delay_seconds'] = None
+                min_replicas = (pool_min_workers if pool_min_workers is not None
+                                else min_replicas)
+            service_config['min_replicas'] = min_replicas
+            service_config['max_replicas'] = pool_max_workers
+            service_config['upscale_delay_seconds'] = pool_upscale_delay
+            service_config['downscale_delay_seconds'] = pool_downscale_delay
             service_config['num_overprovision'] = None
             service_config['target_qps_per_replica'] = None
         else:
@@ -407,22 +394,16 @@ class SkyServiceSpec:
 
         if self.pool:
             # For pool, serialize workers and autoscaling config
-            pool_dict: Dict[str, Any] = {}
-            pool_dict['workers'] = self.min_replicas
-            if self.queue_length_threshold is not None:
-                pool_dict[
-                    'queue_length_threshold'] = self.queue_length_threshold
-                if self.max_replicas is not None:
-                    pool_dict['max_workers'] = self.max_replicas
-                if self.min_replicas is not None:
-                    pool_dict['min_workers'] = self.min_replicas
-                if self.upscale_delay_seconds is not None:
-                    pool_dict[
-                        'upscale_delay_seconds'] = self.upscale_delay_seconds
-                if self.downscale_delay_seconds is not None:
-                    pool_dict['downscale_delay_seconds'] = (
-                        self.downscale_delay_seconds)
-            config['pool'] = pool_dict
+            add_if_not_none('pool', 'workers', self.min_replicas)
+            if self.max_replicas is not None:
+                add_if_not_none('pool', 'max_workers', self.max_replicas)
+                add_if_not_none('pool', 'queue_length_threshold',
+                                self.queue_length_threshold)
+                add_if_not_none('pool', 'min_workers', self.min_replicas)
+                add_if_not_none('pool', 'upscale_delay_seconds',
+                                self.upscale_delay_seconds)
+                add_if_not_none('pool', 'downscale_delay_seconds',
+                                self.downscale_delay_seconds)
             return config
 
         add_if_not_none('readiness_probe', 'path', self.readiness_path)
