@@ -638,19 +638,28 @@ def generate_wait_for_networking_script(job_group_name: str,
     wait_script = textwrap.dedent(f"""
         # Wait for JobGroup networking to be ready
         echo "[SkyPilot] Waiting for network setup..."
+        echo "[SkyPilot] Waiting for hostnames: {hostname_list}"
         HOSTNAMES="{hostname_list}"
         MAX_WAIT=300  # 5 minutes
         ELAPSED=0
+        DNS_MAPPINGS_FILE="$HOME/.sky/jobgroup_dns_mappings.json"
         for hostname in $HOSTNAMES; do
           while ! getent hosts "$hostname" >/dev/null 2>&1; do
             if [ $ELAPSED -ge $MAX_WAIT ]; then
-              echo "[SkyPilot] Error: Network setup timed out for \\"$hostname\\""
+              echo "[SkyPilot] Error: Network setup timed out for \\"$hostname\\" after ${{ELAPSED}}s"
+              echo "[SkyPilot] DNS mappings file exists: $([ -f \\"$DNS_MAPPINGS_FILE\\" ] && echo 'yes' || echo 'no')"
+              echo "[SkyPilot] Hosts file entries:"
+              cat /etc/hosts | grep -i jobgroup || echo "(none)"
               exit 1
             fi
-            echo "[SkyPilot] Waiting for network to be ready..."
+            if [ $(($ELAPSED % 30)) -eq 0 ]; then
+              echo "[SkyPilot] Still waiting for $hostname (${{ELAPSED}}s elapsed)..."
+              echo "[SkyPilot] DNS mappings file: $([ -f \\"$DNS_MAPPINGS_FILE\\" ] && echo 'exists' || echo 'not found')"
+            fi
             sleep 2
             ELAPSED=$((ELAPSED + 2))
           done
+          echo "[SkyPilot] Hostname $hostname is now resolvable"
         done
         echo "[SkyPilot] Network is ready!"
     """)
