@@ -1179,6 +1179,12 @@ def test_volumes_on_kubernetes():
                 f'      storage: 1Gi\n'
                 f'EOF',
             ),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, 'end=$((SECONDS+60)); '
+                'while [ $SECONDS -lt $end ]; do '
+                'if kubectl get pvc existing0; then exit 0; fi; '
+                'sleep 1; '
+                'done; exit 1'),
             f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB',
             f'sky volumes apply -y -n existing0 --type k8s-pvc --size 2GB --use-existing',
             f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "pvc0" && echo "$vols" | grep "existing0"',
