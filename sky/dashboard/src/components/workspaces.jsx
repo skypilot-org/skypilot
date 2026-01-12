@@ -557,7 +557,7 @@ export function Workspaces() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [handleRefresh]);
 
   // Sorting functionality
   const handleSort = (key) => {
@@ -667,7 +667,7 @@ export function Workspaces() {
     }
   };
 
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getWorkspaces);
     dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
@@ -686,7 +686,7 @@ export function Workspaces() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [fetchData]);
 
   const handleCancelDelete = () => {
     setDeleteState({
@@ -892,7 +892,7 @@ export function Workspaces() {
                     className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
                     onClick={() => handleSort('runningClusterCount')}
                   >
-                    Running Clusters{getSortDirection('runningClusterCount')}
+                    Running Clusters {getSortDirection('runningClusterCount')}
                   </TableHead>
                   <TableHead
                     className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
