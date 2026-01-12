@@ -125,7 +125,7 @@ def add_column_to_table(
 
 def add_all_tables_to_db_sqlalchemy(
     metadata: sqlalchemy.MetaData,
-    engine: sqlalchemy.Engine,
+    engine: sqlalchemy.engine.Engine,
 ):
     """Add tables to the database."""
     for table in metadata.tables.values():
@@ -141,7 +141,7 @@ def add_all_tables_to_db_sqlalchemy(
 
 def add_table_to_db_sqlalchemy(
     metadata: sqlalchemy.MetaData,
-    engine: sqlalchemy.Engine,
+    engine: sqlalchemy.engine.Engine,
     table_name: str,
 ):
     """Add a specific table to the database."""
