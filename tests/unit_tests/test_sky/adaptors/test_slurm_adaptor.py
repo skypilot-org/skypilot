@@ -5,7 +5,6 @@ import unittest.mock as mock
 
 import pytest
 
-from sky import exceptions
 from sky.adaptors import slurm
 
 
