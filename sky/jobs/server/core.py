@@ -105,6 +105,11 @@ def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
     if os.environ.get(skylet_constants.SKYPILOT_ROLLING_UPDATE_ENABLED) is None:
         return
 
+    # If persistent storage is enabled (via Helm storage.enabled=true), file
+    # mounts are persisted to the PVC and will survive rolling updates.
+    if os.environ.get(skylet_constants.SKYPILOT_STORAGE_ENABLED) is not None:
+        return
+
     # If consolidation mode is not enabled, don't warn.
     if not managed_job_utils.is_consolidation_mode():
         return
@@ -136,7 +141,9 @@ def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
         'with rolling update enabled for API server. To persist files'
         ' across API server restarts/update, use buckets, volumes, or git '
         'for your file mounts; or, configure a bucket in your SkyPilot config '
-        f'under `jobs.bucket`. {colorama.Style.RESET_ALL}')
+        'under `jobs.bucket`; or, enable persistent storage in Helm with '
+        '`storage.enabled=true`. See: https://docs.skypilot.co/en/latest/'
+        f'reference/kubernetes/kubernetes-deployment.html{colorama.Style.RESET_ALL}')
 
 
 def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
