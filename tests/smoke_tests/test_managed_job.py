@@ -1990,7 +1990,7 @@ def test_managed_jobs_system_logs(generic_cloud: str):
 
             # Get the UUID and view its logs
             's=$(sky jobs logs --system) && '
-            'UUID=$(echo "$s" | tail -n +2 | head -n1) && '
+            'UUID=$(echo "$s" | tail -n 2 | head -n1) && '
             'echo "System UUID: $UUID" && '
             'test -n "$UUID" && '
             's=$(sky jobs logs --system $UUID --no-follow) && '
@@ -2000,7 +2000,7 @@ def test_managed_jobs_system_logs(generic_cloud: str):
 
             # Test sync down system logs
             's=$(sky jobs logs --system) && '
-            'UUID=$(echo "$s" | tail -n +2 | head -n1) && '
+            'UUID=$(echo "$s" | tail -n 2 | head -n1) && '
             's=$(SKYPILOT_DEBUG=0 sky jobs logs --system $UUID --sync-down) && '
             'echo "$s" && '
             # Parse the log path and verify it exists
