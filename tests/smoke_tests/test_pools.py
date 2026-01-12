@@ -322,6 +322,34 @@ def wait_for_message_in_pool_logs(pool_name: str,
 
 
 
+def wait_for_message_in_pool_logs(pool_name: str,
+                                  message: str,
+                                  timeout: int = 300,
+                                  time_between_checks: int = 10):
+    """Wait for a specific message to appear in pool logs.
+    
+    Args:
+        pool_name: Name of the pool to check logs for.
+        message: The message to search for in the logs (case-insensitive).
+        timeout: Maximum time to wait in seconds.
+        time_between_checks: Time to wait between checks in seconds.
+    """
+    num_checks = timeout // time_between_checks
+    return (
+        f'for i in {{1..{num_checks}}}; do '
+        f'logs=$(sky jobs pool logs --controller {pool_name} --no-follow 2>&1); '
+        'echo "$logs"; '
+        f'if echo "$logs" | grep -i "{message}"; then '
+        f'  echo "Found {message} in logs"; '
+        '  exit 0; '
+        'fi; '
+        f'echo "Check $i/{num_checks}: {message} not found yet"; '
+        f'sleep {time_between_checks}; '
+        'done; '
+        f'echo "ERROR: {message} not found in logs after timeout"; '
+        'exit 1')
+
+
 def basic_pool_conf(
     num_workers: int,
     infra: str,
