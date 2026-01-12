@@ -343,7 +343,7 @@ def unified_conf(num_workers: int,
                  resource_string: Optional[str] = None,
                  setup_cmd: str = 'echo "setup message"',
                  run_cmd: str = 'echo "run message"'):
-    resource_string_section = f'    {resource_string}\n' if resource_string is not None else ''
+    resource_string_section = f'        {resource_string}\n' if resource_string is not None else ''
     return textwrap.dedent(f"""
     pool:
         workers: {num_workers}
@@ -1097,50 +1097,6 @@ def test_pools_job_cancel_no_jobs(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
-# TODO(Lloyd): Remove once heterogeneous pools are supported.
-@pytest.mark.no_remote_server  # see note 1 above
-def test_heterogeneous_pool(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    pool_name = f'{name}-pool'
-    pool_name = common_utils.make_cluster_name_on_cloud(
-        pool_name, sky.AWS.max_cluster_name_length())
-    pool_config = basic_pool_conf(num_workers=1,
-                                  infra=generic_cloud,
-                                  accelerator_string='{"L4", "A10G"}')
-    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
-        write_yaml(pool_yaml, pool_config)
-        test = smoke_tests_utils.Test(
-            'test_heterogeneous_pool_counts',
-            [
-                f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} -y 2>&1); echo "$s"; echo; echo; echo "$s" | grep "Heterogeneous clusters are not supported"',
-            ],
-            timeout=smoke_tests_utils.get_timeout(generic_cloud),
-        )
-        smoke_tests_utils.run_one_test(test)
-
-
-#(TODO): Remove once heterogeneous pools are supported.
-@pytest.mark.no_remote_server  # see note 1 above
-def test_heterogeneous_pool_counts(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    pool_name = f'{name}-pool'
-    pool_name = common_utils.make_cluster_name_on_cloud(
-        pool_name, sky.AWS.max_cluster_name_length())
-    pool_config = basic_pool_conf(num_workers=1,
-                                  infra=generic_cloud,
-                                  accelerator_string='{"H100":1, "L40S":1}')
-    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
-        write_yaml(pool_yaml, pool_config)
-        test = smoke_tests_utils.Test(
-            'test_heterogeneous_pool_counts',
-            [
-                f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} -y 2>&1); echo "$s"; echo; echo; echo "$s" | grep "Heterogeneous clusters are not supported"',
-            ],
-            timeout=smoke_tests_utils.get_timeout(generic_cloud),
-        )
-        smoke_tests_utils.run_one_test(test)
-
-
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pools_num_jobs_basic(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -1312,6 +1268,145 @@ def test_pools_single_yaml(generic_cloud: str):
             ],
             timeout=smoke_tests_utils.get_timeout(generic_cloud),
             teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.resource_heavy
+@pytest.mark.no_remote_server  # see note 1 above
+@pytest.mark.no_kubernetes  # Kubernetes may not have multiple GPU types
+@pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
+@pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
+@pytest.mark.no_nebius  # Nebius does not support T4 GPUs
+@pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
+@pytest.mark.no_seeweb  # Seeweb does not support T4
+def test_pools_heterogeneous_any_of(generic_cloud: str):
+    """Test pools with heterogeneous resources using any_of accelerators."""
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    job_name = f'{name}-job'
+    # Use any_of with cheaper GPUs (T4 and V100 are commonly available)
+    one_config = unified_conf(
+        num_workers=1,
+        infra=generic_cloud,
+        resource_string="accelerators: {'T4:1', 'V100:1'}",
+        setup_cmd='echo "setup message"; nvidia-smi',
+        run_cmd='echo "Heterogeneous job"; nvidia-smi')
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    with tempfile.NamedTemporaryFile(delete=True) as one_config_yaml:
+        write_yaml(one_config_yaml, one_config)
+        test = smoke_tests_utils.Test(
+            'test_pools_heterogeneous_any_of',
+            [
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                    pool_name=pool_name, pool_yaml=one_config_yaml.name),
+                (f's=$(sky jobs launch --pool {pool_name} {one_config_yaml.name} --name {job_name} -d -y); '
+                 'echo "$s"; '
+                 'echo; echo; echo "$s" | grep "Job submitted"'),
+                wait_until_job_status(job_name, ['SUCCEEDED'], timeout=timeout),
+            ],
+            timeout=smoke_tests_utils.get_timeout(generic_cloud),
+            teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+@pytest.mark.resource_heavy
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pools_heterogeneous_resource_scheduling(generic_cloud: str):
+    """Test resource-aware scheduling with heterogeneous job requirements.
+    
+    This test validates that jobs with any_of resources (T4 or A100) can be
+    scheduled on a worker with only T4s. The scheduler should recognize that
+    T4s are available and schedule jobs accordingly, even though A100s are
+    also specified as an option.
+    
+    Test scenario:
+    - Pool: 1 worker with g4dn.12xlarge (4 T4 GPUs)
+    - Job: Requests any_of T4:1 or A100:1
+    - Launch 5 jobs that sleep forever
+    - Expected: 4 jobs run, 1 job waits (since only 4 T4s are available)
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+
+    # Create pool with g4dn.12xlarge (has 4 T4 GPUs)
+    pool_config = textwrap.dedent(f"""
+    pool:
+        workers: 1
+    
+    resources:
+        instance_type: g4dn.12xlarge
+        infra: aws
+    
+    setup: |
+        echo "Pool worker setup complete"
+    """)
+
+    # Create job that requests either T4 or A100 (any_of)
+    job_name_prefix = f'{name}-job'
+    job_config = textwrap.dedent(f"""
+    name: {job_name_prefix}
+    
+    resources:
+        accelerators: {{'T4:1', 'A100:1'}}
+    
+    run: |
+        echo "Job running with GPU:"
+        nvidia-smi --query-gpu=name --format=csv,noheader
+        sleep infinity
+    """)
+
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml, \
+         tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+        write_yaml(pool_yaml, pool_config)
+        write_yaml(job_yaml, job_config)
+
+        # Build test commands
+        test_cmds = [
+            _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                  pool_yaml=pool_yaml.name),
+            wait_until_pool_ready(pool_name, timeout=timeout),
+        ]
+
+        # Launch first 4 jobs and wait for each to be RUNNING
+        for i in range(4):
+            job_name = f'{job_name_prefix}-{i}'
+            test_cmds.extend([
+                f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} '
+                f'--name {job_name} -d -y); '
+                f'echo "$s"; '
+                f'echo; echo; echo "$s" | grep "Job submitted"',
+                wait_until_job_status(job_name, ['RUNNING'], timeout=timeout),
+            ])
+
+        # Launch 5th job
+        fifth_job_name = f'{job_name_prefix}-4'
+        test_cmds.extend([
+            f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} '
+            f'--name {fifth_job_name} -d -y); '
+            f'echo "$s"; '
+            f'echo; echo; echo "$s" | grep "Job submitted"',
+            # Wait for it to be PENDING
+            wait_until_job_status(fifth_job_name, ['PENDING'],
+                                  bad_statuses=[],
+                                  timeout=timeout),
+            # Sleep 60 seconds
+            'sleep 60',
+            # Verify it's still PENDING or WAITING (not running)
+            wait_until_job_status(fifth_job_name, ['PENDING'],
+                                  bad_statuses=['RUNNING'],
+                                  timeout=30),
+        ])
+
+        test = smoke_tests_utils.Test(
+            'test_pools_heterogeneous_resource_scheduling',
+            test_cmds,
+            timeout=smoke_tests_utils.get_timeout(generic_cloud) * 2,
+            teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10),
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1566,9 +1661,6 @@ def test_pool_scale_with_workdir(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
-# 2. The resource tests don't currently work on anything but kubernetes because
-# the launched resources for other clouds don't have memory specified.
-@pytest.mark.kubernetes  # see note 2 above
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_resource_multiple_jobs_single_worker(generic_cloud: str):
     """Test that multiple jobs can run on a single worker when resources allow."""
@@ -1633,7 +1725,6 @@ def test_pool_resource_multiple_jobs_single_worker(generic_cloud: str):
                 smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.kubernetes  # see note 2 above
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_resource_contention_two_workers(generic_cloud: str):
     """Test that only one job runs when resources don't allow both."""
@@ -1706,7 +1797,6 @@ def test_pool_resource_contention_two_workers(generic_cloud: str):
                         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.kubernetes  # see note 2 above
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_resource_contention_two_workers_some_available(
         generic_cloud: str):
@@ -1781,7 +1871,6 @@ def test_pool_resource_contention_two_workers_some_available(
                         smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.kubernetes  # see note 2 above
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_resource_reclamation(generic_cloud: str):
     """Test that resources are reclaimed when jobs finish, allowing queued jobs to run."""
@@ -1847,7 +1936,6 @@ def test_pool_resource_reclamation(generic_cloud: str):
                 smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.kubernetes  # see note 2 above
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_resource_fallback_to_unaware(generic_cloud: str):
     """Test that resources are reclaimed when jobs finish, allowing queued jobs to run."""
