@@ -888,13 +888,17 @@ class JobController:
         task_name = task.name
         assert task_name is not None, f'Task {task_id} must have a name'
 
-        # Inject wait script to ensure networking is ready before task starts
+        # Inject wait script to ensure networking is ready before task runs.
+        # We inject this into task.run (not task.setup) because:
+        # - setup runs during cluster provisioning (Phase 1)
+        # - DNS mappings file is written in Phase 3 (after clusters are UP)
+        # - If we block in setup, it times out before Phase 3 can run
         wait_script = job_group_networking.generate_wait_for_networking_script(
             job_group_name, other_job_names)
         if wait_script:
-            # Prepend wait script to task setup
-            current_setup = task.setup or ''
-            task.setup = wait_script + '\n\n' + current_setup
+            # Prepend wait script to task run
+            current_run = task.run or ''
+            task.run = wait_script + '\n\n' + current_run
 
         cluster_name = (managed_job_utils.generate_managed_job_cluster_name(
             task_name, self._job_id) if self._pool is None else None)

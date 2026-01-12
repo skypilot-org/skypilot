@@ -39,6 +39,8 @@ EVENTS = [
     events.ServiceUpdateEvent(pool=True),
     # Report usage heartbeat every 10 minutes.
     events.UsageHeartbeatReportEvent(),
+    # JobGroup networking: DNS resolution for K8s service discovery.
+    events.HostUpdaterEvent(),
 ]
 
 

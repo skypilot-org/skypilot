@@ -23,12 +23,13 @@ Design Goals:
 """
 import asyncio
 import enum
-import shlex
+import json
 import textwrap
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from sky import clouds as sky_clouds
 from sky import sky_logging
+from sky.skylet import host_updater
 
 if TYPE_CHECKING:
     from sky import task as task_lib
@@ -265,14 +266,14 @@ async def _inject_hosts_on_node(
         return False
 
 
-async def _start_k8s_dns_updater_on_node(
+async def _write_dns_mappings_file_on_node(
     runner: 'command_runner.CommandRunner',
     dns_mappings: List[Tuple[str, str]],
 ) -> bool:
-    """Start background DNS updater on a K8s node.
+    """Write DNS mappings file on a node for skylet's HostUpdater.
 
-    The updater resolves K8s service DNS names to IPs and keeps
-    /etc/hosts updated.
+    The skylet's HostUpdaterEvent watches for this file and starts
+    the background DNS updater when it appears.
 
     Args:
         runner: CommandRunner for the target node.
@@ -281,54 +282,44 @@ async def _start_k8s_dns_updater_on_node(
     Returns:
         True if successful, False otherwise.
     """
+    logger.info(f'_write_dns_mappings_file_on_node called with '
+                f'{len(dns_mappings)} mappings')
     if not dns_mappings:
+        logger.info('No DNS mappings to write, returning True')
         return True
 
-    updater_script = generate_k8s_dns_updater_script(dns_mappings)
-    if not updater_script:
-        return True
+    # Encode mappings as JSON
+    mappings_json = json.dumps(
+        [[dns, hostname] for dns, hostname in dns_mappings])
+    # Use $HOME instead of ~ to ensure proper expansion in kubectl exec
+    file_path = host_updater.JOBGROUP_DNS_MAPPINGS_FILE.replace('~', '$HOME')
 
-    # Write script to a file to avoid complex quoting issues
-    # Use shlex.quote() pattern from cloud_vm_ray_backend.py
-    script_path = '/tmp/skypilot-jobgroup-dns-updater.sh'
-    log_path = '/tmp/skypilot-jobgroup-dns-updater.log'
-
-    # Use shlex.quote to safely transfer the script content
-    encoded_script = shlex.quote(updater_script)
-    write_cmd = f'{{ echo {encoded_script} > {script_path}; }}'
+    # Write the JSON to the file using echo with base64 to avoid shell escaping issues
+    # This is more robust than heredoc when running via kubectl exec
+    import base64
+    encoded_json = base64.b64encode(mappings_json.encode()).decode()
+    write_cmd = (f'mkdir -p $(dirname {file_path}) && '
+                 f'echo {encoded_json} | base64 -d > {file_path}')
 
     try:
         loop = asyncio.get_running_loop()
-
-        # Write the script file
-        logger.debug('Writing DNS updater script...')
-        returncode, _, stderr = await loop.run_in_executor(
+        logger.info(f'Writing DNS mappings file to {file_path}...')
+        logger.info(f'Command: {write_cmd[:200]}...')
+        returncode, stdout, stderr = await loop.run_in_executor(
             None, lambda: runner.run(
                 write_cmd, stream_logs=False, require_outputs=True))
+        logger.info(f'Write result: returncode={returncode}, '
+                    f'stdout={stdout[:100] if stdout else ""}, '
+                    f'stderr={stderr[:100] if stderr else ""}')
         if returncode != 0:
-            logger.error(f'Failed to write DNS updater script: {stderr}')
+            logger.error(f'Failed to write DNS mappings file: {stderr}')
             return False
-        logger.debug('DNS updater script written successfully')
-
-        # Make executable and run in background
-        # Use a subshell with exec to fully detach from kubectl exec:
-        # - The outer shell exits immediately after spawning the subshell
-        # - The subshell runs the script with all FDs redirected
-        run_cmd = (f'chmod +x {script_path} && '
-                   f'(nohup {script_path} < /dev/null > {log_path} 2>&1 &) && '
-                   f'sleep 0.1')
-        logger.debug('Starting DNS updater in background...')
-        returncode, _, stderr = await loop.run_in_executor(
-            None,
-            lambda: runner.run(run_cmd, stream_logs=False, require_outputs=True)
-        )
-        if returncode != 0:
-            logger.error(f'Failed to start DNS updater: {stderr}')
-            return False
-        logger.debug('DNS updater started successfully')
+        logger.info('DNS mappings file written successfully')
         return True
     except Exception as e:  # pylint: disable=broad-except
-        logger.error(f'Exception while starting DNS updater: {e}')
+        logger.error(f'Exception while writing DNS mappings file: {e}')
+        import traceback
+        logger.error(traceback.format_exc())
         return False
 
 
@@ -382,7 +373,7 @@ class NetworkConfigurator:
         """Inject /etc/hosts entries for all clusters in the JobGroup.
 
         This maps the unified hostname format to actual addresses:
-        - K8s: Start background DNS updater to resolve service DNS to IPs
+        - K8s: Write DNS mappings file for skylet's HostUpdater
         - SSH: Inject static internal IPs
 
         Args:
@@ -420,10 +411,10 @@ class NetworkConfigurator:
 
             for node_idx, runner in enumerate(runners):
                 if is_k8s:
-                    # K8s: Start background DNS updater
+                    # K8s: Write DNS mappings file for skylet's HostUpdater
                     inject_tasks.append(
-                        _start_k8s_dns_updater_on_node(runner,
-                                                       k8s_dns_mappings))
+                        _write_dns_mappings_file_on_node(
+                            runner, k8s_dns_mappings))
                 else:
                     # SSH: Inject static /etc/hosts
                     if ssh_hosts_content:
