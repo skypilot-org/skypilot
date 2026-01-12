@@ -330,6 +330,174 @@ export async function getWorkspaceInfrastructure() {
   }
 }
 
+// Lightweight function to get just context names quickly (without GPU data)
+// This allows the UI to show contexts immediately while GPU data loads progressively
+export async function getWorkspaceContexts() {
+  try {
+    // Step 1: Get all accessible workspaces for the user (use cache for performance)
+    const { getWorkspaces } = await import('@/data/connectors/workspaces');
+    const workspacesData = await dashboardCache.get(getWorkspaces);
+
+    if (!workspacesData || Object.keys(workspacesData).length === 0) {
+      return {
+        workspaces: {},
+        allContextNames: [],
+        contextWorkspaceMap: {},
+      };
+    }
+
+    // Step 2: For each workspace, fetch enabled clouds with expanded infrastructure
+    const { getEnabledClouds } = await import('@/data/connectors/workspaces');
+    const workspaceInfraData = {};
+    const allContextsAcrossWorkspaces = [];
+    const contextWorkspaceMap = {};
+
+    await Promise.allSettled(
+      Object.entries(workspacesData).map(
+        async ([workspaceName, workspaceConfig]) => {
+          try {
+            // Get enabled clouds with expanded infrastructure for this workspace
+            const expandedClouds = await dashboardCache.get(getEnabledClouds, [
+              workspaceName,
+              true,
+            ]);
+
+            workspaceInfraData[workspaceName] = {
+              config: workspaceConfig,
+              clouds: expandedClouds,
+              contexts: [],
+            };
+
+            // Extract contexts from expanded cloud data
+            if (expandedClouds && Array.isArray(expandedClouds)) {
+              expandedClouds.forEach((infraItem) => {
+                if (infraItem.toLowerCase().startsWith('kubernetes/')) {
+                  const context = infraItem.replace(/^kubernetes\//i, '');
+                  allContextsAcrossWorkspaces.push(context);
+                  if (!contextWorkspaceMap[context]) {
+                    contextWorkspaceMap[context] = [];
+                  }
+                  if (!contextWorkspaceMap[context].includes(workspaceName)) {
+                    contextWorkspaceMap[context].push(workspaceName);
+                  }
+                  workspaceInfraData[workspaceName].contexts.push(context);
+                } else if (infraItem.toLowerCase().startsWith('ssh/')) {
+                  const poolName = infraItem.replace(/^ssh\//i, '');
+                  const sshContextName = `ssh-${poolName}`;
+                  allContextsAcrossWorkspaces.push(sshContextName);
+                  if (!contextWorkspaceMap[sshContextName]) {
+                    contextWorkspaceMap[sshContextName] = [];
+                  }
+                  if (
+                    !contextWorkspaceMap[sshContextName].includes(workspaceName)
+                  ) {
+                    contextWorkspaceMap[sshContextName].push(workspaceName);
+                  }
+                  workspaceInfraData[workspaceName].contexts.push(
+                    sshContextName
+                  );
+                }
+              });
+            }
+          } catch (error) {
+            console.error(
+              `Failed to fetch infrastructure for workspace ${workspaceName}:`,
+              error
+            );
+          }
+        }
+      )
+    );
+
+    return {
+      workspaces: workspaceInfraData,
+      allContextNames: [...new Set(allContextsAcrossWorkspaces)].sort(),
+      contextWorkspaceMap: contextWorkspaceMap,
+    };
+  } catch (error) {
+    console.error('Failed to fetch workspace contexts:', error);
+    throw error;
+  }
+}
+
+// Fetch GPU data for a single context - used for progressive loading
+// Returns processed GPU data for one context that can be merged into state
+export async function getContextGPUData(context) {
+  try {
+    const nodeInfoDict = await getKubernetesPerNodeGPUs(context);
+
+    // Process node info into GPU summaries
+    const gpuToData = {};
+    const perNodeGPUs = [];
+
+    if (nodeInfoDict && Object.keys(nodeInfoDict).length > 0) {
+      for (const nodeName in nodeInfoDict) {
+        const nodeData = nodeInfoDict[nodeName];
+        if (!nodeData) continue;
+
+        const gpuName = nodeData['accelerator_type'] || '-';
+        const totalCount = nodeData['total']?.['accelerator_count'] || 0;
+        const freeCount = nodeData['free']?.['accelerators_available'] || 0;
+        const isReady = nodeData['is_ready'] !== false;
+
+        // Per-node data - use same field names as original getKubernetesGPUsFromContexts
+        perNodeGPUs.push({
+          node_name: nodeData['name'] || nodeName,
+          gpu_name: gpuName,
+          gpu_total: totalCount,
+          gpu_free: freeCount,
+          is_ready: isReady,
+          context: context,
+          ip_address: nodeData['ip_address'] || null,
+          cpu_count: nodeData['cpu_count'] ?? null,
+          memory_gb: nodeData['memory_gb'] ?? null,
+          cpu_free: nodeData['cpu_free'] ?? null,
+          memory_free_gb: nodeData['memory_free_gb'] ?? null,
+        });
+
+        // Aggregate GPU data per context
+        if (totalCount > 0) {
+          if (!gpuToData[gpuName]) {
+            gpuToData[gpuName] = {
+              gpu_name: gpuName,
+              gpu_requestable_qty_per_node: 0,
+              gpu_total: 0,
+              gpu_free: 0,
+              gpu_not_ready: 0,
+              context: context,
+            };
+          }
+          gpuToData[gpuName].gpu_total += totalCount;
+          gpuToData[gpuName].gpu_free += freeCount;
+          if (!isReady) {
+            gpuToData[gpuName].gpu_not_ready += totalCount;
+          }
+          gpuToData[gpuName].gpu_requestable_qty_per_node = totalCount;
+        }
+      }
+    }
+
+    return {
+      context,
+      perContextGPUs: Object.values(gpuToData),
+      perNodeGPUs: perNodeGPUs,
+      error: null,
+    };
+  } catch (error) {
+    const errorMessage =
+      error?.message ||
+      (typeof error === 'string' && error) ||
+      'Context may be unavailable or timed out';
+    console.warn(`Failed to get GPU data for context ${context}:`, errorMessage);
+    return {
+      context,
+      perContextGPUs: [],
+      perNodeGPUs: [],
+      error: errorMessage,
+    };
+  }
+}
+
 // Helper function to get GPU data for specific contexts
 async function getKubernetesGPUsFromContexts(contextNames) {
   try {
