@@ -1571,7 +1571,12 @@ exec {ssh_command} srun --unbuffered --quiet --overlap \
                         max_retry=max_retry,
                         get_remote_home_dir=lambda: self.sky_dir)
         finally:
-            os.unlink(rsh_script_path)
+            try:
+                os.unlink(rsh_script_path)
+            except OSError as e:
+                logger.warning('Failed to remove temporary rsh script '
+                               f'{rsh_script_path}: '
+                               f'{common_utils.exception_to_string(e)}')
 
     @timeline.event
     @context_utils.cancellation_guard
