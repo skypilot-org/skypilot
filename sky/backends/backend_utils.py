@@ -906,6 +906,13 @@ def write_cluster_config(
     is_custom_docker = ('true' if to_provision.extract_docker_image()
                         is not None else 'false')
 
+    # Check if the cluster name is a controller name.
+    is_remote_controller = False
+    controller = controller_utils.Controllers.from_name(
+        cluster_name, expect_exact_match=False)
+    if controller is not None:
+        is_remote_controller = True
+
     # Here, if users specify the controller to be high availability, we will
     # provision a high availability controller. Whether the cloud supports
     # this feature has been checked by
@@ -1037,7 +1044,8 @@ def write_cluster_config(
                 # Authentication (optional).
                 **auth_config,
 
-                # High availability
+                # Controller specific configs
+                'is_remote_controller': is_remote_controller,
                 'high_availability': high_availability_specified,
 
                 # Volume mounts
