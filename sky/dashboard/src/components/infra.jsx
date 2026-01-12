@@ -166,7 +166,7 @@ export function InfrastructureSection({
   contextErrors = {}, // Mapping of contexts to error messages
   gpuMetricsRefreshTrigger = 0, // Counter for forcing iframe refresh
   loadedContexts = new Set(), // Set of contexts that have had their GPU data loaded
-  isInitialLoad = true, // Only show inline spinners during initial load
+  isInitialLoad = true, // Controls panel-level loading spinner (not cell spinners)
 }) {
   // Add defensive check for contexts
   const safeContexts = contexts || [];
@@ -189,8 +189,9 @@ export function InfrastructureSection({
     );
   }
 
-  // Show loading spinner only during initial load (data not yet loaded)
-  if (isLoading && !isDataLoaded && safeContexts.length === 0) {
+  // Show panel-level loading spinner ONLY during initial load
+  // On subsequent refreshes, show the table with cell-level spinners instead
+  if (isInitialLoad && isLoading && !isDataLoaded && safeContexts.length === 0) {
     return (
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
         <div className="p-5">
@@ -359,57 +360,31 @@ export function InfrastructureSection({
                             </NonCapitalizedTooltip>
                           </td>
                           <td className="p-3">
-                            {isInitialLoad && isClusterDataLoading ? (
+                            {isClusterDataLoading ? (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 <CircularProgress size={12} />
                               </span>
-                            ) : stats.clusters > 0 ? (
-                              <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                            ) : (
+                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 {stats.clusters}
                               </span>
+                            )}
+                          </td>
+                          <td className="p-3">
+                            {isJobsDataLoading ? (
+                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                                <CircularProgress size={12} />
+                              </span>
                             ) : (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                0
+                                {jobsData[contextStatsKey]?.jobs || 0}
                               </span>
                             )}
                           </td>
                           <td className="p-3">
-                            {!isJobsDataLoading || !isInitialLoad ? (
-                              jobsData[contextStatsKey]?.jobs || 0 > 0 ? (
-                                <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
-                                  {jobsData[contextStatsKey]?.jobs}
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                  0
-                                </span>
-                              )
-                            ) : (
+                            {!hasNodeData ? (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 <CircularProgress size={12} />
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-3">
-                            {isInitialLoad && !hasNodeData ? (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                <CircularProgress size={12} />
-                              </span>
-                            ) : nodes.length > 0 ? (
-                              <span
-                                className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                  contextErrors[context]
-                                    ? 'bg-yellow-100 text-yellow-800'
-                                    : 'bg-purple-100 text-purple-800'
-                                }`}
-                                title={
-                                  contextErrors[context]
-                                    ? contextErrors[context]
-                                    : ''
-                                }
-                              >
-                                {nodes.length}
-                                {contextErrors[context] ? '*' : ''}
                               </span>
                             ) : (
                               <span
@@ -424,19 +399,16 @@ export function InfrastructureSection({
                                     : ''
                                 }
                               >
-                                0{contextErrors[context] ? '*' : ''}
+                                {nodes.length}
+                                {contextErrors[context] ? '*' : ''}
                               </span>
                             )}
                           </td>
                           {!isSlurm && (
                             <td className="p-3">
-                              {isInitialLoad && !hasNodeData ? (
+                              {!hasNodeData ? (
                                 <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                   <CircularProgress size={12} />
-                                </span>
-                              ) : aggregatedCpu && aggregatedCpu > 0 ? (
-                                <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded text-xs font-medium">
-                                  {formatCpu(aggregatedCpu)}
                                 </span>
                               ) : (
                                 <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
@@ -447,13 +419,9 @@ export function InfrastructureSection({
                           )}
                           {!isSlurm && (
                             <td className="p-3">
-                              {isInitialLoad && !hasNodeData ? (
+                              {!hasNodeData ? (
                                 <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                   <CircularProgress size={12} />
-                                </span>
-                              ) : aggregatedMemory && aggregatedMemory > 0 ? (
-                                <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded text-xs font-medium">
-                                  {formatMemory(aggregatedMemory)}
                                 </span>
                               ) : (
                                 <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
@@ -463,32 +431,24 @@ export function InfrastructureSection({
                             </td>
                           )}
                           <td className="p-3">
-                            {isInitialLoad && !hasGpuData ? (
+                            {!hasGpuData ? (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 <CircularProgress size={12} />
-                              </span>
-                            ) : gpuTypes ? (
-                              <span className="px-2 py-0.5 bg-orange-100 text-orange-800 rounded text-xs font-medium">
-                                {gpuTypes}
                               </span>
                             ) : (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                -
+                                {gpuTypes || '-'}
                               </span>
                             )}
                           </td>
                           <td className="p-3">
-                            {isInitialLoad && !hasGpuData ? (
+                            {!hasGpuData ? (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 <CircularProgress size={12} />
                               </span>
-                            ) : totalGpus > 0 ? (
-                              <span className="px-2 py-0.5 bg-orange-100 text-orange-800 rounded text-xs font-medium">
+                            ) : (
+                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 {totalGpus}
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                0
                               </span>
                             )}
                           </td>
@@ -2695,8 +2655,13 @@ export function GPUs() {
   };
 
   const renderCloudInfrastructure = () => {
-    // Show loading spinner only if no cloud data at all
-    if (cloudLoading && (!cloudInfraData || cloudInfraData.length === 0)) {
+    // Show panel-level loading spinner only during initial load when no cloud data at all
+    // On subsequent loads, show the table structure with cell-level spinners instead
+    if (
+      isInitialLoad &&
+      cloudLoading &&
+      (!cloudInfraData || cloudInfraData.length === 0)
+    ) {
       return (
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm mb-6">
           <div className="p-5">
@@ -2743,9 +2708,11 @@ export function GPUs() {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredCloudInfraData.map((cloud) => {
-                    // Check if cloud data is complete - data is available when defined
-                    const hasCompleteData =
-                      cloud.clusters !== undefined && cloud.jobs !== undefined;
+                    // Show spinner if cloud data is loading or data not yet available
+                    const isLoading =
+                      cloudLoading ||
+                      cloud.clusters === undefined ||
+                      cloud.jobs === undefined;
 
                     return (
                       <tr key={cloud.name} className="hover:bg-gray-50">
@@ -2753,32 +2720,24 @@ export function GPUs() {
                           {cloud.name}
                         </td>
                         <td className="p-3">
-                          {isInitialLoad && !hasCompleteData ? (
+                          {isLoading ? (
                             <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                               <CircularProgress size={12} />
                             </span>
-                          ) : cloud.clusters > 0 ? (
-                            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
-                              {cloud.clusters}
-                            </span>
                           ) : (
                             <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                              0
+                              {cloud.clusters}
                             </span>
                           )}
                         </td>
                         <td className="p-3">
-                          {isInitialLoad && !hasCompleteData ? (
+                          {isLoading ? (
                             <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                               <CircularProgress size={12} />
                             </span>
-                          ) : cloud.jobs > 0 ? (
-                            <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
-                              {cloud.jobs}
-                            </span>
                           ) : (
                             <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                              0
+                              {cloud.jobs}
                             </span>
                           )}
                         </td>
