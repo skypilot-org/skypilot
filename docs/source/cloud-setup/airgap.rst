@@ -1,34 +1,10 @@
 .. _airgap:
 
-Setting Up SkyPilot with Airgapping
-====================================
+Setting Up SkyPilot with Airgapped Environments
+================================================
 
 SkyPilot is compatible with any airgapped setup that allows downloading our required packages via a proxy (for example via an HTTP proxy or Amazon SSM).
 This guide details how to setup SkyPilot in these cases.
-
-.. _airgap-aws-ssm:
-
-AWS SSM
-~~~~~~~
-
-:ref:`AWS SSM <aws-ssm>` allows for secure shell access to EC2 instances without direct network access.
-This enables an airgapped setup where instances without public IP addresses can still be accessed.
-
-Given an airgapped AWS cluster with a private VPC ``private-vpc`` and a private security group ``private-sg``, a simple config can enable SkyPilot on the cluster.
-The following yaml is the SkyPilot config which can be edited at ``http://<api-server-url>/dashboard/config``. See the :ref:`yaml-spec` spec for more details. 
-
-.. code-block:: yaml
-
-    # ~/.sky/config.yaml
-    aws:
-        vpc_name: <private-vpc>
-        security_group_name: <private-sg>
-        use_internal_ips: true
-        use_ssm: true
-
-The above configuration directs SkyPilot to use SSM for connectivity to clusters, using the configured VPC and security group to create a cluster in AWS using private IPs (as a result of ``use_internal_ips: true``).
-
-See :ref:`Using AWS Systems Manager SSM <aws-ssm>` for further instructions on setting up SSM in SkyPilot, including required packages and permissions.
 
 .. _airgap-kubernetes:
 
@@ -65,3 +41,28 @@ The following yaml is the SkyPilot config which can be edited at ``http://<api-s
 Because different tools and libraries use different environment variable names we include all the possible names to ensure compatibility.
 
 This configuration directs SkyPilot pods to use the corporate proxy for outbound traffic.
+
+.. _airgap-aws-ssm:
+
+AWS SSM
+~~~~~~~
+
+:ref:`AWS SSM <aws-ssm>` allows for secure shell access to EC2 instances without direct network access.
+This enables an airgapped setup where instances without public IP addresses can still be accessed.
+
+Given an airgapped AWS cluster with a private VPC ``private-vpc`` and a private security group ``private-sg``, a simple config can enable SkyPilot on the cluster.
+The following yaml is the SkyPilot config which can be edited at ``http://<api-server-url>/dashboard/config``. See the :ref:`yaml-spec` spec for more details. 
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    aws:
+        vpc_name: <private-vpc>
+        security_group_name: <private-sg>
+        use_internal_ips: true
+        use_ssm: true
+
+The above configuration directs SkyPilot to use SSM for connectivity to clusters, using the configured VPC and security group to create a cluster in AWS using private IPs (as a result of ``use_internal_ips: true``).
+
+See :ref:`Using AWS Systems Manager SSM <aws-ssm>` for further instructions on setting up SSM in SkyPilot, including required packages and permissions.
+
