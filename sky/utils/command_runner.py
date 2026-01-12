@@ -1559,8 +1559,8 @@ exec {ssh_command} srun --unbuffered --quiet --overlap \
                                          delete=False) as f:
             f.write(script_content)
             rsh_script_path = f.name
-        os.chmod(rsh_script_path, 0o755)
         try:
+            os.chmod(rsh_script_path, 0o755)
             self._rsync(source,
                         target,
                         node_destination=encoded_info,
