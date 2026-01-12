@@ -444,6 +444,8 @@ class SlurmClient:
         logger.debug(f'Successfully got nodes for job {job_id}: {stdout}')
 
         node_info = {}
+        nodes_to_resolve: List[Tuple[str, str]] = []
+
         for line in stdout.strip().splitlines():
             line = line.strip()
             if line:
@@ -451,28 +453,41 @@ class SlurmClient:
                 if len(parts) >= 2:
                     node_name = parts[0]
                     node_addr = parts[1]
-                    # Resolve hostname to IP if node_addr is not already
-                    # an IP address.
                     try:
                         ipaddress.ip_address(node_addr)
-                        # Already an IP address
-                        node_ip = node_addr
+                        node_info[node_name] = node_addr  # Already an IP
                     except ValueError:
-                        # It's a hostname, resolve it to an IP on the login
-                        # node (the hostname is only resolvable from within
-                        # the cluster). Use ahostsv4 for IPv4-only resolution,
-                        # consistent with the executor's socket.gethostbyname()
-                        # which only returns IPv4.
-                        resolve_cmd = f'getent ahostsv4 {node_addr}'
-                        rc, stdout, stderr = self._run_slurm_cmd(resolve_cmd)
-                        subprocess_utils.handle_returncode(
-                            rc,
-                            resolve_cmd, f'Failed to resolve hostname to IP '
-                            f'for node {node_addr}.',
-                            stderr=f'{stdout}\n{stderr}')
-                        node_ip = stdout.strip().split()[0]
+                        nodes_to_resolve.append((node_name, node_addr))
 
-                    node_info[node_name] = node_ip
+        if nodes_to_resolve:
+            hostnames = [h for _, h in nodes_to_resolve]
+            resolve_cmd = f'getent ahostsv4 {" ".join(hostnames)}'
+            rc, resolve_stdout, stderr = self._run_slurm_cmd(resolve_cmd)
+            subprocess_utils.handle_returncode(
+                rc,
+                resolve_cmd,
+                f'Failed to resolve hostnames: {hostnames}',
+                stderr=f'{resolve_stdout}\n{stderr}')
+
+            # Parse output format:
+            # "10.3.0.0     STREAM node-10-3-0-0"
+            hostname_to_ip = {}
+            for line in resolve_stdout.strip().splitlines():
+                parts = line.split()
+                if len(parts) >= 3:
+                    ip = parts[0]
+                    fqdn = parts[2]
+                    # Match hostname (may be prefix of fqdn)
+                    for _, hostname in nodes_to_resolve:
+                        if fqdn.startswith(hostname):
+                            hostname_to_ip[hostname] = ip
+                            break
+
+            for node_name, hostname in nodes_to_resolve:
+                if hostname not in hostname_to_ip:
+                    raise RuntimeError(
+                        f'Failed to resolve {hostname} for node {node_name}')
+                node_info[node_name] = hostname_to_ip[hostname]
 
         nodes = list(node_info.keys())
         node_ips = [node_info[node] for node in nodes]

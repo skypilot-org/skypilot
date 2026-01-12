@@ -5,6 +5,7 @@ import unittest.mock as mock
 
 import pytest
 
+from sky import exceptions
 from sky.adaptors import slurm
 
 
@@ -323,25 +324,55 @@ class TestGetJobNodes:
             ssh_key=None,
         )
 
-        getent_alpha = ('10.20.30.40       STREAM worker-alpha.internal\n'
-                        '10.20.30.40       DGRAM  \n'
-                        '10.20.30.40       RAW')
-        getent_beta = ('10.20.30.41       STREAM worker-beta.internal\n'
-                       '10.20.30.41       DGRAM  \n'
-                       '10.20.30.41       RAW')
+        getent_batched = ('10.20.30.40       STREAM worker-alpha.internal\n'
+                          '10.20.30.40       DGRAM  \n'
+                          '10.20.30.40       RAW    \n'
+                          '10.20.30.41       STREAM worker-beta.internal\n'
+                          '10.20.30.41       DGRAM  \n'
+                          '10.20.30.41       RAW')
 
         with mock.patch.object(client, 'wait_for_job_nodes'), \
              mock.patch.object(client._runner, 'run') as mock_run:
             mock_run.side_effect = [
+                # First call: squeue output with hostnames
                 (0, 'worker-alpha worker-alpha\nworker-beta worker-beta', ''),
-                (0, getent_alpha, ''),
-                (0, getent_beta, ''),
+                # Second call: batched getent for all hostnames
+                (0, getent_batched, ''),
             ]
 
             nodes, node_ips = client.get_job_nodes('12345', wait=False)
 
             assert nodes == ['worker-alpha', 'worker-beta']
             assert node_ips == ['10.20.30.40', '10.20.30.41']
+
+            # Verify only 2 SSH calls were made (not 1 + N)
+            assert mock_run.call_count == 2
+            # Verify the batched getent command was called
+            second_call = mock_run.call_args_list[1][0][0]
+            assert 'getent ahostsv4 worker-alpha worker-beta' in second_call
+
+    def test_get_job_nodes_hostname_resolution_failure(self):
+        """Test error handling when hostname resolution fails."""
+
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        with mock.patch.object(client, 'wait_for_job_nodes'), \
+             mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [
+                # First call: squeue output with hostnames
+                (0, 'worker-alpha worker-alpha\nworker-beta worker-beta', ''),
+                # Second call: getent fails
+                (2, '', ''),
+            ]
+
+            with pytest.raises(exceptions.CommandError,
+                               match='Failed to resolve hostnames'):
+                client.get_job_nodes('12345', wait=False)
 
 
 class TestGetAllJobsGres:
