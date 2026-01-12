@@ -776,6 +776,17 @@ class SSHCommandRunner(CommandRunner):
                          port_forward: Optional[List[Tuple[int, int]]],
                          connect_timeout: Optional[int]) -> List[str]:
         ssh = ['ssh']
+        if self.enable_interactive_auth:
+            # Enable verbose logging to capture SSH debug logs to stderr.
+            # This is critical for detecting authentication failures.
+            # Without -v, stderr may be empty, typically when ControlMaster
+            # and/or ProxyJump is used.
+            #
+            # -E <log_file> could be used to capture the logs from the
+            # ControlMaster process, but it does not work with ProxyJump,
+            # as ssh does not pass the -E flag to the ssh proxy command,
+            # whereas it does pass the -v flag.
+            ssh += ['-v']
         if ssh_mode == SshMode.NON_INTERACTIVE:
             # Disable pseudo-terminal allocation. Otherwise, the output of
             # ssh will be corrupted by the user's input.
@@ -1049,18 +1060,31 @@ class SSHCommandRunner(CommandRunner):
         if not self.enable_interactive_auth:
             return result
 
+        stderr: Optional[str] = None
         if require_outputs:
-            returncode, _, _ = result
+            returncode, _, stderr = result
         else:
             returncode = result
 
         if returncode != 255:
             return result
-        # Exit code 255 indicates an SSH connection error. It does not
-        # necessarily mean an auth failure, but when ControlMaster is used,
-        # the stdout/stderr does not contain the auth failure message,
-        # which is why we don't check the output here, and just attempt
-        # the interactive auth flow.
+
+        if stderr is not None:
+            auth_failure_patterns = [
+                # https://github.com/openssh/openssh-portable/blob/master/sshconnect2.c#L542
+                # https://github.com/openssh/openssh-portable/blob/master/sshconnect2.c#L1047
+                'Permission denied',
+                # https://github.com/openssh/openssh-portable/blob/master/sshconnect2.c#L479
+                'Authentication failed',
+            ]
+            has_auth_failure = any(
+                pattern in stderr for pattern in auth_failure_patterns)
+            if not has_auth_failure:
+                # No auth failure detected; don't attempt interactive auth.
+                return result
+        # if stderr is None, err on the side of caution and retry with
+        # interactive auth.
+
         session_id = str(uuid.uuid4())
         return self._retry_with_interactive_auth(session_id, command, log_path,
                                                  require_outputs,
