@@ -327,9 +327,6 @@ class AutostopCodeGen:
                      hook_timeout: Optional[int] = None) -> str:
         if wait_for is None:
             wait_for = DEFAULT_AUTOSTOP_WAIT_FOR
-        hook_str = repr(hook) if hook is not None else 'None'
-        # Use None to inherit existing timeout, or pass explicit value
-        timeout_str = str(hook_timeout) if hook_timeout is not None else 'None'
         code = [
             '\nskylet_lib_version = getattr(constants, "SKYLET_LIB_VERSION", 1)'
             '\nif skylet_lib_version < 4: '
@@ -340,8 +337,8 @@ class AutostopCodeGen:
             f'autostop_lib.{wait_for}, {down})'
             '\nelse: '
             f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
-            f'autostop_lib.{wait_for}, {down}, hook={hook_str}, '
-            f'hook_timeout={timeout_str})',
+            f'autostop_lib.{wait_for}, {down}, hook={hook!r}, '
+            f'hook_timeout={hook_timeout})',
         ]
         return cls._build(code)
 
