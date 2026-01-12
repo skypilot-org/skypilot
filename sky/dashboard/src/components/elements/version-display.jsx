@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowUpCircle } from 'lucide-react';
+import { ArrowUpCircle, Bell } from 'lucide-react';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { apiClient } from '@/data/connectors/client';
 
@@ -120,7 +120,7 @@ export function UpgradeHint() {
     >
       <div className="inline-flex items-center justify-center transition-colors duration-150 cursor-help">
         <div className="p-2 rounded-full text-gray-600 hover:bg-gray-100 hover:text-blue-600">
-          <ArrowUpCircle className="w-5 h-5" />
+          <Bell className="w-5 h-5" />
         </div>
       </div>
     </VersionTooltip>
