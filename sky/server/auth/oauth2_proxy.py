@@ -112,8 +112,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # Already authenticated
             return await call_next(request)
 
-        if managed_job_utils.is_consolidation_mode(
-        ) and loopback.is_loopback_request(request):
+        if loopback.is_loopback_request(request):
             return await call_next(request)
 
         async with aiohttp.ClientSession() as session:

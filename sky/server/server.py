@@ -218,8 +218,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        if managed_job_utils.is_consolidation_mode(
-        ) and loopback.is_loopback_request(request):
+        if loopback.is_loopback_request(request):
             return await call_next(request)
 
         if request.url.path.startswith('/api/health'):
