@@ -1189,8 +1189,6 @@ def tail_autostop_logs(cluster_name: str,
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     returnval = backend.tail_autostop_logs(handle, follow=follow, tail=tail)
-    assert isinstance(returnval,
-                      int), (f'returnval must be an int, but got {returnval}')
     return returnval
 
 
