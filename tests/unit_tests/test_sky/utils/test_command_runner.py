@@ -6,6 +6,7 @@ import socket
 import tempfile
 import threading
 import time
+from unittest import mock
 
 import paramiko
 import pytest
@@ -301,3 +302,103 @@ class TestSSHCommandRunnerInteractiveAuth:
             handler_thread.join(timeout=2)
             if os.path.exists(log_path):
                 os.unlink(log_path)
+
+
+class TestSSHCommandRunnerAuthFailureDetection:
+    """Test SSHCommandRunner authentication failure detection logic."""
+
+    @pytest.fixture
+    def runner_with_interactive_auth(self):
+        """Create an SSHCommandRunner with interactive auth enabled."""
+        user_hash = common_utils.get_user_hash()
+        private_key_path, _, _ = auth_utils.get_ssh_key_and_lock_path(user_hash)
+        return command_runner.SSHCommandRunner(
+            node=('127.0.0.1', 22),
+            ssh_user='testuser',
+            ssh_private_key=os.path.expanduser(private_key_path),
+            ssh_control_name='test-control',
+            enable_interactive_auth=True,
+        )
+
+    @pytest.mark.parametrize(
+        'mock_return,run_kwargs,expect_retry',
+        [
+            # Auth failures that should trigger retry:
+            # - Permission denied in stderr
+            ((255, '', 'Permission denied (keyboard-interactive).'), {
+                'require_outputs': True,
+                'separate_stderr': True
+            }, True),
+            # - Authentication failed in stderr
+            ((255, '', 'Authentication failed.'), {
+                'require_outputs': True,
+                'separate_stderr': True
+            }, True),
+            # - Auth failure in stdout (when stderr merged)
+            ((255, 'Permission denied (keyboard-interactive).', ''), {
+                'require_outputs': True,
+                'separate_stderr': False
+            }, True),
+            # - No outputs with rc=255 (fallback to retry)
+            (255, {
+                'require_outputs': False
+            }, True),
+            # Cases that should NOT trigger retry:
+            # - Non-auth failure (rc=255 but no auth message)
+            ((255, '', 'Connection timed out'), {
+                'require_outputs': True,
+                'separate_stderr': True
+            }, False),
+            # - Successful command (rc=0)
+            ((0, 'hello\n', ''), {
+                'require_outputs': True,
+                'separate_stderr': True
+            }, False),
+            # - Non-255 error code
+            ((1, '', 'Command failed'), {
+                'require_outputs': True,
+                'separate_stderr': True
+            }, False),
+        ])
+    def test_interactive_auth_retry_detection(self,
+                                              runner_with_interactive_auth,
+                                              mock_return, run_kwargs,
+                                              expect_retry):
+        """Test that auth failure detection correctly triggers or skips retry."""
+        retry_return = 0 if isinstance(mock_return, int) else (0, 'success', '')
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               return_value=mock_return):
+            with mock.patch.object(runner_with_interactive_auth,
+                                   '_retry_with_interactive_auth',
+                                   return_value=retry_return) as mock_retry:
+                runner_with_interactive_auth.run('echo hello', **run_kwargs)
+
+                if expect_retry:
+                    mock_retry.assert_called_once()
+                else:
+                    mock_retry.assert_not_called()
+
+    def test_interactive_auth_disabled_does_not_retry(self):
+        """When enable_interactive_auth=False, no retry even on auth failure."""
+        user_hash = common_utils.get_user_hash()
+        private_key_path, _, _ = auth_utils.get_ssh_key_and_lock_path(user_hash)
+        runner = command_runner.SSHCommandRunner(
+            node=('127.0.0.1', 22),
+            ssh_user='testuser',
+            ssh_private_key=os.path.expanduser(private_key_path),
+            ssh_control_name='test-control',
+            enable_interactive_auth=False,
+        )
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               return_value=(255, '', 'Permission denied.')):
+            with mock.patch.object(runner,
+                                   '_retry_with_interactive_auth',
+                                   return_value=(0, '', '')) as mock_retry:
+                runner.run('echo hello',
+                           require_outputs=True,
+                           separate_stderr=True)
+                mock_retry.assert_not_called()
