@@ -1679,6 +1679,21 @@ def _format_pod_missing_reason(
         *, context: Optional[str], pod_name: str, event: Any, cluster_name: str,
         transitioned_at: int,
         first_pod: bool) -> Tuple[str, global_user_state.ClusterEventType]:
+    """Format pod missing reason.
+
+    Args:
+        context: The context of the Kubernetes cluster.
+        pod_name: The name of the pod.
+        event: The event object.
+        cluster_name: The name of the cluster.
+        transitioned_at: The timestamp of the event.
+        first_pod: Whether this is the first pod.
+                   Used in cases where some logic only needs to be run
+                   for one pod in the cluster.
+
+    Returns:
+        A tuple of the formatted event string and the event type.
+    """
     del first_pod, context, cluster_name, transitioned_at  #unused
     event_str = (f'[kubernetes pod {pod_name}] '
                  f'{event.reason} {event.message}')
