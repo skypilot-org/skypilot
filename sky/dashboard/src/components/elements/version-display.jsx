@@ -1,9 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, createContext, useContext } from 'react';
 import { ArrowUpCircle, Bell } from 'lucide-react';
 import { NonCapitalizedTooltip } from '@/components/utils';
 import { apiClient } from '@/data/connectors/client';
 
-export function useVersionInfo() {
+const VersionContext = createContext({
+  version: null,
+  latestVersion: null,
+  commit: null,
+  plugins: [],
+});
+
+export function VersionProvider({ children }) {
   const [version, setVersion] = useState(null);
   const [latestVersion, setLatestVersion] = useState(null);
   const [commit, setCommit] = useState(null);
@@ -51,7 +58,15 @@ export function useVersionInfo() {
     getVersionAndPlugins();
   }, []);
 
-  return { version, latestVersion, commit, plugins };
+  return (
+    <VersionContext.Provider value={{ version, latestVersion, commit, plugins }}>
+      {children}
+    </VersionContext.Provider>
+  );
+}
+
+export function useVersionInfo() {
+  return useContext(VersionContext);
 }
 
 function VersionTooltip({
@@ -61,6 +76,7 @@ function VersionTooltip({
   commit,
   plugins,
   showUpdateInfo = true,
+  showCommit = true,
 }) {
   // Create tooltip content
   const tooltipContent = (
@@ -72,7 +88,7 @@ function VersionTooltip({
           <div>New version available: {latestVersion}</div>
         </div>
       )}
-      {commit && (
+      {showCommit && commit && (
         <div>
           {plugins.length > 0 ? 'Core commit' : 'Commit'}: {commit}
         </div>
@@ -81,7 +97,7 @@ function VersionTooltip({
         const pluginName = plugin.name || 'Unknown Plugin';
         const parts = [];
         if (plugin.version) parts.push(plugin.version);
-        if (plugin.commit) parts.push(plugin.commit);
+        if (showCommit && plugin.commit) parts.push(plugin.commit);
         return parts.length > 0 ? (
           <div key={index}>
             {pluginName}: {parts.join(' - ')}
@@ -117,6 +133,7 @@ export function UpgradeHint() {
       latestVersion={latestVersion}
       commit={commit}
       plugins={plugins}
+      showCommit={false}
     >
       <div className="inline-flex items-center justify-center transition-colors duration-150 cursor-help">
         <div className="p-2 rounded-full text-gray-600 hover:bg-gray-100 hover:text-blue-600">
