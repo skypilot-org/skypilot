@@ -154,9 +154,11 @@ def get_autostop_config() -> AutostopConfig:
     if config_str is None:
         return AutostopConfig(-1, -1, None, DEFAULT_AUTOSTOP_WAIT_FOR)
     config = pickle.loads(config_str)
-    # Ensure backward compatibility: set hook to None if not present
+    # Ensure backward compatibility: set hook and hook_timeout if not present
     if not hasattr(config, 'hook'):
         config.hook = None
+    if not hasattr(config, 'hook_timeout'):
+        config.hook_timeout = constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS
     return config
 
 
