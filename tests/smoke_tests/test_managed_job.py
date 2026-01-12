@@ -1989,16 +1989,18 @@ def test_managed_jobs_system_logs(generic_cloud: str):
             's=$(sky jobs logs --system) && echo "$s" && test -n "$s"',
 
             # Get the UUID and view its logs
-            'UUID=$(sky jobs logs --system | head -n1) && '
+            's=$(sky jobs logs --system) && '
+            'UUID=$(echo "$s" | tail -n +2 | head -n1) && '
             'echo "System UUID: $UUID" && '
             'test -n "$UUID" && '
             's=$(sky jobs logs --system $UUID --no-follow) && '
             'echo "$s" && '
-            # Controller logs should contain job status information
-            'echo "$s" | grep -E "Job status:|controller"',
+            # Controller logs should contain controller information
+            'echo "$s" | grep -E "controller"',
 
             # Test sync down system logs
-            'UUID=$(sky jobs logs --system | head -n1) && '
+            's=$(sky jobs logs --system) && '
+            'UUID=$(echo "$s" | tail -n +2 | head -n1) && '
             's=$(SKYPILOT_DEBUG=0 sky jobs logs --system $UUID --sync-down) && '
             'echo "$s" && '
             # Parse the log path and verify it exists
