@@ -1090,6 +1090,8 @@ class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
         """
         super().__init__(service_name, spec)
         # Use default threshold if not specified
+        assert isinstance(spec.queue_length_threshold, int), \
+            'queue_length_threshold must be an integer.'
         self.queue_length_threshold: int = spec.queue_length_threshold
         self._service_name: str = service_name
         logger.info(f'QueueLengthAutoscaler for pool "{service_name}": '
@@ -1111,25 +1113,28 @@ class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
                     f'max_replicas={self.max_replicas}')
 
         # Determine target based on queue length vs threshold
-        if queue_length > self.queue_length_threshold:
+        if queue_length == 0:
+            # There are no pending jobs, we should quickly scale down to 0.
+            target_num_replicas = 0
+            decision = 'SCALE_DOWN_TO_ZERO'
+        elif queue_length > self.queue_length_threshold:
             # Scale up by 1
             target_num_replicas = current_num_replicas + 1
             decision = 'SCALE_UP'
-            logger.info(f'[QueueLengthAutoscaler] Decision: {decision} '
-                        f'{current_num_replicas} -> {target_num_replicas}')
         elif queue_length < self.queue_length_threshold:
             # Scale down by 1
             target_num_replicas = current_num_replicas - 1
             decision = 'SCALE_DOWN'
-            logger.info(f'[QueueLengthAutoscaler] Decision: {decision} '
-                        f'{current_num_replicas} -> {target_num_replicas}')
         else:
             # Queue length equals threshold, keep current
             target_num_replicas = current_num_replicas
             decision = 'NO_CHANGE'
-            logger.info(f'[QueueLengthAutoscaler] Decision: {decision} '
-                        f'staying at {target_num_replicas}')
+        logger.info(f'[QueueLengthAutoscaler] Decision: {decision} '
+                    f'{current_num_replicas} -> {target_num_replicas}')
 
+        # Special case: if target_num_replicas is 0 and queue_length is greater
+        # than 0, we should not scale down to 0. This is to prevent the service
+        # from scaling to zero when there are jobs in the queue.
         if target_num_replicas == 0 and queue_length > 0:
             target_num_replicas = 1
             logger.info('Preventing scale to zero since there are jobs in the'
@@ -1147,10 +1152,9 @@ class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
                        update_mode: serve_utils.UpdateMode) -> None:
         super().update_version(version, spec, update_mode)
         # Update threshold, using default if not specified
-        self.queue_length_threshold = (
-            spec.queue_length_threshold
-            if spec.queue_length_threshold is not None else
-            constants.AUTOSCALER_DEFAULT_QUEUE_LENGTH_THRESHOLD)
+        self.queue_length_threshold = (spec.queue_length_threshold if
+                                       spec.queue_length_threshold is not None
+                                       else self.queue_length_threshold)
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:

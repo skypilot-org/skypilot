@@ -42,7 +42,6 @@ class SkyServiceSpec:
         load_balancing_policy: Optional[str] = None,
         pool: Optional[bool] = None,
         queue_length_threshold: Optional[int] = None,
-        original_workers: Optional[int] = None,
     ) -> None:
         if pool:
             # For pools, max_replicas should never be specified directly by the
@@ -109,7 +108,8 @@ class SkyServiceSpec:
         else:
             # Allow different min/max replicas for pools with queue-length
             # autoscaling
-            if max_replicas is not None and max_replicas != min_replicas:
+            if (not pool and max_replicas is not None and
+                    max_replicas != min_replicas):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Detected different min_replicas and max_replicas '
@@ -151,7 +151,6 @@ class SkyServiceSpec:
         self._load_balancing_policy: Optional[str] = load_balancing_policy
         self._pool: Optional[bool] = pool
         self._queue_length_threshold: Optional[int] = queue_length_threshold
-        self.original_workers: Optional[int] = original_workers
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -251,9 +250,14 @@ class SkyServiceSpec:
             pool_upscale_delay = pool_config.get('upscale_delay_seconds', None)
             pool_downscale_delay = pool_config.get('downscale_delay_seconds',
                                                    None)
-            # Get workers from pool config if not specified at top level
+            # Set the simplified policy section to the min_workers if set,
+            # otherwise use the workers config. If we don't do this here then
+            # we will get set to the default min_replicas value of 1.
             if simplified_policy_section is None:
-                simplified_policy_section = pool_config.get('workers', None)
+                if pool_min_workers is not None:
+                    simplified_policy_section = pool_min_workers
+                else:
+                    simplified_policy_section = workers_config
             # Validate: if queue_length_threshold is set, max_workers must also
             # be set
             if queue_length_threshold is not None and pool_max_workers is None:
@@ -275,30 +279,12 @@ class SkyServiceSpec:
                             f'min_workers ({pool_min_workers}) must be <= '
                             f'max_workers ({pool_max_workers}) for pool '
                             'autoscaling.')
-
         if policy_section is None or simplified_policy_section is not None:
             if simplified_policy_section is not None:
                 min_replicas = simplified_policy_section
-                # Store original workers value for serialization
-                original_workers = simplified_policy_section
             else:
                 min_replicas = constants.DEFAULT_MIN_REPLICAS
-                original_workers = constants.DEFAULT_MIN_REPLICAS
-            # For pools with autoscaling (max_workers specified), use
-            # min_workers if set, otherwise use workers
-            # (simplified_policy_section) as min_replicas
-            if (pool_config is not None and pool_max_workers is not None and
-                    pool_min_workers is not None):
-                if pool_min_workers is not None:
-                    min_replicas = pool_min_workers
-                # If min_workers is not set, use workers
-                # (simplified_policy_section) as min_replicas
             service_config['min_replicas'] = min_replicas
-            # Store original workers value for pool serialization (only if
-            # different from min_replicas)
-            if (pool_config is not None and pool_max_workers is not None and
-                    pool_min_workers is not None):
-                service_config['original_workers'] = original_workers
             # For pools with autoscaling (max_workers specified), use
             # max_workers from pool config
             if pool_config is not None and pool_max_workers is not None:
@@ -422,21 +408,14 @@ class SkyServiceSpec:
         if self.pool:
             # For pool, serialize workers and autoscaling config
             pool_dict: Dict[str, Any] = {}
-            # Use original_workers if available (when min_workers was set),
-            # otherwise use min_replicas
-            workers_value = (self.original_workers if self.original_workers
-                             is not None else self.min_replicas)
-            pool_dict['workers'] = workers_value
+            pool_dict['workers'] = self.min_replicas
             if self.queue_length_threshold is not None:
                 pool_dict[
                     'queue_length_threshold'] = self.queue_length_threshold
                 if self.max_replicas is not None:
                     pool_dict['max_workers'] = self.max_replicas
-                    # Serialize min_workers if it's different from workers
-                    # (i.e., if original_workers was stored)
-                    if (self.original_workers is not None and
-                            self.original_workers != self.min_replicas):
-                        pool_dict['min_workers'] = self.min_replicas
+                if self.min_replicas is not None:
+                    pool_dict['min_workers'] = self.min_replicas
                 if self.upscale_delay_seconds is not None:
                     pool_dict[
                         'upscale_delay_seconds'] = self.upscale_delay_seconds
