@@ -1168,28 +1168,30 @@ class TestVolumeCore:
             assert vol['usedby_pods'] == []
             assert vol['usedby_clusters'] == []
 
-    def test_volume_refresh_with_config_refresh_multiple_volumes(self,
-                                                                  monkeypatch):
+    def test_volume_refresh_with_config_refresh_multiple_volumes(
+            self, monkeypatch):
         """Test volume_refresh with multiple volumes, some needing refresh."""
         # Mock volume data
-        mock_handle1 = mock.MagicMock(name='test-volume-1',
-                                     cloud='k8s',
-                                     type='k8s-pvc',
-                                     region=None,  # Needs refresh
-                                     zone='us-east-1a',
-                                     size='100Gi',
-                                     config={},
-                                     name_on_cloud='test-volume-1-abc123',
-                                     spec=models.VolumeConfig)
-        mock_handle2 = mock.MagicMock(name='test-volume-2',
-                                     cloud='k8s',
-                                     type='k8s-pvc',
-                                     region='us-east-1',  # Doesn't need refresh
-                                     zone='us-east-1a',
-                                     size='200Gi',
-                                     config={},
-                                     name_on_cloud='test-volume-2-def456',
-                                     spec=models.VolumeConfig)
+        mock_handle1 = mock.MagicMock(
+            name='test-volume-1',
+            cloud='k8s',
+            type='k8s-pvc',
+            region=None,  # Needs refresh
+            zone='us-east-1a',
+            size='100Gi',
+            config={},
+            name_on_cloud='test-volume-1-abc123',
+            spec=models.VolumeConfig)
+        mock_handle2 = mock.MagicMock(
+            name='test-volume-2',
+            cloud='k8s',
+            type='k8s-pvc',
+            region='us-east-1',  # Doesn't need refresh
+            zone='us-east-1a',
+            size='200Gi',
+            config={},
+            name_on_cloud='test-volume-2-def456',
+            spec=models.VolumeConfig)
         mock_volumes = [{
             'name': 'test-volume-1',
             'launched_at': 1234567890,
@@ -1254,15 +1256,16 @@ class TestVolumeCore:
                             mock_update_config)
 
         # Mock provision.refresh_volume_config
-        refreshed_handle1 = mock.MagicMock(name='test-volume-1',
-                                          cloud='k8s',
-                                          type='k8s-pvc',
-                                          region='in-cluster',  # Updated
-                                          zone='us-east-1a',
-                                          size='100Gi',
-                                          config={},
-                                          name_on_cloud='test-volume-1-abc123',
-                                          spec=models.VolumeConfig)
+        refreshed_handle1 = mock.MagicMock(
+            name='test-volume-1',
+            cloud='k8s',
+            type='k8s-pvc',
+            region='in-cluster',  # Updated
+            zone='us-east-1a',
+            size='100Gi',
+            config={},
+            name_on_cloud='test-volume-1-abc123',
+            spec=models.VolumeConfig)
 
         def refresh_side_effect(cloud, handle):
             if handle == mock_handle1:

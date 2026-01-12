@@ -177,11 +177,10 @@ def refresh_volume_config(
         need_refresh: Whether need to refresh the volume config.
         volume_config: The volume config to be refreshed.
     """
-    need_refresh = False
     if config.region is None:
-        need_refresh = True
         config.region = kubernetes.in_cluster_context_name()
-    return need_refresh, config
+        return True, config
+    return False, config
 
 
 def get_all_volumes_usedby(
