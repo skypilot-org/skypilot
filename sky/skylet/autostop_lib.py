@@ -335,7 +335,7 @@ class AutostopCodeGen:
             '\nif skylet_lib_version < 4: '
             f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
             f'{down})'
-            '\nelif skylet_lib_version == 4: '
+            '\nelif skylet_lib_version < 5: '
             f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
             f'autostop_lib.{wait_for}, {down})'
             '\nelse: '
