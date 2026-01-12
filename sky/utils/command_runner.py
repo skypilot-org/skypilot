@@ -10,6 +10,7 @@ import shlex
 import signal
 import socket
 import sys
+import tempfile
 import termios
 import threading
 import time
@@ -1543,28 +1544,30 @@ class SlurmCommandRunner(SSHCommandRunner):
                                   port_forward=None,
                                   connect_timeout=None))
 
-        # rsh command: parse job_id+node_list from $1, ssh to login node,
-        # run srun with rsync command.
-        rsh_option = (
-            f'bash --norc --noprofile -c \''
-            f'job_id=$(echo "$1" | cut -d+ -f1); '
-            f'node_list=$(echo "$1" | cut -d+ -f2); '
-            f'shift; '  # Shift past the encoded job_id+node_list
-            f'exec {ssh_command} '  # SSH to login node to run srun
-            f'srun --unbuffered --quiet --overlap '
-            f'--jobid="$job_id" --nodelist="$node_list" --nodes=1 --ntasks=1 '
-            f'"$@"'
-            f'\' --')
+        # The script parses job_id+node_list from $1 (node_destination)
+        # shifts past $1, and then SSHs to login node, and runs srun with
+        # the remaining arguments.
+        script_content = f"""#!/bin/bash
+job_id=$(echo "$1" | cut -d+ -f1)
+node_list=$(echo "$1" | cut -d+ -f2)
+shift
+exec {ssh_command} srun --unbuffered --quiet --overlap \
+    --jobid="$job_id" --nodelist="$node_list" --nodes=1 --ntasks=1 "$@"
+"""
         encoded_info = f'{self.job_id}+{self.slurm_node}'
-        self._rsync(source,
-                    target,
-                    node_destination=encoded_info,
-                    up=up,
-                    rsh_option=rsh_option,
-                    log_path=log_path,
-                    stream_logs=stream_logs,
-                    max_retry=max_retry,
-                    get_remote_home_dir=lambda: self.sky_dir)
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh') as f:
+            f.write(script_content)
+            f.flush()
+            os.chmod(f.name, 0o755)
+            self._rsync(source,
+                        target,
+                        node_destination=encoded_info,
+                        up=up,
+                        rsh_option=f.name,
+                        log_path=log_path,
+                        stream_logs=stream_logs,
+                        max_retry=max_retry,
+                        get_remote_home_dir=lambda: self.sky_dir)
 
     @timeline.event
     @context_utils.cancellation_guard
