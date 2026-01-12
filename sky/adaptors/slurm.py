@@ -3,13 +3,11 @@
 import ipaddress
 import logging
 import re
-import socket
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
 from sky.adaptors import common
 from sky.utils import command_runner
-from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
@@ -460,14 +458,19 @@ class SlurmClient:
                         # Already an IP address
                         node_ip = node_addr
                     except ValueError:
-                        # It's a hostname, resolve it to an IP
-                        try:
-                            node_ip = socket.gethostbyname(node_addr)
-                        except socket.gaierror as e:
-                            raise RuntimeError(
-                                f'Failed to resolve hostname {node_addr} to IP '
-                                f'for node {node_name}: '
-                                f'{common_utils.format_exception(e)}') from e
+                        # It's a hostname, resolve it to an IP on the login
+                        # node (the hostname is only resolvable from within
+                        # the cluster). Use ahostsv4 for IPv4-only resolution,
+                        # consistent with the executor's socket.gethostbyname()
+                        # which only returns IPv4.
+                        resolve_cmd = f'getent ahostsv4 {node_addr}'
+                        rc, stdout, stderr = self._run_slurm_cmd(resolve_cmd)
+                        subprocess_utils.handle_returncode(
+                            rc,
+                            resolve_cmd, f'Failed to resolve hostname to IP '
+                            f'for node {node_addr}.',
+                            stderr=f'{stdout}\n{stderr}')
+                        node_ip = stdout.strip().split()[0]
 
                     node_info[node_name] = node_ip
 

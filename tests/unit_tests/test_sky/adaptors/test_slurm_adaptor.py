@@ -269,6 +269,7 @@ class TestGetJobNodes:
 
             # Verify wait_for_job_nodes was called with the custom timeout
             mock_wait.assert_called_once_with(job_id, timeout=custom_timeout)
+            assert mock_run.call_count == 1
 
     def test_get_job_nodes_uses_default_timeout_when_not_provided(self):
         """Test that get_job_nodes uses default timeout when not provided."""
@@ -290,6 +291,7 @@ class TestGetJobNodes:
             # Verify wait_for_job_nodes was called with None (which becomes default)
             mock_wait.assert_called_once_with(
                 job_id, timeout=slurm._SLURM_DEFAULT_PROVISION_TIMEOUT)
+            assert mock_run.call_count == 1
 
     def test_get_job_nodes_skips_wait_when_wait_false(self):
         """Test that get_job_nodes skips waiting when wait=False."""
@@ -310,6 +312,36 @@ class TestGetJobNodes:
 
             # Verify wait_for_job_nodes was not called
             mock_wait.assert_not_called()
+            assert mock_run.call_count == 1
+
+    def test_get_job_nodes_resolves_hostnames_via_login_node(self):
+        """Test hostnames are resolved via getent ahostsv4 on the login node."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        getent_alpha = ('10.20.30.40       STREAM worker-alpha.internal\n'
+                        '10.20.30.40       DGRAM  \n'
+                        '10.20.30.40       RAW')
+        getent_beta = ('10.20.30.41       STREAM worker-beta.internal\n'
+                       '10.20.30.41       DGRAM  \n'
+                       '10.20.30.41       RAW')
+
+        with mock.patch.object(client, 'wait_for_job_nodes'), \
+             mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [
+                (0, 'worker-alpha worker-alpha\nworker-beta worker-beta', ''),
+                (0, getent_alpha, ''),
+                (0, getent_beta, ''),
+            ]
+
+            nodes, node_ips = client.get_job_nodes('12345', wait=False)
+
+            assert nodes == ['worker-alpha', 'worker-beta']
+            assert node_ips == ['10.20.30.40', '10.20.30.41']
 
 
 class TestGetAllJobsGres:
