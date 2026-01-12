@@ -22,9 +22,11 @@ Design Goals:
     - Platform abstraction: K8s uses native DNS, SSH clouds use /etc/hosts
 """
 import asyncio
+import base64
 import enum
 import json
 import textwrap
+import traceback
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from sky import clouds as sky_clouds
@@ -294,9 +296,8 @@ async def _write_dns_mappings_file_on_node(
     # Use $HOME instead of ~ to ensure proper expansion in kubectl exec
     file_path = host_updater.JOBGROUP_DNS_MAPPINGS_FILE.replace('~', '$HOME')
 
-    # Write the JSON to the file using echo with base64 to avoid shell escaping issues
-    # This is more robust than heredoc when running via kubectl exec
-    import base64
+    # Write the JSON to the file using echo with base64 to avoid shell
+    # escaping issues. This is more robust than heredoc via kubectl exec.
     encoded_json = base64.b64encode(mappings_json.encode()).decode()
     write_cmd = (f'mkdir -p $(dirname {file_path}) && '
                  f'echo {encoded_json} | base64 -d > {file_path}')
@@ -318,7 +319,6 @@ async def _write_dns_mappings_file_on_node(
         return True
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Exception while writing DNS mappings file: {e}')
-        import traceback
         logger.error(traceback.format_exc())
         return False
 
