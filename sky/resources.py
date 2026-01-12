@@ -579,10 +579,6 @@ class Resources:
         For example, memory='16' means each instance must have exactly 16GB
         memory; memory='16+' means each instance must have at least 16GB
         memory.
-
-        (Developer note: The memory field is only used to select the instance
-        type at launch time. Thus, Resources in the backend's ResourceHandle
-        will always have the memory field set to None.)
         """
         if self._memory is not None:
             return self._memory
