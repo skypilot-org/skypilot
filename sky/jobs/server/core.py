@@ -524,6 +524,9 @@ def launch(
                     # intermediate bucket and newly created bucket should be in
                     # workspace A.
                     if consolidation_mode_job_id is None:
+                        # Job controller is not placed in kueue, as the
+                        # controller pod is considered a "system" pod
+                        # and is not subject to queue limits or preemption.
                         with skypilot_config.remove_queue_name_from_config():
                             return execution.launch(
                                 task=controller_task,

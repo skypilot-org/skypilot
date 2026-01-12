@@ -285,7 +285,11 @@ def up(
             with common.with_server_user(
             ), skypilot_config.local_active_workspace_ctx(
                     constants.SKYPILOT_DEFAULT_WORKSPACE
-            ), skypilot_config.remove_queue_name_from_config():
+            ), (
+                    # Serve controller is not placed in kueue, as the controller
+                    # pod is considered a "system" pod and is not subject to
+                    # queue limits or preemption.
+                    skypilot_config.remove_queue_name_from_config()):
                 controller_job_id, controller_handle = execution.launch(
                     task=controller_task,
                     cluster_name=controller_name,
