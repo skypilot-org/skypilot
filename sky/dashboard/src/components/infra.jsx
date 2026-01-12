@@ -2066,28 +2066,7 @@ export function GPUs() {
             return [...filtered, ...gpuData.perNodeGPUs];
           });
 
-          // Update allGPUs - recompute aggregated totals across all contexts
-          setPerContextGPUs((currentPerContextGPUs) => {
-            // Recompute allGPUs from the updated perContextGPUs
-            const gpuSummary = {};
-            currentPerContextGPUs.forEach((gpu) => {
-              if (gpu.gpu_name in gpuSummary) {
-                gpuSummary[gpu.gpu_name].gpu_total += gpu.gpu_total || 0;
-                gpuSummary[gpu.gpu_name].gpu_free += gpu.gpu_free || 0;
-                gpuSummary[gpu.gpu_name].gpu_not_ready +=
-                  gpu.gpu_not_ready || 0;
-              } else {
-                gpuSummary[gpu.gpu_name] = {
-                  gpu_name: gpu.gpu_name,
-                  gpu_total: gpu.gpu_total || 0,
-                  gpu_free: gpu.gpu_free || 0,
-                  gpu_not_ready: gpu.gpu_not_ready || 0,
-                };
-              }
-            });
-            setAllGPUs(Object.values(gpuSummary));
-            return currentPerContextGPUs; // Return unchanged for this setter
-          });
+          // Note: allGPUs is computed via useEffect when perContextGPUs changes
 
           // Update context errors if there was an error
           if (gpuData.error) {
@@ -2308,6 +2287,26 @@ export function GPUs() {
   useEffect(() => {
     refreshDataRef.current = fetchData;
   }, [fetchData]);
+
+  // Compute allGPUs (aggregated totals) whenever perContextGPUs changes
+  useEffect(() => {
+    const gpuSummary = {};
+    perContextGPUs.forEach((gpu) => {
+      if (gpu.gpu_name in gpuSummary) {
+        gpuSummary[gpu.gpu_name].gpu_total += gpu.gpu_total || 0;
+        gpuSummary[gpu.gpu_name].gpu_free += gpu.gpu_free || 0;
+        gpuSummary[gpu.gpu_name].gpu_not_ready += gpu.gpu_not_ready || 0;
+      } else {
+        gpuSummary[gpu.gpu_name] = {
+          gpu_name: gpu.gpu_name,
+          gpu_total: gpu.gpu_total || 0,
+          gpu_free: gpu.gpu_free || 0,
+          gpu_not_ready: gpu.gpu_not_ready || 0,
+        };
+      }
+    });
+    setAllGPUs(Object.values(gpuSummary));
+  }, [perContextGPUs]);
 
   // Effect for initial load.
   useEffect(() => {
