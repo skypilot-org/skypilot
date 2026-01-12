@@ -289,8 +289,14 @@ export function InfrastructureSection({
                       // Check if GPU/Node data is available for THIS specific context
                       // For Kubernetes: use progressive loading (check loadedContexts)
                       // For Slurm/SSH: data is fetched all at once, so use isLoading
-                      const hasGpuData = (isSlurm || isSSH) ? !isLoading : loadedContexts.has(context);
-                      const hasNodeData = (isSlurm || isSSH) ? !isLoading : loadedContexts.has(context);
+                      const hasGpuData =
+                        isSlurm || isSSH
+                          ? !isLoading
+                          : loadedContexts.has(context);
+                      const hasNodeData =
+                        isSlurm || isSSH
+                          ? !isLoading
+                          : loadedContexts.has(context);
 
                       // Format GPU types based on context type
                       // Always calculate from available data (show stale values during refresh)
@@ -1987,7 +1993,10 @@ export function GPUs() {
     [isInitialLoad]
   );
 
-  const fetchKubernetesData = async (forceRefresh, showLoadingIndicators = true) => {
+  const fetchKubernetesData = async (
+    forceRefresh,
+    showLoadingIndicators = true
+  ) => {
     try {
       // Phase 1: Get context names quickly (without GPU data)
       // This allows UI to show contexts immediately while GPU data loads
@@ -2114,7 +2123,10 @@ export function GPUs() {
 
           // Decrement pending count and check if ALL fetches are complete
           pendingContextCountRef.current--;
-          if (pendingContextCountRef.current === 0 && mainFetchDoneRef.current) {
+          if (
+            pendingContextCountRef.current === 0 &&
+            mainFetchDoneRef.current
+          ) {
             setIsFetching(false); // Everything done, stop spinner
           }
         });
@@ -2733,8 +2745,7 @@ export function GPUs() {
                   {filteredCloudInfraData.map((cloud) => {
                     // Check if cloud data is complete - data is available when defined
                     const hasCompleteData =
-                      cloud.clusters !== undefined &&
-                      cloud.jobs !== undefined;
+                      cloud.clusters !== undefined && cloud.jobs !== undefined;
 
                     return (
                       <tr key={cloud.name} className="hover:bg-gray-50">

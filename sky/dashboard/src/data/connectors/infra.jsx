@@ -488,7 +488,10 @@ export async function getContextGPUData(context) {
       error?.message ||
       (typeof error === 'string' && error) ||
       'Context may be unavailable or timed out';
-    console.warn(`Failed to get GPU data for context ${context}:`, errorMessage);
+    console.warn(
+      `Failed to get GPU data for context ${context}:`,
+      errorMessage
+    );
     return {
       context,
       perContextGPUs: [],
