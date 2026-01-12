@@ -3044,7 +3044,8 @@ def check_cluster_available(
                 f'cluster {cluster_name!r}. It is only supported by backend: '
                 f'{backends.CloudVmRayBackend.NAME}.'
                 f'{reset}')
-    if cluster_status != status_lib.ClusterStatus.UP:
+    if cluster_status not in (status_lib.ClusterStatus.UP,
+                              status_lib.ClusterStatus.AUTOSTOPPING):
         with ux_utils.print_exception_no_traceback():
             hint_for_init = ''
             if cluster_status == status_lib.ClusterStatus.INIT:
@@ -3056,7 +3057,8 @@ def check_cluster_available(
                 f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for '
                 f'cluster {cluster_name!r} (status: {cluster_status.value}). '
                 'It is only allowed for '
-                f'{status_lib.ClusterStatus.UP.value} clusters.'
+                f'{status_lib.ClusterStatus.UP.value} and '
+                f'{status_lib.ClusterStatus.AUTOSTOPPING.value} clusters.'
                 f'{hint_for_init}'
                 f'{reset}',
                 cluster_status=cluster_status,
