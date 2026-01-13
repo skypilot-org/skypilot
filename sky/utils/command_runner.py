@@ -262,7 +262,8 @@ def ssh_options_list(
     # is running and the ControlMaster keeps the session, which results in
     # 'ControlPersist' number of seconds delay per ssh commands ran.
     if (ssh_control_name is not None and docker_ssh_proxy_command is None and
-            ssh_proxy_command is None and not disable_control_master):
+            ssh_proxy_command is None and ssh_proxy_jump is None and
+            not disable_control_master):
         control_path = f'{_ssh_control_path(ssh_control_name)}/%C'
         if escape_percent_expand:
             control_path = control_path.replace('%', '%%')
