@@ -285,66 +285,54 @@ def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]],
     mapping_pairs = ' '.join(
         [f'{dns}:{hostname}' for dns, hostname in dns_mappings])
 
-    # Sanitize job group name for use in process identifier
-    safe_job_group_name = job_group_name.replace(' ', '_')
-    process_id = f'skypilot-jobgroup-dns-updater-{safe_job_group_name}'
-    log_file = f'/tmp/{process_id}.log'
+    # Don't use textwrap.dedent() - it causes indentation issues with shebang
+    script = f"""#!/bin/bash
+# Background K8s DNS to IP updater for /etc/hosts
+MAPPINGS="{mapping_pairs}"
+MARKER="# SkyPilot JobGroup K8s entries"
 
-    script = textwrap.dedent(f"""
-        #!/bin/bash
-        # Kill any existing DNS updater for this job group (idempotency)
-        pkill -f "{process_id}" 2>/dev/null || true
-        sleep 0.5
+echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Starting DNS updater for {job_group_name}"
+echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Monitoring mappings: $MAPPINGS"
 
-        # Background K8s DNS to IP updater for /etc/hosts
-        # Process identifier: {process_id}
-        MAPPINGS="{mapping_pairs}"
-        MARKER="# SkyPilot JobGroup K8s entries"
-
-        echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Starting DNS updater for {job_group_name}"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Monitoring mappings: $MAPPINGS"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Log file: {log_file}"
-
-        while true; do
-          # Build new entries
-          new_entries=""
-          needs_update=0
-          for mapping in $MAPPINGS; do
-            k8s_dns="${{mapping%%:*}}"
-            simple_name="${{mapping##*:}}"
-            # Resolve K8s DNS to IP
-            ip=$(getent hosts "$k8s_dns" 2>/dev/null | awk '{{print $1}}')
-            if [ -n "$ip" ]; then
-              new_entries="${{new_entries}}$ip $simple_name  $MARKER
+while true; do
+  # Build new entries
+  new_entries=""
+  needs_update=0
+  for mapping in $MAPPINGS; do
+    k8s_dns="${{mapping%%:*}}"
+    simple_name="${{mapping##*:}}"
+    # Resolve K8s DNS to IP
+    ip=$(getent hosts "$k8s_dns" 2>/dev/null | awk '{{print $1}}')
+    if [ -n "$ip" ]; then
+      new_entries="${{new_entries}}$ip $simple_name  $MARKER
 "
-              # Check if current IP differs from /etc/hosts
-              current_ip=$(getent hosts "$simple_name" 2>/dev/null | awk '{{print $1}}')
-              if [ "$ip" != "$current_ip" ]; then
-                needs_update=1
-                echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] IP changed for $simple_name: $current_ip -> $ip"
-              fi
-            else
-              echo "$(date '+%Y-%m-%d %H:%M:%S') [DEBUG] Waiting to resolve $k8s_dns"
-            fi
-          done
+      # Check if current IP differs from /etc/hosts
+      current_ip=$(getent hosts "$simple_name" 2>/dev/null | awk '{{print $1}}')
+      if [ "$ip" != "$current_ip" ]; then
+        needs_update=1
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] IP changed for $simple_name: $current_ip -> $ip"
+      fi
+    else
+      echo "$(date '+%Y-%m-%d %H:%M:%S') [DEBUG] Waiting to resolve $k8s_dns"
+    fi
+  done
 
-          # Only update /etc/hosts if IPs have changed
-          if [ -n "$new_entries" ] && [ $needs_update -eq 1 ]; then
-            echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Updating /etc/hosts"
-            # In K8s, /etc/hosts is mounted by kubelet and cannot be replaced (mv).
-            # Instead, we filter and rewrite in-place using tee.
-            # 1. Read existing content without our markers
-            existing=$(sudo grep -v "$MARKER" /etc/hosts 2>/dev/null || true)
-            # 2. Write back existing + new entries using tee
-            if echo -e "$existing\\n$new_entries" | sudo tee /etc/hosts > /dev/null; then
-              echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Successfully updated /etc/hosts"
-            else
-              echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Failed to update /etc/hosts"
-            fi
-          fi
-          sleep 5
-        done
-    """)
+  # Only update /etc/hosts if IPs have changed
+  if [ -n "$new_entries" ] && [ $needs_update -eq 1 ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Updating /etc/hosts"
+    # In K8s, /etc/hosts is mounted by kubelet and cannot be replaced (mv).
+    # Instead, we filter and rewrite in-place using tee.
+    # 1. Read existing content without our markers
+    existing=$(sudo grep -v "$MARKER" /etc/hosts 2>/dev/null || true)
+    # 2. Write back existing + new entries using tee
+    if echo -e "$existing\\n$new_entries" | sudo tee /etc/hosts > /dev/null; then
+      echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Successfully updated /etc/hosts"
+    else
+      echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Failed to update /etc/hosts"
+    fi
+  fi
+  sleep 5
+done"""
     return script.strip()
 
 
@@ -402,7 +390,10 @@ async def _start_k8s_dns_updater_on_node(
         finally:
             os.remove(local_script_path)
 
-        # Make executable and run in background (same as pre-skylet version)
+        # Make executable and run in background
+        # Use a subshell with exec to fully detach from kubectl exec:
+        # - The outer shell exits immediately after spawning the subshell
+        # - The subshell runs the script with all FDs redirected
         run_cmd = (f'chmod +x {script_path} && '
                    f'(nohup {script_path} < /dev/null > {log_path} 2>&1 &) && '
                    f'sleep 0.1')
@@ -412,16 +403,16 @@ async def _start_k8s_dns_updater_on_node(
             lambda: runner.run(run_cmd, stream_logs=False, require_outputs=True)
         )
 
-        # Exit code 143 (SIGTERM) is expected from kubectl exec closing connection
-        # The background process continues running despite this
+        # Exit code 143 (SIGTERM) is expected from kubectl exec closing
+        # connection. The background process continues running despite this.
         if returncode != 0 and returncode != 143:
-            logger.error(
-                f'Failed to start DNS updater: returncode={returncode}, stderr={stderr}'
-            )
+            logger.error(f'Failed to start DNS updater: '
+                         f'returncode={returncode}, stderr={stderr}')
             return False
 
         # Verify the process started (separate command)
-        check_cmd = f'pgrep -f "{process_id}" > /dev/null && echo "running" || echo "not running"'
+        check_cmd = (f'pgrep -f "{process_id}" > /dev/null && '
+                     f'echo "running" || echo "not running"')
         returncode, stdout, _ = await loop.run_in_executor(
             None, lambda: runner.run(
                 check_cmd, stream_logs=False, require_outputs=True))
