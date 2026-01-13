@@ -88,16 +88,16 @@ repos:
     hooks:
     -   id: dashboard-lint
         name: dashboard lint
-        entry: bash -c 'cd sky/dashboard && npm install --quiet && npm run lint'
+        entry: bash -c 'cd sky/dashboard && npm run lint'
         language: node
-        language_version: 22.12.0
+        language_version: 24.12.0
         files: ^sky/dashboard/
         pass_filenames: false
 
     -   id: dashboard-format
         name: dashboard format
-        entry: bash -c 'cd sky/dashboard && npm install --quiet && npm run format'
+        entry: bash -c 'cd sky/dashboard && npm run format'
         language: node
-        language_version: 22.12.0
+        language_version: 24.12.0
         files: ^sky/dashboard/
         pass_filenames: false
