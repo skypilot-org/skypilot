@@ -49,6 +49,48 @@ class _DummyProcess:
         return None
 
 
+class _DummyStorage:
+
+    def __init__(self):
+        self.constructed = False
+
+    def construct(self):
+        self.constructed = True
+
+
+class _DummyStatus:
+
+    def __init__(self):
+        self.sky_launch_status = None
+        self.sky_down_status = None
+
+
+class _DummyReplicaInfo:
+
+    def __init__(self, replica_id, cluster_name):
+        self.replica_id = replica_id
+        self.cluster_name = cluster_name
+        self.status_property = _DummyStatus()
+
+
+class _DummyThread:
+
+    def __init__(self, cluster_name, format_exc=None):
+        self.cluster_name = cluster_name
+        self.format_exc = format_exc
+        self._started = False
+
+    def is_alive(self):
+        return False
+
+    def start(self):
+        self._started = True
+        return None
+
+    def join(self):
+        return None
+
+
 def _patch_minimal_start(monkeypatch, tmp_path):
 
     def _dummy_from_yaml_str(*_args, **_kwargs):
@@ -525,45 +567,3 @@ def test_cleanup_task_run_script_missing_file(monkeypatch, tmp_path):
                         'PERSISTENT_RUN_SCRIPT_DIR', str(tmp_path))
 
     serve_service._cleanup_task_run_script(8)
-
-
-class _DummyStorage:
-
-    def __init__(self):
-        self.constructed = False
-
-    def construct(self):
-        self.constructed = True
-
-
-class _DummyStatus:
-
-    def __init__(self):
-        self.sky_launch_status = None
-        self.sky_down_status = None
-
-
-class _DummyReplicaInfo:
-
-    def __init__(self, replica_id, cluster_name):
-        self.replica_id = replica_id
-        self.cluster_name = cluster_name
-        self.status_property = _DummyStatus()
-
-
-class _DummyThread:
-
-    def __init__(self, cluster_name, format_exc=None):
-        self.cluster_name = cluster_name
-        self.format_exc = format_exc
-        self._started = False
-
-    def is_alive(self):
-        return False
-
-    def start(self):
-        self._started = True
-        return None
-
-    def join(self):
-        return None
