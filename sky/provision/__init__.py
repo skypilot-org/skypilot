@@ -150,6 +150,20 @@ def get_volume_usedby(
 
 
 @_route_to_cloud_impl
+def refresh_volume_config(
+    provider_name: str,
+    volume_config: models.VolumeConfig,
+) -> Tuple[bool, models.VolumeConfig]:
+    """Whether need to refresh the volume config in the cloud.
+
+    Returns:
+        need_refresh: Whether need to refresh the volume config.
+        volume_config: The volume config to be refreshed.
+    """
+    return False, volume_config
+
+
+@_route_to_cloud_impl
 def get_all_volumes_usedby(
     provider_name: str, configs: List[models.VolumeConfig]
 ) -> Tuple[Dict[str, Any], Dict[str, Any], Set[str]]:

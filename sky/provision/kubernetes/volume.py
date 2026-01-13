@@ -167,6 +167,22 @@ def get_volume_usedby(
     return _get_volume_usedby(context, namespace, pvc_name)
 
 
+def refresh_volume_config(
+    config: models.VolumeConfig,) -> Tuple[bool, models.VolumeConfig]:
+    """Refreshes the volume config.
+    For volume config with region None, we need to set the region to the
+    in-cluster context name.
+
+    Returns:
+        need_refresh: Whether need to refresh the volume config.
+        volume_config: The volume config to be refreshed.
+    """
+    if config.region is None:
+        config.region = kubernetes.in_cluster_context_name()
+        return True, config
+    return False, config
+
+
 def get_all_volumes_usedby(
     configs: List[models.VolumeConfig],
 ) -> Tuple[Dict[str, Any], Dict[str, Any], Set[str]]:

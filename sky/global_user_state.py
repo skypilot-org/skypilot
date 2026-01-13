@@ -2417,6 +2417,17 @@ def add_volume(
 
 @_init_db
 @metrics_lib.time_me
+def update_volume_config(name: str, config: models.VolumeConfig) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(volume_table).filter_by(name=name).update({
+            volume_table.c.handle: pickle.dumps(config),
+        })
+        session.commit()
+
+
+@_init_db
+@metrics_lib.time_me
 def update_volume(name: str, last_attached_at: int,
                   status: status_lib.VolumeStatus) -> None:
     assert _SQLALCHEMY_ENGINE is not None

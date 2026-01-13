@@ -892,9 +892,9 @@ class Task:
                         raise exceptions.VolumeTopologyConflictError(
                             f'Volume {vol.volume_name} can only be attached on '
                             f'{key}:{req}, which conflicts with another volume '
-                            f'{vol_name} that requires {key}:{previous_req}.'
+                            f'{vol_name} that requires {key}:{previous_req}. '
                             f'Please use different volumes and retry.')
-                    topology[key] = (vol_name, req)
+                    topology[key] = (vol.volume_name, req)
         # Now we have the topology requirements from the intersection of all
         # volumes. Check if there is topology conflict with the resources.
         # Volume must have no conflict with ALL resources even if user
