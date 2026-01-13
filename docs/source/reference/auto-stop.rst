@@ -155,10 +155,10 @@ This is useful for tasks like committing code, saving checkpoints, or performing
      autostop:
        idle_minutes: 10
        hook: |
-         cd my-code-base
-         git add .
-         git commit -m "Commit my code"
-         git push
+         curl -X POST -H 'Content-type: application/json' \
+           --data '{"text":"Cluster shutting down"}' \
+           https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+       hook_timeout: 300
 
 The hook script runs on the cluster and has access to the cluster's filesystem and environment variables.
 If the hook script fails (non-zero exit code), the autostop process will still continue,

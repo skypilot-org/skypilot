@@ -50,10 +50,10 @@ Below is the configuration syntax and some example values.  See details under ea
       idle_minutes: 10
       wait_for: none
       :ref:`hook <auto-stop-hooks>`: |
-        cd my-code-base
-        git add .
-        git commit -m "Auto-commit before shutdown"
-        git push
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{"text":"Cluster shutting down"}' \
+          https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+      hook_timeout: 300
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
       - infra: aws/us-west-2
@@ -336,10 +336,10 @@ OR
     autostop:
       idle_minutes: 10
       hook: |
-        cd my-code-base
-        git add .
-        git commit -m "Auto-commit before shutdown"
-        git push
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{"text":"Cluster shutting down"}' \
+          https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+      hook_timeout: 300
 
 
 .. _yaml-spec-resources-accelerators:
