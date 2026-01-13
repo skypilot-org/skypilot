@@ -1167,3 +1167,129 @@ class TestVolumeCore:
             assert vol['usedby_fetch_failed'] is True
             assert vol['usedby_pods'] == []
             assert vol['usedby_clusters'] == []
+
+    def test_volume_refresh_with_config_refresh_multiple_volumes(
+            self, monkeypatch):
+        """Test volume_refresh with multiple volumes, some needing refresh."""
+        # Mock volume data
+        mock_handle1 = mock.MagicMock(
+            name='test-volume-1',
+            cloud='k8s',
+            type='k8s-pvc',
+            region=None,  # Needs refresh
+            zone='us-east-1a',
+            size='100Gi',
+            config={},
+            name_on_cloud='test-volume-1-abc123',
+            spec=models.VolumeConfig)
+        mock_handle2 = mock.MagicMock(
+            name='test-volume-2',
+            cloud='k8s',
+            type='k8s-pvc',
+            region='us-east-1',  # Doesn't need refresh
+            zone='us-east-1a',
+            size='200Gi',
+            config={},
+            name_on_cloud='test-volume-2-def456',
+            spec=models.VolumeConfig)
+        mock_volumes = [{
+            'name': 'test-volume-1',
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock_handle1,
+            'status': status_lib.VolumeStatus.READY,
+            'is_ephemeral': False
+        }, {
+            'name': 'test-volume-2',
+            'launched_at': 1234567891,
+            'user_hash': 'user456',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock_handle2,
+            'status': status_lib.VolumeStatus.READY,
+            'is_ephemeral': False
+        }]
+
+        # Mock global_user_state
+        mock_get_volumes = mock.MagicMock(return_value=mock_volumes)
+        monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
+
+        # Mock provision.get_all_volumes_usedby
+        mock_get_all_usedby = mock.MagicMock(return_value=({}, {}, set()))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock_get_all_usedby)
+
+        # Mock provision.map_all_volumes_usedby
+        mock_map_all_usedby = mock.MagicMock(return_value=([], []))
+        monkeypatch.setattr(provision, 'map_all_volumes_usedby',
+                            mock_map_all_usedby)
+
+        # Mock global_user_state.get_all_users
+        mock_get_all_users = mock.MagicMock(return_value=[])
+        monkeypatch.setattr(global_user_state, 'get_all_users',
+                            mock_get_all_users)
+
+        # Mock global_user_state.get_volume_by_name
+        def get_volume_side_effect(name):
+            for vol in mock_volumes:
+                if vol['name'] == name:
+                    return vol
+            return None
+
+        mock_get_volume_by_name = mock.MagicMock(
+            side_effect=get_volume_side_effect)
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock_get_volume_by_name)
+
+        # Mock global_user_state.update_volume_status
+        mock_update_status = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'update_volume_status',
+                            mock_update_status)
+
+        # Mock global_user_state.update_volume_config
+        mock_update_config = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'update_volume_config',
+                            mock_update_config)
+
+        # Mock provision.refresh_volume_config
+        refreshed_handle1 = mock.MagicMock(
+            name='test-volume-1',
+            cloud='k8s',
+            type='k8s-pvc',
+            region='in-cluster',  # Updated
+            zone='us-east-1a',
+            size='100Gi',
+            config={},
+            name_on_cloud='test-volume-1-abc123',
+            spec=models.VolumeConfig)
+
+        def refresh_side_effect(cloud, handle):
+            if handle == mock_handle1:
+                return (True, refreshed_handle1)
+            else:
+                return (False, handle)
+
+        mock_refresh_volume_config = mock.MagicMock(
+            side_effect=refresh_side_effect)
+        monkeypatch.setattr(provision, 'refresh_volume_config',
+                            mock_refresh_volume_config)
+
+        # Mock filelock
+        mock_filelock = mock.MagicMock()
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock_filelock)
+
+        # Call the function
+        core.volume_refresh()
+
+        # Verify calls
+        mock_get_volumes.assert_called_once()
+        # refresh_volume_config should be called for both volumes
+        assert mock_refresh_volume_config.call_count == 2
+        # update_volume_config should only be called for volume-1 (need_refresh=True)
+        mock_update_config.assert_called_once_with('test-volume-1',
+                                                   refreshed_handle1)
