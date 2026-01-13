@@ -952,7 +952,6 @@ def get_next_cluster_name(
             for free_resource in free_resources.values():
                 if free_resource is not None and not _is_empty_resource(
                         free_resource):
-                    resource_aware = resource_aware and True
                     break
             else:
                 resource_aware = False
