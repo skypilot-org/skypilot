@@ -41,7 +41,7 @@ def test_verda_region_zone_validation_disallows_zones():
 
 
 @patch('sky.clouds.verda.get_verda_configuration')
-def test_verda_check_credentials_missing(mock_get_config, monkeypatch, 
+def test_verda_check_credentials_missing(mock_get_config, monkeypatch,
                                          tmp_path):
     cloud = verda.Verda()
     # Mock configuration to return False (not configured)
@@ -153,7 +153,6 @@ class TestVerdaClientInstanceCreation:
         get_call = mock_get.call_args
         assert 'https://api.verda.com/v1/instances/instance-123' in get_call[0][
             0]
-
 
     @patch('sky.provision.verda.utils.get_verda_configuration')
     @patch('sky.provision.verda.utils.requests.post')

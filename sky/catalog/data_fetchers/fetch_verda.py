@@ -187,7 +187,7 @@ def _format_accelerator_name(gpu_model: str, gpu_memory_gb: float) -> str:
         else:
             raise ValueError(f'Unsupported A100 memory: {gpu_memory_gb}')
 
-    if (gpu_model != accelerator_name):
+    if gpu_model != accelerator_name:
         print(f'Accelerator name: {gpu_model} -> {accelerator_name}')
     return accelerator_name
 
