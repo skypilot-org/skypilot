@@ -9,7 +9,7 @@
 #  sky launch -c dynamo nvidia-dynamo.sky.yaml --env MODEL_NAME=meta-llama/Llama-3.1-8B-Instruct --env HF_TOKEN
 
 resources:
-  accelerators: H100:1
+  accelerators: {H100:1, H200:1}
   ports: 8080
   # Use the official NVIDIA Dynamo SGLang runtime image from NGC
   image_id: docker:nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
@@ -30,3 +30,14 @@ run: |
   # Start the SGLang worker
   # Using --store-kv file to skip etcd dependency for single-node deployment
   python -m dynamo.sglang --model $MODEL_NAME --store-kv file
+
+# Kubernetes-specific configuration
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+        - securityContext:
+            # Run as root to allow SkyPilot to install necessary packages
+            runAsUser: 0
+            runAsGroup: 0

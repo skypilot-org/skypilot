@@ -10,7 +10,7 @@
 #  sky launch -c dynamo-multi nvidia-dynamo-multinode.sky.yaml --env MODEL_NAME=meta-llama/Llama-3.1-8B-Instruct --env HF_TOKEN
 
 resources:
-  accelerators: H100:8
+  accelerators: {H100:8, H200:8}
   ports: 8080
   # Use the official NVIDIA Dynamo SGLang runtime image from NGC
   image_id: docker:nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
@@ -71,3 +71,14 @@ run: |
     --disaggregation-transfer-backend nixl \
     --disaggregation-bootstrap-port 30001 \
     --page-size 16
+
+# Kubernetes-specific configuration
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+        - securityContext:
+            # Run as root to allow SkyPilot to install necessary packages
+            runAsUser: 0
+            runAsGroup: 0
