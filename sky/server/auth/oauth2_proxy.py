@@ -15,7 +15,6 @@ import starlette.middleware.base
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky.jobs import utils as managed_job_utils
 from sky.server import middleware_utils
 from sky.server.auth import authn
 from sky.server.auth import loopback
