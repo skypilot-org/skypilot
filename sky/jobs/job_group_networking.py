@@ -378,42 +378,52 @@ async def _start_k8s_dns_updater_on_node(
     script_path = f'/tmp/{process_id}.sh'
     log_path = f'/tmp/{process_id}.log'
 
-    # Use shlex.quote to safely transfer the script content
-    encoded_script = shlex.quote(updater_script)
-    write_cmd = f'{{ echo {encoded_script} > {script_path}; }}'
+    loop = asyncio.get_running_loop()
 
     try:
-        loop = asyncio.get_running_loop()
+        # Upload script via rsync (DNS updater script is always long)
+        import os
+        import tempfile
+        with tempfile.NamedTemporaryFile('w',
+                                         prefix='sky_dns_updater_',
+                                         delete=False) as f:
+            f.write(updater_script)
+            f.flush()
+            local_script_path = f.name
 
-        # Write the script file
-        logger.debug('Writing DNS updater script...')
-        returncode, _, stderr = await loop.run_in_executor(
+        try:
+            logger.info(f'Uploading DNS updater script for {job_group_name}...')
+            await loop.run_in_executor(
+                None, lambda: runner.rsync(source=local_script_path,
+                                           target=script_path,
+                                           up=True,
+                                           stream_logs=False))
+            logger.info(f'DNS updater script uploaded to {script_path}')
+        finally:
+            os.remove(local_script_path)
+
+        # Make executable, run in background, and verify - single RTT
+        run_and_verify_cmd = (
+            f'chmod +x {script_path} && '
+            f'(nohup {script_path} < /dev/null > {log_path} 2>&1 &) && '
+            f'sleep 0.1 && '
+            f'pgrep -f "{process_id}" > /dev/null && echo "running"')
+        logger.info(f'Starting DNS updater in background (log: {log_path})...')
+        returncode, stdout, stderr = await loop.run_in_executor(
             None, lambda: runner.run(
-                write_cmd, stream_logs=False, require_outputs=True))
-        if returncode != 0:
-            logger.error(f'Failed to write DNS updater script: {stderr}')
-            return False
-        logger.debug('DNS updater script written successfully')
+                run_and_verify_cmd, stream_logs=False, require_outputs=True))
 
-        # Make executable and run in background
-        # Use a subshell with exec to fully detach from kubectl exec:
-        # - The outer shell exits immediately after spawning the subshell
-        # - The subshell runs the script with all FDs redirected
-        run_cmd = (f'chmod +x {script_path} && '
-                   f'(nohup {script_path} < /dev/null > {log_path} 2>&1 &) && '
-                   f'sleep 0.1')
-        logger.debug('Starting DNS updater in background...')
-        returncode, _, stderr = await loop.run_in_executor(
-            None,
-            lambda: runner.run(run_cmd, stream_logs=False, require_outputs=True)
-        )
         if returncode != 0:
-            logger.error(f'Failed to start DNS updater: {stderr}')
+            logger.error(f'Failed to start DNS updater: stderr={stderr}')
             return False
-        logger.debug('DNS updater started successfully')
+
+        status = stdout.strip() if stdout else 'unknown'
+        logger.info(f'DNS updater status: {status}')
         return True
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Exception while starting DNS updater: {e}')
+        import traceback
+        logger.error(traceback.format_exc())
         return False
 
 
