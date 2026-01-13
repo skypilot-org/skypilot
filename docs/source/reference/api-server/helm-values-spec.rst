@@ -37,6 +37,7 @@ Below is the available helm value keys and the default value of each key:
     :ref:`imageRegistry <helm-values-global-imageRegistry>`: null
     :ref:`imagePullSecrets <helm-values-global-imagePullSecrets>`: null
     :ref:`extraEnvs <helm-values-global-extraEnvs>`: null
+  :ref:`fullnameOverride <helm-values-fullnameOverride>`: null
   :ref:`apiService <helm-values-apiService>`:
     :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot-nightly:latest
     :ref:`upgradeStrategy <helm-values-apiService-upgradeStrategy>`: Recreate
@@ -331,6 +332,35 @@ Default: ``null``
     extraEnvs:
       - name: HTTP_PROXY
         value: http://proxy.example.com
+
+
+.. _helm-values-fullnameOverride:
+
+``fullnameOverride``
+~~~~~~~~~~~~~~~~~~~~
+
+Override the full name used for all resources created by this chart. By default, names are derived from the Helm release name (``Release.Name``). Set ``fullnameOverride`` to enforce a specific base name when coordinating multiple environments.
+
+Note that sub charts will not inherit the top-level ``fullnameOverride`` value, so you need to set it for each sub chart if you want to use a different base name for each sub chart, and the ``fullnameOverride`` of prometheus must be consistent with the top-level ``fullnameOverride`` to make sure the scrape target is consistent.
+
+.. code-block:: yaml
+
+  fullenameOverride: custom-name
+  prometheus:
+    # Must use the same fullnameOverride as top-level
+    fullnameOverride: custom-name
+  ingress-nginx:
+    fullnameOverride: other-name
+  grafana:
+    fullnameOverride: other-name
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  fullnameOverride: custom-name
+  prometheus:
+    fullnameOverride: custom-name
 
 .. _helm-values-apiService:
 

@@ -95,6 +95,36 @@ def _get_dag(job_id: int) -> 'sky.Dag':
     return dag
 
 
+def _add_k8s_annotations(task: 'sky.Task', job_id: int) -> None:
+    """Adds Kubernetes pod config annotations to the task resources.
+
+    This function is a NOP for non-Kubernetes resources, as
+    the kubernetes specific config is not used when launching
+    a cluster on other clouds.
+    """
+    original_resources = task.resources
+    new_resources_list: List['sky.Resources'] = []
+    for original_resource in original_resources:
+        # Get existing config overrides or create new dict
+        config_overrides = original_resource.cluster_config_overrides.copy()
+
+        # Initialize nested structure and add annotations
+        pod_annotations = config_overrides.setdefault(
+            'kubernetes',
+            {}).setdefault('pod_config',
+                           {}).setdefault('metadata',
+                                          {}).setdefault('annotations', {})
+        pod_annotations['skypilot-managed-job-id'] = str(job_id)
+        pod_annotations['skypilot-managed-job-name'] = str(task.name)
+        # Create new resource with updated config
+        new_resource = original_resource.copy(
+            _cluster_config_overrides=config_overrides)
+        new_resources_list.append(new_resource)
+
+    # Set the new resources back to the task
+    task.set_resources(new_resources_list)
+
+
 class JobController:
     """Controls the lifecycle of a single managed job.
 
@@ -336,6 +366,7 @@ class JobController:
                 3. Any unexpected error happens during the `sky.launch`.
         Other exceptions may be raised depending on the backend.
         """
+        _add_k8s_annotations(task, self._job_id)
         task_start_time = time.time()
         logger.info(
             f'Starting task {task_id} ({task.name}) for job {self._job_id}')
@@ -399,15 +430,11 @@ class JobController:
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
 
-            # Get full_resources_json using to_yaml_config from task resources
+            # Get full_resources_json using get_resource_config which handles
+            # heterogeneous resource configurations (any_of/ordered).
             full_resources_json = None
             if task.resources:
-                # Get the first Resources object from the set/list.
-                # TODO(lloyd): This does not work with tasks that have an any_of
-                # config. When we're adding support for heterogeneity we should
-                # change this to use `_resources_to_config`.
-                task_resource = next(iter(task.resources))
-                full_resources_json = task_resource.to_yaml_config()
+                full_resources_json = task.get_resource_config()
 
             await managed_job_state.set_starting_async(
                 self._job_id,

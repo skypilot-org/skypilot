@@ -53,6 +53,21 @@ def volume_refresh():
                                 f'status to IN_USE, usedby: {usedby_pods}')
                     global_user_state.update_volume_status(
                         volume_name, status=status_lib.VolumeStatus.IN_USE)
+            volume_config = latest_volume.get('handle')
+            if volume_config is None:
+                continue
+            # For in-cluster volumes created without setting the region
+            # explicitly before PR
+            # https://github.com/skypilot-org/skypilot/pull/8386, the region
+            # will be None. In this case, when the user enables the external
+            # kubeconfig, the region will be shown as the default context in
+            # the kubeconfig file. We need to refresh the volume config to set
+            # the region to the in-cluster context name for these volumes.
+            need_refresh, volume_config = provision.refresh_volume_config(
+                volume_config.cloud, volume_config)
+            if need_refresh:
+                global_user_state.update_volume_config(volume_name,
+                                                       volume_config)
 
 
 def volume_list(

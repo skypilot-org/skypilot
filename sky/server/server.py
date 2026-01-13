@@ -15,6 +15,7 @@ import pathlib
 import posixpath
 import re
 import resource
+import shlex
 import shutil
 import socket
 import struct
@@ -217,6 +218,10 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
+        # If a previous middleware already authenticated the user, pass through
+        if request.state.auth_user is not None:
+            return await call_next(request)
+
         if managed_job_utils.is_consolidation_mode(
         ) and loopback.is_loopback_request(request):
             return await call_next(request)
@@ -284,6 +289,10 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         X-Skypilot-Auth-Mode header. The auth proxy should either validate the
         auth or set the header X-Skypilot-Auth-Mode: token.
         """
+        # If a previous middleware already authenticated the user, pass through
+        if request.state.auth_user is not None:
+            return await call_next(request)
+
         has_skypilot_auth_header = (
             request.headers.get('X-Skypilot-Auth-Mode') == 'token')
         auth_header = request.headers.get('authorization')
@@ -827,7 +836,8 @@ async def slurm_gpu_availability(
     )
 
 
-@app.get('/slurm_node_info')
+# Keep the GET method for backwards compatibility
+@app.api_route('/slurm_node_info', methods=['GET', 'POST'])
 async def slurm_node_info(
         request: fastapi.Request,
         slurm_node_info_body: payloads.SlurmNodeInfoRequestBody) -> None:
@@ -2197,14 +2207,16 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
 
     # Run sshd inside the Slurm job "container" via srun, such that it inherits
     # the resource constraints of the Slurm job.
-    ssh_cmd.extend(
-        slurm_utils.srun_sshd_command(job_id, target_node, login_node_user))
+    ssh_cmd += [
+        shlex.quote(
+            slurm_utils.srun_sshd_command(job_id, target_node, login_node_user))
+    ]
 
-    proc = await asyncio.create_subprocess_exec(
-        *ssh_cmd,
+    proc = await asyncio.create_subprocess_shell(
+        ' '.join(ssh_cmd),
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE  # Capture stderr separately for logging
+        stderr=asyncio.subprocess.PIPE,  # Capture stderr separately for logging
     )
     assert proc.stdin is not None
     assert proc.stdout is not None

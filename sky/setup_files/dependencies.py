@@ -72,7 +72,7 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
-    'sqlalchemy',
+    'sqlalchemy>=2.0.0',
     'psycopg2-binary',
     'aiosqlite',
     'asyncpg',
@@ -88,7 +88,7 @@ install_requires = [
     'gitpython',
     'paramiko',
     'types-paramiko',
-    'alembic',
+    'alembic>=1.8.0',
     'aiohttp',
     'anyio',
 ]
@@ -248,7 +248,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi==0.4.0'],
     'shadeform': [],  # No dependencies needed for shadeform
-    'slurm': [],  # No dependencies needed for slurm
+    'slurm': ['python-hostlist'],
 }
 
 # Calculate which clouds should be included in the [all] installation.

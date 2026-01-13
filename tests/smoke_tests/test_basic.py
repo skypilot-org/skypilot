@@ -703,6 +703,84 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
             sky.get(sky.down(name))
 
 
+def test_cluster_labels_in_status(generic_cloud: str):
+    """Test that labels in cluster YAML are stored and returned in status."""
+    from sky.client import sdk
+    from sky.utils.common import StatusRefreshMode
+
+    name = smoke_tests_utils.get_cluster_name()
+    expected_labels = {'test-label': 'test-value', 'project': 'smoke-test'}
+
+    def check_labels_in_status():
+        """Check that labels are present in the cluster status."""
+        # Get the cluster status using SDK
+        status_request_id = sdk.status([name],
+                                       refresh=StatusRefreshMode.NONE,
+                                       all_users=True)
+        cluster_records = sdk.stream_and_get(status_request_id)
+
+        # Find our cluster in the status
+        cluster_record = None
+        for cluster in cluster_records:
+            if cluster.get('name') == name:
+                cluster_record = cluster
+                break
+
+        if cluster_record is None:
+            yield f'Cluster {name} not found in status'
+            return
+
+        if 'labels' not in cluster_record:
+            yield 'labels field missing from cluster record'
+            return
+
+        if cluster_record['labels'] is None:
+            yield 'labels field is None'
+            return
+
+        if cluster_record['labels'] != expected_labels:
+            yield (f"Expected labels {expected_labels}, "
+                   f"got {cluster_record['labels']}")
+            return
+
+        # Success - labels are correct
+        return
+
+    # Create YAML with labels
+    yaml_content = textwrap.dedent("""\
+        resources:
+          cpus: 2+
+          labels:
+            test-label: test-value
+            project: smoke-test
+
+        run: |
+          echo "Hello from labeled cluster"
+          sleep 5
+        """)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'cluster_labels_in_status',
+            [
+                f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}',
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=name,
+                    cluster_status=[sky.ClusterStatus.UP],
+                    timeout=600),
+                lambda: check_labels_in_status(),
+            ],
+            teardown=f'sky down -y {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # The sky launch CLI has some additional checks to make sure the cluster is up/
 # restarted. However, the core API doesn't have these; make sure it still works
 @pytest.mark.no_kubernetes
