@@ -121,6 +121,8 @@ message ManagedJobInfo {
   // The `spot.job_id`, which can be used to identify different tasks
   // for the same job
   optional int64 _job_id = 29;
+  // Links (e.g., instance console URLs) as key-value pairs
+  map<string, string> links = 30;
 }
 
 message GetJobTableResponse {

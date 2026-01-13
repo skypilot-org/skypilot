@@ -7,12 +7,15 @@ and can be used to query instance types and pricing information for Shadeform.
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-import pandas as pd
-
+from sky.adaptors import common as adaptors_common
 from sky.catalog import common
 
 if typing.TYPE_CHECKING:
+    import pandas as pd
+
     from sky.clouds import cloud
+else:
+    pd = adaptors_common.LazyImport('pandas')
 
 # We'll use dynamic fetching, so no static CSV file to load
 _df = None

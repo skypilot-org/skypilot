@@ -399,15 +399,11 @@ class JobController:
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
 
-            # Get full_resources_json using to_yaml_config from task resources
+            # Get full_resources_json using get_resource_config which handles
+            # heterogeneous resource configurations (any_of/ordered).
             full_resources_json = None
             if task.resources:
-                # Get the first Resources object from the set/list.
-                # TODO(lloyd): This does not work with tasks that have an any_of
-                # config. When we're adding support for heterogeneity we should
-                # change this to use `_resources_to_config`.
-                task_resource = next(iter(task.resources))
-                full_resources_json = task_resource.to_yaml_config()
+                full_resources_json = task.get_resource_config()
 
             await managed_job_state.set_starting_async(
                 self._job_id,

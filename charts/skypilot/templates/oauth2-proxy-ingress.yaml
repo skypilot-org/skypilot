@@ -2,14 +2,15 @@
 {{- $kubeVersion := .Capabilities.KubeVersion.Major -}}
 {{- $kubeMinorVersion := .Capabilities.KubeVersion.Minor | trimSuffix "+" | int -}}
 {{- $useNewIngressClass := or (gt ($kubeVersion | int) 1) (and (eq ($kubeVersion | int) 1) (ge $kubeMinorVersion 18)) -}}
+{{- $fullName := include "skypilot.fullname" . -}}
 
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ .Release.Name }}-oauth2-proxy
+  name: {{ $fullName }}-oauth2-proxy
   namespace: {{ .Release.Namespace }}
   labels:
-    app: {{ .Release.Name }}-oauth2-proxy
+    app: {{ $fullName }}-oauth2-proxy
     skypilot.co/component: oauth2-proxy
   annotations:
     {{- if not $useNewIngressClass }}
@@ -27,7 +28,7 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: {{ .Release.Name }}-oauth2-proxy
+            name: {{ $fullName }}-oauth2-proxy
             port:
               number: 4180
 {{- end }}
