@@ -1539,7 +1539,6 @@ def ssh_credential_from_yaml(
         ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key_path = auth_section.get('ssh_private_key')
 
-    ssh_provider_module = config['provider']['module']
     ssh_control_name = _get_ssh_control_name(config)
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
 
@@ -1557,6 +1556,7 @@ def ssh_credential_from_yaml(
     }
     if docker_user is not None:
         credentials['docker_user'] = docker_user
+    ssh_provider_module = config['provider']['module']
     # If we are running ssh command on kubernetes node.
     if 'kubernetes' in ssh_provider_module:
         credentials['disable_control_master'] = True
@@ -1593,7 +1593,6 @@ def ssh_credentials_from_handles(
         if ssh_user is None:
             ssh_user = auth_section['ssh_user'].strip()
         ssh_private_key_path = auth_section.get('ssh_private_key')
-        ssh_provider_module = config['provider']['module']
         ssh_control_name = _get_ssh_control_name(config)
         ssh_proxy_command = auth_section.get('ssh_proxy_command')
 
@@ -1611,6 +1610,7 @@ def ssh_credentials_from_handles(
         }
         if docker_user is not None:
             credentials['docker_user'] = docker_user
+        ssh_provider_module = config['provider']['module']
         # If we are running ssh command on kubernetes node.
         if 'kubernetes' in ssh_provider_module:
             credentials['disable_control_master'] = True
