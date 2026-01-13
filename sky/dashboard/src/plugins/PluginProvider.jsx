@@ -16,18 +16,24 @@ const PluginContext = createContext({
   topNavLinks: [],
   routes: [],
   components: {},
+  dataEnhancements: {},
+  tableColumns: {},
 });
 
 const initialState = {
   topNavLinks: [],
   routes: [],
   components: {}, // Map of slot name → array of component configs
+  dataEnhancements: {}, // Map of dataSource → array of enhancements
+  tableColumns: {}, // Map of table name → array of column configs
 };
 
 const actions = {
   REGISTER_TOP_NAV_LINK: 'REGISTER_TOP_NAV_LINK',
   REGISTER_ROUTE: 'REGISTER_ROUTE',
   REGISTER_COMPONENT: 'REGISTER_COMPONENT',
+  REGISTER_DATA_ENHANCEMENT: 'REGISTER_DATA_ENHANCEMENT',
+  REGISTER_TABLE_COLUMN: 'REGISTER_TABLE_COLUMN',
 };
 
 function pluginReducer(state, action) {
@@ -53,6 +59,52 @@ function pluginReducer(state, action) {
         components: {
           ...state.components,
           [slot]: updated,
+        },
+      };
+    }
+    case actions.REGISTER_DATA_ENHANCEMENT: {
+      const { dataSource } = action.payload;
+      const existing = state.dataEnhancements[dataSource] || [];
+      const updated = upsertById(existing, action.payload);
+      // Sort by priority, then by dependencies
+      updated.sort((a, b) => {
+        const aPriority = a.priority ?? 100;
+        const bPriority = b.priority ?? 100;
+        if (aPriority !== bPriority) {
+          return aPriority - bPriority;
+        }
+        // If b depends on a, a should run first
+        if (b.dependencies?.includes(a.id)) {
+          return -1;
+        }
+        if (a.dependencies?.includes(b.id)) {
+          return 1;
+        }
+        return 0;
+      });
+      return {
+        ...state,
+        dataEnhancements: {
+          ...state.dataEnhancements,
+          [dataSource]: updated,
+        },
+      };
+    }
+    case actions.REGISTER_TABLE_COLUMN: {
+      const { table } = action.payload;
+      const existing = state.tableColumns[table] || [];
+      const updated = upsertById(existing, action.payload);
+      // Sort by order (lower order = earlier position)
+      updated.sort((a, b) => {
+        const aOrder = a.header?.order ?? 100;
+        const bOrder = b.header?.order ?? 100;
+        return aOrder - bOrder;
+      });
+      return {
+        ...state,
+        tableColumns: {
+          ...state.tableColumns,
+          [table]: updated,
         },
       };
     }
@@ -262,6 +314,86 @@ function normalizeComponent(config) {
   };
 }
 
+function normalizeDataEnhancement(config) {
+  if (
+    !config ||
+    typeof config !== 'object' ||
+    !config.id ||
+    !config.dataSource ||
+    typeof config.enhance !== 'function'
+  ) {
+    console.warn(
+      '[SkyDashboardPlugin] Invalid data enhancement registration:',
+      config
+    );
+    return null;
+  }
+
+  return {
+    id: String(config.id),
+    dataSource: String(config.dataSource),
+    enhance: config.enhance,
+    priority: Number.isFinite(config.priority) ? config.priority : 100,
+    dependencies: Array.isArray(config.dependencies)
+      ? config.dependencies.map(String)
+      : undefined,
+    fields: Array.isArray(config.fields)
+      ? config.fields.map(String)
+      : undefined,
+  };
+}
+
+function normalizeTableColumn(config) {
+  if (
+    !config ||
+    typeof config !== 'object' ||
+    !config.id ||
+    !config.table ||
+    !config.header ||
+    typeof config.header !== 'object' ||
+    !config.header.label ||
+    !config.cell ||
+    typeof config.cell !== 'object' ||
+    typeof config.cell.render !== 'function'
+  ) {
+    console.warn(
+      '[SkyDashboardPlugin] Invalid table column registration:',
+      config
+    );
+    return null;
+  }
+
+  return {
+    id: String(config.id),
+    table: String(config.table),
+    header: {
+      label: String(config.header.label),
+      sortKey: config.header.sortKey
+        ? String(config.header.sortKey)
+        : undefined,
+      className: config.header.className
+        ? String(config.header.className)
+        : undefined,
+      order: Number.isFinite(config.header.order) ? config.header.order : 100,
+    },
+    cell: {
+      render: config.cell.render,
+      className: config.cell.className
+        ? String(config.cell.className)
+        : undefined,
+    },
+    conditions:
+      config.conditions && typeof config.conditions === 'object'
+        ? {
+            showWhen:
+              typeof config.conditions.showWhen === 'function'
+                ? config.conditions.showWhen
+                : undefined,
+          }
+        : undefined,
+  };
+}
+
 function createPluginApi(dispatch) {
   return {
     registerTopNavLink(link) {
@@ -297,6 +429,52 @@ function createPluginApi(dispatch) {
       });
       return normalized.id;
     },
+    registerDataEnhancement(config) {
+      const normalized = normalizeDataEnhancement(config);
+      if (!normalized) {
+        return null;
+      }
+      // Validate field conflicts with existing enhancements
+      const existingEnhancements = getDataEnhancements(normalized.dataSource);
+      if (normalized.fields && normalized.fields.length > 0) {
+        const conflicts = [];
+        existingEnhancements.forEach((existing) => {
+          if (existing.fields && existing.fields.length > 0) {
+            const overlap = normalized.fields.filter((f) =>
+              existing.fields.includes(f)
+            );
+            if (overlap.length > 0) {
+              conflicts.push({
+                plugin: existing.id,
+                fields: overlap,
+              });
+            }
+          }
+        });
+        if (conflicts.length > 0) {
+          console.warn(
+            `[SkyDashboardPlugin] Field conflicts detected for ${normalized.id}:`,
+            conflicts
+          );
+        }
+      }
+      dispatch({
+        type: actions.REGISTER_DATA_ENHANCEMENT,
+        payload: normalized,
+      });
+      return normalized.id;
+    },
+    registerTableColumn(config) {
+      const normalized = normalizeTableColumn(config);
+      if (!normalized) {
+        return null;
+      }
+      dispatch({
+        type: actions.REGISTER_TABLE_COLUMN,
+        payload: normalized,
+      });
+      return normalized.id;
+    },
     getContext() {
       return {
         basePath: BASE_PATH,
@@ -313,6 +491,18 @@ function createPluginApi(dispatch) {
 
 export function PluginProvider({ children }) {
   const [state, dispatch] = useReducer(pluginReducer, initialState);
+
+  // Expose state reference for getDataEnhancements to access outside React context
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.__pluginStateRef = { current: state };
+      return () => {
+        if (window.__pluginStateRef) {
+          delete window.__pluginStateRef;
+        }
+      };
+    }
+  }, [state]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -347,7 +537,7 @@ export function PluginProvider({ children }) {
         delete window.SkyDashboardPluginAPI;
       }
     };
-  }, []);
+  }, [dispatch]);
 
   const value = useMemo(() => state, [state]);
 
@@ -431,4 +621,43 @@ export function usePluginComponents(slot) {
       return true;
     });
   }, [slot, components]);
+}
+
+/**
+ * Get data enhancements for a specific data source
+ * @param {string} dataSource - The data source name (e.g., 'jobs', 'clusters')
+ * @returns {Array} Array of enhancement configurations
+ */
+export function getDataEnhancements(dataSource) {
+  // This function needs access to the current state
+  // Since it's called from outside React context, we need to access it differently
+  // For now, we'll use a module-level state reference
+  if (typeof window !== 'undefined' && window.__pluginStateRef) {
+    const state = window.__pluginStateRef.current;
+    return state?.dataEnhancements?.[dataSource] || [];
+  }
+  return [];
+}
+
+/**
+ * Hook to get table columns for a specific table
+ * @param {string} tableName - The table name (e.g., 'clusters', 'jobs')
+ * @param {object} context - Optional context for filtering columns
+ * @returns {Array} Array of column configurations sorted by order
+ */
+export function useTableColumns(tableName, context = {}) {
+  const { tableColumns } = usePluginState();
+  return useMemo(() => {
+    if (!tableName) {
+      return [];
+    }
+    const columns = tableColumns[tableName] || [];
+    // Filter by conditions if provided
+    return columns.filter((column) => {
+      if (column.conditions?.showWhen) {
+        return column.conditions.showWhen(context);
+      }
+      return true;
+    });
+  }, [tableName, tableColumns, context]);
 }

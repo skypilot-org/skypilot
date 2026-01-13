@@ -630,6 +630,20 @@ function ActiveTab({
                 </div>
               )}
 
+              {/* Queue Details section - right column */}
+              {clusterData.details && (
+                <PluginSlot
+                  name="clusters.detail.queue_details"
+                  context={{
+                    details: clusterData.details,
+                    queueName: clusterData.kueue_queue_name,
+                    infra: clusterData.full_infra,
+                    clusterData: clusterData,
+                    title: 'Queue Details',
+                  }}
+                />
+              )}
+
               {/* Created by section - spans both columns */}
               {hasCreationArtifacts && (
                 <div className="col-span-2">
