@@ -28,6 +28,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import tigris
 from sky.clouds import cloud as sky_cloud
 from sky.data import data_transfer
 from sky.data import data_utils
@@ -100,6 +101,11 @@ def get_cached_enabled_storage_cloud_names_or_refresh(
     coreweave_is_enabled, _ = coreweave.check_storage_credentials()
     if coreweave_is_enabled:
         enabled_clouds.append(coreweave.NAME)
+
+    # Similarly, handle Tigris storage credentials
+    tigris_is_enabled, _ = tigris.check_storage_credentials()
+    if tigris_is_enabled:
+        enabled_clouds.append(tigris.NAME)
 
     if raise_if_no_cloud_access and not enabled_clouds:
         raise exceptions.NoCloudAccessError(
@@ -4761,3 +4767,37 @@ class CoreWeaveStore(S3CompatibleStore):
         data_utils.verify_coreweave_bucket(bucket_name, retry=36)
 
         return result
+
+
+@register_s3_compatible_store
+class TigrisStore(S3CompatibleStore):
+    """TigrisStore inherits from S3CompatibleStore and represents the backend
+    for Tigris Object Storage buckets.
+    """
+
+    @classmethod
+    def get_config(cls) -> S3CompatibleConfig:
+        """Return the configuration for Tigris Object Storage."""
+        return S3CompatibleConfig(
+            store_type='TIGRIS',
+            url_prefix='tigris://',
+            client_factory=lambda region: data_utils.create_tigris_client(),
+            resource_factory=lambda name: tigris.resource('s3').Bucket(name),
+            split_path=data_utils.split_tigris_path,
+            verify_bucket=data_utils.verify_tigris_bucket,
+            aws_profile=tigris.TIGRIS_PROFILE_NAME,
+            get_endpoint_url=lambda: tigris.ENDPOINT_URL,
+            credentials_file='~/.aws/credentials',
+            config_file=None,
+            cloud_name=tigris.NAME,
+            default_region=tigris.DEFAULT_REGION,
+            mount_cmd_factory=cls._get_tigris_mount_cmd,
+        )
+
+    @classmethod
+    def _get_tigris_mount_cmd(cls, bucket_name: str, mount_path: str,
+                              bucket_sub_path: Optional[str]) -> str:
+        """Factory method for Tigris mount command."""
+        return mounting_utils.get_tigris_mount_cmd(bucket_name, mount_path,
+                                                   tigris.ENDPOINT_URL,
+                                                   bucket_sub_path)

@@ -15,6 +15,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.adaptors import coreweave
+from sky.adaptors import tigris
 from sky.clouds import cloud as sky_cloud
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -35,7 +36,7 @@ def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
     config_allowed_cloud_names = skypilot_config.get_nested(
         ('allowed_clouds',),
         [repr(c) for c in registry.CLOUD_REGISTRY.values()] +
-        [cloudflare.NAME, coreweave.NAME])
+        [cloudflare.NAME, coreweave.NAME, tigris.NAME])
     # filter out the clouds that are disabled in the workspace config
     workspace_disabled_clouds = []
     for cloud in config_allowed_cloud_names:
@@ -109,7 +110,7 @@ def check_capabilities(
 
     def get_all_clouds() -> Tuple[str, ...]:
         return tuple([repr(c) for c in registry.CLOUD_REGISTRY.values()] +
-                     [cloudflare.NAME, coreweave.NAME])
+                     [cloudflare.NAME, coreweave.NAME, tigris.NAME])
 
     def _execute_check_logic_for_workspace(
         current_workspace_name: str,
@@ -149,12 +150,14 @@ def check_capabilities(
                 cloud_name: str
         ) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
             # Validates cloud_name and returns a tuple of the cloud's name and
-            # the cloud object. Includes special handling for Cloudflare and
-            # CoreWeave.
+            # the cloud object. Includes special handling for Cloudflare,
+            # CoreWeave, and Tigris.
             if cloud_name.lower().startswith('cloudflare'):
                 return cloudflare.NAME, cloudflare
             elif cloud_name.lower().startswith('coreweave'):
                 return coreweave.NAME, coreweave
+            elif cloud_name.lower().startswith('tigris'):
+                return tigris.NAME, tigris
             else:
                 cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
                 assert cloud_obj is not None, f'Cloud {cloud_name!r} not found'
@@ -489,6 +492,12 @@ def get_cloud_credential_file_mounts(
     if coreweave_is_enabled:
         coreweave_credential_mounts = coreweave.get_credential_file_mounts()
         file_mounts.update(coreweave_credential_mounts)
+
+    # Similarly, handle Tigris storage credentials
+    tigris_is_enabled, _ = tigris.check_storage_credentials()
+    if tigris_is_enabled:
+        tigris_credential_mounts = tigris.get_credential_file_mounts()
+        file_mounts.update(tigris_credential_mounts)
     return file_mounts
 
 
@@ -554,7 +563,7 @@ def _print_checked_cloud(
         style_str = f'{colorama.Fore.GREEN}{colorama.Style.NORMAL}'
         status_msg = 'enabled'
         capability_string = f'[{", ".join(enabled_capabilities)}]'
-        if verbose and cloud is not cloudflare and cloud is not coreweave:
+        if verbose and cloud not in (cloudflare, coreweave, tigris):
             activated_account = cloud.get_active_user_identity_str()
         if isinstance(
                 cloud_tuple[1],

@@ -1562,6 +1562,34 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
+.. _tigris-installation:
+
+Tigris
+~~~~~~
+
+`Tigris <https://www.tigrisdata.com/>`__ is a globally distributed, S3-compatible object storage with zero egress fees.
+SkyPilot can download/upload data to Tigris buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Tigris support:
+
+Tigris uses the standard AWS credentials format. Run the following command to configure your Tigris credentials:
+
+.. code-block:: shell
+
+  # Configure your Tigris credentials using the 'tigris' profile
+  aws configure --profile tigris
+
+In the prompt, enter your Tigris Access Key ID and Secret Access Key (see `Tigris documentation <https://www.tigrisdata.com/docs/sdks/s3/aws-cli/>`_ to generate credentials). For the region, enter :code:`auto` and for the output format, enter :code:`json`.
+
+.. code-block:: text
+
+  AWS Access Key ID [None]: <your_tigris_access_key_id>
+  AWS Secret Access Key [None]: <your_tigris_secret_access_key>
+  Default region name [None]: auto
+  Default output format [None]: json
+
+.. note::
+
+  Support for Tigris is in beta. Please report any issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
+
 
 Prime Intellect |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
