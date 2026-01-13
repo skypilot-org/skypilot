@@ -185,7 +185,7 @@ customize the timeout in your YAML configuration:
 
 - If the hook times out, autostop will proceed after logging a warning
 - The minimum timeout is 1 second
-- Hook execution will keep the cluster UP, occupying the resources. Be aware of that when setting ``idle_minutes``
+- Hook execution will keep the cluster from terminating while it runs, occupying the resources. Be aware of that when setting ``idle_minutes``
 
 Common use cases for autostop hooks:
 
