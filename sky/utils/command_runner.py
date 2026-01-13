@@ -183,7 +183,12 @@ def _proxyjump_to_proxycommand(proxy_jump: str,
         cmd += ['-l', user]
     if port is not None:
         cmd += ['-p', str(port)]
-    cmd += ['-W', '\'[%h]:%p\'', host]
+    # Redirect stderr to /dev/null to avoid hanging.
+    # The ProxyCommand inherits the parent ssh's stderr pipe.
+    # Without this, the tunnel might hold the pipe open, causing
+    # log_lib.process_subprocess_stream() to hang waiting for stderr EOF.
+    # Anyways only stdin and stdout is used for -W host:port.
+    cmd += ['-W', '\'[%h]:%p\'', host, '2>/dev/null']
 
     return ' '.join(cmd)
 
