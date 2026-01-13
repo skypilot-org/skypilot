@@ -1472,18 +1472,22 @@ def realtime_slurm_gpu_availability(
                     case_sensitive=False,
                 ))
         except exceptions.NotSupportedError as e:
-            logger.error(f'Failed to query Slurm GPU availability: {e}')
+            logger.error(f'Failed to query Slurm GPU availability(1): {e}')
             raise
         except ValueError as e:
+            import traceback  # pylint: disable=import-outside-toplevel
+
             # Re-raise ValueError if no GPUs are found matching the filters
-            logger.error(f'Error querying Slurm GPU availability: {e}')
+            logger.error(f'Error querying Slurm GPU availability(2): {e}'
+                         f'\n{traceback.format_exc()}')
             raise
         except Exception as e:
-            logger.error(
-                'Error querying Slurm GPU availability: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
-            raise ValueError(
-                f'Error querying Slurm GPU availability: {e}') from e
+            import traceback  # pylint: disable=import-outside-toplevel
+            logger.error('Error querying Slurm GPU availability(3): '
+                         f'{common_utils.format_exception(e, use_bracket=True)}'
+                         f'\n{traceback.format_exc()}')
+            raise ValueError(f'Error querying Slurm GPU availability(4): {e}'
+                             f'\n{traceback.format_exc()}') from e
 
         # --- Format the output ---
         realtime_gpu_availability_list: List[
