@@ -2888,25 +2888,3 @@ def download_debug_dump(dump_filename: str,
             f.write(chunk)
 
     return local_path
-
-
-@usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
-@versions.minimal_api_version(27)
-@annotations.client_api
-def list_debug_dumps() -> List[Dict[str, Any]]:
-    """List available debug dumps on the server.
-
-    Returns:
-        List of dictionaries with dump info (filename, size_bytes, created_at).
-    """
-    response = server_common.make_authenticated_request(
-        'GET',
-        '/debug/dump-list',
-    )
-
-    if response.status_code != 200:
-        detail = response.json().get('detail', 'Unknown error')
-        raise exceptions.ClientError(f'Failed to list debug dumps: {detail}')
-
-    return response.json()

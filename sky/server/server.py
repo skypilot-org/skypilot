@@ -33,6 +33,7 @@ import anyio
 import fastapi
 from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
+import starlette.background
 import starlette.middleware.base
 import uvloop
 
@@ -2421,7 +2422,10 @@ async def create_debug_dump(
 @app.get('/debug/dump-download/{dump_filename}')
 async def download_debug_dump(
         dump_filename: str) -> fastapi.responses.FileResponse:
-    """Download a debug dump file."""
+    """Download a debug dump file.
+
+    The dump file is automatically deleted after the download completes.
+    """
     from sky.utils import debug_utils
 
     dump_dir = pathlib.Path(debug_utils.DEBUG_DUMP_DIR).expanduser()
@@ -2438,31 +2442,14 @@ async def download_debug_dump(
         raise fastapi.HTTPException(status_code=403,
                                     detail='Invalid path') from path_err
 
+    # Delete the dump file after download completes
     return fastapi.responses.FileResponse(
         path=dump_path,
         filename=dump_filename,
         media_type='application/zip',
+        background=starlette.background.BackgroundTask(dump_path.unlink,
+                                                       missing_ok=True),
     )
-
-
-@app.get('/debug/dump-list')
-async def list_debug_dumps() -> List[Dict[str, Any]]:
-    """List available debug dumps."""
-    from sky.utils import debug_utils
-
-    dump_dir = pathlib.Path(debug_utils.DEBUG_DUMP_DIR).expanduser()
-    if not dump_dir.exists():
-        return []
-
-    dumps = []
-    for dump_file in sorted(dump_dir.glob('debug_dump_*.zip'), reverse=True):
-        stat = dump_file.stat()
-        dumps.append({
-            'filename': dump_file.name,
-            'size_bytes': stat.st_size,
-            'created_at': stat.st_mtime,
-        })
-    return dumps
 
 
 # === Internal APIs ===
