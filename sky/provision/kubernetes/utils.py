@@ -96,6 +96,7 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     NEBIUS = 'nebius'
     COREWEAVE = 'coreweave'
     TOGETHER = 'together'
+    AWS_EFA = 'aws_efa'
     NONE = 'none'
 
     def get_network_env_vars(self) -> Dict[str, str]:
@@ -121,6 +122,10 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                 # Restrict UCX to TCP to avoid unneccsary errors. NCCL doesn't use UCX
                 'UCX_TLS': 'tcp',
                 'UCX_NET_DEVICES': 'eth0',
+            }
+        elif self == KubernetesHighPerformanceNetworkType.AWS_EFA:
+            return {
+                'FI_PROVIDER': 'efa',
             }
         else:
             # GCP clusters and generic clusters - environment variables are

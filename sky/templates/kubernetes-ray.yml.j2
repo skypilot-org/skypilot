@@ -1174,9 +1174,12 @@ available_node_types:
               {% if k8s_network_type == 'together' and k8s_resource_key is not none %}
               nvidia.com/rdma_ib: {{accelerator_count}}
               {% endif %}
+              {% if k8s_efa_count is not none %}
+              vpc.amazonaws.com/efa: {{k8s_efa_count}}
+              {% endif %}
             {% if k8s_resource_key is not none %}
             limits:
-              # Limits need to be defined for GPU/TPU requests
+              # Limits need to be defined for GPU/TPU/EFA requests
               {% if k8s_resource_key is not none %}
               {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
@@ -1185,6 +1188,9 @@ available_node_types:
               {% endif %}
               {% if k8s_network_type == 'together' %}
               nvidia.com/rdma_ib: {{accelerator_count}}
+              {% endif %}
+              {% if k8s_efa_count is not none %}
+              vpc.amazonaws.com/efa: {{k8s_efa_count}}
               {% endif %}
             {% endif %}
           {% if k8s_ipc_lock_capability %}
