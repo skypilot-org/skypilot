@@ -235,6 +235,8 @@ class JobController:
             # (os.environ may be hijacked to use ContextualEnviron which includes context overrides)
             if self._rank is not None:
                 task_envs['SKYPILOT_JOB_RANK'] = str(self._rank)
+            else:
+                task_envs['SKYPILOT_JOB_RANK'] = '0'
             task.update_envs(task_envs)
 
     def _download_log_and_stream(

@@ -22,22 +22,10 @@ file_mounts:
 # Maybe in the --fast implementation, we can store the hash of setup commands that used to be
 # run and don't skip setup phase if the hash is different.
 setup: |
-  {{ sky_activate_python_env }}
-  # Disable the pip version check to avoid the warning message, which makes the
-  # output hard to read.
-  export PIP_DISABLE_PIP_VERSION_CHECK=1
-
-  {%- for cmd in cloud_dependencies_installation_commands %}
-  {{cmd}}
-  {%- endfor %}
-
   {% if controller_envs.get('SKYPILOT_DEV') != '0' %}
   grep -q 'export SKYPILOT_DEV=' ~/.bashrc || echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
   grep -q 'alias sky-env=' ~/.bashrc || echo 'alias sky-env="{{ sky_activate_python_env }}"' >> ~/.bashrc
   {% endif %}
-
-  # This is used by the skylet events to check if we are a jobs controller.
-  touch {{job_controller_indicator_file}}
 
 run: |
   {%- if not is_consolidation_mode %}

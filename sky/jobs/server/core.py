@@ -311,8 +311,8 @@ def _ensure_controller_up(
     # Controller is not up, provision it (bring up the cluster)
     controller_name = controller.value.cluster_name
     logger.info(f'{colorama.Fore.YELLOW}'
-                f'Jobs controller {controller_name} is not up. '
-                f'Provisioning it...{colorama.Style.RESET_ALL}')
+                f'Ensuring the jobs controller {controller_name} is up before'
+                f'continuing job launch...{colorama.Style.RESET_ALL}')
 
     # Create a minimal task for provisioning the controller cluster
     # We only use this for its resources, not to execute a job
@@ -349,13 +349,6 @@ def _ensure_controller_up(
             skylet_constants.SKYPILOT_DEFAULT_WORKSPACE):
         with common.with_server_user():
             # Only provision the controller, don't execute a job.
-
-            # Run all stages except for execution and launch.
-            stages = [
-                execution.Stage.PROVISION, execution.Stage.OPTIMIZE,
-                execution.Stage.SYNC_WORKDIR, execution.Stage.SYNC_FILE_MOUNTS,
-                execution.Stage.SETUP
-            ]
             _, _ = execution.launch(
                 task=controller_task,
                 cluster_name=controller_name,
@@ -364,7 +357,7 @@ def _ensure_controller_up(
                 _request_name=request_names.AdminPolicyRequestName.
                 JOBS_LAUNCH_CONTROLLER,
                 _disable_controller_check=True,
-                _stages=stages)
+                fast=True)
 
     # Verify the controller is now accessible
     handle = backend_utils.is_controller_accessible(controller=controller,
@@ -387,9 +380,6 @@ def _submit_remotely(controller: controller_utils.Controllers,
                                          task_resources=task_resources)
     backend = backend_utils.get_backend_from_handle(local_handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
-
-    # Make sure the skylet is up to date before continuing.
-    backend.check_skylet_running(local_handle)
 
     workspace = skypilot_config.get_active_workspace(force_user_workspace=True)
     entrypoint = common_utils.get_current_command()
@@ -722,6 +712,10 @@ def launch(
                     return _consolidated_launch(controller, controller_task,
                                                 job_ids)
                 else:
+                    # TODO(lloyd-brown) The cluster should already be launched
+                    # here so we should just be able to use exec, but we need
+                    # to work through the logic and make sure there is no issue
+                    # with say file mounts.
                     result = execution.launch(
                         task=controller_task,
                         cluster_name=controller_name,
