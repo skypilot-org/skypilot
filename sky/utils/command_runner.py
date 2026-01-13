@@ -130,14 +130,42 @@ def _proxyjump_to_proxycommand(proxy_jump: str,
         hostport = dest
         if '@' in dest:
             user, hostport = dest.split('@', 1)
+            if not user:
+                raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
+        if not hostport:
+            raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
         host = hostport
         port = None
-        # Only parse port if it looks like host:port
-        if ':' in hostport:
-            maybe_host, port_str = hostport.rsplit(':', 1)
-            if port_str.isdigit():
+        if hostport.startswith('['):
+            # Bracketed IPv6 case. Only parse a port if the closing bracket is
+            # immediately followed by ":" (i.e., "[...]:<port>").
+            end_bracket = hostport.find(']')
+            if end_bracket == -1:
+                raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
+            rest = hostport[end_bracket + 1:]
+            # After the closing bracket, only "" or ":<port>" is valid.
+            if rest != '' and not rest.startswith(':'):
+                raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
+            if ']:' in hostport:
+                maybe_host, port_str = hostport.rsplit(':', 1)
+                if not port_str.isdigit():
+                    raise ValueError(f'Invalid port: {port_str} in {dest}')
                 host = maybe_host
                 port = int(port_str)
+            # Normalize bracketed IPv6 host by stripping "[...]" so the final
+            # ssh command uses a plain host argument (e.g., "2001:db8::1").
+            if host.startswith('[') and host.endswith(']'):
+                host = host[1:-1]
+            if not host:
+                raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
+        elif hostport.count(':') == 1:
+            # Non-IPv6 host case (hostname or IPv4) with exactly one ":".
+            # We treat this as host:port iff the suffix is a numeric port.
+            maybe_host, port_str = hostport.rsplit(':', 1)
+            if not port_str.isdigit():
+                raise ValueError(f'Invalid port: {port_str} in {dest}')
+            host = maybe_host
+            port = int(port_str)
         return user, host, port
 
     # For multi-hop, use -J for earlier hops and last hop as the target

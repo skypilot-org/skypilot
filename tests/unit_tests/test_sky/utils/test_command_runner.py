@@ -456,6 +456,56 @@ class TestProxyJumpToProxyCommand:
                     'must_not_contain': ['ProxyJump='],
                 },
             ),
+            # ipv4:port
+            (
+                '1.2.3.4:2222',
+                {
+                    'must_contain': [
+                        'ProxyCommand=',
+                        '-p 2222',
+                        '1.2.3.4',
+                    ],
+                    'must_not_contain': ['ProxyJump='],
+                },
+            ),
+            # user@[ipv6]:port
+            (
+                'admin@[2001:db8::1]:2222',
+                {
+                    'must_contain': [
+                        'ProxyCommand=',
+                        '-l admin',
+                        '-p 2222',
+                        # Brackets should not be included in the host argument.
+                        '2001:db8::1',
+                    ],
+                    'must_not_contain': ['ProxyJump=', '[2001:db8::1]'],
+                },
+            ),
+            # user@ipv6 (no port)
+            (
+                'root@2001:aaaa:bbbb:ffff::1',
+                {
+                    'must_contain': [
+                        'ProxyCommand=',
+                        '-l root',
+                        '2001:aaaa:bbbb:ffff::1',
+                    ],
+                    'must_not_contain': ['ProxyJump=', '-p '],
+                },
+            ),
+            # user@ipv6 (numeric last hextet; still no port)
+            (
+                'root@2001:db8::22',
+                {
+                    'must_contain': [
+                        'ProxyCommand=',
+                        '-l root',
+                        '2001:db8::22',
+                    ],
+                    'must_not_contain': ['ProxyJump=', '-p '],
+                },
+            ),
             # Multi-hop
             (
                 'user1@hop1,user2@hop2',
@@ -476,7 +526,6 @@ class TestProxyJumpToProxyCommand:
             ssh_user='ubuntu',
             ssh_private_key=private_key_path,
             ssh_proxy_jump=ssh_proxy_jump,
-            ssh_control_name='unit-test-control',
         )
 
         ssh_cmd = runner.ssh_base_command(
@@ -492,3 +541,39 @@ class TestProxyJumpToProxyCommand:
         for unexpected in expected_assertions['must_not_contain']:
             assert unexpected not in ssh_cmd_str, (
                 f"Unexpected '{unexpected}' in command: {ssh_cmd_str}")
+
+    @pytest.mark.parametrize(
+        'ssh_proxy_jump',
+        [
+            # Invalid bracketed IPv6 port.
+            ('admin@[::1]:ssh'),
+            # Invalid port.
+            ('admin@bastion:notaport'),
+            ('bastion:notaport'),
+            # Empty user.
+            ('@bastion'),
+            # Missing host.
+            ('admin@'),
+            # Malformed bracketed IPv6 (no closing bracket).
+            ('admin@[::1'),
+            # Malformed bracketed IPv6 (unexpected suffix after bracket).
+            ('admin@[::1]foo'),
+            # Empty bracketed host.
+            ('admin@[]:22'),
+        ],
+    )
+    def test_proxyjump_to_proxycommand_invalid_jump_spec_raises(
+            self, private_key_path, ssh_proxy_jump) -> None:
+        runner = command_runner.SSHCommandRunner(
+            node=('10.0.0.5', 22),
+            ssh_user='ubuntu',
+            ssh_private_key=private_key_path,
+            ssh_proxy_jump=ssh_proxy_jump,
+        )
+
+        with pytest.raises(ValueError, match='Invalid'):
+            runner.ssh_base_command(
+                ssh_mode=command_runner.SshMode.NON_INTERACTIVE,
+                port_forward=None,
+                connect_timeout=None,
+            )
