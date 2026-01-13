@@ -553,8 +553,8 @@ export function Workspaces() {
     dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
 
     // Invalidate workspace-specific caches
-    dashboardCache.invalidateFunction(getWorkspaceClusters); // Invalidate all workspace clusters
-    dashboardCache.invalidateFunction(getWorkspaceManagedJobs); // Invalidate all workspace jobs
+    dashboardCache.invalidate(getClusters); // Invalidate all clusters
+    dashboardCache.invalidateFunction(getManagedJobs); // Invalidate all managed jobs
 
     setLoading(true);
     try {
