@@ -360,8 +360,8 @@ def test_cleanup_storage_returns_false_on_teardown_error(monkeypatch):
     assert serve_service.cleanup_storage('service: dummy') is False
 
 
-def test_cleanup_removes_missing_clusters(monkeypatch):
-    """Remove replicas whose clusters no longer exist."""
+def test_cleanup_skips_missing_clusters(monkeypatch):
+    """Skip replicas whose clusters no longer exist."""
     replicas = [
         _DummyReplicaInfo(1, 'missing-1'),
         _DummyReplicaInfo(2, 'missing-2'),
@@ -383,7 +383,7 @@ def test_cleanup_removes_missing_clusters(monkeypatch):
                         lambda *_args, **_kwargs: None)
 
     assert serve_service._cleanup('svc', pool=False) is False
-    assert sorted(removed) == [1, 2]
+    assert sorted(removed) == []
 
 
 def test_cleanup_terminates_replicas_success(monkeypatch):
