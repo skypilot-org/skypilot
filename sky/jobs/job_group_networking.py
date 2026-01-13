@@ -23,8 +23,10 @@ Design Goals:
 """
 import asyncio
 import enum
-import shlex
+import os
+import tempfile
 import textwrap
+import traceback
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from sky import clouds as sky_clouds
@@ -382,8 +384,6 @@ async def _start_k8s_dns_updater_on_node(
 
     try:
         # Upload script via rsync (DNS updater script is always long)
-        import os
-        import tempfile
         with tempfile.NamedTemporaryFile('w',
                                          prefix='sky_dns_updater_',
                                          delete=False) as f:
@@ -402,27 +402,35 @@ async def _start_k8s_dns_updater_on_node(
         finally:
             os.remove(local_script_path)
 
-        # Make executable, run in background, and verify - single RTT
-        run_and_verify_cmd = (
-            f'chmod +x {script_path} && '
-            f'(nohup {script_path} < /dev/null > {log_path} 2>&1 &) && '
-            f'sleep 0.1 && '
-            f'pgrep -f "{process_id}" > /dev/null && echo "running"')
+        # Make executable and run in background (same as pre-skylet version)
+        run_cmd = (f'chmod +x {script_path} && '
+                   f'(nohup {script_path} < /dev/null > {log_path} 2>&1 &) && '
+                   f'sleep 0.1')
         logger.info(f'Starting DNS updater in background (log: {log_path})...')
-        returncode, stdout, stderr = await loop.run_in_executor(
-            None, lambda: runner.run(
-                run_and_verify_cmd, stream_logs=False, require_outputs=True))
+        returncode, _, stderr = await loop.run_in_executor(
+            None,
+            lambda: runner.run(run_cmd, stream_logs=False, require_outputs=True)
+        )
 
-        if returncode != 0:
-            logger.error(f'Failed to start DNS updater: stderr={stderr}')
+        # Exit code 143 (SIGTERM) is expected from kubectl exec closing connection
+        # The background process continues running despite this
+        if returncode != 0 and returncode != 143:
+            logger.error(
+                f'Failed to start DNS updater: returncode={returncode}, stderr={stderr}'
+            )
             return False
+
+        # Verify the process started (separate command)
+        check_cmd = f'pgrep -f "{process_id}" > /dev/null && echo "running" || echo "not running"'
+        returncode, stdout, _ = await loop.run_in_executor(
+            None, lambda: runner.run(
+                check_cmd, stream_logs=False, require_outputs=True))
 
         status = stdout.strip() if stdout else 'unknown'
         logger.info(f'DNS updater status: {status}')
         return True
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Exception while starting DNS updater: {e}')
-        import traceback
         logger.error(traceback.format_exc())
         return False
 
