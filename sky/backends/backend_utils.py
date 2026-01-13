@@ -2614,6 +2614,10 @@ def _update_cluster_status(
                     handle, stream_logs=False)
 
                 if is_autostopping:
+                    logger.debug(
+                        f'The cluster {cluster_name!r} is abnormal '
+                        f'({init_reason}) but is definitely autostopping. '
+                        'Returning AUTOSTOPPING status.')
                     return _handle_autostopping_cluster(print_newline=True)
                 elif is_head_node_alive:
                     logger.debug(
