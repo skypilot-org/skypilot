@@ -191,6 +191,7 @@ def _create_virtual_instance(
         #SBATCH --wait-all-nodes=1
         # Let the job be terminated rather than requeued implicitly.
         #SBATCH --no-requeue
+        #SBATCH --time=1-00:00:00
         #SBATCH --cpus-per-task={int(resources["cpus"])}
         #SBATCH --mem={int(resources["memory"])}G
         {gpu_directive}
