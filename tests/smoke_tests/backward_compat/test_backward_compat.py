@@ -385,20 +385,6 @@ class TestBackwardCompatibility:
                 f'Skylet version 28 introduced breaking changes for '
                 f'user-specific exit codes.')
 
-        # TODO(job-groups): Investigate backward compatibility issues with
-        # load_dag_from_yaml_str. The test fails when current version uses
-        # load_dag_from_yaml_str but base version doesn't have it. Need to
-        # ensure the controller and server code paths are fully backward
-        # compatible when the function names change between versions.
-        # Skip unconditionally during JobGroup development to unblock other tests.
-        from sky.utils import dag_utils
-        has_job_group_support = hasattr(dag_utils, 'load_dag_from_yaml_str')
-        if has_job_group_support:
-            pytest.skip(
-                'Skipping test: current version has JobGroup support '
-                '(load_dag_from_yaml_str) which changes backward compatibility. '
-                'TODO(job-groups): Fix backward compatibility before merging.')
-
         managed_job_name = smoke_tests_utils.get_cluster_name()
 
         def launch_job(job_name: str, command: str):
