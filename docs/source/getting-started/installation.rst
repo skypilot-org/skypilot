@@ -1681,10 +1681,19 @@ Verda |community-badge|
 3. Create the file :code:`~/.verda/config.json` with the following contents:
 
 .. code-block:: shell
-  mkdir -p ~/.verda
-  echo { "client_id": "YOUR_CLIENT_ID", "client_secret": "YOUR_CLIENT_SECRET" } > ~/.verda/config.json
+
+      mkdir -p ~/.verda
+      echo { "client_id": "YOUR_CLIENT_ID", "client_secret": "YOUR_CLIENT_SECRET" } > ~/.verda/config.json
 
 4. Alternatively, you can set the environment variables :code:`VERDA_CLIENT_ID` and :code:`VERDA_CLIENT_SECRET`.
+5. To update your local catalog with Verda Cloud availability information, run the following command:
+
+.. code-block:: shell
+
+      uv run python -m sky.catalog.data_fetchers.fetch_verda
+
+6. You are all set! Verda Cloud does not require any additional setup or dependencies.
+
 
 .. _docker-image:
 
