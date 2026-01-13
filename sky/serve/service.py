@@ -248,10 +248,10 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
     def _read_yaml_if_exists(yaml_path: Optional[str]) -> Optional[str]:
         if yaml_path is None:
             return None
-        expanded_path = os.path.expanduser(yaml_path)
-        if not os.path.exists(expanded_path):
+        try:
+            return _read_yaml_content(yaml_path)
+        except FileNotFoundError:
             return None
-        return _read_yaml_content(expanded_path)
 
     def _resolve_yaml_content(
             version: int,
