@@ -1457,6 +1457,16 @@ def _format_job_details(*, job: Dict[str, Any],
         job['details'] = None
 
 
+def _populate_job_records_from_handles(
+        jobs_with_handle: List[Dict[str, Any]]) -> None:
+    """Populate the job records from the handles."""
+    for job_with_handle in jobs_with_handle:
+        _populate_job_record_from_handle(
+            job=job_with_handle['job'],
+            cluster_name=job_with_handle['cluster_name'],
+            handle=job_with_handle['handle'])
+
+
 def _populate_job_record_from_handle(
         *, job: Dict[str, Any], cluster_name: str,
         handle: 'backends.CloudVmRayResourceHandle') -> None:
@@ -1559,6 +1569,7 @@ def get_managed_job_queue(
         highest_blocking_priority = (
             managed_job_state.get_managed_jobs_highest_priority())
 
+    jobs_with_handle = []
     for job in jobs:
         if not fields or 'job_duration' in fields:
             end_at = job['end_at']
@@ -1591,9 +1602,11 @@ def get_managed_job_queue(
             handle = cluster_name_to_handle.get(
                 cluster_name, None) if cluster_name is not None else None
             if isinstance(handle, backends.CloudVmRayResourceHandle):
-                _populate_job_record_from_handle(job=job,
-                                                 cluster_name=cluster_name,
-                                                 handle=handle)
+                jobs_with_handle.append({
+                    'job': job,
+                    'handle': handle,
+                    'cluster_name': cluster_name,
+                })
             else:
                 # FIXME(zongheng): display the last cached values for these.
                 job['cluster_resources'] = '-'
@@ -1604,6 +1617,9 @@ def get_managed_job_queue(
                 job['infra'] = '-'
                 job['labels'] = None
 
+    _populate_job_records_from_handles(jobs_with_handle)
+
+    for job in jobs:
         if not fields or 'details' in fields:
             _format_job_details(
                 job=job, highest_blocking_priority=highest_blocking_priority)
