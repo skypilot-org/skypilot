@@ -1165,6 +1165,7 @@ def test_volumes_on_kubernetes():
             smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
+                f'kubectl delete pvc existing0 --ignore-not-found && '
                 f'kubectl create -f - <<EOF\n'
                 f'apiVersion: v1\n'
                 f'kind: PersistentVolumeClaim\n'
@@ -1178,24 +1179,38 @@ def test_volumes_on_kubernetes():
                 f'      storage: 1Gi\n'
                 f'EOF',
             ),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, 'end=$((SECONDS+60)); '
+                'while [ $SECONDS -lt $end ]; do '
+                'if kubectl get pvc existing0; then exit 0; fi; '
+                'sleep 1; '
+                'done; exit 1'),
             f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB',
             f'sky volumes apply -y -n existing0 --type k8s-pvc --size 2GB --use-existing',
             f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "pvc0" && echo "$vols" | grep "existing0"',
             f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "{name}"',
-            f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing0 -y',
+            # Test volume mounting warning on relaunch with new volume
+            # Create a new volume pvc1
+            f'sky volumes apply -y -n pvc1 --type k8s-pvc --size 2GB',
+            # Launch with the new volume - should show warning that pvc1 and /mnt/data4 won't be mounted
+            f's=$(sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume_with_new.yaml 2>&1 | tee /dev/stderr) && echo "$s" | grep -i "WARNING: New ephemeral volume(s) with path /mnt/data4 and new volume(s) pvc1 specified in task but not mounted"',
+            f'sky logs {name} 2 --status',  # Ensure the second job succeeded.
+            f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing0 pvc1 -y',
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi',
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then echo "existing0 not deleted" && exit 1; else echo "existing0 deleted"; fi',
+            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "pvc1"); if [ -n "$vol" ]; then echo "pvc1 not deleted" && exit 1; else echo "pvc1 deleted"; fi',
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "{name}"); if [ -n "$vol" ]; then echo "ephemeral volume for cluster {name} not deleted" && exit 1; else echo "ephemeral volume for cluster {name} deleted"; fi',
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
                 'pvcs=$(kubectl get pvc) && echo "$pvcs" && pvc=$(echo "$pvcs" | grep "pvc0"); if [ -n "$pvc" ]; then echo "pvc for volume pvc0 not deleted" && exit 1; else echo "pvc for volume pvc0 deleted"; fi && '
                 'pvc=$(echo "$pvcs" | grep "existing0"); if [ -n "$pvc" ]; then echo "pvc for volume existing0 not deleted" && exit 1; else echo "pvc for volume existing0 deleted"; fi && '
+                'pvc=$(echo "$pvcs" | grep "pvc1"); if [ -n "$pvc" ]; then echo "pvc for volume pvc1 not deleted" && exit 1; else echo "pvc for volume pvc1 deleted"; fi && '
                 f'pvc=$(echo "$pvcs" | grep "{name}"); if [ -n "$pvc" ]; then echo "pvc for ephemeral volume of cluster {name} not deleted" && exit 1; else echo "pvc for ephemeral volume of cluster {name} deleted"; fi',
             ),
         ],
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} && vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then sky volumes delete existing0 -y; fi && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then sky volumes delete pvc0 -y; fi',
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} && vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then sky volumes delete existing0 -y; fi && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then sky volumes delete pvc0 -y; fi && vol=$(echo "$vols" | grep "pvc1"); if [ -n "$vol" ]; then sky volumes delete pvc1 -y; fi',
     )
     smoke_tests_utils.run_one_test(test)
 

@@ -31,6 +31,7 @@ const DEFAULT_FIELDS = [
   'pool_hash',
   'details',
   'failure_reason',
+  'links',
 ];
 
 export async function getManagedJobs(options = {}) {
@@ -214,6 +215,7 @@ export async function getManagedJobs(options = {}) {
         dag_yaml: job.user_yaml,
         entrypoint: job.entrypoint,
         git_commit: job.metadata?.git_commit || '-',
+        links: job.links || {},
         pool: job.pool,
         pool_hash: job.pool_hash,
         current_cluster_name: job.current_cluster_name,

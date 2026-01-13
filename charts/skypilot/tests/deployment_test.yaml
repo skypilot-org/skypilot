@@ -188,6 +188,25 @@ tests:
       - failedTemplate:
           errorMessage: "Local storage is not supported when using RollingUpdate strategy. Use recreate upgrade strategy or set storage.enabled to false."
 
+  - it: should honor fullnameOverride for deployment names and labels
+    set:
+      fullnameOverride: custom-fullname
+    asserts:
+      - equal:
+          path: metadata.name
+          value: custom-fullname-api-server
+      - equal:
+          path: spec.selector.matchLabels.app
+          value: custom-fullname-api
+      - equal:
+          path: spec.template.metadata.labels.app
+          value: custom-fullname-api
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_RELEASE_NAME
+            value: custom-fullname
+
   # Test cases for dbConnectionSecretName configuration
   - it: should set database connection environment variable from secret
     set:

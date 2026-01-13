@@ -49,7 +49,7 @@ repos:
             - types-aiofiles
             - types-PyYAML
             - types-requests<2.31  # Match the condition in requirements.txt
-            - types-setuptools
+            - types-setuptools<80.9  # Match the condition in requirements-dev.txt
             - types-cachetools
             - types-pyvmomi
             - types-paramiko
@@ -83,3 +83,21 @@ repos:
     rev: v0.1.30  # Match the version from requirements
     hooks:
     -   id: helmlint
+
+-   repo: local
+    hooks:
+    -   id: dashboard-lint
+        name: dashboard lint
+        entry: bash -c 'cd sky/dashboard && npm run lint'
+        language: node
+        language_version: 24.12.0
+        files: ^sky/dashboard/
+        pass_filenames: false
+
+    -   id: dashboard-format
+        name: dashboard format
+        entry: bash -c 'cd sky/dashboard && npm run format'
+        language: node
+        language_version: 24.12.0
+        files: ^sky/dashboard/
+        pass_filenames: false

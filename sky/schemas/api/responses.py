@@ -84,6 +84,8 @@ class APIHealthResponse(ResponseBaseModel):
     service_account_token_enabled: bool = False
     # Whether basic auth on ingress is enabled
     ingress_basic_auth_enabled: bool = False
+    # Latest version info (if available)
+    latest_version: Optional[str] = None
 
 
 class StatusResponse(ResponseBaseModel):
@@ -205,6 +207,7 @@ class ManagedJobRecord(ResponseBaseModel):
     job_id_on_pool_cluster: Optional[int] = None
     accelerators: Optional[Dict[str, int]] = None
     labels: Optional[Dict[str, str]] = None
+    links: Optional[Dict[str, str]] = None
 
 
 class VolumeRecord(ResponseBaseModel):

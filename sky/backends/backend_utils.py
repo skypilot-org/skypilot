@@ -906,6 +906,13 @@ def write_cluster_config(
     is_custom_docker = ('true' if to_provision.extract_docker_image()
                         is not None else 'false')
 
+    # Check if the cluster name is a controller name.
+    is_remote_controller = False
+    controller = controller_utils.Controllers.from_name(
+        cluster_name, expect_exact_match=False)
+    if controller is not None:
+        is_remote_controller = True
+
     # Here, if users specify the controller to be high availability, we will
     # provision a high availability controller. Whether the cloud supports
     # this feature has been checked by
@@ -1037,7 +1044,8 @@ def write_cluster_config(
                 # Authentication (optional).
                 **auth_config,
 
-                # High availability
+                # Controller specific configs
+                'is_remote_controller': is_remote_controller,
                 'high_availability': high_availability_specified,
 
                 # Volume mounts
@@ -3309,6 +3317,29 @@ def refresh_cluster_records() -> None:
                                          cluster_names_without_launch_request)
 
 
+def _get_records_with_handle(
+        records: List[Optional[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """Filter for records that have a handle"""
+    return [
+        record for record in records
+        if record is not None and record['handle'] is not None
+    ]
+
+
+def _update_records_with_handle_info(records_with_handle: List[Dict[str, Any]],
+                                     summary_response: bool = False) -> None:
+    """Add resource str to record"""
+    for record in records_with_handle:
+        handle = record['handle']
+        resource_str_simple, resource_str_full = (
+            resources_utils.get_readable_resources_repr(handle,
+                                                        simplified_only=False))
+        record['resources_str'] = resource_str_simple
+        record['resources_str_full'] = resource_str_full
+        if not summary_response:
+            record['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
+
+
 def get_clusters(
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
@@ -3386,27 +3417,6 @@ def get_clusters(
             clusters_str = ', '.join(not_found_clusters)
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
 
-    def _get_records_with_handle(
-            records: List[Optional[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-        """Filter for records that have a handle"""
-        return [
-            record for record in records
-            if record is not None and record['handle'] is not None
-        ]
-
-    def _update_records_with_handle_info(
-            records: List[Optional[Dict[str, Any]]]) -> None:
-        """Add resource str to record"""
-        for record in _get_records_with_handle(records):
-            handle = record['handle']
-            resource_str_simple, resource_str_full = (
-                resources_utils.get_readable_resources_repr(
-                    handle, simplified_only=False))
-            record['resources_str'] = resource_str_simple
-            record['resources_str_full'] = resource_str_full
-            if not summary_response:
-                record['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
-
     def _update_records_with_credentials(
             records: List[Optional[Dict[str, Any]]]) -> None:
         """Add the credentials to the record.
@@ -3479,7 +3489,8 @@ def get_clusters(
                 record.pop('handle', None)
 
     # Add handle info to the records
-    _update_records_with_handle_info(records)
+    _update_records_with_handle_info(_get_records_with_handle(records),
+                                     summary_response=summary_response)
     if include_credentials:
         _update_records_with_credentials(records)
     if refresh == common.StatusRefreshMode.NONE:
@@ -3509,7 +3520,9 @@ def get_clusters(
         # e.g. all the Pods of a cluster on Kubernetes have been
         # deleted before refresh.
         if record is not None and 'error' not in record:
-            _update_records_with_handle_info([record])
+            if record['handle'] is not None:
+                _update_records_with_handle_info(
+                    [record], summary_response=summary_response)
             if include_credentials:
                 _update_records_with_credentials([record])
             progress.update(task, advance=1)
