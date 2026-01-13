@@ -201,6 +201,31 @@ def _profile_exists(profile_name: str) -> bool:
     return False
 
 
+def _validate_credentials(access_key: str, secret_key: str) -> bool:
+    """Validate Tigris credentials by making an API call.
+
+    Args:
+        access_key: The Tigris access key (tid_...).
+        secret_key: The Tigris secret key (tsec_...).
+
+    Returns:
+        True if the credentials are valid, False otherwise.
+    """
+    try:
+        test_client = boto3.client(
+            's3',
+            endpoint_url=ENDPOINT_URL,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name=DEFAULT_REGION,
+        )
+        # ListBuckets is a lightweight call to validate credentials
+        test_client.list_buckets()
+        return True
+    except Exception:  # pylint: disable=broad-except
+        return False
+
+
 def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     """Checks if the user has access credentials to Tigris Object Storage.
 
@@ -219,32 +244,63 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
         string on how to set them up.
     """
     profile_name = get_tigris_profile()
+    access_key = None
+    secret_key = None
+    credential_source = None
 
     # Check for the configured profile
     if profile_name and _profile_exists(profile_name):
-        return (True, None)
+        try:
+            profile_session = boto3.session.Session(profile_name=profile_name)
+            creds = profile_session.get_credentials()
+            if creds is not None:
+                frozen = creds.get_frozen_credentials()
+                access_key = frozen.access_key
+                secret_key = frozen.secret_key
+                credential_source = f'profile [{profile_name}]'
+        except Exception:  # pylint: disable=broad-except
+            pass
 
     # Check for Tigris SDK environment variables
-    tigris_access, tigris_secret = _get_tigris_sdk_env_credentials()
-    if _has_tigris_keys(tigris_access, tigris_secret):
-        return (True, None)
+    if access_key is None:
+        tigris_access, tigris_secret = _get_tigris_sdk_env_credentials()
+        if _has_tigris_keys(tigris_access, tigris_secret):
+            access_key = tigris_access
+            secret_key = tigris_secret
+            credential_source = 'Tigris SDK environment variables'
 
     # Check for Tigris keys in AWS environment variables
-    env_access = os.environ.get('AWS_ACCESS_KEY_ID')
-    env_secret = os.environ.get('AWS_SECRET_ACCESS_KEY')
-    if _has_tigris_keys(env_access, env_secret):
-        return (True, None)
+    if access_key is None:
+        env_access = os.environ.get('AWS_ACCESS_KEY_ID')
+        env_secret = os.environ.get('AWS_SECRET_ACCESS_KEY')
+        if _has_tigris_keys(env_access, env_secret):
+            access_key = env_access
+            secret_key = env_secret
+            credential_source = 'AWS environment variables'
 
     # Check default credentials chain for Tigris keys
-    try:
-        test_session = boto3.session.Session()
-        creds = test_session.get_credentials()
-        if creds is not None:
-            frozen = creds.get_frozen_credentials()
-            if _has_tigris_keys(frozen.access_key, frozen.secret_key):
-                return (True, None)
-    except Exception:  # pylint: disable=broad-except
-        pass
+    if access_key is None:
+        try:
+            test_session = boto3.session.Session()
+            creds = test_session.get_credentials()
+            if creds is not None:
+                frozen = creds.get_frozen_credentials()
+                if _has_tigris_keys(frozen.access_key, frozen.secret_key):
+                    access_key = frozen.access_key
+                    secret_key = frozen.secret_key
+                    credential_source = 'default credentials chain'
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+    # Validate credentials if found
+    if access_key and secret_key:
+        if _validate_credentials(access_key, secret_key):
+            return (True, None)
+        else:
+            # Credentials found but invalid
+            hint = (f'Tigris credentials from {credential_source} are invalid. '
+                    'Please check your access key and secret key.')
+            return (False, hint)
 
     # No Tigris credentials found, provide hints
     hints = (
