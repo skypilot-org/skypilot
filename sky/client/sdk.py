@@ -2817,6 +2817,7 @@ def slurm_node_info(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(27)
 @annotations.client_api
 def create_debug_dump(
     request_ids: Optional[List[str]] = None,
@@ -2855,6 +2856,7 @@ def create_debug_dump(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(27)
 @annotations.client_api
 def download_debug_dump(dump_filename: str,
                         local_path: Optional[str] = None) -> str:
@@ -2890,6 +2892,7 @@ def download_debug_dump(dump_filename: str,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(27)
 @annotations.client_api
 def list_debug_dumps() -> List[Dict[str, Any]]:
     """List available debug dumps on the server.
