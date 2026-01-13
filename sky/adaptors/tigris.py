@@ -152,7 +152,7 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     2. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
     3. The default AWS credentials chain
 
-    Tigris keys have distinctive prefixes: tid_ for access key, tsec_ for secret.
+    Tigris keys have distinctive prefixes: tid_ (access key), tsec_ (secret).
 
     Returns:
         A tuple of a boolean value and a hint message where the bool
@@ -182,15 +182,17 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
         pass
 
     # No Tigris credentials found, provide hints
-    hints = ('Tigris credentials not found. Tigris keys start with tid_/tsec_.\n'
-             f'{_INDENT_PREFIX}You can configure them via:\n'
-             f'{_INDENT_PREFIX}Option 1: Create a [tigris] profile:\n'
-             f'{_INDENT_PREFIX}  $ aws configure --profile tigris\n'
-             f'{_INDENT_PREFIX}Option 2: Set environment variables:\n'
-             f'{_INDENT_PREFIX}  $ export AWS_ACCESS_KEY_ID=tid_...\n'
-             f'{_INDENT_PREFIX}  $ export AWS_SECRET_ACCESS_KEY=tsec_...\n'
-             f'{_INDENT_PREFIX}For more info: '
-             'https://www.tigrisdata.com/docs/sdks/s3/aws-cli/')
+    hints = (
+        'Tigris credentials not found. Tigris keys start with tid_/tsec_.\n'
+        f'{_INDENT_PREFIX}You can configure them via:\n'
+        f'{_INDENT_PREFIX}Option 1: Create a [tigris] profile:\n'
+        f'{_INDENT_PREFIX}  $ pip install "skypilot[tigris]"\n'
+        f'{_INDENT_PREFIX}  $ aws configure --profile tigris\n'
+        f'{_INDENT_PREFIX}Option 2: Set environment variables:\n'
+        f'{_INDENT_PREFIX}  $ export AWS_ACCESS_KEY_ID=tid_...\n'
+        f'{_INDENT_PREFIX}  $ export AWS_SECRET_ACCESS_KEY=tsec_...\n'
+        f'{_INDENT_PREFIX}For more info: '
+        'https://www.tigrisdata.com/docs/sdks/s3/aws-cli/')
 
     return (False, hints)
 
@@ -198,14 +200,13 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
 def tigris_profile_in_aws_cred() -> bool:
     """Checks if Tigris profile is set in aws credentials"""
     cred_path = os.path.expanduser('~/.aws/credentials')
-    tigris_profile_exists = False
-    if os.path.isfile(cred_path):
-        with open(cred_path, 'r', encoding='utf-8') as file:
-            for line in file:
-                if f'[{TIGRIS_PROFILE_NAME}]' in line:
-                    tigris_profile_exists = True
-                    break
-    return tigris_profile_exists
+    if not os.path.isfile(cred_path):
+        return False
+    with open(cred_path, 'r', encoding='utf-8') as file:
+        for line in file:
+            if line.strip() == f'[{TIGRIS_PROFILE_NAME}]':
+                return True
+    return False
 
 
 def get_credential_file_mounts() -> Dict[str, str]:
