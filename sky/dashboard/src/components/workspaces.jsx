@@ -547,6 +547,27 @@ export function Workspaces() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
+  const handleRefresh = useCallback(async () => {
+    // Invalidate cache to ensure fresh data is fetched
+    dashboardCache.invalidate(getWorkspaces);
+    dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
+
+    // Invalidate workspace-specific caches
+    dashboardCache.invalidate(getClusters); // Invalidate all clusters
+    dashboardCache.invalidateFunction(getManagedJobs); // Invalidate all managed jobs
+
+    setLoading(true);
+    try {
+      await apiClient.fetch('/check', {}, 'POST');
+      await fetchData({ showLoadingIndicators: false });
+      setLastFetchedTime(new Date());
+    } catch (error) {
+      console.error('Error during sky check refresh:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchData]);
+
   // Intercept Cmd+R / Ctrl+R to trigger in-app refresh instead of browser reload
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -666,27 +687,6 @@ export function Workspaces() {
       setTopLevelError(error);
     }
   };
-
-  const handleRefresh = useCallback(async () => {
-    // Invalidate cache to ensure fresh data is fetched
-    dashboardCache.invalidate(getWorkspaces);
-    dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
-
-    // Invalidate workspace-specific caches
-    dashboardCache.invalidateFunction(getWorkspaceClusters); // Invalidate all workspace clusters
-    dashboardCache.invalidateFunction(getWorkspaceManagedJobs); // Invalidate all workspace jobs
-
-    setLoading(true);
-    try {
-      await apiClient.fetch('/check', {}, 'POST');
-      await fetchData({ showLoadingIndicators: false });
-      setLastFetchedTime(new Date());
-    } catch (error) {
-      console.error('Error during sky check refresh:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [fetchData]);
 
   const handleCancelDelete = () => {
     setDeleteState({
