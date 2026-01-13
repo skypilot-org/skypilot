@@ -5253,21 +5253,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 idle_minutes_to_autostop=idle_minutes_to_autostop,
                 down=down)
 
-    def refresh_autostop_status(
-            self,
-            handle: CloudVmRayResourceHandle,
-            stream_logs: bool = True) -> Optional[status_lib.ClusterStatus]:
+    def is_definitely_autostopping(self,
+                                   handle: CloudVmRayResourceHandle,
+                                   stream_logs: bool = True) -> bool:
         """Check if the cluster is autostopping.
 
         Returns:
-            ClusterStatus.AUTOSTOPPING if the cluster is autostopping or
-            autodowning, None if the cluster is not in an autostop process or
-            cannot be checked.
+            True if the cluster is definitely autostopping. It is possible
+            that the cluster is still autostopping when False is returned,
+            due to errors like transient network issues.
         """
         if handle.head_ip is None:
             # The head node of the cluster is not UP or in an abnormal state.
             # We cannot check if the cluster is autostopping.
-            return None
+            return False
 
         is_autostopping = False
 
@@ -5282,7 +5281,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # The cluster may have been terminated, causing the gRPC call
                 # to timeout and fail.
                 logger.debug(f'Failed to check if cluster is autostopping: {e}')
-                return None
+                return False
         else:
             code = autostop_lib.AutostopCodeGen.is_autostopping()
             returncode, stdout, stderr = self.run_on_head(
@@ -5293,23 +5292,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 logger.debug('Failed to check if cluster is autostopping with '
                              f'{returncode}: {stdout+stderr}\n'
                              f'Command: {code}')
-                return None
+                return False
 
-        if is_autostopping:
-            return status_lib.ClusterStatus.AUTOSTOPPING
-        return None
-
-    def is_definitely_autostopping(self,
-                                   handle: CloudVmRayResourceHandle,
-                                   stream_logs: bool = True) -> bool:
-        """Check if the cluster is autostopping.
-
-        Returns:
-            True if the cluster is definitely autostopping. It is possible
-            that the cluster is still autostopping when False is returned,
-            due to errors like transient network issues.
-        """
-        return self.refresh_autostop_status(handle, stream_logs) is not None
+        return is_autostopping
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
