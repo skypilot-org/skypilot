@@ -149,7 +149,7 @@ def run_instances(
             instance_data = {
                 'instance_type': instance_type,
                 'hostname': f'{cluster_name_on_cloud}-{node_type}',
-                'location': region,
+                'location_code': region,
                 'is_spot': is_spot if is_spot is not None else False,
                 'contract': 'PAY_AS_YOU_GO' if not is_spot else 'SPOT',
                 'image': image,
@@ -160,6 +160,8 @@ def run_instances(
                     'size': disk_size,
                 }
             }
+            print(instance_data)
+            print("Launching in Verda Cloud..., region: ", region)
             response = verda.instance_create(instance_data)
             instance_id = response.instance_id
         except Exception as e:  # pylint: disable=broad-except

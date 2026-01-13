@@ -2,12 +2,17 @@
 
 import json
 import time
+import typing
 from typing import List, Optional
 
-import requests
-
+from sky.adaptors import common as adaptors_common
 from sky.adaptors.verda import get_verda_configuration
 from sky.catalog import common as catalog_common
+
+if typing.TYPE_CHECKING:
+    import requests
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 TOKEN_ENDPOINT = '/oauth2/token'
 CLIENT_CREDENTIALS = 'client_credentials'
@@ -53,7 +58,7 @@ class APIException(Exception):
         if self.code:
             msg = f'error code: {self.code}\n'
 
-        msg += f'message: {self.message}'
+        msg += f'messagexxxx: {self.message}xxx'
         return msg
 
 
@@ -168,8 +173,11 @@ class AuthenticationService:
         client_id_truncated = self._client_id[:10]
         headers = {
             'User-Agent': f'datacrunch-python-{client_id_truncated}',
-            'Authorization': f'Bearer {self._access_token}'
         }
+
+        if hasattr(self, '_access_token') and self._access_token:
+            headers['Authorization'] = f'Bearer {self._access_token}'
+
         return headers
 
     def is_expired(self) -> bool:
@@ -439,8 +447,9 @@ class Instance:
     def __init__(self, data) -> None:
         self.instance_id = data['id']
         self.status = data['status']
-        self.ip = data.get('ip')
         self.hostname = data['hostname']
+        # For not yet provisioned instances, ip is not available
+        self.ip = data.get('ip')
 
 
 class SSHKey:
@@ -453,8 +462,8 @@ class SSHKey:
         :type id: dict
         """
         self.id = data['id']
-        self.name = data.get('name')
-        self.public_key = data.get('public_key')
+        self.name = data['name']
+        self.public_key = data['key']
 
 
 class VerdaClient:

@@ -314,9 +314,13 @@ class Verda(clouds.Cloud):
         configured, error, _ = get_verda_configuration()
         return configured, error
 
+    @property
+    def name(self):
+        return 'verda'
+
     def get_credential_file_mounts(self) -> Dict[str, str]:
         if os.path.exists(self.CREDENTIALS_PATH):
-            return {f'{self.CREDENTIALS_PATH}': f'{self.CREDENTIALS_PATH}'}
+            return {f'{self.CREDENTIALS_PATH}': '~/.verda/config.json'}
         return {}
 
     @classmethod
