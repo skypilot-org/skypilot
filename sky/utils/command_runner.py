@@ -107,10 +107,13 @@ def _is_skypilot_managed_key(key_path: str) -> bool:
     return len(parts) >= 2 and parts[-1] == 'sky-key' and parts[-2] == 'ssh'
 
 
-# Disable sudo for root user. This is useful when the command is running in a
-# docker container, i.e. image_id is a docker image.
+# Define sudo as a passthrough function if running as root or if sudo doesn't
+# exist. This is useful when the command is running in a docker container
+# (i.e. image_id is a docker image) which may run as root or may not have sudo
+# installed.
 ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD = (
-    '{ [ "$(whoami)" == "root" ] && function sudo() { "$@"; } || true; }')
+    '{ if [ "$(whoami)" == "root" ] || ! command -v sudo >/dev/null 2>&1; '
+    'then function sudo() { "$@"; }; fi; }')
 
 
 def _proxyjump_to_proxycommand(proxy_jump: str,

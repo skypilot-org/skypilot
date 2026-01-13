@@ -664,9 +664,24 @@ available_node_types:
               {%- endif %}
 
               # Helper function to conditionally use sudo
-              # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
-              prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
-              [ $(id -u) -eq 0 ] && function sudo() { "$@"; } || true;
+              # Returns "sudo" only if we're non-root AND sudo exists,
+              # otherwise returns empty string (either we're root or sudo is unavailable)
+              prefix_cmd() {
+                if [ $(id -u) -ne 0 ]; then
+                  if command -v sudo >/dev/null 2>&1; then
+                    echo "sudo"
+                  else
+                    echo ""
+                  fi
+                else
+                  echo ""
+                fi
+              }
+              # Define sudo as a passthrough function if we're root OR sudo doesn't exist.
+              # This avoids "sudo: command not found" errors in images without sudo.
+              if [ $(id -u) -eq 0 ] || ! command -v sudo >/dev/null 2>&1; then
+                function sudo() { "$@"; }
+              fi
 
               STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
 

@@ -308,8 +308,15 @@ def launch(
     # TODO(zhwu): keep this align with setups in
     # `provision.kuberunetes.instance.py`
     setup_cmd = (
-        'prefix_cmd() '
-        '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
+        # Define prefix_cmd to return "sudo" only if non-root AND sudo exists
+        'prefix_cmd() { '
+        'if [ $(id -u) -ne 0 ]; then '
+        'if command -v sudo >/dev/null 2>&1; then echo "sudo"; '
+        'else echo ""; fi; '
+        'else echo ""; fi; }; '
+        # Define sudo as passthrough if root OR sudo doesn't exist
+        'if [ $(id -u) -eq 0 ] || ! command -v sudo >/dev/null 2>&1; then '
+        'function sudo() { "$@"; }; fi; '
         '$(prefix_cmd) apt update;'
         'export DEBIAN_FRONTEND=noninteractive;'
         '$(prefix_cmd) apt install openssh-server rsync curl patch -y;'

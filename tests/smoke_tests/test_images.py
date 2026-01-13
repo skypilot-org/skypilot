@@ -568,6 +568,45 @@ def test_kubernetes_docker_image_and_ssh():
         os.unlink(unprefixed_yaml_path)
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_custom_image_without_sudo():
+    """Test K8s docker images without sudo installed.
+
+    This test verifies that SkyPilot can work with Docker images that don't
+    have sudo installed (like nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1).
+    The fix involves making prefix_cmd() check if sudo exists before using it,
+    and defining a sudo passthrough function when sudo is not available.
+
+    See: https://github.com/skypilot-org/skypilot/issues/8566
+    """
+    # Use the NVIDIA dynamo image which is known to not have sudo installed
+    image_name = 'nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1'
+    docker_prefixed_image_id = f'docker:{image_name}'
+    run_command = 'echo hello world'
+
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'test_kubernetes_custom_image_without_sudo',
+        [
+            # Launch with the image that doesn't have sudo
+            f'sky launch -c {name} --retry-until-up -y '
+            f'--cpus 2+ --memory 2+ '
+            f'--infra kubernetes '
+            f'--image-id {docker_prefixed_image_id} "{run_command}"',
+            f'sky logs {name} 1 --status',
+            # Ensure SSH config is updated and SSH works
+            'sky status',
+            f'ssh {name} -- "{run_command}" | grep "hello world"',
+            # Execute another command to verify the cluster is usable
+            f'sky exec {name} "echo success"',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.fixture
 def private_docker_registry_setup(request):
     """Fixture to setup private docker registry test environment.

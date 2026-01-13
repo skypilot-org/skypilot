@@ -749,8 +749,15 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
         'echo "apt update complete."; ')
 
     install_ssh_k8s_cmd = (
-        'prefix_cmd() '
-        '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
+        # Define prefix_cmd to return "sudo" only if non-root AND sudo exists
+        'prefix_cmd() { '
+        'if [ $(id -u) -ne 0 ]; then '
+        'if command -v sudo >/dev/null 2>&1; then echo "sudo"; '
+        'else echo ""; fi; '
+        'else echo ""; fi; }; '
+        # Define sudo as passthrough if root OR sudo doesn't exist
+        'if [ $(id -u) -eq 0 ] || ! command -v sudo >/dev/null 2>&1; then '
+        'function sudo() { "$@"; }; fi; '
         'export DEBIAN_FRONTEND=noninteractive;'
         'echo "Installing missing packages..."; '
         'for i in {1..5}; do '
