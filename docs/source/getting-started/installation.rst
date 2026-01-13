@@ -1568,23 +1568,28 @@ Tigris
 ~~~~~~
 
 `Tigris <https://www.tigrisdata.com/>`__ is a globally distributed, S3-compatible object storage with zero egress fees.
-SkyPilot can download/upload data to Tigris buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Tigris support:
+SkyPilot can download/upload data to Tigris buckets and mount them as local filesystem on clusters launched by SkyPilot.
 
-Tigris uses the standard AWS credentials format. Run the following command to configure your Tigris credentials:
+Tigris uses standard AWS credentials format. You can configure credentials in one of three ways:
+
+**Option 1: Use a dedicated tigris profile (recommended)**
 
 .. code-block:: shell
 
-  # Configure your Tigris credentials using the 'tigris' profile
   aws configure --profile tigris
 
-In the prompt, enter your Tigris Access Key ID and Secret Access Key (see `Tigris documentation <https://www.tigrisdata.com/docs/sdks/s3/aws-cli/>`_ to generate credentials). For the region, enter :code:`auto` and for the output format, enter :code:`json`.
+**Option 2: Use environment variables**
 
-.. code-block:: text
+.. code-block:: shell
 
-  AWS Access Key ID [None]: <your_tigris_access_key_id>
-  AWS Secret Access Key [None]: <your_tigris_secret_access_key>
-  Default region name [None]: auto
-  Default output format [None]: json
+  export AWS_ACCESS_KEY_ID=<your_tigris_access_key_id>
+  export AWS_SECRET_ACCESS_KEY=<your_tigris_secret_access_key>
+
+**Option 3: Use the default AWS credentials**
+
+If you have AWS credentials configured, SkyPilot will use them with Tigris's endpoint.
+
+When prompted for credentials, enter your Tigris Access Key ID and Secret Access Key (see `Tigris documentation <https://www.tigrisdata.com/docs/sdks/s3/aws-cli/>`_ to generate credentials). For the region, enter :code:`auto`.
 
 .. note::
 

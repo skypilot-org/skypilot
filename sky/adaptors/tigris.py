@@ -47,14 +47,23 @@ def get_tigris_credentials(boto3_session):
 
 @annotations.lru_cache(scope='global')
 def session():
-    """Create an AWS session for Tigris."""
+    """Create an AWS session for Tigris.
+
+    First tries the 'tigris' profile, then falls back to the default
+    credentials chain (environment variables, default profile, etc.).
+    """
     # Creating the session object is not thread-safe for boto3,
     # so we add a reentrant lock to synchronize the session creation.
     # Reference: https://github.com/boto/boto3/issues/1592
     # However, the session object itself is thread-safe, so we are
     # able to use lru_cache() to cache the session object.
     with _session_creation_lock:
-        session_ = boto3.session.Session(profile_name=TIGRIS_PROFILE_NAME)
+        # Try tigris profile first if it exists
+        if tigris_profile_in_aws_cred():
+            session_ = boto3.session.Session(profile_name=TIGRIS_PROFILE_NAME)
+        else:
+            # Fall back to default credentials chain (env vars, default profile)
+            session_ = boto3.session.Session()
         return session_
 
 
@@ -127,27 +136,47 @@ def check_credentials(
 def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     """Checks if the user has access credentials to Tigris Object Storage.
 
+    Tigris credentials can be configured via:
+    1. A [tigris] profile in ~/.aws/credentials
+    2. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+    3. The default AWS credentials chain
+
     Returns:
         A tuple of a boolean value and a hint message where the bool
         is True when credentials needed for Tigris storage are set.
         It is False when they are not set, which would hint with a
         string on how to set them up.
     """
-    hints = None
-    if not tigris_profile_in_aws_cred():
-        hints = (f'[{TIGRIS_PROFILE_NAME}] profile is not set in '
-                 '~/.aws/credentials.')
-        hints += ' Run the following commands:'
-        hints += f'\n{_INDENT_PREFIX}  $ pip install boto3'
-        hints += (f'\n{_INDENT_PREFIX}  $ aws configure --profile '
-                  f'{TIGRIS_PROFILE_NAME}')
-        hints += (f'\n{_INDENT_PREFIX}    # Enter your Tigris Access Key ID '
-                  'and Secret Access Key')
-        hints += (f'\n{_INDENT_PREFIX}    # For region, enter: auto')
-        hints += f'\n{_INDENT_PREFIX}For more info: '
-        hints += 'https://www.tigrisdata.com/docs/sdks/s3/aws-cli/'
+    # Check for tigris profile first
+    if tigris_profile_in_aws_cred():
+        return (True, None)
 
-    return (False, hints) if hints else (True, hints)
+    # Check for environment variables
+    if (os.environ.get('AWS_ACCESS_KEY_ID') and
+            os.environ.get('AWS_SECRET_ACCESS_KEY')):
+        return (True, None)
+
+    # Check default credentials chain by trying to get credentials
+    try:
+        test_session = boto3.session.Session()
+        creds = test_session.get_credentials()
+        if creds is not None:
+            return (True, None)
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+    # No credentials found, provide hints
+    hints = ('Tigris credentials not found. You can configure them via:\n'
+             f'{_INDENT_PREFIX}Option 1: Create a [tigris] profile:\n'
+             f'{_INDENT_PREFIX}  $ aws configure --profile tigris\n'
+             f'{_INDENT_PREFIX}Option 2: Set environment variables:\n'
+             f'{_INDENT_PREFIX}  $ export AWS_ACCESS_KEY_ID=<your_key>\n'
+             f'{_INDENT_PREFIX}  $ export AWS_SECRET_ACCESS_KEY=<your_secret>\n'
+             f'{_INDENT_PREFIX}Option 3: Use the default AWS credentials\n'
+             f'{_INDENT_PREFIX}For more info: '
+             'https://www.tigrisdata.com/docs/sdks/s3/aws-cli/')
+
+    return (False, hints)
 
 
 def tigris_profile_in_aws_cred() -> bool:
