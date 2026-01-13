@@ -62,8 +62,8 @@ class LazyImport(types.ModuleType):
             try:
                 # Check if the submodule exists
                 if importlib_util.find_spec(submodule_name) is None:
-                    raise AttributeError(
-                        f'Module {self._module_name} has no attribute {name}')  # pylint: disable=raise-missing-from
+                    raise AttributeError(  # pylint: disable=raise-missing-from
+                        f'Module {self._module_name} has no attribute {name}')
             except (ValueError, ImportError):
                 # find_spec raises ValueError if the name is invalid
                 # (e.g. contains dots) or ImportError
