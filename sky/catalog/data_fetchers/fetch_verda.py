@@ -163,6 +163,8 @@ def _format_accelerator_name(gpu_model: str, gpu_memory_gb: float) -> str:
 
     Only A100 models need memory suffix (40GB/80GB) since there are two types.
     Other GPU models should not include memory in the name.
+    Also drop Tesla- prefix for Tesla GPUs,
+    as SkyPilot assumes all Tesla GPUs are named as "V100"
     """
     if not gpu_model:
         return ''
@@ -170,13 +172,23 @@ def _format_accelerator_name(gpu_model: str, gpu_memory_gb: float) -> str:
     # Normalize GPU model name for catalog format
     accelerator_name = gpu_model.replace(' ', '-')
 
-    # Only A100 needs memory suffix since there are two types (40GB and 80GB)
-    # Other models (B200, B300, H100, etc.) should not include memory
-    if accelerator_name.upper().startswith('A100') and gpu_memory_gb > 0:
-        # Check if memory is already in the name
-        if str(int(gpu_memory_gb)) not in accelerator_name:
-            accelerator_name = f'{accelerator_name}-{int(gpu_memory_gb)}GB'
+    # No need of "Tesla-" prefix for Tesla GPUs,
+    # as SkyPilot assumes all Tesla GPUs are named as "V100"
+    if accelerator_name.startswith('Tesla-'):
+        accelerator_name = accelerator_name.replace('Tesla-', '')
 
+    # Only A100 needs suffix if it 80GB, or else it is assumed it is 40GB
+    if accelerator_name.startswith('A100-'):
+        # Check if memory is already in the name
+        if gpu_memory_gb == 40:
+            accelerator_name = 'A100'
+        elif gpu_memory_gb == 80:
+            accelerator_name = 'A100-80GB'
+        else:
+            raise ValueError(f'Unsupported A100 memory: {gpu_memory_gb}')
+
+    if gpu_model != accelerator_name:
+        print(f'Accelerator name: {gpu_model} -> {accelerator_name}')
     return accelerator_name
 
 
@@ -195,8 +207,8 @@ def _build_gpu_info(accelerator_name: str, num_gpus: int,
     if num_gpus <= 0 or not accelerator_name or gpu_memory_gb <= 0:
         return ''
 
-    gpu_memory_mib = int(gpu_memory_gb * 1024)
-    total_gpu_memory_mib = gpu_memory_mib * num_gpus
+    total_gpu_memory_mib = gpu_memory_gb * 1024
+    gpu_memory_mib = int(total_gpu_memory_mib / num_gpus)
     gpu_info_dict = {
         'Gpus': [{
             'Name': accelerator_name,
@@ -313,7 +325,7 @@ def create_catalog(output_path: str) -> None:
                 # Extract and format GPU model
                 gpu_model = _extract_gpu_model(instance)
                 accelerator_name = _format_accelerator_name(
-                    gpu_model, gpu_memory_gb)
+                    gpu_model, int(gpu_memory_gb / num_gpus))
 
                 # Build GpuInfo JSON string
                 gpu_info = _build_gpu_info(accelerator_name, num_gpus,
