@@ -64,6 +64,8 @@ RSYNC_NO_OWNER_NO_GROUP_OPTION = '--no-owner --no-group'
 _HASH_MAX_LENGTH = 10
 _DEFAULT_CONNECT_TIMEOUT = 30
 
+DEFAULT_SSH_CONTROL_NAME = '__default__'
+
 # SSH authentication failure patterns to detect when interactive auth retry
 # is needed.
 _SSH_AUTH_FAILURE_PATTERNS = [
@@ -720,7 +722,7 @@ class SSHCommandRunner(CommandRunner):
         node: Tuple[str, int],
         ssh_user: str,
         ssh_private_key: Optional[str],
-        ssh_control_name: Optional[str] = '__default__',
+        ssh_control_name: Optional[str] = DEFAULT_SSH_CONTROL_NAME,
         ssh_proxy_command: Optional[str] = None,
         ssh_proxy_jump: Optional[str] = None,
         docker_user: Optional[str] = None,
