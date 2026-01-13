@@ -1181,6 +1181,7 @@ class SSHCommandRunner(CommandRunner):
             # This is more reliable than checking stderr, which may be empty
             # when ControlMaster or ProxyJump is used.
             has_auth_failure = False
+            ssh_log_content = ''
             if ssh_log_file is not None:
                 try:
                     with open(ssh_log_file, 'r', encoding='utf-8') as f:
