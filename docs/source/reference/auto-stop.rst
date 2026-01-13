@@ -189,59 +189,6 @@ customize the timeout in your YAML configuration:
 
 Common use cases for autostop hooks:
 
-.. dropdown:: Committing and pushing code changes
-
-    .. code-block:: yaml
-
-       resources:
-         autostop:
-           idle_minutes: 10
-           hook: |
-             cd my-code-base
-             git add .
-             git commit -m "Auto-commit before shutdown"
-             git push
-
-.. dropdown:: Saving model checkpoints to persistent storage
-
-    .. code-block:: yaml
-
-       resources:
-         autostop:
-           idle_minutes: 10
-           hook: |
-             # Save checkpoints to a mounted volume or cloud storage
-             cp -r /workspace/checkpoints/* /mnt/persistent-storage/checkpoints/
-             # Or upload to S3
-             aws s3 sync /workspace/checkpoints/ s3://my-bucket/checkpoints/
-
-.. dropdown:: Uploading logs or results to cloud storage
-
-    .. code-block:: yaml
-
-       resources:
-         autostop:
-           idle_minutes: 10
-           hook: |
-             # Upload logs to S3
-             aws s3 sync /workspace/logs/ s3://my-bucket/logs/$(date +%Y%m%d)/
-             # Or upload to GCS
-             gcloud storage cp -r /workspace/results/ gs://my-bucket/results/$(date +%Y%m%d)/
-
-.. dropdown:: Syncing W&B runs before shutdown
-
-    .. code-block:: yaml
-
-       resources:
-         autostop:
-           idle_minutes: 10
-           hook: |
-             # Sync W&B runs to the cloud before shutdown
-             # Sync all runs in the wandb directory
-             wandb sync ./wandb
-             # Or sync a specific run
-             # wandb sync ./wandb/run-20250813_124246-n67z9ude
-
 .. dropdown:: Sending notifications about the cluster shutdown
 
     .. code-block:: yaml
@@ -257,3 +204,27 @@ Common use cases for autostop hooks:
              curl -X POST -H 'Content-type: application/json' \
                --data '{"text":"Cluster shutting down after idle period"}' \
                https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+
+.. dropdown:: Triggering downstream workflows
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             # Trigger an evaluation pipeline in Airflow
+             curl -X POST https://airflow.example.com/api/v1/dags/model_eval/dag_runs \
+                  -H "Content-Type: application/json" \
+                  -d '{"conf": {"model_path": "s3://my-bucket/models/v1"}}'
+
+.. dropdown:: Pushing model to Hugging Face Hub
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             # Upload the trained model to Hugging Face Hub
+             huggingface-cli upload my-org/my-model /workspace/model-output .
