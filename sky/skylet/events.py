@@ -395,9 +395,9 @@ class HostUpdaterEvent(SkyletEvent):
     Manages the background host updater that resolves K8s service DNS names
     to IPs and updates /etc/hosts for JobGroup service discovery.
     """
-    # Check every 10 seconds for new DNS mappings
+    # Check every 2 seconds for new DNS mappings
     # This needs to be fast since the task setup waits for network to be ready
-    EVENT_INTERVAL_SECONDS = 10
+    EVENT_INTERVAL_SECONDS = 2
 
     def __init__(self):
         super().__init__()
