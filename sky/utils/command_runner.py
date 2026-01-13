@@ -146,6 +146,8 @@ def _proxyjump_to_proxycommand(proxy_jump: str,
     cmd = ['ssh']
     if ssh_log_file is not None:
         cmd += ['-E', ssh_log_file]
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            cmd += ['-v']
     if prev_hops:
         cmd += ['-J', ','.join(prev_hops)]
     user, host, port = parse_hop(last_hop)
@@ -908,14 +910,6 @@ class SSHCommandRunner(CommandRunner):
 
         See ssh_options_list for when ControlMaster is not enabled.
         """
-        # Remove -v flag to prevent hang when ControlMaster forks to background.
-        # With -v, SSH outputs verbose logs to stderr. When ControlMaster is
-        # enabled, it forks a background process that inherits stderr.
-        # This keeps the pipe open, blocking the stream reader forever.
-        # The -v flag was needed to detect auth failures in the initial attempt,
-        # but here we no longer need it.
-        command = [arg for arg in command if arg != '-v']
-
         extra_options = [
             # Override ControlPersist to reduce frequency of manual user
             # intervention. The default from ssh_options_list is only 5m.
@@ -1103,6 +1097,11 @@ class SSHCommandRunner(CommandRunner):
             port_forward=port_forward,
             connect_timeout=connect_timeout,
             ssh_log_file=ssh_log_file)
+        # base_ssh_command_without_debug_log = self.ssh_base_command(
+        #     ssh_mode=ssh_mode,
+        #     port_forward=port_forward,
+        #     connect_timeout=connect_timeout,
+        #     ssh_log_file=None)
 
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
