@@ -840,6 +840,13 @@ class CostReportBody(RequestBody):
     dashboard_summary_response: bool = False
 
 
+class CreateDebugDumpBody(RequestBody):
+    """The request body for the debug dump init endpoint."""
+    request_ids: Optional[List[str]] = None
+    cluster_names: Optional[List[str]] = None
+    managed_job_ids: Optional[List[int]] = None
+
+
 class RequestPayload(BasePayload):
     """The payload for the requests."""
 

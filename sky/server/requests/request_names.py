@@ -41,6 +41,8 @@ class RequestName(str, enum.Enum):
     # API requests
     API_CANCEL = 'api_cancel'
     ALL_CONTEXTS = 'all_contexts'
+    # Debug dump requests
+    CREATE_DEBUG_DUMP = 'create_debug_dump'
     # Managed jobs requests
     JOBS_LAUNCH = 'jobs.launch'
     JOBS_QUEUE = 'jobs.queue'

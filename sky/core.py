@@ -34,6 +34,7 @@ from sky.utils import admin_policy_utils
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import debug_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
@@ -1539,3 +1540,17 @@ def get_all_contexts() -> List[str]:
     # For now, assuming get_ssh_node_pool_contexts already returns them
     # in the desired format (e.g., 'ssh-my-cluster')
     return sorted(list(set(kube_contexts + ssh_contexts)))
+
+
+def create_debug_dump(request_ids: Optional[List[str]] = None,
+                      cluster_names: Optional[List[str]] = None,
+                      managed_job_ids: Optional[List[int]] = None) -> str:
+    """Initializes a debug dump."""
+    if not request_ids and not cluster_names and not managed_job_ids:
+        raise ValueError('At least one of request_ids, cluster_names, or '
+                         'managed_job_ids must be provided.')
+
+    debug_dump_path = debug_utils.create_debug_dump(request_ids, cluster_names,
+                                                    managed_job_ids)
+    logger.info(f'Debug dump created at {debug_dump_path}')
+    return str(debug_dump_path)

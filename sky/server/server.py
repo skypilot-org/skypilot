@@ -2403,6 +2403,25 @@ async def all_contexts(request: fastapi.Request) -> None:
     )
 
 
+@app.post('/debug/dump-create')
+async def create_debug_dump(
+        request: fastapi.Request,
+        create_debug_dump_body: payloads.CreateDebugDumpBody) -> None:
+    """Starts a debug dump."""
+
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.CREATE_DEBUG_DUMP,
+        request_body=create_debug_dump_body,
+        func=core.create_debug_dump,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
+
+
+# TODO: add new endpoint to stream debug dump to the client given the path from
+# create_debug_dump endpoint
+
+
 # === Internal APIs ===
 @app.get('/api/completion/cluster_name')
 async def complete_cluster_name(incomplete: str,) -> List[str]:
