@@ -4773,6 +4773,9 @@ class CoreWeaveStore(S3CompatibleStore):
 class TigrisStore(S3CompatibleStore):
     """TigrisStore inherits from S3CompatibleStore and represents the backend
     for Tigris Object Storage buckets.
+
+    Tigris uses standard s3:// URLs. Users specify `store: tigris` in their
+    YAML to route requests through Tigris's endpoint instead of AWS S3.
     """
 
     @classmethod
@@ -4780,10 +4783,11 @@ class TigrisStore(S3CompatibleStore):
         """Return the configuration for Tigris Object Storage."""
         return S3CompatibleConfig(
             store_type='TIGRIS',
-            url_prefix='tigris://',
+            # Tigris uses s3:// URLs - routing is done via store: tigris
+            url_prefix=None,
             client_factory=lambda region: data_utils.create_tigris_client(),
             resource_factory=lambda name: tigris.resource('s3').Bucket(name),
-            split_path=data_utils.split_tigris_path,
+            split_path=data_utils.split_s3_path,
             verify_bucket=data_utils.verify_tigris_bucket,
             aws_profile=tigris.TIGRIS_PROFILE_NAME,
             get_endpoint_url=lambda: tigris.ENDPOINT_URL,

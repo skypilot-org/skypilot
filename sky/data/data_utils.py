@@ -1021,18 +1021,6 @@ def create_tigris_client() -> Client:
     return tigris.client('s3')
 
 
-def split_tigris_path(tigris_path: str) -> Tuple[str, str]:
-    """Splits Tigris Path into Bucket name and Relative Path to Bucket
-
-    Args:
-      tigris_path: str; Tigris Path, e.g. tigris://imagenet/train/
-    """
-    path_parts = tigris_path.replace('tigris://', '').split('/')
-    bucket = path_parts.pop(0)
-    key = '/'.join(path_parts)
-    return bucket, key
-
-
 def verify_tigris_bucket(name: str) -> bool:
     """Verify Tigris bucket exists and is accessible.
 

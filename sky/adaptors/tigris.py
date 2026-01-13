@@ -133,6 +133,17 @@ def check_credentials(
             f'{NAME} does not support {cloud_capability}.')
 
 
+def _has_tigris_keys(access_key: Optional[str],
+                     secret_key: Optional[str]) -> bool:
+    """Check if credentials are Tigris keys based on their prefixes.
+
+    Tigris access keys start with 'tid_' and secret keys start with 'tsec_'.
+    """
+    if access_key and secret_key:
+        return access_key.startswith('tid_') and secret_key.startswith('tsec_')
+    return False
+
+
 def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     """Checks if the user has access credentials to Tigris Object Storage.
 
@@ -140,6 +151,8 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     1. A [tigris] profile in ~/.aws/credentials
     2. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
     3. The default AWS credentials chain
+
+    Tigris keys have distinctive prefixes: tid_ for access key, tsec_ for secret.
 
     Returns:
         A tuple of a boolean value and a hint message where the bool
@@ -151,28 +164,31 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     if tigris_profile_in_aws_cred():
         return (True, None)
 
-    # Check for environment variables
-    if (os.environ.get('AWS_ACCESS_KEY_ID') and
-            os.environ.get('AWS_SECRET_ACCESS_KEY')):
+    # Check for Tigris keys in environment variables
+    env_access = os.environ.get('AWS_ACCESS_KEY_ID')
+    env_secret = os.environ.get('AWS_SECRET_ACCESS_KEY')
+    if _has_tigris_keys(env_access, env_secret):
         return (True, None)
 
-    # Check default credentials chain by trying to get credentials
+    # Check default credentials chain for Tigris keys
     try:
         test_session = boto3.session.Session()
         creds = test_session.get_credentials()
         if creds is not None:
-            return (True, None)
+            frozen = creds.get_frozen_credentials()
+            if _has_tigris_keys(frozen.access_key, frozen.secret_key):
+                return (True, None)
     except Exception:  # pylint: disable=broad-except
         pass
 
-    # No credentials found, provide hints
-    hints = ('Tigris credentials not found. You can configure them via:\n'
+    # No Tigris credentials found, provide hints
+    hints = ('Tigris credentials not found. Tigris keys start with tid_/tsec_.\n'
+             f'{_INDENT_PREFIX}You can configure them via:\n'
              f'{_INDENT_PREFIX}Option 1: Create a [tigris] profile:\n'
              f'{_INDENT_PREFIX}  $ aws configure --profile tigris\n'
              f'{_INDENT_PREFIX}Option 2: Set environment variables:\n'
-             f'{_INDENT_PREFIX}  $ export AWS_ACCESS_KEY_ID=<your_key>\n'
-             f'{_INDENT_PREFIX}  $ export AWS_SECRET_ACCESS_KEY=<your_secret>\n'
-             f'{_INDENT_PREFIX}Option 3: Use the default AWS credentials\n'
+             f'{_INDENT_PREFIX}  $ export AWS_ACCESS_KEY_ID=tid_...\n'
+             f'{_INDENT_PREFIX}  $ export AWS_SECRET_ACCESS_KEY=tsec_...\n'
              f'{_INDENT_PREFIX}For more info: '
              'https://www.tigrisdata.com/docs/sdks/s3/aws-cli/')
 

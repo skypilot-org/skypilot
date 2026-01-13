@@ -1570,7 +1570,7 @@ Tigris
 `Tigris <https://www.tigrisdata.com/>`__ is a globally distributed, S3-compatible object storage with zero egress fees.
 SkyPilot can download/upload data to Tigris buckets and mount them as local filesystem on clusters launched by SkyPilot.
 
-Tigris uses standard AWS credentials format. You can configure credentials in one of three ways:
+Tigris uses S3-compatible APIs with the endpoint ``https://t3.storage.dev``. Tigris access keys start with ``tid_`` and secret keys start with ``tsec_``.
 
 **Option 1: Use a dedicated tigris profile (recommended)**
 
@@ -1582,14 +1582,19 @@ Tigris uses standard AWS credentials format. You can configure credentials in on
 
 .. code-block:: shell
 
-  export AWS_ACCESS_KEY_ID=<your_tigris_access_key_id>
-  export AWS_SECRET_ACCESS_KEY=<your_tigris_secret_access_key>
+  export AWS_ACCESS_KEY_ID=tid_...
+  export AWS_SECRET_ACCESS_KEY=tsec_...
 
-**Option 3: Use the default AWS credentials**
+When prompted for credentials, enter your Tigris Access Key ID (starts with ``tid_``) and Secret Access Key (starts with ``tsec_``). See `Tigris documentation <https://www.tigrisdata.com/docs/iam/manage-access-key/>`_ to generate credentials. For the region, enter :code:`auto`.
 
-If you have AWS credentials configured, SkyPilot will use them with Tigris's endpoint.
+To use Tigris in your SkyPilot YAML, specify ``store: tigris``:
 
-When prompted for credentials, enter your Tigris Access Key ID and Secret Access Key (see `Tigris documentation <https://www.tigrisdata.com/docs/sdks/s3/aws-cli/>`_ to generate credentials). For the region, enter :code:`auto`.
+.. code-block:: yaml
+
+  file_mounts:
+    /data:
+      source: s3://my-tigris-bucket
+      store: tigris
 
 .. note::
 
