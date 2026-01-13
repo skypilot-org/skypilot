@@ -321,64 +321,75 @@ class TestSSHCommandRunnerAuthFailureDetection:
         )
 
     @pytest.mark.parametrize(
-        'mock_return,run_kwargs,expect_retry',
+        'returncode,ssh_log_content,expect_retry',
         [
-            # Auth failures that should trigger retry:
-            # - Permission denied in stderr
-            ((255, '', 'Permission denied (keyboard-interactive).'), {
-                'require_outputs': True,
-                'separate_stderr': True
-            }, True),
-            # - Authentication failed in stderr
-            ((255, '', 'Authentication failed.'), {
-                'require_outputs': True,
-                'separate_stderr': True
-            }, True),
-            # - Auth failure in stdout (when stderr merged)
-            ((255, 'Permission denied (keyboard-interactive).', ''), {
-                'require_outputs': True,
-                'separate_stderr': False
-            }, True),
-            # - No outputs with rc=255 (fallback to retry)
-            (255, {
-                'require_outputs': False
-            }, True),
+            # Auth failures that should trigger retry (rc=255 + auth pattern):
+            (255, 'Permission denied (keyboard-interactive).', True),
+            (255, 'Authentication failed.', True),
             # Cases that should NOT trigger retry:
-            # - Non-auth failure (rc=255 but no auth message)
-            ((255, '', 'Connection timed out'), {
-                'require_outputs': True,
-                'separate_stderr': True
-            }, False),
+            # - rc=255 but no auth pattern in log
+            (255, 'Connection timed out', False),
             # - Successful command (rc=0)
-            ((0, 'hello\n', ''), {
-                'require_outputs': True,
-                'separate_stderr': True
-            }, False),
+            (0, '', False),
             # - Non-255 error code
-            ((1, '', 'Command failed'), {
-                'require_outputs': True,
-                'separate_stderr': True
-            }, False),
+            (1, 'Permission denied', False),
         ])
     def test_interactive_auth_retry_detection(self,
                                               runner_with_interactive_auth,
-                                              mock_return, run_kwargs,
+                                              returncode, ssh_log_content,
                                               expect_retry):
         """Test that auth failure detection correctly triggers or skips retry."""
-        retry_return = 0 if isinstance(mock_return, int) else (0, 'success', '')
+        fd, tmp_path = tempfile.mkstemp()
 
-        with mock.patch.object(command_runner.log_lib,
-                               'run_with_log',
-                               return_value=mock_return):
-            with mock.patch.object(runner_with_interactive_auth,
+        def write_log_and_return(*_args, **_kwargs):
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                f.write(ssh_log_content)
+            return (returncode, '', '')
+
+        try:
+            with mock.patch('tempfile.mkstemp', return_value=(fd, tmp_path)), \
+                 mock.patch.object(command_runner.log_lib, 'run_with_log',
+                                   side_effect=write_log_and_return), \
+                 mock.patch.object(runner_with_interactive_auth,
                                    '_retry_with_interactive_auth',
-                                   return_value=retry_return) as mock_retry:
-                runner_with_interactive_auth.run('echo hello', **run_kwargs)
-
+                                   return_value=(0, 'success', '')) as mock_retry:
+                runner_with_interactive_auth.run('echo hello',
+                                                 require_outputs=True,
+                                                 separate_stderr=True)
                 if expect_retry:
                     mock_retry.assert_called_once()
                 else:
                     mock_retry.assert_not_called()
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    def test_interactive_auth_retry_on_log_read_failure(
+            self, runner_with_interactive_auth):
+        """Test retry fallback when SSH log file cannot be read."""
+        fd, tmp_path = tempfile.mkstemp()
+        real_open = open
+
+        def mock_open_raise_on_log(path, *args, **kwargs):
+            if path == tmp_path and args and 'r' in args[0]:
+                raise IOError('mock read error')
+            return real_open(path, *args, **kwargs)
+
+        try:
+            with mock.patch('tempfile.mkstemp', return_value=(fd, tmp_path)), \
+                 mock.patch.object(command_runner.log_lib, 'run_with_log',
+                                   return_value=(255, '', '')), \
+                 mock.patch('builtins.open', side_effect=mock_open_raise_on_log), \
+                 mock.patch.object(runner_with_interactive_auth,
+                                   '_retry_with_interactive_auth',
+                                   return_value=(0, 'success', '')) as mock_retry:
+                runner_with_interactive_auth.run('echo hello',
+                                                 require_outputs=True,
+                                                 separate_stderr=True)
+                mock_retry.assert_called_once()
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
     def test_interactive_auth_disabled_does_not_retry(self):
         """When enable_interactive_auth=False, no retry even on auth failure."""
@@ -402,3 +413,82 @@ class TestSSHCommandRunnerAuthFailureDetection:
                            require_outputs=True,
                            separate_stderr=True)
                 mock_retry.assert_not_called()
+
+
+class TestProxyJumpToProxyCommand:
+    """Test ProxyJump to ProxyCommand conversion."""
+
+    @pytest.fixture
+    def private_key_path(self) -> str:
+        """Get the SSH private key path."""
+        user_hash = common_utils.get_user_hash()
+        key_path, _, _ = auth_utils.get_ssh_key_and_lock_path(user_hash)
+        return os.path.expanduser(key_path)
+
+    @pytest.mark.parametrize(
+        'ssh_proxy_jump,expected_assertions',
+        [
+            # host
+            (
+                'bastion',
+                {
+                    'must_contain':
+                        ['ProxyCommand=', '-W', '[%h]:%p', 'bastion'],
+                    'must_not_contain': ['ProxyJump=', '-l '],
+                },
+            ),
+            # user@host
+            (
+                'ubuntu@bastion',
+                {
+                    'must_contain': [
+                        'ProxyCommand=', '-l ubuntu', '-W', '[%h]:%p', 'bastion'
+                    ],
+                    'must_not_contain': ['ProxyJump='],
+                },
+            ),
+            # user@host:port
+            (
+                'admin@bastion:2222',
+                {
+                    'must_contain':
+                        ['ProxyCommand=', '-l admin', '-p 2222', 'bastion'],
+                    'must_not_contain': ['ProxyJump='],
+                },
+            ),
+            # Multi-hop
+            (
+                'user1@hop1,user2@hop2',
+                {
+                    'must_contain':
+                        ['ProxyCommand=', '-J user1@hop1', '-l user2', 'hop2'],
+                    'must_not_contain': ['ProxyJump='],
+                },
+            ),
+        ],
+    )
+    def test_proxyjump_to_proxycommand_conversion(self, private_key_path,
+                                                  ssh_proxy_jump,
+                                                  expected_assertions) -> None:
+        """ProxyJump should be converted to equivalent ProxyCommand."""
+        runner = command_runner.SSHCommandRunner(
+            node=('10.0.0.5', 22),
+            ssh_user='ubuntu',
+            ssh_private_key=private_key_path,
+            ssh_proxy_jump=ssh_proxy_jump,
+            ssh_control_name='unit-test-control',
+        )
+
+        ssh_cmd = runner.ssh_base_command(
+            ssh_mode=command_runner.SshMode.NON_INTERACTIVE,
+            port_forward=None,
+            connect_timeout=None,
+        )
+        ssh_cmd_str = ' '.join(ssh_cmd)
+
+        for expected in expected_assertions['must_contain']:
+            assert expected in ssh_cmd_str, (
+                f"Expected '{expected}' in command: {ssh_cmd_str}")
+        for unexpected in expected_assertions['must_not_contain']:
+            assert unexpected not in ssh_cmd_str, (
+                f"Unexpected '{unexpected}' in command: {ssh_cmd_str}")

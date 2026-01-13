@@ -1521,7 +1521,17 @@ def ssh_credential_from_yaml(
     if ssh_user is None:
         ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key_path = auth_section.get('ssh_private_key')
+
+    ssh_provider_module = config['provider']['module']
     ssh_control_name = config.get('cluster_name', '__default__')
+    if 'slurm' in ssh_provider_module:
+        # Multiple SkyPilot clusters may share the same underlying Slurm cluster.
+        # Use the same ssh_control_name (__default__) to reuse SSH
+        # ControlMaster connections.
+        # Different clusters are separated by the %C token (unique connection
+        # hash) in ControlPath (see ssh_options_list),
+        # so using __default__ will not cause collisions.
+        ssh_control_name = '__default__'
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
 
     # Update the ssh_user placeholder in proxy command, if required
@@ -1538,7 +1548,6 @@ def ssh_credential_from_yaml(
     }
     if docker_user is not None:
         credentials['docker_user'] = docker_user
-    ssh_provider_module = config['provider']['module']
     # If we are running ssh command on kubernetes node.
     if 'kubernetes' in ssh_provider_module:
         credentials['disable_control_master'] = True

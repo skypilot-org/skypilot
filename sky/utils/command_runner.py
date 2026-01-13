@@ -10,6 +10,7 @@ import shlex
 import signal
 import socket
 import sys
+import tempfile
 import termios
 import threading
 import time
@@ -27,6 +28,7 @@ from sky.utils import auth_utils
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import control_master_utils
+from sky.utils import env_options
 from sky.utils import git as git_utils
 from sky.utils import interactive_utils
 from sky.utils import subprocess_utils
@@ -105,6 +107,55 @@ ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD = (
     '{ [ "$(whoami)" == "root" ] && function sudo() { "$@"; } || true; }')
 
 
+def _proxyjump_to_proxycommand(proxy_jump: str,
+                               ssh_log_file: Optional[str] = None) -> str:
+    """Convert ProxyJump spec to an equivalent implicit ProxyCommand.
+
+    This mirrors OpenSSH's behavior when converting ProxyJump to ProxyCommand:
+        ProxyJump ubuntu@machine
+        -> ssh -l ubuntu -W '[%h]:%p' machine
+
+    For multi-hop (comma-separated), earlier hops are passed via -J to the
+    last hop's SSH, which runs -W to the final destination.
+    """
+    hops = [h.strip() for h in proxy_jump.split(',') if h.strip()]
+    if not hops:
+        raise ValueError(f'Invalid ProxyJump: {proxy_jump!r}')
+
+    def parse_hop(dest: str) -> Tuple[Optional[str], str, Optional[int]]:
+        # Parse [user@]host[:port]
+        user = None
+        hostport = dest
+        if '@' in dest:
+            user, hostport = dest.split('@', 1)
+        host = hostport
+        port = None
+        # Only parse port if it looks like host:port
+        if ':' in hostport:
+            maybe_host, port_str = hostport.rsplit(':', 1)
+            if port_str.isdigit():
+                host = maybe_host
+                port = int(port_str)
+        return user, host, port
+
+    # For multi-hop, use -J for earlier hops and last hop as the target
+    *prev_hops, last_hop = hops
+
+    cmd = ['ssh']
+    if ssh_log_file is not None:
+        cmd += ['-E', ssh_log_file]
+    if prev_hops:
+        cmd += ['-J', ','.join(prev_hops)]
+    user, host, port = parse_hop(last_hop)
+    if user:
+        cmd += ['-l', user]
+    if port is not None:
+        cmd += ['-p', str(port)]
+    cmd += ['-W', '\'[%h]:%p\'', host]
+
+    return ' '.join(cmd)
+
+
 def ssh_options_list(
     ssh_private_key: Optional[str],
     ssh_control_name: Optional[str],
@@ -116,6 +167,7 @@ def ssh_options_list(
     port: int = 22,
     disable_control_master: Optional[bool] = False,
     escape_percent_expand: bool = False,
+    ssh_log_file: Optional[str] = None,
 ) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     if connect_timeout is None:
@@ -193,19 +245,26 @@ def ssh_options_list(
 
     if ssh_proxy_command is not None:
         logger.debug(f'--- Proxy: {ssh_proxy_command} ---')
+        if ssh_proxy_jump is not None:
+            logger.warning('Both ProxyCommand and ProxyJump are specified. '
+                           'ProxyCommand will take precedence.')
         arg_dict.update({
             # Due to how log_lib.run_with_log() works (using shell=True) we
             # must quote this value.
             'ProxyCommand': shlex.quote(ssh_proxy_command),
         })
-
-    if ssh_proxy_jump is not None:
-        logger.debug(f'--- ProxyJump: {ssh_proxy_jump} ---')
-        if ssh_proxy_command is not None:
-            logger.warning('Both ProxyCommand and ProxyJump are specified. '
-                           'ProxyCommand will take precedence.')
+    elif ssh_proxy_jump is not None:
+        # Convert ProxyJump to an implicit ProxyCommand, mirroring OpenSSH's
+        # behavior. This allows us to inject -E <log_file> because otherwise
+        # OpenSSH does not pass the log file to the derived ProxyCommand and
+        # we could only log it to stderr (with -v), which can be noisy.
+        # See: https://github.com/openssh/openssh-portable/blob/a6f8f793d427a831be1b350741faa4f34066d55f/ssh.c#L1355-L1382 # pylint: disable=line-too-long
+        derived_proxy_command = _proxyjump_to_proxycommand(
+            ssh_proxy_jump, ssh_log_file)
+        logger.debug(f'--- ProxyJump: {ssh_proxy_jump} -> '
+                     f'ProxyCommand: {derived_proxy_command} ---')
         arg_dict.update({
-            'ProxyJump': shlex.quote(ssh_proxy_jump),
+            'ProxyCommand': shlex.quote(derived_proxy_command),
         })
 
     return ssh_key_option + [
@@ -782,21 +841,22 @@ class SSHCommandRunner(CommandRunner):
                                      port_forward=port_forward,
                                      connect_timeout=connect_timeout)
 
-    def ssh_base_command(self, *, ssh_mode: SshMode,
+    def ssh_base_command(self,
+                         *,
+                         ssh_mode: SshMode,
                          port_forward: Optional[List[Tuple[int, int]]],
-                         connect_timeout: Optional[int]) -> List[str]:
+                         connect_timeout: Optional[int],
+                         ssh_log_file: Optional[str] = None) -> List[str]:
         ssh = ['ssh']
-        if self.enable_interactive_auth:
-            # Enable verbose logging to capture SSH debug logs to stderr.
-            # This is critical for detecting authentication failures.
-            # Without -v, stderr may be empty, typically when ControlMaster
-            # and/or ProxyJump is used.
-            #
-            # -E <log_file> could be used to capture the logs from the
-            # ControlMaster process, but it does not work with ProxyJump,
-            # as ssh does not pass the -E flag to the ssh proxy command,
-            # whereas it does pass the -v flag.
-            ssh += ['-v']
+        if ssh_log_file is not None:
+            # -E is needed to capture debug logs from the ControlMaster process
+            # which is forked from the main ssh process.
+            # However, this does not work out of the box with ProxyJump,
+            # since the -E flag is not passed to the ssh proxy subprocess.
+            # For that we have to do some extra work in ssh_options_list.
+            ssh += ['-E', ssh_log_file]
+            if env_options.Options.SHOW_DEBUG_INFO.get():
+                ssh += ['-v']
         if ssh_mode == SshMode.NON_INTERACTIVE:
             # Disable pseudo-terminal allocation. Otherwise, the output of
             # ssh will be corrupted by the user's input.
@@ -825,9 +885,8 @@ class SSHCommandRunner(CommandRunner):
             docker_ssh_proxy_command=docker_ssh_proxy_command,
             port=self.port,
             connect_timeout=connect_timeout,
-            disable_control_master=self.disable_control_master) + [
-                f'{self.ssh_user}@{self.ip}'
-            ]
+            disable_control_master=self.disable_control_master,
+            ssh_log_file=ssh_log_file) + [f'{self.ssh_user}@{self.ip}']
 
     def _retry_with_interactive_auth(
             self, session_id: str, command: List[str], log_path: str,
@@ -1030,11 +1089,18 @@ class SSHCommandRunner(CommandRunner):
             or
             A tuple of (returncode, stdout, stderr).
         """
+        if self.enable_interactive_auth:
+            fd, ssh_log_file = tempfile.mkstemp(prefix='sky_ssh_',
+                                                suffix='.log')
+            os.close(fd)
+        else:
+            ssh_log_file = None
 
         base_ssh_command = self.ssh_base_command(
             ssh_mode=ssh_mode,
             port_forward=port_forward,
-            connect_timeout=connect_timeout)
+            connect_timeout=connect_timeout,
+            ssh_log_file=ssh_log_file)
 
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
@@ -1067,42 +1133,61 @@ class SSHCommandRunner(CommandRunner):
                 command += [f'> {log_path}']
             executable = '/bin/bash'
 
-        result = log_lib.run_with_log(' '.join(command),
-                                      log_path,
-                                      require_outputs=require_outputs,
-                                      stream_logs=stream_logs,
-                                      process_stream=process_stream,
-                                      shell=True,
-                                      executable=executable,
-                                      **kwargs)
-        if not self.enable_interactive_auth:
-            return result
+        try:
+            result = log_lib.run_with_log(' '.join(command),
+                                          log_path,
+                                          require_outputs=require_outputs,
+                                          stream_logs=stream_logs,
+                                          process_stream=process_stream,
+                                          shell=True,
+                                          executable=executable,
+                                          **kwargs)
+            if not self.enable_interactive_auth:
+                return result
 
-        stdout: Optional[str] = None
-        stderr: Optional[str] = None
-        if require_outputs:
-            returncode, stdout, stderr = result
-        else:
-            returncode = result
+            if require_outputs:
+                returncode, _, _ = result
+            else:
+                returncode = result
 
-        if returncode != 255:
-            return result
+            if returncode != 255:
+                return result
 
-        output_to_check = stderr if separate_stderr else stdout
-        if output_to_check is not None:
-            has_auth_failure = any(pattern in output_to_check
-                                   for pattern in _SSH_AUTH_FAILURE_PATTERNS)
+            # Check SSH verbose log file for auth failure patterns.
+            # This is more reliable than checking stderr, which may be empty
+            # when ControlMaster or ProxyJump is used.
+            has_auth_failure = False
+            if ssh_log_file is not None:
+                try:
+                    with open(ssh_log_file, 'r', encoding='utf-8') as f:
+                        ssh_log_content = f.read()
+                    has_auth_failure = any(
+                        pattern in ssh_log_content
+                        for pattern in _SSH_AUTH_FAILURE_PATTERNS)
+                except (OSError, IOError):
+                    # Fall back to retrying with interactive auth to be safe.
+                    has_auth_failure = True
+
             if not has_auth_failure:
                 # No auth failure detected; don't attempt interactive auth.
+                if require_outputs:
+                    returncode, stdout, stderr = result
+                    return returncode, stdout, stderr + '\n' + ssh_log_content
                 return result
-        # if output_to_check is None (i.e. require_outputs=False), err on the
-        # side of caution and retry with interactive auth.
 
-        session_id = str(uuid.uuid4())
-        return self._retry_with_interactive_auth(session_id, command, log_path,
-                                                 require_outputs,
-                                                 process_stream, stream_logs,
-                                                 executable, **kwargs)
+            session_id = str(uuid.uuid4())
+            return self._retry_with_interactive_auth(session_id, command,
+                                                     log_path, require_outputs,
+                                                     process_stream,
+                                                     stream_logs, executable,
+                                                     **kwargs)
+        finally:
+            # Clean up the SSH verbose log file.
+            if ssh_log_file is not None:
+                try:
+                    os.unlink(ssh_log_file)
+                except OSError:
+                    pass
 
     @timeline.event
     def rsync(
