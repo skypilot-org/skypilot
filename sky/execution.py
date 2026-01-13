@@ -560,7 +560,6 @@ def launch(
     _request_name: request_names.AdminPolicyRequestName = request_names.
     AdminPolicyRequestName.CLUSTER_LAUNCH,
     job_logger: logging.Logger = logger,
-    _stages: Optional[List[Stage]] = None,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launches a cluster or task.
@@ -654,7 +653,7 @@ def launch(
             cluster_name, operation_str='sky.launch')
 
     handle = None
-    stages = _stages
+    stages = None
     skip_unnecessary_provisioning = False
     # Check if cluster exists and we are doing fast provisioning
     if fast and cluster_name is not None:
@@ -688,19 +687,18 @@ def launch(
                 ))
         if cluster_status == status_lib.ClusterStatus.UP:
             handle = maybe_handle
-            if stages is None:
-                stages = [
-                    # Provisioning will be short-circuited if the existing
-                    # cluster config hash matches the calculated one.
-                    Stage.PROVISION,
-                    Stage.SYNC_WORKDIR,
-                    Stage.SYNC_FILE_MOUNTS,
-                    # Setup will be skipped if provisioning was skipped.
-                    Stage.SETUP,
-                    Stage.PRE_EXEC,
-                    Stage.EXEC,
-                    Stage.DOWN,
-                ]
+            stages = [
+                # Provisioning will be short-circuited if the existing
+                # cluster config hash matches the calculated one.
+                Stage.PROVISION,
+                Stage.SYNC_WORKDIR,
+                Stage.SYNC_FILE_MOUNTS,
+                # Setup will be skipped if provisioning was skipped.
+                Stage.SETUP,
+                Stage.PRE_EXEC,
+                Stage.EXEC,
+                Stage.DOWN,
+            ]
             skip_unnecessary_provisioning = True
 
     # Attach to setup if the cluster is a controller, so that user can

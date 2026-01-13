@@ -1144,7 +1144,6 @@ class ControllerManager:
         logger.info(f'  pid={self._pid}')
 
         job_rank = None
-
         env_content = file_content_utils.get_job_env_content(job_id)
         if env_content:
             try:

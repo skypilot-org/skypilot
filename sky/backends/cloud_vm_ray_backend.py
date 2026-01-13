@@ -3080,7 +3080,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             f'{cluster_name!r}: {", ".join(failure_details)}'
                             f'{colorama.Style.RESET_ALL}')
 
-
     def check_skylet_running(self, handle: CloudVmRayResourceHandle):
         # For backward compatibility and robustness of skylet, it is checked
         # and restarted if necessary.
@@ -3907,10 +3906,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'
 
-            returncode, stdout, stderr = self.run_on_head(handle,
-                                                          job_submit_cmd,
-                                                          stream_logs=False,
-                                                          require_outputs=True)
+            # For Slurm, run in background so that SSH returns immediately.
+            # This is needed because we add the wait_for_job code above which
+            # makes the command block until the job completes.
+            returncode, stdout, stderr = self.run_on_head(
+                handle,
+                job_submit_cmd,
+                stream_logs=False,
+                require_outputs=True,
+                run_in_background=is_slurm)
             # Happens when someone calls `sky exec` but remote is outdated for
             # running a job. Necessitating calling `sky launch`.
             backend_utils.check_stale_runtime_on_remote(returncode, stderr,
@@ -3926,6 +3930,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'Output: {output}')
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'
+                # See comment above for why run_in_background=is_slurm.
                 returncode, stdout, stderr = self.run_on_head(
                     handle,
                     job_submit_cmd,
