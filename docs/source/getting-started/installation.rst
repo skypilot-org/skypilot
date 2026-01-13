@@ -1580,6 +1580,8 @@ Tigris uses S3-compatible APIs with the endpoint ``https://t3.storage.dev``. Tig
 
 **Option 2: Use Tigris SDK environment variables**
 
+If you already use the `Tigris Storage SDK <https://www.tigrisdata.com/docs/sdks/tigris/>`_, you can source your credentials from the environment variables used by the SDK:
+
 .. code-block:: shell
 
   export TIGRIS_STORAGE_ACCESS_KEY_ID=tid_...
