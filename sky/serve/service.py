@@ -263,6 +263,17 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
 
     service_dir = os.path.expanduser(
         serve_utils.generate_remote_service_dir_name(service_name))
+    os.makedirs(service_dir, exist_ok=True)
+    controller_lock = filelock.FileLock(
+        os.path.join(service_dir, 'controller.lock'))
+    controller_lock_held = False
+    try:
+        controller_lock.acquire(timeout=0)
+    except filelock.Timeout:
+        logger.warning('Controller already running for service '
+                       f'{service_name!r}; skipping start.')
+        return
+    controller_lock_held = True
 
     if not is_recovery:
         with filelock.FileLock(controller_utils.get_resources_lock_path()):
@@ -378,42 +389,46 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         serve_state.set_service_status_and_active_versions(
             service_name, serve_state.ServiceStatus.SHUTTING_DOWN)
     finally:
-        # Kill load balancer process first since it will raise errors if failed
-        # to connect to the controller. Then the controller process.
-        process_to_kill = [
-            proc for proc in [load_balancer_process, controller_process]
-            if proc is not None
-        ]
-        subprocess_utils.kill_children_processes(
-            parent_pids=[process.pid for process in process_to_kill],
-            force=True)
-        for process in process_to_kill:
-            process.join()
-
-        # Catch any exception here to avoid it kill the service monitoring
-        # process. In which case, the service will not only fail to clean
-        # up, but also cannot be terminated in the future as no process
-        # will handle the user signal anymore. Instead, we catch any error
-        # and set it to FAILED_CLEANUP instead.
         try:
-            failed = _cleanup(service_name, service_spec.pool)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.error(f'Failed to clean up service {service_name}: {e}')
-            with ux_utils.enable_traceback():
-                logger.error(f'  Traceback: {traceback.format_exc()}')
-            failed = True
+            # Kill load balancer process first since it will raise errors if
+            # failed to connect to the controller. Then the controller process.
+            process_to_kill = [
+                proc for proc in [load_balancer_process, controller_process]
+                if proc is not None
+            ]
+            subprocess_utils.kill_children_processes(
+                parent_pids=[process.pid for process in process_to_kill],
+                force=True)
+            for process in process_to_kill:
+                process.join()
 
-        if failed:
-            serve_state.set_service_status_and_active_versions(
-                service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
-            logger.error(f'Service {service_name} failed to clean up.')
-        else:
-            shutil.rmtree(service_dir)
-            serve_state.remove_service(service_name)
-            serve_state.delete_all_versions(service_name)
-            logger.info(f'Service {service_name} terminated successfully.')
+            # Catch any exception here to avoid it kill the service monitoring
+            # process. In which case, the service will not only fail to clean
+            # up, but also cannot be terminated in the future as no process
+            # will handle the user signal anymore. Instead, we catch any error
+            # and set it to FAILED_CLEANUP instead.
+            try:
+                failed = _cleanup(service_name, service_spec.pool)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Failed to clean up service {service_name}: {e}')
+                with ux_utils.enable_traceback():
+                    logger.error(f'  Traceback: {traceback.format_exc()}')
+                failed = True
 
-        _cleanup_task_run_script(job_id)
+            if failed:
+                serve_state.set_service_status_and_active_versions(
+                    service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
+                logger.error(f'Service {service_name} failed to clean up.')
+            else:
+                shutil.rmtree(service_dir)
+                serve_state.remove_service(service_name)
+                serve_state.delete_all_versions(service_name)
+                logger.info(f'Service {service_name} terminated successfully.')
+
+            _cleanup_task_run_script(job_id)
+        finally:
+            if controller_lock_held:
+                controller_lock.release()
 
 
 if __name__ == '__main__':
