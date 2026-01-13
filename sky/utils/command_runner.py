@@ -1165,7 +1165,7 @@ class SSHCommandRunner(CommandRunner):
                     has_auth_failure = any(
                         pattern in ssh_log_content
                         for pattern in _SSH_AUTH_FAILURE_PATTERNS)
-                except (OSError, IOError):
+                except OSError:
                     # Fall back to retrying with interactive auth to be safe.
                     has_auth_failure = True
 

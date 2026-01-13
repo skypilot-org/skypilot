@@ -1501,6 +1501,23 @@ def wait_until_ray_cluster_ready(
     return True, docker_user  # success
 
 
+def _get_ssh_control_name(config: Dict[str, Any]) -> str:
+    ssh_provider_module = config['provider']['module']
+    ssh_control_name = config.get('cluster_name',
+                                  command_runner.DEFAULT_SSH_CONTROL_NAME)
+    if 'slurm' in ssh_provider_module:
+        # For Slurm, multiple SkyPilot clusters may share the same underlying
+        # Slurm login node. By using a fixed ssh_control_name ('__default__'),
+        # we ensure that all connections to the same login node reuse the same
+        # SSH ControlMaster process, avoiding repeated SSH handshakes.
+        #
+        # The %C token in ControlPath (see ssh_options_list) ensures that
+        # connections to different login nodes use different sockets, avoiding
+        # collisions between different Slurm clusters.
+        ssh_control_name = command_runner.DEFAULT_SSH_CONTROL_NAME
+    return ssh_control_name
+
+
 def ssh_credential_from_yaml(
     cluster_yaml: Optional[str],
     docker_user: Optional[str] = None,
@@ -1523,18 +1540,7 @@ def ssh_credential_from_yaml(
     ssh_private_key_path = auth_section.get('ssh_private_key')
 
     ssh_provider_module = config['provider']['module']
-    ssh_control_name = config.get('cluster_name',
-                                  command_runner.DEFAULT_SSH_CONTROL_NAME)
-    if 'slurm' in ssh_provider_module:
-        # For Slurm, multiple SkyPilot clusters may share the same underlying
-        # Slurm login node. By using a fixed ssh_control_name ('__default__'),
-        # we ensure that all connections to the same login node reuse the same
-        # SSH ControlMaster process, avoiding repeated SSH handshakes.
-        #
-        # The %C token in ControlPath (see ssh_options_list) ensures that
-        # connections to different login nodes use different sockets, avoiding
-        # collisions between different Slurm clusters.
-        ssh_control_name = command_runner.DEFAULT_SSH_CONTROL_NAME
+    ssh_control_name = _get_ssh_control_name(config)
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
 
     # Update the ssh_user placeholder in proxy command, if required
@@ -1588,11 +1594,7 @@ def ssh_credentials_from_handles(
             ssh_user = auth_section['ssh_user'].strip()
         ssh_private_key_path = auth_section.get('ssh_private_key')
         ssh_provider_module = config['provider']['module']
-        ssh_control_name = config.get('cluster_name',
-                                      command_runner.DEFAULT_SSH_CONTROL_NAME)
-        if 'slurm' in ssh_provider_module:
-            # See above comments in ssh_credential_from_yaml for more details.
-            ssh_control_name = command_runner.DEFAULT_SSH_CONTROL_NAME
+        ssh_control_name = _get_ssh_control_name(config)
         ssh_proxy_command = auth_section.get('ssh_proxy_command')
 
         # Update the ssh_user placeholder in proxy command, if required
