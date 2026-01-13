@@ -1538,7 +1538,6 @@ def ssh_credential_from_yaml(
     if ssh_user is None:
         ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key_path = auth_section.get('ssh_private_key')
-
     ssh_control_name = _get_ssh_control_name(config)
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
 
