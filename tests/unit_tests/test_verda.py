@@ -9,10 +9,9 @@ import pytest
 
 from sky import clouds
 from sky.clouds import verda
-from sky.provision.verda.utils import VerdaClient
-from sky.provision.verda.utils import AuthenticationService
 from sky.provision.verda.utils import Instance
 from sky.provision.verda.utils import InstanceStatus
+from sky.provision.verda.utils import VerdaClient
 
 
 def test_verda_cloud_basics():
