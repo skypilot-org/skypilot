@@ -310,3 +310,40 @@ class TestGetJobNodes:
 
             # Verify wait_for_job_nodes was not called
             mock_wait.assert_not_called()
+
+
+class TestGetAllJobsGres:
+    """Test SlurmClient.get_all_jobs_gres()."""
+
+    def test_get_all_jobs_gres_expansion(self):
+        """Test parsing and expanding multi-node jobs using py-hostlist."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        squeue_output = (f'node01{slurm.SEP}gpu:h100:4\n'
+                         f'node01{slurm.SEP}N/A\n'
+                         f'node01,node03{slurm.SEP}gpu:h100:1\n'
+                         f'node[02-03,06]{slurm.SEP}gpu:h100:2')
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, squeue_output, '')
+
+            result = client.get_all_jobs_gres()
+
+            # Verify squeue was called
+            mock_run.assert_called_once_with(
+                f'squeue -h --states=running,completing -o "%N{slurm.SEP}%b"',
+                require_outputs=True,
+                separate_stderr=True,
+                stream_logs=False,
+            )
+
+            assert len(result) == 4
+            assert result['node01'] == ['gpu:h100:4', 'gpu:h100:1']
+            assert result['node02'] == ['gpu:h100:2']
+            assert result['node03'] == ['gpu:h100:1', 'gpu:h100:2']
+            assert result['node06'] == ['gpu:h100:2']

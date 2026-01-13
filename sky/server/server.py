@@ -218,6 +218,10 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
     async def dispatch(self, request: fastapi.Request, call_next):
+        # If a previous middleware already authenticated the user, pass through
+        if request.state.auth_user is not None:
+            return await call_next(request)
+
         if loopback.is_loopback_request(request):
             return await call_next(request)
 
@@ -284,6 +288,10 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         X-Skypilot-Auth-Mode header. The auth proxy should either validate the
         auth or set the header X-Skypilot-Auth-Mode: token.
         """
+        # If a previous middleware already authenticated the user, pass through
+        if request.state.auth_user is not None:
+            return await call_next(request)
+
         has_skypilot_auth_header = (
             request.headers.get('X-Skypilot-Auth-Mode') == 'token')
         auth_header = request.headers.get('authorization')

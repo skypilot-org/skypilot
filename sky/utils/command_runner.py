@@ -257,6 +257,7 @@ class CommandRunner:
         skip_num_lines: int,
         source_bashrc: bool = False,
         use_login: bool = True,
+        run_in_background: bool = False,
     ) -> str:
         """Returns the command to run."""
         if isinstance(cmd, list):
@@ -287,7 +288,11 @@ class CommandRunner:
             ]
         if not separate_stderr:
             command.append('2>&1')
+        if run_in_background:
+            command = ['nohup'] + command + ['&']
         if not process_stream and skip_num_lines:
+            assert not run_in_background, (
+                'run_in_background and skip_num_lines cannot be used together')
             command += [
                 # A hack to remove the following bash warnings (twice):
                 #  bash: cannot set terminal process group
@@ -448,6 +453,7 @@ class CommandRunner:
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
+            run_in_background: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Runs the command on the cluster.
 
@@ -466,6 +472,7 @@ class CommandRunner:
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
+            run_in_background: Whether to run the command in the background.
 
         Returns:
             returncode
@@ -962,6 +969,7 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
+            run_in_background: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -986,6 +994,7 @@ class SSHCommandRunner(CommandRunner):
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
+            run_in_background: Whether to run the command in the background.
 
         Returns:
             returncode
@@ -1004,11 +1013,13 @@ class SSHCommandRunner(CommandRunner):
             proc = subprocess_utils.run(command, shell=False, check=False)
             return proc.returncode, '', ''
 
-        command_str = self._get_command_to_run(cmd,
-                                               process_stream,
-                                               separate_stderr,
-                                               skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc)
+        command_str = self._get_command_to_run(
+            cmd,
+            process_stream,
+            separate_stderr,
+            skip_num_lines=skip_num_lines,
+            source_bashrc=source_bashrc,
+            run_in_background=run_in_background)
         command = base_ssh_command + [shlex.quote(command_str)]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
@@ -1209,6 +1220,7 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
+            run_in_background: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'kubectl exec' to run 'cmd' on a pod or deployment by its
         name and namespace.
@@ -1233,6 +1245,7 @@ class KubernetesCommandRunner(CommandRunner):
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
+            run_in_background: Whether to run the command in the background.
 
         Returns:
             returncode
@@ -1269,11 +1282,13 @@ class KubernetesCommandRunner(CommandRunner):
             kubectl_base_command.append('-i')
         kubectl_base_command += [*kubectl_args, '--']
 
-        command_str = self._get_command_to_run(cmd,
-                                               process_stream,
-                                               separate_stderr,
-                                               skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc)
+        command_str = self._get_command_to_run(
+            cmd,
+            process_stream,
+            separate_stderr,
+            skip_num_lines=skip_num_lines,
+            source_bashrc=source_bashrc,
+            run_in_background=run_in_background)
         command = kubectl_base_command + [
             # It is important to use /bin/bash -c here to make sure we quote the
             # command to be run properly. Otherwise, directly appending commands
@@ -1387,16 +1402,19 @@ class LocalProcessCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
+            run_in_background: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Use subprocess to run the command."""
         del port_forward, ssh_mode, connect_timeout  # Unused.
 
-        command_str = self._get_command_to_run(cmd,
-                                               process_stream,
-                                               separate_stderr,
-                                               skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc,
-                                               use_login=False)
+        command_str = self._get_command_to_run(
+            cmd,
+            process_stream,
+            separate_stderr,
+            skip_num_lines=skip_num_lines,
+            source_bashrc=source_bashrc,
+            use_login=False,
+            run_in_background=run_in_background)
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
         os.makedirs(log_dir, exist_ok=True)
@@ -1508,37 +1526,6 @@ class SlurmCommandRunner(SSHCommandRunner):
         self.job_id = job_id
         self.slurm_node = slurm_node
 
-        # Build a chained ProxyCommand that goes through the login node to reach
-        # the compute node where the job is running.
-
-        # First, build SSH options to reach the login node, using the user's
-        # existing proxy command or proxy jump if provided.
-        proxy_ssh_options = ' '.join(
-            ssh_options_list(
-                self.ssh_private_key,
-                self.ssh_control_name,
-                ssh_proxy_command=self._ssh_proxy_command,
-                ssh_proxy_jump=self._ssh_proxy_jump,
-                port=self.port,
-                disable_control_master=self.disable_control_master,
-                # We need to escape the %C on the ControlPath,
-                # since this is going to be embedded in a
-                # ProxyCommand.
-                escape_percent_expand=True))
-        login_node_proxy_command = (f'ssh {proxy_ssh_options} '
-                                    f'-W %h:%p {self.ssh_user}@{self.ip}')
-
-        # Update the proxy command to be the login node proxy, which will
-        # be used by super().run() to reach the compute node.
-        self._ssh_proxy_command = login_node_proxy_command
-        # Clear the proxy jump since it's now embedded in the proxy command.
-        self._ssh_proxy_jump = None
-        # Update self.ip to target the compute node.
-        self.ip = slurm_node
-        # Assume the compute node's SSH port is 22.
-        # TODO(kevin): Make this configurable if needed.
-        self.port = 22
-
     def rsync(
         self,
         source: str,
@@ -1549,40 +1536,35 @@ class SlurmCommandRunner(SSHCommandRunner):
         stream_logs: bool = True,
         max_retry: int = 1,
     ) -> None:
-        """Rsyncs files directly to the Slurm compute node,
-        by proxying through the Slurm login node.
-
-        For Slurm, files need to be accessible by compute nodes where jobs
-        execute via srun. This means either it has to be on the compute node's
-        local filesystem, or on a shared filesystem.
+        """Rsyncs files to/from the Slurm compute node using srun as transport.
         """
-        # TODO(kevin): We can probably optimize this to skip the proxying
-        # if the target dir is in a shared filesystem, since it will
-        # be accessible by the compute node.
+        ssh_command = ' '.join(
+            self.ssh_base_command(ssh_mode=SshMode.NON_INTERACTIVE,
+                                  port_forward=None,
+                                  connect_timeout=None))
 
-        # Build SSH options for rsync using the ProxyCommand set up in __init__
-        # to reach the compute node through the login node.
-        ssh_options = ' '.join(
-            ssh_options_list(
-                # Use the same private key as the one used for
-                # connecting to the login node.
-                self.ssh_private_key,
-                None,
-                ssh_proxy_command=self._ssh_proxy_command,
-                disable_control_master=True))
-        rsh_option = f'ssh {ssh_options}'
-
-        self._rsync(
-            source,
-            target,
-            # Compute node
-            node_destination=f'{self.ssh_user}@{self.slurm_node}',
-            up=up,
-            rsh_option=rsh_option,
-            log_path=log_path,
-            stream_logs=stream_logs,
-            max_retry=max_retry,
-            get_remote_home_dir=lambda: self.sky_dir)
+        # rsh command: parse job_id+node_list from $1, ssh to login node,
+        # run srun with rsync command.
+        rsh_option = (
+            f'bash --norc --noprofile -c \''
+            f'job_id=$(echo "$1" | cut -d+ -f1); '
+            f'node_list=$(echo "$1" | cut -d+ -f2); '
+            f'shift; '  # Shift past the encoded job_id+node_list
+            f'exec {ssh_command} '  # SSH to login node to run srun
+            f'srun --unbuffered --quiet --overlap '
+            f'--jobid="$job_id" --nodelist="$node_list" --nodes=1 --ntasks=1 '
+            f'"$@"'
+            f'\' --')
+        encoded_info = f'{self.job_id}+{self.slurm_node}'
+        self._rsync(source,
+                    target,
+                    node_destination=encoded_info,
+                    up=up,
+                    rsh_option=rsh_option,
+                    log_path=log_path,
+                    stream_logs=stream_logs,
+                    max_retry=max_retry,
+                    get_remote_home_dir=lambda: self.sky_dir)
 
     @timeline.event
     @context_utils.cancellation_guard
@@ -1604,14 +1586,6 @@ class SlurmCommandRunner(SSHCommandRunner):
         # could be part of a shared filesystem.
         # And similarly for SKY_RUNTIME_DIR. See constants.\
         # SKY_RUNTIME_DIR_ENV_VAR_KEY for more details.
-        #
-        # SSH directly to the compute node instead of using srun.
-        # This avoids Slurm's proctrack/cgroup which kills all processes
-        # when the job step ends (including child processes launched as
-        # a separate process group), breaking background process spawning
-        # (e.g., JobScheduler._run_job which uses launch_new_process_tree).
-        # Note: proctrack/cgroup is enabled by default on Nebius'
-        # Managed Soperator.
         cmd = (
             f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
             f'"{self.skypilot_runtime_dir}" && '
@@ -1621,5 +1595,9 @@ class SlurmCommandRunner(SSHCommandRunner):
             # ~/.cache/uv.
             f'export UV_CACHE_DIR=/tmp/uv_cache_$(id -u) && '
             f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
+
+        cmd = (f'srun --unbuffered --quiet --overlap --jobid={self.job_id} '
+               f'--nodelist={self.slurm_node} '
+               f'--nodes=1 --ntasks=1 bash -c {shlex.quote(cmd)}')
 
         return super().run(cmd, **kwargs)
