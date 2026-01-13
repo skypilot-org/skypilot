@@ -2263,7 +2263,9 @@ def api_info() -> responses.APIHealthResponse:
     """
     response = server_common.make_authenticated_request('GET', '/api/health')
     response.raise_for_status()
-    return responses.APIHealthResponse(**response.json())
+    api_health_response = responses.APIHealthResponse(**response.json())
+
+    return api_health_response
 
 
 @usage_lib.entrypoint

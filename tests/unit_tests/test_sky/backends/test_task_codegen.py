@@ -186,3 +186,90 @@ def test_slurm_single_node_with_gpu():
     assert_codegen_matches_snapshot('slurm_single_node_with_gpu',
                                     result,
                                     testdata_dir=SLURM_TESTDATA_DIR)
+
+
+class TestRcloneFlushScript:
+    """Unit tests for the rclone flush script output format."""
+
+    def test_flush_script_contains_elapsed_time(self):
+        """Test that flush script reports elapsed time in status messages."""
+        codegen = task_codegen.RayCodeGen()
+        flush_script = codegen._get_rclone_flush_script()
+
+        # Should track and report elapsed time
+        assert 'FLUSH_START_TIME=$(date +%s)' in flush_script
+        assert 'ELAPSED=$(($(date +%s) - FLUSH_START_TIME))' in flush_script
+        assert '${ELAPSED}s' in flush_script
+
+    def test_flush_script_shows_cache_status(self):
+        """Test that flush script extracts and shows vfs cache status."""
+        codegen = task_codegen.RayCodeGen()
+        flush_script = codegen._get_rclone_flush_script()
+
+        # Should extract cache status from log
+        assert 'CACHE_STATUS=' in flush_script
+        assert "vfs cache: cleaned:" in flush_script
+        assert '[${CACHE_STATUS}]' in flush_script
+
+    def test_flush_script_shows_uploading_files(self):
+        """Test that flush script shows files currently being uploaded."""
+        codegen = task_codegen.RayCodeGen()
+        flush_script = codegen._get_rclone_flush_script()
+
+        # Should extract uploading files from log
+        assert 'UPLOADING_FILES=' in flush_script
+        assert 'queuing for upload' in flush_script
+        assert 'uploading: ${UPLOADING_FILES}' in flush_script
+        # Should properly handle comma separation (no trailing comma)
+        assert "sed 's/,$//'" in flush_script
+
+    def test_flush_script_has_fallback_output(self):
+        """Test that flush script falls back to last log line if parsing fails."""
+        codegen = task_codegen.RayCodeGen()
+        flush_script = codegen._get_rclone_flush_script()
+
+        # Should have fallback to last line
+        assert 'LAST_LINE=' in flush_script
+        assert 'Fallback' in flush_script
+        # Should have bare elapsed time as final fallback
+        assert 'cached mount is still uploading (elapsed: ${ELAPSED}s)"' in flush_script
+
+    def test_flush_script_shows_completion_time(self):
+        """Test that flush script shows total time when upload completes."""
+        codegen = task_codegen.RayCodeGen()
+        flush_script = codegen._get_rclone_flush_script()
+
+        # Should report total flush time on completion
+        assert 'TOTAL_FLUSH_TIME=$(($(date +%s) - FLUSH_START_TIME))' in flush_script
+        assert 'cached mount upload complete (took ${TOTAL_FLUSH_TIME}s)' in flush_script
+
+    def test_flush_script_output_message_formats(self):
+        """Test that all output message variants are present."""
+        codegen = task_codegen.RayCodeGen()
+        flush_script = codegen._get_rclone_flush_script()
+
+        # Format 1: cache status + uploading files
+        assert (
+            'cached mount is still uploading (elapsed: ${ELAPSED}s) '
+            '[${CACHE_STATUS}] uploading: ${UPLOADING_FILES}') in flush_script
+
+        # Format 2: cache status only
+        assert ('cached mount is still uploading (elapsed: ${ELAPSED}s) '
+                '[${CACHE_STATUS}]"') in flush_script
+
+        # Format 3: last line fallback
+        assert ('cached mount is still uploading (elapsed: ${ELAPSED}s) '
+                '${LAST_LINE}"') in flush_script
+
+        # Format 4: bare elapsed time (final fallback)
+        assert 'cached mount is still uploading (elapsed: ${ELAPSED}s)"' in flush_script
+
+    def test_slurm_flush_script_same_as_ray(self):
+        """Test that SlurmCodeGen uses the same flush script as RayCodeGen."""
+        ray_codegen = task_codegen.RayCodeGen()
+        slurm_codegen = task_codegen.SlurmCodeGen(slurm_job_id='12345')
+
+        ray_script = ray_codegen._get_rclone_flush_script()
+        slurm_script = slurm_codegen._get_rclone_flush_script()
+
+        assert ray_script == slurm_script
