@@ -2608,7 +2608,8 @@ def _update_cluster_status(
             if isinstance(backend, backends.CloudVmRayBackend):
                 # Check autostopping first, before head_node_alive check
                 # This ensures we detect AUTOSTOPPING even when Ray becomes
-                # unhealthy during hook execution
+                # unhealthy during hook execution, or if the actual nodes are
+                # partially autostopped but not completely yet.
                 is_autostopping = backend.is_definitely_autostopping(
                     handle, stream_logs=False)
 
