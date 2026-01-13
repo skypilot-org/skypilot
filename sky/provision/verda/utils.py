@@ -58,7 +58,7 @@ class APIException(Exception):
         if self.code:
             msg = f'error code: {self.code}\n'
 
-        msg += f'messagexxxx: {self.message}xxx'
+        msg += f'message: {self.message}'
         return msg
 
 

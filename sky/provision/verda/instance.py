@@ -160,8 +160,6 @@ def run_instances(
                     'size': disk_size,
                 }
             }
-            print(instance_data)
-            print("Launching in Verda Cloud..., region: ", region)
             response = verda.instance_create(instance_data)
             instance_id = response.instance_id
         except Exception as e:  # pylint: disable=broad-except

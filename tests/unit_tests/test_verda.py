@@ -41,14 +41,15 @@ def test_verda_region_zone_validation_disallows_zones():
 
 
 @patch('sky.clouds.verda.get_verda_configuration')
-def test_verda_check_credentials_missing(mock_get_config, monkeypatch, tmp_path):
+def test_verda_check_credentials_missing(mock_get_config, monkeypatch, 
+                                         tmp_path):
     cloud = verda.Verda()
     # Mock configuration to return False (not configured)
     mock_get_config.return_value = (False, "Verda credentials not found", None)
-    
+
     fake_path = tmp_path / "config.json"
     monkeypatch.setattr(verda.Verda, "CREDENTIALS_PATH", str(fake_path))
-    
+
     valid, msg = cloud.check_credentials(clouds.CloudCapability.COMPUTE)
     assert not valid
     assert "Verda credentials not found" in msg
@@ -57,13 +58,12 @@ def test_verda_check_credentials_missing(mock_get_config, monkeypatch, tmp_path)
 class TestVerdaClientInstanceCreation:
     """Test cases for VerdaClient instance creation through utils.py."""
 
-
     @patch('sky.provision.verda.utils.get_verda_configuration')
     @patch('sky.provision.verda.utils.requests.post')
     @patch('sky.provision.verda.utils.requests.get')
     @patch('sky.provision.verda.utils.time.time')
     def test_instance_create_success(self, mock_time, mock_get, mock_post,
-                                      mock_get_config):
+                                     mock_get_config):
         """Test successful instance creation."""
         # Mock time to control token expiration
         mock_time.return_value = 1000.0
@@ -74,9 +74,6 @@ class TestVerdaClientInstanceCreation:
         mock_config.client_secret = "test-client-secret"
         mock_config.base_url = "https://api.verda.com/v1"
         mock_get_config.return_value = (True, None, mock_config)
-
-        # Mock generate_headers to return appropriate headers
-
 
         # Mock authentication response (called during HTTPClient.__init__)
         auth_response = MagicMock()
@@ -116,7 +113,7 @@ class TestVerdaClientInstanceCreation:
         payload = {
             'instance_type': 'gpu-h100-8gpu',
             'hostname': 'test-cluster-head',
-            'location': 'FIN-03',
+            'location_code': 'FIN-03',
             'is_spot': False,
             'contract': 'PAY_AS_YOU_GO',
             'image': 'ubuntu-24.04-cuda-12.8-open-docker',
@@ -154,7 +151,8 @@ class TestVerdaClientInstanceCreation:
 
         # Verify get call
         get_call = mock_get.call_args
-        assert 'https://api.verda.com/v1/instances/instance-123' in get_call[0][0]
+        assert 'https://api.verda.com/v1/instances/instance-123' in get_call[0][
+            0]
 
 
     @patch('sky.provision.verda.utils.get_verda_configuration')
@@ -162,7 +160,7 @@ class TestVerdaClientInstanceCreation:
     @patch('sky.provision.verda.utils.requests.get')
     @patch('sky.provision.verda.utils.time.time')
     def test_instance_create_with_spot(self, mock_time, mock_get, mock_post,
-                                        mock_get_config):
+                                       mock_get_config):
         """Test instance creation with spot/preemptible instance."""
         # Mock time to control token expiration
         mock_time.return_value = 1000.0
@@ -173,9 +171,6 @@ class TestVerdaClientInstanceCreation:
         mock_config.client_secret = "test-client-secret"
         mock_config.base_url = "https://api.verda.com/v1"
         mock_get_config.return_value = (True, None, mock_config)
-
-        # Mock generate_headers to return appropriate headers
-
 
         # Mock authentication response (called during HTTPClient.__init__)
         auth_response = MagicMock()
@@ -215,7 +210,7 @@ class TestVerdaClientInstanceCreation:
         payload = {
             'instance_type': 'gpu-h100-8gpu',
             'hostname': 'test-cluster-worker',
-            'location': 'FIN-03',
+            'location_code': 'FIN-03',
             'is_spot': True,
             'contract': 'SPOT',
             'image': 'ubuntu-24.04-cuda-12.8-open-docker',
@@ -241,12 +236,11 @@ class TestVerdaClientInstanceCreation:
         assert create_call[1]['json']['is_spot'] is True
         assert create_call[1]['json']['contract'] == 'SPOT'
 
-
     @patch('sky.provision.verda.utils.get_verda_configuration')
     @patch('sky.provision.verda.utils.requests.post')
     @patch('sky.provision.verda.utils.time.time')
     def test_instance_create_api_error(self, mock_time, mock_post,
-                                        mock_get_config):
+                                       mock_get_config):
         """Test instance creation with API error."""
         # Mock time to control token expiration
         mock_time.return_value = 1000.0
@@ -257,9 +251,6 @@ class TestVerdaClientInstanceCreation:
         mock_config.client_secret = "test-client-secret"
         mock_config.base_url = "https://api.verda.com/v1"
         mock_get_config.return_value = (True, None, mock_config)
-
-        # Mock generate_headers to return appropriate headers
-
 
         # Mock authentication response (called during HTTPClient.__init__)
         auth_response = MagicMock()
@@ -287,7 +278,7 @@ class TestVerdaClientInstanceCreation:
         payload = {
             'instance_type': 'invalid-instance-type',
             'hostname': 'test-cluster-head',
-            'location': 'FIN-03',
+            'location_code': 'FIN-03',
             'is_spot': False,
             'contract': 'PAY_AS_YOU_GO',
             'image': 'ubuntu-24.04-cuda-12.8-open-docker',
