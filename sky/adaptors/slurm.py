@@ -558,7 +558,7 @@ class SlurmClient:
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(rc,
                                            cmd,
-                                           'Failed to get Slurm partitions.',
+                                           f'Failed to get Slurm partitions.{stdout}\n{stderr}',
                                            stderr=f'{stdout}\n{stderr}')
 
         partitions = []
