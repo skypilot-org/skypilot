@@ -207,8 +207,13 @@ def get_tigris_mount_cmd(bucket_name: str,
                          _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount Tigris bucket using s3fs/rclone.
 
-    Tigris credentials are read from ~/.aws/credentials with profile 'tigris'.
+    Tigris credentials are read from ~/.aws/credentials using the profile
+    specified by TIGRIS_PROFILE env var (default: 'tigris').
     """
+    # pylint: disable=import-outside-toplevel
+    from sky.adaptors import tigris
+    tigris_profile = tigris.get_tigris_profile()
+
     if _bucket_sub_path is None:
         _bucket_sub_path = ''
     else:
@@ -219,11 +224,11 @@ def get_tigris_mount_cmd(bucket_name: str,
     rclone_mount = (
         f'{FUSE3_INSTALL_CMD} && '
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
-        f'AWS_PROFILE=tigris '
+        f'AWS_PROFILE={tigris_profile} '
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
         f'--s3-force-path-style=false '
         f'--s3-endpoint {endpoint_url} --daemon --allow-other')
-    goofys_mount = (f'AWS_PROFILE=tigris {_GOOFYS_WRAPPER} '
+    goofys_mount = (f'AWS_PROFILE={tigris_profile} {_GOOFYS_WRAPPER} '
                     '-o allow_other '
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '

@@ -10,7 +10,10 @@ from sky.clouds import cloud
 from sky.utils import annotations
 from sky.utils import ux_utils
 
+# Default profile name
 TIGRIS_PROFILE_NAME = 'tigris'
+# Environment variable to override the profile name
+TIGRIS_PROFILE_ENV = 'TIGRIS_PROFILE'
 ENDPOINT_URL = 'https://t3.storage.dev'
 NAME = 'Tigris'
 DEFAULT_REGION = 'auto'
@@ -29,6 +32,16 @@ botocore = common.LazyImport('botocore',
 
 _LAZY_MODULES = (boto3, botocore)
 _session_creation_lock = threading.RLock()
+
+
+def get_tigris_profile() -> Optional[str]:
+    """Get the Tigris AWS profile name.
+
+    Returns the profile name from TIGRIS_PROFILE env var if set,
+    otherwise returns 'tigris' as the default profile name.
+    Returns None if credentials should come from env vars instead.
+    """
+    return os.environ.get(TIGRIS_PROFILE_ENV, TIGRIS_PROFILE_NAME)
 
 
 def _get_tigris_sdk_env_credentials() -> Tuple[Optional[str], Optional[str]]:
@@ -81,8 +94,8 @@ def get_tigris_credentials(boto3_session):
 def session():
     """Create an AWS session for Tigris.
 
-    First tries the 'tigris' profile, then falls back to the default
-    credentials chain (environment variables, default profile, etc.).
+    Uses the profile specified by TIGRIS_PROFILE env var, or 'tigris' by
+    default. Falls back to default credentials chain if profile not found.
     """
     # Creating the session object is not thread-safe for boto3,
     # so we add a reentrant lock to synchronize the session creation.
@@ -90,9 +103,9 @@ def session():
     # However, the session object itself is thread-safe, so we are
     # able to use lru_cache() to cache the session object.
     with _session_creation_lock:
-        # Try tigris profile first if it exists
-        if tigris_profile_in_aws_cred():
-            session_ = boto3.session.Session(profile_name=TIGRIS_PROFILE_NAME)
+        profile_name = get_tigris_profile()
+        if profile_name and _profile_exists(profile_name):
+            session_ = boto3.session.Session(profile_name=profile_name)
         else:
             # Fall back to default credentials chain (env vars, default profile)
             session_ = boto3.session.Session()
@@ -176,11 +189,23 @@ def _has_tigris_keys(access_key: Optional[str],
     return False
 
 
+def _profile_exists(profile_name: str) -> bool:
+    """Check if an AWS profile exists in ~/.aws/credentials."""
+    cred_path = os.path.expanduser('~/.aws/credentials')
+    if not os.path.isfile(cred_path):
+        return False
+    with open(cred_path, 'r', encoding='utf-8') as file:
+        for line in file:
+            if line.strip() == f'[{profile_name}]':
+                return True
+    return False
+
+
 def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     """Checks if the user has access credentials to Tigris Object Storage.
 
     Tigris credentials can be configured via:
-    1. A [tigris] profile in ~/.aws/credentials
+    1. AWS profile specified by TIGRIS_PROFILE env var (default: 'tigris')
     2. Tigris SDK env vars (TIGRIS_STORAGE_ACCESS_KEY_ID, etc.)
     3. AWS env vars with Tigris keys (AWS_ACCESS_KEY_ID, etc.)
     4. The default AWS credentials chain with Tigris keys
@@ -193,8 +218,10 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
         It is False when they are not set, which would hint with a
         string on how to set them up.
     """
-    # Check for tigris profile first
-    if tigris_profile_in_aws_cred():
+    profile_name = get_tigris_profile()
+
+    # Check for the configured profile
+    if profile_name and _profile_exists(profile_name):
         return (True, None)
 
     # Check for Tigris SDK environment variables
@@ -223,9 +250,10 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     hints = (
         'Tigris credentials not found. Tigris keys start with tid_/tsec_.\n'
         f'{_INDENT_PREFIX}You can configure them via:\n'
-        f'{_INDENT_PREFIX}Option 1: Create a [tigris] profile:\n'
+        f'{_INDENT_PREFIX}Option 1: Add Tigris keys to an AWS profile:\n'
         f'{_INDENT_PREFIX}  $ pip install "skypilot[tigris]"\n'
         f'{_INDENT_PREFIX}  $ aws configure --profile tigris\n'
+        f'{_INDENT_PREFIX}  (Set TIGRIS_PROFILE env var for other profiles)\n'
         f'{_INDENT_PREFIX}Option 2: Set Tigris SDK environment variables:\n'
         f'{_INDENT_PREFIX}  $ export {TIGRIS_ACCESS_KEY_ENV}=tid_...\n'
         f'{_INDENT_PREFIX}  $ export {TIGRIS_SECRET_KEY_ENV}=tsec_...\n'
@@ -239,15 +267,9 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
 
 
 def tigris_profile_in_aws_cred() -> bool:
-    """Checks if Tigris profile is set in aws credentials"""
-    cred_path = os.path.expanduser('~/.aws/credentials')
-    if not os.path.isfile(cred_path):
-        return False
-    with open(cred_path, 'r', encoding='utf-8') as file:
-        for line in file:
-            if line.strip() == f'[{TIGRIS_PROFILE_NAME}]':
-                return True
-    return False
+    """Checks if the configured Tigris profile exists in AWS credentials."""
+    profile_name = get_tigris_profile()
+    return profile_name is not None and _profile_exists(profile_name)
 
 
 def get_credential_file_mounts() -> Dict[str, str]:

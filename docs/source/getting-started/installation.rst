@@ -1572,11 +1572,16 @@ SkyPilot can download/upload data to Tigris buckets and mount them as local file
 
 Tigris uses S3-compatible APIs with the endpoint ``https://t3.storage.dev``. Tigris access keys start with ``tid_`` and secret keys start with ``tsec_``.
 
-**Option 1: Use a dedicated tigris profile (recommended)**
+**Option 1: Use an AWS profile (recommended)**
 
 .. code-block:: shell
 
+  # Default profile name is 'tigris'
   aws configure --profile tigris
+
+  # Or use a custom profile name
+  aws configure --profile my-tigris-profile
+  export TIGRIS_PROFILE=my-tigris-profile
 
 **Option 2: Use Tigris SDK environment variables**
 

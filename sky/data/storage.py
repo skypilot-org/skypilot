@@ -1798,8 +1798,8 @@ class S3CompatibleStore(AbstractStore):
     def _is_same_provider_source(self) -> bool:
         """Check if source is from the same provider."""
         url_prefix = self.config.url_prefix or 's3://'
-        return isinstance(self.source, str) and self.source.startswith(
-            url_prefix)
+        return isinstance(self.source,
+                          str) and self.source.startswith(url_prefix)
 
     def _needs_cross_provider_transfer(self) -> bool:
         """Check if source needs cross-provider transfer."""
