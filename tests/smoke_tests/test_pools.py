@@ -2087,3 +2087,77 @@ def test_pool_fractional_gpu_scheduling(generic_cloud: str):
             )
 
             smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_one_job_per_worker_no_resources(generic_cloud: str):
+    """Test that when no resources are specified, only 1 job runs per worker.
+    
+    This test validates that jobs without resource specifications are
+    limited to 1 job per worker. The test:
+    1. Launches a pool with 1 worker
+    2. Launches 1 job that runs forever
+    3. Waits for it to be RUNNING
+    4. Launches another job that runs forever
+    5. Verifies the second job stays PENDING (doesn't run)
+    """
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+
+    job_name_1 = f'{name}-job-1'
+    job_name_2 = f'{name}-job-2'
+
+    # Create jobs with no resources specified (should default to 1 job per worker)
+    job_config_1 = basic_job_conf(
+        job_name=job_name_1,
+        run_cmd='sleep infinity',
+    )
+    job_config_2 = basic_job_conf(
+        job_name=job_name_2,
+        run_cmd='sleep infinity',
+    )
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml, \
+         tempfile.NamedTemporaryFile(delete=True) as job_yaml_1, \
+         tempfile.NamedTemporaryFile(delete=True) as job_yaml_2:
+        write_yaml(pool_yaml, pool_config)
+        write_yaml(job_yaml_1, job_config_1)
+        write_yaml(job_yaml_2, job_config_2)
+
+        test = smoke_tests_utils.Test(
+            'test_pool_one_job_per_worker_no_resources',
+            [
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                      pool_yaml=pool_yaml.name),
+                wait_until_pool_ready(pool_name, timeout=timeout),
+                # Launch first job
+                _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                    pool_name=pool_name,
+                    job_yaml=job_yaml_1.name,
+                    job_name=job_name_1),
+                # Wait for first job to be RUNNING
+                wait_until_job_status(job_name_1, ['RUNNING'], timeout=timeout),
+                # Launch second job
+                _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                    pool_name=pool_name,
+                    job_yaml=job_yaml_2.name,
+                    job_name=job_name_2),
+                # Wait for second job to be PENDING
+                wait_until_job_status(job_name_2, ['PENDING'],
+                                      bad_statuses=['RUNNING'],
+                                      timeout=timeout),
+                # Sleep for 30 seconds
+                'sleep 30',
+                # Verify second job is still PENDING (not RUNNING)
+                wait_until_job_status(job_name_2, ['PENDING'],
+                                      bad_statuses=['RUNNING'],
+                                      timeout=30),
+            ],
+            timeout=timeout,
+            teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+        )
+
+        smoke_tests_utils.run_one_test(test)
