@@ -1578,14 +1578,21 @@ Tigris uses S3-compatible APIs with the endpoint ``https://t3.storage.dev``. Tig
 
   aws configure --profile tigris
 
-**Option 2: Use environment variables**
+**Option 2: Use Tigris SDK environment variables**
+
+.. code-block:: shell
+
+  export TIGRIS_STORAGE_ACCESS_KEY_ID=tid_...
+  export TIGRIS_STORAGE_SECRET_ACCESS_KEY=tsec_...
+
+**Option 3: Use AWS environment variables**
 
 .. code-block:: shell
 
   export AWS_ACCESS_KEY_ID=tid_...
   export AWS_SECRET_ACCESS_KEY=tsec_...
 
-When prompted for credentials, enter your Tigris Access Key ID (starts with ``tid_``) and Secret Access Key (starts with ``tsec_``). See `Tigris documentation <https://www.tigrisdata.com/docs/iam/manage-access-key/>`_ to generate credentials. For the region, enter :code:`auto`.
+When prompted for credentials (Option 1), enter your Tigris Access Key ID (starts with ``tid_``) and Secret Access Key (starts with ``tsec_``). See `Tigris documentation <https://www.tigrisdata.com/docs/iam/manage-access-key/>`_ to generate credentials. For the region, enter :code:`auto`.
 
 To use Tigris in your SkyPilot YAML, specify ``store: tigris``:
 

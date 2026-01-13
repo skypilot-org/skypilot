@@ -16,6 +16,10 @@ NAME = 'Tigris'
 DEFAULT_REGION = 'auto'
 _INDENT_PREFIX = '    '
 
+# Tigris SDK environment variables
+TIGRIS_ACCESS_KEY_ENV = 'TIGRIS_STORAGE_ACCESS_KEY_ID'
+TIGRIS_SECRET_KEY_ENV = 'TIGRIS_STORAGE_SECRET_ACCESS_KEY'
+
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Tigris. '
                          'Try pip install "skypilot[aws]"')
 
@@ -27,15 +31,43 @@ _LAZY_MODULES = (boto3, botocore)
 _session_creation_lock = threading.RLock()
 
 
+def _get_tigris_sdk_env_credentials() -> Tuple[Optional[str], Optional[str]]:
+    """Get Tigris credentials from Tigris SDK environment variables.
+
+    Returns:
+        Tuple of (access_key, secret_key) from Tigris SDK env vars, or
+        (None, None) if not set.
+    """
+    access_key = os.environ.get(TIGRIS_ACCESS_KEY_ENV)
+    secret_key = os.environ.get(TIGRIS_SECRET_KEY_ENV)
+    return (access_key, secret_key)
+
+
 def get_tigris_credentials(boto3_session):
-    """Gets the Tigris credentials from the boto3 session object.
+    """Gets the Tigris credentials from the boto3 session or environment.
+
+    Checks for credentials in the following order:
+    1. Tigris SDK environment variables
+    2. boto3 session credentials (profile or AWS env vars)
 
     Args:
         boto3_session: The boto3 session object.
     Returns:
-        botocore.credentials.ReadOnlyCredentials object with the Tigris
-        credentials.
+        A tuple of (access_key, secret_key) for Tigris.
     """
+    # First check Tigris SDK environment variables
+    tigris_access, tigris_secret = _get_tigris_sdk_env_credentials()
+    if tigris_access and tigris_secret:
+        # Return a simple object with access_key and secret_key attributes
+        class TigrisCredentials:
+
+            def __init__(self, access_key, secret_key):
+                self.access_key = access_key
+                self.secret_key = secret_key
+
+        return TigrisCredentials(tigris_access, tigris_secret)
+
+    # Fall back to boto3 session credentials
     tigris_credentials = boto3_session.get_credentials()
     if tigris_credentials is None:
         with ux_utils.print_exception_no_traceback():
@@ -149,8 +181,9 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
 
     Tigris credentials can be configured via:
     1. A [tigris] profile in ~/.aws/credentials
-    2. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
-    3. The default AWS credentials chain
+    2. Tigris SDK env vars (TIGRIS_STORAGE_ACCESS_KEY_ID, etc.)
+    3. AWS env vars with Tigris keys (AWS_ACCESS_KEY_ID, etc.)
+    4. The default AWS credentials chain with Tigris keys
 
     Tigris keys have distinctive prefixes: tid_ (access key), tsec_ (secret).
 
@@ -164,7 +197,12 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     if tigris_profile_in_aws_cred():
         return (True, None)
 
-    # Check for Tigris keys in environment variables
+    # Check for Tigris SDK environment variables
+    tigris_access, tigris_secret = _get_tigris_sdk_env_credentials()
+    if _has_tigris_keys(tigris_access, tigris_secret):
+        return (True, None)
+
+    # Check for Tigris keys in AWS environment variables
     env_access = os.environ.get('AWS_ACCESS_KEY_ID')
     env_secret = os.environ.get('AWS_SECRET_ACCESS_KEY')
     if _has_tigris_keys(env_access, env_secret):
@@ -188,7 +226,10 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
         f'{_INDENT_PREFIX}Option 1: Create a [tigris] profile:\n'
         f'{_INDENT_PREFIX}  $ pip install "skypilot[tigris]"\n'
         f'{_INDENT_PREFIX}  $ aws configure --profile tigris\n'
-        f'{_INDENT_PREFIX}Option 2: Set environment variables:\n'
+        f'{_INDENT_PREFIX}Option 2: Set Tigris SDK environment variables:\n'
+        f'{_INDENT_PREFIX}  $ export {TIGRIS_ACCESS_KEY_ENV}=tid_...\n'
+        f'{_INDENT_PREFIX}  $ export {TIGRIS_SECRET_KEY_ENV}=tsec_...\n'
+        f'{_INDENT_PREFIX}Option 3: Set AWS environment variables:\n'
         f'{_INDENT_PREFIX}  $ export AWS_ACCESS_KEY_ID=tid_...\n'
         f'{_INDENT_PREFIX}  $ export AWS_SECRET_ACCESS_KEY=tsec_...\n'
         f'{_INDENT_PREFIX}For more info: '
