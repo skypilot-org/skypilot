@@ -3,13 +3,11 @@
 import ipaddress
 import logging
 import re
-import socket
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
 from sky.adaptors import common
 from sky.utils import command_runner
-from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
@@ -30,6 +28,8 @@ _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Slurm. '
                          'Try running: pip install "skypilot[slurm]"')
 hostlist = common.LazyImport('hostlist',
                              import_error_message=_IMPORT_ERROR_MESSAGE)
+
+_UNRESOLVED_HOSTNAME_MARKER = 'UNRESOLVED'
 
 
 class SlurmPartition(NamedTuple):
@@ -446,6 +446,8 @@ class SlurmClient:
         logger.debug(f'Successfully got nodes for job {job_id}: {stdout}')
 
         node_info = {}
+        nodes_to_resolve: List[Tuple[str, str]] = []
+
         for line in stdout.strip().splitlines():
             line = line.strip()
             if line:
@@ -453,23 +455,52 @@ class SlurmClient:
                 if len(parts) >= 2:
                     node_name = parts[0]
                     node_addr = parts[1]
-                    # Resolve hostname to IP if node_addr is not already
-                    # an IP address.
                     try:
                         ipaddress.ip_address(node_addr)
-                        # Already an IP address
-                        node_ip = node_addr
+                        node_info[node_name] = node_addr  # Already an IP
                     except ValueError:
-                        # It's a hostname, resolve it to an IP
-                        try:
-                            node_ip = socket.gethostbyname(node_addr)
-                        except socket.gaierror as e:
-                            raise RuntimeError(
-                                f'Failed to resolve hostname {node_addr} to IP '
-                                f'for node {node_name}: '
-                                f'{common_utils.format_exception(e)}') from e
+                        nodes_to_resolve.append((node_name, node_addr))
 
-                    node_info[node_name] = node_ip
+        if nodes_to_resolve:
+            hostnames = [h for _, h in nodes_to_resolve]
+            # The output of `getent ahostsv4` is as follows:
+            # 10.0.0.0     STREAM worker-0
+            # 10.0.0.0     DGRAM
+            # 10.0.0.0     RAW
+            resolve_ip_cmd = (
+                f'for h in {" ".join(hostnames)}; do '
+                f'ip=$(getent ahostsv4 "$h" | head -1 | awk \'{{print $1}}\'); '
+                f'if [ -n "$ip" ]; then echo "$h $ip"; '
+                f'else echo "$h {_UNRESOLVED_HOSTNAME_MARKER}"; fi; '
+                f'done')
+            rc, resolve_stdout, stderr = self._run_slurm_cmd(resolve_ip_cmd)
+            subprocess_utils.handle_returncode(
+                rc,
+                resolve_ip_cmd,
+                f'Failed to resolve hostnames for: {hostnames}',
+                stderr=f'{resolve_stdout}\n{stderr}')
+
+            hostname_to_ip = {}
+            unresolved = []
+            for line in resolve_stdout.strip().splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    hostname = parts[0]
+                    ip = parts[1]
+                    if ip == _UNRESOLVED_HOSTNAME_MARKER:
+                        unresolved.append(hostname)
+                    else:
+                        hostname_to_ip[hostname] = ip
+
+            if unresolved:
+                raise RuntimeError(
+                    f'Failed to resolve hostnames for: {unresolved}')
+
+            for node_name, hostname in nodes_to_resolve:
+                if hostname not in hostname_to_ip:
+                    raise RuntimeError(
+                        f'Failed to resolve {hostname} for node {node_name}')
+                node_info[node_name] = hostname_to_ip[hostname]
 
         nodes = list(node_info.keys())
         node_ips = [node_info[node] for node in nodes]
