@@ -32,7 +32,7 @@ def volume_refresh() -> None:
     It updates status, error messages, and usage information in the database.
 
     Status transitions:
-    - ERROR: Volume has errors (e.g., pending due to misconfiguration)
+    - NOT_READY: Volume has errors (e.g., pending due to misconfiguration)
     - IN_USE: Volume is healthy and in use
     - READY: Volume is healthy and not in use
     """

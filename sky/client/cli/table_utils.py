@@ -261,7 +261,7 @@ class PVCVolumeTable(VolumeTable):
                 table_row.append(
                     row.get('config', {}).get('storage_class_name', '-'))
                 table_row.append(row.get('config', {}).get('access_mode', ''))
-                # Add error message (truncated)
+                # Add error message
                 error_msg = row.get('error_message', '')
                 table_row.append(error_msg if error_msg else '-')
             elif self._has_errors:
@@ -269,7 +269,8 @@ class PVCVolumeTable(VolumeTable):
                 error_msg = row.get('error_message', '')
                 # Truncate error message for display
                 if error_msg:
-                    error_msg = common_utils.truncate_long_string(error_msg, 60)
+                    error_msg = common_utils.truncate_long_string(
+                        error_msg, constants.ERROR_MESSAGE_TRUNC_LENGTH)
                 table_row.append(error_msg if error_msg else '-')
 
             self.table.add_row(table_row)

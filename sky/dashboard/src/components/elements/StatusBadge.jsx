@@ -52,12 +52,12 @@ export const getStatusStyle = (status) => {
     case 'FAILED_CONTROLLER':
       return 'bg-red-50 text-red-700';
 
-    // Volume specific statuses
-    case 'READY':
-      return 'bg-green-50 text-green-700';
-    // NOT_READY is handled below with Serve statuses
+    // Volume statuses - 'READY' and 'NOT_READY' are
+    // handled below with Serve statuses
 
     // Serve specific statuses - ReplicaStatus
+    case 'READY':
+      return 'bg-green-50 text-green-700';
     case 'PROVISIONING':
       return 'bg-blue-50 text-blue-700';
     case 'NOT_READY':
