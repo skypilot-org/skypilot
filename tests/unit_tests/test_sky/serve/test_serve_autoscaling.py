@@ -12,6 +12,14 @@ from sky.serve.service_spec import SkyServiceSpec
 from sky.utils import common_utils
 
 
+class DummyReplicaManager:
+
+    def __init__(self, service_name, spec, version):
+        self.service_name = service_name
+        self.spec = spec
+        self.version = version
+
+
 def _build_request_service_spec(**overrides) -> SkyServiceSpec:
     data = {
         'readiness_path': '/',
@@ -65,13 +73,6 @@ def _make_handle(accelerator: str) -> backends.CloudVmRayResourceHandle:
 def test_controller_autoscaler_latest_version_initialized(monkeypatch):
     """Controller init syncs autoscaler latest_version on restart."""
 
-    class DummyReplicaManager:
-
-        def __init__(self, service_name, spec, version):
-            self.service_name = service_name
-            self.spec = spec
-            self.version = version
-
     monkeypatch.setattr(serve_controller.replica_managers,
                         'SkyPilotReplicaManager', DummyReplicaManager)
 
@@ -86,13 +87,6 @@ def test_controller_autoscaler_latest_version_initialized(monkeypatch):
 
 def test_controller_restart_no_scale_churn(monkeypatch):
     """Controller restart should not trigger scale-up churn."""
-
-    class DummyReplicaManager:
-
-        def __init__(self, service_name, spec, version):
-            self.service_name = service_name
-            self.spec = spec
-            self.version = version
 
     monkeypatch.setattr(serve_controller.replica_managers,
                         'SkyPilotReplicaManager', DummyReplicaManager)
