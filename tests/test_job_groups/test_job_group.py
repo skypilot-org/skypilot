@@ -284,7 +284,7 @@ class TestJobGroupNetworking:
                         ('eval-0.ns.svc.cluster.local', 'eval-0.my-group')]
 
         script = job_group_networking.generate_k8s_dns_updater_script(
-            dns_mappings)
+            dns_mappings, 'my-group')
 
         # Verify script contains required elements
         assert 'MAPPINGS=' in script
@@ -294,12 +294,16 @@ class TestJobGroupNetworking:
         assert '/etc/hosts' in script
         assert 'SkyPilot JobGroup K8s entries' in script
         assert 'while true' in script  # Background loop
+        # Verify idempotency (pkill for cleanup)
+        assert 'pkill' in script
+        assert 'skypilot-jobgroup-dns-updater-my-group' in script
 
     def test_generate_k8s_dns_updater_script_empty_mappings(self):
         """Test DNS updater returns empty for no mappings."""
         from sky.jobs import job_group_networking
 
-        script = job_group_networking.generate_k8s_dns_updater_script([])
+        script = job_group_networking.generate_k8s_dns_updater_script(
+            [], 'my-group')
         assert script == ''
 
 

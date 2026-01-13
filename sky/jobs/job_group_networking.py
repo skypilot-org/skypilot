@@ -22,16 +22,13 @@ Design Goals:
     - Platform abstraction: K8s uses native DNS, SSH clouds use /etc/hosts
 """
 import asyncio
-import base64
 import enum
-import json
+import shlex
 import textwrap
-import traceback
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from sky import clouds as sky_clouds
 from sky import sky_logging
-from sky.skylet import host_updater
 
 if TYPE_CHECKING:
     from sky import task as task_lib
@@ -268,58 +265,155 @@ async def _inject_hosts_on_node(
         return False
 
 
-async def _write_dns_mappings_file_on_node(
+def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]],
+                                    job_group_name: str) -> str:
+    """Generate background script to update /etc/hosts with K8s DNS IPs.
+
+    Args:
+        dns_mappings: List of (k8s_dns, simple_hostname) tuples.
+        job_group_name: Name of the job group (for process identification).
+
+    Returns:
+        Bash script as a string (standalone, without nohup wrapper).
+    """
+    if not dns_mappings:
+        return ''
+
+    # Build mapping pairs for the script
+    mapping_pairs = ' '.join(
+        [f'{dns}:{hostname}' for dns, hostname in dns_mappings])
+
+    # Sanitize job group name for use in process identifier
+    safe_job_group_name = job_group_name.replace(' ', '_')
+    process_id = f'skypilot-jobgroup-dns-updater-{safe_job_group_name}'
+    log_file = f'/tmp/{process_id}.log'
+
+    script = textwrap.dedent(f"""
+        #!/bin/bash
+        # Kill any existing DNS updater for this job group (idempotency)
+        pkill -f "{process_id}" 2>/dev/null || true
+        sleep 0.5
+
+        # Background K8s DNS to IP updater for /etc/hosts
+        # Process identifier: {process_id}
+        MAPPINGS="{mapping_pairs}"
+        MARKER="# SkyPilot JobGroup K8s entries"
+
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Starting DNS updater for {job_group_name}"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Monitoring mappings: $MAPPINGS"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Log file: {log_file}"
+
+        while true; do
+          # Build new entries
+          new_entries=""
+          needs_update=0
+          for mapping in $MAPPINGS; do
+            k8s_dns="${{mapping%%:*}}"
+            simple_name="${{mapping##*:}}"
+            # Resolve K8s DNS to IP
+            ip=$(getent hosts "$k8s_dns" 2>/dev/null | awk '{{print $1}}')
+            if [ -n "$ip" ]; then
+              new_entries="${{new_entries}}$ip $simple_name  $MARKER
+"
+              # Check if current IP differs from /etc/hosts
+              current_ip=$(getent hosts "$simple_name" 2>/dev/null | awk '{{print $1}}')
+              if [ "$ip" != "$current_ip" ]; then
+                needs_update=1
+                echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] IP changed for $simple_name: $current_ip -> $ip"
+              fi
+            else
+              echo "$(date '+%Y-%m-%d %H:%M:%S') [DEBUG] Waiting to resolve $k8s_dns"
+            fi
+          done
+
+          # Only update /etc/hosts if IPs have changed
+          if [ -n "$new_entries" ] && [ $needs_update -eq 1 ]; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Updating /etc/hosts"
+            # In K8s, /etc/hosts is mounted by kubelet and cannot be replaced (mv).
+            # Instead, we filter and rewrite in-place using tee.
+            # 1. Read existing content without our markers
+            existing=$(sudo grep -v "$MARKER" /etc/hosts 2>/dev/null || true)
+            # 2. Write back existing + new entries using tee
+            if echo -e "$existing\\n$new_entries" | sudo tee /etc/hosts > /dev/null; then
+              echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Successfully updated /etc/hosts"
+            else
+              echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Failed to update /etc/hosts"
+            fi
+          fi
+          sleep 5
+        done
+    """)
+    return script.strip()
+
+
+async def _start_k8s_dns_updater_on_node(
     runner: 'command_runner.CommandRunner',
     dns_mappings: List[Tuple[str, str]],
+    job_group_name: str,
 ) -> bool:
-    """Write DNS mappings file on a node for skylet's HostUpdater.
+    """Start background DNS updater on a K8s node.
 
-    The skylet's HostUpdaterEvent watches for this file and starts
-    the background DNS updater when it appears.
+    The updater resolves K8s service DNS names to IPs and keeps
+    /etc/hosts updated.
 
     Args:
         runner: CommandRunner for the target node.
         dns_mappings: List of (k8s_dns, simple_hostname) tuples.
+        job_group_name: Name of the job group (for process identification).
 
     Returns:
         True if successful, False otherwise.
     """
-    logger.info(f'_write_dns_mappings_file_on_node called with '
-                f'{len(dns_mappings)} mappings')
     if not dns_mappings:
-        logger.info('No DNS mappings to write, returning True')
         return True
 
-    # Encode mappings as JSON
-    mappings_json = json.dumps(
-        [[dns, hostname] for dns, hostname in dns_mappings])
-    # Use $HOME instead of ~ to ensure proper expansion in kubectl exec
-    file_path = host_updater.JOBGROUP_DNS_MAPPINGS_FILE.replace('~', '$HOME')
+    updater_script = generate_k8s_dns_updater_script(dns_mappings,
+                                                     job_group_name)
+    if not updater_script:
+        return True
 
-    # Write the JSON to the file using echo with base64 to avoid shell
-    # escaping issues. This is more robust than heredoc via kubectl exec.
-    encoded_json = base64.b64encode(mappings_json.encode()).decode()
-    write_cmd = (f'mkdir -p $(dirname {file_path}) && '
-                 f'echo {encoded_json} | base64 -d > {file_path}')
+    # Sanitize job group name for file paths
+    safe_job_group_name = job_group_name.replace(' ', '_')
+    process_id = f'skypilot-jobgroup-dns-updater-{safe_job_group_name}'
+    script_path = f'/tmp/{process_id}.sh'
+    log_path = f'/tmp/{process_id}.log'
+
+    # Use shlex.quote to safely transfer the script content
+    encoded_script = shlex.quote(updater_script)
+    write_cmd = f'{{ echo {encoded_script} > {script_path}; }}'
 
     try:
         loop = asyncio.get_running_loop()
-        logger.info(f'Writing DNS mappings file to {file_path}...')
-        logger.info(f'Command: {write_cmd[:200]}...')
-        returncode, stdout, stderr = await loop.run_in_executor(
+
+        # Write the script file
+        logger.debug('Writing DNS updater script...')
+        returncode, _, stderr = await loop.run_in_executor(
             None, lambda: runner.run(
                 write_cmd, stream_logs=False, require_outputs=True))
-        logger.info(f'Write result: returncode={returncode}, '
-                    f'stdout={stdout[:100] if stdout else ""}, '
-                    f'stderr={stderr[:100] if stderr else ""}')
         if returncode != 0:
-            logger.error(f'Failed to write DNS mappings file: {stderr}')
+            logger.error(f'Failed to write DNS updater script: {stderr}')
             return False
-        logger.info('DNS mappings file written successfully')
+        logger.debug('DNS updater script written successfully')
+
+        # Make executable and run in background
+        # Use a subshell with exec to fully detach from kubectl exec:
+        # - The outer shell exits immediately after spawning the subshell
+        # - The subshell runs the script with all FDs redirected
+        run_cmd = (f'chmod +x {script_path} && '
+                   f'(nohup {script_path} < /dev/null > {log_path} 2>&1 &) && '
+                   f'sleep 0.1')
+        logger.debug('Starting DNS updater in background...')
+        returncode, _, stderr = await loop.run_in_executor(
+            None,
+            lambda: runner.run(run_cmd, stream_logs=False, require_outputs=True)
+        )
+        if returncode != 0:
+            logger.error(f'Failed to start DNS updater: {stderr}')
+            return False
+        logger.debug('DNS updater started successfully')
         return True
     except Exception as e:  # pylint: disable=broad-except
-        logger.error(f'Exception while writing DNS mappings file: {e}')
-        logger.error(traceback.format_exc())
+        logger.error(f'Exception while starting DNS updater: {e}')
         return False
 
 
@@ -411,10 +505,10 @@ class NetworkConfigurator:
 
             for node_idx, runner in enumerate(runners):
                 if is_k8s:
-                    # K8s: Write DNS mappings file for skylet's HostUpdater
+                    # K8s: Start background DNS updater on each node
                     inject_tasks.append(
-                        _write_dns_mappings_file_on_node(
-                            runner, k8s_dns_mappings))
+                        _start_k8s_dns_updater_on_node(runner, k8s_dns_mappings,
+                                                       job_group_name))
                 else:
                     # SSH: Inject static /etc/hosts
                     if ssh_hosts_content:
@@ -540,74 +634,6 @@ def _make_env_var_name(job_name: str) -> str:
     # Convert job name to uppercase and replace hyphens with underscores
     safe_name = job_name.upper().replace('-', '_')
     return f'SKYPILOT_JOBGROUP_HOST_{safe_name}'
-
-
-def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]]) -> str:
-    """Generate background script to update /etc/hosts with K8s DNS IPs.
-
-    Args:
-        dns_mappings: List of (k8s_dns, simple_hostname) tuples.
-
-    Returns:
-        Bash script as a string (standalone, without nohup wrapper).
-    """
-    if not dns_mappings:
-        return ''
-
-    # Build mapping pairs for the script
-    mapping_pairs = ' '.join(
-        [f'{dns}:{hostname}' for dns, hostname in dns_mappings])
-
-    script = textwrap.dedent(f"""
-        #!/bin/bash
-        # Background K8s DNS to IP updater for /etc/hosts
-        MAPPINGS="{mapping_pairs}"
-        MARKER="# SkyPilot JobGroup K8s entries"
-
-        echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Starting DNS updater"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Monitoring mappings: $MAPPINGS"
-
-        while true; do
-          # Build new entries
-          new_entries=""
-          needs_update=0
-          for mapping in $MAPPINGS; do
-            k8s_dns="${{mapping%%:*}}"
-            simple_name="${{mapping##*:}}"
-            # Resolve K8s DNS to IP
-            ip=$(getent hosts "$k8s_dns" 2>/dev/null | awk '{{print $1}}')
-            if [ -n "$ip" ]; then
-              new_entries="${{new_entries}}$ip $simple_name  $MARKER
-"
-              # Check if current IP differs from /etc/hosts
-              current_ip=$(getent hosts "$simple_name" 2>/dev/null | awk '{{print $1}}')
-              if [ "$ip" != "$current_ip" ]; then
-                needs_update=1
-                echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] IP changed for $simple_name: $current_ip -> $ip"
-              fi
-            else
-              echo "$(date '+%Y-%m-%d %H:%M:%S') [WARN] Failed to resolve $k8s_dns"
-            fi
-          done
-
-          # Only update /etc/hosts if IPs have changed
-          if [ -n "$new_entries" ] && [ $needs_update -eq 1 ]; then
-            echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Updating /etc/hosts"
-            # In K8s, /etc/hosts is mounted by kubelet and cannot be replaced (mv).
-            # Instead, we filter and rewrite in-place using tee.
-            # 1. Read existing content without our markers
-            existing=$(sudo grep -v "$MARKER" /etc/hosts 2>/dev/null || true)
-            # 2. Write back existing + new entries using tee
-            if echo -e "$existing\\n$new_entries" | sudo tee /etc/hosts > /dev/null; then
-              echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Successfully updated /etc/hosts"
-            else
-              echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Failed to update /etc/hosts"
-            fi
-          fi
-          sleep 5
-        done
-    """)
-    return script.strip()
 
 
 def generate_wait_for_networking_script(job_group_name: str,
