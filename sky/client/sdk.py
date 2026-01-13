@@ -2808,3 +2808,102 @@ def slurm_node_info(
         json=json.loads(body.model_dump_json()),
     )
     return server_common.get_request_id(response)
+
+
+# =====================
+# = Debug Dump =
+# =====================
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def create_debug_dump(
+    request_ids: Optional[List[str]] = None,
+    cluster_names: Optional[List[str]] = None,
+    managed_job_ids: Optional[List[int]] = None,
+    recent_hours: Optional[float] = None,
+) -> server_common.RequestId[str]:
+    """Create a debug dump for troubleshooting.
+
+    Args:
+        request_ids: List of request IDs to include in the dump.
+        cluster_names: List of cluster names to include in the dump.
+        managed_job_ids: List of managed job IDs to include in the dump.
+        recent_hours: If specified, include all resources active within
+            this many hours.
+
+    Returns:
+        The request ID of the debug dump creation request.
+
+    Request Returns:
+        Path to the created zip file on the server.
+    """
+    body = payloads.CreateDebugDumpBody(
+        request_ids=request_ids,
+        cluster_names=cluster_names,
+        managed_job_ids=managed_job_ids,
+        recent_hours=recent_hours,
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/debug/dump-create',
+        json=json.loads(body.model_dump_json()),
+    )
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def download_debug_dump(dump_filename: str,
+                        local_path: Optional[str] = None) -> str:
+    """Download a debug dump from the server.
+
+    Args:
+        dump_filename: The filename of the dump to download.
+        local_path: Local path to save the dump. If None, saves to
+            current directory with the original filename.
+
+    Returns:
+        Path to the downloaded file.
+    """
+    response = server_common.make_authenticated_request(
+        'GET',
+        f'/debug/dump-download/{dump_filename}',
+        stream=True,
+    )
+
+    if response.status_code != 200:
+        detail = response.json().get('detail', 'Unknown error')
+        raise exceptions.ClientError(f'Failed to download debug dump: {detail}')
+
+    if local_path is None:
+        local_path = dump_filename
+
+    with open(local_path, 'wb') as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            f.write(chunk)
+
+    return local_path
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def list_debug_dumps() -> List[Dict[str, Any]]:
+    """List available debug dumps on the server.
+
+    Returns:
+        List of dictionaries with dump info (filename, size_bytes, created_at).
+    """
+    response = server_common.make_authenticated_request(
+        'GET',
+        '/debug/dump-list',
+    )
+
+    if response.status_code != 200:
+        detail = response.json().get('detail', 'Unknown error')
+        raise exceptions.ClientError(f'Failed to list debug dumps: {detail}')
+
+    return response.json()

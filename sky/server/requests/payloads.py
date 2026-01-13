@@ -845,6 +845,7 @@ class CreateDebugDumpBody(RequestBody):
     request_ids: Optional[List[str]] = None
     cluster_names: Optional[List[str]] = None
     managed_job_ids: Optional[List[int]] = None
+    recent_hours: Optional[float] = None
 
 
 class RequestPayload(BasePayload):

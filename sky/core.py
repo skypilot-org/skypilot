@@ -1544,13 +1544,32 @@ def get_all_contexts() -> List[str]:
 
 def create_debug_dump(request_ids: Optional[List[str]] = None,
                       cluster_names: Optional[List[str]] = None,
-                      managed_job_ids: Optional[List[int]] = None) -> str:
-    """Initializes a debug dump."""
-    if not request_ids and not cluster_names and not managed_job_ids:
-        raise ValueError('At least one of request_ids, cluster_names, or '
-                         'managed_job_ids must be provided.')
+                      managed_job_ids: Optional[List[int]] = None,
+                      recent_hours: Optional[float] = None) -> str:
+    """Create a debug dump for troubleshooting.
 
-    debug_dump_path = debug_utils.create_debug_dump(request_ids, cluster_names,
-                                                    managed_job_ids)
+    Args:
+        request_ids: List of request IDs to include in the dump.
+        cluster_names: List of cluster names to include in the dump.
+        managed_job_ids: List of managed job IDs to include in the dump.
+        recent_hours: If specified, include all resources active within
+            this many hours.
+
+    Returns:
+        Path to the created zip file on the server.
+
+    Raises:
+        ValueError: If no resources are specified.
+    """
+    if (not request_ids and not cluster_names and not managed_job_ids and
+            recent_hours is None):
+        raise ValueError('At least one of request_ids, cluster_names, '
+                         'managed_job_ids, or recent_hours must be provided.')
+
+    debug_dump_path = debug_utils.create_debug_dump(
+        request_ids=request_ids,
+        cluster_names=cluster_names,
+        managed_job_ids=managed_job_ids,
+        recent_hours=recent_hours)
     logger.info(f'Debug dump created at {debug_dump_path}')
     return str(debug_dump_path)

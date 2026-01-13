@@ -2418,8 +2418,51 @@ async def create_debug_dump(
     )
 
 
-# TODO: add new endpoint to stream debug dump to the client given the path from
-# create_debug_dump endpoint
+@app.get('/debug/dump-download/{dump_filename}')
+async def download_debug_dump(
+        dump_filename: str) -> fastapi.responses.FileResponse:
+    """Download a debug dump file."""
+    from sky.utils import debug_utils
+
+    dump_dir = pathlib.Path(debug_utils.DEBUG_DUMP_DIR).expanduser()
+    dump_path = dump_dir / dump_filename
+
+    if not dump_path.exists():
+        raise fastapi.HTTPException(status_code=404,
+                                    detail='Debug dump not found')
+
+    # Security: ensure path is within expected directory
+    try:
+        dump_path.resolve().relative_to(dump_dir.resolve())
+    except ValueError as path_err:
+        raise fastapi.HTTPException(status_code=403,
+                                    detail='Invalid path') from path_err
+
+    return fastapi.responses.FileResponse(
+        path=dump_path,
+        filename=dump_filename,
+        media_type='application/zip',
+    )
+
+
+@app.get('/debug/dump-list')
+async def list_debug_dumps() -> List[Dict[str, Any]]:
+    """List available debug dumps."""
+    from sky.utils import debug_utils
+
+    dump_dir = pathlib.Path(debug_utils.DEBUG_DUMP_DIR).expanduser()
+    if not dump_dir.exists():
+        return []
+
+    dumps = []
+    for dump_file in sorted(dump_dir.glob('debug_dump_*.zip'), reverse=True):
+        stat = dump_file.stat()
+        dumps.append({
+            'filename': dump_file.name,
+            'size_bytes': stat.st_size,
+            'created_at': stat.st_mtime,
+        })
+    return dumps
 
 
 # === Internal APIs ===
