@@ -156,8 +156,6 @@ def _proxyjump_to_proxycommand(proxy_jump: str,
             # ssh command uses a plain host argument (e.g., "2001:db8::1").
             if host.startswith('[') and host.endswith(']'):
                 host = host[1:-1]
-            if not host:
-                raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
         elif hostport.count(':') == 1:
             # Non-IPv6 host case (hostname or IPv4) with exactly one ":".
             # We treat this as host:port iff the suffix is a numeric port.
@@ -166,6 +164,8 @@ def _proxyjump_to_proxycommand(proxy_jump: str,
                 raise ValueError(f'Invalid port: {port_str} in {dest}')
             host = maybe_host
             port = int(port_str)
+        if not host:
+            raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
         return user, host, port
 
     # For multi-hop, use -J for earlier hops and last hop as the target
@@ -1125,11 +1125,6 @@ class SSHCommandRunner(CommandRunner):
             port_forward=port_forward,
             connect_timeout=connect_timeout,
             ssh_log_file=ssh_log_file)
-        # base_ssh_command_without_debug_log = self.ssh_base_command(
-        #     ssh_mode=ssh_mode,
-        #     port_forward=port_forward,
-        #     connect_timeout=connect_timeout,
-        #     ssh_log_file=None)
 
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'

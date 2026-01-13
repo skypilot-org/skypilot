@@ -550,6 +550,8 @@ class TestProxyJumpToProxyCommand:
             # Invalid port.
             ('admin@bastion:notaport'),
             ('bastion:notaport'),
+            # Empty host.
+            (':22'),
             # Empty user.
             ('@bastion'),
             # Missing host.
