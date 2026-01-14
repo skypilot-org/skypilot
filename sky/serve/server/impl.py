@@ -650,7 +650,7 @@ def update(
                 stream_logs=True)
         except exceptions.CommandError as e:
             logger.warning('Failed to backfill serve version metadata for '
-                           f'{service_name} v{current_version}: {e.error_msg}')
+                           f'{service_name} v{current_version}: {e}')
 
         use_legacy = not handle.is_grpc_enabled_with_flag
 
