@@ -235,6 +235,7 @@ def _create_virtual_instance(
         ssh_key,
         ssh_proxy_command=ssh_proxy_command,
         ssh_proxy_jump=ssh_proxy_jump,
+        enable_interactive_auth=True,
     )
 
     cmd = f'mkdir -p {PROVISION_SCRIPTS_DIRECTORY}'

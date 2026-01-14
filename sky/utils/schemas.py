@@ -1487,6 +1487,9 @@ def get_config_schema():
                 'datacenter_only': {
                     'type': 'boolean',
                 },
+                'create_instance_kwargs': {
+                    'type': 'object',
+                },
             }
         },
         'nebius': {
@@ -1650,6 +1653,9 @@ def get_config_schema():
             'cluster_debug_event_retention_hours': {
                 'type': 'number',
             },
+            'cluster_terminal_event_retention_hours': {
+                'type': 'number',
+            },
         }
     }
 
@@ -1766,6 +1772,39 @@ def get_config_schema():
                         },
                         'disabled': {
                             'type': 'boolean'
+                        },
+                        'kueue': {
+                            'type': 'object',
+                            'required': [],
+                            'additionalProperties': False,
+                            'properties': {
+                                'local_queue_name': {
+                                    'type': 'string',
+                                },
+                            },
+                        },
+                        'context_configs': {
+                            'type': 'object',
+                            'required': [],
+                            'properties': {},
+                            # Properties are kubernetes context names.
+                            'additionalProperties': {
+                                'type': 'object',
+                                'required': [],
+                                'additionalProperties': False,
+                                'properties': {
+                                    'kueue': {
+                                        'type': 'object',
+                                        'required': [],
+                                        'additionalProperties': False,
+                                        'properties': {
+                                            'local_queue_name': {
+                                                'type': 'string',
+                                            },
+                                        },
+                                    },
+                                },
+                            },
                         },
                     },
                     'additionalProperties': False,

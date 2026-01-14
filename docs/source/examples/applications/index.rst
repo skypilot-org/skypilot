@@ -10,6 +10,7 @@ AI Applications
    Batch Inference with vLLM <pools_batch_inference>
    Image Vector Database <vector_database>
    RedisVL Vector Search <redisvl-vector-search>
+   SAM3 Video Segmentation <sam3-video-segmentation>
    Streamlit Web Apps <streamlit>
    Tabby: Coding Assistant <tabby>
    LocalGPT: Chat with PDF <localgpt>
