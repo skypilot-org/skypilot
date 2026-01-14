@@ -20,6 +20,13 @@ logger = sky_logging.init_logger(__name__)
 # Persistent location for debug dumps
 DEBUG_DUMP_DIR = '~/.sky/debug_dumps'
 
+# System daemon request IDs to always include in debug dumps
+SYSTEM_REQUEST_IDS = [
+    'skypilot-status-refresh-daemon',
+    'skypilot-volume-status-refresh-daemon',
+    'skypilot-server-on-boot-check',
+]
+
 
 class DebugDumpContext(TypedDict):
     """The context for a debug dump."""
@@ -556,6 +563,9 @@ def create_debug_dump(
     _get_requests_from_managed_jobs(debug_dump_context)
     _get_clusters_from_requests(debug_dump_context)
     _get_clusters_from_managed_jobs(debug_dump_context)
+
+    # Always include system daemon requests
+    debug_dump_context['request_ids'].update(SYSTEM_REQUEST_IDS)
 
     logger.debug(f'After cross-linking: '
                  f'{len(debug_dump_context["request_ids"])} requests, '
