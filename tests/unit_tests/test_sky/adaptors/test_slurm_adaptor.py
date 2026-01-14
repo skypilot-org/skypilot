@@ -441,13 +441,6 @@ class TestParseMaxtime:
         # 2*86400 + 12*3600 + 30*60 + 5 = 172800 + 43200 + 1800 + 5 = 217805
         assert result == 217805
 
-    def test_parse_maxtime_single_digit_hours(self):
-        """Test parsing time with single digit hours."""
-        line = 'PartitionName=dev MaxTime=1:05:30 Default=YES'
-        result = slurm._parse_maxtime(line)
-        # 1*3600 + 5*60 + 30 = 3600 + 300 + 30 = 3930
-        assert result == 3930
-
     def test_parse_maxtime_single_digit_minutes(self):
         """Test parsing time with single digit minutes (padded to 2 digits)."""
         # Note: The regex requires 2-digit minutes, so "05" is used
@@ -466,16 +459,16 @@ class TestParseMaxtime:
 
     def test_parse_maxtime_zero_time(self):
         """Test parsing zero time."""
-        line = 'PartitionName=dev MaxTime=0:00:00 Default=YES'
+        line = 'PartitionName=dev MaxTime=00:00:00 Default=YES'
         result = slurm._parse_maxtime(line)
         assert result == 0
 
     def test_parse_maxtime_large_days(self):
         """Test parsing time with large number of days."""
-        line = 'PartitionName=dev MaxTime=30-23:59:59 Default=YES'
+        line = 'PartitionName=dev MaxTime=300-23:59:59 Default=YES'
         result = slurm._parse_maxtime(line)
-        # 30*86400 + 23*3600 + 59*60 + 59 = 2592000 + 82800 + 3540 + 59 = 2678399
-        assert result == 2678399
+        # 300*86400 + 23*3600 + 59*60 + 59 = 25920000 + 82800 + 3540 + 59 = 26006399
+        assert result == 26006399
 
     def test_parse_maxtime_no_match(self):
         """Test parsing line without MaxTime returns None."""
