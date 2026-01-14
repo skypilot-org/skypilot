@@ -400,7 +400,8 @@ def test_get_pod_primary_container_raises_on_empty_container_list() -> None:
 
     with pytest.raises(ValueError):
         kubernetes_utils.get_pod_primary_container(pod)
-        
+
+
 class TestSSHCommandRunnerAuthFailureDetection:
     """Test SSHCommandRunner authentication failure detection logic."""
 
