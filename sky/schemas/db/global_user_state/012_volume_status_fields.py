@@ -43,8 +43,5 @@ def upgrade():
 
 
 def downgrade():
-    """Remove error_message and usedby columns from volumes table."""
-    with op.get_context().autocommit_block():
-        op.drop_column('volumes', 'error_message')
-        op.drop_column('volumes', 'usedby_pods')
-        op.drop_column('volumes', 'usedby_clusters')
+    """No-op for backward compatibility."""
+    pass

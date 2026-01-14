@@ -337,12 +337,21 @@ def get_all_volumes_errors(
                     if error_msg:
                         volume_errors[volume_name] = error_msg
                     else:
-                        # Generic pending message if no specific error detected
-                        volume_errors[volume_name] = (
-                            'PVC is pending. This may be due to '
-                            'insufficient storage resources or '
-                            'misconfiguration. To diagnose, run: '
-                            f'kubectl describe pvc {pvc_name} -n {namespace}')
+                        volume_binding_mode = (
+                            _check_storage_class_volume_binding_mode(
+                                context, pvc))
+                        if (volume_binding_mode is None or
+                                volume_binding_mode == 'WaitForFirstConsumer'):
+                            volume_errors[volume_name] = None
+                        else:
+                            # Generic pending message if no specific error
+                            # detected
+                            volume_errors[volume_name] = (
+                                'PVC is pending. This may be due to '
+                                'insufficient storage resources or '
+                                'misconfiguration. To diagnose, run: '
+                                f'kubectl describe pvc {pvc_name} -n '
+                                f'{namespace}')
                 elif pvc_phase == 'Lost':
                     volume_errors[volume_name] = (
                         'PVC is in Lost state. The bound PersistentVolume '
@@ -353,6 +362,30 @@ def get_all_volumes_errors(
                     volume_errors[volume_name] = None
 
     return volume_errors
+
+
+def _check_storage_class_volume_binding_mode(context: Optional[str],
+                                             pvc: Any) -> Optional[str]:
+    """Check the volumeBindingMode of the storage class for the PVC.
+
+    Args:
+        context: Kubernetes context
+        pvc: V1PersistentVolumeClaim object
+
+    Returns:
+        volumeBindingMode of the storage class for the PVC,
+        None if failed to read the storage class.
+    """
+    storage_class_name = pvc.spec.storage_class_name
+    if not storage_class_name:
+        return None
+    try:
+        storage_class = kubernetes.storage_api(context).read_storage_class(
+            name=storage_class_name, _request_timeout=kubernetes.API_TIMEOUT)
+        return storage_class.volume_binding_mode
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to read storage class {storage_class_name}: {e}')
+        return None
 
 
 def _check_pvc_access_mode_error(context: Optional[str],

@@ -11,7 +11,6 @@ from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils
-from sky.utils import status_lib
 from sky.utils import volume
 
 logger = sky_logging.init_logger(__name__)
@@ -173,15 +172,6 @@ class VolumeTable(abc.ABC):
                 usedby_str, constants.USED_BY_TRUNC_LENGTH)
         infra = _get_infra_str(row.get('cloud'), row.get('region'),
                                row.get('zone'))
-
-        # Format status with color
-        status_str = row.get('status', '')
-        try:
-            status_enum = status_lib.VolumeStatus(status_str)
-            status_display = status_enum.colored_str()
-        except ValueError:
-            status_display = status_str
-
         return [
             row.get('name', ''),
             row.get('type', ''),
@@ -190,7 +180,7 @@ class VolumeTable(abc.ABC):
             row.get('user_name', '-'),
             row.get('workspace', '-'),
             log_utils.human_duration(row.get('launched_at', 0)),
-            status_display,
+            row.get('status', ''),
             last_attached_at_str,
             usedby,
         ]

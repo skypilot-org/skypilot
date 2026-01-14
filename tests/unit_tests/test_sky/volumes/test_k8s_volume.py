@@ -1515,7 +1515,9 @@ class TestGetAllVolumesErrors:
 
     @patch('sky.provision.kubernetes.volume._get_context_namespace')
     @patch('sky.adaptors.kubernetes.core_api')
-    def test_pvc_pending_generic_error(self, mock_core_api, mock_get_context):
+    @patch('sky.adaptors.kubernetes.storage_api')
+    def test_pvc_pending_generic_error(self, mock_storage_api, mock_core_api,
+                                       mock_get_context):
         """Test that pending PVCs without access mode mismatch get generic error."""
         mock_get_context.return_value = ('my-context', 'my-namespace')
 
@@ -1533,6 +1535,11 @@ class TestGetAllVolumesErrors:
         mock_pv_list.items = []
         mock_core_api.return_value.list_persistent_volume.return_value = mock_pv_list
 
+        # Mock storage class with Immediate binding mode
+        mock_storage_class = Mock()
+        mock_storage_class.volume_binding_mode = 'Immediate'
+        mock_storage_api.return_value.read_storage_class.return_value = mock_storage_class
+
         config = models.VolumeConfig(
             _version=1,
             name='test-vol',
@@ -1548,6 +1555,7 @@ class TestGetAllVolumesErrors:
         errors = k8s_volume.get_all_volumes_errors([config])
 
         assert 'test-vol' in errors
+        assert errors['test-vol'] is not None
         assert 'pending' in errors['test-vol'].lower()
         assert 'kubectl describe pvc' in errors['test-vol']
 
@@ -1597,6 +1605,134 @@ class TestGetAllVolumesErrors:
         assert 'ReadWriteOnce' in errors['test-vol']
         assert 'ReadWriteMany' in errors['test-vol']
         assert 'kubectl describe pvc' in errors['test-vol']
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    @patch('sky.adaptors.kubernetes.storage_api')
+    def test_pvc_pending_wait_for_first_consumer(self, mock_storage_api,
+                                                 mock_core_api,
+                                                 mock_get_context):
+        """Test that pending PVCs with WaitForFirstConsumer get no error."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        # Create a pending PVC
+        mock_pvc = MockPVC('test-pvc', 'my-namespace')
+        mock_pvc.status.phase = 'Pending'
+        mock_pvc.spec.storage_class_name = 'standard'
+
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = [mock_pvc]
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
+
+        # No available PVs
+        mock_pv_list = Mock()
+        mock_pv_list.items = []
+        mock_core_api.return_value.list_persistent_volume.return_value = mock_pv_list
+
+        # Mock storage class with WaitForFirstConsumer binding mode
+        mock_storage_class = Mock()
+        mock_storage_class.volume_binding_mode = 'WaitForFirstConsumer'
+        mock_storage_api.return_value.read_storage_class.return_value = mock_storage_class
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='10',
+            config={'namespace': 'my-namespace'},
+        )
+
+        errors = k8s_volume.get_all_volumes_errors([config])
+
+        # Should be None for WaitForFirstConsumer
+        assert errors.get('test-vol') is None
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    @patch('sky.adaptors.kubernetes.storage_api')
+    def test_pvc_pending_storage_class_read_failure(self, mock_storage_api,
+                                                    mock_core_api,
+                                                    mock_get_context):
+        """Test that pending PVCs with storage class read failure get no error."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        # Create a pending PVC
+        mock_pvc = MockPVC('test-pvc', 'my-namespace')
+        mock_pvc.status.phase = 'Pending'
+        mock_pvc.spec.storage_class_name = 'existent'
+
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = [mock_pvc]
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
+
+        # No available PVs
+        mock_pv_list = Mock()
+        mock_pv_list.items = []
+        mock_core_api.return_value.list_persistent_volume.return_value = mock_pv_list
+
+        # Mock storage class read failure
+        mock_storage_api.return_value.read_storage_class.side_effect = Exception(
+            'Storage class read failure')
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='10',
+            config={'namespace': 'my-namespace'},
+        )
+
+        errors = k8s_volume.get_all_volumes_errors([config])
+
+        # Should be None when storage class read fails
+        assert errors.get('test-vol') is None
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    @patch('sky.adaptors.kubernetes.storage_api')
+    def test_pvc_pending_storage_class_empty(self, mock_storage_api,
+                                             mock_core_api, mock_get_context):
+        """Test that pending PVCs with missing storage class get no error."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        # Create a pending PVC
+        mock_pvc = MockPVC('test-pvc', 'my-namespace')
+        mock_pvc.status.phase = 'Pending'
+        mock_pvc.spec.storage_class_name = ''
+
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = [mock_pvc]
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
+
+        # No available PVs
+        mock_pv_list = Mock()
+        mock_pv_list.items = []
+        mock_core_api.return_value.list_persistent_volume.return_value = mock_pv_list
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='10',
+            config={'namespace': 'my-namespace'},
+        )
+
+        errors = k8s_volume.get_all_volumes_errors([config])
+
+        # Should be None when storage class read fails
+        assert errors.get('test-vol') is None
 
     @patch('sky.provision.kubernetes.volume._get_context_namespace')
     @patch('sky.adaptors.kubernetes.core_api')
