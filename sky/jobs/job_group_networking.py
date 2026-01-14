@@ -360,8 +360,6 @@ async def _start_k8s_dns_updater_on_node(
 
     updater_script = generate_k8s_dns_updater_script(dns_mappings,
                                                      job_group_name)
-    if not updater_script:
-        return True
 
     # Sanitize job group name for file paths
     safe_job_group_name = job_group_name.replace(' ', '_')
@@ -372,12 +370,12 @@ async def _start_k8s_dns_updater_on_node(
     loop = asyncio.get_running_loop()
 
     try:
-        # Upload script via rsync (DNS updater script is always long)
+        # Upload script via rsync
         with tempfile.NamedTemporaryFile('w',
                                          prefix='sky_dns_updater_',
+                                         suffix='.sh',
                                          delete=False) as f:
             f.write(updater_script)
-            f.flush()
             local_script_path = f.name
 
         try:
@@ -391,11 +389,9 @@ async def _start_k8s_dns_updater_on_node(
         finally:
             os.remove(local_script_path)
 
-        # Make executable and run in background, then verify it started
-        # Use a subshell with exec to fully detach from kubectl exec:
-        # - The outer shell exits immediately after spawning the subshell
-        # - The subshell runs the script with all FDs redirected
-        # - After a brief sleep, check if the process is running
+        # Make executable and run in background, then verify it started.
+        # Uses nohup with a subshell to fully detach from kubectl exec.
+        # After a brief sleep, pgrep confirms the process is running.
         run_cmd = (f'chmod +x {script_path} && '
                    f'(nohup {script_path} < /dev/null > {log_path} 2>&1 &) && '
                    f'sleep 0.1 && '
@@ -406,9 +402,9 @@ async def _start_k8s_dns_updater_on_node(
             lambda: runner.run(run_cmd, stream_logs=False, require_outputs=True)
         )
 
-        # Exit code 143 (SIGTERM) is expected from kubectl exec closing
+        # Exit code 143 (SIGTERM) is expected when kubectl exec closes the
         # connection. The background process continues running despite this.
-        if returncode != 0 and returncode != 143:
+        if returncode not in (0, 143):
             logger.error(f'Failed to start DNS updater: '
                          f'returncode={returncode}, stderr={stderr}')
             return False

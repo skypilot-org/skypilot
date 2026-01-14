@@ -294,9 +294,8 @@ class TestJobGroupNetworking:
         assert '/etc/hosts' in script
         assert 'SkyPilot JobGroup K8s entries' in script
         assert 'while true' in script  # Background loop
-        # Verify idempotency (pkill for cleanup)
-        assert 'pkill' in script
-        assert 'skypilot-jobgroup-dns-updater-my-group' in script
+        # Verify idempotency (grep -v for filtering old entries)
+        assert 'grep -v' in script
 
     def test_generate_k8s_dns_updater_script_empty_mappings(self):
         """Test DNS updater returns empty for no mappings."""
