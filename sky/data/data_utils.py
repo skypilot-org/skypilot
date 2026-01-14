@@ -54,6 +54,18 @@ def split_s3_path(s3_path: str) -> Tuple[str, str]:
     return bucket, key
 
 
+def split_tigris_path(tigris_path: str) -> Tuple[str, str]:
+    """Splits Tigris Path into Bucket name and Relative Path to Bucket
+
+    Args:
+      tigris_path: str; Tigris Path, e.g. tigris://imagenet/train/
+    """
+    path_parts = tigris_path.replace('tigris://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
 def split_gcs_path(gcs_path: str) -> Tuple[str, str]:
     """Splits GCS Path into Bucket name and Relative Path to Bucket
 

@@ -1601,14 +1601,13 @@ If you already use the `Tigris Storage SDK <https://www.tigrisdata.com/docs/sdks
 
 When prompted for credentials (Option 1), enter your Tigris Access Key ID (starts with ``tid_``) and Secret Access Key (starts with ``tsec_``). See `Tigris documentation <https://www.tigrisdata.com/docs/iam/manage-access-key/>`_ to generate credentials. For the region, enter :code:`auto`.
 
-To use Tigris in your SkyPilot YAML, specify ``store: tigris``:
+To use Tigris in your SkyPilot YAML, use the ``tigris://`` URL scheme:
 
 .. code-block:: yaml
 
   file_mounts:
     /data:
-      source: s3://my-tigris-bucket
-      store: tigris
+      source: tigris://my-tigris-bucket
 
 .. note::
 

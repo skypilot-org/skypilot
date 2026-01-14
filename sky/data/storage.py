@@ -235,7 +235,7 @@ class StoreType(enum.Enum):
     def store_prefix(self) -> str:
         config = self._get_s3_compatible_config(self.value)
         if config:
-            # For stores with no url_prefix (e.g., Tigris), use s3://
+            # For stores with no url_prefix, fall back to s3://
             return config.url_prefix if config.url_prefix else 's3://'
 
         if self == StoreType.GCS:
@@ -3999,11 +3999,11 @@ class IBMCosStore(AbstractStore):
           StorageBucketCreateError: If bucket creation fails.
         """
         try:
-            self.client.create_bucket(
-                Bucket=bucket_name,
-                CreateBucketConfiguration={
-                    'LocationConstraint': f'{region}-smart'
-                })
+            self.client.create_bucket(Bucket=bucket_name,
+                                      CreateBucketConfiguration={
+                                          'LocationConstraint':
+                                              f'{region}-smart'
+                                      })
             logger.info(f'  {colorama.Style.DIM}Created IBM COS bucket '
                         f'{bucket_name!r} in {region} '
                         'with storage class smart tier'
@@ -4783,8 +4783,8 @@ class TigrisStore(S3CompatibleStore):
     """TigrisStore inherits from S3CompatibleStore and represents the backend
     for Tigris Object Storage buckets.
 
-    Tigris uses standard s3:// URLs. Users specify `store: tigris` in their
-    YAML to route requests through Tigris's endpoint instead of AWS S3.
+    Tigris uses tigris:// URLs (e.g., tigris://my-bucket/path). Users can also
+    specify `store: tigris` in their YAML to explicitly select Tigris storage.
     """
 
     @classmethod
@@ -4792,11 +4792,10 @@ class TigrisStore(S3CompatibleStore):
         """Return the configuration for Tigris Object Storage."""
         return S3CompatibleConfig(
             store_type='TIGRIS',
-            # Tigris uses s3:// URLs - routing is done via store: tigris
-            url_prefix=None,
+            url_prefix='tigris://',
             client_factory=lambda region: data_utils.create_tigris_client(),
             resource_factory=lambda name: tigris.resource('s3').Bucket(name),
-            split_path=data_utils.split_s3_path,
+            split_path=data_utils.split_tigris_path,
             verify_bucket=data_utils.verify_tigris_bucket,
             aws_profile=tigris.TIGRIS_PROFILE_NAME,
             get_endpoint_url=lambda: tigris.ENDPOINT_URL,
