@@ -908,7 +908,8 @@ class Storage(object):
                             f'{source} in the file_mounts section of your YAML')
                 is_local_source = True
             elif split_path.scheme in [
-                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'cw'
+                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'cw',
+                    'tigris'
             ]:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
@@ -933,7 +934,7 @@ class Storage(object):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         f'Supported paths: local, s3://, gs://, https://, '
-                        f'r2://, cos://, oci://, nebius://, cw://. '
+                        f'r2://, cos://, oci://, nebius://, cw://, tigris://. '
                         f'Got: {source}')
         return source, is_local_source
 
@@ -958,6 +959,7 @@ class Storage(object):
                     'oci',
                     'nebius',
                     'cw',
+                    'tigris',
             ]:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageNameError(

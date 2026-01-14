@@ -178,17 +178,6 @@ def check_credentials(
             f'{NAME} does not support {cloud_capability}.')
 
 
-def _has_tigris_keys(access_key: Optional[str],
-                     secret_key: Optional[str]) -> bool:
-    """Check if credentials are Tigris keys based on their prefixes.
-
-    Tigris access keys start with 'tid_' and secret keys start with 'tsec_'.
-    """
-    if access_key and secret_key:
-        return access_key.startswith('tid_') and secret_key.startswith('tsec_')
-    return False
-
-
 def _profile_exists(profile_name: str) -> bool:
     """Check if an AWS profile exists in ~/.aws/credentials."""
     cred_path = os.path.expanduser('~/.aws/credentials')
@@ -232,10 +221,8 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     Tigris credentials can be configured via:
     1. AWS profile specified by TIGRIS_PROFILE env var (default: 'tigris')
     2. Tigris SDK env vars (TIGRIS_STORAGE_ACCESS_KEY_ID, etc.)
-    3. AWS env vars with Tigris keys (AWS_ACCESS_KEY_ID, etc.)
-    4. The default AWS credentials chain with Tigris keys
 
-    Tigris keys have distinctive prefixes: tid_ (access key), tsec_ (secret).
+    Credentials are validated by making an API call to Tigris.
 
     Returns:
         A tuple of a boolean value and a hint message where the bool
@@ -264,33 +251,10 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     # Check for Tigris SDK environment variables
     if access_key is None:
         tigris_access, tigris_secret = _get_tigris_sdk_env_credentials()
-        if _has_tigris_keys(tigris_access, tigris_secret):
+        if tigris_access and tigris_secret:
             access_key = tigris_access
             secret_key = tigris_secret
             credential_source = 'Tigris SDK environment variables'
-
-    # Check for Tigris keys in AWS environment variables
-    if access_key is None:
-        env_access = os.environ.get('AWS_ACCESS_KEY_ID')
-        env_secret = os.environ.get('AWS_SECRET_ACCESS_KEY')
-        if _has_tigris_keys(env_access, env_secret):
-            access_key = env_access
-            secret_key = env_secret
-            credential_source = 'AWS environment variables'
-
-    # Check default credentials chain for Tigris keys
-    if access_key is None:
-        try:
-            test_session = boto3.session.Session()
-            creds = test_session.get_credentials()
-            if creds is not None:
-                frozen = creds.get_frozen_credentials()
-                if _has_tigris_keys(frozen.access_key, frozen.secret_key):
-                    access_key = frozen.access_key
-                    secret_key = frozen.secret_key
-                    credential_source = 'default credentials chain'
-        except Exception:  # pylint: disable=broad-except
-            pass
 
     # Validate credentials if found
     if access_key and secret_key:
