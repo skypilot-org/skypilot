@@ -253,7 +253,6 @@ export function Workspaces() {
     totalClusters: 0,
     managedJobs: 0,
   });
-  const [loading, setLoading] = useState(true);
   const [clustersLoading, setClustersLoading] = useState(true);
   const [jobsLoading, setJobsLoading] = useState(true);
   const [rawWorkspacesData, setRawWorkspacesData] = useState(null);
@@ -468,7 +467,6 @@ export function Workspaces() {
       const { showLoadingIndicators = true } = options;
 
       if (showLoadingIndicators) {
-        setLoading(true);
         setClustersLoading(true);
         setJobsLoading(true);
       }
@@ -519,9 +517,6 @@ export function Workspaces() {
         setWorkspaceDetails(initialWorkspaceDetails);
 
         // Mark initial loading as complete so the table renders
-        if (showLoadingIndicators) {
-          setLoading(false);
-        }
         if (isInitialLoad && showLoadingIndicators) {
           setIsInitialLoad(false);
         }
@@ -548,7 +543,6 @@ export function Workspaces() {
           });
         }
         if (showLoadingIndicators) {
-          setLoading(false);
           setClustersLoading(false);
           setJobsLoading(false);
         }
@@ -583,7 +577,6 @@ export function Workspaces() {
 
   const handleRefresh = useCallback(async () => {
     // Set loading states immediately for responsive UI
-    setLoading(true);
     setClustersLoading(true);
     setJobsLoading(true);
 
@@ -602,7 +595,6 @@ export function Workspaces() {
     } catch (error) {
       console.error('Error during sky check refresh:', error);
     } finally {
-      setLoading(false);
       setClustersLoading(false);
       setJobsLoading(false);
     }
@@ -759,7 +751,7 @@ export function Workspaces() {
   };
 
   // Only show full-page loading spinner during initial load
-  if (isInitialLoad && loading && workspaceDetails.length === 0) {
+  if (isInitialLoad && workspaceDetails.length === 0) {
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress />
@@ -831,13 +823,13 @@ export function Workspaces() {
           <span className="text-sky-blue leading-none">Workspaces</span>
         </div>
         <div className="flex items-center">
-          {(loading || clustersLoading || jobsLoading) && (
+          {(clustersLoading || jobsLoading) && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
               <span className="ml-2 text-gray-500 text-xs">Loading...</span>
             </div>
           )}
-          {!loading && !clustersLoading && !jobsLoading && lastFetchedTime && (
+          {!clustersLoading && !jobsLoading && lastFetchedTime && (
             <LastUpdatedTimestamp
               timestamp={lastFetchedTime}
               className="mr-2"
@@ -845,7 +837,7 @@ export function Workspaces() {
           )}
           <button
             onClick={handleRefresh}
-            disabled={loading || clustersLoading || jobsLoading}
+            disabled={clustersLoading || jobsLoading}
             className="text-sky-blue hover:text-sky-blue-bright flex items-center"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
@@ -909,7 +901,7 @@ export function Workspaces() {
       </div>
 
       {/* Workspaces Table */}
-      {workspaceDetails.length === 0 && !loading ? (
+      {workspaceDetails.length === 0 && !isInitialLoad ? (
         <div className="text-center py-10">
           <p className="text-lg text-gray-600">No workspaces found.</p>
           <p className="text-sm text-gray-500 mt-2">
@@ -947,7 +939,7 @@ export function Workspaces() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {isInitialLoad && loading && sortedWorkspaces.length === 0 ? (
+                {isInitialLoad && sortedWorkspaces.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={5}
