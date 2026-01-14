@@ -598,10 +598,10 @@ export function Workspaces() {
     try {
       await apiClient.fetch('/check', {}, 'POST');
       await fetchData({ showLoadingIndicators: false });
-      setLoading(false);
       setLastFetchedTime(new Date());
     } catch (error) {
       console.error('Error during sky check refresh:', error);
+    } finally {
       setLoading(false);
       setClustersLoading(false);
       setJobsLoading(false);
