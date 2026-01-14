@@ -531,6 +531,7 @@ def create_debug_dump(
     Returns:
         Path to the created zip file.
     """
+    start_time = time.time()
     logger.debug('Starting debug dump creation')
     logger.debug(f'Initial inputs: request_ids={request_ids}, '
                  f'cluster_names={cluster_names}, '
@@ -575,6 +576,34 @@ def create_debug_dump(
         _dump_request_id_info(debug_dump_context['request_ids'], dump_dir)
         _dump_cluster_info(debug_dump_context['cluster_names'], dump_dir)
         _dump_managed_job_info(debug_dump_context['managed_job_ids'], dump_dir)
+
+        # Write summary file
+        elapsed_time = time.time() - start_time
+        summary: Dict[str, Any] = {
+            'requested': {
+                'request_ids': list(request_ids) if request_ids else [],
+                'cluster_names': list(cluster_names) if cluster_names else [],
+                'managed_job_ids': list(managed_job_ids)
+                                   if managed_job_ids else [],
+                'recent_hours': recent_hours,
+            },
+            'collected': {
+                'request_count': len(debug_dump_context['request_ids']),
+                'cluster_count': len(debug_dump_context['cluster_names']),
+                'managed_job_count': len(debug_dump_context['managed_job_ids']),
+                'request_ids': sorted(debug_dump_context['request_ids']),
+                'cluster_names': sorted(debug_dump_context['cluster_names']),
+                'managed_job_ids': sorted(debug_dump_context['managed_job_ids']
+                                         ),
+            },
+            'timing': {
+                'elapsed_seconds': round(elapsed_time, 2),
+                'timestamp': timestamp,
+            },
+        }
+        summary_path = os.path.join(dump_dir, 'summary.json')
+        with open(summary_path, 'w', encoding='utf-8') as f:
+            json.dump(summary, f, indent=2)
 
         # Create zip file in PERSISTENT location (outside temp dir)
         zip_filename = f'debug_dump_{timestamp}.zip'
