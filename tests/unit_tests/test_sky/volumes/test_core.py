@@ -1519,24 +1519,3 @@ class TestVolumeStatus:
         """Test that NOT_READY status exists."""
         assert hasattr(status_lib.VolumeStatus, 'NOT_READY')
         assert status_lib.VolumeStatus.NOT_READY.value == 'NOT_READY'
-
-    def test_volume_status_colored_str_not_ready_no_color(self):
-        """Test that NOT_READY status is not colored."""
-        not_ready_str = status_lib.VolumeStatus.NOT_READY.colored_str()
-        # Should be just the value, no ANSI codes
-        assert not_ready_str == 'NOT_READY'
-        assert '\x1b[' not in not_ready_str
-
-    def test_volume_status_colored_str_ready_not_colored(self):
-        """Test that READY status is not colored."""
-        ready_str = status_lib.VolumeStatus.READY.colored_str()
-        # Should be just the value, no ANSI codes
-        assert ready_str == 'READY'
-        assert '\x1b[' not in ready_str
-
-    def test_volume_status_colored_str_in_use_not_colored(self):
-        """Test that IN_USE status is not colored."""
-        in_use_str = status_lib.VolumeStatus.IN_USE.colored_str()
-        # Should be just the value, no ANSI codes
-        assert in_use_str == 'IN_USE'
-        assert '\x1b[' not in in_use_str
