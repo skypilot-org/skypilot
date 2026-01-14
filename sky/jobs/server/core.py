@@ -312,7 +312,7 @@ def _ensure_controller_up(
     controller_name = controller.value.cluster_name
     logger.info(f'{colorama.Fore.YELLOW}'
                 f'Ensuring the jobs controller {controller_name} is up before'
-                f'continuing job launch...{colorama.Style.RESET_ALL}')
+                f' continuing job launch...{colorama.Style.RESET_ALL}')
 
     # Create a minimal task for provisioning the controller cluster
     # We only use this for its resources, not to execute a job
