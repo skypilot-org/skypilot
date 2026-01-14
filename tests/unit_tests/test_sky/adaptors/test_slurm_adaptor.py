@@ -407,3 +407,71 @@ class TestGetAllJobsGres:
             assert result['node02'] == ['gpu:h100:2']
             assert result['node03'] == ['gpu:h100:1', 'gpu:h100:2']
             assert result['node06'] == ['gpu:h100:2']
+
+
+class TestParseMaxtime:
+    """Test _parse_maxtime()."""
+
+    def test_parse_maxtime_unlimited(self):
+        """Test parsing UNLIMITED MaxTime returns None."""
+        line = (
+            'PartitionName=ml.g5.2xlarge AllowGroups=ALL AllowAccounts=ALL '
+            'AllowQos=ALL AllocNodes=ALL Default=NO QoS=N/A DefaultTime=NONE '
+            'DisableRootJobs=NO ExclusiveUser=NO ExclusiveTopo=NO GraceTime=0 '
+            'Hidden=NO MaxNodes=UNLIMITED MaxTime=UNLIMITED MinNodes=0 LLN=NO '
+            'MaxCPUsPerNode=UNLIMITED MaxCPUsPerSocket=UNLIMITED Nodes=ip-172-3-132-97,ip-172-3-168-59 '
+            'PriorityJobFactor=1 PriorityTier=1 RootOnly=NO ReqResv=NO OverSubscribe=NO OverTimeLimit=NONE '
+            'PreemptMode=OFF State=UP TotalCPUs=96 TotalNodes=2 SelectTypeParameters=NONE JobDefaults=(null) '
+            'DefMemPerNode=UNLIMITED MaxMemPerNode=UNLIMITED TRES=cpu=96,mem=768G,node=2,billing=96,gres/gpu=8'
+        )
+        result = slurm._parse_maxtime(line)
+        assert result is None
+
+    def test_parse_maxtime_time_only(self):
+        """Test parsing time format without days."""
+        line = 'PartitionName=dev MaxTime=12:30:05 Default=YES'
+        result = slurm._parse_maxtime(line)
+        # 12*3600 + 30*60 + 5 = 43200 + 1800 + 5 = 45005
+        assert result == 45005
+
+    def test_parse_maxtime_with_days(self):
+        """Test parsing time format with days."""
+        line = 'PartitionName=dev MaxTime=2-12:30:05 Default=YES'
+        result = slurm._parse_maxtime(line)
+        # 2*86400 + 12*3600 + 30*60 + 5 = 172800 + 43200 + 1800 + 5 = 217805
+        assert result == 217805
+
+    def test_parse_maxtime_single_digit_minutes(self):
+        """Test parsing time with single digit minutes (padded to 2 digits)."""
+        # Note: The regex requires 2-digit minutes, so "05" is used
+        line = 'PartitionName=dev MaxTime=10:05:30 Default=YES'
+        result = slurm._parse_maxtime(line)
+        # 10*3600 + 5*60 + 30 = 36000 + 300 + 30 = 36330
+        assert result == 36330
+
+    def test_parse_maxtime_single_digit_seconds(self):
+        """Test parsing time with single digit seconds (padded to 2 digits)."""
+        # Note: The regex requires 2-digit seconds, so "05" is used
+        line = 'PartitionName=dev MaxTime=10:30:05 Default=YES'
+        result = slurm._parse_maxtime(line)
+        # 10*3600 + 30*60 + 5 = 36000 + 1800 + 5 = 37805
+        assert result == 37805
+
+    def test_parse_maxtime_zero_time(self):
+        """Test parsing zero time."""
+        line = 'PartitionName=dev MaxTime=00:00:00 Default=YES'
+        result = slurm._parse_maxtime(line)
+        assert result == 0
+
+    def test_parse_maxtime_large_days(self):
+        """Test parsing time with large number of days."""
+        line = 'PartitionName=dev MaxTime=300-23:59:59 Default=YES'
+        result = slurm._parse_maxtime(line)
+        # 300*86400 + 23*3600 + 59*60 + 59 = 25920000 + 82800 + 3540 + 59 = 26006399
+        assert result == 26006399
+
+    def test_parse_maxtime_no_match(self):
+        """Test parsing line without MaxTime returns None."""
+        line = 'PartitionName=dev Default=YES Nodes=node1'
+        result = slurm._parse_maxtime(line)
+        assert result is None
