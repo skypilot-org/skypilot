@@ -63,7 +63,6 @@ from sky.utils import yaml_utils
 if typing.TYPE_CHECKING:
     import base64
     import binascii
-    import hashlib
     import io
     import pathlib
     import secrets
@@ -83,7 +82,6 @@ else:
     # only used in api_login()
     base64 = adaptors_common.LazyImport('base64')
     binascii = adaptors_common.LazyImport('binascii')
-    hashlib = adaptors_common.LazyImport('hashlib')
     pathlib = adaptors_common.LazyImport('pathlib')
     requests = adaptors_common.LazyImport('requests')
     secrets = adaptors_common.LazyImport('secrets')
@@ -2489,8 +2487,7 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
     try:
         # Generate PKCE code verifier and challenge
         code_verifier = common_utils.base64_url_encode(secrets.token_bytes(32))
-        verifier_hash = hashlib.sha256(code_verifier.encode('utf-8')).digest()
-        code_challenge = common_utils.base64_url_encode(verifier_hash)
+        code_challenge = common_utils.compute_pkce_challenge(code_verifier)
 
         # Open browser to authorization page (session created on page load)
         auth_url = f'{endpoint}/auth/authorize?code_challenge={code_challenge}'

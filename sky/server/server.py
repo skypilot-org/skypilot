@@ -914,50 +914,10 @@ async def authorize_page(
 
 def _get_authorize_success_html() -> str:
     """Return HTML for successful authorization."""
-    return """<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SkyPilot - Authorization Complete</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-                         Helvetica, Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            margin: 0;
-            background-color: #f8f9fa;
-            color: #202124;
-        }
-        .container {
-            background-color: #ffffff;
-            padding: 48px;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
-            text-align: center;
-            max-width: 400px;
-        }
-        .success-icon {
-            font-size: 48px;
-            margin-bottom: 16px;
-        }
-        h1 { font-size: 24px; font-weight: 500; margin-bottom: 16px; }
-        p { color: #5f6368; margin-bottom: 8px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="success-icon">&#10003;</div>
-        <h1>Authorization Complete</h1>
-        <p>You have successfully authorized the SkyPilot CLI.</p>
-        <p>You can close this tab and return to your terminal.</p>
-    </div>
-</body>
-</html>"""
+    html_dir = pathlib.Path(__file__).parent / 'html'
+    success_page_path = html_dir / 'authorize_success.html'
+    with open(success_page_path, 'r', encoding='utf-8') as f:
+        return f.read()
 
 
 @app.post('/check')

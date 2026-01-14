@@ -1148,3 +1148,12 @@ def base64_url_encode(data: bytes) -> str:
     This is the encoding used by PKCE (RFC 7636) for code challenges.
     """
     return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+
+def compute_pkce_challenge(code_verifier: str) -> str:
+    """Compute PKCE code_challenge from code_verifier using S256.
+
+    This is the challenge method specified in RFC 7636.
+    """
+    digest = hashlib.sha256(code_verifier.encode('utf-8')).digest()
+    return base64_url_encode(digest)

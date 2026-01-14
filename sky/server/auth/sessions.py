@@ -4,7 +4,7 @@ This module provides server-side session storage for the PKCE-based
 CLI authentication flow. Sessions are keyed by code_challenge and
 expire after a configurable timeout. Uses SQLite for cross-worker access.
 """
-import hashlib
+import os
 import sqlite3
 import time
 from typing import Optional, Tuple
@@ -18,12 +18,6 @@ SESSION_EXPIRATION_SECONDS = 300
 
 # Table name for auth sessions
 _AUTH_SESSIONS_TABLE = 'auth_sessions'
-
-
-def compute_challenge(code_verifier: str) -> str:
-    """Compute code_challenge from code_verifier using S256."""
-    digest = hashlib.sha256(code_verifier.encode('utf-8')).digest()
-    return common_utils.base64_url_encode(digest)
 
 
 class AuthSession:
@@ -44,7 +38,8 @@ class AuthSessionStore:
     """SQLite-backed storage for auth sessions."""
 
     def __init__(self):
-        self._db_path = server_constants.API_SERVER_REQUEST_DB_PATH
+        self._db_path = os.path.expanduser(
+            server_constants.API_SERVER_REQUEST_DB_PATH)
 
     def _get_cursor(self):
         """Get a cursor to the database, creating table if needed."""
@@ -157,7 +152,7 @@ class AuthSessionStore:
             - ('pending', None) - Valid but not yet authorized
             - (None, None) - Not found or expired
         """
-        code_challenge = compute_challenge(code_verifier)
+        code_challenge = common_utils.compute_pkce_challenge(code_verifier)
 
         with self._get_cursor() as cursor:
             self._ensure_table(cursor)

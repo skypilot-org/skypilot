@@ -25,18 +25,18 @@ class TestAuthSession:
         assert session.is_expired()
 
 
-class TestComputeChallenge:
-    """Tests for the compute_challenge function."""
+class TestComputePkceChallenge:
+    """Tests for the compute_pkce_challenge function."""
 
     def test_compute_challenge(self):
         code_verifier = 'test_verifier_123456'
         verifier_hash = hashlib.sha256(code_verifier.encode('utf-8')).digest()
         expected = common_utils.base64_url_encode(verifier_hash)
-        assert sessions.compute_challenge(code_verifier) == expected
+        assert common_utils.compute_pkce_challenge(code_verifier) == expected
 
     def test_different_verifiers_different_challenges(self):
-        challenge1 = sessions.compute_challenge('verifier1')
-        challenge2 = sessions.compute_challenge('verifier2')
+        challenge1 = common_utils.compute_pkce_challenge('verifier1')
+        challenge2 = common_utils.compute_pkce_challenge('verifier2')
         assert challenge1 != challenge2
 
 
@@ -97,7 +97,7 @@ class TestAuthSessionStore:
 
     def test_poll_session_authorized(self, store):
         code_verifier = 'test_verifier'
-        code_challenge = sessions.compute_challenge(code_verifier)
+        code_challenge = common_utils.compute_pkce_challenge(code_verifier)
 
         store.get_or_create_session(code_challenge)
         store.authorize_session(code_challenge, 'my_token')
@@ -111,7 +111,7 @@ class TestAuthSessionStore:
 
     def test_poll_session_pending(self, store):
         code_verifier = 'test_verifier'
-        code_challenge = sessions.compute_challenge(code_verifier)
+        code_challenge = common_utils.compute_pkce_challenge(code_verifier)
 
         store.get_or_create_session(code_challenge)
 
