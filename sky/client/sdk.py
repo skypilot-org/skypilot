@@ -14,6 +14,7 @@ from http import cookiejar
 import json
 import logging
 import os
+import platform
 import subprocess
 import typing
 from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
@@ -2815,6 +2816,46 @@ def slurm_node_info(
 # =====================
 
 
+def _build_client_info() -> Dict[str, Any]:
+    """Build client-side info for debug dumps."""
+    import sky  # pylint: disable=import-outside-toplevel
+    from sky.server import constants as server_constants
+
+    def _sanitize_config(config: Dict[str, Any]) -> Dict[str, Any]:
+        """Sanitize config by redacting API server endpoints."""
+        config = dict(config)  # Shallow copy
+        if 'api_server' in config:
+            api_server = dict(config['api_server'])
+            if 'endpoint' in api_server:
+                api_server['endpoint'] = '<redacted>'
+            config['api_server'] = api_server
+        return config
+
+    # Get configs
+    user_config: Dict[str, Any] = {}
+    merged_config: Dict[str, Any] = {}
+    try:
+        user_config = _sanitize_config(dict(skypilot_config.get_user_config()))
+        merged_config = _sanitize_config(dict(skypilot_config.to_dict()))
+    except Exception:  # pylint: disable=broad-except
+        pass  # Config may not be available
+
+    return {
+        'skypilot_version': sky.__version__,
+        'skypilot_commit': getattr(sky, '__commit__', 'unknown'),
+        'api_version': server_constants.API_VERSION,
+        'python_version': platform.python_version(),
+        'platform': platform.platform(),
+        'user_hash': common_utils.get_user_hash(),
+        'environment': {
+            'SKYPILOT_DEBUG': os.environ.get('SKYPILOT_DEBUG', ''),
+            'SKYPILOT_DEV': os.environ.get('SKYPILOT_DEV', ''),
+        },
+        'user_config': user_config,
+        'merged_config': merged_config,
+    }
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(27)
@@ -2845,6 +2886,7 @@ def create_debug_dump(
         cluster_names=cluster_names,
         managed_job_ids=managed_job_ids,
         recent_hours=recent_hours,
+        client_info=_build_client_info(),
     )
     response = server_common.make_authenticated_request(
         'POST',

@@ -518,6 +518,7 @@ def create_debug_dump(
     cluster_names: Optional[List[str]] = None,
     managed_job_ids: Optional[List[int]] = None,
     recent_hours: Optional[float] = None,
+    client_info: Optional[Dict[str, Any]] = None,
 ) -> pathlib.Path:
     """Create a debug dump for troubleshooting.
 
@@ -527,6 +528,7 @@ def create_debug_dump(
         managed_job_ids: List of managed job IDs to include in the dump.
         recent_hours: If specified, include all resources active within
             this many hours.
+        client_info: Optional client-side info to include in the dump.
 
     Returns:
         Path to the created zip file.
@@ -576,6 +578,13 @@ def create_debug_dump(
         _dump_request_id_info(debug_dump_context['request_ids'], dump_dir)
         _dump_cluster_info(debug_dump_context['cluster_names'], dump_dir)
         _dump_managed_job_info(debug_dump_context['managed_job_ids'], dump_dir)
+
+        # Write client info if provided
+        if client_info:
+            logger.debug('Writing client info')
+            client_info_path = os.path.join(dump_dir, 'client_info.json')
+            with open(client_info_path, 'w', encoding='utf-8') as f:
+                json.dump(client_info, f, indent=2, default=str)
 
         # Write summary file
         elapsed_time = time.time() - start_time

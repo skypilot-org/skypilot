@@ -1545,7 +1545,8 @@ def get_all_contexts() -> List[str]:
 def create_debug_dump(request_ids: Optional[List[str]] = None,
                       cluster_names: Optional[List[str]] = None,
                       managed_job_ids: Optional[List[int]] = None,
-                      recent_hours: Optional[float] = None) -> str:
+                      recent_hours: Optional[float] = None,
+                      client_info: Optional[Dict[str, Any]] = None) -> str:
     """Create a debug dump for troubleshooting.
 
     Args:
@@ -1554,6 +1555,7 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
         managed_job_ids: List of managed job IDs to include in the dump.
         recent_hours: If specified, include all resources active within
             this many hours.
+        client_info: Optional client-side info to include in the dump.
 
     Returns:
         Path to the created zip file on the server.
@@ -1570,6 +1572,7 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
         request_ids=request_ids,
         cluster_names=cluster_names,
         managed_job_ids=managed_job_ids,
-        recent_hours=recent_hours)
+        recent_hours=recent_hours,
+        client_info=client_info)
     logger.info(f'Debug dump created at {debug_dump_path}')
     return str(debug_dump_path)
