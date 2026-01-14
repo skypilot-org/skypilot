@@ -71,6 +71,7 @@ from sky.server import versions
 from sky.server.auth import authn
 from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
+from sky.server.auth import sessions as auth_sessions
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
@@ -759,6 +760,249 @@ async def token(request: fastapi.Request,
             # with some reverse proxies.
             'X-Accel-Buffering': 'no'
         })
+
+
+# ======================== Auth Session Endpoints ========================
+# These endpoints implement the PKCE-based CLI login flow that replaces
+# the localhost callback mechanism blocked by recent Chrome changes.
+
+
+@app.post('/api/v1/auth/sessions')
+async def create_auth_session(
+        request: fastapi.Request) -> fastapi.responses.JSONResponse:
+    """Create a new auth session for CLI login.
+
+    This endpoint does not require authentication - it creates a session
+    that will be authorized later when the user authenticates in the browser.
+
+    Request body:
+        code_challenge: Base64url-encoded SHA256 hash of the code verifier
+        code_challenge_method: Must be "S256"
+
+    Returns:
+        session_id: The session ID to use in subsequent requests
+        expires_at: ISO 8601 timestamp when the session expires
+    """
+    try:
+        body = await request.json()
+    except json.JSONDecodeError as e:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='Invalid JSON body') from e
+
+    code_challenge = body.get('code_challenge')
+    code_challenge_method = body.get('code_challenge_method')
+
+    if not code_challenge:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='code_challenge is required')
+
+    if code_challenge_method != 'S256':
+        raise fastapi.HTTPException(
+            status_code=400, detail='code_challenge_method must be S256')
+
+    session = auth_sessions.auth_session_store.create_session(code_challenge)
+
+    expires_at = datetime.datetime.fromtimestamp(
+        session.created_at + auth_sessions.SESSION_EXPIRATION_SECONDS,
+        tz=datetime.timezone.utc).isoformat()
+
+    return fastapi.responses.JSONResponse(
+        content={
+            'session_id': session.session_id,
+            'expires_at': expires_at,
+        },
+        headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/api/v1/auth/sessions/{session_id}')
+async def get_auth_session(
+        session_id: str,
+        code_verifier: Optional[str] = None) -> fastapi.responses.Response:
+    """Get the status of an auth session and retrieve the token if authorized.
+
+    This endpoint requires the code_verifier that was used to generate
+    the code_challenge when creating the session.
+
+    Query params:
+        code_verifier: The original code verifier (required)
+
+    Returns:
+        - 200 with token if session is authorized and verifier is valid
+        - 202 if session is pending (keep polling)
+        - 404 if session not found, expired, or verifier is invalid
+    """
+    if not code_verifier:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='code_verifier is required')
+
+    # First check the session status
+    status = auth_sessions.auth_session_store.get_session_status(
+        session_id, code_verifier)
+
+    if status is None:
+        # Session not found, expired, or invalid verifier
+        raise fastapi.HTTPException(status_code=404, detail='Session not found')
+
+    if status == 'pending':
+        # Session exists but not yet authorized - client should keep polling
+        return fastapi.responses.JSONResponse(status_code=202,
+                                              content={'status': 'pending'},
+                                              headers={'Cache-Control':
+                                                       'no-store'})
+
+    # Session is authorized - consume it and return the token
+    token = auth_sessions.auth_session_store.consume_session(
+        session_id, code_verifier)
+
+    if token is None:
+        # This shouldn't happen if status was 'authorized', but handle it
+        raise fastapi.HTTPException(status_code=404, detail='Session not found')
+
+    return fastapi.responses.JSONResponse(content={
+        'status': 'authorized',
+        'token': token
+    },
+                                          headers={'Cache-Control': 'no-store'})
+
+
+@app.post('/api/v1/auth/sessions/{session_id}/authorize')
+async def authorize_auth_session(
+        request: fastapi.Request,
+        session_id: str) -> fastapi.responses.JSONResponse:
+    """Authorize an auth session (called when user clicks Authorize button).
+
+    This endpoint requires authentication (via auth proxy cookies).
+    It generates the token and stores it in the session for the CLI to retrieve.
+
+    Returns:
+        - 200 if successfully authorized
+        - 404 if session not found or expired
+        - 409 if session was already authorized
+    """
+    # Get the session first to check if it exists
+    session = auth_sessions.auth_session_store.get_session(session_id)
+    if session is None:
+        raise fastapi.HTTPException(status_code=404,
+                                    detail='Session not found or expired')
+
+    if session.status != 'pending':
+        raise fastapi.HTTPException(status_code=409,
+                                    detail='Session already authorized')
+
+    # Generate the token (same logic as /token endpoint)
+    user = _get_auth_user_header(request)
+
+    token_data = {
+        'v': 1,
+        'user': user.id if user is not None else None,
+        'cookies': dict(request.cookies),
+    }
+    json_bytes = json.dumps(token_data).encode('utf-8')
+    token = base64.b64encode(json_bytes).decode('utf-8')
+
+    # Store the token in the session
+    success = auth_sessions.auth_session_store.authorize_session(
+        session_id, token)
+    if not success:
+        raise fastapi.HTTPException(status_code=404,
+                                    detail='Session not found or expired')
+
+    return fastapi.responses.JSONResponse(content={'status': 'authorized'},
+                                          headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/auth/authorize')
+async def authorize_page(
+        request: fastapi.Request,
+        session_id: Optional[str] = None) -> fastapi.responses.Response:
+    """Serve the authorization page where users click to authorize the CLI.
+
+    This page requires authentication (via auth proxy).
+    """
+    if not session_id:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='session_id is required')
+
+    # Check if session exists and is valid
+    session = auth_sessions.auth_session_store.get_session(session_id)
+    if session is None:
+        raise fastapi.HTTPException(
+            status_code=404,
+            detail='Session not found or expired. Please try logging in again.')
+
+    if session.status != 'pending':
+        # Session already authorized - show success message
+        return fastapi.responses.HTMLResponse(
+            content=_get_authorize_success_html(),
+            headers={'Cache-Control': 'no-cache, no-transform'})
+
+    user = _get_auth_user_header(request)
+    user_info = f'Logged in as {user.name}' if user is not None else ''
+
+    html_dir = pathlib.Path(__file__).parent / 'html'
+    authorize_page_path = html_dir / 'authorize_page.html'
+    try:
+        with open(authorize_page_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+    except FileNotFoundError as e:
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail='Authorization page template not found.') from e
+
+    html_content = html_content.replace('SESSION_ID_PLACEHOLDER', session_id)
+    html_content = html_content.replace('USER_PLACEHOLDER', user_info)
+
+    return fastapi.responses.HTMLResponse(
+        content=html_content,
+        headers={'Cache-Control': 'no-cache, no-transform'})
+
+
+def _get_authorize_success_html() -> str:
+    """Return HTML for successful authorization."""
+    return '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkyPilot - Authorization Complete</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                         Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f8f9fa;
+            color: #202124;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 48px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+            text-align: center;
+            max-width: 400px;
+        }
+        .success-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        h1 { font-size: 24px; font-weight: 500; margin-bottom: 16px; }
+        p { color: #5f6368; margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="success-icon">&#10003;</div>
+        <h1>Authorization Complete</h1>
+        <p>You have successfully authorized the SkyPilot CLI.</p>
+        <p>You can close this tab and return to your terminal.</p>
+    </div>
+</body>
+</html>'''
 
 
 @app.post('/check')

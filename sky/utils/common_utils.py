@@ -1,5 +1,6 @@
 """Utils shared between all of sky"""
 
+import base64
 import ctypes
 import difflib
 import enum
@@ -1139,3 +1140,23 @@ def release_memory():
         logger.error(f'Failed to release memory: '
                      f'{format_exception(e)}')
         return 0
+
+
+def base64_url_encode(data: bytes) -> str:
+    """Base64url encode data without padding.
+
+    This is the encoding used by PKCE (RFC 7636) for code challenges.
+    """
+    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+
+def base64_url_decode(data: str) -> bytes:
+    """Base64url decode data, handling missing padding.
+
+    This is the decoding counterpart to base64_url_encode.
+    """
+    # Add padding if needed
+    padding = 4 - len(data) % 4
+    if padding != 4:
+        data += '=' * padding
+    return base64.urlsafe_b64decode(data)
