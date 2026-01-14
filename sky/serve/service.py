@@ -140,6 +140,7 @@ def _cleanup(service_name: str, pool: bool) -> bool:
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(f'Failed to remove replica {info.replica_id} '
                                f'from database: {e}')
+                failed = True
             continue
 
         log_file_name = serve_utils.generate_replica_log_file_name(
