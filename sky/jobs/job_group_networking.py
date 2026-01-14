@@ -260,6 +260,7 @@ async def _inject_hosts_on_node(
         return True
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Exception while injecting /etc/hosts: {e}')
+        logger.error(traceback.format_exc())
         return False
 
 
@@ -278,9 +279,10 @@ def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]],
         return ''
 
     # Validate and build mapping pairs, filtering out unsafe characters
+    # Allow: alphanumeric, dots (DNS), hyphens, underscores (job group names)
     escaped_mappings = []
     for dns, hostname in dns_mappings:
-        if not all(c.isalnum() or c in '.-' for c in dns + hostname):
+        if not all(c.isalnum() or c in '.-_' for c in dns + hostname):
             logger.warning(f'Skipping invalid DNS mapping: {dns} -> {hostname}')
             continue
         escaped_mappings.append(f'{dns}:{hostname}')
@@ -316,6 +318,7 @@ def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]],
               new_entries="${{new_entries}}$ip $simple_name  $MARKER
         "
               # Check if current IP differs from /etc/hosts
+              # Note: On first run, current_ip will be empty, triggering update
               current_ip=$(getent hosts "$simple_name" 2>/dev/null | awk '{{print $1}}')
               if [ "$ip" != "$current_ip" ]; then
                 needs_update=1
@@ -371,6 +374,8 @@ async def _start_k8s_dns_updater_on_node(
                                                      job_group_name)
 
     # Note: job_group_name is validated at YAML load time to be shell-safe
+    # (alphanumeric, hyphens, underscores only - see dag_utils.py:477-485)
+    # This ensures the process_id is safe for use in pgrep patterns and paths
     process_id = f'skypilot-jobgroup-dns-updater-{job_group_name}'
     script_path = f'/tmp/{process_id}.sh'
     log_path = f'/tmp/{process_id}.log'
