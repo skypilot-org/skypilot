@@ -285,6 +285,12 @@ def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]],
             continue
         escaped_mappings.append(f'{dns}:{hostname}')
 
+    # If all mappings were filtered out, return empty (nothing to update)
+    if not escaped_mappings:
+        logger.warning('No valid DNS mappings after filtering, '
+                       'skipping DNS updater script generation')
+        return ''
+
     mapping_pairs = ' '.join(escaped_mappings)
 
     # Note: job_group_name is validated at YAML load time to be shell-safe
@@ -519,7 +525,10 @@ class NetworkConfigurator:
             1 for r in results if not isinstance(r, Exception) and r)
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                logger.error(f'Node {i} injection failed: {result}')
+                tb_str = ''.join(
+                    traceback.format_exception(type(result), result,
+                                               result.__traceback__))
+                logger.error(f'Node {i} injection failed: {result}\n{tb_str}')
             elif not result:
                 logger.error(f'Node {i} injection failed')
 
