@@ -2492,23 +2492,8 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
         verifier_hash = hashlib.sha256(code_verifier.encode('utf-8')).digest()
         code_challenge = common_utils.base64_url_encode(verifier_hash)
 
-        # Create auth session
-        logger.debug('Creating auth session...')
-        response = requests.post(f'{endpoint}/api/v1/auth/sessions',
-                                 json={'code_challenge': code_challenge},
-                                 timeout=10)
-
-        if response.status_code == 404:
-            logger.debug('Server does not support polling-based auth.')
-            return None
-        if response.status_code != 200:
-            logger.debug(f'Failed to create auth session: {response.text}')
-            return None
-
-        session_id = response.json()['session_id']
-
-        # Open browser to authorization page
-        auth_url = f'{endpoint}/auth/authorize?session_id={session_id}'
+        # Open browser to authorization page (session created on page load)
+        auth_url = f'{endpoint}/auth/authorize?code_challenge={code_challenge}'
         if not webbrowser.open(auth_url):
             logger.debug('Failed to open browser.')
             return None
@@ -2523,7 +2508,7 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
         start_time = time.time()
         while time.time() - start_time < oauth_lib.AUTH_TIMEOUT:
             time.sleep(2)
-            resp = requests.get(f'{endpoint}/api/v1/auth/sessions/{session_id}',
+            resp = requests.get(f'{endpoint}/api/v1/auth/token',
                                 params={'code_verifier': code_verifier},
                                 timeout=10)
 
@@ -2533,6 +2518,8 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
                     return data['token']
             elif resp.status_code == 202:
                 continue  # Still pending
+            elif resp.status_code == 404:
+                continue  # Session not created yet (user hasn't loaded page)
             else:
                 logger.debug(f'Poll failed: {resp.status_code}')
                 return None

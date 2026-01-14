@@ -1,11 +1,10 @@
 """In-memory auth session storage for CLI login flow.
 
 This module provides server-side session storage for the PKCE-based
-CLI authentication flow. Sessions are stored in memory and expire
-after a configurable timeout.
+CLI authentication flow. Sessions are keyed by code_challenge and
+expire after a configurable timeout.
 """
 import hashlib
-import secrets
 import threading
 import time
 from typing import Dict, Optional, Tuple
@@ -19,8 +18,7 @@ SESSION_EXPIRATION_SECONDS = 300
 class AuthSession:
     """Represents an authentication session."""
 
-    def __init__(self, session_id: str, code_challenge: str):
-        self.session_id = session_id
+    def __init__(self, code_challenge: str):
         self.code_challenge = code_challenge
         self.status = 'pending'  # 'pending' or 'authorized'
         self.token: Optional[str] = None
@@ -29,11 +27,11 @@ class AuthSession:
     def is_expired(self) -> bool:
         return time.time() - self.created_at > SESSION_EXPIRATION_SECONDS
 
-    def verify_code_verifier(self, code_verifier: str) -> bool:
-        """Verify code verifier against stored challenge using S256."""
-        digest = hashlib.sha256(code_verifier.encode('utf-8')).digest()
-        computed_challenge = common_utils.base64_url_encode(digest)
-        return secrets.compare_digest(computed_challenge, self.code_challenge)
+
+def compute_challenge(code_verifier: str) -> str:
+    """Compute code_challenge from code_verifier using S256."""
+    digest = hashlib.sha256(code_verifier.encode('utf-8')).digest()
+    return common_utils.base64_url_encode(digest)
 
 
 class AuthSessionStore:
@@ -43,35 +41,38 @@ class AuthSessionStore:
         self._sessions: Dict[str, AuthSession] = {}
         self._lock = threading.Lock()
 
-    def create_session(self, code_challenge: str) -> AuthSession:
-        """Create a new auth session."""
-        session_id = secrets.token_urlsafe(32)
-        session = AuthSession(session_id, code_challenge)
-
+    def get_or_create_session(self, code_challenge: str) -> AuthSession:
+        """Get or create a session for the given code_challenge."""
         with self._lock:
             self._cleanup_expired_sessions_locked()
-            self._sessions[session_id] = session
 
-        return session
+            session = self._sessions.get(code_challenge)
+            if session is not None and not session.is_expired():
+                return session
 
-    def get_session(self, session_id: str) -> Optional[AuthSession]:
-        """Get a session by ID. Returns None if not found or expired."""
+            # Create new session
+            session = AuthSession(code_challenge)
+            self._sessions[code_challenge] = session
+            return session
+
+    def get_session(self, code_challenge: str) -> Optional[AuthSession]:
+        """Get session by code_challenge. Returns None if not found/expired."""
         with self._lock:
-            session = self._sessions.get(session_id)
+            session = self._sessions.get(code_challenge)
             if session is None:
                 return None
             if session.is_expired():
-                del self._sessions[session_id]
+                del self._sessions[code_challenge]
                 return None
             return session
 
-    def authorize_session(self, session_id: str, token: str) -> bool:
+    def authorize_session(self, code_challenge: str, token: str) -> bool:
         """Mark a session as authorized and store the token."""
         with self._lock:
-            session = self._sessions.get(session_id)
+            session = self._sessions.get(code_challenge)
             if session is None or session.is_expired():
                 if session is not None:
-                    del self._sessions[session_id]
+                    del self._sessions[code_challenge]
                 return False
 
             if session.status != 'pending':
@@ -81,26 +82,27 @@ class AuthSessionStore:
             session.token = token
             return True
 
-    def poll_session(self, session_id: str,
+    def poll_session(self,
                      code_verifier: str) -> Tuple[Optional[str], Optional[str]]:
-        """Poll a session for its token.
+        """Poll a session for its token using code_verifier.
+
+        Computes code_challenge from code_verifier to look up the session.
 
         Returns:
             (status, token) tuple where:
             - ('authorized', token) - Success, session consumed
             - ('pending', None) - Valid but not yet authorized
-            - (None, None) - Not found, expired, or invalid verifier
+            - (None, None) - Not found or expired
         """
+        code_challenge = compute_challenge(code_verifier)
+
         with self._lock:
-            session = self._sessions.get(session_id)
+            session = self._sessions.get(code_challenge)
             if session is None:
                 return (None, None)
 
             if session.is_expired():
-                del self._sessions[session_id]
-                return (None, None)
-
-            if not session.verify_code_verifier(code_verifier):
+                del self._sessions[code_challenge]
                 return (None, None)
 
             if session.status == 'pending':
@@ -108,14 +110,14 @@ class AuthSessionStore:
 
             # Authorized - consume and return token
             token = session.token
-            del self._sessions[session_id]
+            del self._sessions[code_challenge]
             return ('authorized', token)
 
     def _cleanup_expired_sessions_locked(self) -> None:
         """Remove expired sessions. Must hold _lock."""
-        expired = [s for s, sess in self._sessions.items() if sess.is_expired()]
-        for s in expired:
-            del self._sessions[s]
+        expired = [c for c, sess in self._sessions.items() if sess.is_expired()]
+        for c in expired:
+            del self._sessions[c]
 
 
 # Global session store instance

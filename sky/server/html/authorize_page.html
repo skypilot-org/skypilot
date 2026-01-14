@@ -182,7 +182,7 @@
     </div>
 
     <script>
-        const sessionId = 'SESSION_ID_PLACEHOLDER';
+        const codeChallenge = 'CODE_CHALLENGE_PLACEHOLDER';
         const authorizeBtn = document.getElementById('authorize-btn');
         const errorMessage = document.getElementById('error-message');
         const authView = document.getElementById('auth-view');
@@ -195,9 +195,11 @@
             errorMessage.style.display = 'none';
 
             try {
-                const response = await fetch(`/api/v1/auth/sessions/${sessionId}/authorize`, {
+                const response = await fetch('/api/v1/auth/authorize', {
                     method: 'POST',
-                    credentials: 'include'
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({code_challenge: codeChallenge})
                 });
 
                 if (response.ok) {

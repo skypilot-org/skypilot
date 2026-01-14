@@ -767,50 +767,12 @@ async def token(request: fastapi.Request,
 # the localhost callback mechanism blocked by recent Chrome changes.
 
 
-@app.post('/api/v1/auth/sessions')
-async def create_auth_session(
-        request: fastapi.Request) -> fastapi.responses.JSONResponse:
-    """Create a new auth session for CLI login.
-
-    This endpoint does not require authentication - it creates a session
-    that will be authorized later when the user authenticates in the browser.
-
-    Request body:
-        code_challenge: Base64url-encoded SHA256 hash of the code verifier
-
-    Returns:
-        session_id: The session ID to use in subsequent requests
-        expires_at: ISO 8601 timestamp when the session expires
-    """
-    try:
-        body = await request.json()
-    except json.JSONDecodeError as e:
-        raise fastapi.HTTPException(status_code=400,
-                                    detail='Invalid JSON body') from e
-
-    code_challenge = body.get('code_challenge')
-    if not code_challenge:
-        raise fastapi.HTTPException(status_code=400,
-                                    detail='code_challenge is required')
-
-    session = auth_sessions.auth_session_store.create_session(code_challenge)
-
-    expires_at = datetime.datetime.fromtimestamp(
-        session.created_at + auth_sessions.SESSION_EXPIRATION_SECONDS,
-        tz=datetime.timezone.utc).isoformat()
-
-    return fastapi.responses.JSONResponse(content={
-        'session_id': session.session_id,
-        'expires_at': expires_at,
-    },
-                                          headers={'Cache-Control': 'no-store'})
-
-
-@app.get('/api/v1/auth/sessions/{session_id}')
-async def get_auth_session(
-        session_id: str,
+@app.get('/api/v1/auth/token')
+async def poll_auth_token(
         code_verifier: Optional[str] = None) -> fastapi.responses.Response:
-    """Poll an auth session for its token.
+    """Poll for auth token using code_verifier.
+
+    Computes code_challenge from code_verifier to look up the session.
 
     Query params:
         code_verifier: The original code verifier (required)
@@ -818,14 +780,14 @@ async def get_auth_session(
     Returns:
         - 200 with token if session is authorized
         - 202 if session is pending (keep polling)
-        - 404 if session not found, expired, or verifier invalid
+        - 404 if session not found or expired
     """
     if not code_verifier:
         raise fastapi.HTTPException(status_code=400,
                                     detail='code_verifier is required')
 
     session_status, auth_token = auth_sessions.auth_session_store.poll_session(
-        session_id, code_verifier)
+        code_verifier)
 
     if session_status is None:
         raise fastapi.HTTPException(status_code=404, detail='Session not found')
@@ -843,22 +805,35 @@ async def get_auth_session(
                                           headers={'Cache-Control': 'no-store'})
 
 
-@app.post('/api/v1/auth/sessions/{session_id}/authorize')
+@app.post('/api/v1/auth/authorize')
 async def authorize_auth_session(
-        request: fastapi.Request,
-        session_id: str) -> fastapi.responses.JSONResponse:
+        request: fastapi.Request) -> fastapi.responses.JSONResponse:
     """Authorize an auth session (called when user clicks Authorize button).
 
     This endpoint requires authentication (via auth proxy cookies).
     It generates the token and stores it in the session for the CLI to retrieve.
+
+    Request body:
+        code_challenge: The code challenge for the session to authorize
 
     Returns:
         - 200 if successfully authorized
         - 404 if session not found or expired
         - 409 if session was already authorized
     """
+    try:
+        body = await request.json()
+    except json.JSONDecodeError as e:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='Invalid JSON body') from e
+
+    code_challenge = body.get('code_challenge')
+    if not code_challenge:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='code_challenge is required')
+
     # Get the session first to check if it exists
-    session = auth_sessions.auth_session_store.get_session(session_id)
+    session = auth_sessions.auth_session_store.get_session(code_challenge)
     if session is None:
         raise fastapi.HTTPException(status_code=404,
                                     detail='Session not found or expired')
@@ -880,7 +855,7 @@ async def authorize_auth_session(
 
     # Store the token in the session
     success = auth_sessions.auth_session_store.authorize_session(
-        session_id, auth_token)
+        code_challenge, auth_token)
     if not success:
         raise fastapi.HTTPException(status_code=404,
                                     detail='Session not found or expired')
@@ -892,21 +867,22 @@ async def authorize_auth_session(
 @app.get('/auth/authorize')
 async def authorize_page(
         request: fastapi.Request,
-        session_id: Optional[str] = None) -> fastapi.responses.Response:
+        code_challenge: Optional[str] = None) -> fastapi.responses.Response:
     """Serve the authorization page where users click to authorize the CLI.
 
-    This page requires authentication (via auth proxy).
-    """
-    if not session_id:
-        raise fastapi.HTTPException(status_code=400,
-                                    detail='session_id is required')
+    This page requires authentication (via auth proxy). The session is created
+    automatically when the page loads.
 
-    # Check if session exists and is valid
-    session = auth_sessions.auth_session_store.get_session(session_id)
-    if session is None:
-        raise fastapi.HTTPException(
-            status_code=404,
-            detail='Session not found or expired. Please try logging in again.')
+    Query params:
+        code_challenge: Base64url-encoded SHA256 hash of the code verifier
+    """
+    if not code_challenge:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='code_challenge is required')
+
+    # Get or create session for this code_challenge
+    session = auth_sessions.auth_session_store.get_or_create_session(
+        code_challenge)
 
     if session.status != 'pending':
         # Session already authorized - show success message
@@ -927,7 +903,8 @@ async def authorize_page(
             status_code=500,
             detail='Authorization page template not found.') from e
 
-    html_content = html_content.replace('SESSION_ID_PLACEHOLDER', session_id)
+    html_content = html_content.replace('CODE_CHALLENGE_PLACEHOLDER',
+                                        code_challenge)
     html_content = html_content.replace('USER_PLACEHOLDER', user_info)
 
     return fastapi.responses.HTMLResponse(
