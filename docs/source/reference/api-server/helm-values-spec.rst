@@ -423,6 +423,11 @@ Upgrade strategy for the API server deployment. Available options are:
 
 When set to ``RollingUpdate``, an external database must be configured via :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>` or :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>`.
 
+For persistent storage with RollingUpdate:
+
+- If :ref:`storage.enabled=true <helm-values-storage-enabled>`, use ``storage.accessMode=ReadWriteMany`` with an RWX-capable storage class (e.g., NFS-backed storage). This sets the ``SKYPILOT_API_SERVER_STORAGE_ENABLED`` environment variable, ensuring API server state, managed job logs, and file mounts persist across rolling updates.
+- If ``storage.enabled=false``, file mounts and logs will be lost on pod restart. Consider configuring ``jobs.bucket`` in the SkyPilot config to persist file mounts to cloud storage.
+
 Default: ``"Recreate"``
 
 .. code-block:: yaml
@@ -1142,6 +1147,20 @@ Default: ``null``
 ^^^^^^^^^^^^^^^^^^^
 
 Enable persistent storage for the API server, setting this to ``false`` is prone to data loss and should only be used for testing.
+
+When enabled, SkyPilot creates a PersistentVolumeClaim (PVC) to persist:
+
+- **Managed job logs**: Accessible via ``sky jobs logs <job_id>`` and ``sky jobs logs --controller <job_id>``
+- **File mounts**: Local files uploaded during managed job submission
+- **API server state**: Database, SSH keys, and configuration
+
+.. note::
+
+  Setting ``storage.enabled=true`` sets the environment variable ``SKYPILOT_API_SERVER_STORAGE_ENABLED=true`` on the API server pod. This ensures that API server state, managed job logs, and file mounts persist across API server restarts and rolling updates.
+
+  Transient logs (api_server logs, sky-* cluster logs) are NOT persisted to minimize storage usage.
+
+For RollingUpdate upgrade strategy, see :ref:`apiService.upgradeStrategy <helm-values-apiService-upgradeStrategy>` for storage access mode requirements.
 
 Default: ``true``
 

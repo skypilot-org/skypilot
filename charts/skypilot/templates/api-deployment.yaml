@@ -136,10 +136,8 @@ spec:
         - name: SKYPILOT_ROLLING_UPDATE_ENABLED
           value: "true"
         {{- end }}
-        {{- if .Values.storage.enabled }}
-        - name: SKYPILOT_STORAGE_ENABLED
-          value: "true"
-        {{- end }}
+        - name: SKYPILOT_API_SERVER_STORAGE_ENABLED
+          value: {{ .Values.storage.enabled | quote }}
         {{- if .Values.apiService.metrics.enabled }}
         - name: SKY_API_SERVER_METRICS_ENABLED
           value: "true"
