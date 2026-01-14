@@ -24,11 +24,9 @@ run: |
   sleep 2
 
   # Start the Dynamo frontend (HTTP server + router)
-  # Using --store-kv file to skip etcd dependency for single-node deployment
   python -m dynamo.frontend --http-port 8080 --store-kv file &
 
   # Start the SGLang worker
-  # Using --store-kv file to skip etcd dependency for single-node deployment
   python -m dynamo.sglang --model $MODEL_NAME --store-kv file
 
 # Kubernetes-specific configuration

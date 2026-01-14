@@ -30,10 +30,6 @@ These examples use the official NVIDIA Dynamo container images from NGC:
 
 The NGC images are freely accessible and include all necessary dependencies (NATS, etcd, NIXL, etc.).
 
-### Kubernetes Configuration
-
-For Kubernetes deployments, the examples include a `config.kubernetes.pod_config` section that runs the container as root. This is required because SkyPilot needs to install `rsync` for file syncing, and the Dynamo container runs as a non-root user by default.
-
 ## Launching Nvidia Dynamo with SkyPilot
 
 ### Single-Node Example (`nvidia-dynamo.sky.yaml`)
