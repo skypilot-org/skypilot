@@ -374,16 +374,6 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                                              f'Pod status: {pod_status} '
                                              f'Details: \'{event_message}\' ')
 
-    # Check for PVC binding issues even if no FailedScheduling event found
-    for new_node in new_nodes:
-        pod = kubernetes.core_api(context).read_namespaced_pod(
-            new_node.metadata.name, namespace)
-        if pod.status.phase != 'Pending':
-            continue
-        pvc_error = _get_pvc_binding_status(namespace, context, pod)
-        if pvc_error is not None:
-            raise config_lib.KubernetesError(pvc_error)
-
     raise config_lib.KubernetesError(f'{timeout_err_msg}')
 
 
