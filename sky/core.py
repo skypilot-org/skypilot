@@ -1440,7 +1440,6 @@ def realtime_slurm_gpu_availability(
     del env_vars, kwargs  # Currently unused
 
     if slurm_cluster_name is None:
-        # Include contexts from both Kubernetes and SSH clouds
         slurm_cluster_names = clouds.Slurm.existing_allowed_clusters()
     else:
         slurm_cluster_names = [slurm_cluster_name]
