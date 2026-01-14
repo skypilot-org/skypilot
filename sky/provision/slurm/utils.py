@@ -681,7 +681,7 @@ def format_slurm_duration(duration_seconds: Optional[int]) -> str:
     hours = (duration_seconds % (24 * 3600)) // 3600
     minutes = (duration_seconds % 3600) // 60
     seconds = duration_seconds % 60
-    return f'{days}-{hours}:{minutes}:{seconds}'
+    return f'{days}-{hours:02}:{minutes:02}:{seconds:02}'
 
 
 def srun_sshd_command(
