@@ -113,7 +113,7 @@ RUN MINICONDA_ARCH=$(case "$(uname -m)" in \
         *) echo "$(uname -m)" ;; \
     esac) && \
     echo "Installing Miniconda for architecture: $MINICONDA_ARCH" && \
-    curl -fsSL "https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-${MINICONDA_ARCH}.sh" -o miniconda.sh && \
+    curl -fsSL "https://repo.anaconda.com/miniconda/Miniconda3-py311_23.11.0-2-Linux-${MINICONDA_ARCH}.sh" -o miniconda.sh && \
     chmod +x miniconda.sh && \
     ./miniconda.sh -b -p ~/miniconda3 && \
     rm miniconda.sh
