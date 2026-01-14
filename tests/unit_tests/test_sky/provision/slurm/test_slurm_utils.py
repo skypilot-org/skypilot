@@ -8,22 +8,13 @@ from sky.provision.slurm import utils
 class TestFormatSlurmDuration:
     """Test format_slurm_duration()."""
 
-    def test_format_slurm_duration_10000(self):
-        """Test format_slurm_duration with 10000 seconds."""
-        result = utils.format_slurm_duration(10000)
-        assert result == '0-02:46:40'
-
-    def test_format_slurm_duration_100000(self):
-        """Test format_slurm_duration with 100000 seconds."""
-        result = utils.format_slurm_duration(100000)
-        assert result == '1-03:46:40'
-
-    def test_format_slurm_duration_1000000(self):
-        """Test format_slurm_duration with 1000000 seconds."""
-        result = utils.format_slurm_duration(1000000)
-        assert result == '11-13:46:40'
-
-    def test_format_slurm_duration_none(self):
-        """Test format_slurm_duration with None returns UNLIMITED."""
-        result = utils.format_slurm_duration(None)
-        assert result == 'UNLIMITED'
+    @pytest.mark.parametrize('duration_seconds,expected', [
+        (10000, '0-02:46:40'),
+        (100000, '1-03:46:40'),
+        (1000000, '11-13:46:40'),
+        (None, 'UNLIMITED'),
+    ])
+    def test_format_slurm_duration(self, duration_seconds, expected):
+        """Test format_slurm_duration with various inputs."""
+        result = utils.format_slurm_duration(duration_seconds)
+        assert result == expected
