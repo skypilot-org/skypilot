@@ -473,6 +473,16 @@ def _load_job_group(
                        'These will be ignored.')
 
     group_name = header['name']
+
+    # Validate job group name is safe for shell/filesystem use
+    # (alphanumeric, hyphens, underscores only)
+    if not group_name or not all(c.isalnum() or c in '-_' for c in group_name):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Invalid job group name: {group_name!r}. '
+                'Name must contain only alphanumeric characters, hyphens, '
+                'and underscores.')
+
     placement_str = header.get('placement', 'SAME_INFRA')
     execution_str = header.get('execution', 'parallel')
 
@@ -514,6 +524,14 @@ def _load_job_group(
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'Job {i + 1} in JobGroup must have a "name" field.')
+
+            # Validate job name is safe for shell/filesystem use
+            if not all(c.isalnum() or c in '-_' for c in job_name):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Invalid job name: {job_name!r}. '
+                        'Name must contain only alphanumeric characters, '
+                        'hyphens, and underscores.')
 
             # Check for duplicate job names
             if job_name in job_names:

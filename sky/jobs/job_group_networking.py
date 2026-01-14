@@ -106,12 +106,9 @@ def _construct_k8s_internal_svc(cluster_name_on_cloud: str, namespace: str,
         DNS URL like '{cluster}-head.{namespace}.svc.cluster.local'
     """
     if node_idx == 0:
-        # Head node
         return f'{cluster_name_on_cloud}-head.{namespace}.svc.cluster.local'
-    else:
-        # Worker node
-        return (f'{cluster_name_on_cloud}-worker{node_idx}.'
-                f'{namespace}.svc.cluster.local')
+    return (f'{cluster_name_on_cloud}-worker{node_idx}.'
+            f'{namespace}.svc.cluster.local')
 
 
 def _get_k8s_external_ip(
@@ -208,27 +205,26 @@ def _generate_hosts_entries(
     Returns:
         String containing /etc/hosts entries, one per line.
     """
-    entries = []
-    entries.append(f'# JobGroup: {job_group_name}')
+    entries = [f'# JobGroup: {job_group_name}']
 
     for task, handle in tasks_handles:
         if handle is None:
             logger.warning(f'Skipping job {task.name}: no handle')
             continue
 
-        job_name = task.name
+        if _is_kubernetes(handle):
+            continue
 
-        # Only SSH clouds get static /etc/hosts entries
-        # K8s uses background updater instead
-        if not _is_kubernetes(handle):
-            if handle.stable_internal_external_ips is None:
-                logger.warning(f'Skipping job {task.name}: no IP information')
-                continue
-            for node_idx, (internal_ip,
-                           _) in enumerate(handle.stable_internal_external_ips):
-                hostname = f'{job_name}-{node_idx}.{job_group_name}'
-                entries.append(f'{internal_ip} {hostname}')
-                logger.debug(f'Host entry (SSH): {internal_ip} -> {hostname}')
+        if handle.stable_internal_external_ips is None:
+            logger.warning(f'Skipping job {task.name}: no IP information')
+            continue
+
+        job_name = task.name
+        for node_idx, (internal_ip,
+                       _) in enumerate(handle.stable_internal_external_ips):
+            hostname = f'{job_name}-{node_idx}.{job_group_name}'
+            entries.append(f'{internal_ip} {hostname}')
+            logger.debug(f'Host entry (SSH): {internal_ip} -> {hostname}')
 
     return '\n'.join(entries)
 
@@ -281,10 +277,17 @@ def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]],
     if not dns_mappings:
         return ''
 
-    # Build mapping pairs for the script
-    mapping_pairs = ' '.join(
-        [f'{dns}:{hostname}' for dns, hostname in dns_mappings])
+    # Validate and build mapping pairs, filtering out unsafe characters
+    escaped_mappings = []
+    for dns, hostname in dns_mappings:
+        if not all(c.isalnum() or c in '.-' for c in dns + hostname):
+            logger.warning(f'Skipping invalid DNS mapping: {dns} -> {hostname}')
+            continue
+        escaped_mappings.append(f'{dns}:{hostname}')
 
+    mapping_pairs = ' '.join(escaped_mappings)
+
+    # Note: job_group_name is validated at YAML load time to be shell-safe
     script = textwrap.dedent(f"""\
         #!/bin/bash
         # Background K8s DNS to IP updater for /etc/hosts
@@ -361,9 +364,8 @@ async def _start_k8s_dns_updater_on_node(
     updater_script = generate_k8s_dns_updater_script(dns_mappings,
                                                      job_group_name)
 
-    # Sanitize job group name for file paths
-    safe_job_group_name = job_group_name.replace(' ', '_')
-    process_id = f'skypilot-jobgroup-dns-updater-{safe_job_group_name}'
+    # Note: job_group_name is validated at YAML load time to be shell-safe
+    process_id = f'skypilot-jobgroup-dns-updater-{job_group_name}'
     script_path = f'/tmp/{process_id}.sh'
     log_path = f'/tmp/{process_id}.log'
 
@@ -392,9 +394,10 @@ async def _start_k8s_dns_updater_on_node(
         # Make executable and run in background, then verify it started.
         # Uses nohup with a subshell to fully detach from kubectl exec.
         # After a brief sleep, pgrep confirms the process is running.
+        # Use 0.5s sleep to ensure process is visible on loaded systems.
         run_cmd = (f'chmod +x {script_path} && '
                    f'(nohup {script_path} < /dev/null > {log_path} 2>&1 &) && '
-                   f'sleep 0.1 && '
+                   f'sleep 0.5 && '
                    f'pgrep -f "{process_id}" > /dev/null')
         logger.info(f'Starting DNS updater in background (log: {log_path})...')
         returncode, _, stderr = await loop.run_in_executor(
@@ -443,20 +446,11 @@ class NetworkConfigurator:
             True if all configuration succeeded, False otherwise.
         """
         if placement != PlacementMode.SAME_INFRA:
-            # Future: Handle CROSS_INFRA
             logger.warning(f'Unsupported placement mode: {placement}')
             return False
 
-        # Inject /etc/hosts on all nodes (both K8s and SSH)
-        # This maps the unified hostname format:
-        # {job_name}-{node_idx}.{job_group_name}
-        # to actual addresses (internal_svc URLs for K8s, IPs for SSH)
-        success = await NetworkConfigurator._inject_etc_hosts(
+        return await NetworkConfigurator._inject_etc_hosts(
             job_group_name, tasks_handles)
-        if not success:
-            return False
-
-        return True
 
     @staticmethod
     async def _inject_etc_hosts(
@@ -479,23 +473,17 @@ class NetworkConfigurator:
         """
         logger.info(f'Setting up networking on all {len(tasks_handles)} jobs')
 
-        # Generate static hosts content for SSH nodes
         ssh_hosts_content = _generate_hosts_entries(job_group_name,
                                                     tasks_handles)
-
-        # Generate K8s DNS mappings for background updater
         k8s_dns_mappings = _generate_k8s_dns_mappings(job_group_name,
                                                       tasks_handles)
 
-        # Collect all injection tasks (for all nodes: K8s and SSH)
         inject_tasks = []
         for task, handle in tasks_handles:
             if handle is None:
                 continue
 
             is_k8s = _is_kubernetes(handle)
-
-            # Use handle.get_command_runners() (not hardcoded SSHCommandRunner)
             try:
                 runners = handle.get_command_runners()
             except Exception as e:  # pylint: disable=broad-except
@@ -505,15 +493,12 @@ class NetworkConfigurator:
 
             for node_idx, runner in enumerate(runners):
                 if is_k8s:
-                    # K8s: Start background DNS updater on each node
                     inject_tasks.append(
                         _start_k8s_dns_updater_on_node(runner, k8s_dns_mappings,
                                                        job_group_name))
-                else:
-                    # SSH: Inject static /etc/hosts
-                    if ssh_hosts_content:
-                        inject_tasks.append(
-                            _inject_hosts_on_node(runner, ssh_hosts_content))
+                elif ssh_hosts_content:
+                    inject_tasks.append(
+                        _inject_hosts_on_node(runner, ssh_hosts_content))
                 logger.debug(
                     f'Queued networking setup for {task.name}-{node_idx}')
 
@@ -521,20 +506,15 @@ class NetworkConfigurator:
             logger.warning('No nodes to set up networking')
             return True
 
-        # Execute all injections in parallel
         logger.info(f'Setting up networking on {len(inject_tasks)} nodes...')
-        logger.debug(f'Waiting for {len(inject_tasks)} async tasks to complete')
         try:
-            results = await asyncio.wait_for(
-                asyncio.gather(*inject_tasks, return_exceptions=True),
-                timeout=60.0  # 60 second timeout
-            )
+            results = await asyncio.wait_for(asyncio.gather(
+                *inject_tasks, return_exceptions=True),
+                                             timeout=60.0)
         except asyncio.TimeoutError:
             logger.error('Networking setup timed out after 60 seconds')
             return False
-        logger.debug(f'All {len(inject_tasks)} async tasks completed')
 
-        # Check results
         success_count = sum(
             1 for r in results if not isinstance(r, Exception) and r)
         for i, result in enumerate(results):
@@ -572,12 +552,8 @@ async def setup_job_group_networking(
         True if setup succeeded, False otherwise.
     """
     logger.info(f'Setting up networking for JobGroup: {job_group_name}')
-
-    # Configure network infrastructure (e.g., /etc/hosts)
-    success = await NetworkConfigurator.setup(job_group_name, tasks_handles,
-                                              placement)
-
-    return success
+    return await NetworkConfigurator.setup(job_group_name, tasks_handles,
+                                           placement)
 
 
 def get_job_group_env_vars(
@@ -606,22 +582,19 @@ def get_job_group_env_vars(
     """
     del job_id, placement  # Unused, reserved for future use
 
-    env_vars = {
+    env_vars: Dict[str, str] = {
         SKYPILOT_JOBGROUP_NAME_ENV_VAR: job_group_name,
     }
 
-    # Get task list from either tasks_handles or tasks
     task_list: List['task_lib.Task'] = []
     if tasks_handles:
         task_list = [task for task, _ in tasks_handles]
     elif tasks:
         task_list = tasks
 
-    # Generate environment variables for all jobs
     for task in task_list:
         if task.name is None:
             continue
-        # All jobs use head node address (node index 0)
         address = _get_job_address(task.name, job_group_name, node_idx=0)
         env_var_name = _make_env_var_name(task.name)
         env_vars[env_var_name] = address
@@ -631,7 +604,6 @@ def get_job_group_env_vars(
 
 def _make_env_var_name(job_name: str) -> str:
     """Generate environment variable name for a job's address."""
-    # Convert job name to uppercase and replace hyphens with underscores
     safe_name = job_name.upper().replace('-', '_')
     return f'SKYPILOT_JOBGROUP_HOST_{safe_name}'
 
@@ -656,16 +628,13 @@ def generate_wait_for_networking_script(job_group_name: str,
     ]
 
     if not hostnames:
-        # No other jobs to wait for
         return ''
 
-    # Wait for hostnames to be resolvable
     hostname_list = ' '.join(hostnames)
-    # Sanitize job group name for file paths (same as in updater script)
-    safe_job_group_name = job_group_name.replace(' ', '_')
+    # Note: job_group_name is validated at YAML load time to be shell-safe
     updater_log = (f'/tmp/skypilot-jobgroup-dns-updater-'
-                   f'{safe_job_group_name}.log')
-    updater_process = f'skypilot-jobgroup-dns-updater-{safe_job_group_name}'
+                   f'{job_group_name}.log')
+    updater_process = f'skypilot-jobgroup-dns-updater-{job_group_name}'
 
     wait_script = textwrap.dedent(f"""
         # Wait for JobGroup networking to be ready
