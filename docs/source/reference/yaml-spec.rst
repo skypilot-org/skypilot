@@ -50,10 +50,10 @@ Below is the configuration syntax and some example values.  See details under ea
       idle_minutes: 10
       wait_for: none
       :ref:`hook <auto-stop-hooks>`: |
-        curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"Cluster shutting down"}' \
+        curl -X POST -H 'Content-type: application/json'
+          --data '{"text":"Cluster shutting down"}'
           https://hooks.slack.com/services/YOUR/WEBHOOK/URL
-      hook_timeout: 300
+        hook_timeout: 300
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
       - infra: aws/us-west-2
