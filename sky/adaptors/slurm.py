@@ -60,25 +60,23 @@ class NodeInfo(NamedTuple):
 
 def _parse_maxtime(line: str) -> Optional[int]:
     """Parse the maximum time a job can run from the scontrol output."""
-    maxtime = None
     maxtime_match = _MAXTIME_REGEX.search(line)
-    if maxtime_match:
-        maxtime_str = maxtime_match.group(1).strip()
-        if maxtime_str != 'UNLIMITED':
-            # Convert maxTime from '[days-]hours:minutes:seconds' to seconds.
-            # Example: "2-12:30:05" => (2*86400) + (12*3600) + (30*60) + 5
-            def _maxtime_to_seconds(maxtime_str):
-                if '-' in maxtime_str:
-                    days_part, time_part = maxtime_str.split('-')
-                    days = int(days_part)
-                else:
-                    days = 0
-                    time_part = maxtime_str
-                h, m, s = map(int, time_part.split(':'))
-                return days * 86400 + h * 3600 + m * 60 + s
+    if not maxtime_match:
+        return None
+    maxtime_str = maxtime_match.group(1).strip()
+    if maxtime_str == 'UNLIMITED':
+        return None
 
-            maxtime = _maxtime_to_seconds(maxtime_str)
-    return maxtime
+    # Convert maxTime from '[days-]hours:minutes:seconds' to seconds.
+    # Example: "2-12:30:05" => (2*86400) + (12*3600) + (30*60) + 5
+    days = 0
+    time_part = maxtime_str
+    if '-' in maxtime_str:
+        days_part, time_part = maxtime_str.split('-', 1)
+        days = int(days_part)
+
+    h, m, s = map(int, time_part.split(':'))
+    return days * 86400 + h * 3600 + m * 60 + s
 
 
 class SlurmClient:
