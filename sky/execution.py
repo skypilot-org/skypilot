@@ -513,6 +513,7 @@ def _execute_dag(
                 backend.set_autostop(handle, idle_minutes_to_autostop, wait_for,
                                      down)
 
+        job_id = None
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())

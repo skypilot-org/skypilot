@@ -544,7 +544,9 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
             sky.Resources(infra=generic_cloud,
                           **smoke_tests_utils.LOW_RESOURCE_PARAM))
         req_id = jobs.launch(task, name=job_name)
-        job_id, _ = sky.stream_and_get(req_id)
+        job_ids, _ = sky.stream_and_get(req_id)
+        assert len(job_ids) == 1
+        job_id = job_ids[0]
 
         # Wait for the job to start.
         def is_job_started(job_id: int):
