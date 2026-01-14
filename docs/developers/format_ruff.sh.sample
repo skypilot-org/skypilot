@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# Ruff formatter and linter for SkyPilot
+#
+# This script replaces the following tools:
+# - yapf (formatting)
+# - black (IBM provider formatting)
+# - isort (import sorting)
+# - pylint (linting)
+#
+# Usage:
+#    # Format files that differ from origin/master
+#    bash format.sh
+#
+#    # Format entire codebase
+#    bash format.sh --all
+#
+#    # Format specific files
+#    bash format.sh --files path/to/file.py
+#
+# You are encouraged to run this locally before pushing changes for review.
+
+# Cause the script to exit if a single command fails
+set -eo pipefail
+
+# Navigate to repository root
+builtin cd "$(dirname "${BASH_SOURCE:-$0}")"
+ROOT="$(git rev-parse --show-toplevel)"
+builtin cd "$ROOT" || exit 1
+
+# Version configuration
+RUFF_VERSION_REQUIRED="0.8.4"
+
+# Check ruff version
+RUFF_VERSION=$(ruff --version | head -n 1 | awk '{print $2}')
+if [[ "$RUFF_VERSION" != "$RUFF_VERSION_REQUIRED" ]]; then
+    echo "Wrong ruff version installed: $RUFF_VERSION"
+    echo "Required version: $RUFF_VERSION_REQUIRED"
+    echo "Install with: pip install ruff==$RUFF_VERSION_REQUIRED"
+    exit 1
+fi
+
+echo "Using ruff $RUFF_VERSION"
+
+# Determine which files to format
+if [[ "$1" == '--files' ]]; then
+    # Format specific files
+    shift
+    FILES="$@"
+    echo "Formatting specified files..."
+elif [[ "$1" == '--all' ]]; then
+    # Format entire codebase
+    FILES="."
+    echo "Formatting entire codebase..."
+else
+    # Format only files changed from origin/master
+    MERGEBASE="$(git merge-base origin/master HEAD 2>/dev/null || echo "HEAD~1")"
+    FILES=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' 2>/dev/null || echo "")
+
+    if [[ -z "$FILES" ]]; then
+        echo "No Python files changed since $MERGEBASE"
+        echo "Use --all to format entire codebase"
+        exit 0
+    fi
+    echo "Formatting files changed since $MERGEBASE..."
+fi
+
+# Run ruff format
+echo ""
+echo "=== Running ruff format ==="
+if [[ "$FILES" == "." ]]; then
+    ruff format .
+else
+    echo "$FILES" | tr '\n' '\0' | xargs -0 ruff format
+fi
+
+# Run ruff check with auto-fix
+echo ""
+echo "=== Running ruff check (with auto-fix) ==="
+if [[ "$FILES" == "." ]]; then
+    ruff check --fix .
+else
+    echo "$FILES" | tr '\n' '\0' | xargs -0 ruff check --fix
+fi
+
+# Run mypy (keep until ty migration)
+# TODO: Replace with ty when ready
+echo ""
+echo "=== Running mypy ==="
+mypy $(cat tests/mypy_files.txt) --cache-dir=/dev/null
+
+# Dashboard linting (unchanged)
+echo ""
+echo "=== SkyPilot Dashboard linting and formatting ==="
+if command -v npm &>/dev/null && command -v node &>/dev/null; then
+    npm --prefix sky/dashboard install --silent
+    npm --prefix sky/dashboard run lint
+    npm --prefix sky/dashboard run format
+    echo "Dashboard linting: Done"
+else
+    echo "npm or node not installed, skipping dashboard linting"
+fi
+
+# Check for uncommitted changes
+echo ""
+if ! git diff --quiet &>/dev/null; then
+    echo "=================================================="
+    echo "Reformatted files. Please review and stage changes."
+    echo "=================================================="
+    echo ""
+    echo "Changed files:"
+    git --no-pager diff --name-only
+    echo ""
+    exit 1
+fi
+
+echo ""
+echo "=== All checks passed! ==="

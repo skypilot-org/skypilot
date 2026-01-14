@@ -1,0 +1,104 @@
+# Pre-commit configuration using Ruff
+#
+# This configuration replaces the following hooks:
+# - black (formatting)
+# - isort (import sorting)
+# - yapf (formatting)
+# - pylint (linting)
+#
+# To use this configuration:
+# 1. Copy this file to .pre-commit-config.yaml in the repository root
+# 2. Run: pre-commit install
+# 3. Optionally run on all files: pre-commit run --all-files
+#
+# Migration note: This configuration is designed for use after
+# the ruff migration is complete.
+
+repos:
+  # Standard pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^sky/schemas/generated/
+      - id: end-of-file-fixer
+        exclude: ^sky/schemas/generated/
+      - id: check-yaml
+        exclude: ^charts/
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+      - id: debug-statements
+
+  # Ruff - formatting and linting (replaces black, isort, yapf, pylint)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      # Run formatter first
+      - id: ruff-format
+        name: ruff-format
+        description: "Format Python files with ruff"
+        exclude: |
+          (?x)^(
+            sky/schemas/generated/.*|
+            build/.*
+          )$
+
+      # Then run linter with auto-fix
+      - id: ruff
+        name: ruff-lint
+        description: "Lint Python files with ruff"
+        args: [--fix]
+        exclude: |
+          (?x)^(
+            sky/schemas/generated/.*|
+            build/.*
+          )$
+
+  # Mypy - type checking (keep until ty migration)
+  # TODO: Replace with ty when ready
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.14.1
+    hooks:
+      - id: mypy
+        name: mypy
+        description: "Type check Python files with mypy"
+        files: ^sky/
+        exclude: |
+          (?x)^(
+            sky/benchmark/.*|
+            sky/callbacks/.*|
+            sky/backends/monkey_patches/.*|
+            sky/schemas/generated/.*
+          )$
+        args:
+          - --cache-dir=/dev/null
+          - --check-untyped-defs
+        pass_filenames: false
+        additional_dependencies:
+          - types-PyYAML
+          - types-paramiko
+          - types-requests<2.31
+          - types-setuptools<80.9
+          - types-cachetools
+          - types-pyvmomi
+          - types-aiofiles
+          - types-protobuf
+          - types-python-dateutil
+
+  # Helm chart linting
+  - repo: https://github.com/gruntwork-io/pre-commit
+    rev: v0.1.30
+    hooks:
+      - id: helmlint
+        files: ^charts/
+
+# Configuration for specific hooks
+default_language_version:
+  python: python3.11
+
+# Run in parallel for speed
+default_stages: [pre-commit]
+
+# Fail fast on first error
+fail_fast: false

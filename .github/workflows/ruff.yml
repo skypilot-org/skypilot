@@ -1,0 +1,72 @@
+# Ruff linting and formatting workflow
+# This workflow runs ruff for both linting and format checking
+#
+# Migration note: This workflow is designed to eventually replace:
+# - format.yml (yapf, black, isort)
+# - pylint.yml
+#
+# Initially run as non-blocking (continue-on-error: true) alongside
+# existing workflows. Once stable, remove the old workflows.
+
+name: Ruff
+
+on:
+  push:
+    branches:
+      - master
+      - 'releases/**'
+  pull_request:
+  merge_group:
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    # Set to false once migration is complete and ruff is the primary linter
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ruff
+        run: pip install ruff==0.8.4
+
+      - name: Run ruff format check
+        run: |
+          echo "Checking code formatting with ruff..."
+          ruff format --check --diff .
+
+      - name: Run ruff linter
+        run: |
+          echo "Running ruff linter..."
+          ruff check --output-format=github .
+
+  # Optional: Run ruff with auto-fix suggestions
+  ruff-fix-suggestions:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ruff
+        run: pip install ruff==0.8.4
+
+      - name: Check for auto-fixable issues
+        run: |
+          echo "Checking for auto-fixable issues..."
+          FIXES=$(ruff check --fix --diff . 2>&1) || true
+          if [ -n "$FIXES" ]; then
+            echo "The following issues can be auto-fixed by running 'ruff check --fix .':"
+            echo "$FIXES"
+          fi

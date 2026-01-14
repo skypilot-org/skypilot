@@ -1,0 +1,67 @@
+# Development dependencies after ruff/ty migration
+#
+# This file shows what requirements-dev.txt would look like
+# after completing the migration from yapf/mypy/pylint to ruff/ty.
+#
+# Removed tools:
+# - yapf==0.32.0 (replaced by ruff format)
+# - black==22.10.0 (replaced by ruff format)
+# - isort==5.12.0 (replaced by ruff's isort)
+# - pylint==2.14.5 (replaced by ruff check)
+# - pylint-quotes==0.2.3 (replaced by ruff's flake8-quotes)
+# - mypy==1.14.1 (will be replaced by ty when ready)
+
+# === Formatting and Linting ===
+# Ruff replaces yapf, black, isort, pylint, pylint-quotes
+ruff==0.8.4
+
+# === Type Checking ===
+# Keep mypy until ty is production-ready
+mypy==1.14.1
+types-PyYAML
+types-paramiko
+types-requests<2.31        # 2.31+ requires urllib3>2
+types-setuptools<80.9      # Pin to avoid stricter type defs
+types-cachetools
+types-pyvmomi
+types-aiofiles
+types-protobuf
+types-python-dateutil
+
+# Uncomment when ty is ready:
+# ty>=0.1.0
+
+# === Testing ===
+pytest
+pytest-xdist
+pytest-env>=0.6
+pytest-asyncio
+buildkite-test-collector
+
+# === Other Development Tools ===
+memory_profiler==0.61.0
+
+# For AWS mocking
+moto==5.1.2
+boto3-stubs[s3,ec2,sts,iam,service-quotas]
+
+# For PostgreSQL backend tests
+psycopg2-binary==2.9.10
+
+# For Helm Okta test
+selenium==4.33.0
+webdriver-manager==4.0.2
+
+# For proto files generation
+grpcio-tools==1.63.0
+grpcio==1.63.0
+protobuf==5.26.1
+
+# Pydantic for API models
+pydantic<2.12              # Avoid pydantic-core 2.41.x breaking changes
+
+# TOML parsing (for ruff config)
+toml==0.10.2
+
+# Pre-commit hooks
+pre-commit>=3.0.0
