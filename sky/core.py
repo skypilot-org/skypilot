@@ -1409,6 +1409,7 @@ def realtime_slurm_gpu_availability(
     This function calls the Slurm backend to fetch GPU info.
 
     Args:
+        slurm_cluster_name: Optional Slurm cluster name to filter by.
         name_filter: Optional name filter for GPUs.
         quantity_filter: Optional quantity filter for GPUs.
         env_vars: Environment variables (may be needed for backend).
