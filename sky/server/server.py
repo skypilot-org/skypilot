@@ -777,7 +777,6 @@ async def create_auth_session(
 
     Request body:
         code_challenge: Base64url-encoded SHA256 hash of the code verifier
-        code_challenge_method: Must be "S256"
 
     Returns:
         session_id: The session ID to use in subsequent requests
@@ -790,15 +789,9 @@ async def create_auth_session(
                                     detail='Invalid JSON body') from e
 
     code_challenge = body.get('code_challenge')
-    code_challenge_method = body.get('code_challenge_method')
-
     if not code_challenge:
         raise fastapi.HTTPException(status_code=400,
                                     detail='code_challenge is required')
-
-    if code_challenge_method != 'S256':
-        raise fastapi.HTTPException(status_code=400,
-                                    detail='code_challenge_method must be S256')
 
     session = auth_sessions.auth_session_store.create_session(code_challenge)
 

@@ -2495,10 +2495,7 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
         # Create auth session
         logger.debug('Creating auth session...')
         response = requests.post(f'{endpoint}/api/v1/auth/sessions',
-                                 json={
-                                     'code_challenge': code_challenge,
-                                     'code_challenge_method': 'S256'
-                                 },
+                                 json={'code_challenge': code_challenge},
                                  timeout=10)
 
         if response.status_code == 404:
@@ -2718,13 +2715,19 @@ def api_login(endpoint: Optional[str] = None,
         token: Optional[str] = None
 
         # Try methods in order:
-        # 1. New polling-based flow (PKCE)
+        # 1. New polling-based flow (PKCE) - only on servers >= API v27
         # 2. Old localhost callback flow
         # 3. Manual token entry
-        token = _try_polling_auth(endpoint)
+        remote_api_version_str = api_server_info.api_version
+        if remote_api_version_str is not None:
+            try:
+                if int(remote_api_version_str) >= 27:
+                    token = _try_polling_auth(endpoint)
+            except ValueError:
+                pass  # Invalid version string, skip polling auth
 
         if token is None:
-            # Polling auth failed, try localhost callback
+            # Polling auth not available or failed, try localhost callback
             token = _try_localhost_callback_auth(endpoint)
 
         if token is None:
