@@ -489,7 +489,8 @@ class NetworkConfigurator:
         k8s_dns_mappings = _generate_k8s_dns_mappings(job_group_name,
                                                       tasks_handles)
 
-        inject_tasks = []
+        # Each entry: (coroutine, task_name, node_idx, is_k8s)
+        setup_tasks: List[Tuple] = []
         for task, handle in tasks_handles:
             if handle is None:
                 continue
@@ -504,38 +505,48 @@ class NetworkConfigurator:
 
             for node_idx, runner in enumerate(runners):
                 if is_k8s:
-                    inject_tasks.append(
-                        _start_k8s_dns_updater_on_node(runner, k8s_dns_mappings,
-                                                       job_group_name))
+                    coro = _start_k8s_dns_updater_on_node(
+                        runner, k8s_dns_mappings, job_group_name)
+                    setup_tasks.append((coro, task.name, node_idx, True))
                 elif ssh_hosts_content:
-                    inject_tasks.append(
-                        _inject_hosts_on_node(runner, ssh_hosts_content))
+                    coro = _inject_hosts_on_node(runner, ssh_hosts_content)
+                    setup_tasks.append((coro, task.name, node_idx, False))
                 logger.debug(
                     f'Queued networking setup for {task.name}-{node_idx}')
 
-        if not inject_tasks:
+        if not setup_tasks:
             logger.warning('No nodes to set up networking')
             return True
 
-        logger.info(f'Setting up networking on {len(inject_tasks)} nodes...')
+        coroutines = [entry[0] for entry in setup_tasks]
+        logger.info(f'Setting up networking on {len(coroutines)} nodes...')
         try:
-            results = await asyncio.wait_for(asyncio.gather(
-                *inject_tasks, return_exceptions=True),
-                                             timeout=60.0)
+            results = await asyncio.wait_for(
+                asyncio.gather(*coroutines, return_exceptions=True),
+                timeout=60.0)
         except asyncio.TimeoutError:
             logger.error('Networking setup timed out after 60 seconds')
             return False
 
-        success_count = sum(
-            1 for r in results if not isinstance(r, Exception) and r)
+        success_count = 0
         for i, result in enumerate(results):
+            if result is True:
+                success_count += 1
+                continue
+
+            # Log error details for failed tasks
+            _, task_name, node_idx, is_k8s = setup_tasks[i]
+            setup_type = 'K8s DNS updater' if is_k8s else '/etc/hosts'
+            node_label = f'{task_name}-{node_idx}'
+
             if isinstance(result, Exception):
                 tb_str = ''.join(
                     traceback.format_exception(type(result), result,
                                                result.__traceback__))
-                logger.error(f'Node {i} injection failed: {result}\n{tb_str}')
-            elif not result:
-                logger.error(f'Node {i} injection failed')
+                logger.error(
+                    f'{setup_type} failed on {node_label}: {result}\n{tb_str}')
+            else:
+                logger.error(f'{setup_type} failed on {node_label}')
 
         logger.info(
             f'Hosts injection: {success_count}/{len(results)} succeeded')
