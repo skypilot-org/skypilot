@@ -3210,7 +3210,9 @@ def is_controller_accessible(
         if not runner.check_connection():
             error_msg = controller.value.connection_error_hint
     else:
-        assert controller_status == status_lib.ClusterStatus.UP, handle
+        assert controller_status in (
+            status_lib.ClusterStatus.UP,
+            status_lib.ClusterStatus.AUTOSTOPPING), handle
 
     if error_msg is not None:
         if exit_if_not_accessible:

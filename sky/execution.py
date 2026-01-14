@@ -12,6 +12,7 @@ import colorama
 from sky import admin_policy
 from sky import backends
 from sky import clouds
+from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
@@ -692,6 +693,12 @@ def launch(
                     # once.
                     cluster_status_lock_timeout=-1,
                 ))
+        if cluster_status == status_lib.ClusterStatus.AUTOSTOPPING:
+            raise exceptions.ClusterNotUpError(
+                f'Cannot submit tasks to cluster {cluster_name!r} which is '
+                f'autostopping (executing autostop hooks). '
+                f'Current status: {cluster_status.value}.',
+                cluster_status=cluster_status)
         if cluster_status == status_lib.ClusterStatus.UP:
             handle = maybe_handle
             stages = [

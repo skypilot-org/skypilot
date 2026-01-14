@@ -494,6 +494,85 @@ def test_stop_on_autostopping(generic_cloud: str):
 @pytest.mark.no_lambda_cloud
 @pytest.mark.no_ibm
 @pytest.mark.no_kubernetes
+@pytest.mark.no_slurm
+@pytest.mark.no_hyperbolic
+@pytest.mark.no_shadeform
+@pytest.mark.no_seeweb
+def test_autostopping_behaviors(generic_cloud: str):
+    """Test various behaviors on AUTOSTOPPING cluster.
+
+    This test verifies:
+    1. Task submission (sky exec) is rejected on AUTOSTOPPING cluster
+    2. SSH access still works (for debugging/intervention)
+    3. sky url command works (cluster is accessible)
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+    # Make hook long enough to run all tests while cluster is in AUTOSTOPPING
+    hook_duration = 300
+
+    minimal_yaml_path = 'tests/test_yamls/minimal.yaml'
+    yaml_config = yaml_utils.read_yaml(minimal_yaml_path)
+    yaml_config['resources'] = {
+        'autostop': {
+            'idle_minutes': 1,
+            'hook': f'echo "Hook running" && sleep {hook_duration}'
+        }
+    }
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+        yaml_utils.dump_yaml(f.name, yaml_config)
+        f.flush()
+
+        test = smoke_tests_utils.Test(
+            'test_autostopping_behaviors',
+            [
+                # Launch cluster with a URL endpoint to test sky url
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {f.name} '
+                f'--port 8080 --no-setup-cloud-identity) && '
+                f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+                f'sky status -r {name} | grep UP',
+
+                # Wait until cluster enters AUTOSTOPPING state
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=name,
+                    cluster_status=[sky.ClusterStatus.AUTOSTOPPING],
+                    timeout=autostop_timeout),
+
+                # Test 1: sky exec should be rejected with clear error message
+                # (New task submissions should fail during autostop)
+                f's=$(sky exec {name} "echo test" 2>&1); echo "$s"; '
+                f'echo "$s" | grep "autostopping"',
+
+                # Test 2: sky url should work (cluster is still accessible)
+                f's=$(sky url {name} 2>&1) && echo "$s" | grep "{name}"',
+
+                # Test 3: SSH access should still work (using direct SSH command)
+                # This is useful for debugging/intervention during autostop
+                f's=$(sky ssh {name} --command "echo ssh_works" 2>&1) && echo "$s" | grep "ssh_works"',
+
+                # Verify cluster is still in AUTOSTOPPING state after tests
+                f'sky status -r {name} | grep AUTOSTOPPING',
+
+                # Wait for hook to complete and cluster to STOP
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=name,
+                    cluster_status=[sky.ClusterStatus.STOPPED],
+                    timeout=autostop_timeout),
+            ],
+            f'sky down -y {name}',
+            timeout=smoke_tests_utils.get_timeout(generic_cloud) +
+            autostop_timeout,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# See cloud exclusion explanations in test_autostop
+@pytest.mark.no_fluidstack
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_ibm
+@pytest.mark.no_kubernetes
 @pytest.mark.no_hyperbolic
 @pytest.mark.no_shadeform
 @pytest.mark.no_seeweb

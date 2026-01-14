@@ -282,7 +282,8 @@ class StrategyExecutor:
                 logger.info(f'Unexpected exception: {e}\nFailed to get the '
                             'refresh the cluster status. Retrying.')
                 continue
-            if cluster_status != status_lib.ClusterStatus.UP:
+            if cluster_status not in (status_lib.ClusterStatus.UP,
+                                      status_lib.ClusterStatus.AUTOSTOPPING):
                 # The cluster can be preempted before the job is
                 # launched.
                 # Break to let the retry launch kick in.
