@@ -1106,7 +1106,7 @@ available_node_types:
                       continue
                     fi
                   fi
-                  service_name=$(grep -oE -- '--service-name[[:space:]]+[^[:space:]]+' "$file" | head -n1 | awk '{print $2}' || true)
+                  service_name=$(grep -oE -- '--service-name(=| +)[^[:space:]]+' "$file" | head -n1 | awk -F'[= ]' '{print $NF}' || true)
                   if [ -n "$service_name" ]; then
                     existing_job_id="${SERVICE_TO_JOB_ID[$service_name]}"
                     if [ -z "$existing_job_id" ] || [ "$JOB_ID" -gt "$existing_job_id" ]; then
