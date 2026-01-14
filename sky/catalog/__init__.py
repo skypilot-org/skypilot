@@ -150,7 +150,7 @@ def list_accelerator_realtime(
     for gpu, items in qtys_map.items():
         for item in items:
             accelerator_counts[gpu].append(item.accelerator_count)
-        accelerator_counts[gpu] = sorted(accelerator_counts[gpu])
+        accelerator_counts[gpu] = sorted(set(accelerator_counts[gpu]))
     return (accelerator_counts, total_accelerators_capacity,
             total_accelerators_available)
 
