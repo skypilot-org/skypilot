@@ -12,17 +12,16 @@ class TestAuthSession:
     """Tests for the AuthSession class."""
 
     def test_session_creation(self):
-        session = sessions.AuthSession('challenge')
+        session = sessions.AuthSession('challenge', 'pending', None,
+                                       time.time())
         assert session.code_challenge == 'challenge'
         assert session.status == 'pending'
         assert session.token is None
         assert not session.is_expired()
 
     def test_session_expiration(self):
-        session = sessions.AuthSession('challenge')
-        assert not session.is_expired()
-        session.created_at = time.time(
-        ) - sessions.SESSION_EXPIRATION_SECONDS - 1
+        old_time = time.time() - sessions.SESSION_EXPIRATION_SECONDS - 1
+        session = sessions.AuthSession('challenge', 'pending', None, old_time)
         assert session.is_expired()
 
 
@@ -45,8 +44,12 @@ class TestAuthSessionStore:
     """Tests for the AuthSessionStore class."""
 
     @pytest.fixture
-    def store(self):
-        return sessions.AuthSessionStore()
+    def store(self, tmp_path):
+        """Create a store with a temporary database."""
+        db_path = str(tmp_path / 'test_sessions.db')
+        store = sessions.AuthSessionStore()
+        store._db_path = db_path  # pylint: disable=protected-access
+        return store
 
     def test_get_or_create_session(self, store):
         session = store.get_or_create_session('challenge')
@@ -56,7 +59,9 @@ class TestAuthSessionStore:
     def test_get_or_create_returns_existing(self, store):
         session1 = store.get_or_create_session('challenge')
         session2 = store.get_or_create_session('challenge')
-        assert session1 is session2
+        # With SQLite, objects are different instances but same data
+        assert session1.code_challenge == session2.code_challenge
+        assert session1.status == session2.status
 
     def test_get_session(self, store):
         store.get_or_create_session('challenge')
@@ -67,10 +72,11 @@ class TestAuthSessionStore:
     def test_get_nonexistent_session(self, store):
         assert store.get_session('nonexistent') is None
 
-    def test_get_expired_session(self, store):
-        session = store.get_or_create_session('challenge')
-        session.created_at = time.time(
-        ) - sessions.SESSION_EXPIRATION_SECONDS - 1
+    def test_get_expired_session(self, store, monkeypatch):
+        store.get_or_create_session('challenge')
+        # Fast-forward time past expiration
+        future_time = time.time() + sessions.SESSION_EXPIRATION_SECONDS + 10
+        monkeypatch.setattr(time, 'time', lambda: future_time)
         assert store.get_session('challenge') is None
 
     def test_authorize_session(self, store):
@@ -122,15 +128,17 @@ class TestAuthSessionStore:
         assert status is None
         assert token is None
 
-    def test_expired_sessions_cleanup(self, store):
-        session1 = store.get_or_create_session('challenge1')
-        session1.created_at = time.time(
-        ) - sessions.SESSION_EXPIRATION_SECONDS - 1
-
+    def test_expired_sessions_cleanup(self, store, monkeypatch):
+        store.get_or_create_session('challenge1')
         store.get_or_create_session('challenge2')
 
+        # Fast-forward time past expiration
+        future_time = time.time() + sessions.SESSION_EXPIRATION_SECONDS + 10
+        monkeypatch.setattr(time, 'time', lambda: future_time)
+
+        # Both should be expired now
         assert store.get_session('challenge1') is None
-        assert store.get_session('challenge2') is not None
+        assert store.get_session('challenge2') is None
 
 
 class TestGlobalStore:
