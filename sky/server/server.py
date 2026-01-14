@@ -818,45 +818,31 @@ async def create_auth_session(
 async def get_auth_session(
         session_id: str,
         code_verifier: Optional[str] = None) -> fastapi.responses.Response:
-    """Get the status of an auth session and retrieve the token if authorized.
-
-    This endpoint requires the code_verifier that was used to generate
-    the code_challenge when creating the session.
+    """Poll an auth session for its token.
 
     Query params:
         code_verifier: The original code verifier (required)
 
     Returns:
-        - 200 with token if session is authorized and verifier is valid
+        - 200 with token if session is authorized
         - 202 if session is pending (keep polling)
-        - 404 if session not found, expired, or verifier is invalid
+        - 404 if session not found, expired, or verifier invalid
     """
     if not code_verifier:
         raise fastapi.HTTPException(status_code=400,
                                     detail='code_verifier is required')
 
-    # First check the session status
-    status = auth_sessions.auth_session_store.get_session_status(
+    status, token = auth_sessions.auth_session_store.poll_session(
         session_id, code_verifier)
 
     if status is None:
-        # Session not found, expired, or invalid verifier
         raise fastapi.HTTPException(status_code=404, detail='Session not found')
 
     if status == 'pending':
-        # Session exists but not yet authorized - client should keep polling
         return fastapi.responses.JSONResponse(status_code=202,
                                               content={'status': 'pending'},
                                               headers={'Cache-Control':
                                                        'no-store'})
-
-    # Session is authorized - consume it and return the token
-    token = auth_sessions.auth_session_store.consume_session(
-        session_id, code_verifier)
-
-    if token is None:
-        # This shouldn't happen if status was 'authorized', but handle it
-        raise fastapi.HTTPException(status_code=404, detail='Session not found')
 
     return fastapi.responses.JSONResponse(content={
         'status': 'authorized',
