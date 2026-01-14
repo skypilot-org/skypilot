@@ -33,7 +33,7 @@ def run_sky_task(task_config: dict, cluster_prefix: str = 'prefect') -> str:
     import sky
     import uuid
 
-    task_config['resources']['cloud'] = 'kubernetes'
+    task_config['resources']['infra'] = 'kubernetes'
     sky_task = sky.Task.from_yaml_config(task_config)
 
     # Generate a unique cluster name

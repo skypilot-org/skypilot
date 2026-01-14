@@ -6,6 +6,7 @@ using SkyPilot for infrastructure and Prefect for orchestration.
 Usage:
     python sky_k8s_example.py
 """
+import textwrap
 from typing import Any, Dict
 import uuid
 
@@ -41,7 +42,7 @@ def run_sky_task(
     # Ensure the task targets Kubernetes
     if 'resources' not in task_config:
         task_config['resources'] = {}
-    task_config['resources']['cloud'] = 'kubernetes'
+    task_config['resources']['infra'] = 'kubernetes'
 
     # Create task and generate cluster name
     sky_task = sky.Task.from_yaml_config(task_config)
@@ -82,14 +83,14 @@ def k8s_multi_stage_pipeline():
                 'cpus': '2+'
             },
             'setup': 'pip install pandas numpy',
-            'run': """
-echo "Preprocessing data..."
-python -c "
-import numpy as np
-X = np.random.randn(1000, 10)
-print(f'Generated dataset: {X.shape}')
-"
-""",
+            'run': textwrap.dedent("""\
+                echo "Preprocessing data..."
+                python -c "
+                import numpy as np
+                X = np.random.randn(1000, 10)
+                print(f'Generated dataset: {X.shape}')
+                "
+                """),
         })
 
     # Stage 2: Training (GPU)
@@ -101,15 +102,15 @@ print(f'Generated dataset: {X.shape}')
                 'accelerators': 'H100:1'
             },
             'setup': 'pip install torch',
-            'run': """
-echo "Training model..."
-python -c "
-import torch
-print(f'CUDA available: {torch.cuda.is_available()}')
-for epoch in range(3):
-    print(f'Epoch {epoch+1}/3 - Loss: {0.5 - 0.1*epoch:.4f}')
-"
-""",
+            'run': textwrap.dedent("""\
+                echo "Training model..."
+                python -c "
+                import torch
+                print(f'CUDA available: {torch.cuda.is_available()}')
+                for epoch in range(3):
+                    print(f'Epoch {epoch+1}/3 - Loss: {0.5 - 0.1*epoch:.4f}')
+                "
+                """),
         })
 
     # Stage 3: Evaluation (GPU)
@@ -121,14 +122,14 @@ for epoch in range(3):
                 'accelerators': 'H100:1'
             },
             'setup': 'pip install torch',
-            'run': """
-echo "Evaluating model..."
-python -c "
-import random
-accuracy = random.uniform(0.85, 0.95)
-print(f'Accuracy: {accuracy:.2%}')
-"
-""",
+            'run': textwrap.dedent("""\
+                echo "Evaluating model..."
+                python -c "
+                import random
+                accuracy = random.uniform(0.85, 0.95)
+                print(f'Accuracy: {accuracy:.2%}')
+                "
+                """),
         })
 
     logger.info('Pipeline complete!')
