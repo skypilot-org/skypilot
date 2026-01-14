@@ -394,10 +394,16 @@ class CommandRunner:
                 shlex.quote('true && export OMP_NUM_THREADS=1 '
                             f'PYTHONWARNINGS=ignore && ({cmd})')
             ]
-        if not separate_stderr:
-            command.append('2>&1')
         if run_in_background:
-            command = ['nohup'] + command + ['&']
+            command = ['nohup'] + command + [
+                '>/dev/null',  # Detach stdout.
+                '2>&1',  # Detach stderr.
+                '</dev/null',  # Detach stdin.
+                '&',  # Run in background.
+            ]
+        else:
+            if not separate_stderr:
+                command.append('2>&1')
         if not process_stream and skip_num_lines:
             assert not run_in_background, (
                 'run_in_background and skip_num_lines cannot be used together')
