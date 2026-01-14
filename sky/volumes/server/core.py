@@ -30,6 +30,10 @@ def volume_refresh():
     volumes = volume_list(is_ephemeral=False)
     for volume in volumes:
         volume_name = volume.name
+        if volume.usedby_fetch_failed:
+            logger.info(f'Skipping status update for volume {volume_name} '
+                        f'due to failed usedby fetch')
+            continue
         usedby_pods = volume.usedby_pods
         with _volume_lock(volume_name):
             latest_volume = global_user_state.get_volume_by_name(volume_name)
@@ -49,11 +53,29 @@ def volume_refresh():
                                 f'status to IN_USE, usedby: {usedby_pods}')
                     global_user_state.update_volume_status(
                         volume_name, status=status_lib.VolumeStatus.IN_USE)
+            volume_config = latest_volume.get('handle')
+            if volume_config is None:
+                continue
+            # For in-cluster volumes created without setting the region
+            # explicitly before PR
+            # https://github.com/skypilot-org/skypilot/pull/8386, the region
+            # will be None. In this case, when the user enables the external
+            # kubeconfig, the region will be shown as the default context in
+            # the kubeconfig file. We need to refresh the volume config to set
+            # the region to the in-cluster context name for these volumes.
+            need_refresh, volume_config = provision.refresh_volume_config(
+                volume_config.cloud, volume_config)
+            if need_refresh:
+                global_user_state.update_volume_config(volume_name,
+                                                       volume_config)
 
 
 def volume_list(
         is_ephemeral: Optional[bool] = None) -> List[responses.VolumeRecord]:
     """Gets the volumes.
+
+    Args:
+        is_ephemeral: Whether to include ephemeral volumes.
 
     Returns:
         [
@@ -74,6 +96,7 @@ def volume_list(
                 'status': sky.VolumeStatus,
                 'usedby_pods': List[str],
                 'usedby_clusters': List[str],
+                'usedby_fetch_failed': bool,
                 'is_ephemeral': bool,
             }
         ]
@@ -93,11 +116,23 @@ def volume_list(
             cloud_to_configs[cloud].append(config)
 
         cloud_to_used_by_pods, cloud_to_used_by_clusters = {}, {}
+        cloud_to_failed_volume_names = {}
         for cloud, configs in cloud_to_configs.items():
-            used_by_pods, used_by_clusters = provision.get_all_volumes_usedby(
-                cloud, configs)
-            cloud_to_used_by_pods[cloud] = used_by_pods
-            cloud_to_used_by_clusters[cloud] = used_by_clusters
+            try:
+                used_by_pods, used_by_clusters, failed_volume_names = (
+                    provision.get_all_volumes_usedby(cloud, configs))
+                cloud_to_used_by_pods[cloud] = used_by_pods
+                cloud_to_used_by_clusters[cloud] = used_by_clusters
+                cloud_to_failed_volume_names[cloud] = failed_volume_names
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to get usedby info for volumes on {cloud}: {e}')
+                cloud_to_used_by_pods[cloud] = {}
+                cloud_to_used_by_clusters[cloud] = {}
+                cloud_to_failed_volume_names[cloud] = {
+                    config.name for config in configs
+                }
+                continue
 
         all_users = global_user_state.get_all_users()
         user_map = {user.id: user.name for user in all_users}
@@ -114,6 +149,7 @@ def volume_list(
                 'last_use': volume.get('last_use'),
                 'usedby_pods': [],
                 'usedby_clusters': [],
+                'usedby_fetch_failed': False,
                 'is_ephemeral': volume.get('is_ephemeral', False),
             }
             status = volume.get('status')
@@ -126,12 +162,17 @@ def volume_list(
                 logger.warning(f'Volume {volume_name} has no handle.')
                 continue
             cloud = config.cloud
-            usedby_pods, usedby_clusters = provision.map_all_volumes_usedby(
-                cloud,
-                cloud_to_used_by_pods[cloud],
-                cloud_to_used_by_clusters[cloud],
-                config,
-            )
+            if volume_name in cloud_to_failed_volume_names[cloud]:
+                record['usedby_fetch_failed'] = True
+            else:
+                usedby_pods, usedby_clusters = provision.map_all_volumes_usedby(
+                    cloud,
+                    cloud_to_used_by_pods[cloud],
+                    cloud_to_used_by_clusters[cloud],
+                    config,
+                )
+                record['usedby_pods'] = usedby_pods
+                record['usedby_clusters'] = usedby_clusters
             record['type'] = config.type
             record['cloud'] = config.cloud
             record['region'] = config.region
@@ -139,18 +180,20 @@ def volume_list(
             record['size'] = config.size
             record['config'] = config.config
             record['name_on_cloud'] = config.name_on_cloud
-            record['usedby_pods'] = usedby_pods
-            record['usedby_clusters'] = usedby_clusters
             records.append(responses.VolumeRecord(**record))
         return records
 
 
-def volume_delete(names: List[str], ignore_not_found: bool = False) -> None:
+def volume_delete(names: List[str],
+                  ignore_not_found: bool = False,
+                  purge: bool = False) -> None:
     """Deletes volumes.
 
     Args:
         names: List of volume names to delete.
         ignore_not_found: If True, ignore volumes that are not found.
+        purge: If True, delete the volume from the database even if the
+          deletion API fails.
 
     Raises:
         ValueError: If the volume does not exist
@@ -167,22 +210,32 @@ def volume_delete(names: List[str], ignore_not_found: bool = False) -> None:
             if config is None:
                 raise ValueError(f'Volume {name} has no handle.')
             cloud = config.cloud
-            usedby_pods, usedby_clusters = provision.get_volume_usedby(
-                cloud, config)
-            if usedby_clusters:
-                usedby_clusters_str = ', '.join(usedby_clusters)
-                cluster_str = 'clusters' if len(
-                    usedby_clusters) > 1 else 'cluster'
-                raise ValueError(f'Volume {name} is used by {cluster_str}'
-                                 f' {usedby_clusters_str}.')
-            if usedby_pods:
-                usedby_pods_str = ', '.join(usedby_pods)
-                pod_str = 'pods' if len(usedby_pods) > 1 else 'pod'
-                raise ValueError(
-                    f'Volume {name} is used by {pod_str} {usedby_pods_str}.')
+            if not purge:
+                usedby_pods, usedby_clusters = provision.get_volume_usedby(
+                    cloud, config)
+                if usedby_clusters:
+                    usedby_clusters_str = ', '.join(usedby_clusters)
+                    cluster_str = 'clusters' if len(
+                        usedby_clusters) > 1 else 'cluster'
+                    raise ValueError(f'Volume {name} is used by {cluster_str}'
+                                     f' {usedby_clusters_str}.')
+                if usedby_pods:
+                    usedby_pods_str = ', '.join(usedby_pods)
+                    pod_str = 'pods' if len(usedby_pods) > 1 else 'pod'
+                    raise ValueError(
+                        f'Volume {name} is used by {pod_str} {usedby_pods_str}.'
+                    )
             logger.debug(f'Deleting volume {name} with config {config}')
             with _volume_lock(name):
-                provision.delete_volume(cloud, config)
+                try:
+                    provision.delete_volume(cloud, config)
+                except Exception as e:  # pylint: disable=broad-except
+                    if purge:
+                        logger.warning(f'Failed to delete volume {name} '
+                                       f'on {cloud}: {e}. Purging from '
+                                       'database.')
+                    else:
+                        raise
                 global_user_state.delete_volume(name)
         logger.info(f'Deleted volumes: {names}')
 

@@ -10,7 +10,7 @@ import logging
 import os
 import traceback
 import typing
-from typing import Optional, Set
+from typing import List, Optional, Set
 
 from sky import backends
 from sky import dag as dag_lib
@@ -30,6 +30,7 @@ from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import env_options
+from sky.utils import instance_links as instance_links_utils
 from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils import ux_utils
@@ -74,6 +75,7 @@ class StrategyExecutor:
         starting: Set[int],
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
+        recover_on_exit_codes: Optional[List[int]] = None,
     ) -> None:
         """Initialize the strategy executor.
 
@@ -87,6 +89,8 @@ class StrategyExecutor:
             starting: Set of job IDs that are currently starting.
             starting_lock: Lock to synchronize starting jobs.
             starting_signal: Condition to signal when a job can start.
+            recover_on_exit_codes: List of exit codes that should trigger
+                recovery regardless of max_restarts_on_errors limit.
         """
         assert isinstance(backend, backends.CloudVmRayBackend), (
             'Only CloudVMRayBackend is supported.')
@@ -99,6 +103,7 @@ class StrategyExecutor:
         self.cluster_name = cluster_name
         self.backend = backend
         self.max_restarts_on_errors = max_restarts_on_errors
+        self.recover_on_exit_codes = recover_on_exit_codes or []
         self.job_id = job_id
         self.task_id = task_id
         self.pool = pool
@@ -123,6 +128,9 @@ class StrategyExecutor:
     ) -> 'StrategyExecutor':
         """Create a strategy from a task."""
 
+        # TODO(cooperc): Consider defaulting to FAILOVER if using k8s with a
+        # single context, since there are not multiple clouds/regions to
+        # failover through.
         resource_list = list(task.resources)
         job_recovery = resource_list[0].job_recovery
         for resource in resource_list:
@@ -144,16 +152,26 @@ class StrategyExecutor:
             job_recovery_name: Optional[str] = name
             max_restarts_on_errors = job_recovery.pop('max_restarts_on_errors',
                                                       0)
+            recover_exit_codes = job_recovery.pop('recover_on_exit_codes', None)
+            # Normalize single integer to list
+            recover_on_exit_codes: Optional[List[int]] = None
+            if isinstance(recover_exit_codes, int):
+                recover_on_exit_codes = [recover_exit_codes]
+            elif isinstance(recover_exit_codes, list):
+                recover_on_exit_codes = [
+                    int(code) for code in recover_exit_codes
+                ]
         else:
             job_recovery_name = job_recovery
             max_restarts_on_errors = 0
+            recover_on_exit_codes = None
         job_recovery_strategy = (registry.JOBS_RECOVERY_STRATEGY_REGISTRY.
                                  from_str(job_recovery_name))
         assert job_recovery_strategy is not None, job_recovery_name
         return job_recovery_strategy(cluster_name, backend, task,
                                      max_restarts_on_errors, job_id, task_id,
                                      pool, starting, starting_lock,
-                                     starting_signal)
+                                     starting_signal, recover_on_exit_codes)
 
     async def launch(self) -> float:
         """Launch the cluster for the first time.
@@ -275,19 +293,25 @@ class StrategyExecutor:
                 break
 
             try:
-                status = await managed_job_utils.get_job_status(
-                    self.backend,
-                    self.cluster_name,
-                    job_id=self.job_id_on_pool_cluster)
+                status, transient_error_reason = (
+                    await managed_job_utils.get_job_status(
+                        self.backend,
+                        self.cluster_name,
+                        job_id=self.job_id_on_pool_cluster))
             except Exception as e:  # pylint: disable=broad-except
+                transient_error_reason = common_utils.format_exception(e)
                 # If any unexpected error happens, retry the job checking
                 # loop.
                 # Note: the CommandError is already handled in the
                 # get_job_status, so it should not happen here.
                 # TODO(zhwu): log the unexpected error to usage collection
                 # for future debugging.
-                logger.info(f'Unexpected exception: {e}\nFailed to get the '
-                            'job status. Retrying.')
+                logger.info('Unexpected exception during fetching job status: '
+                            f'{common_utils.format_exception(e)}')
+                continue
+            if transient_error_reason is not None:
+                logger.info('Transient error when fetching the job status: '
+                            f'{transient_error_reason}')
                 continue
 
             # Check the job status until it is not in initialized status
@@ -444,9 +468,16 @@ class StrategyExecutor:
                                 raise
                             logger.info('Managed job cluster launched.')
                         else:
+                            # Get task resources from DAG for resource-aware
+                            # scheduling.
+                            task_resources = None
+                            if self.dag.tasks:
+                                task = self.dag.tasks[self.task_id]
+                                task_resources = task.resources
+
                             self.cluster_name = await (context_utils.to_thread(
                                 serve_utils.get_next_cluster_name, self.pool,
-                                self.job_id))
+                                self.job_id, task_resources))
                             if self.cluster_name is None:
                                 raise exceptions.NoClusterLaunchedError(
                                     'No cluster name found in the pool.')
@@ -537,6 +568,52 @@ class StrategyExecutor:
                         # At this point, a sky.launch() has succeeded. Cluster
                         # may be UP (no preemption since) or DOWN (newly
                         # preempted).
+                        # Auto-populate instance links if cluster is on a real
+                        # cloud
+                        if self.cluster_name is not None and self.pool is None:
+                            try:
+                                handle = await context_utils.to_thread(
+                                    global_user_state.
+                                    get_handle_from_cluster_name,
+                                    self.cluster_name)
+                                if (handle is not None and hasattr(
+                                        handle, 'cached_cluster_info') and
+                                        handle.cached_cluster_info is not None):
+                                    cluster_info = handle.cached_cluster_info
+                                    instance_links = (instance_links_utils.
+                                                      generate_instance_links(
+                                                          cluster_info,
+                                                          self.cluster_name))
+                                    if instance_links:
+                                        # Store instance links directly in
+                                        # database
+                                        await state.update_links_async(
+                                            self.job_id, self.task_id,
+                                            instance_links)
+                                        logger.debug(
+                                            f'Auto-populated instance links: '
+                                            f'{instance_links}')
+                                    else:
+                                        logger.debug('Failed to generate '
+                                                     'instance links')
+                                else:
+                                    logger.debug(
+                                        'Cluster handle not found or '
+                                        'cached cluster info is None so'
+                                        'not populating instance links')
+                            except Exception as e:  # pylint: disable=broad-except
+                                # Don't fail the launch if we can't generate
+                                # links
+                                logger.debug(
+                                    'Failed to auto-populate instance links: '
+                                    f'{e}')
+                        else:
+                            if self.pool:
+                                logger.debug('Not populating instance links '
+                                             'since the cluster is for a pool')
+                            else:
+                                logger.debug('Not populating instance links '
+                                             'since the cluster name is None')
                         job_submitted_at = await (
                             self._wait_until_job_starts_on_cluster())
                         if job_submitted_at is not None:
@@ -589,15 +666,35 @@ class StrategyExecutor:
                 # NoClusterLaunchedError.
                 assert False, 'Unreachable'
 
-    def should_restart_on_failure(self) -> bool:
+    def should_restart_on_failure(self,
+                                  exit_codes: Optional[List[int]] = None
+                                 ) -> bool:
         """Increments counter & checks if job should be restarted on a failure.
+
+        Args:
+            exit_codes: List of exit codes from the failed job. If any exit code
+                matches recover_on_exit_codes, recovery will be triggered
+                regardless of max_restarts_on_errors limit.
 
         Returns:
             True if the job should be restarted, otherwise False.
         """
+        # Check if any exit code matches the configured recover_on_exit_codes
+        # This triggers recovery without incrementing the counter
+        if exit_codes and self.recover_on_exit_codes:
+            for exit_code in exit_codes:
+                if exit_code in self.recover_on_exit_codes:
+                    logger.info(f'Exit code {exit_code} matched '
+                                'recover_on_exit_codes, triggering recovery')
+                    return True
+
+        # Otherwise, check the max_restarts_on_errors counter
         self.restart_cnt_on_failure += 1
         if self.restart_cnt_on_failure > self.max_restarts_on_errors:
             return False
+        logger.info(f'Restart count {self.restart_cnt_on_failure} '
+                    'is less than max_restarts_on_errors, '
+                    'restarting job')
         return True
 
 
@@ -620,10 +717,11 @@ class FailoverStrategyExecutor(StrategyExecutor):
         starting: Set[int],
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
+        recover_on_exit_codes: Optional[List[int]] = None,
     ) -> None:
         super().__init__(cluster_name, backend, task, max_restarts_on_errors,
                          job_id, task_id, pool, starting, starting_lock,
-                         starting_signal)
+                         starting_signal, recover_on_exit_codes)
         # Note down the cloud/region of the launched cluster, so that we can
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is

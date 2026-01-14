@@ -23,6 +23,7 @@ from sky import catalog
 from sky import exceptions
 from sky import sky_logging
 from sky.client import common as client_common
+from sky.client import interactive_utils
 from sky.client import sdk
 from sky.schemas.api import responses
 from sky.server import common as server_common
@@ -167,9 +168,17 @@ async def stream_response_async(request_id: Optional[str],
         retry_context = rest.get_retry_context()
     try:
         line_count = 0
+
         async for line in rich_utils.decode_rich_status_async(response):
             if line is not None:
                 line_count += 1
+
+                line = await interactive_utils.handle_interactive_auth_async(
+                    line)
+                if line is None:
+                    # Line was consumed by interactive auth handler
+                    continue
+
                 if retry_context is None:
                     print(line, flush=True, end='', file=output_stream)
                 elif line_count > retry_context.line_processed:

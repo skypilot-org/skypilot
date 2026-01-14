@@ -146,7 +146,7 @@ Apply ``~/.sky/sky_node_pools.yaml`` to the API server by the following steps fo
    .. tab-item:: Local API server
 
       If you did not start an API server instance or use a :ref:`local API server <sky-api-server-local>`, set ``~/.sky/ssh_node_pools.yaml`` on your local machine.
-   
+
    .. tab-item:: Helm Deployment
 
       If you use a Helm Deployment, follow the :ref:`SSH Node Pool configuration instructions <sky-api-server-configure-credentials>` to upload your ``~/.sky/ssh_node_pools.yaml`` and SSH keys to the API server.
@@ -202,6 +202,8 @@ SkyPilot automatically select one with available resources.
 
     # Let SkyPilot automatically select the cluster with available resources.
     sky launch --infra ssh -- echo "Running on SkyPilot selected cluster"
+
+.. _ssh-volumes:
 
 Attaching NFS and other volumes
 -------------------------------
@@ -316,6 +318,9 @@ Volume mounting can be done directly in the task YAML on a per-task basis, or gl
                        path: /mnt/<mount_tag> # e.g. /mnt/filesystem-d0
                        type: Directory
 
+.. note::
+
+   The ``ssh.pod_config`` in the :ref:`advanced config <config-yaml-ssh>` applies to every cluster launched on SSH node pools. To mount different paths per cluster, set the ``ssh.pod_config`` in the task YAML file as described in the per-task configuration section. Refer to `Kubernetes documentation <https://kubernetes.io/docs/reference/generated/kubernetes-api/latest/#pod-v1-core>`_ for more details about the Kubernetes Pod config.
 
 Cleanup
 -------

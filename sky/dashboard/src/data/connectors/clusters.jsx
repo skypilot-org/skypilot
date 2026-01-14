@@ -6,7 +6,7 @@ import { apiClient } from '@/data/connectors/client';
 import { ENDPOINT } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
 
-const DEFAULT_TAIL_LINES = 10000;
+const DEFAULT_TAIL_LINES = 5000;
 
 /**
  * Truncates a string in the middle, preserving parts from beginning and end.
@@ -65,6 +65,11 @@ export async function getClusters({ clusterNames = null } = {}) {
       } else {
         region_or_zone = cluster.region;
       }
+      // For SSH Node Pools, strip the 'ssh-' prefix from region display
+      // to avoid redundant "SSH (ssh-poolname)" showing as "SSH (poolname)"
+      if (cluster.cloud === 'SSH' && region_or_zone?.startsWith('ssh-')) {
+        region_or_zone = region_or_zone.substring(4);
+      }
       // Store the full value before truncation
       const full_region_or_zone = region_or_zone;
       // Truncate region_or_zone in the middle if it's too long
@@ -97,6 +102,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         last_event: cluster.last_event,
         to_down: cluster.to_down,
         cluster_name_on_cloud: cluster.cluster_name_on_cloud,
+        labels: cluster.labels || {},
         jobs: [],
         command: cluster.last_creation_command || cluster.last_use,
         task_yaml: cluster.last_creation_yaml || '{}',
@@ -195,6 +201,7 @@ export async function streamClusterJobLogs({
   jobId,
   onNewLog,
   workspace,
+  signal,
 }) {
   try {
     await apiClient.stream(
@@ -208,9 +215,14 @@ export async function streamClusterJobLogs({
           active_workspace: workspace || 'default',
         },
       },
-      onNewLog
+      onNewLog,
+      { signal }
     );
   } catch (error) {
+    // Abort is an expected control path (e.g., user refresh/navigation).
+    if (error?.name === 'AbortError') {
+      return;
+    }
     console.error('Error in streamClusterJobLogs:', error);
     showToast(`Error in streamClusterJobLogs: ${error.message}`, 'error');
   }

@@ -19,6 +19,7 @@ import {
   NonCapitalizedTooltip,
   REFRESH_INTERVAL,
   TimestampWithTooltip,
+  LastUpdatedTimestamp,
 } from '@/components/utils';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -43,6 +44,7 @@ import {
 } from '@/components/elements/modals';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { useMobile } from '@/hooks/useMobile';
+import { PluginSlot } from '@/plugins/PluginSlot';
 import {
   Select,
   SelectContent,
@@ -55,6 +57,7 @@ import cachePreloader from '@/lib/cache-preloader';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import yaml from 'js-yaml';
 import { UserDisplay } from '@/components/elements/UserDisplay';
+import { evaluateCondition } from '@/components/shared/FilterSystem';
 
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
@@ -86,6 +89,10 @@ const PROPERTY_OPTIONS = [
   {
     label: 'Infra',
     value: 'infra',
+  },
+  {
+    label: 'Labels',
+    value: 'labels',
   },
 ];
 
@@ -209,8 +216,10 @@ export function Clusters() {
     user: [],
     workspace: [],
     infra: [],
+    labels: [],
   }); /// Option values for properties
   const [preloadingComplete, setPreloadingComplete] = useState(false);
+  const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
   // Handle URL query parameters for workspace and user filtering and show history
   useEffect(() => {
@@ -302,10 +311,12 @@ export function Clusters() {
 
         // Signal that preloading is complete
         setPreloadingComplete(true);
+        setLastFetchedTime(new Date());
       } catch (error) {
         console.error('Error fetching data for filters:', error);
         // Still signal completion even on error so the table can load
         setPreloadingComplete(true);
+        setLastFetchedTime(new Date());
       }
     };
 
@@ -430,6 +441,7 @@ export function Clusters() {
     // Trigger a new preload cycle
     cachePreloader.preloadForPage('clusters', { force: true }).then(() => {
       setPreloadingComplete(true);
+      setLastFetchedTime(new Date());
       // Call refresh after preloading is complete
       if (refreshDataRef.current) {
         refreshDataRef.current();
@@ -510,6 +522,9 @@ export function Clusters() {
               <CircularProgress size={15} className="mt-0" />
               <span className="ml-2 text-gray-500 text-sm">Loading...</span>
             </div>
+          )}
+          {!loading && lastFetchedTime && (
+            <LastUpdatedTimestamp timestamp={lastFetchedTime} />
           )}
           <button
             onClick={handleRefresh}
@@ -592,6 +607,7 @@ export function ClusterTable({
       user: [],
       workspace: [],
       infra: [],
+      labels: [],
     };
 
     const pushWithoutDuplication = (array, item) => {
@@ -606,6 +622,17 @@ export function ClusterTable({
       pushWithoutDuplication(optionValues.user, cluster.user);
       pushWithoutDuplication(optionValues.workspace, cluster.workspace);
       pushWithoutDuplication(optionValues.infra, cluster.infra);
+
+      // Extract labels - add only key:value pairs
+      const labels = cluster.labels || {};
+      if (labels && typeof labels === 'object') {
+        Object.entries(labels).forEach(([key, value]) => {
+          if (key && value) {
+            // Add key:value pair format only
+            pushWithoutDuplication(optionValues.labels, `${key}:${value}`);
+          }
+        });
+      }
     });
 
     return optionValues;
@@ -674,33 +701,6 @@ export function ClusterTable({
     setLocalLoading(false);
     setIsInitialLoad(false);
   }, [setLoading, showHistory, historyDays, setOptionValues]);
-
-  // Utility: checks a condition based on operator
-  const evaluateCondition = (item, filter) => {
-    const { property, operator, value } = filter;
-
-    if (!value) return true; // skip empty filters
-
-    // Global search: check all values
-    if (!property) {
-      const strValue = value.toLowerCase();
-      return Object.values(item).some((val) =>
-        val?.toString().toLowerCase().includes(strValue)
-      );
-    }
-
-    const itemValue = item[property.toLowerCase()]?.toString().toLowerCase();
-    const filterValue = value.toString().toLowerCase();
-
-    switch (operator) {
-      case '=':
-        return itemValue === filterValue;
-      case ':':
-        return itemValue?.includes(filterValue);
-      default:
-        return true;
-    }
-  };
 
   // Use useMemo to compute sorted data
   const sortedData = React.useMemo(() => {
@@ -893,7 +893,16 @@ export function ClusterTable({
                   return (
                     <TableRow key={index}>
                       <TableCell>
-                        <StatusBadge status={item.status} />
+                        <PluginSlot
+                          name="clusters.table.status.badge"
+                          context={item}
+                          fallback={
+                            <StatusBadge
+                              status={item.status}
+                              statusTooltip={item.statusTooltip}
+                            />
+                          }
+                        />
                       </TableCell>
                       <TableCell>
                         <Link
@@ -1270,6 +1279,12 @@ const FilterDropdown = ({
         case 'infra':
           updatedValueOptions =
             valueList.infra.filter(
+              (value) => !selectedValues.find((val) => val === value)
+            ) || [];
+          break;
+        case 'labels':
+          updatedValueOptions =
+            valueList.labels.filter(
               (value) => !selectedValues.find((val) => val === value)
             ) || [];
           break;

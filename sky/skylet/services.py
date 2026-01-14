@@ -197,12 +197,11 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                     f.write(request.codegen)
                 os.chmod(script_path, 0o755)
 
-            cd = f'cd {constants.SKY_REMOTE_WORKDIR}'
             job_submit_cmd = (
                 # JOB_CMD_IDENTIFIER is used for identifying the process
                 # retrieved with pid is the same driver process.
                 f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
-                f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}'
+                f'{constants.SKY_PYTHON_CMD} -u {script_path}'
                 # Do not use &>, which is not POSIX and may not work.
                 # Note that the order of ">filename 2>&1" matters.
                 f' > {remote_log_path} 2>&1')
@@ -387,6 +386,21 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
+    def GetJobExitCodes(  # type: ignore[return]
+            self, request: jobsv1_pb2.GetJobExitCodesRequest,
+            context: grpc.ServicerContext
+    ) -> jobsv1_pb2.GetJobExitCodesResponse:
+        try:
+            job_id = request.job_id if request.HasField(
+                'job_id') else job_lib.get_latest_job_id()
+            exit_codes: Optional[List[int]] = None
+            if job_id:
+                exit_codes_list = job_lib.get_exit_codes(job_id)
+                exit_codes = exit_codes_list if exit_codes_list else []
+            return jobsv1_pb2.GetJobExitCodesResponse(exit_codes=exit_codes)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
 
 class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                             ):
@@ -488,7 +502,8 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     entrypoint=job.get('entrypoint'),
                     metadata=converted_metadata,
                     pool=job.get('pool'),
-                    pool_hash=job.get('pool_hash'))
+                    pool_hash=job.get('pool_hash'),
+                    links=job.get('links'))
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(

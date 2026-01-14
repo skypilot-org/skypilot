@@ -131,10 +131,15 @@ get_previous_version() {
 
     # For skypilot-nightly, we need to include --devel flag to get dev versions
     if [ "$package_name" = "skypilot-nightly" ]; then
-        local versions=$(helm search repo skypilot/$package_name --versions --devel --output json | jq -r '.[].version' | sort -V)
+        local versions=$(helm search repo skypilot/$package_name --versions --devel --output json | jq -r '.[] | select(.name == "skypilot/'"$package_name"'").version' | sort -V)
     else
         # For skypilot (stable), we don't use --devel flag
-        local versions=$(helm search repo skypilot/$package_name --versions --output json | jq -r '.[].version' | sort -V)
+		# If the current_ver is an rc, we still don't want to use --devel,
+		# because we should compare against the latest stable (non-rc) version
+		# `helm search skypilot/skypilot` may also return charts for
+		# skypilot/skypilot-prometheus-server, so filter the package name in jq as
+		# well.
+        local versions=$(helm search repo skypilot/$package_name --versions --output json | jq -r '.[] | select(.name == "skypilot/'"$package_name"'").version' | sort -V)
     fi
 
     if [ -z "$versions" ]; then
@@ -146,9 +151,17 @@ get_previous_version() {
     echo "$versions" | tail -10
 
     # Convert current version format to match helm repo format
-    # Convert 1.0.0.dev20250913 to 1.0.0-dev.20250913
-    local helm_format_ver=$(echo "$current_ver" | sed 's/\.dev/-dev./')
+    # Convert 0.11.0rc1 -> 0.11.0-rc.1
+    # Convert 1.0.0.dev20250913 -> 1.0.0-dev.20250913
+    local helm_format_ver=$(echo "$current_ver" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)rc([0-9]+)/\1-rc.\2/;s/([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)/\1-dev.\2/')
     echo "Looking for version: $helm_format_ver"
+
+    # Check if current version is an RC version (before conversion)
+    local is_rc_version=false
+    if [[ "$current_ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+rc[0-9]+ ]]; then
+        is_rc_version=true
+        echo "Detected RC version: $current_ver (converted to $helm_format_ver)"
+    fi
 
     # Find the version that comes before the current version
     local previous_version=""
@@ -162,7 +175,13 @@ get_previous_version() {
         last_version="$version"
     done <<< "$versions"
 
-    if [ -z "$previous_version" ]; then
+    if [ "$is_rc_version" = true ]; then
+        # When current version is an rc, it won't be in the available versions,
+        # since --devel is not used. We should just compare against the latest
+        # available version.
+        echo "Using the latest version $last_version since the current version $current_ver is an rc"
+        previous_version="$last_version"
+    elif [ -z "$previous_version" ]; then
         echo "Error: Could not find a previous version for $current_ver (looking for $helm_format_ver)"
         echo "available versions:"
         echo "$versions"

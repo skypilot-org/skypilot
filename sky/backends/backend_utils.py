@@ -69,6 +69,7 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import volume as volume_utils
 from sky.utils import yaml_utils
+from sky.utils.plugin_extensions import ExternalFailureSource
 from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
@@ -763,7 +764,20 @@ def write_cluster_config(
                     keys=('allowed_contexts',),
                     default_value=None)
             if allowed_contexts is None:
-                excluded_clouds.add(cloud)
+                # Exclude both Kubernetes and SSH explicitly since:
+                # 1. isinstance(cloud, clouds.Kubernetes) matches both (SSH
+                #    inherits from Kubernetes)
+                # 2. Both share the same get_credential_file_mounts() which
+                #    returns the kubeconfig. So if we don't exclude both, the
+                #    unexcluded one will upload the kubeconfig.
+                # TODO(romilb): This is a workaround. The right long-term fix
+                # is to have SSH Node Pools use its own kubeconfig instead of
+                # sharing the global kubeconfig at ~/.kube/config. In the
+                # interim, SSH Node Pools' get_credential_file_mounts can filter
+                # contexts starting with ssh- and create a temp kubeconfig
+                # to upload.
+                excluded_clouds.add(clouds.Kubernetes())
+                excluded_clouds.add(clouds.SSH())
         else:
             excluded_clouds.add(cloud)
 
@@ -891,6 +905,13 @@ def write_cluster_config(
                            else 'false')
     is_custom_docker = ('true' if to_provision.extract_docker_image()
                         is not None else 'false')
+
+    # Check if the cluster name is a controller name.
+    is_remote_controller = False
+    controller = controller_utils.Controllers.from_name(
+        cluster_name, expect_exact_match=False)
+    if controller is not None:
+        is_remote_controller = True
 
     # Here, if users specify the controller to be high availability, we will
     # provision a high availability controller. Whether the cloud supports
@@ -1023,7 +1044,8 @@ def write_cluster_config(
                 # Authentication (optional).
                 **auth_config,
 
-                # High availability
+                # Controller specific configs
+                'is_remote_controller': is_remote_controller,
                 'high_availability': high_availability_specified,
 
                 # Volume mounts
@@ -2262,6 +2284,12 @@ def _update_cluster_status(
                         for status in node_statuses) and
                     len(node_statuses) == handle.launched_nodes)
 
+    external_cluster_failures = ExternalFailureSource.get(
+        cluster_hash=record['cluster_hash'])
+    logger.debug(f'Cluster {cluster_name} with cluster_hash '
+                 f'{record["cluster_hash"]} has external cluster failures: '
+                 f'{external_cluster_failures}')
+
     def get_node_counts_from_ray_status(
             runner: command_runner.CommandRunner) -> Tuple[int, int, str, str]:
         rc, output, stderr = runner.run(
@@ -2401,8 +2429,9 @@ def _update_cluster_status(
 
     # For Slurm, skip Ray health check since it doesn't use Ray.
     should_check_ray = cloud is not None and cloud.uses_ray()
-    if all_nodes_up and (not should_check_ray or
-                         run_ray_status_to_check_ray_cluster_healthy()):
+    if (all_nodes_up and (not should_check_ray or
+                          run_ray_status_to_check_ray_cluster_healthy()) and
+            not external_cluster_failures):
         # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.
@@ -2505,15 +2534,15 @@ def _update_cluster_status(
     #  (2) Otherwise, we will reset the autostop setting, unless the cluster is
     #      autostopping/autodowning.
     some_nodes_terminated = 0 < len(node_statuses) < handle.launched_nodes
-    # If all nodes are up and ray cluster is health, we would have returned
-    # earlier. So if all_nodes_up is True and we are here, it means the ray
-    # cluster must have been unhealthy.
-    ray_cluster_unhealthy = all_nodes_up
     some_nodes_not_stopped = any(status[0] != status_lib.ClusterStatus.STOPPED
                                  for status in node_statuses)
     is_abnormal = (some_nodes_terminated or some_nodes_not_stopped)
 
-    if is_abnormal:
+    if is_abnormal and not external_cluster_failures:
+        # If all nodes are up and ray cluster is healthy, we would have returned
+        # earlier. So if all_nodes_up is True and we are here, it means the ray
+        # cluster must have been unhealthy.
+        ray_cluster_unhealthy = all_nodes_up
         status_reason = ', '.join(
             [status[1] for status in node_statuses if status[1] is not None])
 
@@ -2641,8 +2670,25 @@ def _update_cluster_status(
             cluster_name,
             include_user_info=include_user_info,
             summary_response=summary_response)
-    # Now is_abnormal is False: either node_statuses is empty or all nodes are
-    # STOPPED.
+    # Now either:
+    # (1) is_abnormal is False: either node_statuses is empty or all nodes are
+    #                           STOPPED
+    # or
+    # (2) there are external cluster failures reported by a plugin.
+
+    # If there are external cluster failures and the cluster has not been
+    # terminated on cloud (to_terminate), we can return the cluster record as is.
+    # This is because when an external failure is detected, the cluster will be
+    # marked as INIT with a reason indicating the details of the failure. So, we
+    # do not want to modify the cluster status in this function except for in the
+    # case where the cluster has been terminated on cloud, in which case we should
+    # clean up the cluster from SkyPilot's global state.
+    if external_cluster_failures and not to_terminate:
+        return global_user_state.get_cluster_from_name(
+            cluster_name,
+            include_user_info=include_user_info,
+            summary_response=summary_response)
+
     verb = 'terminated' if to_terminate else 'stopped'
     backend = backends.CloudVmRayBackend()
     global_user_state.add_cluster_event(
@@ -3218,6 +3264,29 @@ def refresh_cluster_records() -> None:
                                          cluster_names_without_launch_request)
 
 
+def _get_records_with_handle(
+        records: List[Optional[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """Filter for records that have a handle"""
+    return [
+        record for record in records
+        if record is not None and record['handle'] is not None
+    ]
+
+
+def _update_records_with_handle_info(records_with_handle: List[Dict[str, Any]],
+                                     summary_response: bool = False) -> None:
+    """Add resource str to record"""
+    for record in records_with_handle:
+        handle = record['handle']
+        resource_str_simple, resource_str_full = (
+            resources_utils.get_readable_resources_repr(handle,
+                                                        simplified_only=False))
+        record['resources_str'] = resource_str_simple
+        record['resources_str_full'] = resource_str_full
+        if not summary_response:
+            record['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
+
+
 def get_clusters(
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
@@ -3295,27 +3364,6 @@ def get_clusters(
             clusters_str = ', '.join(not_found_clusters)
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
 
-    def _get_records_with_handle(
-            records: List[Optional[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-        """Filter for records that have a handle"""
-        return [
-            record for record in records
-            if record is not None and record['handle'] is not None
-        ]
-
-    def _update_records_with_handle_info(
-            records: List[Optional[Dict[str, Any]]]) -> None:
-        """Add resource str to record"""
-        for record in _get_records_with_handle(records):
-            handle = record['handle']
-            resource_str_simple, resource_str_full = (
-                resources_utils.get_readable_resources_repr(
-                    handle, simplified_only=False))
-            record['resources_str'] = resource_str_simple
-            record['resources_str_full'] = resource_str_full
-            if not summary_response:
-                record['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
-
     def _update_records_with_credentials(
             records: List[Optional[Dict[str, Any]]]) -> None:
         """Add the credentials to the record.
@@ -3368,6 +3416,8 @@ def get_clusters(
             handle = record['handle']
             record['nodes'] = handle.launched_nodes
             if handle.launched_resources is None:
+                # Set default values when launched_resources is None
+                record['labels'] = {}
                 continue
             record['cloud'] = (f'{handle.launched_resources.cloud}'
                                if handle.launched_resources.cloud else None)
@@ -3380,11 +3430,14 @@ def get_clusters(
             record['accelerators'] = (
                 f'{handle.launched_resources.accelerators}'
                 if handle.launched_resources.accelerators else None)
+            record['labels'] = (handle.launched_resources.labels
+                                if handle.launched_resources.labels else {})
             if not include_handle:
                 record.pop('handle', None)
 
     # Add handle info to the records
-    _update_records_with_handle_info(records)
+    _update_records_with_handle_info(_get_records_with_handle(records),
+                                     summary_response=summary_response)
     if include_credentials:
         _update_records_with_credentials(records)
     if refresh == common.StatusRefreshMode.NONE:
@@ -3414,7 +3467,9 @@ def get_clusters(
         # e.g. all the Pods of a cluster on Kubernetes have been
         # deleted before refresh.
         if record is not None and 'error' not in record:
-            _update_records_with_handle_info([record])
+            if record['handle'] is not None:
+                _update_records_with_handle_info(
+                    [record], summary_response=summary_response)
             if include_credentials:
                 _update_records_with_credentials([record])
             progress.update(task, advance=1)

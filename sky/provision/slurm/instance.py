@@ -72,6 +72,7 @@ def _create_virtual_instance(
     ssh_user = ssh_config_dict['user']
     ssh_key = ssh_config_dict['private_key']
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
+    ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
     partition = slurm_utils.get_partition_from_config(provider_config)
 
     client = slurm.SlurmClient(
@@ -80,6 +81,7 @@ def _create_virtual_instance(
         ssh_user,
         ssh_key,
         ssh_proxy_command=ssh_proxy_command,
+        ssh_proxy_jump=ssh_proxy_jump,
     )
 
     # COMPLETING state occurs when a job is being terminated - during this
@@ -168,12 +170,13 @@ def _create_virtual_instance(
     skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
     sky_home_dir = _sky_cluster_home_dir(cluster_name_on_cloud)
     ready_signal = f'{sky_home_dir}/.sky_sbatch_ready'
+    slurm_marker_file = f'{sky_home_dir}/{slurm_utils.SLURM_MARKER_FILE}'
 
     # Build the sbatch script
     gpu_directive = ''
     if (accelerator_type is not None and accelerator_type.upper() != 'NONE' and
             accelerator_count > 0):
-        gpu_directive = (f'#SBATCH --gres=gpu:{accelerator_type.lower()}:'
+        gpu_directive = (f'#SBATCH --gres=gpu:{accelerator_type}:'
                          f'{accelerator_count}')
 
     # By default stdout and stderr will be written to $HOME/slurm-%j.out
@@ -215,6 +218,8 @@ def _create_virtual_instance(
         mkdir -p {sky_home_dir}
         # Create sky runtime directory on each node.
         srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}
+        # Marker file to indicate we're in a Slurm cluster.
+        touch {slurm_marker_file}
         # Suppress login messages.
         touch {sky_home_dir}/.hushlogin
         # Signal that the sbatch script has completed setup.
@@ -229,6 +234,7 @@ def _create_virtual_instance(
         ssh_user,
         ssh_key,
         ssh_proxy_command=ssh_proxy_command,
+        ssh_proxy_jump=ssh_proxy_jump,
     )
 
     cmd = f'mkdir -p {PROVISION_SCRIPTS_DIRECTORY}'
@@ -305,6 +311,7 @@ def query_instances(
     ssh_user = ssh_config_dict['user']
     ssh_key = ssh_config_dict['private_key']
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
+    ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
     client = slurm.SlurmClient(
         ssh_host,
@@ -312,6 +319,7 @@ def query_instances(
         ssh_user,
         ssh_key,
         ssh_proxy_command=ssh_proxy_command,
+        ssh_proxy_jump=ssh_proxy_jump,
     )
 
     # Map Slurm job states to SkyPilot ClusterStatus
@@ -401,6 +409,7 @@ def get_cluster_info(
     ssh_user = ssh_config_dict['user']
     ssh_key = ssh_config_dict['private_key']
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
+    ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
     client = slurm.SlurmClient(
         ssh_host,
@@ -408,6 +417,7 @@ def get_cluster_info(
         ssh_user,
         ssh_key,
         ssh_proxy_command=ssh_proxy_command,
+        ssh_proxy_jump=ssh_proxy_jump,
     )
 
     # Find running job for this cluster
@@ -480,35 +490,65 @@ def terminate_instances(
             'worker_only=True is not supported for Slurm, this is a no-op.')
         return
 
-    ssh_config_dict = provider_config['ssh']
-    ssh_host = ssh_config_dict['hostname']
-    ssh_port = int(ssh_config_dict['port'])
-    ssh_user = ssh_config_dict['user']
-    ssh_private_key = ssh_config_dict['private_key']
-    # Check if we are running inside a Slurm job (Only happens with autodown,
-    # where the Skylet will invoke terminate_instances on the remote cluster),
-    # where we assume SSH between nodes have been set up on each node's
-    # ssh config.
-    # TODO(kevin): Validate this assumption. Another way would be to
-    # mount the private key to the remote cluster, like we do with
-    # other clouds' API keys.
-    if slurm_utils.is_inside_slurm_job():
-        logger.debug('Running inside a Slurm job, using machine\'s ssh config')
-        ssh_private_key = None
-    ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
+    # Check if we are running inside a Slurm cluster (only happens with
+    # autodown, where the Skylet invokes terminate_instances on the remote
+    # cluster). In this case, use local execution instead of SSH.
+    # This assumes that the compute node is able to run scancel.
+    # TODO(kevin): Validate this assumption.
+    if slurm_utils.is_inside_slurm_cluster():
+        logger.debug('Running inside a Slurm cluster, using local execution')
+        client = slurm.SlurmClient(is_inside_slurm_cluster=True)
+    else:
+        ssh_config_dict = provider_config['ssh']
+        ssh_host = ssh_config_dict['hostname']
+        ssh_port = int(ssh_config_dict['port'])
+        ssh_user = ssh_config_dict['user']
+        ssh_private_key = ssh_config_dict['private_key']
+        ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
+        ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
-    client = slurm.SlurmClient(
-        ssh_host,
-        ssh_port,
-        ssh_user,
-        ssh_private_key,
-        ssh_proxy_command=ssh_proxy_command,
+        client = slurm.SlurmClient(
+            ssh_host,
+            ssh_port,
+            ssh_user,
+            ssh_private_key,
+            ssh_proxy_command=ssh_proxy_command,
+            ssh_proxy_jump=ssh_proxy_jump,
+        )
+    jobs_state = client.get_jobs_state_by_name(cluster_name_on_cloud)
+    if not jobs_state:
+        logger.debug(f'Job for cluster {cluster_name_on_cloud} not found, '
+                     'it may have been terminated.')
+        return
+    assert len(jobs_state) == 1, (
+        f'Multiple jobs found for cluster {cluster_name_on_cloud}: {jobs_state}'
     )
-    client.cancel_jobs_by_name(
-        cluster_name_on_cloud,
-        signal='TERM',
-        full=True,
-    )
+
+    job_state = jobs_state[0].strip()
+    # Terminal states where scancel is not needed or will fail.
+    terminal_states = {
+        'COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL', 'PREEMPTED',
+        'SPECIAL_EXIT'
+    }
+    if job_state in terminal_states:
+        logger.debug(
+            f'Job for cluster {cluster_name_on_cloud} is already in a terminal '
+            f'state {job_state}. No action needed.')
+        return
+
+    if job_state in ('PENDING', 'CONFIGURING'):
+        # For pending/configuring jobs, cancel without signal to avoid hangs.
+        client.cancel_jobs_by_name(cluster_name_on_cloud, signal=None)
+    elif job_state == 'COMPLETING':
+        # Job is already being terminated. No action needed.
+        logger.debug(
+            f'Job for cluster {cluster_name_on_cloud} is already completing. '
+            'No action needed.')
+    else:
+        # For other states (e.g., RUNNING, SUSPENDED), send a TERM signal.
+        client.cancel_jobs_by_name(cluster_name_on_cloud,
+                                   signal='TERM',
+                                   full=True)
 
 
 def open_ports(
@@ -557,6 +597,10 @@ def get_command_runners(
     # it is the login node's. The internal IP is the private IP of the node.
     ssh_user = cast(str, credentials.pop('ssh_user'))
     ssh_private_key = cast(str, credentials.pop('ssh_private_key'))
+    # ssh_proxy_jump is Slurm-specific, it does not exist in the auth section
+    # of the cluster yaml.
+    ssh_proxy_jump = cluster_info.provider_config.get('ssh', {}).get(
+        'proxyjump', None)
     runners = [
         command_runner.SlurmCommandRunner(
             (instance_info.external_ip or '', instance_info.ssh_port),
@@ -566,6 +610,8 @@ def get_command_runners(
             skypilot_runtime_dir=_skypilot_runtime_dir(cluster_name_on_cloud),
             job_id=instance_info.tags['job_id'],
             slurm_node=instance_info.tags['node'],
+            ssh_proxy_jump=ssh_proxy_jump,
+            enable_interactive_auth=True,
             **credentials) for instance_info in instances
     ]
 

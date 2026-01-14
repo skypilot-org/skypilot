@@ -205,7 +205,7 @@ Following tabs describe how to configure credentials for different clouds on the
         .. code-block:: bash
 
             # --reuse-values keeps the Helm chart values set in the previous step
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
               --set kubernetesCredentials.useKubeconfig=true \
@@ -213,16 +213,20 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. tip::
 
-            If you are using a kubeconfig file that contains `exec-based authentication <https://kubernetes.io/docs/reference/access-authn-authz/authentication/#configuration>`_ (e.g., GKE's default ``gke-gcloud-auth-plugin`` based authentication), you will need to strip the path information from the ``command`` field in the exec configuration.
-            You can use the ``exec_kubeconfig_converter.py`` script to do this.
+            If you are using a kubeconfig file that contains `exec-based authentication <https://kubernetes.io/docs/reference/access-authn-authz/authentication/#configuration>`_ (e.g., GKE's default ``gke-gcloud-auth-plugin``, Nebius Managed Kubernetes, OCI, etc.), you will need to generate a kubeconfig with static authentication instead.
+            You can use the ``generate_kubeconfig.sh`` script to do this.
 
             .. code-block:: bash
 
-                python -m sky.utils.kubernetes.exec_kubeconfig_converter --input ~/.kube/config --output ~/.kube/config.converted
+                # Download the script
+                curl -O https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/sky/utils/kubernetes/generate_kubeconfig.sh && chmod +x generate_kubeconfig.sh
 
-            Then create the Kubernetes secret with the converted kubeconfig file ``~/.kube/config.converted``.
+                # Generate the kubeconfig
+                export KUBECONFIG=$HOME/.kube/config # or the path to your kubeconfig file
+                ./generate_kubeconfig.sh
 
-            The specific cloud's credential for the exec-based authentication also needs to be configured. For example, to enable exec-based authentication for GKE, you also need to setup GCP credentials (see the GCP tab above).
+            Then create the Kubernetes secret with the generated kubeconfig file ``./kubeconfig``.
+
 
         .. dropdown:: Update Kubernetes credentials
 
@@ -286,7 +290,7 @@ Following tabs describe how to configure credentials for different clouds on the
         .. code-block:: bash
 
             # --reuse-values keeps the Helm chart values set in the previous step
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                 --namespace $NAMESPACE \
                 --reuse-values \
                 --set awsCredentials.enabled=true
@@ -308,7 +312,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
               .. code-block:: bash
 
-                  helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set awsCredentials.awsSecretName=aws-credentials-new
@@ -352,7 +356,7 @@ Following tabs describe how to configure credentials for different clouds on the
         .. code-block:: bash
 
             # --reuse-values keeps the Helm chart values set in the previous step
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                 --namespace $NAMESPACE \
                 --reuse-values \
                 --set awsCredentials.enabled=true \
@@ -386,7 +390,7 @@ Following tabs describe how to configure credentials for different clouds on the
             .. code-block:: bash
 
                 # TODO: replace with your secret name and keys in the secret
-                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set awsCredentials.enabled=true \
@@ -399,7 +403,7 @@ Following tabs describe how to configure credentials for different clouds on the
             .. code-block:: bash
 
                 # TODO: replace with your secret name
-                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set awsCredentials.enabled=true \
@@ -424,7 +428,7 @@ Following tabs describe how to configure credentials for different clouds on the
         .. code-block:: bash
 
             # --reuse-values keeps the Helm chart values set in the previous step
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
               --set gcpCredentials.enabled=true \
@@ -437,7 +441,7 @@ Following tabs describe how to configure credentials for different clouds on the
             .. code-block:: bash
 
                 # TODO: replace with your secret name
-                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set gcpCredentials.enabled=true \
@@ -459,7 +463,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
               .. code-block:: bash
 
-                  helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set gcpCredentials.gcpSecretName=gcp-credentials-new
@@ -509,7 +513,7 @@ Following tabs describe how to configure credentials for different clouds on the
             .. code-block:: bash
 
                 # TODO: replace with your secret name
-                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set runpodCredentials.enabled=true \
@@ -531,7 +535,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
               .. code-block:: bash
 
-                  helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set runpodCredentials.runpodSecretName=runpod-credentials-new
@@ -577,7 +581,7 @@ Following tabs describe how to configure credentials for different clouds on the
         .. code-block:: bash
 
             # --reuse-values keeps the Helm chart values set in the previous step
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
               --set lambdaCredentials.enabled=true
@@ -589,7 +593,7 @@ Following tabs describe how to configure credentials for different clouds on the
             .. code-block:: bash
 
                 # TODO: replace with your secret name
-                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set lambdaCredentials.enabled=true \
@@ -611,7 +615,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
               .. code-block:: bash
 
-                  helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set lambdaCredentials.lambdaSecretName=lambda-credentials-new
@@ -684,7 +688,7 @@ Following tabs describe how to configure credentials for different clouds on the
         .. code-block:: bash
 
             # --reuse-values keeps the Helm chart values set in the previous step
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
               --set nebiusCredentials.enabled=true \
@@ -697,7 +701,7 @@ Following tabs describe how to configure credentials for different clouds on the
             .. code-block:: bash
 
                 # TODO: replace with your secret name
-                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set nebiusCredentials.enabled=true \
@@ -742,7 +746,7 @@ Following tabs describe how to configure credentials for different clouds on the
         .. code-block:: bash
 
             # --reuse-values keeps the Helm chart values set in the previous step
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
               --set vastCredentials.enabled=true
@@ -754,7 +758,7 @@ Following tabs describe how to configure credentials for different clouds on the
             .. code-block:: bash
 
                 # TODO: replace with your secret name
-                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set vastCredentials.enabled=true \
@@ -776,7 +780,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
               .. code-block:: bash
 
-                  helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set vastCredentials.vastSecretName=vast-credentials-new
@@ -919,7 +923,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
               .. code-block:: bash
 
-                  helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set r2Credentials.r2SecretName=r2-credentials-new
@@ -1003,7 +1007,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
               .. code-block:: bash
 
-                  helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set coreweaveCredentials.coreweaveSecretName=coreweave-credentials-new
@@ -1059,7 +1063,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
                 # TODO: replace with your secret name
                 # if secret name is not provided, secret name defaults to `digitalocean-credentials`
-                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set digitaloceanCredentials.enabled=true \
@@ -1081,7 +1085,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
               .. code-block:: bash
 
-                  helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set digitaloceanCredentials.digitaloceanSecretName=digitalocean-credentials-new
@@ -1149,7 +1153,7 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
     .. code-block:: bash
 
         # --reuse-values keeps the Helm chart values set in the previous step
-        helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+        helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
         --namespace $NAMESPACE \
         --reuse-values \
         --set apiService.dbConnectionString=postgresql://<username>:<password>@<host>:<port>/<database>
@@ -1171,7 +1175,7 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
 
     .. code-block:: bash
 
-        helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+        helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
           --namespace $NAMESPACE \
           --reuse-values \
           --set apiService.dbConnectionSecretName=skypilot-db-connection-uri
@@ -1226,7 +1230,7 @@ To modify your SkyPilot config, use the SkyPilot dashboard: ``http://<api-server
 
         # Install the API server with the config file
         # --reuse-values keeps the Helm chart values set in the previous step
-        helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+        helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
         --namespace $NAMESPACE \
         --reuse-values \
         --set-file apiService.config=config.yaml
@@ -1384,7 +1388,7 @@ Apply the configuration using:
 
 .. code-block:: bash
 
-    helm upgrade --install skypilot skypilot/skypilot-nightly --devel -f values.yaml
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel -f values.yaml
 
 
 Additional setup for EKS
@@ -1428,7 +1432,7 @@ Then apply the values.yaml file using the `-f` flag when running the helm upgrad
 
 .. code-block:: bash
 
-    helm upgrade --install skypilot skypilot/skypilot-nightly --devel -f values.yaml
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel -f values.yaml
 
 .. _minimum-permissions-in-helm:
 
@@ -1455,21 +1459,21 @@ In helm deployment, a set of default permissions are granted to the API server t
 
      .. code-block:: bash
 
-        helm upgrade --install skypilot skypilot/skypilot-nightly --devel --reuse-values \
+        helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
           --set rbac.manageRbacPolicies=false
 
 * If your use case does not require object storage mounting, you can disable the permissions to manage SkyPilot system components by setting ``rbac.manageSystemComponents=false``:
 
   .. code-block:: bash
 
-      helm upgrade --install skypilot skypilot/skypilot-nightly --devel --reuse-values \
+      helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
         --set rbac.manageSystemComponents=false
 
 If you want to use an existing service account and permissions that meet the :ref:`minimum permissions required for SkyPilot<k8s-permissions>` instead of the one managed by Helm, you can disable the creation of RBAC policies and specify the service account name to use:
 
 .. code-block:: bash
 
-    helm upgrade --install skypilot skypilot/skypilot-nightly --devel --reuse-values \
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
       --set rbac.create=false \
       --set rbac.serviceAccountName=my-existing-service-account
 

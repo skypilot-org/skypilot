@@ -1,6 +1,6 @@
 """SDK functions for cluster/job management."""
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import colorama
 
@@ -279,6 +279,74 @@ all_clusters, unmanaged_clusters, all_jobs, context
     return all_clusters, unmanaged_clusters, all_jobs, context
 
 
+@typing.overload
+def get_cluster_events(
+    cluster_name: Optional[str] = ...,
+    cluster_hash: Optional[str] = ...,
+    event_type: str = ...,
+    include_timestamps: Literal[False] = ...,
+    limit: Optional[int] = ...,
+) -> List[str]:
+    ...
+
+
+@typing.overload
+def get_cluster_events(
+    cluster_name: Optional[str] = ...,
+    cluster_hash: Optional[str] = ...,
+    event_type: str = ...,
+    include_timestamps: Literal[True] = ...,
+    limit: Optional[int] = ...,
+) -> List[Dict[str, Union[str, int]]]:
+    ...
+
+
+@typing.overload
+def get_cluster_events(
+    cluster_name: Optional[str] = ...,
+    cluster_hash: Optional[str] = ...,
+    event_type: str = ...,
+    include_timestamps: bool = ...,
+    limit: Optional[int] = ...,
+) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
+    ...
+
+
+def get_cluster_events(
+    cluster_name: Optional[str] = None,
+    cluster_hash: Optional[str] = None,
+    event_type: str = 'STATUS_CHANGE',
+    include_timestamps: bool = False,
+    limit: Optional[int] = None
+) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
+    """Get events for a cluster.
+
+    Args:
+        cluster_name: Name of the cluster. Cannot be specified if cluster_hash
+            is specified.
+        cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
+            is specified.
+        event_type: Type of events to retrieve ('STATUS_CHANGE' or 'DEBUG').
+        include_timestamps: If True, returns list of dicts with 'reason' and
+            'transitioned_at' fields. If False, returns list of reason strings.
+        limit: If specified, returns at most this many events (most recent).
+            If None, returns all events.
+
+    Returns:
+        If include_timestamps is False: List of event reason strings.
+        If include_timestamps is True: List of dicts with 'reason' and
+            'transitioned_at' (unix timestamp) fields.
+        Events are ordered from oldest to newest.
+    """
+    event_type_enum = global_user_state.ClusterEventType(event_type)
+    return global_user_state.get_cluster_events(
+        cluster_name=cluster_name,
+        cluster_hash=cluster_hash,
+        event_type=event_type_enum,
+        include_timestamps=include_timestamps,
+        limit=limit)
+
+
 def endpoints(cluster: str,
               port: Optional[Union[int, str]] = None) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
@@ -394,52 +462,54 @@ def cost_report(
         cluster_reports = subprocess_utils.run_in_parallel(
             _process_cluster_report, cluster_reports)
 
-    def _update_record_with_resources(record: Dict[str, Any]) -> None:
-        """Add resource fields for dashboard compatibility."""
-        if record is None:
-            return
-        resources = record.get('resources')
-        if resources is None:
-            return
-        if not dashboard_summary_response:
-            fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
-        else:
-            fields = ['cloud']
-        for field in fields:
-            try:
-                record[field] = str(getattr(resources, field))
-            except Exception as e:  # pylint: disable=broad-except
-                # Ok to skip the fields as this is just for display
-                # purposes.
-                logger.debug(f'Failed to get resources.{field} for cluster '
-                             f'{record["name"]}: {str(e)}')
-                record[field] = None
-
-        # Add resources_str and resources_str_full for dashboard
-        # compatibility
-        num_nodes = record.get('num_nodes', 1)
-        try:
-            resource_str_simple, resource_str_full = (
-                resources_utils.format_resource(resources,
-                                                simplified_only=False))
-            record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
-            record['resources_str_full'] = f'{num_nodes}x{resource_str_full}'
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to get resources_str for cluster '
-                         f'{record["name"]}: {str(e)}')
-            for field in fields:
-                record[field] = None
-            record['resources_str'] = '-'
-            record['resources_str_full'] = '-'
-
     for report in cluster_reports:
-        _update_record_with_resources(report)
+        _update_record_with_resources(report, dashboard_summary_response)
         if dashboard_summary_response:
             report.pop('usage_intervals')
             report.pop('user_hash')
             report.pop('resources')
 
     return cluster_reports
+
+
+def _update_record_with_resources(
+        record: Dict[str, Any],
+        dashboard_summary_response: bool = False) -> None:
+    """Add resource fields for dashboard compatibility."""
+    if record is None:
+        return
+    resources = record.get('resources')
+    if resources is None:
+        return
+    if not dashboard_summary_response:
+        fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
+    else:
+        fields = ['cloud']
+    for field in fields:
+        try:
+            record[field] = str(getattr(resources, field))
+        except Exception as e:  # pylint: disable=broad-except
+            # Ok to skip the fields as this is just for display
+            # purposes.
+            logger.debug(f'Failed to get resources.{field} for cluster '
+                         f'{record["name"]}: {str(e)}')
+            record[field] = None
+
+    # Add resources_str and resources_str_full for dashboard
+    # compatibility
+    num_nodes = record.get('num_nodes', 1)
+    try:
+        resource_str_simple, resource_str_full = (
+            resources_utils.format_resource(resources, simplified_only=False))
+        record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
+        record['resources_str_full'] = f'{num_nodes}x{resource_str_full}'
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to get resources_str for cluster '
+                     f'{record["name"]}: {str(e)}')
+        for field in fields:
+            record[field] = None
+        record['resources_str'] = '-'
+        record['resources_str_full'] = '-'
 
 
 def _start(

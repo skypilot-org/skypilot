@@ -143,6 +143,7 @@ SCP = clouds.SCP
 Slurm = clouds.Slurm
 Kubernetes = clouds.Kubernetes
 K8s = Kubernetes
+SSH = clouds.SSH
 OCI = clouds.OCI
 Paperspace = clouds.Paperspace
 PrimeIntellect = clouds.PrimeIntellect
@@ -164,6 +165,7 @@ __all__ = [
     'IBM',
     'Kubernetes',
     'K8s',
+    'SSH',
     'Lambda',
     'OCI',
     'Paperspace',

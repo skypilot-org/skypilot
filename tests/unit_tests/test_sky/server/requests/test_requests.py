@@ -1,5 +1,6 @@
 """Unit tests for sky.server.requests.requests module."""
 import asyncio
+import logging
 import pathlib
 import time
 from typing import List, Optional
@@ -170,6 +171,7 @@ async def test_clean_finished_requests_with_retention(isolated_database):
     # Mock log file unlinking
     with mock.patch.object(pathlib.Path, 'unlink') as mock_unlink:
         with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+            mock_logger.getEffectiveLevel.return_value = logging.INFO
             await requests.clean_finished_requests_with_retention(
                 retention_seconds)
 
@@ -243,6 +245,7 @@ async def test_clean_finished_requests_with_retention_batch_size_functionality(
     # Test with limit=10 - should process in batches of 10
     with mock.patch.object(pathlib.Path, 'unlink') as mock_unlink:
         with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+            mock_logger.getEffectiveLevel.return_value = logging.INFO
             # Track how get_request_tasks_async is called to verify batching
             original_get_request_tasks_async = requests.get_request_tasks_async
             call_counts = []
@@ -307,6 +310,7 @@ async def test_clean_finished_requests_with_retention_limit_larger_than_total(
     # Test with limit=100 (much larger than the 5 requests)
     with mock.patch.object(pathlib.Path, 'unlink'):
         with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+            mock_logger.getEffectiveLevel.return_value = logging.INFO
             # Track calls to verify single batch processing
             original_get_request_tasks_async = requests.get_request_tasks_async
             call_counts = []
@@ -361,6 +365,7 @@ async def test_clean_finished_requests_with_retention_batch_size_one(
     # Test with limit=1 (process one at a time)
     with mock.patch.object(pathlib.Path, 'unlink'):
         with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+            mock_logger.getEffectiveLevel.return_value = logging.INFO
             # Track calls to verify single-request processing
             original_get_request_tasks_async = requests.get_request_tasks_async
             call_counts = []
@@ -414,6 +419,7 @@ async def test_clean_finished_requests_with_retention_no_old_requests(
     await requests.create_if_not_exists_async(recent_request)
 
     with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+        mock_logger.getEffectiveLevel.return_value = logging.INFO
         await requests.clean_finished_requests_with_retention(retention_seconds)
 
     # Verify request was NOT deleted
@@ -466,6 +472,7 @@ async def test_clean_finished_requests_with_retention_all_statuses(
 
     with mock.patch.object(pathlib.Path, 'unlink'):
         with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+            mock_logger.getEffectiveLevel.return_value = logging.INFO
             await requests.clean_finished_requests_with_retention(
                 retention_seconds)
 
