@@ -388,6 +388,15 @@ def _cluster_maybe_autoscaling(namespace, context, search_start) -> bool:
         return False
 
 
+def _update_spinner_message(*, iteration: int, pods: List[Any],
+                            context: Optional[str], namespace: str,
+                            cluster_name_on_cloud: str,
+                            cluster_name: str) -> None:
+    del iteration, pods, context, namespace  #unused
+    del cluster_name_on_cloud, cluster_name  #unused
+    pass
+
+
 @timeline.event
 def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                                cluster_name: str,
@@ -428,6 +437,7 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
             return True
         return time.time() - start_time < timeout
 
+    iteration = 0
     while _evaluate_timeout():
         # Get all pods in a single API call using the cluster name label
         # which all pods in new_nodes should share
@@ -480,7 +490,15 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                 rich_utils.force_update_status(
                     ux_utils.spinner_message(f'Launching ({msg})',
                                              cluster_name=cluster_name))
+        if not is_autoscaling:
+            _update_spinner_message(iteration=iteration,
+                                    pods=pods,
+                                    context=context,
+                                    namespace=namespace,
+                                    cluster_name_on_cloud=cluster_name_on_cloud,
+                                    cluster_name=cluster_name)
 
+        iteration += 1
         time.sleep(1)
 
     # Handle pod scheduling errors
@@ -609,10 +627,13 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             # TODO(kevin): Should we take provision_timeout into account here,
             # instead of hardcoding the number of retries?
             if missing_pods_retry >= _MAX_MISSING_PODS_RETRIES:
+                first_pod = True
                 for pod_name in missing_pod_names:
                     reason = _get_pod_missing_reason(context, namespace,
-                                                     cluster_name, pod_name)
+                                                     cluster_name, pod_name,
+                                                     first_pod)
                     logger.warning(f'Pod {pod_name} missing: {reason}')
+                    first_pod = False
                 raise config_lib.KubernetesError(
                     f'Failed to get all pods after {missing_pods_retry} '
                     f'retries. Some pods may have been terminated or failed '
@@ -954,6 +975,14 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         pod_spec['metadata']['labels'] = tags
     pod_spec['metadata']['labels'].update(
         {constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud})
+    # Add the cluster name as an annotation to the pod spec.
+    # We cannot use a label because label values have both
+    # a length limit and charset limit (i.e no special chars).
+    # Annotations are not subject to these limits.
+    # This annotation is used to identify the cluster name from the pod
+    pod_spec['metadata'].setdefault('annotations', {}).update({
+        'skypilot-cluster-name': cluster_name,
+    })
 
     ephemeral_volumes = provider_config.get('ephemeral_volume_infos')
     if ephemeral_volumes:
@@ -1532,7 +1561,8 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
     Checks both pod conditions (for preemption/disruption) and
     container statuses (for exit codes/errors).
     """
-    latest_timestamp = pod.status.start_time or datetime.datetime.min
+    utc_min_time = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+    latest_timestamp = (pod.status.start_time or utc_min_time)
     ready_state = 'Unknown'
     termination_reason = 'Terminated unexpectedly'
     container_reasons = []
@@ -1645,8 +1675,35 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
     return None
 
 
+def _format_pod_missing_reason(
+        *, context: Optional[str], pod_name: str, event: Any, cluster_name: str,
+        transitioned_at: int,
+        first_pod: bool) -> Tuple[str, global_user_state.ClusterEventType]:
+    """Format pod missing reason.
+
+    Args:
+        context: The context of the Kubernetes cluster.
+        pod_name: The name of the pod.
+        event: The event object.
+        cluster_name: The name of the cluster.
+        transitioned_at: The timestamp of the event.
+        first_pod: Whether this is the first pod.
+                   Used in cases where some logic only needs to be run
+                   for one pod in the cluster.
+
+    Returns:
+        A tuple of the formatted event string and the event type.
+    """
+    del first_pod, context, cluster_name, transitioned_at  #unused
+    event_str = (f'[kubernetes pod {pod_name}] '
+                 f'{event.reason} {event.message}')
+    event_type = global_user_state.ClusterEventType.DEBUG
+    return event_str, event_type
+
+
 def _get_pod_missing_reason(context: Optional[str], namespace: str,
-                            cluster_name: str, pod_name: str) -> Optional[str]:
+                            cluster_name: str, pod_name: str,
+                            first_pod: bool) -> Optional[str]:
     """Get events for missing pod and write to cluster events."""
     logger.debug(f'Analyzing events for pod {pod_name}')
     pod_events = _get_pod_events(context, namespace, pod_name)
@@ -1666,14 +1723,21 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
             # Try inserting the latest events first. If the event is a
             # duplicate, it means the event (and any previous events) have
             # already been inserted - so do not insert further events.
+            transitioned_at = int(event.metadata.creation_timestamp.timestamp())
+            event_str, event_type = _format_pod_missing_reason(
+                context=context,
+                pod_name=pod_name,
+                event=event,
+                first_pod=first_pod,
+                cluster_name=cluster_name,
+                transitioned_at=transitioned_at)
             try:
                 global_user_state.add_cluster_event(
                     cluster_name,
-                    None, f'[kubernetes pod {pod_name}] '
-                    f'{event.reason} {event.message}',
-                    global_user_state.ClusterEventType.DEBUG,
-                    transitioned_at=int(
-                        event.metadata.creation_timestamp.timestamp()),
+                    None,
+                    event_str,
+                    event_type,
+                    transitioned_at=transitioned_at,
                     expose_duplicate_error=True)
                 logger.debug(f'[pod {pod_name}] encountered new pod event: '
                              f'{event.metadata.creation_timestamp} '
@@ -1912,13 +1976,15 @@ def query_instances(
             for service in provider_config.get('services', [])
         ]))
 
+    first_pod = True
     for target_pod_name in target_pod_names:
         if target_pod_name not in cluster_status:
             # If the pod is not in the cluster_status, it means it's not
             # running.
             # Analyze what happened to the pod based on events.
             reason = _get_pod_missing_reason(context, namespace, cluster_name,
-                                             target_pod_name)
+                                             target_pod_name, first_pod)
+            first_pod = False
             reason = (f'{target_pod_name}: {reason}'
                       if reason is not None else None)
             if not non_terminated_only:
