@@ -6,6 +6,7 @@ import socket
 import tempfile
 import threading
 import time
+from unittest import mock
 
 import paramiko
 import pytest
@@ -301,3 +302,280 @@ class TestSSHCommandRunnerInteractiveAuth:
             handler_thread.join(timeout=2)
             if os.path.exists(log_path):
                 os.unlink(log_path)
+
+
+class TestSSHCommandRunnerAuthFailureDetection:
+    """Test SSHCommandRunner authentication failure detection logic."""
+
+    @pytest.fixture
+    def runner_with_interactive_auth(self):
+        """Create an SSHCommandRunner with interactive auth enabled."""
+        user_hash = common_utils.get_user_hash()
+        private_key_path, _, _ = auth_utils.get_ssh_key_and_lock_path(user_hash)
+        return command_runner.SSHCommandRunner(
+            node=('127.0.0.1', 22),
+            ssh_user='testuser',
+            ssh_private_key=os.path.expanduser(private_key_path),
+            ssh_control_name='test-control',
+            enable_interactive_auth=True,
+        )
+
+    @pytest.mark.parametrize(
+        'returncode,ssh_log_content,expect_retry',
+        [
+            # Auth failures that should trigger retry (rc=255 + auth pattern):
+            (255, 'Permission denied (keyboard-interactive).', True),
+            (255, 'Authentication failed.', True),
+            # Cases that should NOT trigger retry:
+            # - rc=255 but no auth pattern in log
+            (255, 'Connection timed out', False),
+            # - Successful command (rc=0)
+            (0, '', False),
+            # - Non-255 error code
+            (1, 'Permission denied', False),
+        ])
+    def test_interactive_auth_retry_detection(self,
+                                              runner_with_interactive_auth,
+                                              returncode, ssh_log_content,
+                                              expect_retry):
+        """Test that auth failure detection correctly triggers or skips retry."""
+        fd, tmp_path = tempfile.mkstemp()
+
+        def write_log_and_return(*_args, **_kwargs):
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                f.write(ssh_log_content)
+            return (returncode, '', '')
+
+        try:
+            with mock.patch('tempfile.mkstemp', return_value=(fd, tmp_path)), \
+                 mock.patch.object(command_runner.log_lib, 'run_with_log',
+                                   side_effect=write_log_and_return), \
+                 mock.patch.object(runner_with_interactive_auth,
+                                   '_retry_with_interactive_auth',
+                                   return_value=(0, 'success', '')) as mock_retry:
+                runner_with_interactive_auth.run('echo hello',
+                                                 require_outputs=True,
+                                                 separate_stderr=True)
+                if expect_retry:
+                    mock_retry.assert_called_once()
+                else:
+                    mock_retry.assert_not_called()
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    def test_interactive_auth_retry_on_log_read_failure(
+            self, runner_with_interactive_auth):
+        """Test retry fallback when SSH log file cannot be read."""
+        fd, tmp_path = tempfile.mkstemp()
+        real_open = open
+
+        def mock_open_raise_on_log(path, *args, **kwargs):
+            if path == tmp_path and args and 'r' in args[0]:
+                raise IOError('mock read error')
+            return real_open(path, *args, **kwargs)
+
+        try:
+            with mock.patch('tempfile.mkstemp', return_value=(fd, tmp_path)), \
+                 mock.patch.object(command_runner.log_lib, 'run_with_log',
+                                   return_value=(255, '', '')), \
+                 mock.patch('builtins.open', side_effect=mock_open_raise_on_log), \
+                 mock.patch.object(runner_with_interactive_auth,
+                                   '_retry_with_interactive_auth',
+                                   return_value=(0, 'success', '')) as mock_retry:
+                runner_with_interactive_auth.run('echo hello',
+                                                 require_outputs=True,
+                                                 separate_stderr=True)
+                mock_retry.assert_called_once()
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    def test_interactive_auth_disabled_does_not_retry(self):
+        """When enable_interactive_auth=False, no retry even on auth failure."""
+        user_hash = common_utils.get_user_hash()
+        private_key_path, _, _ = auth_utils.get_ssh_key_and_lock_path(user_hash)
+        runner = command_runner.SSHCommandRunner(
+            node=('127.0.0.1', 22),
+            ssh_user='testuser',
+            ssh_private_key=os.path.expanduser(private_key_path),
+            ssh_control_name='test-control',
+            enable_interactive_auth=False,
+        )
+
+        with mock.patch.object(command_runner.log_lib,
+                               'run_with_log',
+                               return_value=(255, '', 'Permission denied.')):
+            with mock.patch.object(runner,
+                                   '_retry_with_interactive_auth',
+                                   return_value=(0, '', '')) as mock_retry:
+                runner.run('echo hello',
+                           require_outputs=True,
+                           separate_stderr=True)
+                mock_retry.assert_not_called()
+
+
+class TestProxyJumpToProxyCommand:
+    """Test ProxyJump to ProxyCommand conversion."""
+
+    @pytest.fixture
+    def private_key_path(self) -> str:
+        """Get the SSH private key path."""
+        user_hash = common_utils.get_user_hash()
+        key_path, _, _ = auth_utils.get_ssh_key_and_lock_path(user_hash)
+        return os.path.expanduser(key_path)
+
+    @pytest.mark.parametrize(
+        'ssh_proxy_jump,expected_assertions',
+        [
+            # host
+            (
+                'bastion',
+                {
+                    'must_contain':
+                        ['ProxyCommand=', '-W', '[%h]:%p', 'bastion'],
+                    'must_not_contain': ['ProxyJump=', '-l '],
+                },
+            ),
+            # user@host
+            (
+                'ubuntu@bastion',
+                {
+                    'must_contain': [
+                        'ProxyCommand=', '-l ubuntu', '-W', '[%h]:%p', 'bastion'
+                    ],
+                    'must_not_contain': ['ProxyJump='],
+                },
+            ),
+            # user@host:port
+            (
+                'admin@bastion:2222',
+                {
+                    'must_contain':
+                        ['ProxyCommand=', '-l admin', '-p 2222', 'bastion'],
+                    'must_not_contain': ['ProxyJump='],
+                },
+            ),
+            # ipv4:port
+            (
+                '1.2.3.4:2222',
+                {
+                    'must_contain': [
+                        'ProxyCommand=',
+                        '-p 2222',
+                        '1.2.3.4',
+                    ],
+                    'must_not_contain': ['ProxyJump='],
+                },
+            ),
+            # user@[ipv6]:port
+            (
+                'admin@[2001:db8::1]:2222',
+                {
+                    'must_contain': [
+                        'ProxyCommand=',
+                        '-l admin',
+                        '-p 2222',
+                        # Brackets should not be included in the host argument.
+                        '2001:db8::1',
+                    ],
+                    'must_not_contain': ['ProxyJump=', '[2001:db8::1]'],
+                },
+            ),
+            # user@ipv6 (no port)
+            (
+                'root@2001:aaaa:bbbb:ffff::1',
+                {
+                    'must_contain': [
+                        'ProxyCommand=',
+                        '-l root',
+                        '2001:aaaa:bbbb:ffff::1',
+                    ],
+                    'must_not_contain': ['ProxyJump=', '-p '],
+                },
+            ),
+            # user@ipv6 (numeric last hextet; still no port)
+            (
+                'root@2001:db8::22',
+                {
+                    'must_contain': [
+                        'ProxyCommand=',
+                        '-l root',
+                        '2001:db8::22',
+                    ],
+                    'must_not_contain': ['ProxyJump=', '-p '],
+                },
+            ),
+            # Multi-hop
+            (
+                'user1@hop1,user2@hop2',
+                {
+                    'must_contain':
+                        ['ProxyCommand=', '-J user1@hop1', '-l user2', 'hop2'],
+                    'must_not_contain': ['ProxyJump='],
+                },
+            ),
+        ],
+    )
+    def test_proxyjump_to_proxycommand_conversion(self, private_key_path,
+                                                  ssh_proxy_jump,
+                                                  expected_assertions) -> None:
+        """ProxyJump should be converted to equivalent ProxyCommand."""
+        runner = command_runner.SSHCommandRunner(
+            node=('10.0.0.5', 22),
+            ssh_user='ubuntu',
+            ssh_private_key=private_key_path,
+            ssh_proxy_jump=ssh_proxy_jump,
+        )
+
+        ssh_cmd = runner.ssh_base_command(
+            ssh_mode=command_runner.SshMode.NON_INTERACTIVE,
+            port_forward=None,
+            connect_timeout=None,
+        )
+        ssh_cmd_str = ' '.join(ssh_cmd)
+
+        for expected in expected_assertions['must_contain']:
+            assert expected in ssh_cmd_str, (
+                f"Expected '{expected}' in command: {ssh_cmd_str}")
+        for unexpected in expected_assertions['must_not_contain']:
+            assert unexpected not in ssh_cmd_str, (
+                f"Unexpected '{unexpected}' in command: {ssh_cmd_str}")
+
+    @pytest.mark.parametrize(
+        'ssh_proxy_jump',
+        [
+            # Invalid bracketed IPv6 port.
+            ('admin@[::1]:ssh'),
+            # Invalid port.
+            ('admin@bastion:notaport'),
+            ('bastion:notaport'),
+            # Empty host.
+            (':22'),
+            # Empty user.
+            ('@bastion'),
+            # Missing host.
+            ('admin@'),
+            # Malformed bracketed IPv6 (no closing bracket).
+            ('admin@[::1'),
+            # Malformed bracketed IPv6 (unexpected suffix after bracket).
+            ('admin@[::1]foo'),
+            # Empty bracketed host.
+            ('admin@[]:22'),
+        ],
+    )
+    def test_proxyjump_to_proxycommand_invalid_jump_spec_raises(
+            self, private_key_path, ssh_proxy_jump) -> None:
+        runner = command_runner.SSHCommandRunner(
+            node=('10.0.0.5', 22),
+            ssh_user='ubuntu',
+            ssh_private_key=private_key_path,
+            ssh_proxy_jump=ssh_proxy_jump,
+        )
+
+        with pytest.raises(ValueError, match='Invalid'):
+            runner.ssh_base_command(
+                ssh_mode=command_runner.SshMode.NON_INTERACTIVE,
+                port_forward=None,
+                connect_timeout=None,
+            )
