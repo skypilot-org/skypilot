@@ -2526,10 +2526,9 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
         start_time = time.time()
         while time.time() - start_time < oauth_lib.AUTH_TIMEOUT:
             time.sleep(2)
-            resp = requests.get(
-                f'{endpoint}/api/v1/auth/sessions/{session_id}',
-                params={'code_verifier': code_verifier},
-                timeout=10)
+            resp = requests.get(f'{endpoint}/api/v1/auth/sessions/{session_id}',
+                                params={'code_verifier': code_verifier},
+                                timeout=10)
 
             if resp.status_code == 200:
                 data = resp.json()
@@ -2602,11 +2601,13 @@ def _try_manual_token_entry(endpoint: str) -> Optional[str]:
     """Fall back to manual token entry."""
     try:
         token_url = f'{endpoint}/token'
-        click.echo(f'Visit this URL to get the token:\n\n'
-                   f'{colorama.Style.BRIGHT}{token_url}{colorama.Style.RESET_ALL}\n')
+        click.echo(
+            f'Visit this URL to get the token:\n\n'
+            f'{colorama.Style.BRIGHT}{token_url}{colorama.Style.RESET_ALL}\n')
         return click.prompt('Paste the token') or None
     except (KeyboardInterrupt, click.Abort):
-        click.echo(f'\n{colorama.Style.DIM}Cancelled.{colorama.Style.RESET_ALL}')
+        click.echo(
+            f'\n{colorama.Style.DIM}Cancelled.{colorama.Style.RESET_ALL}')
         return None
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Manual token entry failed: {e}')

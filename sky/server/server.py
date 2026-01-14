@@ -797,8 +797,8 @@ async def create_auth_session(
                                     detail='code_challenge is required')
 
     if code_challenge_method != 'S256':
-        raise fastapi.HTTPException(
-            status_code=400, detail='code_challenge_method must be S256')
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='code_challenge_method must be S256')
 
     session = auth_sessions.auth_session_store.create_session(code_challenge)
 
@@ -806,12 +806,11 @@ async def create_auth_session(
         session.created_at + auth_sessions.SESSION_EXPIRATION_SECONDS,
         tz=datetime.timezone.utc).isoformat()
 
-    return fastapi.responses.JSONResponse(
-        content={
-            'session_id': session.session_id,
-            'expires_at': expires_at,
-        },
-        headers={'Cache-Control': 'no-store'})
+    return fastapi.responses.JSONResponse(content={
+        'session_id': session.session_id,
+        'expires_at': expires_at,
+    },
+                                          headers={'Cache-Control': 'no-store'})
 
 
 @app.get('/api/v1/auth/sessions/{session_id}')
@@ -832,21 +831,21 @@ async def get_auth_session(
         raise fastapi.HTTPException(status_code=400,
                                     detail='code_verifier is required')
 
-    status, token = auth_sessions.auth_session_store.poll_session(
+    session_status, auth_token = auth_sessions.auth_session_store.poll_session(
         session_id, code_verifier)
 
-    if status is None:
+    if session_status is None:
         raise fastapi.HTTPException(status_code=404, detail='Session not found')
 
-    if status == 'pending':
-        return fastapi.responses.JSONResponse(status_code=202,
-                                              content={'status': 'pending'},
-                                              headers={'Cache-Control':
-                                                       'no-store'})
+    if session_status == 'pending':
+        return fastapi.responses.JSONResponse(
+            status_code=202,
+            content={'status': 'pending'},
+            headers={'Cache-Control': 'no-store'})
 
     return fastapi.responses.JSONResponse(content={
         'status': 'authorized',
-        'token': token
+        'token': auth_token
     },
                                           headers={'Cache-Control': 'no-store'})
 
@@ -884,11 +883,11 @@ async def authorize_auth_session(
         'cookies': dict(request.cookies),
     }
     json_bytes = json.dumps(token_data).encode('utf-8')
-    token = base64.b64encode(json_bytes).decode('utf-8')
+    auth_token = base64.b64encode(json_bytes).decode('utf-8')
 
     # Store the token in the session
     success = auth_sessions.auth_session_store.authorize_session(
-        session_id, token)
+        session_id, auth_token)
     if not success:
         raise fastapi.HTTPException(status_code=404,
                                     detail='Session not found or expired')
@@ -945,7 +944,7 @@ async def authorize_page(
 
 def _get_authorize_success_html() -> str:
     """Return HTML for successful authorization."""
-    return '''<!DOCTYPE html>
+    return """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -988,7 +987,7 @@ def _get_authorize_success_html() -> str:
         <p>You can close this tab and return to your terminal.</p>
     </div>
 </body>
-</html>'''
+</html>"""
 
 
 @app.post('/check')
