@@ -4001,11 +4001,11 @@ class IBMCosStore(AbstractStore):
           StorageBucketCreateError: If bucket creation fails.
         """
         try:
-            self.client.create_bucket(Bucket=bucket_name,
-                                      CreateBucketConfiguration={
-                                          'LocationConstraint':
-                                              f'{region}-smart'
-                                      })
+            self.client.create_bucket(
+                Bucket=bucket_name,
+                CreateBucketConfiguration={
+                    'LocationConstraint': f'{region}-smart'
+                })
             logger.info(f'  {colorama.Style.DIM}Created IBM COS bucket '
                         f'{bucket_name!r} in {region} '
                         'with storage class smart tier'
