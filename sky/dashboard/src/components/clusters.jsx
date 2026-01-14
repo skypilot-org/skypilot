@@ -599,6 +599,7 @@ export function ClusterTable({
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [fetchError, setFetchError] = useState(null);
 
   const fetchOptionValuesFromClusters = (clusters) => {
     let optionValues = {
@@ -641,6 +642,7 @@ export function ClusterTable({
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     setLocalLoading(true);
+    setFetchError(null);
 
     try {
       // Use cached data if available, which should have been preloaded by cache preloader
@@ -693,6 +695,7 @@ export function ClusterTable({
       }
     } catch (error) {
       console.error('Error fetching cluster data:', error);
+      setFetchError(error.message || 'Failed to fetch cluster data');
       setOptionValues(fetchOptionValuesFromClusters([]));
       setData([]);
     }
@@ -987,7 +990,16 @@ export function ClusterTable({
                     colSpan={9}
                     className="text-center py-6 text-gray-500"
                   >
-                    {showHistory ? 'No clusters found' : 'No active clusters'}
+                    {fetchError ? (
+                      <div className="text-red-500">
+                        <span className="font-medium">Error: </span>
+                        {fetchError}
+                      </div>
+                    ) : showHistory ? (
+                      'No clusters found'
+                    ) : (
+                      'No active clusters'
+                    )}
                   </TableCell>
                 </TableRow>
               )}
