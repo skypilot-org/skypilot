@@ -718,6 +718,8 @@ def test_get_pvc_binding_status_pending_pvc(monkeypatch):
     assert 'Pending' in result
     assert 'ProvisioningFailed' in result
     assert 'storageclass does not support ReadWriteMany' in result
+    assert 'kubectl describe pvc' in result
+    assert 'test-namespace' in result
 
 
 def test_raise_pod_scheduling_errors_pvc_unbound(monkeypatch):

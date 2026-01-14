@@ -209,11 +209,15 @@ def _get_pvc_binding_status(namespace: str, context: Optional[str],
 
     if pending_pvcs:
         pvc_list = ', '.join(pending_pvcs)
+        # Get the first PVC name for the kubectl command
+        first_pvc_name = pending_pvcs[0].split(' ')[0]
         return (
             f'PVC binding issue detected: {pvc_list}. '
             'Check if the storage class supports the requested access mode '
             'and if there is sufficient storage capacity. '
-            'Run `sky volumes ls` or check the dashboard for volume status.')
+            'Run `sky volumes ls` for status of volumes managed by SkyPilot, '
+            f'or use `kubectl describe pvc {first_pvc_name} -n {namespace}` '
+            'to debug.')
     return None
 
 
@@ -358,10 +362,11 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                     'PVC binding issue detected. '
                     'Check if the storage class supports the requested access '
                     'mode and if there is sufficient storage capacity. '
-                    'Run `sky volumes ls` or check the dashboard for volume '
-                    'status.')
+                    'Run `sky volumes ls` for status of volumes managed by '
+                    'SkyPilot, or use `kubectl describe pvc -n {namespace}` '
+                    'to debug.'.format(namespace=namespace))
                 raise config_lib.KubernetesError(
-                    f'{timeout_err_msg} {pvc_msg} '
+                    f'{pvc_msg} '
                     f'Pod status: {pod_status} '
                     f'Details: \'{event_message}\' ')
 
@@ -377,7 +382,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
             continue
         pvc_error = _get_pvc_binding_status(namespace, context, pod)
         if pvc_error is not None:
-            raise config_lib.KubernetesError(f'{timeout_err_msg} {pvc_error}')
+            raise config_lib.KubernetesError(pvc_error)
 
     raise config_lib.KubernetesError(f'{timeout_err_msg}')
 
