@@ -349,13 +349,13 @@ def get_all_volumes_errors(
                             volume_errors[volume_name] = (
                                 'PVC is pending. This may be due to '
                                 'insufficient storage resources or '
-                                'misconfiguration. To diagnose, run: '
+                                'misconfiguration. To debug, run: '
                                 f'kubectl describe pvc {pvc_name} -n '
                                 f'{namespace}')
                 elif pvc_phase == 'Lost':
                     volume_errors[volume_name] = (
                         'PVC is in Lost state. The bound PersistentVolume '
-                        'has been deleted or is unavailable. To diagnose, '
+                        'has been deleted or is unavailable. To debug, '
                         f'run: kubectl describe pvc {pvc_name} -n {namespace}')
                 else:
                     # Other phases (e.g., Terminating)
@@ -445,7 +445,7 @@ def _check_pvc_access_mode_error(context: Optional[str],
     return (f'PVC access mode mismatch: PVC requests {pvc_access_mode}, but '
             f'available PersistentVolumes support: {pv_access_modes_str}. '
             f'Update the volume with the correct access_mode '
-            f'(e.g., ReadWriteMany) and recreate it. To diagnose, run: '
+            f'(e.g., ReadWriteMany) and recreate it. To debug, run: '
             f'kubectl describe pvc {pvc_name} -n {namespace}')
 
 
