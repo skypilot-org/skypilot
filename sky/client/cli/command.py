@@ -6683,6 +6683,9 @@ def api_start(deploy: bool, host: str, foreground: bool,
                   host=host,
                   foreground=foreground,
                   enable_basic_auth=enable_basic_auth)
+    api_server_url = server_common.get_server_url(host)
+    api_server_info = server_common.get_api_server_status(api_server_url)
+    server_common.check_and_print_upgrade_hint(api_server_info, api_server_url)
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
@@ -6954,6 +6957,8 @@ def api_info():
                f'version: {api_server_info.version}\n'
                f'{ux_utils.INDENT_SYMBOL}User: {user.name} ({user.id})\n'
                f'{ux_utils.INDENT_LAST_SYMBOL}{location}')
+    # Show upgrade hint if available
+    server_common.check_and_print_upgrade_hint(api_server_info, url)
 
 
 @cli.group(cls=_NaturalOrderGroup)

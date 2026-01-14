@@ -66,6 +66,7 @@ from sky.server import plugins
 from sky.server import server_utils
 from sky.server import state
 from sky.server import stream_utils
+from sky.server import version_check
 from sky.server import versions
 from sky.server.auth import authn
 from sky.server.auth import loopback
@@ -222,8 +223,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if request.state.auth_user is not None:
             return await call_next(request)
 
-        if managed_job_utils.is_consolidation_mode(
-        ) and loopback.is_loopback_request(request):
+        if loopback.is_loopback_request(request):
             return await call_next(request)
 
         if request.url.path.startswith('/api/health'):
@@ -530,6 +530,8 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             logger.debug(f'Request {event.id} already exists.')
     await schedule_on_boot_check_async()
     asyncio.create_task(cleanup_upload_ids())
+    # Start periodic version check task (runs daily)
+    asyncio.create_task(version_check.check_versions_periodically())
     if metrics_utils.METRICS_ENABLED:
         # Start monitoring the event loop lag in each server worker
         # event loop (process).
@@ -1899,6 +1901,11 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
                                         detail='Authentication required')
 
     logger.debug(f'Health endpoint: request.state.auth_user = {user}')
+
+    # Get latest version from cache (returns None for dev versions
+    # or if not available)
+    latest_version = version_check.get_latest_version_for_current()
+
     return responses.APIHealthResponse(
         status=server_status,
         # Kept for backward compatibility, clients before 0.11.0 will read this
@@ -1920,6 +1927,8 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         ingress_basic_auth_enabled=os.environ.get(
             constants.SKYPILOT_INGRESS_BASIC_AUTH_ENABLED,
             'false').lower() == 'true',
+        # Latest version info (if available and newer than current)
+        latest_version=latest_version,
     )
 
 

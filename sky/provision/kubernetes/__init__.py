@@ -16,3 +16,4 @@ from sky.provision.kubernetes.volume import delete_volume
 from sky.provision.kubernetes.volume import get_all_volumes_usedby
 from sky.provision.kubernetes.volume import get_volume_usedby
 from sky.provision.kubernetes.volume import map_all_volumes_usedby
+from sky.provision.kubernetes.volume import refresh_volume_config

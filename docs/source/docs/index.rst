@@ -302,6 +302,7 @@ Read the research:
 
    ../examples/managed-jobs
    Job Groups <../examples/job-groups>
+   Checkpointing and Recovery <../examples/checkpointing>
    Multi-Node Jobs <../running-jobs/distributed-jobs>
    Many Parallel Jobs <../running-jobs/many-jobs>
    Model Training Guide <../reference/training-guide>
@@ -363,6 +364,7 @@ Read the research:
    ../cloud-setup/cloud-permissions/index
    Admin Policies <../cloud-setup/policy>
    External Logging Storage <../cloud-setup/external-logging>
+   Airgapped Environments <../cloud-setup/airgap>
 
 .. toctree::
    :hidden:
