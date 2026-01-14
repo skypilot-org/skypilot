@@ -5,6 +5,7 @@ import textwrap
 import time
 from typing import Any, cast, Dict, List, Optional, Tuple
 
+from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
@@ -13,6 +14,7 @@ from sky.provision import constants
 from sky.provision.slurm import utils as slurm_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import db_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -30,6 +32,157 @@ POLL_INTERVAL_SECONDS = 2
 # Default KillWait is 30 seconds, so we add some buffer time here.
 _JOB_TERMINATION_TIMEOUT_SECONDS = 60
 _SKY_DIR_CREATION_TIMEOUT_SECONDS = 30
+
+# Map Slurm job states to human-readable failure reasons
+_SLURM_STATE_REASONS = {
+    'CANCELLED': 'job was cancelled',
+    'FAILED': 'job failed',
+    'TIMEOUT': 'job exceeded time limit',
+    'NODE_FAIL': 'job terminated due to node failure',
+    'PREEMPTED': 'job was preempted',
+    'OUT_OF_MEMORY': 'job ran out of memory',
+    'DEADLINE': 'job reached deadline',
+    'BOOT_FAIL': 'job failed due to node boot failure',
+}
+
+
+def _format_slurm_job_event(
+    job_id: str,
+    job_history: slurm.JobHistoryInfo,
+) -> Tuple[str, global_user_state.ClusterEventType]:
+    """Format a Slurm job event for storage.
+
+    Args:
+        job_id: The Slurm job ID.
+        job_history: The job history information from sacct.
+
+    Returns:
+        A tuple of (formatted event string, event type).
+    """
+    state = job_history.state
+    reason = job_history.reason
+    exit_code = job_history.exit_code
+    node_list = job_history.node_list
+
+    # Build event message
+    parts = [f'[slurm job {job_id}]']
+    parts.append(f'State: {state}')
+
+    if reason and reason not in ('None', ''):
+        parts.append(f'Reason: {reason}')
+
+    if exit_code and exit_code not in ('0:0', ''):
+        parts.append(f'ExitCode: {exit_code}')
+
+    # FailedNode is particularly useful for NODE_FAIL states
+    if job_history.failed_node and job_history.failed_node not in ('', 'None'):
+        parts.append(f'FailedNode: {job_history.failed_node}')
+
+    if node_list and node_list not in ('', 'None'):
+        parts.append(f'Nodes: {node_list}')
+
+    # MaxRSS helps diagnose out-of-memory issues
+    if job_history.max_rss and job_history.max_rss not in ('', '0'):
+        parts.append(f'MaxRSS: {job_history.max_rss}')
+
+    # Timelimit helps diagnose TIMEOUT states
+    if (state == 'TIMEOUT' and job_history.timelimit and
+            job_history.timelimit not in ('', 'UNLIMITED')):
+        parts.append(f'Timelimit: {job_history.timelimit}')
+
+    if job_history.elapsed and job_history.elapsed != '00:00:00':
+        parts.append(f'Elapsed: {job_history.elapsed}')
+
+    # AdminComment may contain additional failure details from cluster admins
+    if (job_history.admin_comment and
+            job_history.admin_comment not in ('', 'None')):
+        parts.append(f'AdminComment: {job_history.admin_comment}')
+
+    event_str = ' '.join(parts)
+    event_type = global_user_state.ClusterEventType.DEBUG
+    return event_str, event_type
+
+
+def _get_slurm_job_missing_reason(
+    cluster_name: str,
+    cluster_name_on_cloud: str,
+    client: slurm.SlurmClient,
+) -> Optional[str]:
+    """Get events for a missing Slurm job and write to cluster events.
+
+    This function queries sacct to find historical information about jobs
+    that are no longer visible in squeue (completed, failed, cancelled, etc.)
+    and stores the events in the cluster events table.
+
+    Args:
+        cluster_name: The SkyPilot cluster name.
+        cluster_name_on_cloud: The name used for the Slurm job.
+        client: The SlurmClient to use for queries.
+
+    Returns:
+        A human-readable reason for why the job is missing, or None if
+        no useful information could be found.
+    """
+    logger.debug(f'Analyzing sacct history for job {cluster_name_on_cloud}')
+
+    # Get job history from sacct
+    job_history_list = client.get_job_history_by_name(cluster_name_on_cloud)
+
+    if not job_history_list:
+        logger.debug(f'No job history found for {cluster_name_on_cloud}')
+        return None
+
+    # Process the most recent job history entry
+    # (jobs are returned in chronological order, so take the last one)
+    job_history = job_history_list[-1]
+    job_id = job_history.job_id
+
+    # Format and store the event
+    event_str, event_type = _format_slurm_job_event(job_id, job_history)
+
+    # Try to store the event
+    try:
+        global_user_state.add_cluster_event(
+            cluster_name,
+            None,
+            event_str,
+            event_type,
+            expose_duplicate_error=True,
+        )
+        logger.debug(f'[slurm job {job_id}] recorded event: {event_str}')
+    except db_utils.UniqueConstraintViolationError:
+        # Event already exists, no new information to return
+        logger.debug(f'[slurm job {job_id}] event already recorded')
+        return None
+
+    # Determine the failure reason from the job state
+    state = job_history.state
+    reason = job_history.reason
+
+    # Build human-readable failure reason
+    if state in _SLURM_STATE_REASONS:
+        failure_reason = _SLURM_STATE_REASONS[state]
+        if reason and reason not in ('None', ''):
+            failure_reason = f'{failure_reason} ({reason})'
+    elif reason and reason not in ('None', ''):
+        failure_reason = reason
+    else:
+        failure_reason = f'job ended with state {state}'
+
+    # Add exit code information if non-zero
+    if job_history.exit_code and job_history.exit_code not in ('0:0', ''):
+        failure_reason = f'{failure_reason}, exit code: {job_history.exit_code}'
+
+    # Add failed node information for NODE_FAIL states
+    if (job_history.failed_node and
+            job_history.failed_node not in ('', 'None')):
+        failure_reason = f'{failure_reason}, failed node: {job_history.failed_node}'
+
+    # Add memory info for OUT_OF_MEMORY states
+    if state == 'OUT_OF_MEMORY' and job_history.max_rss:
+        failure_reason = f'{failure_reason}, max memory used: {job_history.max_rss}'
+
+    return failure_reason
 
 
 def _sky_cluster_home_dir(cluster_name_on_cloud: str) -> str:
@@ -303,7 +456,7 @@ def query_instances(
     retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional[status_lib.ClusterStatus], Optional[str]]]:
     """See sky/provision/__init__.py"""
-    del cluster_name, retry_if_missing  # Unused for Slurm
+    del retry_if_missing  # Unused for Slurm
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
 
     ssh_config_dict = provider_config['ssh']
@@ -342,6 +495,8 @@ def query_instances(
 
     statuses: Dict[str, Tuple[Optional[status_lib.ClusterStatus],
                               Optional[str]]] = {}
+    found_job_in_squeue = False
+
     for state, sky_status in status_map.items():
         jobs = client.query_jobs(
             cluster_name_on_cloud,
@@ -349,13 +504,15 @@ def query_instances(
         )
 
         for job_id in jobs:
+            found_job_in_squeue = True
             if state in ('pending', 'failed', 'node_fail', 'cancelled',
                          'completed'):
                 reason = client.get_job_reason(job_id)
                 if non_terminated_only and sky_status is None:
-                    # TODO(kevin): For better UX, we should also find out
-                    # which node(s) exactly that failed if it's a node_fail
-                    # state.
+                    # For terminated jobs visible in squeue, get more detailed
+                    # info from sacct and record events
+                    _get_slurm_job_missing_reason(
+                        cluster_name, cluster_name_on_cloud, client)
                     logger.debug(f'Job {job_id} is terminated, but '
                                  'query_instances is called with '
                                  f'non_terminated_only=True. State: {state}, '
@@ -368,10 +525,16 @@ def query_instances(
                     instance_id = slurm_utils.instance_id(job_id, node)
                     statuses[instance_id] = (sky_status, None)
 
-        # TODO(kevin): Query sacct too to get more historical job info.
-        # squeue only includes completed jobs that finished in the last
-        # MinJobAge seconds (default 300s). Or could be earlier if it
-        # reaches MaxJobCount first (default 10_000).
+    # If no job was found in squeue, query sacct to get historical job info.
+    # squeue only includes completed jobs that finished in the last
+    # MinJobAge seconds (default 300s). Or could be earlier if it
+    # reaches MaxJobCount first (default 10_000).
+    if not found_job_in_squeue:
+        reason = _get_slurm_job_missing_reason(
+            cluster_name, cluster_name_on_cloud, client)
+        if reason:
+            logger.debug(f'Job {cluster_name_on_cloud} not found in squeue, '
+                         f'but found in sacct: {reason}')
 
     return statuses
 

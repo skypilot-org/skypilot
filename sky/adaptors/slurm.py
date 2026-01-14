@@ -45,6 +45,25 @@ class SlurmPartition(NamedTuple):
     maxtime: Optional[int]
 
 
+class JobHistoryInfo(NamedTuple):
+    """Historical information about a Slurm job from sacct."""
+    job_id: str
+    state: str
+    exit_code: str
+    derived_exit_code: str
+    reason: str
+    node_list: str
+    start_time: str
+    end_time: str
+    elapsed: str
+    # Additional fields for better diagnosis
+    failed_node: str  # Node whose failure caused job termination
+    max_rss: str  # Maximum resident set size (memory usage)
+    timelimit: str  # Job time limit
+    alloc_tres: str  # Allocated trackable resources (GPUs, etc.)
+    admin_comment: str  # Admin comments (may contain failure info)
+
+
 # TODO(kevin): Add more API types for other client functions.
 class NodeInfo(NamedTuple):
     """Information about a Slurm node from sinfo."""
@@ -625,3 +644,62 @@ class SlurmClient:
             at the end of the name.
         """
         return [partition.name for partition in self.get_partitions_info()]
+
+    def get_job_history_by_name(self, job_name: str) -> List[JobHistoryInfo]:
+        """Get historical job information for jobs matching a name.
+
+        This is useful for getting information about jobs that have completed
+        or failed, which are no longer visible in squeue.
+
+        Args:
+            job_name: The Slurm job name to search for.
+
+        Returns:
+            List of JobHistoryInfo for matching jobs.
+        """
+        # Use sacct with --name to filter by job name
+        # -X: Only show job allocations, not steps (.batch, .0, etc.)
+        # -P: Parsable output, no trailing delimiter
+        # --delimiter: Use SEP for consistency with other Slurm commands
+        # --starttime: Limit search to recent jobs (last 7 days)
+        fmt = ('JobID,State,ExitCode,DerivedExitCode,'
+               'Reason,NodeList,Start,End,Elapsed,'
+               'FailedNode,MaxRSS,Timelimit,AllocTRES,AdminComment')
+        cmd = (f'sacct --name={job_name} -X -P --noheader '
+               f'--delimiter="{SEP}" --starttime=now-7days -o "{fmt}"')
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            logger.debug(f'Failed to get job history for name {job_name}: '
+                         f'{stdout}\n{stderr}')
+            return []
+
+        results = []
+        seen_job_ids = set()
+        for line in stdout.strip().splitlines():
+            if not line:
+                continue
+            parts = line.split(SEP)
+            if len(parts) != 14:
+                logger.debug(f'Unexpected sacct output format: {line!r}')
+                continue
+            entry_job_id = parts[0]
+            if entry_job_id not in seen_job_ids:
+                seen_job_ids.add(entry_job_id)
+                results.append(
+                    JobHistoryInfo(
+                        job_id=parts[0],
+                        state=parts[1],
+                        exit_code=parts[2],
+                        derived_exit_code=parts[3],
+                        reason=parts[4],
+                        node_list=parts[5],
+                        start_time=parts[6],
+                        end_time=parts[7],
+                        elapsed=parts[8],
+                        failed_node=parts[9],
+                        max_rss=parts[10],
+                        timelimit=parts[11],
+                        alloc_tres=parts[12],
+                        admin_comment=parts[13],
+                    ))
+        return results
