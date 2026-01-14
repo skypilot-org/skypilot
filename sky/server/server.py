@@ -1844,6 +1844,7 @@ async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
     for plugin_info in plugins.get_plugins():
         info = {
             'js_extension_path': plugin_info.js_extension_path,
+            'requires_early_init': plugin_info.requires_early_init,
         }
         for attr in ('name', 'version', 'commit'):
             value = getattr(plugin_info, attr, None)
