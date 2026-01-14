@@ -84,11 +84,11 @@ def _create_virtual_instance(
         ssh_proxy_jump=ssh_proxy_jump,
     )
 
-    partition_info = slurm_utils.get_partition_info(cluster_name_on_cloud,
-                                                    partition)
+    slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
+    partition_info = slurm_utils.get_partition_info(slurm_cluster, partition)
     if partition_info is None:
         raise ValueError(f'Partition info for {partition} not found '
-                         f'for cluster {cluster_name_on_cloud}')
+                         f'for SLURM cluster {slurm_cluster}')
     max_time = slurm_utils.format_slurm_duration(partition_info.maxtime)
 
     # COMPLETING state occurs when a job is being terminated - during this

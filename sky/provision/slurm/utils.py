@@ -233,6 +233,15 @@ def instance_id(job_id: str, node: str) -> str:
     return f'job{job_id}-{node}'
 
 
+def get_slurm_cluster_from_config(provider_config: Dict[str, Any]) -> str:
+    """Return the Slurm cluster from the provider config.
+    """
+    slurm_cluster = provider_config.get('cluster')
+    if slurm_cluster is None:
+        raise ValueError('Slurm cluster not specified in provider config.')
+    return slurm_cluster
+
+
 def get_partition_from_config(provider_config: Dict[str, Any]) -> str:
     """Return the partition from the provider config.
 
