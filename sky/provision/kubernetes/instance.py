@@ -179,14 +179,16 @@ def _format_pvc_binding_error(pvc_details: Optional[str], pvc_names: List[str],
         header = f'PVC binding issue detected: {pvc_details}.'
     else:
         header = 'PVC binding issue detected.'
-    # kubectl describe pvc can take multiple PVC names as args
-    pvc_names_str = ' '.join(pvc_names) if pvc_names else '<pvc-name>'
+    debug_lines = ['To debug, run:', '  sky volumes ls']
+    if pvc_names:
+        # kubectl describe pvc can take multiple PVC names as args
+        pvc_names_str = ' '.join(pvc_names)
+        debug_lines.append(
+            f'  kubectl describe pvc {pvc_names_str} -n {namespace}')
     return (f'{header}\n'
             'Check if the storage class supports the requested access '
-            'mode and if there is sufficient storage capacity.\n'
-            'To debug, run:\n'
-            '  sky volumes ls\n'
-            f'  kubectl describe pvc {pvc_names_str} -n {namespace}')
+            'mode and if there is sufficient storage capacity.\n' +
+            '\n'.join(debug_lines))
 
 
 def _get_pvc_binding_status(namespace: str, context: Optional[str],
