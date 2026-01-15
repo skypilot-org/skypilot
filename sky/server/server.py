@@ -802,10 +802,7 @@ async def poll_auth_token(
     if auth_token is None:
         raise fastapi.HTTPException(status_code=404, detail='Session not found')
 
-    return fastapi.responses.JSONResponse(content={
-        'status': 'authorized',
-        'token': auth_token
-    },
+    return fastapi.responses.JSONResponse(content={'token': auth_token},
                                           headers={'Cache-Control': 'no-store'})
 
 

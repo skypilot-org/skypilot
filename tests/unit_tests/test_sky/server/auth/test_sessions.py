@@ -8,21 +8,6 @@ from sky.server.auth import sessions
 from sky.utils import common_utils
 
 
-class TestAuthSession:
-    """Tests for the AuthSession class."""
-
-    def test_session_creation(self):
-        session = sessions.AuthSession('challenge', 'token123', time.time())
-        assert session.code_challenge == 'challenge'
-        assert session.token == 'token123'
-        assert not session.is_expired()
-
-    def test_session_expiration(self):
-        old_time = time.time() - sessions.SESSION_EXPIRATION_SECONDS - 1
-        session = sessions.AuthSession('challenge', 'token123', old_time)
-        assert session.is_expired()
-
-
 class TestComputeCodeChallenge:
     """Tests for the compute_code_challenge function."""
 

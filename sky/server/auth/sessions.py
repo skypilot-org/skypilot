@@ -20,18 +20,6 @@ SESSION_EXPIRATION_SECONDS = 300
 _AUTH_SESSIONS_TABLE = 'auth_sessions'
 
 
-class AuthSession:
-    """Represents an authentication session."""
-
-    def __init__(self, code_challenge: str, token: str, created_at: float):
-        self.code_challenge = code_challenge
-        self.token = token
-        self.created_at = created_at
-
-    def is_expired(self) -> bool:
-        return time.time() - self.created_at > SESSION_EXPIRATION_SECONDS
-
-
 class AuthSessionStore:
     """SQLite-backed storage for auth sessions."""
 

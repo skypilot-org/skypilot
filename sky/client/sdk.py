@@ -2511,7 +2511,7 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
 
             if resp.status_code == 200:
                 data = resp.json()
-                if data.get('status') == 'authorized' and 'token' in data:
+                if 'token' in data:
                     return data['token']
             elif resp.status_code != 404:
                 # 404 means user hasn't clicked Authorize yet, keep polling
