@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# YAPF formatter, adapted from ray.
+# Fast formatter using Ruff (replaces YAPF, isort, pylint)
 #
 # Usage:
 #    # Do work and commit your work.
@@ -7,11 +7,9 @@
 #    # Format files that differ from origin/master.
 #    bash format.sh
 
-#    # Commit changed files with message 'Run yapf and pylint'
+#    # Commit changed files with message 'Run formatter'
 #
-#
-# YAPF + Clang formatter (if installed). This script formats all changed files from the last mergebase.
-# You are encouraged to run this locally before pushing changes for review.
+# Ruff is 10-100x faster than the traditional tools it replaces.
 
 # Cause the script to exit if a single command fails
 set -eo pipefail
@@ -21,17 +19,12 @@ builtin cd "$(dirname "${BASH_SOURCE:-$0}")"
 ROOT="$(git rev-parse --show-toplevel)"
 builtin cd "$ROOT" || exit 1
 
-YAPF_VERSION=$(yapf --version | awk '{print $2}')
-PYLINT_VERSION=$(pylint --version | head -n 1 | awk '{print $2}')
-PIP_LIST_CMD="pip list"
-if ! command -v pip >/dev/null 2>&1; then
-    PIP_LIST_CMD="uv pip list"
-fi
-PYLINT_QUOTES_VERSION=$($PIP_LIST_CMD | awk '/pylint-quotes/ {print $2}')
+# Check tool versions
+RUFF_VERSION=$(ruff --version | awk '{print $2}')
 MYPY_VERSION=$(mypy --version | awk '{print $2}')
 BLACK_VERSION=$(black --version | head -n 1 | awk '{print $2}')
 
-# # params: tool name, tool version, required version
+# params: tool name, tool version, required version
 tool_version_check() {
     if [[ $2 != $3 ]]; then
         echo "Wrong $1 version installed: $3 is required, not $2."
@@ -39,125 +32,77 @@ tool_version_check() {
     fi
 }
 
-tool_version_check "yapf" $YAPF_VERSION "$(grep yapf requirements-dev.txt | cut -d'=' -f3)"
-tool_version_check "pylint" $PYLINT_VERSION "$(grep "pylint==" requirements-dev.txt | cut -d'=' -f3)"
-tool_version_check "pylint-quotes" $PYLINT_QUOTES_VERSION "$(grep "pylint-quotes==" requirements-dev.txt | cut -d'=' -f3)"
+tool_version_check "ruff" "$RUFF_VERSION" "$(grep "^ruff==" requirements-dev.txt | cut -d'=' -f3)"
 tool_version_check "mypy" "$MYPY_VERSION" "$(grep mypy requirements-dev.txt | cut -d'=' -f3)"
 tool_version_check "black" "$BLACK_VERSION" "$(grep black requirements-dev.txt | cut -d'=' -f3)"
 
-YAPF_FLAGS=(
-    '--recursive'
-    '--parallel'
-)
+# Directories to format/lint
+DIRS=(sky tests examples llm docs)
 
-YAPF_EXCLUDES=(
-    '--exclude' 'build/**'
-    '--exclude' 'sky/skylet/providers/ibm/**'
-    '--exclude' 'sky/schemas/generated/**'
-    '--exclude' 'tests/unit_tests/test_sky/backends/testdata/**'
-)
+# Get merge base for changed file detection
+MERGEBASE="$(git merge-base origin/master HEAD 2>/dev/null || echo "")"
 
-ISORT_YAPF_EXCLUDES=(
-    '--sg' 'build/**'
-    '--sg' 'sky/skylet/providers/ibm/**'
-    '--sg' 'sky/schemas/generated/**'
-    '--sg' 'tests/unit_tests/test_sky/backends/testdata/**'
-)
-
+# IBM-specific code still uses Black
 BLACK_INCLUDES=(
     'sky/skylet/providers/ibm'
 )
 
-PYLINT_FLAGS=(
-    '--load-plugins'  'pylint_quotes'
-    '--ignore-paths' 'sky/schemas/generated|sky/skylet/providers/ibm'
-)
-
-# Format specified files
-format() {
-    yapf --in-place "${YAPF_FLAGS[@]}" "$@"
-}
-
-# Format files that differ from main branch. Ignores dirs that are not slated
-# for autoformat yet.
-format_changed() {
-    # The `if` guard ensures that the list of filenames is not empty, which
-    # could cause yapf to receive 0 positional arguments, making it hang
-    # waiting for STDIN.
-    #
-    # `diff-filter=ACM` and $MERGEBASE is to ensure we only format files that
-    # exist on both branches.
-    MERGEBASE="$(git merge-base origin/master HEAD)"
-
-    if ! git diff --diff-filter=ACM --quiet --exit-code "$MERGEBASE" -- '*.py' '*.pyi' &>/dev/null; then
-        git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' | \
-            tr '\n' '\0' | xargs -P 5 -0 \
-            yapf --in-place "${YAPF_EXCLUDES[@]}" "${YAPF_FLAGS[@]}"
-    fi
-
-}
-
-# Format all files
-format_all() {
-    yapf --in-place "${YAPF_FLAGS[@]}" "${YAPF_EXCLUDES[@]}" sky tests examples llm
-}
-
-echo 'SkyPilot Black:'
+echo '=== SkyPilot Black (IBM-specific code) ==='
 black "${BLACK_INCLUDES[@]}"
 
-## This flag formats individual files. --files *must* be the first command line
-## arg to use this option.
+echo '=== SkyPilot Ruff Linter ==='
+# Ruff check with auto-fix (replaces pylint + isort)
 if [[ "$1" == '--files' ]]; then
-   format "${@:2}"
-   # If `--all` is passed, then any further arguments are ignored and the
-   # entire python directory is formatted.
+    # Format specific files
+    ruff check --fix "${@:2}"
 elif [[ "$1" == '--all' ]]; then
-   format_all
+    # Format all files
+    ruff check --fix "${DIRS[@]}"
 else
-   # Format only the files that changed in last commit.
-   format_changed
-fi
-echo 'SkyPilot yapf: Done'
-
-echo 'SkyPilot isort:'
-isort sky tests examples llm docs "${ISORT_YAPF_EXCLUDES[@]}"
-
-isort --profile black -l 88 -m 3 "sky/skylet/providers/ibm"
-
-
-# Run mypy
-# TODO(zhwu): When more of the codebase is typed properly, the mypy flags
-# should be set to do a more stringent check.
-echo 'SkyPilot mypy:'
-# Workaround for mypy 1.14.1 cache serialization bug that causes
-# "AssertionError: Internal error: unresolved placeholder type None"
-# Using --cache-dir=/dev/null disables cache writing to avoid the error
-mypy $(cat tests/mypy_files.txt) --cache-dir=/dev/null
-
-# Run Pylint
-echo 'Sky Pylint:'
-if [[ "$1" == '--files' ]]; then
-    # If --files is passed, filter to files within sky/ and examples/ and pass to pylint.
-    pylint "${PYLINT_FLAGS[@]}" "${@:2}"
-elif [[ "$1" == '--all' ]]; then
-    # Pylint entire sky and examples directories.
-    pylint "${PYLINT_FLAGS[@]}" sky examples
-else
-    # Pylint only files in sky/ and examples/ that have changed in last commit.
-    changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- 'sky/*.py' 'sky/*.pyi' 'examples/*.py' 'examples/*.pyi')
-    if [[ -n "$changed_files" ]]; then
-        echo "$changed_files" | tr '\n' '\0' | xargs -0 pylint "${PYLINT_FLAGS[@]}"
+    # Format only changed files
+    if [[ -n "$MERGEBASE" ]]; then
+        changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' 2>/dev/null || true)
+        if [[ -n "$changed_files" ]]; then
+            echo "$changed_files" | xargs ruff check --fix
+        else
+            echo 'Ruff linter skipped: no Python files changed.'
+        fi
     else
-        echo 'Pylint skipped: no files changed in sky/.'
+        # No merge base, format all
+        ruff check --fix "${DIRS[@]}"
     fi
 fi
 
+echo '=== SkyPilot Ruff Formatter ==='
+# Ruff format (replaces yapf + isort formatting)
+if [[ "$1" == '--files' ]]; then
+    ruff format "${@:2}"
+elif [[ "$1" == '--all' ]]; then
+    ruff format "${DIRS[@]}"
+else
+    if [[ -n "$MERGEBASE" ]]; then
+        changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' 2>/dev/null || true)
+        if [[ -n "$changed_files" ]]; then
+            echo "$changed_files" | xargs ruff format
+        else
+            echo 'Ruff formatter skipped: no Python files changed.'
+        fi
+    else
+        ruff format "${DIRS[@]}"
+    fi
+fi
+
+echo '=== SkyPilot Ruff: Done ==='
+
+# Run mypy (type checking - cannot be replaced by Ruff)
+echo '=== SkyPilot mypy ==='
+mypy $(cat tests/mypy_files.txt) --cache-dir=/dev/null
+
 # Lint and format the dashboard
-echo "SkyPilot Dashboard linting and formatting:"
-if ! npm -v || ! node -v; then
+echo "=== SkyPilot Dashboard linting and formatting ==="
+if ! npm -v > /dev/null 2>&1 || ! node -v > /dev/null 2>&1; then
     echo "npm or node is not installed, please install them first"
     # Don't fail the script if npm or node is not installed
-    # because it's not required for all users
 else
     npm --prefix sky/dashboard install
     npm --prefix sky/dashboard run lint

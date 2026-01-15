@@ -1,4 +1,9 @@
-# formatting
+# formatting - modern tools (fast)
+# Ruff replaces yapf, isort, pylint for much faster linting
+# match the version with .pre-commit-config.yaml
+ruff==0.9.6
+
+# formatting - legacy tools (kept for backwards compatibility)
 # match the version with .pre-commit-config.yaml
 yapf==0.32.0
 # match the version with .pre-commit-config.yaml

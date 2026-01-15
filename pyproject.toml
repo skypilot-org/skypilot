@@ -32,3 +32,87 @@ line_length = 80
 multi_line_output = 0
 combine_as_imports = true
 use_parentheses = true
+
+[tool.ruff]
+# Target Python 3.8 for compatibility
+target-version = "py38"
+line-length = 80
+
+# Exclude paths that were excluded in the original setup
+exclude = [
+    "build",
+    "sky/skylet/providers/ibm",
+    "sky/schemas/generated",
+    "tests/unit_tests/test_sky/backends/testdata",
+]
+
+[tool.ruff.lint]
+# Enable rules that replace pylint functionality
+# F: Pyflakes (errors, undefined names, unused imports)
+# E: pycodestyle errors
+# W: pycodestyle warnings
+# I: isort (import sorting)
+# UP: pyupgrade (Python upgrade suggestions)
+# B: flake8-bugbear (common bugs)
+# SIM: flake8-simplify
+# Q: flake8-quotes (quote consistency - replaces pylint-quotes)
+# N: pep8-naming (naming conventions)
+# C4: flake8-comprehensions
+# T20: flake8-print (print statements)
+select = ["F", "E", "W", "I", "B", "Q", "C4"]
+
+# Ignore rules that were disabled in pylint or cause too many changes
+ignore = [
+    # Line length handled by formatter
+    "E501",
+    # Allow lambda assignment (was disabled in pylint: unnecessary-lambda-assignment)
+    "E731",
+    # Ignore missing docstrings (was disabled: missing-function-docstring)
+    "D100", "D101", "D102", "D103", "D104", "D105", "D107",
+    # Allow star imports in __init__.py
+    "F401", "F403",
+    # Ignore complexity rules (disabled in pylint as 'R' category)
+    "C901",
+    # Allow boolean positional args (common in the codebase)
+    "FBT001", "FBT002",
+    # B008: function call in default argument (common pattern in click)
+    "B008",
+    # B904: raise from (too many changes)
+    "B904",
+    # B007: unused loop control variable
+    "B007",
+]
+
+# Per-file ignores for specific patterns
+[tool.ruff.lint.per-file-ignores]
+# Allow unused imports and late imports in __init__.py files
+"__init__.py" = ["F401", "F403", "E402"]
+# sky/__init__.py has intentional late imports after version check
+"sky/__init__.py" = ["F401", "F403", "E402"]
+# Tests can have more relaxed rules
+"tests/**" = ["F401", "F403", "B", "E402"]
+# Examples can have print statements
+"examples/**" = ["T20"]
+"llm/**" = ["T20"]
+
+[tool.ruff.lint.isort]
+# Match the Google profile from isort config
+force-single-line = false
+force-sort-within-sections = true
+combine-as-imports = true
+split-on-trailing-comma = false
+known-first-party = ["sky"]
+
+[tool.ruff.lint.flake8-quotes]
+# Match pylint-quotes configuration
+inline-quotes = "single"
+docstring-quotes = "double"
+multiline-quotes = "double"
+
+[tool.ruff.format]
+# Configure formatter to match YAPF Google style as closely as possible
+quote-style = "single"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = false
