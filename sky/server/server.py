@@ -204,6 +204,23 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
     return models.User(id=user_hash, name=user_name)
 
 
+def _generate_auth_token(request: fastapi.Request) -> str:
+    """Generate an auth token from the request.
+
+    The token contains the user info and cookies, base64 encoded.
+    Used by both /token and /api/v1/auth/authorize endpoints.
+    """
+    user = _get_auth_user_header(request)
+    token_data = {
+        # Token version number, bump for backwards incompatible changes.
+        'v': 1,
+        'user': user.id if user is not None else None,
+        'cookies': dict(request.cookies),
+    }
+    json_bytes = json.dumps(token_data).encode('utf-8')
+    return base64.b64encode(json_bytes).decode('utf-8')
+
+
 @middleware_utils.websocket_aware
 class InitializeRequestAuthUserMiddleware(
         starlette.middleware.base.BaseHTTPMiddleware):
@@ -727,16 +744,9 @@ def handle_concurrent_worker_exhausted_error(
 async def token(request: fastapi.Request,
                 local_port: Optional[int] = None) -> fastapi.responses.Response:
     del local_port  # local_port is used by the served js, but ignored by server
-    user = _get_auth_user_header(request)
-
-    token_data = {
-        'v': 1,  # Token version number, bump for backwards incompatible.
-        'user': user.id if user is not None else None,
-        'cookies': request.cookies,
-    }
     # Use base64 encoding to avoid having to escape anything in the HTML.
-    json_bytes = json.dumps(token_data).encode('utf-8')
-    base64_str = base64.b64encode(json_bytes).decode('utf-8')
+    base64_str = _generate_auth_token(request)
+    user = _get_auth_user_header(request)
 
     html_dir = pathlib.Path(__file__).parent / 'html'
     token_page_path = html_dir / 'token_page.html'
@@ -842,16 +852,7 @@ async def authorize_auth_session(
         raise fastapi.HTTPException(status_code=409,
                                     detail='Session already authorized')
 
-    # Generate the token (same logic as /token endpoint)
-    user = _get_auth_user_header(request)
-
-    token_data = {
-        'v': 1,
-        'user': user.id if user is not None else None,
-        'cookies': dict(request.cookies),
-    }
-    json_bytes = json.dumps(token_data).encode('utf-8')
-    auth_token = base64.b64encode(json_bytes).decode('utf-8')
+    auth_token = _generate_auth_token(request)
 
     # Store the token in the session
     success = auth_sessions.auth_session_store.authorize_session(

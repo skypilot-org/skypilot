@@ -2703,12 +2703,12 @@ def api_login(endpoint: Optional[str] = None,
         # 2. Old localhost callback flow
         # 3. Manual token entry
         remote_api_version_str = api_server_info.api_version
-        if remote_api_version_str is not None:
-            try:
-                if int(remote_api_version_str) >= 28:
-                    token = _try_polling_auth(endpoint)
-            except ValueError:
-                pass  # Invalid version string, skip polling auth
+        try:
+            if (remote_api_version_str is not None and
+                    int(remote_api_version_str) >= 28):
+                token = _try_polling_auth(endpoint)
+        except ValueError:
+            pass  # Invalid version string, skip polling auth
 
         if token is None:
             # Polling auth not available or failed, try localhost callback
