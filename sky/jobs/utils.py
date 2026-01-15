@@ -1265,7 +1265,7 @@ def get_alive_controller_uuids() -> List[str]:
         try:
             uuid_lib.UUID(uuid)  # check if the uuid is a valid uuid
         except ValueError:
-            print(f'Invalid commandline: {cmdline}')
+            logger.warning(f'Invalid commandline: {cmdline}')
             continue
 
     return uuids
