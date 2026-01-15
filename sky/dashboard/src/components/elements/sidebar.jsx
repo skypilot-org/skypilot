@@ -24,7 +24,7 @@ import {
   KueueIcon,
   KeyIcon,
 } from '@/components/elements/icons';
-import { Settings, User } from 'lucide-react';
+import { Settings, User, Clock } from 'lucide-react';
 
 // Map icon names to icon components for plugin nav links
 const ICON_MAP = {
@@ -35,6 +35,7 @@ const ICON_MAP = {
   book: BookDocIcon,
   users: UsersIcon,
   volume: VolumeIcon,
+  clock: Clock,
   kueue: KueueIcon,
 };
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';

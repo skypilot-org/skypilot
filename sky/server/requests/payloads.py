@@ -873,6 +873,7 @@ class RequestPayload(BasePayload):
 
 class SlurmGpuAvailabilityRequestBody(RequestBody):
     """Request body for getting Slurm real-time GPU availability."""
+    slurm_cluster_name: Optional[str] = None
     name_filter: Optional[str] = None
     quantity_filter: Optional[int] = None
 

@@ -223,8 +223,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if request.state.auth_user is not None:
             return await call_next(request)
 
-        if managed_job_utils.is_consolidation_mode(
-        ) and loopback.is_loopback_request(request):
+        if loopback.is_loopback_request(request):
             return await call_next(request)
 
         if request.url.path.startswith('/api/health'):
