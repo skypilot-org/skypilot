@@ -1145,15 +1145,19 @@ def release_memory():
 def base64_url_encode(data: bytes) -> str:
     """Base64url encode data without padding.
 
-    This is the encoding used by PKCE (RFC 7636) for code challenges.
+    Uses URL-safe alphabet (- and _ instead of + and /) and strips padding
+    to avoid URL encoding issues with = characters.
     """
     return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
 
 
-def compute_pkce_challenge(code_verifier: str) -> str:
-    """Compute PKCE code_challenge from code_verifier using S256.
+def compute_code_challenge(code_verifier: str) -> str:
+    """Compute a code_challenge from code_verifier using SHA256.
 
-    This is the challenge method specified in RFC 7636.
+    Used in the CLI login flow for CSRF protection. The CLI generates a
+    random code_verifier, computes the challenge, and sends the challenge
+    to the server. Later, the CLI proves it initiated the request by
+    providing the original verifier which the server hashes to verify.
     """
     digest = hashlib.sha256(code_verifier.encode('utf-8')).digest()
     return base64_url_encode(digest)

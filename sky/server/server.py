@@ -763,8 +763,8 @@ async def token(request: fastapi.Request,
 
 
 # ======================== Auth Session Endpoints ========================
-# These endpoints implement the PKCE-based CLI login flow that replaces
-# the localhost callback mechanism blocked by recent Chrome changes.
+# These endpoints implement the polling-based CLI login flow that replaces
+# the localhost callback mechanism blocked by Chrome's Private Network Access.
 
 
 @app.get('/api/v1/auth/token')

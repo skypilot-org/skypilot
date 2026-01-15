@@ -1,6 +1,6 @@
 """SQLite-based auth session storage for CLI login flow.
 
-This module provides server-side session storage for the PKCE-based
+This module provides server-side session storage for the polling-based
 CLI authentication flow. Sessions are keyed by code_challenge and
 expire after a configurable timeout. Uses SQLite for cross-worker access.
 """
@@ -152,7 +152,7 @@ class AuthSessionStore:
             - ('pending', None) - Valid but not yet authorized
             - (None, None) - Not found or expired
         """
-        code_challenge = common_utils.compute_pkce_challenge(code_verifier)
+        code_challenge = common_utils.compute_code_challenge(code_verifier)
 
         with self._get_cursor() as cursor:
             self._ensure_table(cursor)

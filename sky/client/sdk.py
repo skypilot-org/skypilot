@@ -2483,11 +2483,11 @@ def _check_endpoint_in_env_var(is_login: bool) -> None:
 
 
 def _try_polling_auth(endpoint: str) -> Optional[str]:
-    """Try the polling-based authentication flow with PKCE."""
+    """Try the polling-based authentication flow."""
     try:
-        # Generate PKCE code verifier and challenge
+        # Generate code verifier (random secret) and challenge (hash of verifier)
         code_verifier = common_utils.base64_url_encode(secrets.token_bytes(32))
-        code_challenge = common_utils.compute_pkce_challenge(code_verifier)
+        code_challenge = common_utils.compute_code_challenge(code_verifier)
 
         # Open browser to authorization page (session created on page load)
         auth_url = f'{endpoint}/auth/authorize?code_challenge={code_challenge}'
@@ -2699,7 +2699,7 @@ def api_login(endpoint: Optional[str] = None,
         token: Optional[str] = None
 
         # Try methods in order:
-        # 1. New polling-based flow (PKCE) - only on servers >= API v27
+        # 1. New polling-based flow - only on servers >= API v27
         # 2. Old localhost callback flow
         # 3. Manual token entry
         remote_api_version_str = api_server_info.api_version
