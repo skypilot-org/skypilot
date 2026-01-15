@@ -615,6 +615,11 @@ determines how long to wait for the connection to be established.
 
 Default: ``10``.
 
+The low-level socket connect timeout used for the raw SSH probe can be tuned
+with the ``SKYPILOT_SSH_SOCKET_CONNECT_TIMEOUT`` environment variable (seconds;
+default: ``1``). This controls how long each socket connection attempt waits
+before SkyPilot falls back to retrying.
+
 .. _config-yaml-aws:
 
 ``aws``
