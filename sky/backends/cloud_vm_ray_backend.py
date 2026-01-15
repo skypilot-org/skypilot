@@ -4469,9 +4469,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               tail: Optional[int] = None) -> int:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
+        # we can't send a UUID or else it will cause an import error so we
+        # convert it to a string before sending over. also don't want to add
+        # an import in codegen since it would increase the time to load the
+        # module.
+        system_safe = str(system) if isinstance(system, uuid.UUID) else system
         # TODO(kevin): Migrate stream_logs to gRPC
         code = managed_jobs.ManagedJobCodeGen.stream_logs(
-            job_name, job_id, follow, controller, tail, str(system))
+            job_name, job_id, follow, controller, tail, system_safe)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.

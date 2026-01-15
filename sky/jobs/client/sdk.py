@@ -406,8 +406,9 @@ def download_logs(
     job_id: Optional[int],
     refresh: bool,
     controller: bool,
-    system: Union[uuid.UUID, Literal[True]],
     local_dir: str = constants.SKY_LOGS_DIRECTORY,
+    *,
+    system: Union[str, Literal[True]],
 ) -> Dict[str, str]:
     ...
 
@@ -418,8 +419,20 @@ def download_logs(
     job_id: Optional[int],
     refresh: bool,
     controller: bool,
-    system: Literal[None],
+    local_dir: str,
+    system: Union[str, Literal[True]],
+) -> Dict[str, str]:
+    ...
+
+
+@overload
+def download_logs(
+    name: Optional[str],
+    job_id: Optional[int],
+    refresh: bool,
+    controller: bool,
     local_dir: str = constants.SKY_LOGS_DIRECTORY,
+    system: None = None,
 ) -> Dict[int, str]:
     ...
 
@@ -431,8 +444,8 @@ def download_logs(
     job_id: Optional[int],
     refresh: bool,
     controller: bool,
-    system=None,
     local_dir: str = constants.SKY_LOGS_DIRECTORY,
+    system: Optional[Union[str, Literal[True]]] = None,
 ) -> Union[Dict[int, str], Dict[str, str]]:
     """Sync down logs of managed jobs.
 
@@ -441,11 +454,11 @@ def download_logs(
     Args:
         name: Name of the managed job to sync down logs.
         job_id: ID of the managed job to sync down logs.
-        system: UUID of the system to sync down logs or True to sync all active
-                logs.
         refresh: Whether to restart the jobs controller if it is stopped.
         controller: Whether to sync down logs from the jobs controller.
         local_dir: Local directory to sync down logs.
+        system: UUID of the system to sync down logs or True to sync all active
+                logs.
 
     Returns:
         A dictionary mapping job ID or system UUID to the local path.

@@ -131,8 +131,9 @@ async def download_logs(
     job_id: Optional[int],
     refresh: bool,
     controller: bool,
-    system: Union[uuid.UUID, Literal[True]],
     local_dir: str = constants.SKY_LOGS_DIRECTORY,
+    *,
+    system: Union[str, Literal[True]],
 ) -> Dict[str, str]:
     ...
 
@@ -143,8 +144,20 @@ async def download_logs(
     job_id: Optional[int],
     refresh: bool,
     controller: bool,
-    system: Literal[None],
+    local_dir: str,
+    system: Union[str, Literal[True]],
+) -> Dict[str, str]:
+    ...
+
+
+@overload
+async def download_logs(
+    name: Optional[str],
+    job_id: Optional[int],
+    refresh: bool,
+    controller: bool,
     local_dir: str = constants.SKY_LOGS_DIRECTORY,
+    system: None = None,
 ) -> Dict[int, str]:
     ...
 
@@ -155,12 +168,12 @@ async def download_logs(
     job_id: Optional[int],
     refresh: bool,
     controller: bool,
-    system=None,
     local_dir: str = constants.SKY_LOGS_DIRECTORY,
+    system: Optional[Union[str, Literal[True]]] = None,
 ) -> Union[Dict[int, str], Dict[str, str]]:
     """Async version of download_logs() that syncs down logs of managed jobs."""
     return await context_utils.to_thread(sdk.download_logs, name, job_id,
-                                         refresh, controller, system, local_dir)
+                                         refresh, controller, local_dir, system)
 
 
 @usage_lib.entrypoint

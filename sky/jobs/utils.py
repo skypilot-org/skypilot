@@ -1228,6 +1228,7 @@ def find_controller_pid_by_uuid(uuid: str) -> Optional[int]:
         cmdline = process.cmdline()
         if not cmdline:
             continue
+        cmdline = ' '.join(cmdline)
         if uuid in cmdline:
             return pid
     return None
