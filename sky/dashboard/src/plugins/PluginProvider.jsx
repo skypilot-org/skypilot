@@ -334,7 +334,8 @@ export function PluginProvider({ children }) {
       manifest.forEach((pluginDescriptor) => {
         const jsPath = extractJsPath(pluginDescriptor);
         if (jsPath && !cancelled) {
-          const requiresEarlyInit = pluginDescriptor.requires_early_init === true;
+          const requiresEarlyInit =
+            pluginDescriptor.requires_early_init === true;
           loadPluginScript(jsPath, requiresEarlyInit);
         }
       });
