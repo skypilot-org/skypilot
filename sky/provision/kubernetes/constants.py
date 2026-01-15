@@ -5,23 +5,37 @@
 # Order matters: longer names must come before shorter substrings
 # (e.g., 'L40S' before 'L40' before 'L4') to ensure correct matching.
 CANONICAL_GPU_NAMES = [
+    # Blackwell architecture (2024+)
+    'GB300',
+    'GB200',
+    'B200',
+    'B100',
+    # Hopper architecture
+    'GH200',
+    'H200',
+    'H100-80GB',
+    'H100',
+    # Ampere architecture
     'A100-80GB',
     'A100',
     'A10G',
-    'H100',
-    'K80',
-    'M60',
-    'T4g',
-    'T4',
-    'V100',
     'A10',
-    'P4000',
-    'P100',
-    'P40',
-    'P4',
+    'A30',
+    'A40',
+    # Ada Lovelace architecture
     'L40S',
     'L40',
     'L4',
+    # Older architectures
+    'V100',
+    'P100',
+    'P40',
+    'P4000',
+    'P4',
+    'T4g',
+    'T4',
+    'K80',
+    'M60',
 ]
 
 NO_GPU_HELP_MESSAGE = ('If your cluster contains GPUs, make sure '
