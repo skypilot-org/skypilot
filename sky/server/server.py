@@ -8,6 +8,7 @@ import contextlib
 import datetime
 from enum import IntEnum
 import hashlib
+import html
 import json
 import multiprocessing
 import os
@@ -757,7 +758,8 @@ async def token(request: fastapi.Request,
         raise fastapi.HTTPException(
             status_code=500, detail='Token page template not found.') from e
 
-    user_info_string = f'Logged in as {user.name}' if user is not None else ''
+    user_info_string = html.escape(
+        f'Logged in as {user.name}') if user is not None else ''
     html_content = html_content.replace(
         'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER',
         base64_str).replace('USER_PLACEHOLDER', user_info_string)
@@ -861,7 +863,8 @@ async def authorize_page(
     user = request.state.auth_user
     if user is None:
         user = _get_auth_user_header(request)
-    user_info = f'Logged in as {user.name}' if user is not None else ''
+    user_info = html.escape(
+        f'Logged in as {user.name}') if user is not None else ''
 
     html_dir = pathlib.Path(__file__).parent / 'html'
     authorize_page_path = html_dir / 'authorize_page.html'
@@ -869,7 +872,7 @@ async def authorize_page(
         html_content = f.read()
 
     html_content = html_content.replace('CODE_CHALLENGE_PLACEHOLDER',
-                                        code_challenge)
+                                        html.escape(code_challenge))
     html_content = html_content.replace('USER_PLACEHOLDER', user_info)
 
     return fastapi.responses.HTMLResponse(
