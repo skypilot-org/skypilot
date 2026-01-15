@@ -133,6 +133,25 @@ ssh torchforge
 2. **vLLM import errors**: Ensure you're using the correct PyTorch/CUDA versions
 3. **Model download fails**: Check `HF_TOKEN` for gated models
 
+### Known Warnings During Shutdown
+
+After training completes, you may see warnings like:
+
+```
+UserWarning: resource_tracker: '/shared_tensor_...': [Errno 2] No such file or directory
+SupervisionError: Endpoint call Generator.generate() failed
+```
+
+These are **harmless shutdown race conditions** and do not indicate training failures:
+
+- **resource_tracker warnings**: TorchStore uses shared memory for weight synchronization. During shutdown, multiple processes may try to clean up the same shared memory segments.
+- **SupervisionError**: When training reaches MAX_STEPS, the training loop exits while the rollout thread may still have in-flight Generator calls. This is a known TorchForge shutdown behavior.
+
+To verify training worked correctly, look for:
+- "Reached training limit (N steps)" message
+- "Pushing weights for policy version N" messages
+- GRPO loss metrics (grpo_loss/total_loss, grpo_loss/kl_divergence_mean)
+
 ## Resources
 
 - [TorchForge Documentation](https://meta-pytorch.org/torchforge)
