@@ -2722,7 +2722,6 @@ def api_login(endpoint: Optional[str] = None,
             data = base64.b64decode(token)
         except binascii.Error as e:
             raise ValueError(f'Malformed token: {token}') from e
-        logger.debug(f'Token data: {data!r}')
         try:
             json_data = json.loads(data)
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
