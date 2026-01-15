@@ -1449,30 +1449,36 @@ class Task:
                                           key=lambda x: len(x.stores),
                                           reverse=True)
             for storage in storage_to_construct:
-                # We first try to get the preferred store so that we can pass the
-                # region to the construct() method if the store type matches.
+                # We first try to get the preferred store so that we can pass
+                # the region to construct() if the store type matches.
                 store_type, store_region = self._get_preferred_store()
                 # If the store type inferred from the task's resources matches
-                # the storage's store type, we pass the region to the storage
-                # constructor.
+                # the storage's store type, we pass the region to the
+                # storage constructor.
                 # We need to guard this because the task's preferred store
                 # type might not handle the storage's store type (e.g., if
                 # the storage is S3 and the task is on Azure).
                 # TODO(romilb): We should improve this logic to be more generic.
-                if (storage.source is None or
-                        storage.source.startswith('file://') or
-                    (store_type == storage_lib.StoreType.S3 and
-                     storage.source.startswith('s3://')) or
-                    (store_type == storage_lib.StoreType.GCS and
-                     storage.source.startswith('gs://')) or
-                    (store_type == storage_lib.StoreType.AZURE and
-                     data_utils.is_az_container_endpoint(storage.source)) or
-                    (store_type == storage_lib.StoreType.R2 and
-                     storage.source.startswith('r2://')) or
-                    (store_type == storage_lib.StoreType.IBM and
-                     storage.source.startswith('cos://')) or
-                    (store_type == storage_lib.StoreType.OCI and
-                     storage.source.startswith('oci://'))):
+                is_new_bucket = (storage.source is None or
+                                 isinstance(storage.source, list) or
+                                 (isinstance(storage.source, str) and
+                                  storage.source.startswith('file://')))
+                is_matching_cloud_store = (
+                    isinstance(storage.source, str) and
+                    ((store_type == storage_lib.StoreType.S3 and
+                      storage.source.startswith('s3://')) or
+                     (store_type == storage_lib.StoreType.GCS and
+                      storage.source.startswith('gs://')) or
+                     (store_type == storage_lib.StoreType.AZURE and
+                      data_utils.is_az_container_endpoint(storage.source)) or
+                     (store_type == storage_lib.StoreType.R2 and
+                      storage.source.startswith('r2://')) or
+                     (store_type == storage_lib.StoreType.IBM and
+                      storage.source.startswith('cos://')) or
+                     (store_type == storage_lib.StoreType.OCI and
+                      storage.source.startswith('oci://'))))
+
+                if is_new_bucket or is_matching_cloud_store:
                     storage.construct(region=store_region)
                 else:
                     storage.construct()

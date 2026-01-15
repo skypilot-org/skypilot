@@ -19,6 +19,8 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.server.requests import request_names
 from sky.skylet import autostop_lib
+from sky.data import data_utils
+from sky.data import storage as storage_lib
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
@@ -214,28 +216,37 @@ def _execute(
             if task.storage_mounts is not None:
                 for storage in task.storage_mounts.values():
                     # Ensure the storage is constructed.
+                    # pylint: disable=protected-access
                     store_type, region = task._get_preferred_store()
-                    # If the store type inferred from the task's resources matches
-                    # the storage's store type, we pass the region to the storage
-                    # constructor.
+                    # If the store type inferred from the task's resources
+                    # matches the storage's store type, we pass the region to
+                    # the storage constructor.
                     # We need to guard this because the task's preferred store
                     # type might not handle the storage's store type (e.g., if
                     # the storage is S3 and the task is on Azure).
-                    # TODO(romilb): We should improve this logic to be more generic.
-                    if (storage.source is None or
-                            storage.source.startswith('file://') or
-                        (store_type == storage_lib.StoreType.S3 and
-                         storage.source.startswith('s3://')) or
-                        (store_type == storage_lib.StoreType.GCS and
-                         storage.source.startswith('gs://')) or
-                        (store_type == storage_lib.StoreType.AZURE and
-                         data_utils.is_az_container_endpoint(storage.source)) or
-                        (store_type == storage_lib.StoreType.R2 and
-                         storage.source.startswith('r2://')) or
-                        (store_type == storage_lib.StoreType.IBM and
-                         storage.source.startswith('cos://')) or
-                        (store_type == storage_lib.StoreType.OCI and
-                         storage.source.startswith('oci://'))):
+                    # TODO(romilb): We should improve this logic to be more
+                    # generic.
+                    is_new_bucket = (storage.source is None or
+                                     isinstance(storage.source, list) or
+                                     (isinstance(storage.source, str) and
+                                      storage.source.startswith('file://')))
+                    is_matching_cloud_store = (
+                        isinstance(storage.source, str) and
+                        ((store_type == storage_lib.StoreType.S3 and
+                          storage.source.startswith('s3://')) or
+                         (store_type == storage_lib.StoreType.GCS and
+                          storage.source.startswith('gs://')) or
+                         (store_type == storage_lib.StoreType.AZURE and
+                          data_utils.is_az_container_endpoint(
+                              storage.source)) or
+                         (store_type == storage_lib.StoreType.R2 and
+                          storage.source.startswith('r2://')) or
+                         (store_type == storage_lib.StoreType.IBM and
+                          storage.source.startswith('cos://')) or
+                         (store_type == storage_lib.StoreType.OCI and
+                          storage.source.startswith('oci://'))))
+
+                    if is_new_bucket or is_matching_cloud_store:
                         storage.construct(region=region)
                     else:
                         storage.construct()
