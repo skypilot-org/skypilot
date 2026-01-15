@@ -162,6 +162,34 @@ def _lack_resource_msg(resource: str,
     return msg
 
 
+def _format_pvc_binding_error(pvc_details: Optional[str],
+                              pvc_names: List[str],
+                              namespace: str) -> str:
+    """Format a PVC binding error message.
+
+    Args:
+        pvc_details: Optional details about the PVC issue (e.g., event messages).
+            If None, a generic message is used.
+        pvc_names: List of PVC names that have binding issues.
+        namespace: Kubernetes namespace.
+
+    Returns:
+        Formatted error message with debug instructions.
+    """
+    if pvc_details:
+        header = f'PVC binding issue detected: {pvc_details}.'
+    else:
+        header = 'PVC binding issue detected.'
+    # kubectl describe pvc can take multiple PVC names as args
+    pvc_names_str = ' '.join(pvc_names) if pvc_names else '<pvc-name>'
+    return (f'{header}\n'
+            'Check if the storage class supports the requested access '
+            'mode and if there is sufficient storage capacity.\n'
+            'To debug, run:\n'
+            '  sky volumes ls\n'
+            f'  kubectl describe pvc {pvc_names_str} -n {namespace}')
+
+
 def _get_pvc_binding_status(namespace: str, context: Optional[str],
                             pod: Any) -> Optional[str]:
     """Check if any PVCs used by a pod are pending/unbound.
@@ -171,7 +199,7 @@ def _get_pvc_binding_status(namespace: str, context: Optional[str],
     if pod.spec.volumes is None:
         return None
 
-    pending_pvcs = []
+    pending_pvcs = []  # List of (pvc_name, details_string)
     for vol in pod.spec.volumes:
         pvc_claim = vol.persistent_volume_claim
         if pvc_claim is None:
@@ -202,22 +230,15 @@ def _get_pvc_binding_status(namespace: str, context: Optional[str],
                 if event_messages:
                     # Take the most recent event message
                     pending_info += f' - {event_messages[-1]}'
-                pending_pvcs.append(pending_info)
+                pending_pvcs.append((pvc_name, pending_info))
         except Exception as e:  # pylint: disable=broad-except
             logger.debug(f'Failed to get PVC {pvc_name} status: {e}')
             continue
 
     if pending_pvcs:
-        pvc_list = ', '.join(pending_pvcs)
-        # Get the first PVC name for the kubectl command
-        first_pvc_name = pending_pvcs[0].split(' ')[0]
-        return (
-            f'PVC binding issue detected: {pvc_list}. '
-            'Check if the storage class supports the requested access mode '
-            'and if there is sufficient storage capacity. '
-            'Run `sky volumes ls` for status of volumes managed by SkyPilot, '
-            f'or use `kubectl describe pvc {first_pvc_name} -n {namespace}` '
-            'to debug.')
+        pvc_names = [pvc[0] for pvc in pending_pvcs]
+        pvc_details = ', '.join(pvc[1] for pvc in pending_pvcs)
+        return _format_pvc_binding_error(pvc_details, pvc_names, namespace)
     return None
 
 
@@ -359,14 +380,11 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                              in event_message)
             if pvc_error is not None or has_pvc_issue:
                 pvc_msg = pvc_error if pvc_error else (
-                    'PVC binding issue detected. '
-                    'Check if the storage class supports the requested access '
-                    'mode and if there is sufficient storage capacity. '
-                    'Run `sky volumes ls` for status of volumes managed by '
-                    'SkyPilot, or use `kubectl describe pvc -n {namespace}` '
-                    'to debug.'.format(namespace=namespace))
+                    _format_pvc_binding_error(pvc_details=None,
+                                              pvc_names=[],
+                                              namespace=namespace))
                 raise config_lib.KubernetesError(
-                    f'{pvc_msg} '
+                    f'{pvc_msg}\n'
                     f'Pod status: {pod_status} '
                     f'Details: \'{event_message}\' ')
 
@@ -1396,8 +1414,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     try:
         return _create_pods(region, cluster_name, cluster_name_on_cloud, config)
     except (kubernetes.api_exception(), config_lib.KubernetesError) as e:
-        e_msg = common_utils.format_exception(e).replace('\n', ' ')
-        logger.warning('run_instances: Error occurred when creating pods: '
+        e_msg = common_utils.format_exception(e)
+        logger.warning('run_instances: Error occurred when creating pods:\n'
                        f'{e_msg}')
         raise
 
