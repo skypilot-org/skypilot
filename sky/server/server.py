@@ -891,7 +891,10 @@ async def authorize_page(
             content='<h1>Already Authorized</h1><p>You can close this tab.</p>',
             headers={'Cache-Control': 'no-cache, no-transform'})
 
-    user = _get_auth_user_header(request)
+    # Try to get user from request state (set by OAuth2 middleware) or headers
+    user = request.state.auth_user
+    if user is None:
+        user = _get_auth_user_header(request)
     user_info = f'Logged in as {user.name}' if user is not None else ''
 
     html_dir = pathlib.Path(__file__).parent / 'html'
