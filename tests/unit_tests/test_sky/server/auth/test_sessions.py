@@ -12,16 +12,14 @@ class TestAuthSession:
     """Tests for the AuthSession class."""
 
     def test_session_creation(self):
-        session = sessions.AuthSession('challenge', 'pending', None,
-                                       time.time())
+        session = sessions.AuthSession('challenge', 'token123', time.time())
         assert session.code_challenge == 'challenge'
-        assert session.status == 'pending'
-        assert session.token is None
+        assert session.token == 'token123'
         assert not session.is_expired()
 
     def test_session_expiration(self):
         old_time = time.time() - sessions.SESSION_EXPIRATION_SECONDS - 1
-        session = sessions.AuthSession('challenge', 'pending', None, old_time)
+        session = sessions.AuthSession('challenge', 'token123', old_time)
         assert session.is_expired()
 
 
@@ -51,94 +49,75 @@ class TestAuthSessionStore:
         store._db_path = db_path  # pylint: disable=protected-access
         return store
 
-    def test_get_or_create_session(self, store):
-        session = store.get_or_create_session('challenge')
-        assert session.code_challenge == 'challenge'
-        assert session.status == 'pending'
-
-    def test_get_or_create_returns_existing(self, store):
-        session1 = store.get_or_create_session('challenge')
-        session2 = store.get_or_create_session('challenge')
-        # With SQLite, objects are different instances but same data
-        assert session1.code_challenge == session2.code_challenge
-        assert session1.status == session2.status
-
-    def test_get_session(self, store):
-        store.get_or_create_session('challenge')
-        retrieved = store.get_session('challenge')
-        assert retrieved is not None
-        assert retrieved.code_challenge == 'challenge'
-
-    def test_get_nonexistent_session(self, store):
-        assert store.get_session('nonexistent') is None
-
-    def test_get_expired_session(self, store, monkeypatch):
-        store.get_or_create_session('challenge')
-        # Fast-forward time past expiration
-        future_time = time.time() + sessions.SESSION_EXPIRATION_SECONDS + 10
-        monkeypatch.setattr(time, 'time', lambda: future_time)
-        assert store.get_session('challenge') is None
-
-    def test_authorize_session(self, store):
-        store.get_or_create_session('challenge')
-        assert store.authorize_session('challenge', 'token123')
-
-        retrieved = store.get_session('challenge')
-        assert retrieved.status == 'authorized'
-        assert retrieved.token == 'token123'
-
-    def test_authorize_nonexistent_session(self, store):
-        assert not store.authorize_session('nonexistent', 'token')
-
-    def test_authorize_twice_fails(self, store):
-        store.get_or_create_session('challenge')
-        assert store.authorize_session('challenge', 'token1')
-        assert not store.authorize_session('challenge', 'token2')
-
-    def test_poll_session_authorized(self, store):
+    def test_create_session(self, store):
         code_verifier = 'test_verifier'
         code_challenge = common_utils.compute_code_challenge(code_verifier)
 
-        store.get_or_create_session(code_challenge)
-        store.authorize_session(code_challenge, 'my_token')
+        store.create_session(code_challenge, 'my_token')
 
-        status, token = store.poll_session(code_verifier)
-        assert status == 'authorized'
+        token = store.poll_session(code_verifier)
+        assert token == 'my_token'
+
+    def test_create_session_overwrites(self, store):
+        # Duplicate authorize clicks should just overwrite
+        code_verifier = 'test_verifier'
+        code_challenge = common_utils.compute_code_challenge(code_verifier)
+
+        store.create_session(code_challenge, 'token1')
+        store.create_session(code_challenge, 'token2')
+
+        token = store.poll_session(code_verifier)
+        assert token == 'token2'
+
+    def test_poll_session_consumes(self, store):
+        code_verifier = 'test_verifier'
+        code_challenge = common_utils.compute_code_challenge(code_verifier)
+
+        store.create_session(code_challenge, 'my_token')
+
+        # First poll returns the token
+        token = store.poll_session(code_verifier)
         assert token == 'my_token'
 
         # Session should be consumed (deleted)
-        assert store.get_session(code_challenge) is None
-
-    def test_poll_session_pending(self, store):
-        code_verifier = 'test_verifier'
-        code_challenge = common_utils.compute_code_challenge(code_verifier)
-
-        store.get_or_create_session(code_challenge)
-
-        status, token = store.poll_session(code_verifier)
-        assert status == 'pending'
+        token = store.poll_session(code_verifier)
         assert token is None
-
-        # Session should still exist
-        assert store.get_session(code_challenge) is not None
 
     def test_poll_session_not_found(self, store):
         # Poll with a verifier that has no corresponding session
-        status, token = store.poll_session('nonexistent_verifier')
-        assert status is None
+        token = store.poll_session('nonexistent_verifier')
+        assert token is None
+
+    def test_poll_expired_session(self, store, monkeypatch):
+        code_verifier = 'test_verifier'
+        code_challenge = common_utils.compute_code_challenge(code_verifier)
+
+        store.create_session(code_challenge, 'my_token')
+
+        # Fast-forward time past expiration
+        future_time = time.time() + sessions.SESSION_EXPIRATION_SECONDS + 10
+        monkeypatch.setattr(time, 'time', lambda: future_time)
+
+        # Should return None due to expiration
+        token = store.poll_session(code_verifier)
         assert token is None
 
     def test_expired_sessions_cleanup(self, store, monkeypatch):
-        store.get_or_create_session('challenge1')
-        store.get_or_create_session('challenge2')
+        code_verifier1 = 'verifier1'
+        code_verifier2 = 'verifier2'
+        code_challenge1 = common_utils.compute_code_challenge(code_verifier1)
+        code_challenge2 = common_utils.compute_code_challenge(code_verifier2)
+
+        store.create_session(code_challenge1, 'token1')
+        store.create_session(code_challenge2, 'token2')
 
         # Fast-forward time past expiration
         future_time = time.time() + sessions.SESSION_EXPIRATION_SECONDS + 10
         monkeypatch.setattr(time, 'time', lambda: future_time)
 
         # Both should be expired now
-        assert store.get_session('challenge1') is None
-        assert store.get_session('challenge2') is None
+        assert store.poll_session(code_verifier1) is None
+        assert store.poll_session(code_verifier2) is None
 
 
 class TestGlobalStore:

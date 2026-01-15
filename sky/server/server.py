@@ -789,24 +789,16 @@ async def poll_auth_token(
 
     Returns:
         - 200 with token if session is authorized
-        - 202 if session is pending (keep polling)
-        - 404 if session not found or expired
+        - 404 if session not found (user hasn't clicked Authorize yet)
     """
     if not code_verifier:
         raise fastapi.HTTPException(status_code=400,
                                     detail='code_verifier is required')
 
-    session_status, auth_token = auth_sessions.auth_session_store.poll_session(
-        code_verifier)
+    auth_token = auth_sessions.auth_session_store.poll_session(code_verifier)
 
-    if session_status is None:
+    if auth_token is None:
         raise fastapi.HTTPException(status_code=404, detail='Session not found')
-
-    if session_status == 'pending':
-        return fastapi.responses.JSONResponse(
-            status_code=202,
-            content={'status': 'pending'},
-            headers={'Cache-Control': 'no-store'})
 
     return fastapi.responses.JSONResponse(content={
         'status': 'authorized',
@@ -821,15 +813,13 @@ async def authorize_auth_session(
     """Authorize an auth session (called when user clicks Authorize button).
 
     This endpoint requires authentication (via auth proxy cookies).
-    It generates the token and stores it in the session for the CLI to retrieve.
+    It generates the token and creates a session for the CLI to retrieve.
 
     Request body:
-        code_challenge: The code challenge for the session to authorize
+        code_challenge: The code challenge from the CLI
 
     Returns:
         - 200 if successfully authorized
-        - 404 if session not found or expired
-        - 409 if session was already authorized
     """
     try:
         body = await request.json()
@@ -842,24 +832,10 @@ async def authorize_auth_session(
         raise fastapi.HTTPException(status_code=400,
                                     detail='code_challenge is required')
 
-    # Get the session first to check if it exists
-    session = auth_sessions.auth_session_store.get_session(code_challenge)
-    if session is None:
-        raise fastapi.HTTPException(status_code=404,
-                                    detail='Session not found or expired')
-
-    if session.status != 'pending':
-        raise fastapi.HTTPException(status_code=409,
-                                    detail='Session already authorized')
-
     auth_token = _generate_auth_token(request)
 
-    # Store the token in the session
-    success = auth_sessions.auth_session_store.authorize_session(
-        code_challenge, auth_token)
-    if not success:
-        raise fastapi.HTTPException(status_code=404,
-                                    detail='Session not found or expired')
+    # Create the session with the token
+    auth_sessions.auth_session_store.create_session(code_challenge, auth_token)
 
     return fastapi.responses.JSONResponse(content={'status': 'authorized'},
                                           headers={'Cache-Control': 'no-store'})
@@ -871,8 +847,8 @@ async def authorize_page(
         code_challenge: Optional[str] = None) -> fastapi.responses.Response:
     """Serve the authorization page where users click to authorize the CLI.
 
-    This page requires authentication (via auth proxy). The session is created
-    automatically when the page loads.
+    This page requires authentication (via auth proxy). No session is created
+    until the user clicks Authorize.
 
     Query params:
         code_challenge: Base64url-encoded SHA256 hash of the code verifier
@@ -880,16 +856,6 @@ async def authorize_page(
     if not code_challenge:
         raise fastapi.HTTPException(status_code=400,
                                     detail='code_challenge is required')
-
-    # Get or create session for this code_challenge
-    session = auth_sessions.auth_session_store.get_or_create_session(
-        code_challenge)
-
-    if session.status != 'pending':
-        # Session already authorized
-        return fastapi.responses.HTMLResponse(
-            content='<h1>Already Authorized</h1><p>You can close this tab.</p>',
-            headers={'Cache-Control': 'no-cache, no-transform'})
 
     # Try to get user from request state (set by OAuth2 middleware) or headers
     user = request.state.auth_user
