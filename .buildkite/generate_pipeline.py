@@ -143,6 +143,7 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--helm-version')
     parser.add_argument('--helm-package')
     parser.add_argument('--jobs-consolidation', action="store_true")
+    parser.add_argument('--serve-consolidation', action="store_true")
     parser.add_argument('--grpc', action="store_true")
     parser.add_argument('--env-file')
     parser.add_argument('--plugin-yaml')
@@ -186,6 +187,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append(f'--helm-package {parsed_args.helm_package}')
     if parsed_args.jobs_consolidation:
         extra_args.append('--jobs-consolidation')
+    if parsed_args.serve_consolidation:
+        extra_args.append('--serve-consolidation')
     if parsed_args.grpc:
         extra_args.append('--grpc')
     if parsed_args.env_file:
