@@ -895,13 +895,8 @@ async def authorize_page(
 
     html_dir = pathlib.Path(__file__).parent / 'html'
     authorize_page_path = html_dir / 'authorize_page.html'
-    try:
-        with open(authorize_page_path, 'r', encoding='utf-8') as f:
-            html_content = f.read()
-    except FileNotFoundError as e:
-        raise fastapi.HTTPException(
-            status_code=500,
-            detail='Authorization page template not found.') from e
+    with open(authorize_page_path, 'r', encoding='utf-8') as f:
+        html_content = f.read()
 
     html_content = html_content.replace('CODE_CHALLENGE_PLACEHOLDER',
                                         code_challenge)

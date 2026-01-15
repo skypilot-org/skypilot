@@ -2485,7 +2485,7 @@ def _check_endpoint_in_env_var(is_login: bool) -> None:
 def _try_polling_auth(endpoint: str) -> Optional[str]:
     """Try the polling-based authentication flow."""
     try:
-        # Generate code verifier (random secret) and challenge (hash of verifier)
+        # Generate code verifier (random secret) and challenge (hash)
         code_verifier = common_utils.base64_url_encode(secrets.token_bytes(32))
         code_challenge = common_utils.compute_code_challenge(code_verifier)
 
@@ -2516,7 +2516,7 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
             elif resp.status_code == 202:
                 continue  # Still pending
             elif resp.status_code == 404:
-                continue  # Session not created yet (user hasn't loaded page)
+                continue  # Session not found, keep polling
             else:
                 logger.debug(f'Poll failed: {resp.status_code}')
                 return None
@@ -2699,7 +2699,7 @@ def api_login(endpoint: Optional[str] = None,
         token: Optional[str] = None
 
         # Try methods in order:
-        # 1. New polling-based flow - only on servers >= API v27
+        # 1. New polling-based flow - only on servers >= API v28
         # 2. Old localhost callback flow
         # 3. Manual token entry
         remote_api_version_str = api_server_info.api_version
