@@ -2504,7 +2504,7 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
         # Poll for token
         start_time = time.time()
         while time.time() - start_time < oauth_lib.AUTH_TIMEOUT:
-            time.sleep(2)
+            time.sleep(1)
             resp = requests.get(f'{endpoint}/api/v1/auth/token',
                                 params={'code_verifier': code_verifier},
                                 timeout=10)
