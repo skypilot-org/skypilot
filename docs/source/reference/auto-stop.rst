@@ -155,9 +155,10 @@ This is useful for tasks like committing code, saving checkpoints, or performing
      autostop:
        idle_minutes: 10
        hook: |
-         curl -X POST -H 'Content-type: application/json' \
-           --data '{"text":"Cluster shutting down"}' \
-           https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+         cd my-code-base
+         git add .
+         git commit -m "Commit my code"
+         git push
        hook_timeout: 300
 
 The hook script runs on the cluster and has access to the cluster's filesystem and environment variables.
@@ -188,6 +189,59 @@ customize the timeout in your YAML configuration:
 - Hook execution will keep the cluster from terminating while it runs, occupying the resources. Be aware of that when setting ``idle_minutes``
 
 Common use cases for autostop hooks:
+
+.. dropdown:: Committing and pushing code changes
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             cd my-code-base
+             git add .
+             git commit -m "Auto-commit before shutdown"
+             git push
+
+.. dropdown:: Saving model checkpoints to persistent storage
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             # Save checkpoints to a mounted volume or cloud storage
+             cp -r /workspace/checkpoints/* /mnt/persistent-storage/checkpoints/
+             # Or upload to S3
+             aws s3 sync /workspace/checkpoints/ s3://my-bucket/checkpoints/
+
+.. dropdown:: Uploading logs or results to cloud storage
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             # Upload logs to S3
+             aws s3 sync /workspace/logs/ s3://my-bucket/logs/$(date +%Y%m%d)/
+             # Or upload to GCS
+             gcloud storage cp -r /workspace/results/ gs://my-bucket/results/$(date +%Y%m%d)/
+
+.. dropdown:: Syncing W&B runs before shutdown
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             # Sync W&B runs to the cloud before shutdown
+             # Sync all runs in the wandb directory
+             wandb sync ./wandb
+             # Or sync a specific run
+             # wandb sync ./wandb/run-20250813_124246-n67z9ude
 
 .. dropdown:: Sending notifications about the cluster shutdown
 
