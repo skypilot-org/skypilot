@@ -369,32 +369,6 @@ class TestSerializeKubernetesNodeInfo:
         assert parsed['node_info_dict']['node2']['name'] == 'node2'
         assert parsed['node_info_dict']['node2']['other_field'] == 'value2'
 
-    # @mock.patch(
-    #     'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
-    # )
-    # def test_node_without_is_cordoned_and_taints_fields(self, mock_get_version):
-    #     """Test that nodes without is_cordoned and taints fields are handled gracefully."""
-    #     mock_get_version.return_value = 20
-    #     data = {
-    #         'node_info_dict': {
-    #             'node1': {
-    #                 'name': 'node1'
-    #             },  # No is_cordoned or taints fields
-    #             'node2': {
-    #                 'name': 'node2',
-    #                 'is_cordoned': True,
-    #                 'taints': ['NoSchedule']
-    #             }
-    #         }
-    #     }
-    #     # Should not raise an error
-    #     result = return_value_serializers.serialize_kubernetes_node_info(data)
-    #     parsed = json.loads(result)
-    #     assert 'is_cordoned' not in parsed['node_info_dict']['node1']
-    #     assert 'taints' not in parsed['node_info_dict']['node1']
-    #     assert 'is_cordoned' not in parsed['node_info_dict']['node2']
-    #     assert 'taints' not in parsed['node_info_dict']['node2']
-
     @mock.patch(
         'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
     )

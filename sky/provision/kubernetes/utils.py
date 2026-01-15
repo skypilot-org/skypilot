@@ -1296,8 +1296,8 @@ class V1Node:
             'effect': t.effect
         }
                 for t in self.spec.taints
-                if t.key != 'node.kubernetes.io/unschedulable' or
-                t.effect != 'NoSchedule']
+                if not (t.key == 'node.kubernetes.io/unschedulable' and
+                        t.effect == 'NoSchedule')]
 
 
 @annotations.lru_cache(scope='request', maxsize=10)
