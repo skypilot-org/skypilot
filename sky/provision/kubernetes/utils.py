@@ -1222,14 +1222,31 @@ class V1NodeStatus:
 
 
 @dataclasses.dataclass
+class V1Taint:
+    """Represents a Kubernetes node taint."""
+    key: str
+    effect: str
+    value: Optional[str] = None
+
+
+@dataclasses.dataclass
+class V1NodeSpec:
+    """Represents a Kubernetes node spec."""
+    unschedulable: bool
+    taints: List[V1Taint]
+
+
+@dataclasses.dataclass
 class V1Node:
     """Represents a Kubernetes node."""
     metadata: V1ObjectMeta
     status: V1NodeStatus
+    spec: V1NodeSpec
 
     @classmethod
     def from_dict(cls, data: dict) -> 'V1Node':
         """Create V1Node from a dictionary."""
+        spec_data = data.get('spec', {})
         return cls(metadata=V1ObjectMeta(
             name=data['metadata']['name'],
             labels=data['metadata'].get('labels', {}),
@@ -1246,7 +1263,15 @@ class V1Node:
                            V1NodeCondition(type=cond['type'],
                                            status=cond['status'])
                            for cond in data['status'].get('conditions', [])
-                       ]))
+                       ]),
+                   spec=V1NodeSpec(unschedulable=spec_data.get(
+                       'unschedulable', False),
+                                   taints=[
+                                       V1Taint(key=taint['key'],
+                                               effect=taint['effect'],
+                                               value=taint.get('value'))
+                                       for taint in spec_data.get('taints', [])
+                                   ]))
 
     def is_ready(self) -> bool:
         """Check if the node is ready based on its conditions.
@@ -1258,6 +1283,21 @@ class V1Node:
             if condition.type == 'Ready':
                 return condition.status == 'True'
         return False
+
+    def is_cordoned(self) -> bool:
+        """Check if the node is cordoned based on its spec.unschedulable."""
+        return self.spec.unschedulable
+
+    def get_non_cordon_taints(self) -> List[Dict[str, Any]]:
+        """Get the taints on the node except the cordon taint."""
+        return [{
+            'key': t.key,
+            'value': t.value if t.value else None,
+            'effect': t.effect
+        }
+                for t in self.spec.taints
+                if t.key != 'node.kubernetes.io/unschedulable' or
+                t.effect != 'NoSchedule']
 
 
 @annotations.lru_cache(scope='request', maxsize=10)
@@ -3219,7 +3259,10 @@ def get_kubernetes_node_info(
                 memory_gb=memory_gb,
                 cpu_free=cpu_free,
                 memory_free_gb=memory_free_gb,
-                is_ready=node_is_ready)
+                is_ready=node_is_ready,
+                is_cordoned=node.is_cordoned(),
+                taints=node.get_non_cordon_taints(),
+            )
             continue
 
         if not node_is_ready:
@@ -3248,7 +3291,10 @@ def get_kubernetes_node_info(
             memory_gb=memory_gb,
             cpu_free=cpu_free,
             memory_free_gb=memory_free_gb,
-            is_ready=node_is_ready)
+            is_ready=node_is_ready,
+            is_cordoned=node.is_cordoned(),
+            taints=node.get_non_cordon_taints(),
+        )
     hint = ''
     if has_multi_host_tpu:
         hint = ('(Note: Multi-host TPUs are detected and excluded from the '

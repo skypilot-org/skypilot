@@ -202,6 +202,174 @@ def test_get_kubernetes_node_info():
         assert node_info.node_info_dict['node-1'].free[
             'accelerators_available'] == 2
 
+    # Test case 7: Cordoned node
+    mock_cordoned_node = mock.MagicMock()
+    mock_cordoned_node.metadata.name = 'node-cordoned'
+    mock_cordoned_node.metadata.labels = {
+        'skypilot.co/accelerator': 'a100-80gb',
+        'cloud.google.com/gke-accelerator-count': '4'
+    }
+    mock_cordoned_node.status.allocatable = {'nvidia.com/gpu': '4'}
+    mock_cordoned_node.status.capacity = {'cpu': '8', 'memory': '32Gi'}
+    mock_cordoned_node.status.addresses = [
+        mock.MagicMock(type='InternalIP', address='10.0.0.10')
+    ]
+    mock_cordoned_node.spec.unschedulable = True
+    mock_cordoned_node.spec.taints = [
+        mock.MagicMock(key='node.kubernetes.io/unschedulable',
+                       value=None,
+                       effect='NoSchedule')
+    ]
+    mock_cordoned_node.is_ready.return_value = True
+    mock_cordoned_node.is_cordoned.return_value = True
+    mock_cordoned_node.get_non_cordon_taints.return_value = []
+
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=[mock_cordoned_node]), \
+         mock.patch('sky.provision.kubernetes.utils.'
+                   'get_allocated_resources_by_node',
+                   return_value=({mock_cordoned_node.metadata.name: 2}, {})), \
+         mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                   return_value='nvidia.com/gpu'):
+        node_info = utils.get_kubernetes_node_info()
+        assert isinstance(node_info, models.KubernetesNodesInfo)
+        assert len(node_info.node_info_dict) == 1
+        assert node_info.node_info_dict['node-cordoned'].is_cordoned is True
+        assert node_info.node_info_dict['node-cordoned'].taints == []
+
+    # Test case 8: Node with custom taints (no cordon)
+    mock_tainted_node = mock.MagicMock()
+    mock_tainted_node.metadata.name = 'node-tainted'
+    mock_tainted_node.metadata.labels = {
+        'skypilot.co/accelerator': 'v100',
+        'cloud.google.com/gke-accelerator-count': '2'
+    }
+    mock_tainted_node.status.allocatable = {'nvidia.com/gpu': '2'}
+    mock_tainted_node.status.capacity = {'cpu': '4', 'memory': '16Gi'}
+    mock_tainted_node.status.addresses = [
+        mock.MagicMock(type='InternalIP', address='10.0.0.11')
+    ]
+    mock_tainted_node.spec.unschedulable = False
+    mock_tainted_node.spec.taints = [
+        mock.MagicMock(key='dedicated', value='gpu', effect='NoSchedule'),
+        mock.MagicMock(key='gpu-type', value='v100', effect='NoExecute')
+    ]
+    mock_tainted_node.is_ready.return_value = True
+    mock_tainted_node.is_cordoned.return_value = False
+    mock_tainted_node.get_non_cordon_taints.return_value = [{
+        'key': 'dedicated',
+        'value': 'gpu',
+        'effect': 'NoSchedule'
+    }, {
+        'key': 'gpu-type',
+        'value': 'v100',
+        'effect': 'NoExecute'
+    }]
+
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=[mock_tainted_node]), \
+         mock.patch('sky.provision.kubernetes.utils.'
+                   'get_allocated_resources_by_node',
+                   return_value=({mock_tainted_node.metadata.name: 1}, {})), \
+         mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                   return_value='nvidia.com/gpu'):
+        node_info = utils.get_kubernetes_node_info()
+        assert isinstance(node_info, models.KubernetesNodesInfo)
+        assert len(node_info.node_info_dict) == 1
+        assert node_info.node_info_dict['node-tainted'].is_cordoned is False
+        assert len(node_info.node_info_dict['node-tainted'].taints) == 2
+        assert node_info.node_info_dict['node-tainted'].taints[0] == {
+            'key': 'dedicated',
+            'value': 'gpu',
+            'effect': 'NoSchedule'
+        }
+        assert node_info.node_info_dict['node-tainted'].taints[1] == {
+            'key': 'gpu-type',
+            'value': 'v100',
+            'effect': 'NoExecute'
+        }
+
+    # Test case 9: Cordoned node with additional custom taints
+    mock_cordoned_and_tainted = mock.MagicMock()
+    mock_cordoned_and_tainted.metadata.name = 'node-cordoned-and-tainted'
+    mock_cordoned_and_tainted.metadata.labels = {
+        'skypilot.co/accelerator': 't4',
+        'cloud.google.com/gke-accelerator-count': '1'
+    }
+    mock_cordoned_and_tainted.status.allocatable = {'nvidia.com/gpu': '1'}
+    mock_cordoned_and_tainted.status.capacity = {'cpu': '2', 'memory': '8Gi'}
+    mock_cordoned_and_tainted.status.addresses = [
+        mock.MagicMock(type='InternalIP', address='10.0.0.12')
+    ]
+    mock_cordoned_and_tainted.spec.unschedulable = True
+    mock_cordoned_and_tainted.spec.taints = [
+        mock.MagicMock(key='node.kubernetes.io/unschedulable',
+                       value=None,
+                       effect='NoSchedule'),
+        mock.MagicMock(key='maintenance', value='true', effect='NoSchedule')
+    ]
+    mock_cordoned_and_tainted.is_ready.return_value = True
+    mock_cordoned_and_tainted.is_cordoned.return_value = True
+    mock_cordoned_and_tainted.get_non_cordon_taints.return_value = [{
+        'key': 'maintenance',
+        'value': 'true',
+        'effect': 'NoSchedule'
+    }]
+
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=[mock_cordoned_and_tainted]), \
+         mock.patch('sky.provision.kubernetes.utils.'
+                   'get_allocated_resources_by_node',
+                   return_value=({mock_cordoned_and_tainted.metadata.name: 0}, {})), \
+         mock.patch('sky.provision.kubernetes.utils.get_gpu_resource_key',
+                   return_value='nvidia.com/gpu'):
+        node_info = utils.get_kubernetes_node_info()
+        assert isinstance(node_info, models.KubernetesNodesInfo)
+        assert len(node_info.node_info_dict) == 1
+        assert node_info.node_info_dict[
+            'node-cordoned-and-tainted'].is_cordoned is True
+        # Should only return non-cordon taints
+        assert len(
+            node_info.node_info_dict['node-cordoned-and-tainted'].taints) == 1
+        assert node_info.node_info_dict['node-cordoned-and-tainted'].taints[
+            0] == {
+                'key': 'maintenance',
+                'value': 'true',
+                'effect': 'NoSchedule'
+            }
+
+    # Test case 10: CPU-only node with cordoned status
+    mock_cpu_cordoned = mock.MagicMock()
+    mock_cpu_cordoned.metadata.name = 'node-cpu-cordoned'
+    mock_cpu_cordoned.metadata.labels = {}
+    mock_cpu_cordoned.status.allocatable = {'cpu': '4', 'memory': '16Gi'}
+    mock_cpu_cordoned.status.capacity = {'cpu': '4', 'memory': '16Gi'}
+    mock_cpu_cordoned.status.addresses = [
+        mock.MagicMock(type='InternalIP', address='10.0.0.13')
+    ]
+    mock_cpu_cordoned.spec.unschedulable = True
+    mock_cpu_cordoned.spec.taints = [
+        mock.MagicMock(key='node.kubernetes.io/unschedulable',
+                       value=None,
+                       effect='NoSchedule')
+    ]
+    mock_cpu_cordoned.is_ready.return_value = True
+    mock_cpu_cordoned.is_cordoned.return_value = True
+    mock_cpu_cordoned.get_non_cordon_taints.return_value = []
+
+    with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                   return_value=[mock_cpu_cordoned]), \
+         mock.patch('sky.provision.kubernetes.utils.'
+                   'get_allocated_resources_by_node',
+                   return_value=({}, {})):
+        node_info = utils.get_kubernetes_node_info()
+        assert isinstance(node_info, models.KubernetesNodesInfo)
+        assert len(node_info.node_info_dict) == 1
+        assert node_info.node_info_dict['node-cpu-cordoned'].is_cordoned is True
+        assert node_info.node_info_dict['node-cpu-cordoned'].taints == []
+        assert node_info.node_info_dict['node-cpu-cordoned'].total[
+            'accelerator_count'] == 0
+
 
 def test_get_all_kube_context_names():
     """Tests get_all_kube_context_names function with KUBECONFIG env var."""
@@ -1137,7 +1305,7 @@ def test_parse_cpu_or_gpu_resource_to_float():
 
 def test_parse_memory_resource_with_millibytes():
     """Test parse_memory_resource function with lowercase 'm' suffix.
-    
+
     This test verifies that parse_memory_resource correctly handles memory
     values with lowercase 'm' suffix like '100m' = 0.1 bytes.
     Note: For memory, 'm' means milli (0.001 bytes), so 100m = 100 * 0.001 = 0.1 bytes.

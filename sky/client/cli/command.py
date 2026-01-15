@@ -3949,12 +3949,34 @@ def show_gpus(
                 utilization_str = (
                     f'{available} of '
                     f'{node_info.total["accelerator_count"]} free')
+                extra_info = []
+                # Add extra info if node is cordoned, tainted, or not ready
+                taints = getattr(node_info, 'taints', None)
+                if taints:
+                    # key=value:effect if value is not empty
+                    # key:effect if value is empty
+                    taints_strs = []
+                    for taint in taints:
+                        if taint.get('value'):
+                            taints_strs.append(
+                                f'{taint["key"]}={taint.get("value")}:'
+                                f'{taint["effect"]}')
+                        else:
+                            taints_strs.append(
+                                f'{taint["key"]}:{taint["effect"]}')
+                    if taints_strs:
+                        taints_str = ', '.join(taints_strs)
+                        extra_info.append(f'Taints: {taints_str}')
+                node_is_cordoned = getattr(node_info, 'is_cordoned', False)
+                if node_is_cordoned:
+                    extra_info.append('Node Cordoned')
                 # Check if node is ready (defaults to True for backward
                 # compatibility with older server versions)
                 node_is_ready = getattr(node_info, 'is_ready', True)
                 if not node_is_ready:
-                    utilization_str += ' (Node NotReady)'
-
+                    extra_info.append('Node NotReady')
+                if extra_info:
+                    utilization_str += f' ({", ".join(extra_info)})'
                 node_table.add_row([
                     context_name, node_name, cpu_str, memory_str, acc_type,
                     utilization_str
