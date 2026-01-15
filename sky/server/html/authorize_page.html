@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Authorize SkyPilot CLI</title>
+    <title>Sign in to SkyPilot CLI</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -50,20 +50,9 @@
         }
         .description {
             font-size: 14px;
-            line-height: 1.6;
+            line-height: 1.5;
             color: #5f6368;
             margin-bottom: 32px;
-            text-align: left;
-            background-color: #f8f9fa;
-            padding: 16px;
-            border-radius: 4px;
-        }
-        .description ul {
-            margin: 8px 0 0 0;
-            padding-left: 20px;
-        }
-        .description li {
-            margin-bottom: 4px;
         }
         .button-group {
             display: flex;
@@ -144,16 +133,11 @@
                 <path d="M16.632 21.3918L15.2651 27.6605L21.3357 25.6091L30.3276 16.6172L16.632 21.3918Z" fill="#39A4DD"/>
             </svg>
         </div>
-        <h1>Authorize SkyPilot CLI</h1>
+        <h1>Sign in to SkyPilot CLI</h1>
         <p class="user-identifier">USER_PLACEHOLDER</p>
-        <div class="description">
-            <strong>The SkyPilot CLI is requesting access to your account.</strong>
-            <ul>
-                <li>Launch and manage cloud resources</li>
-                <li>Run jobs and serve models</li>
-                <li>Access your cloud credentials configured on the server</li>
-            </ul>
-        </div>
+        <p class="description">
+            Click <strong>Authorize</strong> to link the SkyPilot CLI to your account.
+        </p>
         <div class="button-group">
             <button class="cancel-button" onclick="cancelAuth()">Cancel</button>
             <button id="authorize-btn" class="authorize-button" onclick="authorize()">Authorize</button>

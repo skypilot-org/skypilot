@@ -2495,9 +2495,9 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
             logger.debug('Failed to open browser.')
             return None
 
-        click.echo(f'{colorama.Fore.GREEN}Browser opened. '
-                   f'Please click "Authorize" to complete login.'
+        click.echo(f'{colorama.Fore.GREEN}Browser opened at {auth_url}'
                    f'{colorama.Style.RESET_ALL}\n'
+                   f'Please click "Authorize" to complete login.\n'
                    f'{colorama.Style.DIM}Press ctrl+c to enter token manually.'
                    f'{colorama.Style.RESET_ALL}')
 
@@ -2702,13 +2702,9 @@ def api_login(endpoint: Optional[str] = None,
         # 1. New polling-based flow - only on servers >= API v28
         # 2. Old localhost callback flow
         # 3. Manual token entry
-        remote_api_version_str = api_server_info.api_version
-        try:
-            if (remote_api_version_str is not None and
-                    int(remote_api_version_str) >= 28):
-                token = _try_polling_auth(endpoint)
-        except ValueError:
-            pass  # Invalid version string, skip polling auth
+        remote_api_version = versions.get_remote_api_version()
+        if remote_api_version is not None and remote_api_version >= 28:
+            token = _try_polling_auth(endpoint)
 
         if token is None:
             # Polling auth not available or failed, try localhost callback
