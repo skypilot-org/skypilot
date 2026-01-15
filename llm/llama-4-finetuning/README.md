@@ -7,35 +7,44 @@
 
 Meta's Llama 4 represents the next generation of open-source large language models, featuring advanced capabilities with the **Llama-4-Maverick-17B-128E model** - a 400B  parameter (17B active) Mixture of Experts (MoE) architecture with 128 experts.
 
-This guide shows how to use [SkyPilot](https://github.com/skypilot-org/skypilot) and [torchtune](https://pytorch.org/torchtune/stable/index.html) to **finetune Llama 4 on your own infra**. Everything is packaged in a simple [SkyPilot YAML](https://docs.skypilot.co/en/latest/getting-started/quickstart.html), that can be launched with one command on your infra: 
+This guide shows how to use [SkyPilot](https://github.com/skypilot-org/skypilot) with torchtune and Llama Factory to **finetune Llama 4 on your own infra**. Everything is packaged in simple [SkyPilot YAMLs](https://docs.skypilot.co/en/latest/getting-started/quickstart.html), that can be launched with one command on your infra:
 - Kubernetes cluster
 - Cloud accounts ([16+ clouds supported](https://docs.skypilot.co/en/latest/getting-started/installation.html))
 
-## Finetune Llama 4 with SkyPilot
-We will use [torchtune](https://pytorch.org/torchtune/stable/index.html) to finetune Llama 4 Maverick.
+## 📁 Available Recipes
 
-This model requires at least 2 nodes with 8x H200 GPUs each.
+Choose the right recipe for your needs:
 
-To set up the environment for launching the finetuning job, finish the [Appendix: Preparation](#appendix-preparation) section first.
+| **Recipe** | **Requirements** | **Description** |
+|------------------------|------------------|-----------------|
+| 🌟 **llama-4-maverick-sft.yaml** | **4 nodes**<br>32x H200 GPUs<br>1000+ GB CPU memory per node | Full finetuning using torchtune with CPU offloading with 400B model. Recommended if you have 32 or more H200s. |
+| 🎯 **llama-4-maverick-lora.yaml** | **2 nodes**<br>16x H100 GPUs<br>1000+ GB CPU memory per node | **Memory efficient** - LoRA fine-tuning with lower resource requirements. Great for limited GPU resources. |
+| 🚀 **llama-4-scout-sft.yaml** | **2 nodes**<br>16x H100 GPUs<br>1000+ GB CPU memory per node | Full finetuning using torchtune with 109B model. Good start for users with H100s. |
 
-The finetuning job is packaged in a SkyPilot YAML. It can be launched on any of your own infra, such as Kubernetes or any cloud, with the same interface:
+## Full finetuning with CPU offloading
+
+This approach uses [torchtune](https://github.com/pytorch/torchtune) to do full supervised fine-tuning with CPU offloading to reduce GPU memory requirements. Requires 32 or more H200s.
+
+**SkyPilot YAML**: [`llama-4-maverick-sft.yaml`](https://github.com/skypilot-org/skypilot/blob/master/llm/llama-4-finetuning/llama-4-maverick-sft.yaml)
+
+Run the following on your local machine:
 
 <details>
     <summary>
-        SkyPilot YAML for finetuning Llama 4: <code>llama-4-maverick.yaml</code>
+        SkyPilot YAML for finetuning Llama 4: <code>llama-4-maverick-sft.yaml</code>
     </summary>
-    
+
 ```yaml
 # Full finetuning of Llama-4 Maverick 17B MoE model with 128 experts.
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch llama-4-maverick.yaml -c maverick --env HF_TOKEN
+#  HF_TOKEN=xxx sky launch llama-4-maverick-sft.yaml -c maverick --env HF_TOKEN
 #
-# This config requires at least 2 nodes with 8x H200 GPUs each.
+# This config requires at least 4 nodes with 8x H200 GPUs each.
 
 envs:
-  HF_TOKEN: 
+  HF_TOKEN:
 
 resources:
   cpus: 100+
@@ -43,9 +52,13 @@ resources:
   accelerators: H200:8
   disk_tier: best
 
-num_nodes: 2
+num_nodes: 4
 
-# Optional: configure buckets for dataset and checkpoints. You can then use the /outputs directory to write checkpoints.
+# Optional: configure buckets for dataset and checkpoints. You can then use the
+# /checkpoints directory to write checkpoints, which writes to local disk first
+# and asynchronously uploads to the cloud bucket. Pass /checkpoints to the main
+# training script.
+# file_mounts:
 # file_mounts:
 #  /dataset:
 #    source: s3://my-dataset-bucket
@@ -75,9 +88,23 @@ run: |
   --rdzv_endpoint=$MASTER_ADDR:29500 \
   full_finetune_distributed \
   --config llama4/maverick_17B_128E_full \
-  model_dir=/tmp/Llama-4-Maverick-17B-128E-Instruct
+  model_dir=/tmp/Llama-4-Maverick-17B-128E-Instruct \
+  dataset.packed=True tokenizer.max_seq_len=4096 \
+  gradient_accumulation_steps=1 \
+  enable_activation_offloading=True \
+  activation_offloading_use_streams=False \
+  optimizer_in_bwd=True \
+  optimizer=torch.optim.AdamW \
+  optimizer_kwargs.fused=True \
+  max_steps_per_epoch=1 \
+  epochs=10 \
+  enable_dcp=True \
+  enable_async_checkpointing=True \
+  resume_from_checkpoint=False \
+  keep_last_n_checkpoints=1 \
+  fsdp_cpu_offload=True
 ```
-    
+
 </details>
 
 Run the following on your local machine:
@@ -88,10 +115,18 @@ git clone https://github.com/skypilot-org/skypilot
 cd skypilot/llm/llama-4-finetuning
 
 export HF_TOKEN=xxxx
+sky launch -c maverick-torchtune llama-4-maverick-sft.yaml \
+  --env HF_TOKEN
+```
 
-# Full finetuning of Llama 4 Maverick 17B MoE
-# Requires 2+ nodes with H200 GPUs for distributed training
-sky launch -c maverick llama-4-maverick.yaml \
+## Alternative Approaches
+
+### LoRA Fine-tuning (Lower Resource Requirements)
+For users with limited GPU resources, LoRA (Low-Rank Adaptation) provides an efficient alternative that can run on 16 H100s:
+
+```bash
+# LoRA finetuning - requires fewer resources
+sky launch -c maverick-lora llama-4-maverick-lora.yaml \
   --env HF_TOKEN
 ```
 
@@ -109,7 +144,7 @@ export HF_TOKEN="xxxx"
 
 4. Install SkyPilot for launching the finetuning:
 ```bash
-pip install skypilot-nightly[aws,gcp,kubernetes] 
+pip install skypilot-nightly[aws,gcp,kubernetes]
 # or other clouds (16 clouds + kubernetes supported) you have setup
 # See: https://docs.skypilot.co/en/latest/getting-started/installation.html
 ```
@@ -136,7 +171,7 @@ sky check
 ```
 
 ## What's next
-    
+
 * [AI on Kubernetes Without the Pain](https://blog.skypilot.co/ai-on-kubernetes/)
 * [SkyPilot AI Gallery](https://docs.skypilot.co/en/latest/gallery/index.html)
 * [SkyPilot Docs](https://docs.skypilot.co)

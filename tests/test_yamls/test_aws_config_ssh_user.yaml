@@ -1,0 +1,10 @@
+aws:
+  vpc_name: fake-vpc
+  ssh_user: test-user
+  remote_identity:
+    - sky-serve-fake1-*: fake1-skypilot-role
+    - sky-serve-fake2-*: fake2-skypilot-role
+
+  security_group_name:
+    - sky-serve-fake1-*: fake-1-sg
+    - sky-serve-fake2-*: fake-2-sg

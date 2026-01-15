@@ -1,14 +1,19 @@
 """Test the controller_utils module."""
-from typing import Any, Dict, Optional, Set, Tuple
+import importlib
+import multiprocessing
+import os
+from typing import Any, Dict, Set
 from unittest import mock
 
 import pytest
 
-import sky
 from sky import clouds
+from sky import exceptions
+from sky import resources as resources_lib
 from sky.jobs import constants as managed_job_constants
 from sky.serve import constants as serve_constants
 from sky.skylet import constants
+from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import registry
 
@@ -22,16 +27,16 @@ _DEFAULT_AUTOSTOP = {
     ('controller_type', 'custom_controller_resources_config', 'expected'), [
         ('jobs', {}, {
             'cpus': '4+',
-            'memory': '8x',
+            'memory': '4x',
             'disk_size': 50,
             'autostop': _DEFAULT_AUTOSTOP,
         }),
         ('jobs', {
-            'cpus': '4+',
+            'cpus': '8+',
             'disk_size': 100,
         }, {
-            'cpus': '4+',
-            'memory': '8x',
+            'cpus': '8+',
+            'memory': '4x',
             'disk_size': 100,
             'autostop': _DEFAULT_AUTOSTOP,
         }),
@@ -64,6 +69,8 @@ def test_get_controller_resources(controller_type: str,
     monkeypatch.setattr('sky.skypilot_config.loaded', lambda: True)
     monkeypatch.setattr('sky.skypilot_config.get_nested',
                         get_custom_controller_resources)
+    monkeypatch.setattr('sky.global_user_state.get_handle_from_cluster_name',
+                        lambda _: None)
 
     controller_resources = list(
         controller_utils.get_controller_resources(
@@ -77,7 +84,8 @@ def test_get_controller_resources(controller_type: str,
 
 
 def _check_controller_resources(
-        controller_resources: Set[sky.Resources], expected_infra_list: Set[str],
+        controller_resources: Set[resources_lib.Resources],
+        expected_infra_list: Set[str],
         default_controller_resources: Dict[str, Any]) -> None:
     """Helper function to check that the controller resources match the
     expected combinations."""
@@ -111,7 +119,7 @@ def test_get_controller_resources_with_task_resources(
     expected_infra_set = all_clouds
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
-        task_resources=[sky.Resources(infra=c) for c in all_clouds])
+        task_resources=[resources_lib.Resources(infra=c) for c in all_clouds])
     _check_controller_resources(controller_resources, expected_infra_set,
                                 default_controller_resources)
 
@@ -126,16 +134,16 @@ def test_get_controller_resources_with_task_resources(
         cloud = registry.CLOUD_REGISTRY.from_str(cloud_str)
         try:
             cloud.check_features_are_supported(
-                sky.Resources(),
-                {sky.clouds.CloudImplementationFeatures.HOST_CONTROLLERS})
-        except sky.exceptions.NotSupportedError:
+                resources_lib.Resources(),
+                {clouds.CloudImplementationFeatures.HOST_CONTROLLERS})
+        except exceptions.NotSupportedError:
             return False
         return True
 
     expected_infra_set = {c for c in all_clouds if _could_host_controllers(c)}
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
-        task_resources=[sky.Resources(infra=c) for c in all_clouds])
+        task_resources=[resources_lib.Resources(infra=c) for c in all_clouds])
     _check_controller_resources(controller_resources, expected_infra_set,
                                 default_controller_resources)
 
@@ -144,8 +152,8 @@ def test_get_controller_resources_with_task_resources(
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[
-            sky.Resources(accelerators='L4'),
-            sky.Resources(infra='runpod', accelerators='A40'),
+            resources_lib.Resources(accelerators='L4'),
+            resources_lib.Resources(infra='runpod', accelerators='A40'),
         ])
     assert len(controller_resources) == 1
     config = list(controller_resources)[0].to_yaml_config()
@@ -156,14 +164,18 @@ def test_get_controller_resources_with_task_resources(
     # regions, and zones. Each combination should contain the default resources
     # along with the cloud, region, and zone.
     all_cloud_regions_zones = [
-        sky.Resources(cloud=sky.AWS(), region='us-east-1', zone='us-east-1a'),
-        sky.Resources(cloud=sky.AWS(), region='ap-south-1', zone='ap-south-1b'),
-        sky.Resources(cloud=sky.GCP(),
-                      region='us-central1',
-                      zone='us-central1-a'),
-        sky.Resources(cloud=sky.GCP(),
-                      region='europe-west1',
-                      zone='europe-west1-b'),
+        resources_lib.Resources(cloud=clouds.AWS(),
+                                region='us-east-1',
+                                zone='us-east-1a'),
+        resources_lib.Resources(cloud=clouds.AWS(),
+                                region='ap-south-1',
+                                zone='ap-south-1b'),
+        resources_lib.Resources(cloud=clouds.GCP(),
+                                region='us-central1',
+                                zone='us-central1-a'),
+        resources_lib.Resources(cloud=clouds.GCP(),
+                                region='europe-west1',
+                                zone='europe-west1-b'),
     ]
     expected_infra_set = {
         'aws/us-east-1/us-east-1a',
@@ -185,9 +197,9 @@ def test_get_controller_resources_with_task_resources(
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[
-            sky.Resources(infra='aws/us-west-2'),
-            sky.Resources(infra='aws/us-west-2/us-west-2b'),
-            sky.Resources(infra='gcp/us-central1/us-central1-a')
+            resources_lib.Resources(infra='aws/us-west-2'),
+            resources_lib.Resources(infra='aws/us-west-2/us-west-2b'),
+            resources_lib.Resources(infra='gcp/us-central1/us-central1-a')
         ])
     expected_infra_set = {
         'aws/us-west-2',
@@ -203,14 +215,14 @@ def test_get_controller_resources_with_task_resources(
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[
-            sky.Resources(cloud=sky.GCP(), region='europe-west1'),
-            sky.Resources(cloud=sky.GCP()),
-            sky.Resources(cloud=sky.AWS(),
-                          region='eu-north-1',
-                          zone='eu-north-1a'),
-            sky.Resources(cloud=sky.AWS(), region='eu-north-1'),
-            sky.Resources(cloud=sky.AWS(), region='ap-south-1'),
-            sky.Resources(cloud=sky.Azure()),
+            resources_lib.Resources(cloud=clouds.GCP(), region='europe-west1'),
+            resources_lib.Resources(cloud=clouds.GCP()),
+            resources_lib.Resources(cloud=clouds.AWS(),
+                                    region='eu-north-1',
+                                    zone='eu-north-1a'),
+            resources_lib.Resources(cloud=clouds.AWS(), region='eu-north-1'),
+            resources_lib.Resources(cloud=clouds.AWS(), region='ap-south-1'),
+            resources_lib.Resources(cloud=clouds.Azure()),
         ])
     expected_infra_set = {
         'aws/eu-north-1',
@@ -643,3 +655,175 @@ def test_get_cloud_dependencies_installation_commands_cudo_only(
     # Should include Cudo dependencies
     combined_commands = ' '.join(commands)
     assert 'cudoctl' in combined_commands
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_shared_controller_vars_to_fill(controller_type: str, monkeypatch):
+    """Test that api_server config is removed from user config sent to controller."""
+    from sky.utils import yaml_utils
+
+    def mock_get_cloud_dependencies_installation_commands(controller):
+        return ['echo "Installing dependencies"']
+
+    monkeypatch.setattr(
+        'sky.utils.controller_utils._get_cloud_dependencies_installation_commands',
+        mock_get_cloud_dependencies_installation_commands)
+
+    controller = controller_utils.Controllers.from_type(controller_type)
+
+    user_config = {
+        'api_server': {
+            'endpoint': 'http://example.com:8080',
+            'service_account_token': 'sky_test_token_123'
+        },
+        'admin_policy': '/path/to/admin/policy',
+        'allowed_contexts': ['context1', 'context2'],
+        'jobs': {
+            'controller': {
+                'resources': {
+                    'cpus': '8+'
+                }
+            }
+        }
+    }
+
+    result = controller_utils.shared_controller_vars_to_fill(
+        controller, '/remote/path/to/config', user_config.copy())
+
+    local_config_path = result['local_user_config_path']
+    assert local_config_path is not None
+
+    saved_config = yaml_utils.read_yaml(local_config_path)
+
+    # Verify that api_server, admin_policy, and allowed_contexts are removed
+    assert 'api_server' not in saved_config
+    assert 'admin_policy' not in saved_config
+    assert 'allowed_contexts' not in saved_config
+
+    # Verify that other config is preserved
+    assert 'jobs' in saved_config
+    assert saved_config['jobs']['controller']['resources']['cpus'] == '8+'
+
+    os.unlink(local_config_path)
+
+
+def _run_controller_cluster_name_refresh_test(controller_type: str):
+    """Helper function to run in subprocess to avoid module pollution."""
+    import importlib
+    from unittest import mock
+
+    from sky.utils import common
+    from sky.utils import controller_utils
+
+    stale_hash = 'def456'
+    with mock.patch('sky.utils.common_utils.get_user_hash',
+                    return_value=stale_hash):
+        # Reload modules to simulate server startup.
+        importlib.reload(common)
+        importlib.reload(controller_utils)
+
+        controller = controller_utils.Controllers.from_type(controller_type)
+        prefix = (common.JOB_CONTROLLER_PREFIX if controller_type == 'jobs' else
+                  common.SKY_SERVE_CONTROLLER_PREFIX)
+
+        # cluster_name should contain the stale hash at this point.
+        expected_stale_name = f'{prefix}{stale_hash}'
+        assert controller.value.cluster_name == expected_stale_name, (
+            f'Expected {expected_stale_name}, got {controller.value.cluster_name}'
+        )
+
+        # Simulate server startup: _init_or_restore_server_user_hash reads
+        # the correct hash from db, writes to disk, and calls
+        # refresh_server_id().
+        correct_hash = 'abc123'
+        with mock.patch('sky.utils.common_utils.get_user_hash',
+                        return_value=correct_hash):
+            common.refresh_server_id()
+
+            # cluster_name should now return the updated value.
+            expected_correct_name = f'{prefix}{correct_hash}'
+            assert controller.value.cluster_name == expected_correct_name, (
+                f'Expected {expected_correct_name}, got {controller.value.cluster_name}'
+            )
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_controller_cluster_name_refresh(controller_type: str):
+    """Test controller cluster name is evaluated dynamically, not only at import time.
+
+    Scenario:
+    1. At module import: user_hash on disk is "stale" (e.g., def456)
+    2. Server startup: reads correct hash from db (e.g., abc123), writes to disk,
+       calls refresh_server_id()
+    3. cluster_name property should return the updated value, not the stale one
+    """
+    # Run in subprocess to avoid module pollution from importlib.reload().
+    proc = multiprocessing.Process(
+        target=_run_controller_cluster_name_refresh_test,
+        args=(controller_type,))
+    proc.start()
+    proc.join()
+    assert proc.exitcode == 0, f'Subprocess test failed with exit code {proc.exitcode}'
+
+
+def _run_controller_cluster_name_client_side_test(controller_type: str):
+    """Helper function to run in subprocess to avoid module pollution."""
+    import importlib
+    from unittest import mock
+
+    from sky.utils import common
+    from sky.utils import controller_utils
+
+    client_hash = 'def456'
+    with mock.patch('sky.utils.common_utils.get_user_hash',
+                    return_value=client_hash):
+        # Reload modules to get the mock hash.
+        importlib.reload(common)
+        importlib.reload(controller_utils)
+
+        controller = controller_utils.Controllers.from_type(controller_type)
+        prefix = (common.JOB_CONTROLLER_PREFIX if controller_type == 'jobs' else
+                  common.SKY_SERVE_CONTROLLER_PREFIX)
+
+        # Initially, cluster_name uses client's hash.
+        expected_client_name = f'{prefix}{client_hash}'
+        assert controller.value.cluster_name == expected_client_name
+        assert controller.value._cluster_name_from_server is None
+
+        # Server has a different hash - client receives the actual controller
+        # name.
+        server_hash = 'abc123'
+        actual_controller_name = f'{prefix}{server_hash}'
+
+        # Client calls from_name() with the server-provided name.
+        # This happens when client receives cluster info from server.
+        controller = controller_utils.Controllers.from_name(
+            actual_controller_name, expect_exact_match=False)
+
+        # Should have the server-provided name set.
+        assert controller.value.cluster_name == actual_controller_name, (
+            f'Expected {actual_controller_name}, got {controller.value.cluster_name}'
+        )
+
+        # Clean up.
+        controller.value._cluster_name_from_server = None
+
+
+@pytest.mark.parametrize('controller_type', ['jobs', 'serve'])
+def test_controller_cluster_name_client_side(controller_type: str):
+    """Test client-side cluster name caching when receiving name from server.
+
+    Runs in subprocess to avoid module pollution from importlib.reload().
+
+    This test verifies client-side behavior where the client may not know
+    the exact controller name (because it doesn't have the server's user hash).
+    When from_name() is called with the actual controller name from the server,
+    it should save it using set_cluster_name_from_server().
+    """
+    # Run in subprocess to avoid module pollution from importlib.reload().
+    proc = multiprocessing.Process(
+        target=_run_controller_cluster_name_client_side_test,
+        args=(controller_type,))
+    proc.start()
+    proc.join()
+    assert proc.exitcode == 0, f'Subprocess test failed with exit code {proc.exitcode}'

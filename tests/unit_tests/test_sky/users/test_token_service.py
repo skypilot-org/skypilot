@@ -21,6 +21,9 @@ class TestTokenService:
 
             service = token_service.TokenService()
 
+            assert service.secret_key is None
+
+            service._lazy_initialize()
             assert service.secret_key is not None
             assert len(service.secret_key) >= 32  # Ensure sufficient entropy
             mock_global_state.set_system_config.assert_called_once()
@@ -33,7 +36,7 @@ class TestTokenService:
             mock_global_state.get_system_config.return_value = existing_secret
 
             service = token_service.TokenService()
-
+            service._lazy_initialize()
             assert service.secret_key == existing_secret
 
     def test_create_token_basic(self):

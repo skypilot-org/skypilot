@@ -9,7 +9,8 @@ CONTAINER_NAME_PREFIX = 'sky-remote-test'
 
 def is_inside_docker() -> bool:
     """Check if the current environment is running inside a Docker container."""
-    if os.path.exists('/.dockerenv'):
+    if os.path.exists('/.dockerenv') or os.path.exists(
+            '/proc/sys/fs/binfmt_misc/WSLInterop'):
         return True
 
     return False
@@ -27,7 +28,7 @@ def get_container_name() -> str:
     return container_name
 
 
-def get_host_port() -> int:
+def get_api_server_host_port() -> int:
     """Get the host port that will be listened by the test container."""
     container_name = get_container_name()
     # Create a deterministic hash using MD5
@@ -37,21 +38,39 @@ def get_host_port() -> int:
     return port
 
 
+def get_metrics_host_port() -> int:
+    """Get the host port that will be mapped to the metrics server inside the test container."""
+    return get_api_server_host_port() + 1
+
+
 def get_api_server_endpoint_inside_docker() -> str:
     """Get the API server endpoint inside a Docker container."""
     host = 'host.docker.internal' if is_inside_docker() else '0.0.0.0'
-    return f'http://{host}:{get_host_port()}'
+    return f'http://{host}:{get_api_server_host_port()}'
 
 
-def create_and_setup_new_container(target_container_name: str, host_port: int,
-                                   container_port: int, username: str) -> str:
+def get_metrics_endpoint_inside_docker() -> str:
+    """Get the metrics server endpoint inside a Docker container."""
+    host = 'host.docker.internal' if is_inside_docker() else '0.0.0.0'
+    metrics_port = get_metrics_host_port()
+    return f'http://{host}:{metrics_port}'
+
+
+def create_and_setup_new_container(target_container_name: str,
+                                   api_server_host_port: int,
+                                   api_server_container_port: int,
+                                   metrics_host_port: int,
+                                   metrics_container_port: int,
+                                   username: str) -> str:
     """Create a new Docker container and copy files/directories from current container.
 
     Args:
-        target_container_name: Name for the new container (default: sky-remote-test-buildkite-generic5)
-        host_port: Port on host machine to bind (default: 46581)
-        container_port: Port in container to expose (default: 46580)
-        username: Username in the container (default: buildkite)
+        target_container_name: Name for the new container
+        api_server_host_port: Port on host machine to bind
+        api_server_container_port: Port in container to expose
+        metrics_host_port: Port on host machine to bind
+        metrics_container_port: Port in container to expose
+        username: Username in the container
 
     Returns:
         ID of the newly created container
@@ -71,17 +90,22 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
         os.path.join(user_home, '.azure'): f'/home/{username}/.azure',
         os.path.join(user_home, '.config/gcloud'): f'/home/{username}/.config/gcloud',
         os.path.join(user_home, '.kube/config'): f'/home/{username}/.kube/config',
+        # Use this directory to check if all files are copied/mounted correctly.
+        os.path.join(workspace_path, 'tests/smoke_tests/docker'): f'/success_mount_directory',
     }
 
     if is_inside_docker():
         # Run the new container directly
         run_cmd = (f'docker run -d '
+                   f'--cpus=4 '
                    f'--name {target_container_name} '
-                   f'-p {host_port}:{container_port} '
+                   f'-p {api_server_host_port}:{api_server_container_port} '
+                   f'-p {metrics_host_port}:{metrics_container_port} '
                    f'--add-host=host.docker.internal:host-gateway '
                    f'-e USERNAME={username} '
                    f'-e LAUNCHED_BY_DOCKER_CONTAINER=1 '
                    f'-e SKYPILOT_DISABLE_USAGE_COLLECTION=1 '
+                   f'-e SKY_API_SERVER_METRICS_ENABLED=true '
                    f'{IMAGE_NAME}')
 
         subprocess.check_call(run_cmd, shell=True)
@@ -92,13 +116,17 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
                 if os.path.isdir(src_path):
                     # Copy directory contents
                     # The "/." at the end copies the contents of the directory, not the directory itself
-                    copy_cmd = f'docker cp {src_path}/. {target_container_name}:{dst_path}'
+                    copy_cmd = (
+                        f'docker cp {src_path}/. {target_container_name}:{dst_path} && '
+                        f'docker exec {target_container_name} sudo chown -R {username} {dst_path}'
+                    )
                 elif os.path.isfile(src_path):
                     # Copy file
                     # First create the parent directory in the container
                     copy_cmd = (
                         f'docker exec {target_container_name} mkdir -p {os.path.dirname(dst_path)} && '
-                        f'docker cp {src_path} {target_container_name}:{dst_path}'
+                        f'docker cp {src_path} {target_container_name}:{dst_path} && '
+                        f'docker exec {target_container_name} sudo chown -R {username} {dst_path}'
                     )
                 logger.info(f'Running copy command: {copy_cmd}')
                 subprocess.check_call(copy_cmd, shell=True)
@@ -125,8 +153,10 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
 
         docker_cmd.extend([
             *[f'-v={v}' for v in volumes], '-e', f'USERNAME={username}', '-e',
-            'SKYPILOT_DISABLE_USAGE_COLLECTION=1', '-p',
-            f'{host_port}:{container_port}', IMAGE_NAME
+            'SKYPILOT_DISABLE_USAGE_COLLECTION=1', '-e',
+            'SKY_API_SERVER_METRICS_ENABLED=true', '-p',
+            f'{api_server_host_port}:{api_server_container_port}', '-p',
+            f'{metrics_host_port}:{metrics_container_port}', IMAGE_NAME
         ])
 
         subprocess.check_call(docker_cmd)

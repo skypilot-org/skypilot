@@ -6,16 +6,17 @@ Concepts:
 - Cluster handle: (non-user facing) an opaque backend handle for us to
   interact with a cluster.
 """
+import asyncio
+import enum
 import functools
 import json
 import os
-import pathlib
 import pickle
 import re
 import threading
 import time
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 import uuid
 
 import sqlalchemy
@@ -23,18 +24,22 @@ from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import sqlite
+from sqlalchemy.ext import asyncio as sql_async
 from sqlalchemy.ext import declarative
-import yaml
 
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.metrics import utils as metrics_lib
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import context_utils
-from sky.utils import db_utils
 from sky.utils import registry
 from sky.utils import status_lib
+from sky.utils import yaml_utils
+from sky.utils.db import db_utils
+from sky.utils.db import migration_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -48,7 +53,20 @@ _ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 _ALLOWED_CLOUDS_KEY_PREFIX = 'allowed_clouds_'
 
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
-_DB_INIT_LOCK = threading.Lock()
+_SQLALCHEMY_ENGINE_ASYNC: Optional[sql_async.AsyncEngine] = None
+_SQLALCHEMY_ENGINE_LOCK = threading.Lock()
+
+DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 24.0
+DEBUG_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
+TERMINAL_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
+MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS = 3600
+
+_UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS = [
+    # sqlite
+    'UNIQUE constraint failed',
+    # postgres
+    'duplicate key value violates unique constraint',
+]
 
 Base = declarative.declarative_base()
 
@@ -100,6 +118,13 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('last_creation_command',
                       sqlalchemy.Text,
                       server_default=None),
+    sqlalchemy.Column('is_managed', sqlalchemy.Integer, server_default='0'),
+    sqlalchemy.Column('provision_log_path',
+                      sqlalchemy.Text,
+                      server_default=None),
+    sqlalchemy.Column('skylet_ssh_tunnel_metadata',
+                      sqlalchemy.LargeBinary,
+                      server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
@@ -127,6 +152,7 @@ volume_table = sqlalchemy.Table(
                       server_default=None),
     sqlalchemy.Column('last_use', sqlalchemy.Text),
     sqlalchemy.Column('status', sqlalchemy.Text),
+    sqlalchemy.Column('is_ephemeral', sqlalchemy.Integer, server_default='0'),
 )
 
 # Table for Cluster History
@@ -158,6 +184,50 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('last_creation_command',
                       sqlalchemy.Text,
                       server_default=None),
+    sqlalchemy.Column('workspace', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('provision_log_path',
+                      sqlalchemy.Text,
+                      server_default=None),
+    sqlalchemy.Column('last_activity_time',
+                      sqlalchemy.Integer,
+                      server_default=None,
+                      index=True),
+    sqlalchemy.Column('launched_at',
+                      sqlalchemy.Integer,
+                      server_default=None,
+                      index=True),
+)
+
+
+class ClusterEventType(enum.Enum):
+    """Type of cluster event."""
+    DEBUG = 'DEBUG'
+    """Detailed debugging information from the cloud"""
+
+    STATUS_CHANGE = 'STATUS_CHANGE'
+    """Used to denote events that modify cluster status."""
+
+    TERMINAL = 'TERMINAL'
+    """Used to denote events that are directly related to
+    a cluster's termination."""
+
+
+# Table for cluster status change events.
+# starting_status: Status of the cluster at the start of the event.
+# ending_status: Status of the cluster at the end of the event.
+# reason: Reason for the transition.
+# transitioned_at: Timestamp of the transition.
+cluster_event_table = sqlalchemy.Table(
+    'cluster_events',
+    Base.metadata,
+    sqlalchemy.Column('cluster_hash', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('name', sqlalchemy.Text),
+    sqlalchemy.Column('starting_status', sqlalchemy.Text),
+    sqlalchemy.Column('ending_status', sqlalchemy.Text),
+    sqlalchemy.Column('reason', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('transitioned_at', sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column('type', sqlalchemy.Text),
+    sqlalchemy.Column('request_id', sqlalchemy.Text, server_default=None),
 )
 
 ssh_key_table = sqlalchemy.Table(
@@ -220,17 +290,16 @@ def _glob_to_similar(glob_pattern):
     return like_pattern
 
 
-def create_table():
+def create_table(engine: sqlalchemy.engine.Engine):
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
     # https://github.com/microsoft/WSL/issues/2395
     # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
     #  This may cause the database locked problem from WSL issue #1441.
-    if (_SQLALCHEMY_ENGINE.dialect.name
-            == db_utils.SQLAlchemyDialect.SQLITE.value and
+    if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value and
             not common_utils.is_wsl()):
         try:
-            with orm.Session(_SQLALCHEMY_ENGINE) as session:
+            with orm.Session(engine) as session:
                 session.execute(sqlalchemy.text('PRAGMA journal_mode=WAL'))
                 session.commit()
         except sqlalchemy_exc.OperationalError as e:
@@ -239,168 +308,68 @@ def create_table():
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    # Create tables if they don't exist
-    Base.metadata.create_all(bind=_SQLALCHEMY_ENGINE)
-
-    # For backward compatibility.
-    # TODO(zhwu): Remove this function after all users have migrated to
-    # the latest version of SkyPilot.
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        # Add autostop column to clusters table
-        db_utils.add_column_to_table_sqlalchemy(session,
-                                                'clusters',
-                                                'autostop',
-                                                sqlalchemy.Integer(),
-                                                default_statement='DEFAULT -1')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'metadata',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT \'{}\'')
-
-        db_utils.add_column_to_table_sqlalchemy(session,
-                                                'clusters',
-                                                'to_down',
-                                                sqlalchemy.Integer(),
-                                                default_statement='DEFAULT 0')
-
-        # The cloud identity that created the cluster.
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'owner',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'cluster_hash',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'storage_mounts_metadata',
-            sqlalchemy.LargeBinary(),
-            default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'cluster_ever_up',
-            sqlalchemy.Integer(),
-            default_statement='DEFAULT 0',
-            # Set the value to 1 so that all the existing clusters before #2977
-            # are considered as ever up, i.e:
-            #   existing cluster's default (null) -> 1;
-            #   new cluster's default -> 0;
-            # This is conservative for the existing clusters: even if some INIT
-            # clusters were never really UP, setting it to 1 means they won't be
-            # auto-deleted during any failover.
-            value_to_replace_existing_entries=1)
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'status_updated_at',
-            sqlalchemy.Integer(),
-            default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'user_hash',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL',
-            value_to_replace_existing_entries=common_utils.get_current_user(
-            ).id)
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'config_hash',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'cluster_history',
-            'user_hash',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'workspace',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT \'default\'',
-            value_to_replace_existing_entries=constants.
-            SKYPILOT_DEFAULT_WORKSPACE)
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'last_creation_yaml',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL',
-        )
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'clusters',
-            'last_creation_command',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'users',
-            'password',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'users',
-            'created_at',
-            sqlalchemy.Integer(),
-            default_statement='DEFAULT NULL')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'cluster_history',
-            'last_creation_yaml',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-
-        db_utils.add_column_to_table_sqlalchemy(
-            session,
-            'cluster_history',
-            'last_creation_command',
-            sqlalchemy.Text(),
-            default_statement='DEFAULT NULL')
-
-        session.commit()
+    migration_utils.safe_alembic_upgrade(
+        engine, migration_utils.GLOBAL_USER_STATE_DB_NAME,
+        migration_utils.GLOBAL_USER_STATE_VERSION)
 
 
+def initialize_and_get_db_async() -> sql_async.AsyncEngine:
+    global _SQLALCHEMY_ENGINE_ASYNC
+    if _SQLALCHEMY_ENGINE_ASYNC is not None:
+        return _SQLALCHEMY_ENGINE_ASYNC
+    with _SQLALCHEMY_ENGINE_LOCK:
+        if _SQLALCHEMY_ENGINE_ASYNC is not None:
+            return _SQLALCHEMY_ENGINE_ASYNC
+
+        _SQLALCHEMY_ENGINE_ASYNC = db_utils.get_engine('state',
+                                                       async_engine=True)
+    initialize_and_get_db()
+    return _SQLALCHEMY_ENGINE_ASYNC
+
+
+# We wrap the sqlalchemy engine initialization in a thread
+# lock to ensure that multiple threads do not initialize the
+# engine which could result in a rare race condition where
+# a session has already been created with _SQLALCHEMY_ENGINE = e1,
+# and then another thread overwrites _SQLALCHEMY_ENGINE = e2
+# which could result in e1 being garbage collected unexpectedly.
 def initialize_and_get_db() -> sqlalchemy.engine.Engine:
     global _SQLALCHEMY_ENGINE
+
     if _SQLALCHEMY_ENGINE is not None:
         return _SQLALCHEMY_ENGINE
-    with _DB_INIT_LOCK:
-        if _SQLALCHEMY_ENGINE is None:
-            conn_string = None
-            if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-                conn_string = skypilot_config.get_nested(('db',), None)
-            if conn_string:
-                logger.debug(f'using db URI from {conn_string}')
-                _SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
-                    conn_string, poolclass=sqlalchemy.NullPool)
-            else:
-                db_path = os.path.expanduser('~/.sky/state.db')
-                pathlib.Path(db_path).parents[0].mkdir(parents=True,
-                                                       exist_ok=True)
-                _SQLALCHEMY_ENGINE = sqlalchemy.create_engine('sqlite:///' +
-                                                              db_path)
-            create_table()
-    return _SQLALCHEMY_ENGINE
+    with _SQLALCHEMY_ENGINE_LOCK:
+        if _SQLALCHEMY_ENGINE is not None:
+            return _SQLALCHEMY_ENGINE
+        # get an engine to the db
+        engine = db_utils.get_engine('state')
+
+        # run migrations if needed
+        create_table(engine)
+
+        # return engine
+        _SQLALCHEMY_ENGINE = engine
+        # Cache the result of _sqlite_supports_returning()
+        # ahead of time, as it won't change throughout
+        # the lifetime of the engine.
+        _sqlite_supports_returning()
+        return _SQLALCHEMY_ENGINE
+
+
+def _init_db_async(func):
+    """Initialize the async database."""
+
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        if _SQLALCHEMY_ENGINE_ASYNC is None:
+            # this may happen multiple times since there is no locking
+            # here but thats fine, this is just a short circuit for the
+            # common case.
+            await context_utils.to_thread(initialize_and_get_db_async)
+
+        return await func(*args, **kwargs)
+
+    return wrapper
 
 
 def _init_db(func):
@@ -414,18 +383,51 @@ def _init_db(func):
     return wrapper
 
 
+@annotations.lru_cache(scope='global', maxsize=1)
+def _sqlite_supports_returning() -> bool:
+    """Check if SQLite (3.35.0+) and SQLAlchemy (2.0+) support RETURNING.
+
+    See https://sqlite.org/lang_returning.html and
+    https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#insert-update-delete-returning  # pylint: disable=line-too-long
+    """
+    sqlalchemy_version_parts = sqlalchemy.__version__.split('.')
+    assert len(sqlalchemy_version_parts) >= 1, \
+        f'Invalid SQLAlchemy version: {sqlalchemy.__version__}'
+    sqlalchemy_major = int(sqlalchemy_version_parts[0])
+    if sqlalchemy_major < 2:
+        return False
+
+    assert _SQLALCHEMY_ENGINE is not None
+    if (_SQLALCHEMY_ENGINE.dialect.name !=
+            db_utils.SQLAlchemyDialect.SQLITE.value):
+        return False
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.execute(sqlalchemy.text('SELECT sqlite_version()'))
+        version_str = result.scalar()
+        version_parts = version_str.split('.')
+        assert len(version_parts) >= 2, \
+            f'Invalid version string: {version_str}'
+        major, minor = int(version_parts[0]), int(version_parts[1])
+        return (major > 3) or (major == 3 and minor >= 35)
+
+
 @_init_db
-def add_or_update_user(user: models.User,
-                       allow_duplicate_name: bool = True) -> bool:
+@metrics_lib.time_me
+def add_or_update_user(
+    user: models.User,
+    allow_duplicate_name: bool = True,
+    return_user: bool = False
+) -> typing.Union[bool, typing.Tuple[bool, models.User]]:
     """Store the mapping from user hash to user name for display purposes.
 
     Returns:
-        Boolean: whether the user is newly added
+        If return_user=False: bool (whether the user is newly added)
+        If return_user=True: Tuple[bool, models.User]
     """
     assert _SQLALCHEMY_ENGINE is not None
 
     if user.name is None:
-        return False
+        return (False, user) if return_user else False
 
     # Set created_at if not already set
     created_at = user.created_at
@@ -437,7 +439,7 @@ def add_or_update_user(user: models.User,
             existing_user = session.query(user_table).filter(
                 user_table.c.name == user.name).first()
             if existing_user is not None:
-                return False
+                return (False, user) if return_user else False
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
@@ -451,24 +453,57 @@ def add_or_update_user(user: models.User,
                                     name=user.name,
                                     password=user.password,
                                     created_at=created_at)
+            use_returning = return_user and _sqlite_supports_returning()
+            if use_returning:
+                insert_stmnt = insert_stmnt.returning(
+                    user_table.c.id,
+                    user_table.c.name,
+                    user_table.c.password,
+                    user_table.c.created_at,
+                )
             result = session.execute(insert_stmnt)
 
-            # Check if the INSERT actually inserted a row
-            was_inserted = result.rowcount > 0
+            row = None
+            if use_returning:
+                # With RETURNING, check if we got a row back.
+                row = result.fetchone()
+                was_inserted = row is not None
+            else:
+                # Without RETURNING, use rowcount.
+                was_inserted = result.rowcount > 0
 
             if not was_inserted:
                 # User existed, so update it (but don't update created_at)
+                update_values = {user_table.c.name: user.name}
                 if user.password:
-                    session.query(user_table).filter_by(id=user.id).update({
-                        user_table.c.name: user.name,
-                        user_table.c.password: user.password
-                    })
-                else:
-                    session.query(user_table).filter_by(id=user.id).update(
-                        {user_table.c.name: user.name})
+                    update_values[user_table.c.password] = user.password
+
+                update_stmnt = sqlalchemy.update(user_table).where(
+                    user_table.c.id == user.id).values(update_values)
+                if use_returning:
+                    update_stmnt = update_stmnt.returning(
+                        user_table.c.id, user_table.c.name,
+                        user_table.c.password, user_table.c.created_at)
+
+                result = session.execute(update_stmnt)
+                if use_returning:
+                    row = result.fetchone()
 
             session.commit()
-            return was_inserted
+
+            if return_user:
+                if row is None:
+                    # row=None means the sqlite used has no RETURNING support,
+                    # so we need to do a separate query
+                    row = session.query(user_table).filter_by(
+                        id=user.id).first()
+                updated_user = models.User(id=row.id,
+                                           name=row.name,
+                                           password=row.password,
+                                           created_at=row.created_at)
+                return was_inserted, updated_user
+            else:
+                return was_inserted
 
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
@@ -493,6 +528,9 @@ def add_or_update_user(user: models.User,
             upsert_stmnt = insert_stmnt.on_conflict_do_update(
                 index_elements=[user_table.c.id], set_=set_).returning(
                     user_table.c.id,
+                    user_table.c.name,
+                    user_table.c.password,
+                    user_table.c.created_at,
                     # This will be True for INSERT, False for UPDATE
                     sqlalchemy.literal_column('(xmax = 0)').label('was_inserted'
                                                                  ))
@@ -500,15 +538,23 @@ def add_or_update_user(user: models.User,
             result = session.execute(upsert_stmnt)
             row = result.fetchone()
 
-            ret = bool(row.was_inserted) if row else False
+            was_inserted = bool(row.was_inserted) if row else False
             session.commit()
 
-            return ret
+            if return_user:
+                updated_user = models.User(id=row.id,
+                                           name=row.name,
+                                           password=row.password,
+                                           created_at=row.created_at)
+                return was_inserted, updated_user
+            else:
+                return was_inserted
         else:
             raise ValueError('Unsupported database dialect')
 
 
 @_init_db
+@metrics_lib.time_me
 def get_user(user_id: str) -> Optional[models.User]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -521,6 +567,23 @@ def get_user(user_id: str) -> Optional[models.User]:
                        created_at=row.created_at)
 
 
+@_init_db
+@metrics_lib.time_me
+def get_users(user_ids: Set[str]) -> Dict[str, models.User]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(user_table).filter(
+            user_table.c.id.in_(user_ids)).all()
+    return {
+        row.id: models.User(id=row.id,
+                            name=row.name,
+                            password=row.password,
+                            created_at=row.created_at) for row in rows
+    }
+
+
+@_init_db
+@metrics_lib.time_me
 def get_user_by_name(username: str) -> List[models.User]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).filter_by(name=username).all()
@@ -534,6 +597,20 @@ def get_user_by_name(username: str) -> List[models.User]:
     ]
 
 
+@_init_db
+@metrics_lib.time_me
+def get_user_by_name_match(username_match: str) -> List[models.User]:
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(user_table).filter(
+            user_table.c.name.like(f'%{username_match}%')).all()
+    return [
+        models.User(id=row.id, name=row.name, created_at=row.created_at)
+        for row in rows
+    ]
+
+
+@_init_db
+@metrics_lib.time_me
 def delete_user(user_id: str) -> None:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.query(user_table).filter_by(id=user_id).delete()
@@ -541,6 +618,7 @@ def delete_user(user_id: str) -> None:
 
 
 @_init_db
+@metrics_lib.time_me
 def get_all_users() -> List[models.User]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -554,13 +632,17 @@ def get_all_users() -> List[models.User]:
 
 
 @_init_db
+@metrics_lib.time_me
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle',
                           requested_resources: Optional[Set[Any]],
                           ready: bool,
                           is_launch: bool = True,
                           config_hash: Optional[str] = None,
-                          task_config: Optional[Dict[str, Any]] = None):
+                          task_config: Optional[Dict[str, Any]] = None,
+                          is_managed: bool = False,
+                          provision_log_path: Optional[str] = None,
+                          existing_cluster_hash: Optional[str] = None):
     """Adds or updates cluster_name -> cluster_handle mapping.
 
     Args:
@@ -573,8 +655,15 @@ def add_or_update_cluster(cluster_name: str,
             and last_use will be updated. Otherwise, use the old value.
         config_hash: Configuration hash for the cluster.
         task_config: The config of the task being launched.
+        is_managed: Whether the cluster is launched by the
+            controller.
+        provision_log_path: Absolute path to provision.log, if available.
+        existing_cluster_hash: If specified, the cluster will be updated
+            only if the cluster_hash matches. If a cluster does not exist,
+            it will not be inserted and an error will be raised.
     """
     assert _SQLALCHEMY_ENGINE is not None
+
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     handle = pickle.dumps(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None
@@ -609,6 +698,8 @@ def add_or_update_cluster(cluster_name: str,
 
     user_hash = common_utils.get_current_user().id
     active_workspace = skypilot_config.get_active_workspace()
+    history_workspace = active_workspace
+    history_hash = user_hash
 
     conditional_values = {}
     if is_launch:
@@ -649,9 +740,13 @@ def add_or_update_cluster(cluster_name: str,
         if (is_launch and not cluster_row or
                 cluster_row.status != status_lib.ClusterStatus.UP.value):
             conditional_values.update({
-                'last_creation_yaml': common_utils.dump_yaml_str(task_config)
+                'last_creation_yaml': yaml_utils.dump_yaml_str(task_config)
                                       if task_config else None,
                 'last_creation_command': last_use,
+            })
+        if provision_log_path is not None:
+            conditional_values.update({
+                'provision_log_path': provision_log_path,
             })
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -664,35 +759,52 @@ def add_or_update_cluster(cluster_name: str,
             session.rollback()
             raise ValueError('Unsupported database dialect')
 
-        insert_stmnt = insert_func(cluster_table).values(
-            name=cluster_name,
-            **conditional_values,
-            handle=handle,
-            status=status.value,
-            # set metadata to server default ('{}')
-            # set owner to server default (null)
-            cluster_hash=cluster_hash,
-            # set storage_mounts_metadata to server default (null)
-            status_updated_at=status_updated_at,
-        )
-        do_update_stmt = insert_stmnt.on_conflict_do_update(
-            index_elements=[cluster_table.c.name],
-            set_={
+        if existing_cluster_hash is not None:
+            count = session.query(cluster_table).filter_by(
+                name=cluster_name, cluster_hash=existing_cluster_hash).update({
+                    **conditional_values, cluster_table.c.handle: handle,
+                    cluster_table.c.status: status.value,
+                    cluster_table.c.status_updated_at: status_updated_at
+                })
+            assert count <= 1
+            if count == 0:
+                raise ValueError(f'Cluster {cluster_name} with hash '
+                                 f'{existing_cluster_hash} not found.')
+        else:
+            insert_stmnt = insert_func(cluster_table).values(
+                name=cluster_name,
                 **conditional_values,
-                cluster_table.c.handle: handle,
-                cluster_table.c.status: status.value,
-                # do not update metadata value
-                # do not update owner value
-                cluster_table.c.cluster_hash: cluster_hash,
-                # do not update storage_mounts_metadata
-                cluster_table.c.status_updated_at: status_updated_at,
-                # do not update user_hash
-            })
-        session.execute(do_update_stmt)
+                handle=handle,
+                status=status.value,
+                # set metadata to server default ('{}')
+                # set owner to server default (null)
+                cluster_hash=cluster_hash,
+                # set storage_mounts_metadata to server default (null)
+                status_updated_at=status_updated_at,
+                is_managed=int(is_managed),
+            )
+            insert_or_update_stmt = insert_stmnt.on_conflict_do_update(
+                index_elements=[cluster_table.c.name],
+                set_={
+                    **conditional_values,
+                    cluster_table.c.handle: handle,
+                    cluster_table.c.status: status.value,
+                    # do not update metadata value
+                    # do not update owner value
+                    cluster_table.c.cluster_hash: cluster_hash,
+                    # do not update storage_mounts_metadata
+                    cluster_table.c.status_updated_at: status_updated_at,
+                    # do not update user_hash
+                })
+            session.execute(insert_or_update_stmt)
 
         # Modify cluster history table
         launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
         launched_resources = getattr(cluster_handle, 'launched_resources', None)
+        if cluster_row and cluster_row.workspace:
+            history_workspace = cluster_row.workspace
+        if cluster_row and cluster_row.user_hash:
+            history_hash = cluster_row.user_hash
         creation_info = {}
         if conditional_values.get('last_creation_yaml') is not None:
             creation_info = {
@@ -702,6 +814,10 @@ def add_or_update_cluster(cluster_name: str,
                     conditional_values.get('last_creation_command'),
             }
 
+        # Calculate last_activity_time and launched_at from usage_intervals
+        last_activity_time = _get_cluster_last_activity_time(usage_intervals)
+        launched_at = _get_cluster_launch_time(usage_intervals)
+
         insert_stmnt = insert_func(cluster_history_table).values(
             cluster_hash=cluster_hash,
             name=cluster_name,
@@ -710,6 +826,10 @@ def add_or_update_cluster(cluster_name: str,
             launched_resources=pickle.dumps(launched_resources),
             usage_intervals=pickle.dumps(usage_intervals),
             user_hash=user_hash,
+            workspace=history_workspace,
+            provision_log_path=provision_log_path,
+            last_activity_time=last_activity_time,
+            launched_at=launched_at,
             **creation_info,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
@@ -723,12 +843,316 @@ def add_or_update_cluster(cluster_name: str,
                     pickle.dumps(launched_resources),
                 cluster_history_table.c.usage_intervals:
                     pickle.dumps(usage_intervals),
-                cluster_history_table.c.user_hash: user_hash,
+                cluster_history_table.c.user_hash: history_hash,
+                cluster_history_table.c.workspace: history_workspace,
+                cluster_history_table.c.provision_log_path: provision_log_path,
+                cluster_history_table.c.last_activity_time: last_activity_time,
+                cluster_history_table.c.launched_at: launched_at,
                 **creation_info,
             })
         session.execute(do_update_stmt)
 
         session.commit()
+
+
+@_init_db
+@metrics_lib.time_me
+def add_cluster_event(cluster_name: str,
+                      new_status: Optional[status_lib.ClusterStatus],
+                      reason: str,
+                      event_type: ClusterEventType,
+                      nop_if_duplicate: bool = False,
+                      duplicate_regex: Optional[str] = None,
+                      expose_duplicate_error: bool = False,
+                      transitioned_at: Optional[int] = None) -> None:
+    """Add a cluster event.
+
+    Args:
+        cluster_name: Name of the cluster.
+        new_status: New status of the cluster.
+        reason: Reason for the event.
+        event_type: Type of the event.
+        nop_if_duplicate: If True, do not add the event if it is a duplicate.
+        duplicate_regex: If provided, do not add the event if it matches the
+            regex. Only used if nop_if_duplicate is True.
+        expose_duplicate_error: If True, raise an error if the event is a
+            duplicate. Only used if nop_if_duplicate is True.
+        transitioned_at: If provided, use this timestamp for the event.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    cluster_hash = _get_hash_for_existing_cluster(cluster_name)
+    if cluster_hash is None:
+        logger.debug(f'Hash for cluster {cluster_name} not found. '
+                     'Skipping event.')
+        return
+    if transitioned_at is None:
+        transitioned_at = int(time.time())
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            session.rollback()
+            raise ValueError('Unsupported database dialect')
+
+        cluster_row = session.query(cluster_table).filter_by(name=cluster_name)
+        last_status = cluster_row.first(
+        ).status if cluster_row and cluster_row.first() is not None else None
+        if nop_if_duplicate:
+            last_event = get_last_cluster_event(cluster_hash,
+                                                event_type=event_type)
+            if duplicate_regex is not None and last_event is not None:
+                if re.search(duplicate_regex, last_event):
+                    return
+            elif last_event == reason:
+                return
+        try:
+            request_id = common_utils.get_current_request_id()
+            session.execute(
+                insert_func(cluster_event_table).values(
+                    cluster_hash=cluster_hash,
+                    name=cluster_name,
+                    starting_status=last_status,
+                    ending_status=new_status.value if new_status else None,
+                    reason=reason,
+                    transitioned_at=transitioned_at,
+                    type=event_type.value,
+                    request_id=request_id,
+                ))
+            session.commit()
+        except sqlalchemy.exc.IntegrityError as e:
+            for msg in _UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS:
+                if msg in str(e):
+                    # This can happen if the cluster event is added twice.
+                    # We can ignore this error unless the caller requests
+                    # to expose the error.
+                    if expose_duplicate_error:
+                        raise db_utils.UniqueConstraintViolationError(
+                            value=reason, message=str(e))
+                    else:
+                        return
+            raise e
+
+
+def get_last_cluster_event(cluster_hash: str,
+                           event_type: ClusterEventType) -> Optional[str]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(cluster_event_table).filter_by(
+            cluster_hash=cluster_hash, type=event_type.value).order_by(
+                cluster_event_table.c.transitioned_at.desc()).first()
+    if row is None:
+        return None
+    return row.reason
+
+
+def get_terminal_or_last_status_change_event(
+        cluster_hash: str) -> Optional[str]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Order by type (TERMINAL first, STATUS_CHANGE after),
+        # then by transitioned_at desc.
+        # Use a CASE expression for ordering type.
+        type_priority = sqlalchemy.case(
+            (cluster_event_table.c.type == ClusterEventType.TERMINAL.value, 0),
+            else_=1)
+        row = session.query(cluster_event_table).filter(
+            cluster_event_table.c.cluster_hash == cluster_hash,
+            cluster_event_table.c.type.in_([
+                ClusterEventType.TERMINAL.value,
+                ClusterEventType.STATUS_CHANGE.value
+            ])).order_by(type_priority,
+                         cluster_event_table.c.transitioned_at.desc()).first()
+    if row is None:
+        return None
+    return row.reason
+
+
+def _get_last_or_terminal_cluster_event_multiple(
+        cluster_hashes: Set[str]) -> Dict[str, str]:
+    """Returns the last or terminal cluster event for each cluster."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Create a priority expression: TERMINAL (0) before STATUS_CHANGE (1)
+        type_priority = sqlalchemy.case(
+            (cluster_event_table.c.type == ClusterEventType.TERMINAL.value, 0),
+            else_=1)
+
+        # Use ROW_NUMBER to rank events within each cluster_hash,
+        # ordered by type priority (TERMINAL first) then by transitioned_at
+        # (latest first)
+        row_number = sqlalchemy.func.row_number().over(
+            partition_by=cluster_event_table.c.cluster_hash,
+            order_by=[
+                type_priority,
+                cluster_event_table.c.transitioned_at.desc()
+            ]).label('rn')
+
+        # Subquery to get all events with their rank
+        ranked_events = session.query(
+            cluster_event_table.c.cluster_hash, cluster_event_table.c.reason,
+            row_number).filter(
+                cluster_event_table.c.cluster_hash.in_(cluster_hashes),
+                cluster_event_table.c.type !=
+                ClusterEventType.DEBUG.value).subquery()
+
+        # Select only the top-ranked event for each cluster
+        rows = session.query(
+            ranked_events.c.cluster_hash,
+            ranked_events.c.reason).filter(ranked_events.c.rn == 1).all()
+
+    return {row.cluster_hash: row.reason for row in rows}
+
+
+def cleanup_cluster_events_with_retention(retention_hours: float,
+                                          event_type: ClusterEventType) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    # Once for events with type STATUS_CHANGE.
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        query = session.query(cluster_event_table).filter(
+            cluster_event_table.c.transitioned_at <
+            time.time() - retention_hours * 3600,
+            cluster_event_table.c.type == event_type.value)
+        logger.debug(f'Deleting {query.count()} cluster events.')
+        query.delete()
+        session.commit()
+
+
+async def cluster_event_retention_daemon():
+    """Garbage collect cluster events periodically."""
+    while True:
+        logger.info('Running cluster event retention daemon...')
+        # Use the latest config.
+        skypilot_config.reload_config()
+        retention_hours = skypilot_config.get_nested(
+            ('api_server', 'cluster_event_retention_hours'),
+            DEFAULT_CLUSTER_EVENT_RETENTION_HOURS)
+        debug_retention_hours = skypilot_config.get_nested(
+            ('api_server', 'cluster_debug_event_retention_hours'),
+            DEBUG_CLUSTER_EVENT_RETENTION_HOURS)
+        terminal_retention_hours = skypilot_config.get_nested(
+            ('api_server', 'cluster_terminal_event_retention_hours'),
+            TERMINAL_CLUSTER_EVENT_RETENTION_HOURS)
+        try:
+            if retention_hours >= 0:
+                logger.debug('Cleaning up cluster events with retention '
+                             f'{retention_hours} hours.')
+                cleanup_cluster_events_with_retention(
+                    retention_hours, ClusterEventType.STATUS_CHANGE)
+            if debug_retention_hours >= 0:
+                logger.debug('Cleaning up debug cluster events with retention '
+                             f'{debug_retention_hours} hours.')
+                cleanup_cluster_events_with_retention(debug_retention_hours,
+                                                      ClusterEventType.DEBUG)
+            if terminal_retention_hours >= 0:
+                logger.debug(
+                    'Cleaning up terminal cluster events with retention '
+                    f'{terminal_retention_hours} hours.')
+                cleanup_cluster_events_with_retention(terminal_retention_hours,
+                                                      ClusterEventType.TERMINAL)
+        except asyncio.CancelledError:
+            logger.info('Cluster event retention daemon cancelled')
+            break
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Error running cluster event retention daemon: {e}')
+
+        # Run daemon at most once every hour to avoid too frequent cleanup.
+        sleep_amount = max(
+            min(retention_hours * 3600, debug_retention_hours * 3600),
+            MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS)
+        await asyncio.sleep(sleep_amount)
+
+
+@typing.overload
+def get_cluster_events(
+    cluster_name: Optional[str],
+    cluster_hash: Optional[str],
+    event_type: ClusterEventType,
+    include_timestamps: Literal[False],
+    limit: Optional[int] = ...,
+) -> List[str]:
+    ...
+
+
+@typing.overload
+def get_cluster_events(
+    cluster_name: Optional[str],
+    cluster_hash: Optional[str],
+    event_type: ClusterEventType,
+    include_timestamps: Literal[True],
+    limit: Optional[int] = ...,
+) -> List[Dict[str, Union[str, int]]]:
+    ...
+
+
+@typing.overload
+def get_cluster_events(
+    cluster_name: Optional[str],
+    cluster_hash: Optional[str],
+    event_type: ClusterEventType,
+    include_timestamps: bool = ...,
+    limit: Optional[int] = ...,
+) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
+    ...
+
+
+def get_cluster_events(
+    cluster_name: Optional[str],
+    cluster_hash: Optional[str],
+    event_type: ClusterEventType,
+    include_timestamps: bool = False,
+    limit: Optional[int] = None
+) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
+    """Returns the cluster events for the cluster.
+
+    Args:
+        cluster_name: Name of the cluster. Cannot be specified if cluster_hash
+            is specified.
+        cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
+            is specified.
+        event_type: Type of the event.
+        include_timestamps: If True, returns list of dicts with 'reason' and
+            'transitioned_at' fields. If False, returns list of reason strings.
+        limit: If specified, returns at most this many events (most recent).
+            If None, returns all events.
+
+    Returns:
+        If include_timestamps is False: List of reason strings.
+        If include_timestamps is True: List of dicts with 'reason' and
+            'transitioned_at' (unix timestamp) fields.
+        Events are ordered from oldest to newest.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+
+    cluster_hash = _resolve_cluster_hash(cluster_hash, cluster_name)
+    if cluster_hash is None:
+        raise ValueError(f'Hash for cluster {cluster_name} not found.')
+
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if limit is not None:
+            # To get the most recent N events in ASC order, we use a subquery:
+            # 1. Get most recent N events (ORDER BY DESC LIMIT N)
+            # 2. Re-order them by ASC
+            subquery = session.query(cluster_event_table).filter_by(
+                cluster_hash=cluster_hash, type=event_type.value).order_by(
+                    cluster_event_table.c.transitioned_at.desc()).limit(
+                        limit).subquery()
+            rows = session.query(subquery).order_by(
+                subquery.c.transitioned_at.asc()).all()
+        else:
+            rows = session.query(cluster_event_table).filter_by(
+                cluster_hash=cluster_hash, type=event_type.value).order_by(
+                    cluster_event_table.c.transitioned_at.asc()).all()
+
+    if include_timestamps:
+        return [{
+            'reason': row.reason,
+            'transitioned_at': row.transitioned_at
+        } for row in rows]
+    return [row.reason for row in rows]
 
 
 def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
@@ -744,6 +1168,7 @@ def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
 
 
 @_init_db
+@metrics_lib.time_me
 def update_cluster_handle(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle'):
     assert _SQLALCHEMY_ENGINE is not None
@@ -755,6 +1180,7 @@ def update_cluster_handle(cluster_name: str,
 
 
 @_init_db
+@metrics_lib.time_me
 def update_last_use(cluster_name: str):
     """Updates the last used command for the cluster."""
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -764,11 +1190,13 @@ def update_last_use(cluster_name: str):
 
 
 @_init_db
+@metrics_lib.time_me
 def remove_cluster(cluster_name: str, terminate: bool) -> None:
     """Removes cluster_name mapping."""
     assert _SQLALCHEMY_ENGINE is not None
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
+    provision_log_path = get_cluster_provision_log_path(cluster_name)
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # usage_intervals is not None and not empty
@@ -778,6 +1206,16 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
             end_time = int(time.time())
             usage_intervals.append((start_time, end_time))
             _set_cluster_usage_intervals(cluster_hash, usage_intervals)
+
+        if provision_log_path:
+            assert cluster_hash is not None, cluster_name
+            session.query(cluster_history_table).filter_by(
+                cluster_hash=cluster_hash
+            ).filter(
+                cluster_history_table.c.provision_log_path.is_(None)
+            ).update({
+                cluster_history_table.c.provision_log_path: provision_log_path
+            })
 
         if terminate:
             session.query(cluster_table).filter_by(name=cluster_name).delete()
@@ -801,37 +1239,115 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
 
 
 @_init_db
+@metrics_lib.time_me
 def get_handle_from_cluster_name(
         cluster_name: str) -> Optional['backends.ResourceHandle']:
     assert _SQLALCHEMY_ENGINE is not None
     assert cluster_name is not None, 'cluster_name cannot be None'
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+        row = (session.query(
+            cluster_table.c.handle).filter_by(name=cluster_name).first())
     if row is None:
         return None
     return pickle.loads(row.handle)
 
 
 @_init_db
-def get_glob_cluster_names(cluster_name: str) -> List[str]:
+@metrics_lib.time_me
+def get_handles_from_cluster_names(
+        cluster_names: Set[str]
+) -> Dict[str, Optional['backends.ResourceHandle']]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(cluster_table.c.name,
+                             cluster_table.c.handle).filter(
+                                 cluster_table.c.name.in_(cluster_names)).all()
+        return {
+            row.name: pickle.loads(row.handle) if row is not None else None
+            for row in rows
+        }
+
+
+@_init_db
+@metrics_lib.time_me
+def get_cluster_name_to_handle_map(
+    is_managed: Optional[bool] = None,
+) -> Dict[str, Optional['backends.ResourceHandle']]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        query = session.query(cluster_table.c.name, cluster_table.c.handle)
+        if is_managed is not None:
+            query = query.filter(cluster_table.c.is_managed == int(is_managed))
+        rows = query.all()
+    name_to_handle = {}
+    for row in rows:
+        if row.handle and len(row.handle) > 0:
+            name_to_handle[row.name] = pickle.loads(row.handle)
+        else:
+            name_to_handle[row.name] = None
+    return name_to_handle
+
+
+@_init_db_async
+@metrics_lib.time_me
+async def get_status_from_cluster_name_async(
+        cluster_name: str) -> Optional[status_lib.ClusterStatus]:
+    """Get the status of a cluster."""
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    assert cluster_name is not None, 'cluster_name cannot be None'
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        result = await session.execute(
+            sqlalchemy.select(cluster_table.c.status).where(
+                cluster_table.c.name == cluster_name))
+        row = result.first()
+
+        if row is None:
+            return None
+        return status_lib.ClusterStatus(row[0])
+
+
+@_init_db
+@metrics_lib.time_me
+def get_status_from_cluster_name(
+        cluster_name: str) -> Optional[status_lib.ClusterStatus]:
+    assert _SQLALCHEMY_ENGINE is not None
+    assert cluster_name is not None, 'cluster_name cannot be None'
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(
+            cluster_table.c.status).filter_by(name=cluster_name).first()
+    if row is None:
+        return None
+    return status_lib.ClusterStatus[row.status]
+
+
+@_init_db
+@metrics_lib.time_me
+def get_glob_cluster_names(
+        cluster_name: str,
+        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
     assert cluster_name is not None, 'cluster_name cannot be None'
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
                 db_utils.SQLAlchemyDialect.SQLITE.value):
-            rows = session.query(cluster_table).filter(
-                cluster_table.c.name.op('GLOB')(cluster_name)).all()
+            query = session.query(cluster_table.c.name).filter(
+                cluster_table.c.name.op('GLOB')(cluster_name))
         elif (_SQLALCHEMY_ENGINE.dialect.name ==
               db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-            rows = session.query(cluster_table).filter(
+            query = session.query(cluster_table.c.name).filter(
                 cluster_table.c.name.op('SIMILAR TO')(
-                    _glob_to_similar(cluster_name))).all()
+                    _glob_to_similar(cluster_name)))
         else:
             raise ValueError('Unsupported database dialect')
+        if workspaces_filter is not None:
+            query = query.filter(
+                cluster_table.c.workspace.in_(workspaces_filter))
+        rows = query.all()
     return [row.name for row in rows]
 
 
 @_init_db
+@metrics_lib.time_me
 def set_cluster_status(cluster_name: str,
                        status: status_lib.ClusterStatus) -> None:
     assert _SQLALCHEMY_ENGINE is not None
@@ -849,6 +1365,7 @@ def set_cluster_status(cluster_name: str,
 
 
 @_init_db
+@metrics_lib.time_me
 def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
                                to_down: bool) -> None:
     assert _SQLALCHEMY_ENGINE is not None
@@ -865,26 +1382,85 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
 
 
 @_init_db
+@metrics_lib.time_me
 def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+        row = session.query(
+            cluster_table.c.launched_at).filter_by(name=cluster_name).first()
     if row is None or row.launched_at is None:
         return None
     return int(row.launched_at)
 
 
 @_init_db
+@metrics_lib.time_me
 def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+        row = session.query(
+            cluster_table.c.metadata).filter_by(name=cluster_name).first()
     if row is None or row.metadata is None:
         return None
     return json.loads(row.metadata)
 
 
 @_init_db
+@metrics_lib.time_me
+def get_cluster_provision_log_path(cluster_name: str) -> Optional[str]:
+    """Returns provision_log_path from clusters table, if recorded."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+    if row is None:
+        return None
+    return getattr(row, 'provision_log_path', None)
+
+
+@_init_db
+@metrics_lib.time_me
+def get_cluster_history_provision_log_path(cluster_name: str) -> Optional[str]:
+    """Returns provision_log_path from cluster_history for this name.
+
+    If the cluster currently exists, we use its hash. Otherwise, we look up
+    historical rows by name and choose the most recent one based on
+    usage_intervals.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Try current cluster first (fast path)
+        cluster_hash = _get_hash_for_existing_cluster(cluster_name)
+        if cluster_hash is not None:
+            row = session.query(cluster_history_table).filter_by(
+                cluster_hash=cluster_hash).first()
+            if row is not None:
+                return getattr(row, 'provision_log_path', None)
+
+        # Fallback: search history by name and pick the latest by
+        # usage_intervals
+        rows = session.query(cluster_history_table).filter_by(
+            name=cluster_name).all()
+        if not rows:
+            return None
+
+        def latest_timestamp(usages_bin) -> int:
+            try:
+                intervals = pickle.loads(usages_bin)
+                # intervals: List[Tuple[int, Optional[int]]]
+                if not intervals:
+                    return -1
+                _, end = intervals[-1]
+                return end if end is not None else int(time.time())
+            except Exception:  # pylint: disable=broad-except
+                return -1
+
+        latest_row = max(rows,
+                         key=lambda r: latest_timestamp(r.usage_intervals))
+        return getattr(latest_row, 'provision_log_path', None)
+
+
+@_init_db
+@metrics_lib.time_me
 def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -898,17 +1474,20 @@ def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
 
 
 @_init_db
+@metrics_lib.time_me
 def get_cluster_storage_mounts_metadata(
         cluster_name: str) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+        row = (session.query(cluster_table.c.storage_mounts_metadata).filter_by(
+            name=cluster_name).first())
     if row is None or row.storage_mounts_metadata is None:
         return None
     return pickle.loads(row.storage_mounts_metadata)
 
 
 @_init_db
+@metrics_lib.time_me
 def set_cluster_storage_mounts_metadata(
         cluster_name: str, storage_mounts_metadata: Dict[str, Any]) -> None:
     assert _SQLALCHEMY_ENGINE is not None
@@ -925,6 +1504,40 @@ def set_cluster_storage_mounts_metadata(
 
 
 @_init_db
+@metrics_lib.time_me
+def get_cluster_skylet_ssh_tunnel_metadata(
+        cluster_name: str) -> Optional[Tuple[int, int]]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        row = session.query(
+            cluster_table.c.skylet_ssh_tunnel_metadata).filter_by(
+                name=cluster_name).first()
+    if row is None or row.skylet_ssh_tunnel_metadata is None:
+        return None
+    return pickle.loads(row.skylet_ssh_tunnel_metadata)
+
+
+@_init_db
+@metrics_lib.time_me
+def set_cluster_skylet_ssh_tunnel_metadata(
+        cluster_name: str,
+        skylet_ssh_tunnel_metadata: Optional[Tuple[int, int]]) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        value = pickle.dumps(
+            skylet_ssh_tunnel_metadata
+        ) if skylet_ssh_tunnel_metadata is not None else None
+        count = session.query(cluster_table).filter_by(
+            name=cluster_name).update(
+                {cluster_table.c.skylet_ssh_tunnel_metadata: value})
+        session.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
+
+
+@_init_db
+@metrics_lib.time_me
 def _get_cluster_usage_intervals(
         cluster_hash: Optional[str]
 ) -> Optional[List[Tuple[int, Optional[int]]]]:
@@ -932,23 +1545,24 @@ def _get_cluster_usage_intervals(
     if cluster_hash is None:
         return None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_history_table).filter_by(
+        row = session.query(cluster_history_table.c.usage_intervals).filter_by(
             cluster_hash=cluster_hash).first()
     if row is None or row.usage_intervals is None:
         return None
     return pickle.loads(row.usage_intervals)
 
 
-def _get_cluster_launch_time(cluster_hash: str) -> Optional[int]:
-    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
+def _get_cluster_launch_time(
+    usage_intervals: Optional[List[Tuple[int,
+                                         Optional[int]]]]) -> Optional[int]:
     if usage_intervals is None:
         return None
     return usage_intervals[0][0]
 
 
-def _get_cluster_duration(cluster_hash: str) -> int:
+def _get_cluster_duration(
+        usage_intervals: Optional[List[Tuple[int, Optional[int]]]]) -> int:
     total_duration = 0
-    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
     if usage_intervals is None:
         return total_duration
@@ -965,16 +1579,33 @@ def _get_cluster_duration(cluster_hash: str) -> int:
     return total_duration
 
 
+def _get_cluster_last_activity_time(
+    usage_intervals: Optional[List[Tuple[int,
+                                         Optional[int]]]]) -> Optional[int]:
+    last_activity_time = None
+    if usage_intervals:
+        last_interval = usage_intervals[-1]
+        last_activity_time = (last_interval[1] if last_interval[1] is not None
+                              else last_interval[0])
+    return last_activity_time
+
+
 @_init_db
+@metrics_lib.time_me
 def _set_cluster_usage_intervals(
         cluster_hash: str, usage_intervals: List[Tuple[int,
                                                        Optional[int]]]) -> None:
     assert _SQLALCHEMY_ENGINE is not None
+
+    # Calculate last_activity_time from usage_intervals
+    last_activity_time = _get_cluster_last_activity_time(usage_intervals)
+
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         count = session.query(cluster_history_table).filter_by(
             cluster_hash=cluster_hash).update({
                 cluster_history_table.c.usage_intervals:
-                    pickle.dumps(usage_intervals)
+                    pickle.dumps(usage_intervals),
+                cluster_history_table.c.last_activity_time: last_activity_time,
             })
         session.commit()
     assert count <= 1, count
@@ -983,6 +1614,7 @@ def _set_cluster_usage_intervals(
 
 
 @_init_db
+@metrics_lib.time_me
 def set_owner_identity_for_cluster(cluster_name: str,
                                    owner_identity: Optional[List[str]]) -> None:
     assert _SQLALCHEMY_ENGINE is not None
@@ -1000,22 +1632,59 @@ def set_owner_identity_for_cluster(cluster_name: str,
 
 
 @_init_db
+@metrics_lib.time_me
 def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+        row = (session.query(
+            cluster_table.c.cluster_hash).filter_by(name=cluster_name).first())
     if row is None or row.cluster_hash is None:
         return None
     return row.cluster_hash
 
 
+def _resolve_cluster_hash(cluster_hash: Optional[str] = None,
+                          cluster_name: Optional[str] = None) -> Optional[str]:
+    """Resolve cluster_hash from either cluster_hash or cluster_name.
+
+    Validates that exactly one of cluster_hash or cluster_name is provided,
+    then resolves cluster_name to cluster_hash if needed.
+
+    Args:
+        cluster_hash: Direct cluster hash, if known.
+        cluster_name: Cluster name to resolve to hash.
+
+    Returns:
+        The cluster_hash string, or None if cluster_name was provided but
+        the cluster doesn't exist.
+
+    Raises:
+        ValueError: If both or neither of cluster_hash/cluster_name are
+        provided.
+    """
+    if cluster_hash is not None and cluster_name is not None:
+        raise ValueError(f'Cannot specify both cluster_hash ({cluster_hash}) '
+                         f'and cluster_name ({cluster_name})')
+
+    if cluster_hash is None and cluster_name is None:
+        raise ValueError('Must specify either cluster_hash or cluster_name')
+
+    if cluster_name is not None:
+        return _get_hash_for_existing_cluster(cluster_name)
+
+    return cluster_hash
+
+
 @_init_db
+@metrics_lib.time_me
 def get_launched_resources_from_cluster_hash(
         cluster_hash: str) -> Optional[Tuple[int, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_history_table).filter_by(
-            cluster_hash=cluster_hash).first()
+        row = session.query(
+            cluster_history_table.c.num_nodes,
+            cluster_history_table.c.launched_resources).filter_by(
+                cluster_hash=cluster_hash).first()
     if row is None:
         return None
     num_nodes = row.num_nodes
@@ -1056,17 +1725,48 @@ def _load_storage_mounts_metadata(
 
 
 @_init_db
+@metrics_lib.time_me
 @context_utils.cancellation_guard
 def get_cluster_from_name(
-        cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
+        cluster_name: Optional[str],
+        *,
+        include_user_info: bool = True,
+        summary_response: bool = False) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
+    query_fields = [
+        cluster_table.c.name,
+        cluster_table.c.launched_at,
+        cluster_table.c.handle,
+        cluster_table.c.last_use,
+        cluster_table.c.status,
+        cluster_table.c.autostop,
+        cluster_table.c.to_down,
+        cluster_table.c.owner,
+        cluster_table.c.metadata,
+        cluster_table.c.cluster_hash,
+        cluster_table.c.cluster_ever_up,
+        cluster_table.c.status_updated_at,
+        cluster_table.c.user_hash,
+        cluster_table.c.config_hash,
+        cluster_table.c.workspace,
+        cluster_table.c.is_managed,
+    ]
+    if not summary_response:
+        query_fields.extend([
+            cluster_table.c.last_creation_yaml,
+            cluster_table.c.last_creation_command,
+        ])
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        row = session.query(cluster_table).filter_by(name=cluster_name).first()
+        query = session.query(*query_fields)
+        row = query.filter_by(name=cluster_name).first()
     if row is None:
         return None
-    user_hash = _get_user_hash_or_current_user(row.user_hash)
-    user = get_user(user_hash)
-    user_name = user.name if user is not None else None
+    if include_user_info:
+        user_hash = _get_user_hash_or_current_user(row.user_hash)
+        user = get_user(user_hash)
+        user_name = user.name if user is not None else None
+    if not summary_response:
+        last_event = get_terminal_or_last_status_change_event(row.cluster_hash)
     # TODO: use namedtuple instead of dict
     record = {
         'name': row.name,
@@ -1079,63 +1779,184 @@ def get_cluster_from_name(
         'owner': _load_owner(row.owner),
         'metadata': json.loads(row.metadata),
         'cluster_hash': row.cluster_hash,
-        'storage_mounts_metadata': _load_storage_mounts_metadata(
-            row.storage_mounts_metadata),
         'cluster_ever_up': bool(row.cluster_ever_up),
         'status_updated_at': row.status_updated_at,
-        'user_hash': user_hash,
-        'user_name': user_name,
-        'config_hash': row.config_hash,
         'workspace': row.workspace,
-        'last_creation_yaml': row.last_creation_yaml,
-        'last_creation_command': row.last_creation_command,
+        'is_managed': bool(row.is_managed),
+        'config_hash': row.config_hash,
     }
+    if not summary_response:
+        record['last_creation_yaml'] = row.last_creation_yaml
+        record['last_creation_command'] = row.last_creation_command
+        record['last_event'] = last_event
+    if include_user_info:
+        record['user_hash'] = user_hash
+        record['user_name'] = user_name
 
     return record
 
 
 @_init_db
-def get_clusters() -> List[Dict[str, Any]]:
+@metrics_lib.time_me
+@context_utils.cancellation_guard
+def cluster_with_name_exists(cluster_name: str) -> bool:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(cluster_table).order_by(
-            sqlalchemy.desc(cluster_table.c.launched_at)).all()
+        row = session.query(
+            cluster_table.c.name).filter_by(name=cluster_name).first()
+    if row is None:
+        return False
+    return True
+
+
+@_init_db
+@metrics_lib.time_me
+def get_clusters(
+    *,  # keyword only separator
+    exclude_managed_clusters: bool = False,
+    workspaces_filter: Optional[Dict[str, Any]] = None,
+    user_hashes_filter: Optional[Set[str]] = None,
+    cluster_names: Optional[List[str]] = None,
+    summary_response: bool = False,
+) -> List[Dict[str, Any]]:
+    """Get clusters from the database.
+
+    Args:
+        exclude_managed_clusters: If True, exclude clusters that have
+            is_managed field set to True.
+        workspaces_filter: If specified, only include clusters
+            that has workspace field set to one of the values.
+        user_hashes_filter: If specified, only include clusters
+            that has user_hash field set to one of the values.
+        cluster_names: If specified, only include clusters
+            that has name field set to one of the values.
+    """
+    # is a cluster has a null user_hash,
+    # we treat it as belonging to the current user.
+    current_user_hash = common_utils.get_user_hash()
+    assert _SQLALCHEMY_ENGINE is not None
+    query_fields = [
+        cluster_table.c.name,
+        cluster_table.c.launched_at,
+        cluster_table.c.handle,
+        cluster_table.c.status,
+        cluster_table.c.autostop,
+        cluster_table.c.to_down,
+        cluster_table.c.cluster_hash,
+        cluster_table.c.cluster_ever_up,
+        cluster_table.c.user_hash,
+        cluster_table.c.workspace,
+        user_table.c.name.label('user_name'),
+    ]
+    if not summary_response:
+        query_fields.extend([
+            cluster_table.c.last_creation_yaml,
+            cluster_table.c.last_creation_command,
+            cluster_table.c.config_hash,
+            cluster_table.c.owner,
+            cluster_table.c.metadata,
+            cluster_table.c.last_use,
+            cluster_table.c.status_updated_at,
+        ])
+    if not exclude_managed_clusters:
+        query_fields.append(cluster_table.c.is_managed)
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        query = session.query(*query_fields).outerjoin(
+            user_table, cluster_table.c.user_hash == user_table.c.id)
+        if exclude_managed_clusters:
+            query = query.filter(cluster_table.c.is_managed == int(False))
+        if workspaces_filter is not None:
+            query = query.filter(
+                cluster_table.c.workspace.in_(workspaces_filter))
+        if user_hashes_filter is not None:
+            if current_user_hash in user_hashes_filter:
+                # backwards compatibility for old clusters.
+                # If current_user_hash is in user_hashes_filter, we include
+                # clusters that have a null user_hash.
+                query = query.filter(
+                    (cluster_table.c.user_hash.in_(user_hashes_filter) |
+                     (cluster_table.c.user_hash is None)))
+            else:
+                query = query.filter(
+                    cluster_table.c.user_hash.in_(user_hashes_filter))
+        if cluster_names is not None:
+            query = query.filter(cluster_table.c.name.in_(cluster_names))
+        query = query.order_by(sqlalchemy.desc(cluster_table.c.launched_at))
+        rows = query.all()
     records = []
+
+    # Check if we need to fetch the current user's name,
+    # for backwards compatibility, if user_hash is None.
+    current_user_name = None
+    needs_current_user = any(row.user_hash is None for row in rows)
+    if needs_current_user:
+        current_user = get_user(current_user_hash)
+        current_user_name = (current_user.name
+                             if current_user is not None else None)
+
+    # get last cluster event for each row
+    if not summary_response:
+        cluster_hashes = {row.cluster_hash for row in rows}
+        last_cluster_event_dict = _get_last_or_terminal_cluster_event_multiple(
+            cluster_hashes)
+
     for row in rows:
-        user_hash = _get_user_hash_or_current_user(row.user_hash)
-        user = get_user(user_hash)
-        user_name = user.name if user is not None else None
+        handle = pickle.loads(row.handle)
+        priority = (handle.launched_resources.priority
+                    if handle.launched_resources is not None else None)
         # TODO: use namedtuple instead of dict
         record = {
             'name': row.name,
             'launched_at': row.launched_at,
-            'handle': pickle.loads(row.handle),
-            'last_use': row.last_use,
+            'handle': handle,
             'status': status_lib.ClusterStatus[row.status],
+            'priority': priority
+                        if priority is not None else constants.DEFAULT_PRIORITY,
             'autostop': row.autostop,
             'to_down': bool(row.to_down),
-            'owner': _load_owner(row.owner),
-            'metadata': json.loads(row.metadata),
             'cluster_hash': row.cluster_hash,
-            'storage_mounts_metadata': _load_storage_mounts_metadata(
-                row.storage_mounts_metadata),
             'cluster_ever_up': bool(row.cluster_ever_up),
-            'status_updated_at': row.status_updated_at,
-            'user_hash': user_hash,
-            'user_name': user_name,
-            'config_hash': row.config_hash,
+            'user_hash': (row.user_hash
+                          if row.user_hash is not None else current_user_hash),
+            'user_name': (row.user_name
+                          if row.user_name is not None else current_user_name),
             'workspace': row.workspace,
-            'last_creation_yaml': row.last_creation_yaml,
-            'last_creation_command': row.last_creation_command,
+            'is_managed': False
+                          if exclude_managed_clusters else bool(row.is_managed),
         }
+        if not summary_response:
+            record['last_creation_yaml'] = row.last_creation_yaml
+            record['last_creation_command'] = row.last_creation_command
+            record['last_event'] = last_cluster_event_dict.get(
+                row.cluster_hash, None)
+            record['config_hash'] = row.config_hash
+            record['owner'] = _load_owner(row.owner)
+            record['metadata'] = json.loads(row.metadata)
+            record['last_use'] = row.last_use
+            record['status_updated_at'] = row.status_updated_at
 
         records.append(record)
     return records
 
 
 @_init_db
+@metrics_lib.time_me
+def get_cluster_names(exclude_managed_clusters: bool = False,) -> List[str]:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        query = session.query(cluster_table.c.name)
+        if exclude_managed_clusters:
+            query = query.filter(cluster_table.c.is_managed == int(False))
+        rows = query.all()
+    return [row[0] for row in rows]
+
+
+@_init_db
+@metrics_lib.time_me
 def get_clusters_from_history(
-        days: Optional[int] = None) -> List[Dict[str, Any]]:
+        days: Optional[int] = None,
+        abbreviate_response: bool = False,
+        cluster_hashes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """Get cluster reports from history.
 
     Args:
@@ -1148,67 +1969,100 @@ def get_clusters_from_history(
         List of cluster records with history information.
     """
     assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        # Explicitly select columns from both tables to avoid ambiguity
-        query = session.query(
-            cluster_history_table.c.cluster_hash, cluster_history_table.c.name,
-            cluster_history_table.c.num_nodes,
-            cluster_history_table.c.requested_resources,
-            cluster_history_table.c.launched_resources,
-            cluster_history_table.c.usage_intervals,
-            cluster_history_table.c.user_hash,
-            cluster_history_table.c.last_creation_yaml,
-            cluster_history_table.c.last_creation_command,
-            cluster_table.c.status, cluster_table.c.workspace,
-            cluster_table.c.status_updated_at).select_from(
-                cluster_history_table.join(cluster_table,
-                                           cluster_history_table.c.cluster_hash
-                                           == cluster_table.c.cluster_hash,
-                                           isouter=True))
 
-        rows = query.all()
+    current_user_hash = common_utils.get_user_hash()
 
     # Prepare filtering parameters
-    cutoff_time = None
+    cutoff_time = 0
     if days is not None:
         cutoff_time = int(time.time()) - (days * 24 * 60 * 60)
 
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Explicitly select columns from both tables to avoid ambiguity
+        if abbreviate_response:
+            query = session.query(
+                cluster_history_table.c.cluster_hash,
+                cluster_history_table.c.name, cluster_history_table.c.num_nodes,
+                cluster_history_table.c.launched_resources,
+                cluster_history_table.c.usage_intervals,
+                cluster_history_table.c.user_hash,
+                cluster_history_table.c.workspace.label('history_workspace'),
+                cluster_history_table.c.last_activity_time,
+                cluster_history_table.c.launched_at, cluster_table.c.status,
+                cluster_table.c.workspace)
+        else:
+            query = session.query(
+                cluster_history_table.c.cluster_hash,
+                cluster_history_table.c.name, cluster_history_table.c.num_nodes,
+                cluster_history_table.c.launched_resources,
+                cluster_history_table.c.usage_intervals,
+                cluster_history_table.c.user_hash,
+                cluster_history_table.c.last_creation_yaml,
+                cluster_history_table.c.last_creation_command,
+                cluster_history_table.c.workspace.label('history_workspace'),
+                cluster_history_table.c.last_activity_time,
+                cluster_history_table.c.launched_at, cluster_table.c.status,
+                cluster_table.c.workspace)
+
+        query = query.select_from(
+            cluster_history_table.join(cluster_table,
+                                       cluster_history_table.c.cluster_hash ==
+                                       cluster_table.c.cluster_hash,
+                                       isouter=True))
+
+        # Only include clusters that are either active (status is not None)
+        # or are within the cutoff time (cutoff_time <= last_activity_time).
+        # If days is not specified, we include all clusters by setting
+        # cutoff_time to 0.
+        query = query.filter(
+            (cluster_table.c.status.isnot(None) |
+             (cluster_history_table.c.last_activity_time >= cutoff_time)))
+
+        # Order by launched_at descending (most recent first)
+        query = query.order_by(
+            sqlalchemy.desc(cluster_history_table.c.launched_at))
+
+        if cluster_hashes is not None:
+            query = query.filter(
+                cluster_history_table.c.cluster_hash.in_(cluster_hashes))
+        rows = query.all()
+
+    usage_intervals_dict = {}
+    row_to_user_hash = {}
+    for row in rows:
+        row_usage_intervals: List[Tuple[int, Optional[int]]] = []
+        if row.usage_intervals:
+            try:
+                row_usage_intervals = pickle.loads(row.usage_intervals)
+            except (pickle.PickleError, AttributeError):
+                pass
+        usage_intervals_dict[row.cluster_hash] = row_usage_intervals
+        user_hash = (row.user_hash
+                     if row.user_hash is not None else current_user_hash)
+        row_to_user_hash[row.cluster_hash] = user_hash
+
+    user_hashes = set(row_to_user_hash.values())
+    user_hash_to_user = get_users(user_hashes)
+    cluster_hashes = set(row_to_user_hash.keys())
+    last_cluster_event_dict = _get_last_or_terminal_cluster_event_multiple(
+        cluster_hashes)
+
     records = []
     for row in rows:
-        user_hash = _get_user_hash_or_current_user(row.user_hash)
-        launched_at = _get_cluster_launch_time(row.cluster_hash)
-        duration = _get_cluster_duration(row.cluster_hash)
+        user_hash = row_to_user_hash[row.cluster_hash]
+        user = user_hash_to_user.get(user_hash, None)
+        user_name = user.name if user is not None else None
+        last_event = last_cluster_event_dict.get(row.cluster_hash, None)
+        launched_at = row.launched_at
+        usage_intervals: Optional[List[Tuple[
+            int,
+            Optional[int]]]] = usage_intervals_dict.get(row.cluster_hash, None)
+        duration = _get_cluster_duration(usage_intervals)
 
         # Parse status
         status = None
         if row.status:
             status = status_lib.ClusterStatus[row.status]
-
-        # Apply filtering: always include active clusters, filter historical
-        # ones by time
-        if cutoff_time is not None and status is None:  # Historical cluster
-            # For historical clusters, check if they were used recently
-            # Use the most recent activity from usage_intervals to determine
-            # last use
-            usage_intervals = []
-            if row.usage_intervals:
-                try:
-                    usage_intervals = pickle.loads(row.usage_intervals)
-                except (pickle.PickleError, AttributeError):
-                    usage_intervals = []
-
-            # Find the most recent activity time from usage_intervals
-            last_activity_time = None
-            if usage_intervals:
-                # Get the end time of the last interval (or start time if
-                # still running)
-                last_interval = usage_intervals[-1]
-                last_activity_time = (last_interval[1] if last_interval[1]
-                                      is not None else last_interval[0])
-
-            # Skip historical clusters that haven't been used recently
-            if last_activity_time is None or last_activity_time < cutoff_time:
-                continue
 
         # Parse launched resources safely
         launched_resources = None
@@ -1218,17 +2072,8 @@ def get_clusters_from_history(
             except (pickle.PickleError, AttributeError):
                 launched_resources = None
 
-        # Parse usage intervals safely
-        usage_intervals = []
-        if row.usage_intervals:
-            try:
-                usage_intervals = pickle.loads(row.usage_intervals)
-            except (pickle.PickleError, AttributeError):
-                usage_intervals = []
-
-        # Get user name from user hash
-        user = get_user(user_hash)
-        user_name = user.name if user is not None else None
+        workspace = (row.history_workspace
+                     if row.history_workspace else row.workspace)
 
         record = {
             'name': row.name,
@@ -1236,15 +2081,19 @@ def get_clusters_from_history(
             'duration': duration,
             'num_nodes': row.num_nodes,
             'resources': launched_resources,
+            'priority': launched_resources.priority
+                        if launched_resources is not None else None,
             'cluster_hash': row.cluster_hash,
             'usage_intervals': usage_intervals,
             'status': status,
             'user_hash': user_hash,
             'user_name': user_name,
-            'workspace': row.workspace,
-            'last_creation_yaml': row.last_creation_yaml,
-            'last_creation_command': row.last_creation_command,
+            'workspace': workspace,
+            'last_event': last_event,
         }
+        if not abbreviate_response:
+            record['last_creation_yaml'] = row.last_creation_yaml
+            record['last_creation_command'] = row.last_creation_command
 
         records.append(record)
 
@@ -1254,15 +2103,17 @@ def get_clusters_from_history(
 
 
 @_init_db
+@metrics_lib.time_me
 def get_cluster_names_start_with(starts_with: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(cluster_table).filter(
+        rows = session.query(cluster_table.c.name).filter(
             cluster_table.c.name.like(f'{starts_with}%')).all()
-    return [row.name for row in rows]
+    return [row[0] for row in rows]
 
 
 @_init_db
+@metrics_lib.time_me
 def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
                               workspace: str) -> List['clouds.Cloud']:
     assert _SQLALCHEMY_ENGINE is not None
@@ -1288,6 +2139,7 @@ def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
 
 
 @_init_db
+@metrics_lib.time_me
 def set_enabled_clouds(enabled_clouds: List[str],
                        cloud_capability: 'cloud.CloudCapability',
                        workspace: str) -> None:
@@ -1317,6 +2169,7 @@ def _get_enabled_clouds_key(cloud_capability: 'cloud.CloudCapability',
 
 
 @_init_db
+@metrics_lib.time_me
 def get_allowed_clouds(workspace: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1328,6 +2181,7 @@ def get_allowed_clouds(workspace: str) -> List[str]:
 
 
 @_init_db
+@metrics_lib.time_me
 def set_allowed_clouds(allowed_clouds: List[str], workspace: str) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1354,6 +2208,7 @@ def _get_allowed_clouds_key(workspace: str) -> str:
 
 
 @_init_db
+@metrics_lib.time_me
 def add_or_update_storage(storage_name: str,
                           storage_handle: 'Storage.StorageMetadata',
                           storage_status: status_lib.StorageStatus):
@@ -1396,6 +2251,7 @@ def add_or_update_storage(storage_name: str,
 
 
 @_init_db
+@metrics_lib.time_me
 def remove_storage(storage_name: str):
     """Removes Storage from Database"""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1405,6 +2261,7 @@ def remove_storage(storage_name: str):
 
 
 @_init_db
+@metrics_lib.time_me
 def set_storage_status(storage_name: str,
                        status: status_lib.StorageStatus) -> None:
     assert _SQLALCHEMY_ENGINE is not None
@@ -1418,6 +2275,7 @@ def set_storage_status(storage_name: str,
 
 
 @_init_db
+@metrics_lib.time_me
 def get_storage_status(storage_name: str) -> Optional[status_lib.StorageStatus]:
     assert _SQLALCHEMY_ENGINE is not None
     assert storage_name is not None, 'storage_name cannot be None'
@@ -1429,6 +2287,7 @@ def get_storage_status(storage_name: str) -> Optional[status_lib.StorageStatus]:
 
 
 @_init_db
+@metrics_lib.time_me
 def set_storage_handle(storage_name: str,
                        handle: 'Storage.StorageMetadata') -> None:
     assert _SQLALCHEMY_ENGINE is not None
@@ -1443,6 +2302,7 @@ def set_storage_handle(storage_name: str,
 
 
 @_init_db
+@metrics_lib.time_me
 def get_handle_from_storage_name(
         storage_name: Optional[str]) -> Optional['Storage.StorageMetadata']:
     assert _SQLALCHEMY_ENGINE is not None
@@ -1456,6 +2316,7 @@ def get_handle_from_storage_name(
 
 
 @_init_db
+@metrics_lib.time_me
 def get_glob_storage_name(storage_name: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
     assert storage_name is not None, 'storage_name cannot be None'
@@ -1475,6 +2336,7 @@ def get_glob_storage_name(storage_name: str) -> List[str]:
 
 
 @_init_db
+@metrics_lib.time_me
 def get_storage_names_start_with(starts_with: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1484,6 +2346,7 @@ def get_storage_names_start_with(starts_with: str) -> List[str]:
 
 
 @_init_db
+@metrics_lib.time_me
 def get_storage() -> List[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1502,6 +2365,7 @@ def get_storage() -> List[Dict[str, Any]]:
 
 
 @_init_db
+@metrics_lib.time_me
 def get_volume_names_start_with(starts_with: str) -> List[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1511,10 +2375,15 @@ def get_volume_names_start_with(starts_with: str) -> List[str]:
 
 
 @_init_db
-def get_volumes() -> List[Dict[str, Any]]:
+@metrics_lib.time_me
+def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.query(volume_table).all()
+        if is_ephemeral is None:
+            rows = session.query(volume_table).all()
+        else:
+            rows = session.query(volume_table).filter_by(
+                is_ephemeral=int(is_ephemeral)).all()
     records = []
     for row in rows:
         records.append({
@@ -1526,11 +2395,13 @@ def get_volumes() -> List[Dict[str, Any]]:
             'last_attached_at': row.last_attached_at,
             'last_use': row.last_use,
             'status': status_lib.VolumeStatus[row.status],
+            'is_ephemeral': bool(row.is_ephemeral),
         })
     return records
 
 
 @_init_db
+@metrics_lib.time_me
 def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1550,14 +2421,24 @@ def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
 
 
 @_init_db
-def add_volume(name: str, config: models.VolumeConfig,
-               status: status_lib.VolumeStatus) -> None:
+@metrics_lib.time_me
+def add_volume(
+    name: str,
+    config: models.VolumeConfig,
+    status: status_lib.VolumeStatus,
+    is_ephemeral: bool = False,
+) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     volume_launched_at = int(time.time())
     handle = pickle.dumps(config)
     last_use = common_utils.get_current_command()
     user_hash = common_utils.get_current_user().id
     active_workspace = skypilot_config.get_active_workspace()
+    if is_ephemeral:
+        last_attached_at = int(time.time())
+        status = status_lib.VolumeStatus.IN_USE
+    else:
+        last_attached_at = None
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -1574,9 +2455,10 @@ def add_volume(name: str, config: models.VolumeConfig,
             handle=handle,
             user_hash=user_hash,
             workspace=active_workspace,
-            last_attached_at=None,
+            last_attached_at=last_attached_at,
             last_use=last_use,
             status=status.value,
+            is_ephemeral=int(is_ephemeral),
         )
         do_update_stmt = insert_stmnt.on_conflict_do_nothing()
         session.execute(do_update_stmt)
@@ -1584,6 +2466,18 @@ def add_volume(name: str, config: models.VolumeConfig,
 
 
 @_init_db
+@metrics_lib.time_me
+def update_volume_config(name: str, config: models.VolumeConfig) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(volume_table).filter_by(name=name).update({
+            volume_table.c.handle: pickle.dumps(config),
+        })
+        session.commit()
+
+
+@_init_db
+@metrics_lib.time_me
 def update_volume(name: str, last_attached_at: int,
                   status: status_lib.VolumeStatus) -> None:
     assert _SQLALCHEMY_ENGINE is not None
@@ -1596,6 +2490,7 @@ def update_volume(name: str, last_attached_at: int,
 
 
 @_init_db
+@metrics_lib.time_me
 def update_volume_status(name: str, status: status_lib.VolumeStatus) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1606,6 +2501,7 @@ def update_volume_status(name: str, status: status_lib.VolumeStatus) -> None:
 
 
 @_init_db
+@metrics_lib.time_me
 def delete_volume(name: str) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1614,6 +2510,7 @@ def delete_volume(name: str) -> None:
 
 
 @_init_db
+@metrics_lib.time_me
 def get_ssh_keys(user_hash: str) -> Tuple[str, str, bool]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1625,6 +2522,7 @@ def get_ssh_keys(user_hash: str) -> Tuple[str, str, bool]:
 
 
 @_init_db
+@metrics_lib.time_me
 def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1651,6 +2549,7 @@ def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
 
 
 @_init_db
+@metrics_lib.time_me
 def add_service_account_token(token_id: str,
                               token_name: str,
                               token_hash: str,
@@ -1684,6 +2583,7 @@ def add_service_account_token(token_id: str,
 
 
 @_init_db
+@metrics_lib.time_me
 def get_service_account_token(token_id: str) -> Optional[Dict[str, Any]]:
     """Get a service account token by token_id."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1705,6 +2605,7 @@ def get_service_account_token(token_id: str) -> Optional[Dict[str, Any]]:
 
 
 @_init_db
+@metrics_lib.time_me
 def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
     """Get all service account tokens for a user (as creator)."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1724,6 +2625,7 @@ def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
 
 
 @_init_db
+@metrics_lib.time_me
 def update_service_account_token_last_used(token_id: str) -> None:
     """Update the last_used_at timestamp for a service account token."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1737,6 +2639,7 @@ def update_service_account_token_last_used(token_id: str) -> None:
 
 
 @_init_db
+@metrics_lib.time_me
 def delete_service_account_token(token_id: str) -> bool:
     """Delete a service account token.
 
@@ -1752,6 +2655,7 @@ def delete_service_account_token(token_id: str) -> bool:
 
 
 @_init_db
+@metrics_lib.time_me
 def rotate_service_account_token(token_id: str,
                                  new_token_hash: str,
                                  new_expires_at: Optional[int] = None) -> None:
@@ -1782,6 +2686,7 @@ def rotate_service_account_token(token_id: str,
 
 
 @_init_db
+@metrics_lib.time_me
 def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
     """Get the cluster yaml from the database or the local file system.
     If the cluster yaml is not in the database, check if it exists on the
@@ -1798,17 +2703,60 @@ def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
         row = session.query(cluster_yaml_table).filter_by(
             cluster_name=cluster_name).first()
     if row is None:
-        # If the cluster yaml is not in the database, check if it exists
-        # on the local file system and migrate it to the database.
-        # TODO(syang): remove this check once we have a way to migrate the
-        # cluster from file to database. Remove on v0.12.0.
-        if cluster_yaml_path is not None and os.path.exists(cluster_yaml_path):
-            with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
+        return _set_cluster_yaml_from_file(cluster_yaml_path, cluster_name)
+    return row.yaml
+
+
+def get_cluster_yaml_str_multiple(cluster_yaml_paths: List[str]) -> List[str]:
+    """Get the cluster yaml from the database or the local file system.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    cluster_names_to_yaml_paths = {}
+    for cluster_yaml_path in cluster_yaml_paths:
+        cluster_name, _ = os.path.splitext(os.path.basename(cluster_yaml_path))
+        cluster_names_to_yaml_paths[cluster_name] = cluster_yaml_path
+
+    cluster_names = list(cluster_names_to_yaml_paths.keys())
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.query(cluster_yaml_table).filter(
+            cluster_yaml_table.c.cluster_name.in_(cluster_names)).all()
+    row_cluster_names_to_yaml = {row.cluster_name: row.yaml for row in rows}
+
+    yaml_strs = []
+    for cluster_name in cluster_names:
+        if cluster_name in row_cluster_names_to_yaml:
+            yaml_strs.append(row_cluster_names_to_yaml[cluster_name])
+        else:
+            yaml_str = _set_cluster_yaml_from_file(
+                cluster_names_to_yaml_paths[cluster_name], cluster_name)
+            yaml_strs.append(yaml_str)
+    return yaml_strs
+
+
+def _set_cluster_yaml_from_file(cluster_yaml_path: str,
+                                cluster_name: str) -> Optional[str]:
+    """Set the cluster yaml in the database from a file."""
+    # If the cluster yaml is not in the database, check if it exists
+    # on the local file system and migrate it to the database.
+    # TODO(syang): remove this check once we have a way to migrate the
+    # cluster from file to database. Remove on v0.12.0.
+    if cluster_yaml_path is not None:
+        # First try the exact path
+        path_to_read = None
+        if os.path.exists(cluster_yaml_path):
+            path_to_read = cluster_yaml_path
+        # Fallback: try with .debug suffix (when debug logging was enabled)
+        # Debug logging causes YAML files to be saved with .debug suffix
+        # but the path stored in the handle doesn't include it
+        debug_path = cluster_yaml_path + '.debug'
+        if os.path.exists(debug_path):
+            path_to_read = debug_path
+        if path_to_read is not None:
+            with open(path_to_read, 'r', encoding='utf-8') as f:
                 yaml_str = f.read()
             set_cluster_yaml(cluster_name, yaml_str)
             return yaml_str
-        return None
-    return row.yaml
+    return None
 
 
 def get_cluster_yaml_dict(cluster_yaml_path: Optional[str]) -> Dict[str, Any]:
@@ -1819,10 +2767,24 @@ def get_cluster_yaml_dict(cluster_yaml_path: Optional[str]) -> Dict[str, Any]:
     yaml_str = get_cluster_yaml_str(cluster_yaml_path)
     if yaml_str is None:
         raise ValueError(f'Cluster yaml {cluster_yaml_path} not found.')
-    return yaml.safe_load(yaml_str)
+    return yaml_utils.safe_load(yaml_str)
+
+
+def get_cluster_yaml_dict_multiple(
+        cluster_yaml_paths: List[str]) -> List[Dict[str, Any]]:
+    """Get the cluster yaml as a dictionary from the database."""
+    yaml_strs = get_cluster_yaml_str_multiple(cluster_yaml_paths)
+    yaml_dicts = []
+    for idx, yaml_str in enumerate(yaml_strs):
+        if yaml_str is None:
+            raise ValueError(
+                f'Cluster yaml {cluster_yaml_paths[idx]} not found.')
+        yaml_dicts.append(yaml_utils.safe_load(yaml_str))
+    return yaml_dicts
 
 
 @_init_db
+@metrics_lib.time_me
 def set_cluster_yaml(cluster_name: str, yaml_str: str) -> None:
     """Set the cluster yaml in the database."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1845,6 +2807,7 @@ def set_cluster_yaml(cluster_name: str, yaml_str: str) -> None:
 
 
 @_init_db
+@metrics_lib.time_me
 def remove_cluster_yaml(cluster_name: str):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
@@ -1854,6 +2817,7 @@ def remove_cluster_yaml(cluster_name: str):
 
 
 @_init_db
+@metrics_lib.time_me
 def get_all_service_account_tokens() -> List[Dict[str, Any]]:
     """Get all service account tokens across all users (for admin access)."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1872,6 +2836,7 @@ def get_all_service_account_tokens() -> List[Dict[str, Any]]:
 
 
 @_init_db
+@metrics_lib.time_me
 def get_system_config(config_key: str) -> Optional[str]:
     """Get a system configuration value by key."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1884,6 +2849,7 @@ def get_system_config(config_key: str) -> Optional[str]:
 
 
 @_init_db
+@metrics_lib.time_me
 def set_system_config(config_key: str, config_value: str) -> None:
     """Set a system configuration value."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1913,3 +2879,18 @@ def set_system_config(config_key: str, config_value: str) -> None:
             })
         session.execute(upsert_stmnt)
         session.commit()
+
+
+@_init_db
+def get_max_db_connections() -> Optional[int]:
+    """Get the maximum number of connections for the engine."""
+    assert _SQLALCHEMY_ENGINE is not None
+    if (_SQLALCHEMY_ENGINE.dialect.name ==
+            db_utils.SQLAlchemyDialect.SQLITE.value):
+        return None
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        max_connections = session.execute(
+            sqlalchemy.text('SHOW max_connections')).scalar()
+        if max_connections is None:
+            return None
+        return int(max_connections)

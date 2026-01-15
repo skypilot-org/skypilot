@@ -64,6 +64,12 @@ Clusters SDK
 .. autofunction:: sky.autostop
   :noindex:
 
+``sky.endpoints``
+~~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.endpoints
+  :noindex:
+
 
 Jobs SDK
 --------
@@ -120,6 +126,12 @@ Managed jobs SDK
 .. autofunction:: sky.jobs.launch
   :noindex:
 
+``sky.jobs.queue_v2``
+^^^^^^^^^^^^^^^^^^^^^
+
+.. autofunction:: sky.jobs.queue_v2
+  :noindex:
+
 ``sky.jobs.queue``
 ^^^^^^^^^^^^^^^^^^^
 
@@ -137,6 +149,28 @@ Managed jobs SDK
 ^^^^^^^^^^^^^^^^^^^^^^
 
 .. autofunction:: sky.jobs.tail_logs
+  :noindex:
+
+
+Volumes SDK
+------------
+
+``sky.volumes.ls``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.volumes.ls
+  :noindex:
+
+``sky.volumes.apply``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.volumes.apply
+  :noindex:
+
+``sky.volumes.delete``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.volumes.delete
   :noindex:
 
 

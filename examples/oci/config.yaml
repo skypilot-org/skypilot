@@ -1,12 +1,13 @@
 oci:
-  default:
-    # oci_config_profile: DEFAULT
-    compartment_ocid: ocid1.compartment.oc1..aaaaaaaahr7aicqtodxmcfor6pbqn3hvsngpftozyxzqw36gj4kh3w3kkj4q
-    # image_tag_general: skypilot:cpu-ubuntu-2004
-    # image_tag_gpu: skypilot:gpu-ubuntu-2004
+  region_configs:
+    default:
+      # oci_config_profile: DEFAULT
+      compartment_ocid: ocid1.compartment.oc1..aaaaaaaahr7aicqtodxmcfor6pbqn3hvsngpftozyxzqw36gj4kh3w3kkj4q
+      # image_tag_general: skypilot:cpu-ubuntu-2004
+      # image_tag_gpu: skypilot:gpu-ubuntu-2004
 
-  ap-seoul-1:
-    vcn_subnet: ocid1.subnet.oc1.ap-seoul-1.aaaaaaaa5c6wndifsij6yfyfehmi3tazn6mvhhiewqmajzcrlryurnl7nuja
+    ap-seoul-1:
+      vcn_subnet: ocid1.subnet.oc1.ap-seoul-1.aaaaaaaa5c6wndifsij6yfyfehmi3tazn6mvhhiewqmajzcrlryurnl7nuja
 
-  us-ashburn-1:
-    vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+    us-ashburn-1:
+      vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa

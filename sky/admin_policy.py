@@ -9,10 +9,13 @@ import pydantic
 
 import sky
 from sky import exceptions
+from sky import models
 from sky.adaptors import common as adaptors_common
+from sky.server.requests import request_names
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import requests
@@ -48,8 +51,10 @@ class _UserRequestBody(pydantic.BaseModel):
     # will be converted to JSON string, which will lose the None key.
     task: str
     skypilot_config: str
+    request_name: str
     request_options: Optional[RequestOptions] = None
     at_client_side: bool = False
+    user: str
 
 
 @dataclasses.dataclass
@@ -72,32 +77,48 @@ class UserRequest:
         skypilot_config: Global skypilot config to be used in this request.
         request_options: Request options. It is None for jobs and services.
         at_client_side: Is the request intercepted by the policy at client-side?
+        user: User who made the request.
+              Only available on the server side.
+              This value is None if at_client_side is True.
     """
     task: 'sky.Task'
     skypilot_config: 'sky.Config'
+    request_name: request_names.AdminPolicyRequestName
     request_options: Optional['RequestOptions'] = None
     at_client_side: bool = False
+    user: Optional['models.User'] = None
 
     def encode(self) -> str:
         return _UserRequestBody(
-            task=common_utils.dump_yaml_str(self.task.to_yaml_config()),
-            skypilot_config=common_utils.dump_yaml_str(
-                dict(self.skypilot_config)),
+            task=yaml_utils.dump_yaml_str(self.task.to_yaml_config()),
+            skypilot_config=yaml_utils.dump_yaml_str(dict(
+                self.skypilot_config)),
+            request_name=self.request_name.value,
             request_options=self.request_options,
             at_client_side=self.at_client_side,
+            user=(yaml_utils.dump_yaml_str(self.user.to_dict())
+                  if self.user is not None else ''),
         ).model_dump_json()
 
     @classmethod
     def decode(cls, body: str) -> 'UserRequest':
         user_request_body = _UserRequestBody.model_validate_json(body)
+        user_dict = yaml_utils.read_yaml_str(
+            user_request_body.user) if user_request_body.user != '' else None
+        user = models.User(
+            id=user_dict['id'],
+            name=user_dict['name']) if user_dict is not None else None
         return cls(
             task=sky.Task.from_yaml_config(
-                common_utils.read_yaml_all_str(user_request_body.task)[0]),
+                yaml_utils.read_yaml_all_str(user_request_body.task)[0]),
             skypilot_config=config_utils.Config.from_dict(
-                common_utils.read_yaml_all_str(
+                yaml_utils.read_yaml_all_str(
                     user_request_body.skypilot_config)[0]),
+            request_name=request_names.AdminPolicyRequestName(
+                user_request_body.request_name),
             request_options=user_request_body.request_options,
             at_client_side=user_request_body.at_client_side,
+            user=user,
         )
 
 
@@ -116,18 +137,24 @@ class MutatedUserRequest:
 
     def encode(self) -> str:
         return _MutatedUserRequestBody(
-            task=common_utils.dump_yaml_str(self.task.to_yaml_config()),
-            skypilot_config=common_utils.dump_yaml_str(
-                dict(self.skypilot_config),)).model_dump_json()
+            task=yaml_utils.dump_yaml_str(self.task.to_yaml_config()),
+            skypilot_config=yaml_utils.dump_yaml_str(dict(
+                self.skypilot_config),)).model_dump_json()
 
     @classmethod
-    def decode(cls, mutated_user_request_body: str) -> 'MutatedUserRequest':
+    def decode(cls, mutated_user_request_body: str,
+               original_request: UserRequest) -> 'MutatedUserRequest':
         mutated_user_request_body = _MutatedUserRequestBody.model_validate_json(
             mutated_user_request_body)
-        return cls(task=sky.Task.from_yaml_config(
-            common_utils.read_yaml_all_str(mutated_user_request_body.task)[0]),
+        task = sky.Task.from_yaml_config(
+            yaml_utils.read_yaml_all_str(mutated_user_request_body.task)[0])
+        # Some internal Task fields are not serialized. We need to manually
+        # restore them from the original request.
+        task.managed_job_dag = original_request.task.managed_job_dag
+        task.service_name = original_request.task.service_name
+        return cls(task=task,
                    skypilot_config=config_utils.Config.from_dict(
-                       common_utils.read_yaml_all_str(
+                       yaml_utils.read_yaml_all_str(
                            mutated_user_request_body.skypilot_config)[0],))
 
 
@@ -243,7 +270,8 @@ class RestfulAdminPolicy(PolicyTemplate):
                     f'{self.policy_url}: {e}') from None
 
         try:
-            mutated_user_request = MutatedUserRequest.decode(response.json())
+            mutated_user_request = MutatedUserRequest.decode(
+                response.json(), user_request)
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.RestfulPolicyError(

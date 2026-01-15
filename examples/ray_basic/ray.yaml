@@ -1,0 +1,22 @@
+# This example demonstrates how to use the one-click user-space Ray cluster
+# in SkyPilot.
+#
+# Usage:
+#   sky launch -c ray-cluster ray.yaml
+
+resources:
+  cpus: 2+
+
+num_nodes: 2
+
+workdir: .
+
+run: |
+  # This script is only available on skypilot-nightly>=1.0.0.dev20251114
+  # If you are using an older version, you can copy and paste the script from:
+  # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster
+  ~/sky_templates/ray/start_cluster
+
+  if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+    python main.py
+  fi

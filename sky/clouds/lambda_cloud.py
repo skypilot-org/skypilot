@@ -15,7 +15,7 @@ if typing.TYPE_CHECKING:
 
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 else:
     requests = adaptors_common.LazyImport('requests')
 
@@ -59,7 +59,9 @@ class Lambda(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         del resources  # unused
         return cls._CLOUD_UNSUPPORTED_FEATURES
@@ -69,10 +71,15 @@ class Lambda(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
         assert zone is None, 'Lambda does not support zones.'
         del accelerators, zone  # unused
         if use_spot:
@@ -132,14 +139,17 @@ class Lambda(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(
-        cls,
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        disk_tier: Optional['resources_utils.DiskTier'] = None
-    ) -> Optional[str]:
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None,
+            disk_tier: Optional['resources_utils.DiskTier'] = None,
+            region: Optional[str] = None,
+            zone: Optional[str] = None) -> Optional[str]:
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
                                                  clouds='lambda')
 
     @classmethod
@@ -227,7 +237,9 @@ class Lambda(clouds.Cloud):
             default_instance_type = Lambda.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
-                disk_tier=resources.disk_tier)
+                disk_tier=resources.disk_tier,
+                region=resources.region,
+                zone=resources.zone)
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
             else:

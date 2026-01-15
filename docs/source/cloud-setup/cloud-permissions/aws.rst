@@ -52,12 +52,61 @@ Log in and approve the request in your web browser. Then back in the CLI, comple
 If everything is set up correctly, :code:`sky check aws` should succeed!
 
 
+.. _aws-ssm:
+
+Using AWS Systems Manager (SSM)
+--------------------------------
+
+`AWS Systems Manager Session Manager <https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html>`_ provides secure shell access to EC2 instances without requiring direct network access through SSH ports or bastion hosts.
+
+SkyPilot can be configured to use SSM for SSH connections by setting ``use_ssm`` to true in your :ref:`config.yaml <config-yaml>` file under the ``aws`` section. One use case for SSM is to enable running SkyPilot for AWS instances that do not have public IPs. By also setting ``use_internal_ips`` to true in your :ref:`config.yaml <config-yaml>` file under the ``aws`` section SkyPilot will use private IPs to connect to the instances and will have access via SSM.
+
+Prerequisites
+~~~~~~~~~~~~~
+
+Before using SSM with SkyPilot, ensure the following:
+
+1. **AWS CLI v2** and **Session Manager plugin** are installed. Follow the `installation guide <https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html>`_ for your operating system.
+
+   .. note::
+      If using a :ref:`remote API server <sky-api-server>`, install the Session Manager plugin on the API server instead of your local machine.
+
+2. **IAM permissions** are configured to allow SSM access:
+
+   - Your user/role needs ``ssm:StartSession`` permission
+   - The ``skypilot-v1`` IAM role (used by EC2 instances) needs the ``AmazonSSMManagedInstanceCore`` managed policy attached
+
+   To attach the SSM policy to the SkyPilot role:
+
+   a. Open the `IAM console <https://console.aws.amazon.com/iam/>`_ and go to **Roles**
+   b. Search for and select the ``skypilot-v1`` role
+   c. Click **Add permissions** → **Attach policies**
+   d. Search for ``AmazonSSMManagedInstanceCore`` and select it
+   e. Click **Add permissions**
+
+Configuration
+~~~~~~~~~~~~~
+
+Add the following to your ``~/.sky/config.yaml`` file:
+
+.. code-block:: yaml
+
+    aws:
+        use_ssm: true
+
+Once configured, SkyPilot will automatically use SSM for all SSH connections to your AWS instances in the specified regions.
+
+
 .. _sso-feature-compat:
 
 Multi-cloud access with SSO login
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 SSO login has limited functionality *across multiple clouds*. If you use multiple clouds, you can :ref:`set up a dedicated IAM user and access key <dedicated-aws-user>` so that instances launched on other clouds can use AWS resources.
+
+.. tip::
+
+    If you are running SkyPilot on an EKS cluster and need S3 access without static credentials, see :ref:`aws-eks-iam-roles` for setting up IAM roles for EKS pods.
 
 .. list-table::
    :header-rows: 1
@@ -155,6 +204,10 @@ Follow these steps to create a new AWS user:
        .. tab-item:: Simplified permissions
 
            Search for the **AdministratorAccess** policy, and check the box to add it. Click **Next** to proceed.
+
+           .. tip::
+
+            To use AWS for S3 but not for launching VMs, add **AmazonS3FullAccess** policy instead.
 
        .. tab-item:: Minimal permissions
 
@@ -560,3 +613,9 @@ Common issues
       # .bashrc / .zshrc
       # Enable AWS profile named "AWSPowerUserAccess-123456789012"
       export AWS_PROFILE='AWSPowerUserAccess-123456789012'
+
+
+.. toctree::
+   :hidden:
+
+   aws-eks-iam-roles

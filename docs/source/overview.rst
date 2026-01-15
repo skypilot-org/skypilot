@@ -5,11 +5,16 @@ Overview
 ========================
 
 SkyPilot combines your cloud infra --- Kubernetes
-clusters, clouds and regions for VMs, and existing machines --- into a unified compute pool, which is optimized for running AI workloads.
+clusters, Slurm clusters, clouds and regions for VMs, and existing machines --- into a unified compute pool, which is optimized for running AI workloads.
 
 .. image:: images/skypilot-abstractions-long-2.png
     :width: 90%
     :align: center
+    :class: only-light
+.. image:: images/skypilot-abstractions-long-2-dark.png
+    :width: 90%
+    :align: center
+    :class: only-dark
 
 
 You can run AI workloads on this pool in a unified interface, using these core abstractions:
@@ -199,12 +204,72 @@ A service can have one or more replicas, potentially spanning across locations (
 
 See :ref:`sky-serve` to get started.
 
-Bringing your infra
+Bring your own compute
 -------------------------------------------------------------------
 
-SkyPilot easily connects to your existing infra---clouds, Kubernetes
-clusters, or on-prem machines---using each infra's native authentication
-(cloud credentials, kubeconfig, SSH).
+SkyPilot easily connects to your existing infra---Kubernetes clusters, Slurm clusters, clouds, or on-prem machines---using each infra's native authentication
+(kubeconfig, cloud credentials, SSH).
+
+.. _concept-kubernetes-clusters:
+
+Kubernetes clusters
+~~~~~~~~~~~~~~~~~~~~~
+
+You can bring existing Kubernetes clusters, including managed clusters (e.g.,
+EKS, GKE, AKS) or on-prem ones, into SkyPilot.  Auto-failover
+between multiple clusters is also supported.
+
+.. image:: images/k8s-skypilot-architecture-light.png
+    :width: 45%
+    :align: center
+    :class: no-scaled-link, only-light
+
+.. image:: images/k8s-skypilot-architecture-dark.png
+    :width: 45%
+    :align: center
+    :class: no-scaled-link, only-dark
+
+Example usage:
+
+.. tab-set::
+
+    .. tab-item:: CLI
+        :sync: cli
+
+        .. code-block:: console
+
+            $ sky launch --infra k8s  # Use any available Kubernetes context.
+            $ # Or use a particular context:
+            $ sky launch --infra k8s/my-cluster1
+            $ sky launch --infra k8s/my-cluster2
+
+    .. tab-item:: Python
+        :sync: python
+
+        .. code-block:: python
+
+            import sky
+            task = sky.Task().set_resources(sky.Resources(
+                infra='k8s',  # Use any available Kubernetes context.
+                # Or use a particular context:
+                # infra='k8s/my-cluster1',
+                # infra='k8s/my-cluster2',
+            ))
+            sky.launch(task)
+
+
+See :ref:`kubernetes-overview`.
+
+
+.. _concept-slurm-clusters:
+
+Slurm clusters
+~~~~~~~~~~~~~~~~~~~~~
+
+You can run SkyPilot tasks on existing Slurm clusters by connecting to their login nodes via SSH.
+SkyPilot allows you to manage multiple Slurm clusters through a single interface.
+
+See :ref:`slurm-overview` and :ref:`slurm-getting-started` for details.
 
 .. _concept-cloud-vms:
 
@@ -274,52 +339,6 @@ Example usage:
                 # infra='aws/us-east-1/us-east-1a',
             ))
             sky.launch(task)
-
-.. _concept-kubernetes-clusters:
-
-Kubernetes clusters
-~~~~~~~~~~~~~~~~~~~~~
-
-You can bring existing Kubernetes clusters, including managed clusters (e.g.,
-EKS, GKE, AKS) or on-prem ones, into SkyPilot.  Auto-failover
-between multiple clusters is also supported.
-
-.. image:: images/k8s-skypilot-architecture-light.png
-    :width: 45%
-    :align: center
-    :class: no-scaled-link, only-light
-
-.. image:: images/k8s-skypilot-architecture-dark.png
-    :width: 45%
-    :align: center
-    :class: no-scaled-link, only-dark
-
-Example usage:
-
-.. tab-set::
-
-    .. tab-item:: CLI
-        :sync: cli
-
-        .. code-block:: console
-
-            $ sky launch --infra k8s  # Use any available Kubernetes context.
-            $ sky launch --infra k8s/my-cluster-context  # Use a particular context.
-
-    .. tab-item:: Python
-        :sync: python
-
-        .. code-block:: python
-
-            import sky
-            task = sky.Task().set_resources(sky.Resources(
-                infra='k8s',  # Use any available Kubernetes context.
-                # infra='k8s/my-cluster-context',  # Use a particular context.
-            ))
-            sky.launch(task)
-
-
-See :ref:`kubernetes-overview`.
 
 .. _concept-existing-machines:
 
@@ -392,7 +411,7 @@ Workloads also obtain higher GPU capacity and cost savings.
 Users can specify each workload's search space. It can be as flexible or as specific as desired. Example search spaces that can be specified:
 
 - Use the cheapest and available GPUs out of a set, ``{A10g:8, A10:8, L4:8, A100:8}``
-- Use my Kubernetes cluster or any accessible clouds (pictured above)
+- Use my Kubernetes cluster, Slurm cluster, or any accessible clouds (pictured above)
 - Use either a spot or on-demand H100 GPU
 - Use AWS's five European regions only
 - Use a specific zone, region, or cloud

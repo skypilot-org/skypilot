@@ -4,22 +4,21 @@ import time
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-import sky
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import directory_utils
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     import jinja2
-    import yaml
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
-    yaml = adaptors_common.LazyImport('yaml')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -56,31 +55,10 @@ def get_port_mode(
     return port_mode
 
 
-def get_networking_mode(
-    mode_str: Optional[str],
-    context: Optional[str],
-) -> kubernetes_enums.KubernetesNetworkingMode:
-    """Get the networking mode from the provider config."""
-    mode_str = mode_str or skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
-        region=context,
-        keys=('networking_mode',),
-        default_value=kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.
-        value)
-    try:
-        networking_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
-            mode_str)
-    except ValueError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(str(e) +
-                             ' Please check: ~/.sky/config.yaml.') from None
-    return networking_mode
-
-
 def fill_loadbalancer_template(namespace: str, context: Optional[str],
                                service_name: str, ports: List[int],
                                selector_key: str, selector_value: str) -> Dict:
-    template_path = os.path.join(sky.__root_dir__, 'templates',
+    template_path = os.path.join(directory_utils.get_sky_dir(), 'templates',
                                  _LOADBALANCER_TEMPLATE_NAME)
     if not os.path.exists(template_path):
         raise FileNotFoundError(
@@ -88,13 +66,15 @@ def fill_loadbalancer_template(namespace: str, context: Optional[str],
 
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
+    context, cloud_str = kubernetes_utils.get_cleaned_context_and_cloud_str(
+        context)
     annotations = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata', 'annotations'),
         default_value={})
     labels = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata', 'labels'),
         default_value={})
@@ -108,7 +88,7 @@ def fill_loadbalancer_template(namespace: str, context: Optional[str],
         annotations=annotations,
         labels=labels,
     )
-    content = yaml.safe_load(cont)
+    content = yaml_utils.safe_load(cont)
     return content
 
 
@@ -116,20 +96,22 @@ def fill_ingress_template(namespace: str, context: Optional[str],
                           service_details: List[Tuple[str, int,
                                                       str]], ingress_name: str,
                           selector_key: str, selector_value: str) -> Dict:
-    template_path = os.path.join(sky.__root_dir__, 'templates',
+    template_path = os.path.join(directory_utils.get_sky_dir(), 'templates',
                                  _INGRESS_TEMPLATE_NAME)
     if not os.path.exists(template_path):
         raise FileNotFoundError(
             f'Template "{_INGRESS_TEMPLATE_NAME}" does not exist.')
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
+    context, cloud_str = kubernetes_utils.get_cleaned_context_and_cloud_str(
+        context)
     annotations = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata', 'annotations'),
         default_value={})
     labels = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud=cloud_str,
         region=context,
         keys=('custom_metadata', 'labels'),
         default_value={})
@@ -147,7 +129,7 @@ def fill_ingress_template(namespace: str, context: Optional[str],
         annotations=annotations,
         labels=labels,
     )
-    content = yaml.safe_load(cont)
+    content = yaml_utils.safe_load(cont)
 
     # Return a dictionary containing both specs
     return {

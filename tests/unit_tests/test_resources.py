@@ -11,6 +11,7 @@ from sky import global_user_state
 from sky import skypilot_config
 from sky.clouds import cloud as sky_cloud
 from sky.resources import Resources
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import resources_utils
 
@@ -141,7 +142,10 @@ def test_no_cloud_labels_resources_single_enabled_cloud():
 @mock.patch('sky.catalog.instance_type_exists', return_value=True)
 @mock.patch('sky.catalog.get_accelerators_from_instance_type',
             return_value={'fake-acc': 2})
+@mock.patch('sky.clouds.aws.AWS.get_image_root_device_name',
+            return_value='/dev/sda1')
 @mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
+@mock.patch('sky.catalog.get_arch_from_instance_type', return_value='fake-arch')
 @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 def test_aws_make_deploy_variables(*mocks) -> None:
     os.environ[
@@ -164,10 +168,12 @@ def test_aws_make_deploy_variables(*mocks) -> None:
     expected_config_base = {
         'instance_type': resource.instance_type,
         'custom_resources': '{"fake-acc":2}',
+        'max_efa_interfaces': 0,
         'use_spot': False,
         'region': 'fake-region',
         'image_id': 'fake-image',
         'disk_encrypted': False,
+        'ssh_user': 'ubuntu',
         'disk_tier': 'gp3',
         'disk_throughput': 218,
         'disk_iops': 3500,
@@ -176,7 +182,8 @@ def test_aws_make_deploy_variables(*mocks) -> None:
         'docker_login_config': None,
         'docker_run_options': [],
         'initial_setup_commands': [],
-        'zones': 'fake-zone'
+        'zones': 'fake-zone',
+        'root_device_name': '/dev/sda1'
     }
 
     # test using defaults
@@ -217,6 +224,63 @@ def test_aws_make_deploy_variables(*mocks) -> None:
                                             zones,
                                             num_nodes=1,
                                             dryrun=True)
+    assert config == expected_config, ('unexpected resource '
+                                       'variables generated')
+
+
+@mock.patch('sky.catalog.instance_type_exists', return_value=True)
+@mock.patch('sky.catalog.get_accelerators_from_instance_type',
+            return_value={'fake-acc': 2})
+@mock.patch('sky.clouds.aws.AWS.get_image_root_device_name',
+            return_value='/dev/xvda')
+@mock.patch('sky.catalog.get_image_id_from_tag', return_value='fake-image')
+@mock.patch('sky.catalog.get_arch_from_instance_type', return_value='fake-arch')
+@mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
+def test_aws_make_deploy_variables_ssh_user(*mocks) -> None:
+    os.environ[
+        skypilot_config.
+        ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_aws_config_ssh_user.yaml'
+    importlib.reload(skypilot_config)
+
+    cloud = clouds.AWS()
+    cluster_name = resources_utils.ClusterName(display_name='display',
+                                               name_on_cloud='cloud')
+    region = clouds.Region(name='fake-region')
+    zones = [clouds.Zone(name='fake-zone')]
+    resource = Resources(cloud=cloud, instance_type='fake-type: 3')
+    config = resource.make_deploy_variables(cluster_name,
+                                            region,
+                                            zones,
+                                            num_nodes=1,
+                                            dryrun=True)
+
+    expected_config_base = {
+        'instance_type': resource.instance_type,
+        'custom_resources': '{"fake-acc":2}',
+        'max_efa_interfaces': 0,
+        'use_spot': False,
+        'region': 'fake-region',
+        'image_id': 'fake-image',
+        'disk_encrypted': False,
+        'ssh_user': 'test-user',
+        'disk_tier': 'gp3',
+        'disk_throughput': 218,
+        'disk_iops': 3500,
+        'docker_image': None,
+        'docker_container_name': 'sky_container',
+        'docker_login_config': None,
+        'docker_run_options': [],
+        'initial_setup_commands': [],
+        'zones': 'fake-zone',
+        'root_device_name': '/dev/xvda'
+    }
+
+    # test using defaults
+    expected_config = expected_config_base.copy()
+    expected_config.update({
+        'security_group': 'fake-default-sg',
+        'security_group_managed_by_skypilot': 'true'
+    })
     assert config == expected_config, ('unexpected resource '
                                        'variables generated')
 
@@ -400,6 +464,51 @@ def test_resources_ordered_preference():
 
     assert resources_list[2].infra.cloud.lower() == 'azure'
     assert resources_list[2].infra.region == 'eastus'
+
+
+def test_resources_any_of_dump_in_serve_version_bump():
+    any_of_1 = [
+        {
+            'accelerators': {
+                'H200': 1
+            },
+            'disk_size': 256,
+        },
+        {
+            'disk_size': 256,
+            'accelerators': {
+                'H100': 1
+            },
+        },
+        {
+            'disk_size': 256,
+            'accelerators': {
+                'L4': 4
+            },
+        },
+    ]
+    any_of_2 = [
+        {
+            'accelerators': {
+                'H100': 1
+            },
+            'disk_size': 256,
+        },
+        {
+            'accelerators': {
+                'L4': 4
+            },
+            'disk_size': 256,
+        },
+        {
+            'disk_size': 256,
+            'accelerators': {
+                'H200': 1
+            },
+        },
+    ]
+    assert (resources_utils.normalize_any_of_resources_config(any_of_1) ==
+            resources_utils.normalize_any_of_resources_config(any_of_2))
 
 
 def test_resources_any_of_ordered_exclusive():
@@ -686,6 +795,7 @@ def test_autostop_config():
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is True
     assert r.autostop_config.idle_minutes == 0  # default value
+    assert r.autostop_config.wait_for == None  # default value
 
     # Override with idle_minutes when no existing autostop config
     r = Resources()
@@ -696,29 +806,39 @@ def test_autostop_config():
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is False  # default value
     assert r.autostop_config.idle_minutes == 10
+    assert r.autostop_config.wait_for == None  # default value
 
     # Override with both down and idle_minutes when no existing config
     r = Resources()
     assert r.autostop_config is None
 
-    r.override_autostop_config(down=True, idle_minutes=15)
+    r.override_autostop_config(down=True,
+                               idle_minutes=15,
+                               wait_for=autostop_lib.AutostopWaitFor.JOBS)
     assert r.autostop_config is not None
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is True
     assert r.autostop_config.idle_minutes == 15
+    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.JOBS
 
     # Override when there's an existing autostop config
-    r = Resources(autostop={'idle_minutes': 20, 'down': False})
+    r = Resources(autostop={
+        'idle_minutes': 20,
+        'down': False,
+        'wait_for': 'none'
+    })
     assert r.autostop_config is not None
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is False
     assert r.autostop_config.idle_minutes == 20
+    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.NONE
 
     # Override only down flag
     r.override_autostop_config(down=True)
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is True
     assert r.autostop_config.idle_minutes == 20  # unchanged
+    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.NONE  # unchanged
 
     # Override existing config with new idle_minutes
     r = Resources(autostop={'idle_minutes': 25, 'down': True})
@@ -730,12 +850,19 @@ def test_autostop_config():
     assert r.autostop_config.down is True  # unchanged
     assert r.autostop_config.idle_minutes == 30
 
-    # Override existing config with both parameters
-    r = Resources(autostop={'idle_minutes': 35, 'down': False})
-    r.override_autostop_config(down=True, idle_minutes=40)
+    # Override existing config with all parameters
+    r = Resources(autostop={
+        'idle_minutes': 35,
+        'down': False,
+        'wait_for': 'jobs'
+    })
+    r.override_autostop_config(down=True,
+                               idle_minutes=40,
+                               wait_for=autostop_lib.AutostopWaitFor.NONE)
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is True
     assert r.autostop_config.idle_minutes == 40
+    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.NONE
 
     # Call override with default parameters (should do nothing)
     r = Resources()
@@ -745,33 +872,45 @@ def test_autostop_config():
     assert r.autostop_config is None  # should remain None
 
     # Call override with default parameters on existing config
-    r = Resources(autostop={'idle_minutes': 45, 'down': True})
+    r = Resources(autostop={
+        'idle_minutes': 45,
+        'down': True,
+        'wait_for': 'none'
+    })
     original_config = r.autostop_config
 
     r.override_autostop_config()  # should do nothing
     assert r.autostop_config is original_config  # same object
     assert r.autostop_config.idle_minutes == 45  # unchanged
     assert r.autostop_config.down is True  # unchanged
+    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.NONE  # unchanged
 
     # Override with down=False (should still create config if none exists)
     r = Resources()
     assert r.autostop_config is None
 
-    r.override_autostop_config(down=False, idle_minutes=50)
+    r.override_autostop_config(
+        down=False,
+        idle_minutes=50,
+        wait_for=autostop_lib.AutostopWaitFor.JOBS_AND_SSH)
     assert r.autostop_config is not None
     assert r.autostop_config.enabled is True
     assert r.autostop_config.down is False
     assert r.autostop_config.idle_minutes == 50
+    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.JOBS_AND_SSH
 
     # Test with disabled autostop config
     r = Resources(autostop=False)
     assert r.autostop_config is not None
     assert r.autostop_config.enabled is False
 
-    r.override_autostop_config(down=True, idle_minutes=55)
+    r.override_autostop_config(down=True,
+                               idle_minutes=55,
+                               wait_for=autostop_lib.AutostopWaitFor.NONE)
     assert r.autostop_config.enabled is False  # should remain disabled
     assert r.autostop_config.down is True
     assert r.autostop_config.idle_minutes == 55
+    assert r.autostop_config.wait_for == autostop_lib.AutostopWaitFor.NONE
 
 
 def test_disk_size_conversion():
@@ -1047,3 +1186,334 @@ def test_priority_to_yaml_and_load(resources_kwargs, expected_yaml_config):
     assert loaded_r.cpus == r.cpus
     if 'accelerators' in expected_yaml_config:
         assert loaded_r.accelerators == r.accelerators
+
+
+@pytest.mark.parametrize(
+    'r_kwargs, blocked_kwargs, expected',
+    [
+        # All fields match
+        ({
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': True
+        }, {
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': True
+        }, True),
+        # use_spot mismatch
+        ({
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': True
+        }, {
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': False
+        }, False),
+        # cloud mismatch
+        ({
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+        }, {
+            'cloud': clouds.GCP(),
+            'instance_type': 'g2-standard-4',
+            'region': 'us-east4',
+            'zone': 'us-east4-c',
+            'accelerators': {
+                'L4': 1
+            },
+        }, False),
+        # instance_type mismatch
+        ({
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.2xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': True
+        }, {
+            'cloud': clouds.AWS(),
+            'instance_type': 'p3.8xlarge',
+            'region': 'us-west-2',
+            'zone': 'us-west-2a',
+            'accelerators': {
+                'V100': 1
+            },
+            'use_spot': True
+        }, False),
+    ])
+def test_should_be_blocked_by(r_kwargs, blocked_kwargs, expected):
+    """Test should_be_blocked_by method."""
+    r = Resources(**r_kwargs)
+    blocked = Resources(**blocked_kwargs)
+    assert r.should_be_blocked_by(blocked) == expected
+
+
+@mock.patch(
+    'sky.provision.kubernetes.utils.check_port_forward_mode_dependencies')
+def test_ssh_end_to_end_make_deploy_variables(mock_check_deps,
+                                              enable_all_clouds) -> None:
+    """End-to-end test: SSH cloud reads pod_config and provision_timeout from 'ssh' config.
+
+    This test verifies that when launching an SSH cluster, the entire flow
+    (from Resources.make_deploy_variables through SSH.make_deploy_resources_variables)
+    correctly reads configuration from the 'ssh' section and NOT from 'kubernetes' section.
+    """
+    # Set up config with both SSH and Kubernetes sections
+    os.environ[
+        skypilot_config.
+        ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_ssh_pod_config.yaml'
+    importlib.reload(skypilot_config)
+
+    # Create SSH cloud and resources
+    ssh_cloud = clouds.SSH()
+    cluster_name = resources_utils.ClusterName(display_name='ssh-test',
+                                               name_on_cloud='ssh-test')
+    region = clouds.Region(name='ssh-test-cluster')
+    zones = None
+    resource = Resources(cloud=ssh_cloud, instance_type='2CPU--4GB')
+
+    # Call make_deploy_variables - this is the entry point for the entire flow
+    config = resource.make_deploy_variables(cluster_name,
+                                            region,
+                                            zones,
+                                            num_nodes=1,
+                                            dryrun=True)
+
+    # Verify that provision_timeout comes from SSH config (7200), not K8s config (3600)
+    assert config['timeout'] == '7200', \
+        f"Should use SSH provision_timeout (7200), not Kubernetes (3600). Got: {config['timeout']}"
+
+    # The main assertion is timeout - pod_config merging happens elsewhere in the flow
+
+    # Clean up
+    del os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG]
+    importlib.reload(skypilot_config)
+
+
+def test_resources_add_subtract_cpu_only():
+    """Test adding and subtracting Resources with only CPU."""
+    r1 = Resources(cpus='2')
+    r2 = Resources(cpus='3')
+
+    # Test addition
+    result = r1 + r2
+    assert result is not None
+    assert result.cpus == '5.0'
+    assert result.memory is None
+    assert result.accelerators is None
+
+    # Test subtraction
+    result = r2 - r1
+    assert result is not None
+    assert result.cpus == '1.0'
+    assert result.memory is None
+    assert result.accelerators is None
+
+    # Test subtraction that results in 0
+    result = r1 - r1
+    assert result is not None
+    assert result.cpus is None  # 0 becomes None
+    assert result.memory is None
+    assert result.accelerators is None
+
+    # Test subtraction that would be negative (should clamp to 0/None)
+    result = r1 - r2
+    assert result is not None
+    assert result.cpus is None  # -1 becomes None (0 clamped)
+    assert result.memory is None
+    assert result.accelerators is None
+
+
+def test_resources_add_subtract_cpu_memory():
+    """Test adding and subtracting Resources with CPU and memory."""
+    r1 = Resources(cpus='2', memory='8')
+    r2 = Resources(cpus='3', memory='16')
+
+    # Test addition
+    result = r1 + r2
+    assert result is not None
+    assert result.cpus == '5.0'
+    assert result.memory == '24.0'
+    assert result.accelerators is None
+
+    # Test subtraction
+    result = r2 - r1
+    assert result is not None
+    assert result.cpus == '1.0'
+    assert result.memory == '8.0'
+    assert result.accelerators is None
+
+    # Test with None in one operand
+    r3 = Resources(cpus='2')
+    result = r1 + r3
+    assert result is not None
+    assert result.cpus == '4.0'
+    assert result.memory == '8.0'  # Preserved from r1
+    assert result.accelerators is None
+
+
+def test_resources_add_subtract_accelerators():
+    """Test adding and subtracting Resources with accelerators."""
+    r1 = Resources(accelerators={'V100': 2})
+    r2 = Resources(accelerators={'V100': 3})
+
+    # Test addition
+    result = r1 + r2
+    assert result is not None
+    assert result.cpus is None
+    assert result.memory is None
+    assert result.accelerators == {'V100': 5.0}
+
+    # Test subtraction
+    result = r2 - r1
+    assert result is not None
+    assert result.cpus is None
+    assert result.memory is None
+    assert result.accelerators == {'V100': 1.0}
+
+    # Test subtraction that results in 0 (should be removed)
+    result = r1 - r1
+    assert result is not None
+    assert result.cpus is None
+    assert result.memory is None
+    assert result.accelerators is None
+
+    # Test with different accelerator types
+    r3 = Resources(accelerators={'A100': 1})
+    result = r1 + r3
+    assert result is not None
+    assert result.accelerators == {'V100': 2.0, 'A100': 1.0}
+
+    # Test subtraction with different accelerator types
+    result = r1 - r3
+    assert result is not None
+    assert result.accelerators == {'V100': 2.0}  # A100 not in r1, so unchanged
+
+
+def test_resources_add_subtract_mixed():
+    """Test adding Resources with different combinations."""
+    # Start with all 3 resource types
+    r_base = Resources(cpus='4', memory='16', accelerators={'V100': 2})
+
+    # Add one with only memory
+    r_memory = Resources(memory='8')
+    result = r_base + r_memory
+    assert result is not None
+    assert result.cpus == '4.0'  # Preserved from r_base
+    assert result.memory == '24.0'  # 16 + 8
+    assert result.accelerators == {'V100': 2.0}  # Preserved from r_base
+
+    # Add one with only accelerator
+    r_accel = Resources(accelerators={'A100': 1})
+    result = result + r_accel
+    assert result is not None
+    assert result.cpus == '4.0'  # Still preserved
+    assert result.memory == '24.0'  # Still preserved
+    assert result.accelerators == {
+        'V100': 2.0,
+        'A100': 1.0
+    }  # Both accelerators
+
+    # Test subtraction with mixed resources
+    r_subtract = Resources(cpus='2', memory='8', accelerators={'V100': 1})
+    result = r_base - r_subtract
+    assert result is not None
+    assert result.cpus == '2.0'  # 4 - 2
+    assert result.memory == '8.0'  # 16 - 8
+    assert result.accelerators == {'V100': 1.0}  # 2 - 1
+
+    # Test subtracting None
+    result = r_base - None
+    assert result is not None
+    assert result.cpus == '4'
+    assert result.memory == '16'
+    assert result.accelerators == {'V100': 2.0}
+
+
+def test_resources_add_subtract_with_none():
+    """Test adding and subtracting with None operands."""
+    r1 = Resources(cpus='2', memory='8', accelerators={'V100': 1})
+
+    # Adding None should return self
+    result = r1 + None
+    assert result is not None
+    assert result.cpus == '2'
+    assert result.memory == '8'
+    assert result.accelerators == {'V100': 1.0}
+
+    # Subtracting None should return self
+    result = r1 - None
+    assert result is not None
+    assert result.cpus == '2'
+    assert result.memory == '8'
+    assert result.accelerators == {'V100': 1.0}
+
+
+@mock.patch(
+    'sky.provision.kubernetes.utils.check_port_forward_mode_dependencies')
+def test_kubernetes_end_to_end_make_deploy_variables(mock_check_deps,
+                                                     enable_all_clouds) -> None:
+    """End-to-end test: Kubernetes cloud reads config from 'kubernetes' section.
+
+    This test complements test_ssh_end_to_end_make_deploy_variables by verifying
+    that Kubernetes cloud reads from 'kubernetes' section (not 'ssh' section).
+    """
+    # Set up config with both SSH and Kubernetes sections
+    os.environ[
+        skypilot_config.
+        ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_ssh_pod_config.yaml'
+    importlib.reload(skypilot_config)
+
+    # Create Kubernetes cloud and resources
+    k8s_cloud = clouds.Kubernetes()
+    cluster_name = resources_utils.ClusterName(display_name='k8s-test',
+                                               name_on_cloud='k8s-test')
+    region = clouds.Region(name='test-k8s-cluster')
+    zones = None
+    resource = Resources(cloud=k8s_cloud, instance_type='2CPU--4GB')
+
+    # Call make_deploy_variables
+    config = resource.make_deploy_variables(cluster_name,
+                                            region,
+                                            zones,
+                                            num_nodes=1,
+                                            dryrun=True)
+
+    # Verify that provision_timeout comes from Kubernetes config (3600), not SSH (7200)
+    assert config['timeout'] == '3600', \
+        f"Should use Kubernetes provision_timeout (3600), not SSH (7200). Got: {config['timeout']}"
+
+    # The main assertion is timeout - pod_config merging happens elsewhere in the flow
+
+    # Clean up
+    del os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG]
+    importlib.reload(skypilot_config)

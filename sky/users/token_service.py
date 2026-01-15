@@ -5,6 +5,7 @@ import datetime
 import hashlib
 import os
 import secrets
+import threading
 from typing import Any, Dict, Generator, Optional
 
 import filelock
@@ -44,12 +45,21 @@ class TokenService:
     """Service for managing JWT-based service account tokens."""
 
     def __init__(self):
-        self.secret_key = self._get_or_generate_secret()
+        self.secret_key = None
+        self.init_lock = threading.Lock()
+
+    def _lazy_initialize(self):
+        if self.secret_key is not None:
+            return
+        with self.init_lock:
+            if self.secret_key is not None:
+                return
+            self.secret_key = self._get_or_generate_secret()
 
     def _get_or_generate_secret(self) -> str:
         """Get JWT secret from database or generate a new one."""
-        with _jwt_secret_lock():
-            # Try to get from database (persistent across deployments)
+
+        def _get_secret_from_db():
             try:
                 db_secret = global_user_state.get_system_config(
                     JWT_SECRET_DB_KEY)
@@ -58,7 +68,17 @@ class TokenService:
                     return db_secret
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(f'Failed to get JWT secret from database: {e}')
+            return None
 
+        # Try to get from database (persistent across deployments)
+        token_from_db = _get_secret_from_db()
+        if token_from_db:
+            return token_from_db
+
+        with _jwt_secret_lock():
+            token_from_db = _get_secret_from_db()
+            if token_from_db:
+                return token_from_db
             # Generate a new secret and store in database
             new_secret = secrets.token_urlsafe(64)
             try:
@@ -91,6 +111,7 @@ class TokenService:
         Returns:
             Dict containing token info including the JWT token
         """
+        self._lazy_initialize()
         now = datetime.datetime.now(datetime.timezone.utc)
         token_id = secrets.token_urlsafe(12)  # Shorter ID for JWT
 
@@ -144,6 +165,7 @@ class TokenService:
         Returns:
             Decoded token payload or None if invalid
         """
+        self._lazy_initialize()
         if not token.startswith('sky_'):
             return None
 

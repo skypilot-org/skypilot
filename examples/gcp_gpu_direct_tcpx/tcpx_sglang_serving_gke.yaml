@@ -1,0 +1,45 @@
+name: tcpx-sglang-serving-gke
+
+resources:
+  infra: k8s
+  gpus: H100:8
+  network_tier: best
+  disk_size: 1024
+  disk_tier: best
+  ports: 30000
+
+num_nodes: 2 # Specify number of nodes to launch; requirements may vary based on accelerators
+
+setup: |
+  sudo apt install -y nvidia-cuda-toolkit libnuma1
+  
+  source ~/sky-venv/bin/activate
+  if [ $? -eq 0 ]; then
+    echo 'venv exists'
+  else
+    uv venv ~/sky-venv --seed --python=3.10
+    source ~/sky-venv/bin/activate
+  fi
+  
+  # Install sglang with all dependencies using uv
+  uv pip install "sglang[all]>=0.4.7.post1"
+  uv pip install setuptools
+
+run: |
+  source ~/sky-venv/bin/activate
+  
+  # Launch the server with appropriate configuration
+  MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  # TP should be number of GPUs per node times number of nodes
+  TP=$(($SKYPILOT_NUM_GPUS_PER_NODE * $SKYPILOT_NUM_NODES))
+
+  python -m sglang.launch_server \
+    --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
+    --tp $TP \
+    --dist-init-addr ${MASTER_ADDR}:5000 \
+    --nnodes ${SKYPILOT_NUM_NODES} \
+    --node-rank ${SKYPILOT_NODE_RANK} \
+    --trust-remote-code \
+    --host 0.0.0.0 \
+    --port 30000
+

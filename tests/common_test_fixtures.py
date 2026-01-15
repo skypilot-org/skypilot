@@ -8,6 +8,7 @@ import unittest
 import uuid
 
 import boto3
+import click.testing
 import fastapi
 from fastapi import testclient
 import pandas as pd
@@ -22,6 +23,7 @@ from sky.catalog import vsphere_catalog
 from sky.provision import common as provision_common
 from sky.provision.aws import config as aws_config
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.serve import serve_rpc_utils
 from sky.serve import serve_state
 from sky.server import common as server_common
 from sky.server import constants as server_constants
@@ -53,7 +55,8 @@ def aws_config_region(monkeypatch: pytest.MonkeyPatch) -> str:
 
 @pytest.fixture
 def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
-                         mock_stream_utils, mock_redirect_log_file) -> None:
+                         mock_stream_utils, mock_redirect_log_file,
+                         mock_execute_in_coroutine) -> None:
     """Fixture to mock HTTP requests using FastAPI's TestClient."""
     # This fixture automatically replaces `requests.get` and `requests.post`
     # with mocked versions that route requests through a FastAPI TestClient.
@@ -169,14 +172,6 @@ def check_quota_available_mock(*_, **__):
     return True
 
 
-def mock_redirect_output(*_, **__):
-    return (None, None)
-
-
-def mock_restore_output(*_, **__):
-    return None
-
-
 @pytest.fixture
 def enable_all_clouds(monkeypatch, request, mock_client_requests):
     """Create mock context managers for cloud configurations."""
@@ -254,7 +249,12 @@ def mock_job_table_no_job(monkeypatch):
 def mock_job_table_one_job(monkeypatch):
     """Mock job table to return one job."""
 
-    def mock_get_job_table(*_, **__):
+    def mock_get_job_table(*args, **__):
+        # The third argument is the cmd.
+        cmd = args[2]
+        # Return no pools for the job table.
+        if 'get_service_status_encoded' in cmd:
+            return 0, message_utils.encode_payload([]), ''
         current_time = time.time()
         job_data = {
             'job_id': '1',
@@ -274,6 +274,10 @@ def mock_job_table_one_job(monkeypatch):
             'task_name': 'test_task',
             'job_duration': 20,
             'priority': constants.DEFAULT_PRIORITY,
+            'pool': None,
+            'current_cluster_name': None,
+            'job_id_on_pool_cluster': None,
+            'pool_hash': None,
         }
         return 0, message_utils.encode_payload([job_data]), ''
 
@@ -306,6 +310,17 @@ def mock_services_no_service(monkeypatch):
 
 
 @pytest.fixture
+def mock_services_no_service_grpc(monkeypatch):
+    """Mock services to return no services."""
+
+    def mock_get_services_grpc(*_, **__):
+        return []
+
+    monkeypatch.setattr(serve_rpc_utils.RpcRunner, 'get_service_status',
+                        mock_get_services_grpc)
+
+
+@pytest.fixture
 def mock_services_one_service(monkeypatch):
     """Mock services to return one service."""
 
@@ -331,6 +346,30 @@ def mock_services_one_service(monkeypatch):
             payload_type='service_status'), ''
 
     monkeypatch.setattr(CloudVmRayBackend, 'run_on_head', mock_get_services)
+
+
+@pytest.fixture
+def mock_services_one_service_grpc(monkeypatch):
+    """Mock services to return one services."""
+
+    def mock_get_services_grpc(*_, **__):
+        service = {
+            'name': 'test_service',
+            'controller_job_id': 1,
+            'uptime': 20,
+            'status': serve_state.ServiceStatus.READY,
+            'controller_port': 30001,
+            'load_balancer_port': 30000,
+            'endpoint': '4.3.2.1:30000',
+            'policy': None,
+            'requested_resources_str': '',
+            'replica_info': [],
+            'tls_encrypted': False,
+        }
+        return [service]
+
+    monkeypatch.setattr(serve_rpc_utils.RpcRunner, 'get_service_status',
+                        mock_get_services_grpc)
 
 
 @pytest.fixture
@@ -372,11 +411,36 @@ def mock_queue(monkeypatch):
 
 
 @pytest.fixture
+def mock_execute_in_coroutine(monkeypatch):
+
+    class MockCoroutineTask:
+
+        def cancel(self):
+            return
+
+    def mock_execute_in_coroutine(*args, **kwargs):
+        return MockCoroutineTask()
+
+    monkeypatch.setattr(
+        'sky.server.requests.executor.execute_request_in_coroutine',
+        mock_execute_in_coroutine)
+
+
+@pytest.fixture
 def mock_redirect_log_file(monkeypatch):
-    monkeypatch.setattr('sky.server.requests.executor._redirect_output',
-                        mock_redirect_output)
-    monkeypatch.setattr('sky.server.requests.executor._restore_output',
-                        mock_restore_output)
+    # Click's CliRunner replaces sys.stdout/stderr with _NamedTextIOWrapper objects
+    # that don't support fileno(). We patch these wrapper objects to add fileno() support.
+    original_init = click.testing._NamedTextIOWrapper.__init__
+
+    def patched_wrapper_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        if hasattr(self, 'name') and 'stdout' in str(self.name):
+            self.fileno = lambda: 1
+        else:
+            self.fileno = lambda: 2
+
+    monkeypatch.setattr(click.testing._NamedTextIOWrapper, '__init__',
+                        patched_wrapper_init)
 
 
 @pytest.fixture

@@ -23,20 +23,22 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import common_utils
-from sky.utils import db_utils
-from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
+from sky.utils.db import db_utils
 
 if typing.TYPE_CHECKING:
     import psutil
+
+    from sky.schemas.generated import jobsv1_pb2
 else:
     psutil = adaptors_common.LazyImport('psutil')
+    jobsv1_pb2 = adaptors_common.LazyImport('sky.schemas.generated.jobsv1_pb2')
 
 logger = sky_logging.init_logger(__name__)
 
-_LINUX_NEW_LINE = '\n'
 _JOB_STATUS_LOCK = '~/.sky/locks/.job_{}.lock'
 # JOB_CMD_IDENTIFIER is used for identifying the process retrieved
 # with pid is the same driver process to guard against the case where
@@ -63,6 +65,8 @@ class JobInfoLoc(enum.IntEnum):
     RESOURCES = 8
     PID = 9
     LOG_PATH = 10
+    METADATA = 11
+    EXIT_CODES = 12
 
 
 def create_table(cursor, conn):
@@ -81,13 +85,9 @@ def create_table(cursor, conn):
             # is not critical and is likely to be enabled by other processes.
 
     # Pid column is used for keeping track of the driver process of a job. It
-    # can be in three states:
-    # -1: The job was submitted with SkyPilot older than #4318, where we use
-    #     ray job submit to submit the job, i.e. no pid is recorded. This is for
-    #     backward compatibility and should be removed after 0.10.0.
+    # can be in two states:
     # 0: The job driver process has never been started. When adding a job with
-    #    INIT state, the pid will be set to 0 (the default -1 value is just for
-    #    backward compatibility).
+    #    INIT state, the pid will be set to 0.
     # >=0: The job has been started. The pid is the driver process's pid.
     #      The driver can be actually running or finished.
     # TODO(SKY-1213): username is actually user hash, should rename.
@@ -103,7 +103,8 @@ def create_table(cursor, conn):
         end_at FLOAT DEFAULT NULL,
         resources TEXT DEFAULT NULL,
         pid INTEGER DEFAULT -1,
-        log_dir TEXT DEFAULT NULL)""")
+        log_dir TEXT DEFAULT NULL,
+        metadata TEXT DEFAULT '{}')""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS pending_jobs(
         job_id INTEGER,
@@ -117,6 +118,14 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'pid',
                                  'INTEGER DEFAULT -1')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'log_dir',
+                                 'TEXT DEFAULT NULL')
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'jobs',
+                                 'metadata',
+                                 'TEXT DEFAULT \'{}\'',
+                                 value_to_replace_existing_entries='{}')
+    db_utils.add_column_to_table(cursor, conn, 'jobs', 'exit_codes',
                                  'TEXT DEFAULT NULL')
     conn.commit()
 
@@ -136,7 +145,7 @@ def init_db(func):
 
         with _db_init_lock:
             if _DB is None:
-                db_path = os.path.expanduser('~/.sky/jobs.db')
+                db_path = runtime_utils.get_runtime_dir_path('.sky/jobs.db')
                 os.makedirs(pathlib.Path(db_path).parents[0], exist_ok=True)
                 _DB = db_utils.SQLiteConn(db_path, create_table)
         return func(*args, **kwargs)
@@ -212,6 +221,45 @@ class JobStatus(enum.Enum):
         color = _JOB_STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
+    @classmethod
+    def from_protobuf(
+            cls,
+            protobuf_value: 'jobsv1_pb2.JobStatus') -> Optional['JobStatus']:
+        """Convert protobuf JobStatus enum to Python enum value."""
+        protobuf_to_enum = {
+            jobsv1_pb2.JOB_STATUS_INIT: cls.INIT,
+            jobsv1_pb2.JOB_STATUS_PENDING: cls.PENDING,
+            jobsv1_pb2.JOB_STATUS_SETTING_UP: cls.SETTING_UP,
+            jobsv1_pb2.JOB_STATUS_RUNNING: cls.RUNNING,
+            jobsv1_pb2.JOB_STATUS_FAILED_DRIVER: cls.FAILED_DRIVER,
+            jobsv1_pb2.JOB_STATUS_SUCCEEDED: cls.SUCCEEDED,
+            jobsv1_pb2.JOB_STATUS_FAILED: cls.FAILED,
+            jobsv1_pb2.JOB_STATUS_FAILED_SETUP: cls.FAILED_SETUP,
+            jobsv1_pb2.JOB_STATUS_CANCELLED: cls.CANCELLED,
+            jobsv1_pb2.JOB_STATUS_UNSPECIFIED: None,
+        }
+        if protobuf_value not in protobuf_to_enum:
+            raise ValueError(
+                f'Unknown protobuf JobStatus value: {protobuf_value}')
+        return protobuf_to_enum[protobuf_value]
+
+    def to_protobuf(self) -> 'jobsv1_pb2.JobStatus':
+        """Convert this Python enum value to protobuf enum value."""
+        enum_to_protobuf = {
+            JobStatus.INIT: jobsv1_pb2.JOB_STATUS_INIT,
+            JobStatus.PENDING: jobsv1_pb2.JOB_STATUS_PENDING,
+            JobStatus.SETTING_UP: jobsv1_pb2.JOB_STATUS_SETTING_UP,
+            JobStatus.RUNNING: jobsv1_pb2.JOB_STATUS_RUNNING,
+            JobStatus.FAILED_DRIVER: jobsv1_pb2.JOB_STATUS_FAILED_DRIVER,
+            JobStatus.SUCCEEDED: jobsv1_pb2.JOB_STATUS_SUCCEEDED,
+            JobStatus.FAILED: jobsv1_pb2.JOB_STATUS_FAILED,
+            JobStatus.FAILED_SETUP: jobsv1_pb2.JOB_STATUS_FAILED_SETUP,
+            JobStatus.CANCELLED: jobsv1_pb2.JOB_STATUS_CANCELLED,
+        }
+        if self not in enum_to_protobuf:
+            raise ValueError(f'Unknown JobStatus value: {self}')
+        return enum_to_protobuf[self]
+
 
 # We have two steps for job submissions:
 # 1. Client reserve a job id from the job table by adding a INIT state job.
@@ -253,11 +301,7 @@ class JobScheduler:
              f'WHERE job_id={job_id!r}'))
         _DB.conn.commit()
         pid = subprocess_utils.launch_new_process_tree(run_cmd)
-        # TODO(zhwu): Backward compatibility, remove this check after 0.10.0.
-        # This is for the case where the job is submitted with SkyPilot older
-        # than #4318, using ray job submit.
-        if 'job submit' in run_cmd:
-            pid = -1
+
         _DB.cursor.execute((f'UPDATE jobs SET pid={pid} '
                             f'WHERE job_id={job_id!r}'))
         _DB.conn.commit()
@@ -338,16 +382,25 @@ def make_job_command_with_user_switching(username: str,
 
 
 @init_db
-def add_job(job_name: str, username: str, run_timestamp: str,
-            resources_str: str) -> Tuple[int, str]:
+def add_job(job_name: str,
+            username: str,
+            run_timestamp: str,
+            resources_str: str,
+            metadata: str = '{}') -> Tuple[int, str]:
     """Atomically reserve the next available job id for the user."""
     assert _DB is not None
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
-    _DB.cursor.execute(
-        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null)',
-        (job_name, username, job_submitted_at, JobStatus.INIT.value,
-         run_timestamp, None, resources_str))
+    if int(constants.SKYLET_VERSION) >= 28:
+        _DB.cursor.execute(
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?, null)',  # pylint: disable=line-too-long
+            (job_name, username, job_submitted_at, JobStatus.INIT.value,
+             run_timestamp, None, resources_str, metadata))
+    else:
+        _DB.cursor.execute(
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)',  # pylint: disable=line-too-long
+            (job_name, username, job_submitted_at, JobStatus.INIT.value,
+             run_timestamp, None, resources_str, metadata))
     _DB.conn.commit()
     rows = _DB.cursor.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                               (run_timestamp,))
@@ -425,6 +478,41 @@ def set_status(job_id: int, status: JobStatus) -> None:
 
 
 @init_db
+def set_exit_codes(job_id: int, exit_codes: List[int]) -> None:
+    """Set exit codes for a job as comma-separated string.
+
+    Args:
+        job_id: The job ID to update.
+        exit_codes: A list of exit codes to store.
+    """
+    assert _DB is not None
+    exit_codes_str = ','.join(str(code) for code in exit_codes)
+    with filelock.FileLock(_get_lock_path(job_id)):
+        _DB.cursor.execute('UPDATE jobs SET exit_codes=(?) WHERE job_id=(?)',
+                           (exit_codes_str, job_id))
+        _DB.conn.commit()
+
+
+@init_db
+def get_exit_codes(job_id: int) -> Optional[List[int]]:
+    """Get exit codes for a job from comma-separated string.
+
+    Args:
+        job_id: The job ID to retrieve exit codes for.
+
+    Returns:
+        A list of exit codes, or None if not found.
+    """
+    assert _DB is not None
+    rows = _DB.cursor.execute('SELECT exit_codes FROM jobs WHERE job_id=(?)',
+                              (job_id,))
+    row = rows.fetchone()
+    if row is None or row[0] is None:
+        return None
+    return [int(code) for code in row[0].split(',')]
+
+
+@init_db
 def set_job_started(job_id: int) -> None:
     # TODO(mraheja): remove pylint disabling when filelock version updated.
     # pylint: disable=abstract-class-instantiated
@@ -462,8 +550,27 @@ def get_status(job_id: int) -> Optional[JobStatus]:
         return get_status_no_lock(job_id)
 
 
+def wait_for_job_completion(job_id: int, poll_interval: float = 1.0) -> None:
+    """Wait for a job to reach a terminal state.
+
+    Args:
+        job_id: The job ID to wait for.
+        poll_interval: How often to poll the job status in seconds.
+    """
+    while True:
+        status = get_status(job_id)
+        if status is None or status.is_terminal():
+            break
+        time.sleep(poll_interval)
+
+
 @init_db
 def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
+    return message_utils.encode_payload(get_statuses(job_ids))
+
+
+@init_db
+def get_statuses(job_ids: List[int]) -> Dict[int, Optional[str]]:
     assert _DB is not None
     # Per-job lock is not required here, since the staled job status will not
     # affect the caller.
@@ -471,10 +578,51 @@ def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
     rows = _DB.cursor.execute(
         f'SELECT job_id, status FROM jobs WHERE job_id IN ({query_str})',
         job_ids)
-    statuses = {job_id: None for job_id in job_ids}
+    statuses: Dict[int, Optional[str]] = {job_id: None for job_id in job_ids}
     for (job_id, status) in rows:
         statuses[job_id] = status
-    return message_utils.encode_payload(statuses)
+    return statuses
+
+
+@init_db
+def get_jobs_info(user_hash: Optional[str] = None,
+                  all_jobs: bool = False) -> List['jobsv1_pb2.JobInfo']:
+    """Get detailed job information.
+
+    Similar to dump_job_queue but returns structured protobuf objects instead
+    of encoded strings.
+
+    Args:
+        user_hash: The user hash to show jobs for. Show all the users if None.
+        all_jobs: Whether to show all jobs, not just the pending/running ones.
+    """
+    assert _DB is not None
+
+    status_list: Optional[List[JobStatus]] = [
+        JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING
+    ]
+    if all_jobs:
+        status_list = None
+
+    jobs = _get_jobs(user_hash, status_list=status_list)
+    jobs_info = []
+    for job in jobs:
+        jobs_info.append(
+            jobsv1_pb2.JobInfo(job_id=job['job_id'],
+                               job_name=job['job_name'],
+                               username=job['username'],
+                               submitted_at=job['submitted_at'],
+                               status=job['status'].to_protobuf(),
+                               run_timestamp=job['run_timestamp'],
+                               start_at=job['start_at'],
+                               end_at=job['end_at'],
+                               resources=job['resources'],
+                               pid=job['pid'],
+                               log_path=os.path.join(
+                                   constants.SKY_LOGS_DIRECTORY,
+                                   job['run_timestamp']),
+                               metadata=json.dumps(job['metadata'])))
+    return jobs_info
 
 
 def load_statuses_payload(
@@ -513,16 +661,27 @@ def get_job_submitted_or_ended_timestamp_payload(job_id: int,
     PENDING state.
 
     The normal job duration will use `start_at` instead of `submitted_at` (in
-    `format_job_queue()`), because the job may stay in PENDING if the cluster is
-    busy.
+    `table_utils.format_job_queue()`), because the job may stay in PENDING if
+    the cluster is busy.
+    """
+    return message_utils.encode_payload(
+        get_job_submitted_or_ended_timestamp(job_id, get_ended_time))
+
+
+@init_db
+def get_job_submitted_or_ended_timestamp(
+        job_id: int, get_ended_time: bool) -> Optional[float]:
+    """Get the job submitted timestamp.
+
+    Returns the raw timestamp or None if job doesn't exist.
     """
     assert _DB is not None
     field = 'end_at' if get_ended_time else 'submitted_at'
     rows = _DB.cursor.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
                               (job_id,))
     for (timestamp,) in rows:
-        return message_utils.encode_payload(timestamp)
-    return message_utils.encode_payload(None)
+        return timestamp
+    return None
 
 
 def get_ray_port():
@@ -531,7 +690,8 @@ def get_ray_port():
     If the port file does not exist, the cluster was launched before #1790,
     return the default port.
     """
-    port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
+    port_path = runtime_utils.get_runtime_dir_path(
+        constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 6379
     port = json.load(open(port_path, 'r', encoding='utf-8'))['ray_port']
@@ -544,7 +704,8 @@ def get_job_submission_port():
     If the port file does not exist, the cluster was launched before #1790,
     return the default port.
     """
-    port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
+    port_path = runtime_utils.get_runtime_dir_path(
+        constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 8265
     port = json.load(open(port_path, 'r',
@@ -569,7 +730,16 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
             'end_at': row[JobInfoLoc.END_AT.value],
             'resources': row[JobInfoLoc.RESOURCES.value],
             'pid': row[JobInfoLoc.PID.value],
+            'metadata': json.loads(row[JobInfoLoc.METADATA.value]),
         })
+        if int(constants.SKYLET_VERSION) >= 28:
+            exit_code_str = row[JobInfoLoc.EXIT_CODES.value]
+            if not isinstance(exit_code_str, str):
+                records[-1]['exit_codes'] = None
+            else:
+                records[-1]['exit_codes'] = ([
+                    int(code) for code in exit_code_str.split(',')
+                ])
     return records
 
 
@@ -661,7 +831,7 @@ def update_job_status(job_ids: List[int],
     statuses = []
     for job_id in job_ids:
         # Per-job status lock is required because between the job status
-        # query and the job status update, the job status in the databse
+        # query and the job status update, the job status in the database
         # can be modified by the generated ray program.
         with filelock.FileLock(_get_lock_path(job_id)):
             status = None
@@ -712,12 +882,6 @@ def update_job_status(job_ids: List[int],
                         'the job state is not in terminal states, setting '
                         'it to FAILED_DRIVER')
                     status = JobStatus.FAILED_DRIVER
-            elif job_pid < 0:
-                # TODO(zhwu): Backward compatibility, remove after 0.10.0.
-                # We set the job status to PENDING instead of actually
-                # checking ray job status and let the status in job table
-                # take effect in the later max.
-                status = JobStatus.PENDING
 
             pending_job = _get_pending_job(job_id)
             if pending_job is not None:
@@ -830,34 +994,6 @@ def is_cluster_idle() -> bool:
     assert False, 'Should not reach here'
 
 
-def format_job_queue(jobs: List[Dict[str, Any]]):
-    """Format the job queue for display.
-
-    Usage:
-        jobs = get_job_queue()
-        print(format_job_queue(jobs))
-    """
-    job_table = log_utils.create_table([
-        'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
-        'STATUS', 'LOG'
-    ])
-    for job in jobs:
-        job_table.add_row([
-            job['job_id'],
-            job['job_name'],
-            job['username'],
-            log_utils.readable_time_duration(job['submitted_at']),
-            log_utils.readable_time_duration(job['start_at']),
-            log_utils.readable_time_duration(job['start_at'],
-                                             job['end_at'],
-                                             absolute=True),
-            job['resources'],
-            job['status'].colored_str(),
-            job['log_path'],
-        ])
-    return job_table
-
-
 def dump_job_queue(user_hash: Optional[str], all_jobs: bool) -> str:
     """Get the job queue in encoded json format.
 
@@ -894,27 +1030,6 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
-# TODO(zhwu): Backward compatibility for jobs submitted before #4318, remove
-# after 0.10.0.
-def _create_ray_job_submission_client():
-    """Import the ray job submission client."""
-    try:
-        import ray  # pylint: disable=import-outside-toplevel
-    except ImportError:
-        logger.error('Failed to import ray')
-        raise
-    try:
-        # pylint: disable=import-outside-toplevel
-        from ray import job_submission
-    except ImportError:
-        logger.error(
-            f'Failed to import job_submission with ray=={ray.__version__}')
-        raise
-    port = get_job_submission_port()
-    return job_submission.JobSubmissionClient(
-        address=f'http://127.0.0.1:{port}')
-
-
 def _make_ray_job_id(sky_job_id: int) -> str:
     return f'{sky_job_id}-{getpass.getuser()}'
 
@@ -934,6 +1049,13 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
         Encoded job IDs that are actually cancelled. Caller should use
         message_utils.decode_payload() to parse.
     """
+    return message_utils.encode_payload(cancel_jobs(jobs, cancel_all,
+                                                    user_hash))
+
+
+def cancel_jobs(jobs: Optional[List[int]],
+                cancel_all: bool = False,
+                user_hash: Optional[str] = None) -> List[int]:
     job_records = []
     all_status = [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING]
     if jobs is None and not cancel_all:
@@ -976,18 +1098,6 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 # We don't have to start a daemon to forcefully kill the process
                 # as our job driver process will clean up the underlying
                 # child processes.
-            elif job['pid'] < 0:
-                try:
-                    # TODO(zhwu): Backward compatibility, remove after 0.10.0.
-                    # The job was submitted with ray job submit before #4318.
-                    job_client = _create_ray_job_submission_client()
-                    job_client.stop_job(_make_ray_job_id(job['job_id']))
-                except RuntimeError as e:
-                    # If the request to the job server fails, we should not
-                    # set the job to CANCELLED.
-                    if 'does not exist' not in str(e):
-                        logger.warning(str(e))
-                        continue
             # Get the job status again to avoid race condition.
             job_status = get_status_no_lock(job['job_id'])
             if job_status in [
@@ -997,7 +1107,7 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 cancelled_ids.append(job['job_id'])
 
         scheduler.schedule_step()
-    return message_utils.encode_payload(cancelled_ids)
+    return cancelled_ids
 
 
 @init_db
@@ -1017,6 +1127,17 @@ def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
 
 @init_db
 def get_log_dir_for_jobs(job_ids: List[Optional[str]]) -> str:
+    """Returns the relative paths to the log files for jobs with globbing,
+    encoded."""
+    job_to_dir = get_job_log_dirs(job_ids)
+    job_to_dir_str: Dict[str, str] = {}
+    for job_id, log_dir in job_to_dir.items():
+        job_to_dir_str[str(job_id)] = log_dir
+    return message_utils.encode_payload(job_to_dir_str)
+
+
+@init_db
+def get_job_log_dirs(job_ids: List[int]) -> Dict[int, str]:
     """Returns the relative paths to the log files for jobs with globbing."""
     assert _DB is not None
     query_str = ' OR '.join(['job_id GLOB (?)'] * len(job_ids))
@@ -1025,16 +1146,16 @@ def get_log_dir_for_jobs(job_ids: List[Optional[str]]) -> str:
             SELECT * FROM jobs
             WHERE {query_str}""", job_ids)
     rows = _DB.cursor.fetchall()
-    job_to_dir = {}
+    job_to_dir: Dict[int, str] = {}
     for row in rows:
         job_id = row[JobInfoLoc.JOB_ID.value]
         if row[JobInfoLoc.LOG_PATH.value]:
-            job_to_dir[str(job_id)] = row[JobInfoLoc.LOG_PATH.value]
+            job_to_dir[job_id] = row[JobInfoLoc.LOG_PATH.value]
         else:
             run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-            job_to_dir[str(job_id)] = os.path.join(constants.SKY_LOGS_DIRECTORY,
-                                                   run_timestamp)
-    return message_utils.encode_payload(job_to_dir)
+            job_to_dir[job_id] = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                              run_timestamp)
+    return job_to_dir
 
 
 class JobLibCodeGen:
@@ -1055,7 +1176,7 @@ class JobLibCodeGen:
 
     @classmethod
     def add_job(cls, job_name: Optional[str], username: str, run_timestamp: str,
-                resources_str: str) -> str:
+                resources_str: str, metadata: str) -> str:
         if job_name is None:
             job_name = '-'
         code = [
@@ -1066,11 +1187,20 @@ class JobLibCodeGen:
             '\nif int(constants.SKYLET_VERSION) < 9: '
             'raise RuntimeError("SkyPilot runtime is too old, which does not '
             'support submitting jobs.")',
-            '\nresult = job_lib.add_job('
+            '\nresult = None',
+            '\nif int(constants.SKYLET_VERSION) < 15: '
+            '\n result = job_lib.add_job('
             f'{job_name!r},'
             f'{username!r},'
             f'{run_timestamp!r},'
             f'{resources_str!r})',
+            '\nelse: '
+            '\n result = job_lib.add_job('
+            f'{job_name!r},'
+            f'{username!r},'
+            f'{run_timestamp!r},'
+            f'{resources_str!r},'
+            f'metadata={metadata!r})',
             ('\nif isinstance(result, tuple):'
              '\n  print("Job ID: " + str(result[0]), flush=True)'
              '\n  print("Log Dir: " + str(result[1]), flush=True)'
@@ -1085,6 +1215,15 @@ class JobLibCodeGen:
             'job_lib.scheduler.queue('
             f'{job_id!r},'
             f'{cmd!r})',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def wait_for_job(cls, job_id: int) -> str:
+        code = [
+            # TODO(kevin): backward compatibility, remove in 0.13.0.
+            (f'job_lib.wait_for_job_completion({job_id!r}) if '
+             'hasattr(job_lib, "wait_for_job_completion") else None'),
         ]
         return cls._build(code)
 
@@ -1154,15 +1293,14 @@ class JobLibCodeGen:
              f'  log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)'
             ),
             # Add a newline to leave the if indent block above.
-            f'\ntail_log_kwargs = {{"job_id": job_id, "log_dir": log_dir, "managed_job_id": {managed_job_id!r}, "follow": {follow}}}',
-            f'{_LINUX_NEW_LINE}if getattr(constants, "SKYLET_LIB_VERSION", 1) > 1: tail_log_kwargs["tail"] = {tail}',
-            f'{_LINUX_NEW_LINE}log_lib.tail_logs(**tail_log_kwargs)',
+            f'\nlog_lib.tail_logs(job_id=job_id, log_dir=log_dir, managed_job_id={managed_job_id!r}, follow={follow}, tail={tail})',
             # After tailing, check the job status and exit with appropriate code
             'job_status = job_lib.get_status(job_id)',
-            # Backward compatibility for returning exit code: Skylet versions 2
-            # and older did not have JobExitCode, so we use 0 for those versions
-            # TODO: Remove this special handling after 0.10.0.
-            'exit_code = exceptions.JobExitCode.from_job_status(job_status) if getattr(constants, "SKYLET_LIB_VERSION", 1) > 2 else 0',
+            'exit_code = exceptions.JobExitCode.from_job_status(job_status)',
+            # Fix for dashboard: When follow=False and job is still running (NOT_FINISHED=101),
+            # exit with success (0) since fetching current logs is a successful operation.
+            # This prevents shell wrappers from printing "command terminated with exit code 101".
+            f'exit_code = 0 if not {follow} and exit_code == 101 else exit_code',
             'sys.exit(exit_code)',
         ]
         return cls._build(code)
@@ -1207,7 +1345,18 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
+    def get_job_exit_codes(cls, job_id: Optional[int] = None) -> str:
+        """Generate shell command to retrieve exit codes."""
+        code = [
+            f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',  # pylint: disable=line-too-long
+            'exit_codes = job_lib.get_exit_codes(job_id) if job_id is not None and int(constants.SKYLET_VERSION) >= 28 else {}',  # pylint: disable=line-too-long
+            'print(exit_codes, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         code = ';'.join(code)
-        return f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(code)}'
+        return (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
+                f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(code)}')

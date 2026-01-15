@@ -1,6 +1,6 @@
 """Sky backend interface."""
 import typing
-from typing import Dict, Generic, Optional, Tuple
+from typing import Any, Dict, Generic, Optional, Tuple, Union
 
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
@@ -90,8 +90,16 @@ class Backend(Generic[_ResourceHandleType]):
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_workdir')
-    def sync_workdir(self, handle: _ResourceHandleType, workdir: Path) -> None:
-        return self._sync_workdir(handle, workdir)
+    def sync_workdir(self, handle: _ResourceHandleType,
+                     workdir: Union[Path, Dict[str, Any]],
+                     envs_and_secrets: Dict[str, str]) -> None:
+        return self._sync_workdir(handle, workdir, envs_and_secrets)
+
+    @timeline.event
+    @usage_lib.messages.usage.update_runtime('download_file')
+    def download_file(self, handle: _ResourceHandleType, local_file_path: str,
+                      remote_file_path: str) -> None:
+        return self._download_file(handle, local_file_path, remote_file_path)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_file_mounts')
@@ -118,7 +126,6 @@ class Backend(Generic[_ResourceHandleType]):
     def execute(self,
                 handle: _ResourceHandleType,
                 task: 'task_lib.Task',
-                detach_run: bool,
                 dryrun: bool = False) -> Optional[int]:
         """Execute the task on the cluster.
 
@@ -129,7 +136,7 @@ class Backend(Generic[_ResourceHandleType]):
             handle.get_cluster_name())
         usage_lib.messages.usage.update_actual_task(task)
         with rich_utils.safe_status(ux_utils.spinner_message('Submitting job')):
-            return self._execute(handle, task, detach_run, dryrun)
+            return self._execute(handle, task, dryrun)
 
     @timeline.event
     def post_execute(self, handle: _ResourceHandleType, down: bool) -> None:
@@ -165,7 +172,13 @@ class Backend(Generic[_ResourceHandleType]):
     ) -> Tuple[Optional[_ResourceHandleType], bool]:
         raise NotImplementedError
 
-    def _sync_workdir(self, handle: _ResourceHandleType, workdir: Path) -> None:
+    def _sync_workdir(self, handle: _ResourceHandleType,
+                      workdir: Union[Path, Dict[str, Any]],
+                      envs_and_secrets: Dict[str, str]) -> None:
+        raise NotImplementedError
+
+    def _download_file(self, handle: _ResourceHandleType, local_file_path: str,
+                       remote_file_path: str) -> None:
         raise NotImplementedError
 
     def _sync_file_mounts(
@@ -183,7 +196,6 @@ class Backend(Generic[_ResourceHandleType]):
     def _execute(self,
                  handle: _ResourceHandleType,
                  task: 'task_lib.Task',
-                 detach_run: bool,
                  dryrun: bool = False) -> Optional[int]:
         raise NotImplementedError
 

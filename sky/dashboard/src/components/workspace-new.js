@@ -109,7 +109,7 @@ export function NewWorkspace() {
           <Button
             onClick={handleNext}
             disabled={!isFormValid || loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-300 disabled:text-gray-500"
+            className="w-full bg-sky-600 hover:bg-sky-700 text-white disabled:bg-gray-300 disabled:text-gray-500"
           >
             {loading ? 'Loading...' : 'Next: Configure Workspace'}
           </Button>

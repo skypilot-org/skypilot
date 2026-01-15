@@ -20,6 +20,7 @@ from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as sky_cloud
 from sky.usage import usage_lib
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import registry
@@ -781,7 +782,7 @@ class Optimizer:
         def _instance_type_str(resources: 'resources_lib.Resources') -> str:
             instance_type = resources.instance_type
             assert instance_type is not None, 'Instance type must be specified'
-            if isinstance(resources.cloud, clouds.Kubernetes):
+            if isinstance(resources.cloud, (clouds.Kubernetes, clouds.Slurm)):
                 instance_type = '-'
                 if resources.use_spot:
                     instance_type = ''
@@ -865,11 +866,12 @@ class Optimizer:
                 'use_spot': resources.use_spot
             }
 
-            # Handle special case for Kubernetes and SSH clouds
-            if isinstance(resources.cloud, clouds.Kubernetes):
+            # Handle special case for Kubernetes, SSH, and SLURM clouds
+            if isinstance(resources.cloud, (clouds.Kubernetes, clouds.Slurm)):
                 # Region for Kubernetes-like clouds (SSH, Kubernetes) is the
-                # context name, i.e. different Kubernetes clusters. We add
-                # region to the key to show all the Kubernetes clusters in the
+                # context name, i.e. different Kubernetes clusters.
+                # Region for SLURM is the cluster name.
+                # We add region to the key to show all the clusters in the
                 # optimizer table for better UX.
 
                 if resources.cloud.__class__.__name__ == 'SSH':
@@ -997,23 +999,29 @@ class Optimizer:
     @staticmethod
     def _print_candidates(node_to_candidate_map: _TaskToPerCloudCandidates):
         for node, candidate_set in node_to_candidate_map.items():
-            if node.best_resources:
-                accelerator = node.best_resources.accelerators
-            else:
-                accelerator = list(node.resources)[0].accelerators
+            best_resources = node.best_resources
+            if best_resources is None:
+                best_resources = list(node.resources)[0]
             is_multi_instances = False
-            if accelerator:
-                acc_name, acc_count = list(accelerator.items())[0]
+            if best_resources.accelerators:
+                acc_name, acc_count = list(
+                    best_resources.accelerators.items())[0]
                 for cloud, candidate_list in candidate_set.items():
-                    if len(candidate_list) > 1:
+                    # Filter only the candidates matching the best
+                    # resources chosen by the optimizer.
+                    best_resources_candidates = [
+                        res for res in candidate_list if
+                        res.get_accelerators_str() == f'{acc_name}:{acc_count}'
+                    ]
+                    if len(best_resources_candidates) > 1:
                         is_multi_instances = True
-                        instance_list = [
+                        instance_list = set([
                             res.instance_type
-                            for res in candidate_list
+                            for res in best_resources_candidates
                             if res.instance_type is not None
-                        ]
+                        ])
                         candidate_str = resources_utils.format_resource(
-                            candidate_list[0], simplify=True)
+                            best_resources, simplified_only=True)[0]
 
                         logger.info(
                             f'{colorama.Style.DIM}🔍 Multiple {cloud} instances '
@@ -1256,12 +1264,13 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
 
 
 def _check_specified_regions(task: task_lib.Task) -> None:
-    """Check if specified regions (Kubernetes contexts) are enabled.
+    """Check if specified regions (Kubernetes/SSH contexts) are enabled.
 
     Args:
         task: The task to check.
     """
-    # Only check for Kubernetes now
+    # Only check for Kubernetes/SSH for now
+    # Below check works because SSH inherits Kubernetes cloud.
     if not all(
             isinstance(resources.cloud, clouds.Kubernetes)
             for resources in task.resources):
@@ -1270,12 +1279,21 @@ def _check_specified_regions(task: task_lib.Task) -> None:
     for resources in task.resources:
         if resources.region is None:
             continue
-        existing_contexts = clouds.Kubernetes.existing_allowed_contexts()
+
+        is_ssh = isinstance(resources.cloud, clouds.SSH)
+        if is_ssh:
+            existing_contexts = clouds.SSH.existing_allowed_contexts()
+        else:
+            existing_contexts = clouds.Kubernetes.existing_allowed_contexts()
+
         region = resources.region
         task_name = f' {task.name!r}' if task.name is not None else ''
         msg = f'Task{task_name} requires '
         if region not in existing_contexts:
-            infra_str = f'Kubernetes/{region}'
+            if is_ssh:
+                infra_str = f'SSH/{common_utils.removeprefix(region, "ssh-")}'
+            else:
+                infra_str = f'Kubernetes/{region}'
             logger.warning(f'{infra_str} is not enabled.')
             volume_mounts_str = ''
             if task.volume_mounts:
@@ -1327,8 +1345,7 @@ def _fill_in_launchable_resources(
     launchable: Dict[resources_lib.Resources, List[resources_lib.Resources]] = (
         collections.defaultdict(list))
     all_fuzzy_candidates = set()
-    cloud_candidates: _PerCloudCandidates = collections.defaultdict(
-        List[resources_lib.Resources])
+    cloud_candidates: _PerCloudCandidates = collections.defaultdict(list)
     resource_hints: Dict[resources_lib.Resources,
                          List[str]] = collections.defaultdict(list)
     if blocked_resources is None:
@@ -1365,7 +1382,10 @@ def _fill_in_launchable_resources(
                 launchable[resources].extend(
                     resources_utils.make_launchables_for_valid_region_zones(
                         cheapest))
-                cloud_candidates[cloud] = feasible_resources.resources_list
+                # Each cloud can occur multiple times in feasible_list,
+                # for different region/zone.
+                cloud_candidates[cloud].extend(
+                    feasible_resources.resources_list)
             else:
                 all_fuzzy_candidates.update(
                     feasible_resources.fuzzy_candidate_list)

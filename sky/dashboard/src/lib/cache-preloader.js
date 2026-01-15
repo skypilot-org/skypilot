@@ -2,12 +2,21 @@
 // This utility manages background preloading of cache data to improve page switching performance
 
 import dashboardCache from './cache';
-import { getClusters, getClusterHistory } from '@/data/connectors/clusters';
-import { getManagedJobs } from '@/data/connectors/jobs';
+import { getClusters } from '@/data/connectors/clusters';
+import {
+  getManagedJobs,
+  getManagedJobsWithClientPagination,
+} from '@/data/connectors/jobs';
 import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
-import { getInfraData } from '@/data/connectors/infra';
 import { getVolumes } from '@/data/connectors/volumes';
+import {
+  getEnabledCloudsList,
+  getWorkspaceContexts,
+  getContextGPUData,
+  getSlurmInfrastructure,
+} from '@/data/connectors/infra';
+import { getSSHNodePools } from '@/data/connectors/ssh-node-pools';
 
 /**
  * Complete list of all dashboard cache functions organized by page
@@ -16,31 +25,52 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Base functions used across multiple pages (no arguments)
   base: {
     getClusters: { fn: getClusters, args: [] },
-    getClusterHistory: { fn: getClusterHistory, args: [] },
-    getManagedJobs: { fn: getManagedJobs, args: [{ allUsers: true }] },
+    // For jobs page - uses client-side pagination wrapper
+    getManagedJobs: {
+      fn: getManagedJobsWithClientPagination,
+      args: [{ allUsers: true }],
+    },
+    // For infra/users/workspaces pages - shared cache entry
+    getManagedJobsForOtherPages: {
+      fn: getManagedJobs,
+      args: [{ allUsers: true, skipFinished: true }],
+    },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
-    getInfraData: { fn: getInfraData, args: [] },
+    getEnabledCloudsList: {
+      fn: getEnabledCloudsList,
+      args: [],
+    },
+    getWorkspaceContexts: { fn: getWorkspaceContexts, args: [] },
+    getSlurmInfrastructure: { fn: getSlurmInfrastructure, args: [] },
+    getSSHNodePools: { fn: getSSHNodePools, args: [] },
     getVolumes: { fn: getVolumes, args: [] },
   },
 
   // Functions with arguments (require dynamic data)
   dynamic: {
     getEnabledClouds: { fn: getEnabledClouds, requiresWorkspaces: true },
+    getContextGPUDataForAllContexts: {
+      fn: getContextGPUData,
+      requiresContexts: true,
+    },
   },
 
   // Page-specific function requirements
   pages: {
-    clusters: ['getClusters', 'getClusterHistory', 'getWorkspaces', 'getUsers'],
+    clusters: ['getClusters', 'getWorkspaces'],
     jobs: ['getManagedJobs', 'getClusters', 'getWorkspaces', 'getUsers'],
-    infra: ['getInfraData', 'getClusters', 'getManagedJobs'],
+    infra: [
+      // Empty - infra page uses progressive loading via fetchData()
+      // All infra functions are background-preloaded from other pages
+    ],
     workspaces: [
       'getWorkspaces',
       'getClusters',
-      'getManagedJobs',
+      'getManagedJobsForOtherPages',
       'getEnabledClouds',
     ],
-    users: ['getUsers', 'getClusters', 'getManagedJobs'],
+    users: ['getUsers', 'getClusters', 'getManagedJobsForOtherPages'],
     volumes: ['getVolumes'],
   },
 };
@@ -52,6 +82,8 @@ class CachePreloader {
   constructor() {
     this.isPreloading = false;
     this.preloadPromises = new Map();
+    this.recentlyPreloaded = new Map(); // Track recently preloaded functions with timestamps
+    this.PRELOAD_GRACE_PERIOD = 5000; // 5 seconds grace period
   }
 
   /**
@@ -102,10 +134,19 @@ class CachePreloader {
         if (force) {
           dashboardCache.invalidate(fn, args);
         }
-        promises.push(dashboardCache.get(fn, args));
+        promises.push(
+          dashboardCache.get(fn, args).then((result) => {
+            // Mark this function as recently preloaded
+            this._markAsPreloaded(fn, args);
+            return result;
+          })
+        );
       } else if (functionName === 'getEnabledClouds') {
         // Dynamic function that requires workspace data
         promises.push(this._loadEnabledCloudsForAllWorkspaces(force));
+      } else if (functionName === 'getContextGPUDataForAllContexts') {
+        // Dynamic function that requires context names first
+        promises.push(this._loadContextGPUDataForAllContexts(force));
       }
     }
 
@@ -141,6 +182,41 @@ class CachePreloader {
   }
 
   /**
+   * Load GPU data for all Kubernetes contexts
+   * @private
+   */
+  async _loadContextGPUDataForAllContexts(force = false) {
+    try {
+      // First get context names
+      if (force) {
+        dashboardCache.invalidate(getWorkspaceContexts);
+      }
+      const contextsData = await dashboardCache.get(getWorkspaceContexts);
+
+      if (!contextsData || !contextsData.allContextNames) {
+        return;
+      }
+
+      // Filter to only K8s contexts (not SSH)
+      const kubeContexts = contextsData.allContextNames.filter(
+        (ctx) => ctx && !ctx.startsWith('ssh-')
+      );
+
+      // Load GPU data for each context in parallel
+      const promises = kubeContexts.map((context) => {
+        if (force) {
+          dashboardCache.invalidate(getContextGPUData, [context]);
+        }
+        return dashboardCache.get(getContextGPUData, [context]);
+      });
+
+      await Promise.allSettled(promises);
+    } catch (error) {
+      console.error('[CachePreloader] Error loading context GPU data:', error);
+    }
+  }
+
+  /**
    * Background preload other pages
    * @private
    */
@@ -151,27 +227,69 @@ class CachePreloader {
 
     this.isPreloading = true;
 
-    // Get all pages except current
-    const otherPages = Object.keys(DASHBOARD_CACHE_FUNCTIONS.pages).filter(
-      (page) => page !== currentPage
+    // Get functions already loaded for current page
+    const currentPageFunctions = new Set(
+      DASHBOARD_CACHE_FUNCTIONS.pages[currentPage]
     );
+
+    // Get all unique functions needed by other pages, excluding current page functions
+    const allOtherFunctions = new Set();
+    Object.keys(DASHBOARD_CACHE_FUNCTIONS.pages)
+      .filter((page) => page !== currentPage)
+      .forEach((page) => {
+        DASHBOARD_CACHE_FUNCTIONS.pages[page].forEach((functionName) => {
+          if (!currentPageFunctions.has(functionName)) {
+            allOtherFunctions.add(functionName);
+          }
+        });
+      });
+
+    // Always background-preload all infra data when NOT on infra page
+    // (infra page uses progressive loading via fetchData, so we don't block it)
+    if (currentPage !== 'infra') {
+      // Base functions for infra
+      allOtherFunctions.add('getClusters');
+      allOtherFunctions.add('getManagedJobsForOtherPages');
+      allOtherFunctions.add('getEnabledCloudsList');
+      allOtherFunctions.add('getWorkspaceContexts');
+      allOtherFunctions.add('getSlurmInfrastructure');
+      allOtherFunctions.add('getSSHNodePools');
+      // Dynamic function for K8s GPU data
+      allOtherFunctions.add('getContextGPUDataForAllContexts');
+    }
 
     console.log(
-      `[CachePreloader] Background preloading pages: ${otherPages.join(', ')}`
+      `[CachePreloader] Background preloading ${allOtherFunctions.size} unique functions: ${Array.from(allOtherFunctions).join(', ')}`
     );
 
-    // Preload all pages immediately in parallel
-    const preloadPromises = otherPages.map(async (page) => {
-      try {
-        await this._loadPageData(page, false);
-        console.log(`[CachePreloader] Background loaded: ${page}`);
-      } catch (error) {
-        console.error(
-          `[CachePreloader] Background load failed for ${page}:`,
-          error
-        );
+    // Load each unique function once
+    const preloadPromises = Array.from(allOtherFunctions).map(
+      async (functionName) => {
+        try {
+          if (DASHBOARD_CACHE_FUNCTIONS.base[functionName]) {
+            // Base function (no arguments)
+            const { fn, args } = DASHBOARD_CACHE_FUNCTIONS.base[functionName];
+            await dashboardCache.get(fn, args);
+            // Mark this function as recently preloaded
+            this._markAsPreloaded(fn, args);
+          } else if (functionName === 'getEnabledClouds') {
+            // Dynamic function that requires workspace data
+            await this._loadEnabledCloudsForAllWorkspaces(false);
+          } else if (functionName === 'getContextGPUDataForAllContexts') {
+            // Dynamic function that requires context names first
+            await this._loadContextGPUDataForAllContexts(false);
+          }
+          console.log(
+            `[CachePreloader] Background loaded function: ${functionName}`
+          );
+        } catch (error) {
+          console.error(
+            `[CachePreloader] Background load failed for function ${functionName}:`,
+            error
+          );
+        }
       }
-    });
+    );
 
     // Wait for all preloading to complete
     Promise.allSettled(preloadPromises).then(() => {
@@ -212,18 +330,80 @@ class CachePreloader {
   }
 
   /**
+   * Check if a function was recently preloaded (within grace period)
+   * @param {Function} fetchFunction - The function to check
+   * @param {Array} [args=[]] - Arguments to check
+   * @returns {boolean} - True if recently preloaded
+   */
+  wasRecentlyPreloaded(fetchFunction, args = []) {
+    const key = this._generateKey(fetchFunction, args);
+    const preloadTime = this.recentlyPreloaded.get(key);
+
+    if (!preloadTime) {
+      return false;
+    }
+
+    const now = Date.now();
+    const isRecent = now - preloadTime < this.PRELOAD_GRACE_PERIOD;
+
+    // Clean up expired entries
+    if (!isRecent) {
+      this.recentlyPreloaded.delete(key);
+    }
+
+    return isRecent;
+  }
+
+  /**
+   * Mark a function as recently preloaded
+   * @private
+   */
+  _markAsPreloaded(fetchFunction, args = []) {
+    const key = this._generateKey(fetchFunction, args);
+    this.recentlyPreloaded.set(key, Date.now());
+  }
+
+  /**
+   * Generate a cache key based on function name and arguments (same as DashboardCache)
+   * @private
+   */
+  _generateKey(fetchFunction, args) {
+    // Use same key generation logic as DashboardCache
+    const functionString = fetchFunction.toString();
+    const functionHash = this._simpleHash(functionString);
+    const argsHash = args.length > 0 ? JSON.stringify(args) : '';
+    return `${functionHash}_${argsHash}`;
+  }
+
+  /**
+   * Simple string hash function (same as DashboardCache)
+   * @private
+   */
+  _simpleHash(str) {
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+      hash = (hash << 5) + hash + str.charCodeAt(i);
+    }
+    return hash >>> 0;
+  }
+
+  /**
    * Clear all cache and reset preloader state
    */
   clearCache() {
     dashboardCache.clear();
     this.isPreloading = false;
     this.preloadPromises.clear();
+    this.recentlyPreloaded.clear();
     console.log('[CachePreloader] Cache cleared');
   }
 }
 
 // Create singleton instance
 const cachePreloader = new CachePreloader();
+
+// Set up coordination between cache and preloader
+dashboardCache.setPreloader(cachePreloader);
 
 export { CachePreloader, cachePreloader };
 export default cachePreloader;

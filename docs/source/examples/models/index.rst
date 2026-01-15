@@ -4,6 +4,7 @@ Models
 .. toctree::
    :maxdepth: 1
 
+   OpenAI gpt-oss <gpt-oss>
    DeepSeek-R1 <deepseek-r1>
    DeepSeek-R1 Distilled <deepseek-r1-distilled>
    DeepSeek-Janus <deepseek-janus>
@@ -17,7 +18,9 @@ Models
    Pixtral <pixtral>
    Mixtral <mixtral>
    Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot/>
-   Qwen 2.5 <qwen>
+   Qwen 3 <qwen>
+   Kimi K2 <kimi-k2>
+   Kimi K2 Thinking <kimi-k2-thinking>
    Yi <yi>
    Gemma <gemma>
    DBRX <dbrx>

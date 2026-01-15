@@ -1,0 +1,19 @@
+--- a/cli.py
++++ b/cli.py
+@@ -1,3 +1,7 @@
++# Adapted from https://github.com/ray-project/ray/blob/ray-2.9.3/dashboard/modules/job/cli.py
++# Fixed the problem in ray's issue https://github.com/ray-project/ray/issues/26514
++# Otherwise, the output redirection ">" will not work.
++
+ import json
+ import os
+ import sys
+@@ -270,7 +274,7 @@
+         working_dir=working_dir,
+     )
+     job_id = client.submit_job(
+-        entrypoint=list2cmdline(entrypoint),
++        entrypoint=" ".join(entrypoint),
+         submission_id=submission_id,
+         runtime_env=final_runtime_env,
+         metadata=metadata_json,

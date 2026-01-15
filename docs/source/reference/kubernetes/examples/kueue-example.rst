@@ -31,7 +31,7 @@ To install Kueue, run the following command:
 .. code-block:: bash
 
     # See https://github.com/kubernetes-sigs/kueue/releases for available versions.
-    VERSION=v0.11.4
+    VERSION=v0.12.3
     kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/$VERSION/manifests.yaml
 
 
@@ -41,30 +41,68 @@ Patch Kueue to support plain pods
 Kueue does not support scheduling plain pods out of the box. Since SkyPilot creates and manages workloads as pods,
 the Kueue config needs to be patched to support plain pods.
 
-.. code-block:: bash
+.. tab-set::
 
-    # Extract and patch the config and save it to /tmp/kueueconfig.yaml
-    # This is required because SkyPilot creates and manages workloads as pods
-    kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations.frameworks += ["pod"]' > /tmp/kueueconfig.yaml
-    # Create an updated ConfigMap from /tmp/kueueconfig.yaml and apply the changes
-    kubectl -n kueue-system create cm kueue-manager-config --from_file=controller_manager_config.yaml=/tmp/kueueconfig.yaml --dry-run=client -o yaml | kubectl -n kueue-system apply -f -
-    # Restart the kueue-controller-manager pod with the following command
-    kubectl -n kueue-system rollout restart deployment kueue-controller-manager
-    # Wait for the restart to complete
-    kubectl -n kueue-system rollout status deployment kueue-controller-manager
+    .. tab-item:: Patch Kueue
+        :sync: patch-kueue-tab
 
-Check that the patch is applied by running the following command:
+        .. code-block:: bash
 
-.. code-block:: bash
+            # Extract and patch the config and save it to /tmp/kueueconfig.yaml
+            # This is required because SkyPilot creates and manages workloads as pods
+            kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations.frameworks += ["pod"]' > /tmp/kueueconfig.yaml
+            # Create an updated ConfigMap from /tmp/kueueconfig.yaml and apply the changes
+            kubectl -n kueue-system create cm kueue-manager-config --from_file=controller_manager_config.yaml=/tmp/kueueconfig.yaml --dry-run=client -o yaml | kubectl -n kueue-system apply -f -
+            # Restart the kueue-controller-manager pod with the following command
+            kubectl -n kueue-system rollout restart deployment kueue-controller-manager
+            # Wait for the restart to complete
+            kubectl -n kueue-system rollout status deployment kueue-controller-manager
 
-    kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations.frameworks'
+        Check that the patch is applied by running the following command:
 
-This should output:
+        .. code-block:: bash
 
-.. code-block:: bash
+            kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations.frameworks'
 
-    ...
-    - pod
+        This should output:
+
+        .. code-block:: bash
+
+            ...
+            - pod
+
+    .. tab-item:: Patch Kueue with GPUDirect enabled on GKE
+        :sync: patch-kueue-gke-tab
+
+        If you are using GKE, and want to enable the `GPUDirect networking stack <https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx#required-features-capabilities>`_ for the GPU nodes, you need to patch the Kueue config to support plain pods and add ``networking.gke.io.networks`` to the ``resources.excludeResourcePrefixes`` to exclude the networking resources from the resource quota.
+
+        .. code-block:: bash
+            :emphasize-lines: 2
+
+            # Extract and patch the config and save it to /tmp/kueueconfig.yaml
+            kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations.frameworks += ["pod"] | .resources.excludeResourcePrefixes += ["networking.gke.io.networks"]' > /tmp/kueueconfig.yaml
+            # Create an updated ConfigMap from /tmp/kueueconfig.yaml and apply the changes
+            kubectl -n kueue-system create cm kueue-manager-config --from_file=controller_manager_config.yaml=/tmp/kueueconfig.yaml --dry-run=client -o yaml | kubectl -n kueue-system apply -f -
+            # Restart the kueue-controller-manager pod with the following command
+            kubectl -n kueue-system rollout restart deployment kueue-controller-manager
+            # Wait for the restart to complete
+            kubectl -n kueue-system rollout status deployment kueue-controller-manager
+
+        Check that the patch is applied by running the following command:
+
+        .. code-block:: bash
+
+            kubectl -n kueue-system get cm kueue-manager-config -o jsonpath={.data.controller_manager_config\\.yaml} | yq '.integrations, .resources'
+
+        This should output:
+
+        .. code-block:: bash
+
+            frameworks:
+              ...
+              - pod
+            excludeResourcePrefixes:
+              - networking.gke.io.networks
 
 (Optional) Patch Kueue to support gang scheduling
 -----------------------------------------------------------
@@ -150,45 +188,107 @@ A local queue points to a cluster queue. Multiple local queues can point to the 
 
 Here, a cluster queue and a local queue are created.
 
-``kueue.yaml``:
+.. tab-set::
 
-.. code-block:: yaml
+    .. tab-item:: kueue.yaml
+        :sync: kueue-yaml-tab
 
-    apiVersion: kueue.x-k8s.io/v1beta1
-    kind: ClusterQueue
-    metadata:
-      name: "skypilot-cluster-queue"
-    spec:
-      namespaceSelector: {} # match all namespaces
-      resourceGroups:
-      - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
-        flavors:
-        - name: "default-flavor"
-          # Adjust this value based on actual resource needs.
-          # The resource quote should be at most the resource
-          # capacity of the cluster.
-          # This section must include all resources defined in
-          # 'coveredResources' above.
-          # Set an "infinite" quota for resources that
-          # you don't want to limit.
-          resources:
-          - name: "cpu"
-            nominalQuota: 16
-          - name: "memory"
-            nominalQuota: 32Gi
-          - name: "nvidia.com/gpu"
-            nominalQuota: 1000000 # "Infinite" quota
-      preemption:
-        withinClusterQueue: LowerPriority
-    ---
-    apiVersion: kueue.x-k8s.io/v1beta1
-    kind: LocalQueue
-    metadata:
-      # A local queue is in a namespace
-      namespace: "default"
-      name: "skypilot-local-queue"
-    spec:
-      clusterQueue: "skypilot-cluster-queue"
+        .. code-block:: yaml
+
+            apiVersion: kueue.x-k8s.io/v1beta1
+            kind: ClusterQueue
+            metadata:
+              name: "skypilot-cluster-queue"
+            spec:
+              namespaceSelector: {} # match all namespaces
+              resourceGroups:
+              - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
+                flavors:
+                - name: "default-flavor"
+                  # Adjust this value based on actual resource needs.
+                  # The resource quote should be at most the resource
+                  # capacity of the cluster.
+                  # This section must include all resources defined in
+                  # 'coveredResources' above.
+                  # Set an "infinite" quota for resources that
+                  # you don't want to limit.
+                  resources:
+                  - name: "cpu"
+                    nominalQuota: 16
+                  - name: "memory"
+                    nominalQuota: 32Gi
+                  - name: "nvidia.com/gpu"
+                    nominalQuota: 1000000 # "Infinite" quota
+              preemption:
+                withinClusterQueue: LowerPriority
+            ---
+            apiVersion: kueue.x-k8s.io/v1beta1
+            kind: LocalQueue
+            metadata:
+              # A local queue is in a namespace
+              namespace: "default"
+              name: "skypilot-local-queue"
+            spec:
+              clusterQueue: "skypilot-cluster-queue"
+
+    .. tab-item:: kueue.yaml with GKE DWS Enabled
+        :sync: kueue-yaml-gke-dws-tab
+
+        When using :ref:`GKE DWS <dws-with-kueue>`, an ``AdmissionCheck`` and ``ProvisioningRequestConfig`` should be added to the ``kueue.yaml`` file to make sure that the head and worker PodSets in a multi-node cluster are merged into a single PodSet when creating ProvisioningRequest to trigger scale up in GKE.
+
+        .. code-block:: yaml
+          :emphasize-lines: 1-20,41-42
+
+          apiVersion: kueue.x-k8s.io/v1beta1
+          kind: AdmissionCheck
+          metadata:
+            name: dws-prov
+          spec:
+            controllerName: kueue.x-k8s.io/provisioning-request
+            parameters:
+              apiGroup: kueue.x-k8s.io
+              kind: ProvisioningRequestConfig
+              name: dws-config
+          ---
+          apiVersion: kueue.x-k8s.io/v1beta1
+          kind: ProvisioningRequestConfig
+          metadata:
+            name: dws-config
+          spec:
+            provisioningClassName: queued-provisioning.gke.io
+            managedResources:
+            - nvidia.com/gpu
+            podSetMergePolicy: IdenticalWorkloadSchedulingRequirements
+          ---
+          apiVersion: kueue.x-k8s.io/v1beta1
+          kind: ClusterQueue
+          metadata:
+            name: "skypilot-cluster-queue"
+          spec:
+            namespaceSelector: {}
+            resourceGroups:
+            - coveredResources: ["cpu", "memory", "nvidia.com/gpu", "ephemeral-storage"]
+              flavors:
+              - name: "default-flavor"
+                resources:
+                - name: "cpu"
+                  nominalQuota: 1000000000    # "Infinite" quota
+                - name: "memory"
+                  nominalQuota: 1000000000Gi  # "Infinite" quota
+                - name: "nvidia.com/gpu"
+                  nominalQuota: 1000000000    # "Infinite" quota
+                - name: "ephemeral-storage"
+                  nominalQuota: 1000000000Ti  # "Infinite" quota
+            admissionChecks:
+            - dws-prov
+          ---
+          apiVersion: kueue.x-k8s.io/v1beta1
+          kind: LocalQueue
+          metadata:
+            namespace: "default"
+            name: "skypilot-local-queue"
+          spec:
+            clusterQueue: "skypilot-cluster-queue"
 
 To create the cluster and local queues above, save the snippet to ``kueue.yaml`` and run the following command:
 

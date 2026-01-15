@@ -8,7 +8,8 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
-import { REFRESH_INTERVALS } from '@/lib/config';
+import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
+import Link from 'next/link';
 
 // Refresh interval in milliseconds
 export const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
@@ -187,13 +188,74 @@ export const NonCapitalizedTooltip = ({ children, ...props }) => {
       {...DEFAULT_TOOLTIP_PROPS}
       {...props}
       content={
-        <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 text-sm rounded">
+        <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 text-sm rounded whitespace-pre-line">
           {content}
         </span>
       }
     >
       {children}
     </Tooltip>
+  );
+};
+
+/**
+ * Component to display "Updated X ago" with auto-refresh
+ * Shows the time since last data fetch with a tooltip showing exact time
+ */
+export const LastUpdatedTimestamp = ({ timestamp, className = '' }) => {
+  const [, setTick] = useState(0);
+
+  // Auto-update every 10 seconds to keep the relative time current
+  useEffect(() => {
+    if (!timestamp) return;
+
+    const interval = setInterval(() => {
+      setTick((t) => t + 1);
+    }, 10000); // Update every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [timestamp]);
+
+  if (!timestamp) {
+    return null;
+  }
+
+  const now = new Date();
+  const diff = now - timestamp;
+
+  // Time constants for readability
+  const ONE_SECOND_MS = 1000;
+  const ONE_MINUTE_MS = 60 * ONE_SECOND_MS;
+  const ONE_HOUR_MS = 60 * ONE_MINUTE_MS;
+  const ONE_DAY_MS = 24 * ONE_HOUR_MS;
+
+  // Format relative time
+  let relativeText;
+  if (diff < 5 * ONE_SECOND_MS) {
+    relativeText = 'just now';
+  } else if (diff < ONE_MINUTE_MS) {
+    const seconds = Math.floor(diff / ONE_SECOND_MS);
+    relativeText = `${seconds}s ago`;
+  } else if (diff < ONE_HOUR_MS) {
+    const minutes = Math.floor(diff / ONE_MINUTE_MS);
+    relativeText = `${minutes}m ago`;
+  } else if (diff < ONE_DAY_MS) {
+    const hours = Math.floor(diff / ONE_HOUR_MS);
+    relativeText = `${hours}h ago`;
+  } else {
+    const days = Math.floor(diff / ONE_DAY_MS);
+    relativeText = `${days}d ago`;
+  }
+
+  return (
+    <NonCapitalizedTooltip
+      content={`Last updated: ${formatDateTime(timestamp)}`}
+      className="text-sm text-muted-foreground"
+    >
+      <span className={`text-xs text-gray-500 ${className}`}>
+        Updated {relativeText}
+      </span>
+    </NonCapitalizedTooltip>
   );
 };
 
@@ -232,50 +294,24 @@ export function formatDuration(durationInSeconds) {
 export function formatLogs(str) {
   if (!str) return '';
 
-  // Filter out unwanted lines
-  const lines = str
+  // Remove ANSI escape codes
+  const cleaned = stripAnsiCodes(str);
+
+  // Split into lines and format each one
+  return cleaned
     .split('\n')
-    .filter(
-      (line) =>
+    .filter((line) => {
+      // Filter out empty lines and rich terminal formatting artifacts
+      return (
+        line.trim() !== '' && // remove empty
         !line.match(/<rich_.*?\[bold cyan\]/) &&
         !line.match(/<rich_.*>.*<\/rich_.*>/) &&
         !line.match(/├──/) &&
         !line.match(/└──/)
-    );
-
-  // Remove ANSI escape codes
-  str = stripAnsiCodes(lines.join('\n'));
-
-  // Process each line
-  return str
-    .split('\n')
-    .map((line) => {
-      // Match the format: "I 04-14 02:07:19 controller.py:59] DAG:"
-      const standardMatch = line.match(
-        /^([IWED])\s+(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+([^:]+:\d+\])(.*)/
       );
-
-      if (standardMatch) {
-        const [_, level, timestamp, location, message] = standardMatch;
-        const logLevel =
-          {
-            I: 'INFO',
-            W: 'WARNING',
-            E: 'ERROR',
-            D: 'DEBUG',
-          }[level] || '';
-
-        return `<span class="log-line ${logLevel}"><span class="level">${level}</span><span class="timestamp">${timestamp}</span><span class="location">${location}</span><span class="message">${message}</span></span>`;
-      }
-
-      // If it doesn't match the standard format, try to split on parentheses content
-      const parts = line.match(/^(\([^)]+\))(.*)$/);
-      if (parts) {
-        const [_, prefix, rest] = parts;
-        return `<span class="log-line"><span class="log-prefix">${prefix}</span><span class="log-rest">${rest}</span></span>`;
-      }
-
-      // If no patterns match, return the line as is
+    })
+    .map((line) => {
+      // Wrap each line in log formatting
       return `<span class="log-line"><span class="message">${line}</span></span>`;
     })
     .join('\n');
@@ -357,6 +393,16 @@ export function stripAnsiCodes(str) {
   return str.replace(/\x1b\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGKH]/g, '');
 }
 
+// Common filter for control / rich payload log lines
+export function shouldDropLogLine(line) {
+  if (!line) return true;
+  if (line.includes('<sky-payload')) return true;
+  if (/rich_(init|update|start|exit)/i.test(line)) return true;
+  if (/<rich_.*?>.*<\/rich_.*?>/i.test(line)) return true;
+  if (/^├──/.test(line) || /^└──/.test(line)) return true;
+  return false;
+}
+
 function extractNodeTypes(logs) {
   const nodePattern = /\((head|worker\d+),/g; // Matches 'head' or 'worker' followed by any number
   const nodeTypes = new Set();
@@ -380,23 +426,33 @@ function extractNodeTypes(logs) {
 
 export function LogFilter({ logs, controller = false }) {
   const [selectedNode, setSelectedNode] = useState('all');
-  const [filteredLogs, setFilteredLogs] = useState(logs);
+  const normalizeLogs = (input) => {
+    if (!input) return [];
+    if (Array.isArray(input)) return input;
+    if (typeof input === 'string') {
+      return input.split('\n').filter((line) => line !== '');
+    }
+    return [];
+  };
+
+  const normalizedLogs = normalizeLogs(logs);
+  const [filteredLogs, setFilteredLogs] = useState(normalizedLogs);
   const [nodeTypes, setNodeTypes] = useState([]);
 
   useEffect(() => {
-    setNodeTypes(extractNodeTypes(logs));
-  }, [logs]);
+    setNodeTypes(extractNodeTypes(normalizedLogs.join('\n')));
+  }, [normalizedLogs]);
 
   useEffect(() => {
     if (selectedNode === 'all') {
-      setFilteredLogs(logs);
+      setFilteredLogs(normalizedLogs);
     } else {
-      const filtered = logs
-        .split('\n')
-        .filter((line) => line.includes(`(${selectedNode},`));
-      setFilteredLogs(filtered.join('\n'));
+      const filtered = normalizedLogs.filter((line) =>
+        line.includes(`(${selectedNode},`)
+      );
+      setFilteredLogs(filtered);
     }
-  }, [selectedNode, logs]);
+  }, [selectedNode, normalizedLogs]);
 
   return (
     <div>
@@ -425,9 +481,11 @@ export function LogFilter({ logs, controller = false }) {
         </div>
       )}
       <div
-        className="logs-container"
-        dangerouslySetInnerHTML={{ __html: filteredLogs }}
-      />
+        className="logs-container whitespace-pre-wrap break-all font-mono text-sm text-gray-900"
+        aria-label="job-logs"
+      >
+        {filteredLogs.join('\n')}
+      </div>
     </div>
   );
 }
@@ -455,7 +513,7 @@ export function TimestampWithTooltip({ date }) {
     hour12: true,
     timeZoneName: 'short',
   });
-  const fullLocalTimestamp = dateStr + ', ' + timeStr;
+  const fullLocalTimestamp = dateStr + ' ' + timeStr;
 
   let displayText;
   // Always show relative time with shortened format
@@ -493,5 +551,215 @@ export function formatFullTimestamp(date) {
     hour12: true,
     timeZoneName: 'short',
   });
-  return dateStr + ', ' + timeStr;
+  return dateStr + ' ' + timeStr;
 }
+
+// Shared badge components for pools
+
+export const getJobStatusCounts = (poolData) => {
+  if (!poolData || !poolData.jobCounts) return {};
+  return poolData.jobCounts;
+};
+
+export const getInfraSummary = (replicaInfo) => {
+  if (!replicaInfo || replicaInfo.length === 0) return {};
+
+  const readyWorkers = replicaInfo.filter(
+    (worker) => worker.status === 'READY'
+  );
+
+  const cloudData = {};
+  readyWorkers.forEach((worker) => {
+    try {
+      // Handle undefined/null/empty cloud values
+      const hasCloud =
+        worker.cloud &&
+        worker.cloud.trim() !== '' &&
+        worker.cloud !== 'undefined';
+      const hasRegion =
+        worker.region &&
+        worker.region !== 'undefined' &&
+        worker.region !== null &&
+        worker.region.trim() !== '';
+
+      // Skip if both cloud and region are missing
+      if (!hasCloud && !hasRegion) {
+        return;
+      }
+
+      const cloud = hasCloud ? worker.cloud : 'Unknown';
+      const region = hasRegion ? worker.region : null;
+
+      if (!cloudData[cloud]) {
+        cloudData[cloud] = {
+          count: 0,
+          regions: new Set(),
+        };
+      }
+
+      cloudData[cloud].count += 1;
+      if (region) {
+        cloudData[cloud].regions.add(region);
+      }
+    } catch (error) {
+      // Handle errors gracefully
+      if (!cloudData['Unknown']) {
+        cloudData['Unknown'] = {
+          count: 0,
+          regions: new Set(),
+        };
+      }
+      cloudData['Unknown'].count += 1;
+    }
+  });
+
+  // Convert to the expected format: "Cloud (X regions) Total" or "Kubernetes (X contexts) Total"
+  const infraCounts = {};
+  Object.entries(cloudData).forEach(([cloud, data]) => {
+    const regionCount = data.regions.size;
+
+    // Use 'context' for Kubernetes, 'region' for other clouds
+    const isKubernetes =
+      cloud.toLowerCase().includes('kubernetes') ||
+      cloud.toLowerCase().includes('k8s');
+    const locationTerm = isKubernetes ? 'context' : 'region';
+    const locationText =
+      regionCount === 1
+        ? `1 ${locationTerm}`
+        : `${regionCount} ${locationTerm}s`;
+
+    const key = regionCount > 0 ? `${cloud} (${locationText})` : cloud;
+    infraCounts[key] = data.count;
+  });
+
+  return infraCounts;
+};
+
+export const JobStatusBadges = ({ jobCounts, getStatusStyle }) => {
+  if (!jobCounts || Object.keys(jobCounts).length === 0) {
+    return <span className="text-gray-1000">No active jobs</span>;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {Object.entries(jobCounts).map(([status, count]) => {
+        const style = getStatusStyle(status);
+        return (
+          <span
+            key={status}
+            className={`px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium ${style}`}
+          >
+            <span>{status}</span>
+            <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+              {count}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+};
+
+export const InfraBadges = ({ replicaInfo }) => {
+  const infraCounts = getInfraSummary(replicaInfo);
+
+  if (Object.keys(infraCounts).length === 0) {
+    return <span className="text-gray-500 text-sm">-</span>;
+  }
+
+  const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
+
+  const truncateCloudRegion = (cloudWithRegion) => {
+    // Check if there's a region part in parentheses
+    const parenIndex = cloudWithRegion.indexOf('(');
+    if (parenIndex === -1) {
+      // No region part, return as is
+      return cloudWithRegion;
+    }
+
+    const cloudName = cloudWithRegion.substring(0, parenIndex).trim();
+    const regionPart = cloudWithRegion.substring(
+      parenIndex + 1,
+      cloudWithRegion.length - 1
+    );
+
+    // Only truncate the region part if it's longer than the truncate length
+    if (regionPart.length <= NAME_TRUNCATE_LENGTH) {
+      return cloudWithRegion;
+    }
+
+    // Truncate only the region part
+    const truncatedRegion = `${regionPart.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionPart.substring(regionPart.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+
+    return `${cloudName} (${truncatedRegion})`;
+  };
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {Object.entries(infraCounts).map(([cloudWithRegion, count]) => {
+        const displayText = truncateCloudRegion(cloudWithRegion);
+        const shouldTruncate = displayText !== cloudWithRegion;
+
+        return (
+          <span
+            key={cloudWithRegion}
+            className="px-2 py-1 rounded-full flex items-center space-x-2 text-xs font-medium bg-blue-50 text-blue-700"
+          >
+            {shouldTruncate ? (
+              <NonCapitalizedTooltip
+                content={cloudWithRegion}
+                className="text-sm text-muted-foreground"
+              >
+                <span>{displayText}</span>
+              </NonCapitalizedTooltip>
+            ) : (
+              <span>{cloudWithRegion}</span>
+            )}
+            <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+              {count}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+};
+
+// Common function for rendering pool links with hash comparison
+export const renderPoolLink = (poolName, poolHash, poolsData) => {
+  if (!poolName) return '-';
+
+  // Check if pool hash matches to determine if we should link
+  const matchingPool = poolsData.find(
+    (pool) => pool.name === poolName && pool.hash === poolHash
+  );
+
+  if (matchingPool && poolHash) {
+    // Running pool - show green circle indicator
+    return (
+      <div className="flex items-center space-x-2">
+        <NonCapitalizedTooltip content="This pool is running" placement="top">
+          <div className="w-2 h-2 bg-green-700 rounded-full"></div>
+        </NonCapitalizedTooltip>
+        <Link
+          href={`/jobs/pools/${poolName}`}
+          className="text-gray-700 hover:text-blue-600 hover:underline"
+        >
+          {poolName}
+        </Link>
+      </div>
+    );
+  }
+  // Pool exists but no matching hash found - likely terminated
+  const shortHash = poolHash ? poolHash.substring(0, 4) : '';
+  return (
+    <div className="flex items-center space-x-2">
+      <NonCapitalizedTooltip content="This pool is terminated" placement="top">
+        <div className="w-2 h-2 bg-gray-800"></div>
+      </NonCapitalizedTooltip>
+      <span>
+        {poolName} ({shortHash})
+      </span>
+    </div>
+  );
+};

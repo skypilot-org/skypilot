@@ -1,27 +1,40 @@
-{{- if and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled") (eq (index .Values.ingress "oauth2-proxy" "session-store-type" | default "redis") "redis") (not (index .Values.ingress "oauth2-proxy" "redis-url")) -}}
-{{- $redis := index .Values.ingress "oauth2-proxy" "redis" -}}
+{{- if or .Values.auth.oauth.enabled (and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled")) }}
+{{- $oauth2 := .Values.auth.oauth -}}
+{{- if not .Values.auth.oauth.enabled -}}
+{{- $oauth2 = index .Values.ingress "oauth2-proxy" -}}
+{{- end -}}
+{{- if and (eq (index $oauth2 "session-store-type" | default "redis") "redis") (not (index $oauth2 "redis-url")) (not (index $oauth2 "redis-secret")) -}}
+{{- $fullName := include "skypilot.fullname" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-oauth2-proxy-redis
+  name: {{ $fullName }}-oauth2-proxy-redis
   namespace: {{ .Release.Namespace }}
   labels:
-    app: {{ .Release.Name }}-oauth2-proxy-redis
+    app: {{ $fullName }}-oauth2-proxy-redis
     skypilot.co/component: oauth2-proxy-redis
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-oauth2-proxy-redis
+      app: {{ $fullName }}-oauth2-proxy-redis
   template:
     metadata:
       labels:
-        app: {{ .Release.Name }}-oauth2-proxy-redis
+        app: {{ $fullName }}-oauth2-proxy-redis
         skypilot.co/component: oauth2-proxy-redis
     spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: redis
-        image: redis:7-alpine
+        image: {{ include "common.image" (dict "root" . "image" (default "redis:7-alpine" (index $oauth2 "redis-image"))) }}
+        {{- with $.Values.global.extraEnvs }}
+        env:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         ports:
         - containerPort: 6379
         resources:
@@ -35,10 +48,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-oauth2-proxy-redis
+  name: {{ $fullName }}-oauth2-proxy-redis
   namespace: {{ .Release.Namespace }}
   labels:
-    app: {{ .Release.Name }}-oauth2-proxy-redis
+    app: {{ $fullName }}-oauth2-proxy-redis
     skypilot.co/component: oauth2-proxy-redis
 spec:
   type: ClusterIP
@@ -48,5 +61,6 @@ spec:
     protocol: TCP
     name: redis
   selector:
-    app: {{ .Release.Name }}-oauth2-proxy-redis
+    app: {{ $fullName }}-oauth2-proxy-redis
+{{- end -}}
 {{- end -}}

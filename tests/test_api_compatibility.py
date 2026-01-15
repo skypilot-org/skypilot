@@ -112,10 +112,12 @@ def get_field_info(model_class: Type) -> Dict[str, Dict[str, Any]]:
 def compare_field_types(type1: Any, type2: Any) -> bool:
     """Compare two type annotations for compatibility."""
     # Handle Optional types
+    # For Optional[Union[typea, typeb]], we need to compare the union types
+    # in set to avoid order dependency.
     if get_origin(type1) is Union and type(None) in get_args(type1):
-        type1 = next(arg for arg in get_args(type1) if arg is not type(None))
+        type1 = set(arg for arg in get_args(type1) if arg is not type(None))
     if get_origin(type2) is Union and type(None) in get_args(type2):
-        type2 = next(arg for arg in get_args(type2) if arg is not type(None))
+        type2 = set(arg for arg in get_args(type2) if arg is not type(None))
 
     # Handle List types
     if get_origin(type1) is list:

@@ -437,3 +437,202 @@ def test_nested_config_override_with_nonexistent_key():
                                     default_value=None,
                                     override_configs=override_config)
     assert result == override_config['kubernetes']['pod_config']
+
+
+def test_get_cloud_config_value_from_dict_ssh_with_context():
+    """Test get_cloud_config_value_from_dict for SSH cloud with context_configs."""
+    # Test SSH cloud with context_configs
+    dict_config = {
+        'ssh': {
+            'pod_config': {
+                'metadata': {
+                    'labels': {
+                        'default': 'true'
+                    }
+                }
+            },
+            'context_configs': {
+                'my-cluster': {
+                    'pod_config': {
+                        'metadata': {
+                            'labels': {
+                                'cluster': 'my-cluster'
+                            }
+                        }
+                    },
+                    'provision_timeout': 3600
+                }
+            }
+        }
+    }
+
+    # Get context-specific pod_config
+    result = config_utils.get_cloud_config_value_from_dict(
+        dict_config=dict_config,
+        cloud='ssh',
+        region='my-cluster',
+        keys=('pod_config',),
+        default_value={})
+
+    expected = {'metadata': {'labels': {'cluster': 'my-cluster'}}}
+    assert result == expected
+
+    # Get context-specific provision_timeout
+    result = config_utils.get_cloud_config_value_from_dict(
+        dict_config=dict_config,
+        cloud='ssh',
+        region='my-cluster',
+        keys=('provision_timeout',),
+        default_value=600)
+    assert result == 3600
+
+    # Get config for non-existent context (should return default)
+    result = config_utils.get_cloud_config_value_from_dict(
+        dict_config=dict_config,
+        cloud='ssh',
+        region='non-existent-cluster',
+        keys=('provision_timeout',),
+        default_value=600)
+    assert result == 600
+
+
+def test_get_cloud_config_value_from_dict_ssh_without_context():
+    """Test get_cloud_config_value_from_dict for SSH cloud without context."""
+    dict_config = {
+        'ssh': {
+            'pod_config': {
+                'metadata': {
+                    'labels': {
+                        'default': 'true'
+                    }
+                }
+            },
+            'provision_timeout': 1800
+        }
+    }
+
+    # Get top-level pod_config (no context)
+    result = config_utils.get_cloud_config_value_from_dict(
+        dict_config=dict_config,
+        cloud='ssh',
+        region=None,
+        keys=('pod_config',),
+        default_value={})
+
+    expected = {'metadata': {'labels': {'default': 'true'}}}
+    assert result == expected
+
+    # Get top-level provision_timeout (no context)
+    result = config_utils.get_cloud_config_value_from_dict(
+        dict_config=dict_config,
+        cloud='ssh',
+        region=None,
+        keys=('provision_timeout',),
+        default_value=600)
+    assert result == 1800
+
+
+def test_get_cloud_config_value_from_dict_kubernetes_with_context():
+    """Test get_cloud_config_value_from_dict for Kubernetes cloud with context_configs."""
+    dict_config = {
+        'kubernetes': {
+            'pod_config': {
+                'metadata': {
+                    'labels': {
+                        'default': 'true'
+                    }
+                }
+            },
+            'context_configs': {
+                'k8s-cluster-1': {
+                    'pod_config': {
+                        'metadata': {
+                            'labels': {
+                                'cluster': 'k8s-cluster-1'
+                            }
+                        }
+                    },
+                    'autoscaler': 'gke'
+                }
+            }
+        }
+    }
+
+    # Get context-specific pod_config
+    # Note: Context configs are MERGED with default configs, not replaced
+    result = config_utils.get_cloud_config_value_from_dict(
+        dict_config=dict_config,
+        cloud='kubernetes',
+        region='k8s-cluster-1',
+        keys=('pod_config',),
+        default_value={})
+
+    expected = {
+        'metadata': {
+            'labels': {
+                'cluster': 'k8s-cluster-1',
+                'default': 'true'  # Default label is preserved and merged
+            }
+        }
+    }
+    assert result == expected
+
+    # Get context-specific autoscaler
+    result = config_utils.get_cloud_config_value_from_dict(
+        dict_config=dict_config,
+        cloud='kubernetes',
+        region='k8s-cluster-1',
+        keys=('autoscaler',),
+        default_value=None)
+    assert result == 'gke'
+
+
+def test_merge_k8s_configs_with_patch_merge_keys():
+    """Test merging Kubernetes configs using patch merge keys."""
+    base_config = {
+        'env': [{
+            'name': 'ENV1',
+            'value': 'value1'
+        }, {
+            'name': 'ENV2',
+            'value': 'value2'
+        }],
+        'ports': [{
+            'containerPort': 8080,
+            'protocol': 'TCP'
+        }]
+    }
+    override_config = {
+        'env': [{
+            'name': 'ENV1',
+            'value': 'updated_value1'
+        }, {
+            'name': 'ENV3',
+            'value': 'value3'
+        }],
+        'ports': [{
+            'containerPort': 8080,
+            'protocol': 'UDP'
+        }, {
+            'containerPort': 9090,
+            'protocol': 'TCP'
+        }]
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+
+    # Check env variables
+    assert len(base_config['env']) == 3
+    env1 = next(e for e in base_config['env'] if e['name'] == 'ENV1')
+    assert env1['value'] == 'updated_value1'
+    env3 = next(e for e in base_config['env'] if e['name'] == 'ENV3')
+    assert env3['value'] == 'value3'
+
+    # Check ports
+    assert len(base_config['ports']) == 2
+    port_8080 = next(
+        p for p in base_config['ports'] if p['containerPort'] == 8080)
+    assert port_8080['protocol'] == 'UDP'
+    port_9090 = next(
+        p for p in base_config['ports'] if p['containerPort'] == 9090)
+    assert port_9090['protocol'] == 'TCP'

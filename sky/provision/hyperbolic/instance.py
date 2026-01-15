@@ -1,6 +1,6 @@
 """Hyperbolic instance provisioning."""
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.provision import common
@@ -64,8 +64,9 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return next(iter(instances.keys()))
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
+    del cluster_name  # unused
     logger.info(f'Starting run_instances with region={region}, '
                 f'cluster={cluster_name_on_cloud}')
     logger.debug(f'Config: {config}')
@@ -304,12 +305,14 @@ def get_cluster_info(
 
 
 def query_instances(
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[dict] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional['status_lib.ClusterStatus']]:
+    retry_if_missing: bool = False,
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """Returns the status of the specified instances for Hyperbolic."""
-    del provider_config  # unused
+    del cluster_name, provider_config, retry_if_missing  # unused
     # Fetch all instances for this cluster
     instances = utils.list_instances(
         metadata={'skypilot': {
@@ -319,7 +322,8 @@ def query_instances(
         # No instances found: return empty dict to indicate fully deleted
         return {}
 
-    statuses: Dict[str, Optional['status_lib.ClusterStatus']] = {}
+    statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
+                              Optional[str]]] = {}
     for instance_id, instance in instances.items():
         try:
             raw_status = instance.get('status', 'unknown').lower()
@@ -328,7 +332,7 @@ def query_instances(
             status = hyperbolic_status.to_cluster_status()
             if non_terminated_only and status is None:
                 continue
-            statuses[instance_id] = status
+            statuses[instance_id] = (status, None)
         except utils.HyperbolicError as e:
             logger.warning(
                 f'Failed to parse status for instance {instance_id}: {e}')
@@ -412,6 +416,16 @@ def cleanup_ports(
 ) -> None:
     """Cleanup ports. Not supported for Hyperbolic."""
     raise NotImplementedError('cleanup_ports is not supported for Hyperbolic')
+
+
+def cleanup_custom_multi_network(
+    cluster_name_on_cloud: str,
+    provider_config: Dict[str, Any],
+    failover: bool = False,
+) -> None:
+    """Cleanup custom multi-network. Not supported for Hyperbolic."""
+    raise NotImplementedError(
+        'cleanup_custom_multi_network is not supported for Hyperbolic')
 
 
 def open_ports(

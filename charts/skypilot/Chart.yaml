@@ -1,12 +1,13 @@
 apiVersion: v2
 name: skypilot
 description: A Helm chart for deploying SkyPilot API server on Kubernetes
+icon: "https://raw.githubusercontent.com/skypilot-org/skypilot/master/charts/skypilot/skypilot.svg"
 type: application
 version: 0.0.0
 appVersion: "0.0"
 dependencies:
   - name: ingress-nginx
-    version: 4.11.3
+    version: 4.11.8
     repository: https://kubernetes.github.io/ingress-nginx
     condition: ingress-nginx.enabled
   - name: prometheus

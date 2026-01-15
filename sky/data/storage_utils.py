@@ -5,7 +5,7 @@ import pathlib
 import shlex
 import stat
 import subprocess
-from typing import Any, Dict, List, Optional, Set, TextIO, Union
+from typing import List, Optional, Set, TextIO, Union
 import warnings
 import zipfile
 
@@ -15,55 +15,11 @@ from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import log_utils
 
 logger = sky_logging.init_logger(__name__)
 
 _USE_SKYIGNORE_HINT = (
     'To avoid using .gitignore, you can create a .skyignore file instead.')
-
-
-def format_storage_table(storages: List[Dict[str, Any]],
-                         show_all: bool = False) -> str:
-    """Format the storage table for display.
-
-    Args:
-        storage_table (dict): The storage table.
-
-    Returns:
-        str: The formatted storage table.
-    """
-    storage_table = log_utils.create_table([
-        'NAME',
-        'UPDATED',
-        'STORE',
-        'COMMAND',
-        'STATUS',
-    ])
-
-    for row in storages:
-        launched_at = row['launched_at']
-        if show_all:
-            command = row['last_use']
-        else:
-            command = common_utils.truncate_long_string(
-                row['last_use'], constants.LAST_USE_TRUNC_LENGTH)
-        storage_table.add_row([
-            # NAME
-            row['name'],
-            # LAUNCHED
-            log_utils.readable_time_duration(launched_at),
-            # CLOUDS
-            ', '.join([s.value for s in row['store']]),
-            # COMMAND,
-            command,
-            # STATUS
-            row['status'].value,
-        ])
-    if storages:
-        return str(storage_table)
-    else:
-        return 'No existing storage.'
 
 
 def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
@@ -252,17 +208,28 @@ def get_excluded_files(src_dir_path: str) -> List[str]:
 
 def zip_files_and_folders(items: List[str],
                           output_file: Union[str, pathlib.Path],
-                          log_file: Optional[TextIO] = None):
+                          log_file: Optional[TextIO] = None,
+                          relative_to_items: bool = False):
 
-    def _store_symlink(zipf, path: str, is_dir: bool):
+    def _get_archive_name(file_path: str, item_path: str) -> str:
+        """Get the archive name for a file based on the relative parameters."""
+        if relative_to_items:
+            # Make paths relative to the item itself
+            return os.path.relpath(file_path, os.path.dirname(item_path))
+        else:
+            # Default: use full path (existing behavior)
+            return file_path
+
+    def _store_symlink(zipf, path: str, archive_name: str, is_dir: bool):
         # Get the target of the symlink
         target = os.readlink(path)
         # Use relative path as absolute path will not be able to resolve on
         # remote API server.
         if os.path.isabs(target):
             target = os.path.relpath(target, os.path.dirname(path))
-        # Create a ZipInfo instance
-        zi = zipfile.ZipInfo(path + '/') if is_dir else zipfile.ZipInfo(path)
+        # Create a ZipInfo instance using the archive name
+        zi = zipfile.ZipInfo(archive_name +
+                             '/') if is_dir else zipfile.ZipInfo(archive_name)
         # Set external attributes to mark as symlink
         zi.external_attr = 0xA1ED0000
         # Write symlink target as content
@@ -281,8 +248,18 @@ def zip_files_and_folders(items: List[str],
                     # Add the file to the zip archive even if it matches
                     # patterns in dot ignore files, as it was explicitly
                     # specified by user.
-                    zipf.write(item)
+                    archive_name = _get_archive_name(item, item)
+                    zipf.write(item, archive_name)
                 elif os.path.isdir(item):
+                    # Include root dir
+                    archive_name = _get_archive_name(item, item)
+                    # If it's a symlink, store it as a symlink
+                    if os.path.islink(item):
+                        _store_symlink(zipf, item, archive_name, is_dir=True)
+                    else:
+                        zipf.write(item, archive_name)
+
+                    # Include dir contents recursively
                     excluded_files = set([
                         os.path.join(item, f.rstrip('/'))
                         for f in get_excluded_files(item)
@@ -304,21 +281,29 @@ def zip_files_and_folders(items: List[str],
                         # directories)
                         for dir_name in dirs:
                             dir_path = os.path.join(root, dir_name)
+                            archive_name = _get_archive_name(dir_path, item)
                             # If it's a symlink, store it as a symlink
                             if os.path.islink(dir_path):
-                                _store_symlink(zipf, dir_path, is_dir=True)
+                                _store_symlink(zipf,
+                                               dir_path,
+                                               archive_name,
+                                               is_dir=True)
                             else:
-                                zipf.write(dir_path)
+                                zipf.write(dir_path, archive_name)
 
                         for file in files:
                             file_path = os.path.join(root, file)
                             if file_path in excluded_files:
                                 continue
+                            archive_name = _get_archive_name(file_path, item)
                             if os.path.islink(file_path):
-                                _store_symlink(zipf, file_path, is_dir=False)
+                                _store_symlink(zipf,
+                                               file_path,
+                                               archive_name,
+                                               is_dir=False)
                                 continue
                             if stat.S_ISSOCK(os.stat(file_path).st_mode):
                                 continue
-                            zipf.write(file_path)
+                            zipf.write(file_path, archive_name)
                 if log_file is not None:
                     log_file.write(f'Zipped {item}\n')

@@ -6,6 +6,12 @@ Serving Models
 SkyServe is SkyPilot's model serving library. SkyServe takes an existing serving
 framework and deploys it across one or more regions or clouds.
 
+.. warning::
+   
+   SkyServe is currently in **beta**. It is well-suited for internal serving use cases (R&D, batch inference) but is not yet recommended for external/production serving. Expect rough edges.
+   
+   As we actively develop SkyServe, we welcome `feedback <https://slack.skypilot.co>`_ and `contributions <https://github.com/skypilot-org/skypilot/blob/master/CONTRIBUTING.md>`_.
+
 .. * Serve on scarce resources (e.g., A100; spot) with **reduced costs and increased availability**
 
 Why SkyServe?
@@ -36,11 +42,6 @@ How it works:
 .. SkyServe provides a simple CLI interface to deploy and manage your services. It
 .. features a simple YAML spec to describe your services (referred to as a *service
 .. YAML* in the following) and a centralized controller to manage the deployments.
-
-
-.. tip::
-
-  To get started with SkyServe, use the nightly build of SkyPilot: ``pip install -U skypilot-nightly``
 
 Quick tour: LLM serving
 -----------------------
@@ -487,6 +488,13 @@ It is automatically launched when the first service is deployed, and it is autos
 Thus, **no user action is needed** to manage its lifecycle.
 
 You can see the controller with :code:`sky status` and refresh its status by using the :code:`-r/--refresh` flag.
+
+High availability controller
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SkyServe also supports a High Availability Controller mode when running controller on Kubernetes. This ensures your services remain available even if the controller pod experiences unexpected failures. The controller state is preserved using persistent volumes, allowing seamless recovery with minimal disruption to your running services.
+
+For more details on setting up and configuring high availability, see :ref:`High availability controller <sky-serve-high-availability-controller>`.
 
 .. _customizing-sky-serve-controller-resources:
 

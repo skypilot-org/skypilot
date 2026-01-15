@@ -1,0 +1,29 @@
+name: amd-rocm-minGPT-ddp
+
+resources:
+  cloud: kubernetes
+  image_id: docker:rocm/pytorch-training:v25.6
+  accelerators: MI300:4
+  cpus: 128
+  memory: 512+
+
+
+setup: |
+  echo " minGPT example derived from https://github.com/pytorch/examples"
+  sleep 10
+  
+run: |
+  echo " rocm-smi smoke test:"
+  rocm-smi
+  # amd dockers can use their own conda environment
+  conda deactivate
+  
+  git clone https://github.com/pytorch/examples.git
+  cd examples/distributed/minGPT-ddp
+  # Install dependencies
+  pip install -r requirements.txt
+  sleep 5
+ 
+  echo "Running Pytorch minGPT example..."
+  sudo /bin/bash run_example.sh ./mingpt/main.py 4
+  rocm-smi

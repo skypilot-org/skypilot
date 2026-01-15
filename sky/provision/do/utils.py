@@ -17,6 +17,7 @@ from sky.provision import constants as provision_constants
 from sky.provision.do import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -30,7 +31,7 @@ POSSIBLE_CREDENTIALS_PATHS = [
 INITIAL_BACKOFF_SECONDS = 10
 MAX_BACKOFF_FACTOR = 10
 MAX_ATTEMPTS = 6
-SSH_KEY_NAME_ON_DO = f'sky-key-{common_utils.get_user_hash()}'
+SSH_KEY_NAME_ON_DO_PREFIX = 'sky-key-'
 
 _client = None
 _ssh_key_id = None
@@ -61,7 +62,7 @@ def _init_client():
     if get_credentials_path() is None:
         raise DigitalOceanError(
             'No credentials found, please run `doctl auth init`')
-    credentials = common_utils.read_yaml(get_credentials_path())
+    credentials = yaml_utils.read_yaml(get_credentials_path())
     default_token = credentials.get('access-token', None)
     if default_token is not None:
         try:
@@ -125,7 +126,7 @@ def ssh_key_id(public_key: str):
 
         request = {
             'public_key': public_key,
-            'name': SSH_KEY_NAME_ON_DO,
+            'name': SSH_KEY_NAME_ON_DO_PREFIX + common_utils.get_user_hash(),
         }
         _ssh_key_id = client().ssh_keys.create(body=request)['ssh_key']
     return _ssh_key_id

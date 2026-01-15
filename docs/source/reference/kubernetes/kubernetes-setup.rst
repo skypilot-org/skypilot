@@ -55,6 +55,7 @@ After these required steps, perform optional setup steps as needed:
 * :ref:`kubernetes-setup-priority`
 * :ref:`kubernetes-setup-serviceaccount`
 * :ref:`kubernetes-setup-ports`
+* :ref:`kubernetes-setup-proxy`
 
 Once completed, the administrator can share the kubeconfig file with users, who can then submit tasks to the cluster using SkyPilot.
 
@@ -108,11 +109,15 @@ Step 2 - Set up GPU support
 
 To utilize GPUs on Kubernetes, your cluster must:
 
-1. Have the ``nvidia.com/gpu`` **resource** available on all GPU nodes and have ``nvidia`` as the default runtime for your container engine.
+-  If using NVIDIA GPUs, have the ``nvidia.com/gpu`` **resource** available on all GPU nodes and have ``nvidia`` as the default runtime for your container engine.
 
    * If you are following :ref:`our deployment guides <kubernetes-deployment>` or using GKE or EKS, this would already be set up. Else, install the `Nvidia GPU Operator <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#install-nvidia-gpu-operator>`_.
 
-2. Have a **label on each node specifying the GPU type**. See :ref:`Setting up GPU labels <kubernetes-gpu-labels>` for more details.
+- If using AMD GPUs, have the ``amd.com/gpu`` **resource** available on all GPU nodes and install the AMD GPU Operator.
+
+  * Follow the instructions in :ref:`AMD GPUs on Kubernetes <kubernetes-amd-gpu>` to install the AMD GPU Operator.
+
+- Have a **label on each node specifying the GPU type**. See :ref:`Setting up GPU labels <kubernetes-gpu-labels>` for more details.
 
 
 .. tip::
@@ -180,6 +185,10 @@ If none of the above labels are present on your cluster, we provide a convenienc
 
 .. note::
 
+    Automatically labelling AMD GPUs is not supported at this moment. Please follow the instructions in "Manually labelling nodes" section below.
+
+.. note::
+
     If the GPU labelling process fails, you can run ``python -m sky.utils.kubernetes.gpu_labeler --cleanup`` to clean up the failed jobs.
 
 Manually labelling nodes
@@ -187,7 +196,7 @@ Manually labelling nodes
 
 You can also manually label nodes, if required. Labels must be of the format ``skypilot.co/accelerator: <gpu_name>`` where ``<gpu_name>`` is the lowercase name of the GPU.
 
-For example, a node with H100 GPUs must have a label :code:`skypilot.co/accelerator: h100`.
+For example, a node with H100 GPUs must have a label :code:`skypilot.co/accelerator: h100`, and a node with MI300 GPUs must have a label :code:`skypilot.co/accelerator: mi300`.
 
 Use the following command to label a node:
 
@@ -244,204 +253,22 @@ The following setup steps are optional and can be performed based on your specif
 * :ref:`kubernetes-setup-serviceaccount`
 * :ref:`kubernetes-setup-ports`
 * :ref:`kubernetes-setup-fuse`
+* :ref:`kubernetes-setup-proxy`
 
 .. _kubernetes-setup-volumes:
 
-Set up NFS and other volumes
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Set up volumes
+^^^^^^^^^^^^^^^
 
-`Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ can be attached to your SkyPilot pods using the :ref:`pod_config <kubernetes-custom-pod-config>` field. This is useful for accessing shared storage such as NFS or local high-performance storage like NVMe drives.
+SkyPilot supports mounting various types of volumes to your pods on Kubernetes:
 
-Volume mounting can be done directly in the task YAML on a per-task basis, or globally for all tasks in :code:`~/.sky/config.yaml`.
+* **Persistent volumes**: Independently managed volumes with lifecycle separate from clusters, ideal for long-term data storage and sharing datasets across clusters. These can be backed by block storage (e.g., AWS EBS, GCP Persistent Disk) or distributed file systems (e.g., JuiceFS, Nebius shared file system, AWS EFS, GCP Filestore).
 
-Examples:
+* **Ephemeral volumes**: Automatically created and deleted with your cluster, suitable for temporary storage and caches that are cluster-specific.
 
-.. tab-set::
+* **Other volume types**: You can also mount hostPath, NFS, etc. as needed.
 
-    .. tab-item:: NFS using hostPath
-      :name: kubernetes-volumes-hostpath-nfs
-
-      Mount a NFS share that's `already mounted on the Kubernetes nodes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_.
-
-      **Per-task configuration:**
-
-      .. code-block:: yaml
-
-           # task.yaml
-           run: |
-             echo "Hello, world!" > /mnt/nfs/hello.txt
-             ls -la /mnt/nfs
-
-           config:
-             kubernetes:
-               pod_config:
-                 spec:
-                   containers:
-                     - volumeMounts:
-                         - mountPath: /mnt/nfs
-                           name: my-host-nfs
-                   volumes:
-                     - name: my-host-nfs
-                       hostPath:
-                         path: /path/on/host/nfs
-                         type: Directory
-
-      **Global configuration:**
-
-      .. code-block:: yaml
-
-           # ~/.sky/config.yaml
-           kubernetes:
-             pod_config:
-               spec:
-                 containers:
-                   - volumeMounts:
-                       - mountPath: /mnt/nfs
-                         name: my-host-nfs
-                 volumes:
-                   - name: my-host-nfs
-                     hostPath:
-                       path: /path/on/host/nfs
-                       type: Directory
-
-    .. tab-item:: NFS using native volume
-      :name: kubernetes-volumes-native-nfs
-
-      Mount a NFS share using Kubernetes' `native NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_ support.
-
-      **Per-task configuration:**
-
-      .. code-block:: yaml
-
-           # task.yaml
-           run: |
-             echo "Hello, world!" > /mnt/nfs/hello.txt
-             ls -la /mnt/nfs
-
-           config:
-             kubernetes:
-               pod_config:
-                 spec:
-                    containers:
-                      - volumeMounts:
-                          - mountPath: /mnt/nfs
-                            name: nfs-volume
-                    volumes:
-                      - name: nfs-volume
-                        nfs:
-                          server: nfs.example.com
-                          path: /shared
-                          readOnly: false
-
-      **Global configuration:**
-
-      .. code-block:: yaml
-
-           # ~/.sky/config.yaml
-           kubernetes:
-             pod_config:
-               spec:
-                 containers:
-                   - volumeMounts:
-                       - mountPath: /mnt/nfs
-                         name: nfs-volume
-                 volumes:
-                   - name: nfs-volume
-                     nfs:
-                       server: nfs.example.com
-                       path: /shared
-                       readOnly: false
-
-    .. tab-item:: NVMe using hostPath
-      :name: kubernetes-volumes-hostpath-nvme
-
-      Mount local NVMe storage that's already mounted on the Kubernetes nodes.
-
-      **Per-task configuration:**
-
-      .. code-block:: yaml
-
-           # task.yaml
-           run: |
-             echo "Hello, world!" > /mnt/nvme/hello.txt
-             ls -la /mnt/nvme
-
-           config:
-             kubernetes:
-               pod_config:
-                 spec:
-                    containers:
-                      - volumeMounts:
-                          - mountPath: /mnt/nvme
-                            name: nvme
-                    volumes:
-                      - name: nvme
-                        hostPath:
-                          path: /path/on/host/nvme
-                          type: Directory
-
-      **Global configuration:**
-
-      .. code-block:: yaml
-
-           # ~/.sky/config.yaml
-           kubernetes:
-             pod_config:
-               spec:
-                 containers:
-                   - volumeMounts:
-                       - mountPath: /mnt/nvme
-                         name: nvme
-                 volumes:
-                   - name: nvme
-                     hostPath:
-                       path: /path/on/host/nvme
-                       type: Directory
-
-    .. tab-item:: Nebius shared filesystem
-      :name: kubernetes-volumes-nebius-shared-filesystem
-
-      When creating a node group on the Nebius console, attach your desired shared file system to the node group (``Create Node Group`` -> ``Attach shared filesystem``):
-
-      * Ensure ``Auto mount`` is enabled.
-      * Note the ``Mount tag`` (e.g. ``filesystem-d0``).
-
-      .. image:: ../../images/screenshots/nebius/nebius-k8s-attach-fs.png
-        :width: 50%
-        :align: center
-
-      Nebius will automatically mount the shared filesystem to hosts in the node group. You can then use a ``hostPath`` volume to mount the shared filesystem to your SkyPilot pods.
-
-      **Per-task configuration:**
-
-      .. code-block:: yaml
-
-           # task.yaml
-           run: |
-             echo "Hello, world!" > /mnt/nfs/hello.txt
-             ls -la /mnt/nfs
-
-           config:
-             kubernetes:
-               pod_config:
-                 spec:
-                   containers:
-                     - volumeMounts:
-                         - mountPath: /mnt/nfs
-                           name: nebius-sharedfs
-                   volumes:
-                     - name: nebius-sharedfs
-                       hostPath:
-                         path: /mnt/<mount_tag> # e.g. /mnt/filesystem-d0
-                         type: Directory
-
-
-.. note::
-
-  When using `hostPath volumes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_, the specified paths must already exist on the Kubernetes node where the pod is scheduled.
-
-  For NFS mounts using hostPath, ensure the NFS mount is already configured on all Kubernetes nodes.
-
+For detailed information on configuring and using volumes, see :ref:`volumes-on-kubernetes`.
 
 .. _kubernetes-setup-priority:
 
@@ -517,6 +344,40 @@ However, if you are operating in a cluster with restricted permissions, you can 
     # If you do not want to grant SkyPilot the ability to create privileged daemonsets, manually deploy the FUSE proxy:
     $ kubectl create namespace skypilot-system || true
     $ kubectl -n skypilot-system apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/sky/provision/kubernetes/manifests/fusermount-server-daemonset.yaml
+
+.. _kubernetes-setup-proxy:
+
+Set up proxy configuration
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If your Kubernetes cluster is behind a corporate proxy or firewall, SkyPilot pods may fail to download dependencies during setup. This typically manifests as the installation getting stuck during conda initialization or package downloads.
+
+To resolve this, you can configure proxy settings for SkyPilot pods by adding environment variables to your pod configuration in ``~/.sky/config.yaml``:
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    kubernetes:
+      pod_config:
+        spec:
+          containers:
+            - env:
+                - name: HTTP_PROXY
+                  value: http://proxy-host:3128
+                - name: HTTPS_PROXY
+                  value: http://proxy-host:3128
+                - name: NO_PROXY
+                  value: localhost,127.0.0.1
+                - name: http_proxy
+                  value: http://proxy-host:3128
+                - name: https_proxy
+                  value: http://proxy-host:3128
+                - name: no_proxy
+                  value: localhost,127.0.0.1
+
+Replace ``proxy-host:3128`` with your actual proxy server address and port.
+
+Both uppercase and lowercase versions of the proxy environment variables are included for maximum compatibility across different tools and libraries.
 
 .. _kubernetes-observability:
 

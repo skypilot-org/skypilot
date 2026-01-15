@@ -1,0 +1,12 @@
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        volumes:
+        - name: test-volume
+          persistentVolumeClaim:
+            claimName: {{ pvc_name }}
+        containers:
+        - volumeMounts:
+          - name: test-volume
+            mountPath: /mnt/test-data

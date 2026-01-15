@@ -31,7 +31,30 @@
   {{- fail "Error\nDeploying a SkyPilot API server requires at least 4 CPU cores and 8 GiB memory. You can either:\n1. Change `--set apiService.resources.requests.cpu` and `--set apiService.resources.requests.memory` to meet the requirements or unset them to use defaults\n2. add `--set apiService.skipResourceCheck=true` in command args to bypass this check (not recommended for production)\nto resolve this issue and then try again." -}}
 {{- end -}}
 
-{{- end -}} 
+{{- end -}}
+
+{{/*
+Resolve the image name, overriding the registry when global.imageRegistry is set.
+Usage: {{ include "common.image" (dict "root" . "image" "repo/name:tag") }}
+*/}}
+{{- define "common.image" -}}
+{{- $image := default "" .image -}}
+{{- $registry := default "" .root.Values.global.imageRegistry -}}
+{{- if $registry -}}
+  {{- $imagePath := trimPrefix "/" $image -}}
+  {{- $parts := splitList "/" $imagePath -}}
+  {{- if gt (len $parts) 1 -}}
+    {{- $first := index $parts 0 -}}
+    {{- if or (contains "." $first) (contains ":" $first) (eq $first "localhost") -}}
+      {{- $imagePath = join "/" (slice $parts 1) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- printf "%s/%s" (trimSuffix "/" $registry) $imagePath -}}
+{{- else -}}
+  {{- $image -}}
+{{- end -}}
+{{- end -}}
+
 
 {{/*
 Check for apiService.config during upgrade and display warning
@@ -46,15 +69,26 @@ https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.
 {{- end -}}
 
 {{/*
+Compute full release name with optional fullnameOverride.
+*/}}
+{{- define "skypilot.fullname" -}}
+{{- if .Values.fullnameOverride -}}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Create the name of the service account to use
 */}}
 {{- define "skypilot.serviceAccountName" -}}
 {{- if .Values.rbac.serviceAccountName -}}
 {{ .Values.rbac.serviceAccountName }}
 {{- else -}}
-{{ .Release.Name }}-api-sa
+{{ include "skypilot.fullname" . }}-api-sa
 {{- end -}}
-{{- end -}} 
+{{- end -}}
 
 {{/*
 Create the namespace if not exist
@@ -85,7 +119,7 @@ false
 {{- if .Values.apiService.initialBasicAuthSecret -}}
 {{ .Values.apiService.initialBasicAuthSecret }}
 {{- else if .Values.apiService.initialBasicAuthCredentials -}}
-{{ printf "%s-initial-basic-auth" .Release.Name }}
+{{ printf "%s-initial-basic-auth" (include "skypilot.fullname" .) }}
 {{- else -}}
 {{- /* Return empty string */ -}}
 {{ "" }}
@@ -97,4 +131,47 @@ false
 --deploy{{ if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }} --enable-basic-auth{{ end }}
 {{- end -}}
 
+{{- define "skypilot.oauth2ProxyURL" -}}
+http://{{ include "skypilot.fullname" . }}-oauth2-proxy:4180
+{{- end -}}
 
+{{- define "skypilot.ingressBasicAuthEnabled" -}}
+{{- if and .Values.ingress.enabled (or .Values.ingress.authSecret .Values.ingress.authCredentials) -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
+{{- define "skypilot.ingressOAuthEnabled" -}}
+{{- if and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled") -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
+{{- define "skypilot.serviceAccountAuthEnabled" -}}
+{{- if include "skypilot.ingressBasicAuthEnabled" . | trim | eq "true" -}}
+false
+{{- else if and .Values.auth .Values.auth.serviceAccount (ne .Values.auth.serviceAccount.enabled nil) -}}
+{{- .Values.auth.serviceAccount.enabled -}}
+{{- else -}}
+{{- .Values.apiService.enableServiceAccounts -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Validate the oauth config */}}
+{{- define "skypilot.validateOAuthConfig" -}}
+{{- $authOAuthEnabled := .Values.auth.oauth.enabled -}}
+{{- $ingressBasicAuthEnabled := include "skypilot.ingressBasicAuthEnabled" . | trim | eq "true" -}}
+{{- $ingressOAuthEnabled := include "skypilot.ingressOAuthEnabled" . | trim | eq "true" -}}
+
+{{- if and $authOAuthEnabled $ingressBasicAuthEnabled -}}
+  {{- fail "Error\nauth.oauth.enabled cannot be used together with ingress basic authentication (ingress.authSecret or ingress.authCredentials). These authentication methods are mutually exclusive. Please:\n1. Disable auth.oauth.enabled, OR\n2. Remove ingress.authSecret and ingress.authCredentials\nThen try again." -}}
+{{- end -}}
+
+{{- if and $authOAuthEnabled $ingressOAuthEnabled -}}
+  {{- fail "Error\nauth.oauth.enabled cannot be used together with ingress OAuth2 proxy authentication (ingress.oauth2-proxy.enabled). These authentication methods are mutually exclusive. Please:\n1. Disable auth.oauth.enabled, OR\n2. Set ingress.oauth2-proxy.enabled to false\nThen try again." -}}
+{{- end -}}
+{{- end -}}

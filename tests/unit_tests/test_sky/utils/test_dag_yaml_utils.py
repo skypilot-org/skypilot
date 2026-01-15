@@ -8,10 +8,10 @@ from sky.utils import dag_utils
 
 
 class TestDumpChainDagToYamlStr:
-    """Test dump_chain_dag_to_yaml_str function with secrets redaction."""
+    """Test dump_chain_dag_to_yaml_str function with user-specified YAML handling."""
 
-    def test_dump_chain_dag_with_redact_secrets_false(self):
-        """Test dumping chain DAG with redact_secrets=False (default)."""
+    def test_dump_chain_dag_with_use_user_specified_yaml_false(self):
+        """Test dumping chain DAG with use_user_specified_yaml=False (default)."""
         # Create a DAG with a task containing secrets
         dag = dag_lib.Dag()
         dag.name = 'test-dag'
@@ -35,8 +35,8 @@ class TestDumpChainDagToYamlStr:
         # Verify envs are preserved
         assert 'public-value' in yaml_str
 
-    def test_dump_chain_dag_with_redact_secrets_true(self):
-        """Test dumping chain DAG with redact_secrets=True."""
+    def test_dump_chain_dag_with_use_user_specified_yaml_true(self):
+        """Test dumping chain DAG with use_user_specified_yaml=True."""
         # Create a DAG with a task containing secrets
         dag = dag_lib.Dag()
         dag.name = 'test-dag'
@@ -50,8 +50,8 @@ class TestDumpChainDagToYamlStr:
         dag.add(task)
 
         # Test with explicit redaction
-        yaml_str = dag_utils.dump_chain_dag_to_yaml_str(dag,
-                                                        redact_secrets=True)
+        yaml_str = dag_utils.dump_chain_dag_to_yaml_str(
+            dag, use_user_specified_yaml=True)
 
         # Verify secrets are redacted
         assert 'secret-value' not in yaml_str
@@ -78,20 +78,20 @@ class TestDumpChainDagToYamlStr:
 
         # Test with redaction enabled
         yaml_str_redacted = dag_utils.dump_chain_dag_to_yaml_str(
-            dag, redact_secrets=True)
+            dag, use_user_specified_yaml=True)
 
         # String values should be redacted
         assert 'secret-string' not in yaml_str_redacted
         assert '<redacted>' in yaml_str_redacted
 
-        # Non-string values should be preserved
-        assert '5432' in yaml_str_redacted
-        assert 'true' in yaml_str_redacted.lower()
-        assert 'null' in yaml_str_redacted.lower()
+        # All values should be redacted (including non-string values)
+        assert '5432' not in yaml_str_redacted
+        # Note: we avoid checking for 'true'/'null' as they may appear elsewhere in YAML
+        # The key check is that <redacted> appears and original secret values don't
 
         # Test without redaction
         yaml_str_no_redact = dag_utils.dump_chain_dag_to_yaml_str(
-            dag, redact_secrets=False)
+            dag, use_user_specified_yaml=False)
 
         # All values should be preserved
         assert 'secret-string' in yaml_str_no_redact
@@ -113,9 +113,9 @@ class TestDumpChainDagToYamlStr:
 
         # Test both redaction modes (should be identical)
         yaml_str_redacted = dag_utils.dump_chain_dag_to_yaml_str(
-            dag, redact_secrets=True)
+            dag, use_user_specified_yaml=True)
         yaml_str_no_redact = dag_utils.dump_chain_dag_to_yaml_str(
-            dag, redact_secrets=False)
+            dag, use_user_specified_yaml=False)
 
         # Both should be identical since no secrets exist
         assert yaml_str_redacted == yaml_str_no_redact
@@ -147,8 +147,8 @@ class TestDumpChainDagToYamlStr:
 
         # Test explicit redaction for both
         dag_yaml_str_redacted = dag_utils.dump_chain_dag_to_yaml_str(
-            dag, redact_secrets=True)
-        task_config_redacted = task.to_yaml_config(redact_secrets=True)
+            dag, use_user_specified_yaml=True)
+        task_config_redacted = task.to_yaml_config(use_user_specified_yaml=True)
 
         # Both should redact secrets
         assert 'secret-value' not in dag_yaml_str_redacted
@@ -173,13 +173,13 @@ class TestDumpChainDagToYamlStr:
 
         # Test without redaction
         yaml_str_no_redact = dag_utils.dump_chain_dag_to_yaml_str(
-            dag, redact_secrets=False)
+            dag, use_user_specified_yaml=False)
         assert 'task1-secret-value' in yaml_str_no_redact
         assert 'task2-secret-value' in yaml_str_no_redact
 
         # Test with redaction
         yaml_str_redacted = dag_utils.dump_chain_dag_to_yaml_str(
-            dag, redact_secrets=True)
+            dag, use_user_specified_yaml=True)
         assert 'task1-secret-value' not in yaml_str_redacted
         assert 'task2-secret-value' not in yaml_str_redacted
         assert '<redacted>' in yaml_str_redacted

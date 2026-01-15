@@ -29,7 +29,7 @@ More infra choices (AWS, Lambda Cloud, RunPod, SSH Node Pools, and more) are cov
 Prerequisites
 --------------
 
-* Okta with SkyPilot API server configured as OIDC App (see `auth proxy docs <https://docs.skypilot.co/en/latest/reference/api-server/examples/api-server-auth-proxy.html#setting-up-oauth2-proxy-with-okta>`_)
+* Okta with SkyPilot API server configured as OIDC App (see `auth proxy docs <https://docs.skypilot.co/en/latest/reference/auth.html#okta-oidc-setup>`_)
 * GCP credentials with access to a GKE cluster and permissions to create VMs (`GCP service account with json key <https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html#service-account>`_)
 * Nebius credentials (`Nebius service account with json key <https://docs.nebius.com/iam/service-accounts/authorized-keys#create>`_)
 * An existing `Nebius Managed Kubernetes cluster <https://docs.nebius.com/kubernetes>`_
@@ -157,7 +157,6 @@ Deploy the API server with helm:
      --set kubernetesCredentials.kubeconfigSecretName=kube-credentials \
      --set gcpCredentials.enabled=true \
      --set gcpCredentials.projectId=$GCP_PROJECT_ID \
-     --set gcpCredentials.serviceAccountJson=$GCP_SERVICE_ACCOUNT_JSON \
      --set nebiusCredentials.enabled=true \
      --set nebiusCredentials.tenantId=$NEBIUS_TENANT_ID
 
@@ -296,8 +295,8 @@ Some commands to try:
 * ``sky show-gpus`` to show available GPUs
 * ``sky status`` to see SkyPilot status and infra available
 
-✨ Bonus: Infiniband and Nebius shared filesystem
--------------------------------------------------
+✨ Bonus: Infiniband, Nebius shared filesystem, and volumes
+-----------------------------------------------------------
 
 Configuring Infiniband on Nebius Kubernetes cluster
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -376,3 +375,151 @@ Here's an example of how to use the shared filesystem in a SkyPilot job:
 
 .. note::
    Add the above ``config`` field to the SkyPilot config (``~/.sky/config.yaml`` `global config <https://docs.skypilot.co/en/latest/reference/config.html#config-yaml>`_ or ``.sky.yaml`` `project config <https://docs.skypilot.co/en/latest/reference/config-sources.html#config-client-project-config>`_) to have the shared filesystem mounted automatically for all your jobs.
+
+Volumes on top of Nebius shared filesystem
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The above guide allows you to mount the entire Nebius shared filesystem to all SkyPilot clusters. Additionally, SkyPilot supports creating and managing :ref:`volumes <volumes-on-kubernetes>` on top of the shared filesystem using Kubernetes Persistent Volume Claims.
+
+Volumes provide several key benefits:
+
+* **Caching**: Serve as persistent cache for PyPI packages, Hugging Face models, and other dependencies
+* **Isolation**: Provide better data isolation between clusters and jobs compared to mounting the shared filesystem directly to node groups
+
+1. Prepare a volume YAML file:
+
+   .. code-block:: yaml
+
+     # volume.yaml
+     name: new-pvc
+     type: k8s-pvc
+     infra: k8s/nebius-mk8s-nebius-gpu-dev
+     size: 10Gi
+     config:
+       namespace: default  # optional
+       storage_class_name: csi-mounted-fs-path-sc
+       access_mode: ReadWriteMany
+
+2. Create the volume with ``sky volumes apply volume.yaml``:
+
+   .. code-block:: console
+
+     $ sky volumes apply volume.yaml
+     Proceed to create volume 'new-pvc'? [Y/n]: Y
+     Creating PVC: new-pvc-73ec42f2-5c6c4e
+
+3. Mount the volume in your task YAML:
+
+   .. code-block:: yaml
+
+     # task.yaml
+     volumes:
+       /mnt/data: new-pvc  # The volume new-pvc will be mounted to /mnt/data
+
+     run: |
+       echo "Hello, World!" > /mnt/data/hello.txt
+
+Refer to :ref:`volumes-on-kubernetes` for more details.
+
+.. _api-server-gpu-metrics-setup-nebius:
+
+Setup GPU metrics in Nebius Kubernetes cluster
+----------------------------------------------
+
+If you are using Nebius Kubernetes cluster, you can setup GPU metrics in the cluster to get real-time GPU metrics in the SkyPilot dashboard.
+
+1. Install the Prometheus operator.
+
+On Nebius console, in the detail page of the Nebius Kubernetes cluster, go to ``Applications`` -> Search for ``Prometheus Operator`` -> ``Deploy`` -> Enter ``skypilot`` for the ``Namespace`` -> ``Deploy application``.
+
+.. image:: ../../../images/metrics/search-prom-operator.png
+    :alt: Search for Prometheus Operator
+    :align: center
+    :width: 60%
+
+.. image:: ../../../images/metrics/deploy-prom-operator.png
+    :alt: Deploy Prometheus Operator
+    :align: center
+    :width: 60%
+
+Wait for the Prometheus operator to be installed, the status badge will become ``Deployed``.
+
+.. image:: ../../../images/metrics/status-prom-operator.png
+    :alt: Status of Prometheus Operator
+    :align: center
+    :width: 60%
+
+You can also check the Pod status to verify the installation.
+
+.. code-block:: bash
+
+  kubectl get pods -n skypilot
+
+By default, the CPU and memory metrics exported by node exporter do not include the ``node`` label, which is required for the SkyPilot dashboard to display the metrics. You can add the ``node`` label to the metrics by applying the following config to the node exporter service monitor resource:
+
+.. code-block:: bash
+
+  kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/metrics/kube_prometheus_node_exporter_service_monitor.yaml -n skypilot
+
+2. Install the Nvidia Device Plugin.
+
+On Nebius console, in the detail page of the Nebius Kubernetes cluster, go to ``Applications`` -> Search for ``Nvidia Device Plugin`` -> ``Deploy`` -> Make sure to check the ``Enable GPU metrics monitoring`` -> ``Deploy application``.
+
+.. image:: ../../../images/metrics/search-device-plugin.png
+    :alt: Search for Nvidia Device Plugin
+    :align: center
+    :width: 60%
+
+.. image:: ../../../images/metrics/deploy-device-plugin.png
+    :alt: Deploy Nvidia Device Plugin
+    :align: center
+    :width: 60%
+
+Wait for the Nvidia Device Plugin to be installed, the status badge will become ``Deployed``.
+
+.. image:: ../../../images/metrics/status-device-plugin.png
+    :alt: Status of Nvidia Device Plugin
+    :align: center
+    :width: 60%
+
+You can also check the Pod status to verify the installation.
+
+.. code-block:: bash
+
+  kubectl get pods -n nvidia-device-plugin
+
+The dcgm exporter will be installed automatically.
+
+3. Create the Prometheus service for SkyPilot API server to retrieve the GPU metrics:
+
+   .. code-block:: bash
+
+     kubectl create -f https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/metrics/skypilot_prometheus_server_service.yaml -n skypilot
+
+Confirm that the service endpoint is created by running the following command:
+
+.. code-block:: bash
+
+  kubectl get endpoints skypilot-prometheus-server -n skypilot
+  NAME                         ENDPOINTS           AGE
+  skypilot-prometheus-server   10.24.20.128:9090   62s
+
+4. If you are using multiple Kubernetes clusters, you will need to add the context names to ``allowed_contexts`` in the SkyPilot config.
+
+An example config file that allows using the hosting Kubernetes cluster and two additional Kubernetes clusters is shown below:
+
+.. code-block:: yaml
+
+  kubernetes:
+    allowed_contexts:
+    # The hosting Kubernetes cluster, you cannot set this if the hosting cluster is disabled by kubernetesCredentials.useApiServerCluster=false
+    - in-cluster
+    # The additional Kubernetes context names in the kubeconfig you configured
+    - context1
+    - context2
+
+Refer to :ref:`config-yaml-kubernetes-allowed-contexts` for how to set the SkyPilot config in Helm chart values.
+
+5. Refer to :ref:`api-server-setup-dcgm-metrics-scraping` to upgrade the API server to scrape the GPU metrics.
+
+Now you should be able to see the GPU metrics in the SkyPilot dashboard.

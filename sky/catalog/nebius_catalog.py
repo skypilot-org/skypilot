@@ -38,7 +38,6 @@ def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
-    assert not use_spot, 'Nebius does not support spot.'
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Nebius does not support zones.')
@@ -51,12 +50,15 @@ def get_vcpus_mem_from_instance_type(
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory: Optional[str] = None,
+                              disk_tier: Optional[
+                                  resources_utils.DiskTier] = None,
+                              region: Optional[str] = None,
+                              zone: Optional[str] = None) -> Optional[str]:
     del disk_tier  # unused
-    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory)
+    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory, region,
+                                                      zone)
 
 
 def get_accelerators_from_instance_type(

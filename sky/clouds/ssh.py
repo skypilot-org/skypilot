@@ -4,16 +4,16 @@ import os
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
-import yaml
-
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.clouds import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.ssh_node_pools import constants as ssh_constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -21,7 +21,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-SSH_NODE_POOLS_PATH = os.path.expanduser('~/.sky/ssh_node_pools.yaml')
+SSH_NODE_POOLS_PATH = ssh_constants.DEFAULT_SSH_NODE_POOLS_PATH
 
 
 @registry.CLOUD_REGISTRY.register()
@@ -45,10 +45,12 @@ class SSH(kubernetes.Kubernetes):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[kubernetes.clouds.CloudImplementationFeatures, str]:
         # Inherit all Kubernetes unsupported features
-        return super()._unsupported_features_for_resources(resources)
+        return super()._unsupported_features_for_resources(resources, region)
 
     @classmethod
     def get_ssh_node_pool_contexts(cls) -> List[str]:
@@ -66,7 +68,7 @@ class SSH(kubernetes.Kubernetes):
         if os.path.exists(SSH_NODE_POOLS_PATH):
             try:
                 with open(SSH_NODE_POOLS_PATH, 'r', encoding='utf-8') as f:
-                    ssh_config = yaml.safe_load(f)
+                    ssh_config = yaml_utils.safe_load(f)
                     if ssh_config:
                         # Get cluster names and prepend 'ssh-' to match
                         # context naming convention
@@ -253,7 +255,7 @@ class SSH(kubernetes.Kubernetes):
     @classmethod
     def expand_infras(cls) -> List[str]:
         return [
-            f'{cls.canonical_name()}/{c.lstrip("ssh-")}'
+            f'{cls.canonical_name()}/{common_utils.removeprefix(c, "ssh-")}'
             for c in cls.existing_allowed_contexts(silent=True)
         ]
 

@@ -36,11 +36,15 @@ The above is achieved by configuring the following section in the config file:
        # Use both AWS and GCP.
        gcp:
          project_id: project-id-for-team-a
+       aws:
+         profile: team-a-profile
 
      team-b:
        # Use GCP only with a different project ID.
        gcp:
          project_id: project-id-for-team-b
+         capabilities:
+           - storage
        aws:
          disabled: true
 
@@ -80,11 +84,22 @@ The above is achieved by configuring the following section in the config file:
            gcp:
              disabled: false
              project_id: GCP project ID
+             capabilities:
+               - compute
+               - storage
+
+           aws:
+             disabled: false
+             profile: aws-profile-name
+             capabilities:
+               - compute
+               - storage
 
            nebius:
              disabled: false
              tenant_id: Nebius tenant ID (tenant-xxxxxxxx)
              credentials_file_path: ~/.nebius/credentials-file-name.json
+             domain: api.nebius.cloud:443
 
 To apply the configuration, follow the following steps:
 
@@ -165,6 +180,11 @@ Then, ``/monorepo/team-a/.sky.yaml`` may set:
 
 All SkyPilot CLI or API calls with ``/monorepo/team-a`` as the PWD will use the workspace ``team-a``.
 
+.. code-block:: console
+
+   $ cd /monorepo/team-a
+   $ sky launch -c training training.sky.yaml
+
 Similarly, ``/monorepo/team-b/.sky.yaml`` may set:
 
 .. code-block:: yaml
@@ -232,4 +252,4 @@ Currently, all users in an organization are allowed to use any configured
 workspace. Users can flexibly switch to a different workspace as shown above.
 
 SkyPilot supports using Okta, Google Workspace, or other SSO providers to
-authenticate users. See :ref:`here <api-server-auth-proxy>`.
+authenticate users. See :ref:`here <api-server-oauth>`.

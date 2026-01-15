@@ -24,6 +24,7 @@ class Dag:
         self.graph = nx.DiGraph()
         self.name: Optional[str] = None
         self.policy_applied: bool = False
+        self.pool: Optional[str] = None
 
     def add(self, task: 'task.Task') -> None:
         self.graph.add_node(task)

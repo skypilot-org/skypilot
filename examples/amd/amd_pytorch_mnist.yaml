@@ -1,0 +1,23 @@
+name: amd-rocm-pytorch-mnist
+
+resources:
+  cloud: kubernetes
+  image_id: docker:rocm/pytorch-training:v25.6
+  accelerators: MI300:2
+  cpus: 128
+  memory: 512+
+
+
+setup: |
+  echo " MNIST example derived from https://github.com/pytorch/examples"
+  sleep 10
+ 
+run: |
+  echo " rocm-smi smoke test:"
+  rocm-smi
+  # amd dockers can use their own conda environment
+  conda deactivate
+  git clone https://github.com/pytorch/examples.git
+  cd examples/mnist
+  python3 main.py
+  rocm-smi

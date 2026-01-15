@@ -1,0 +1,4 @@
+aws:
+  post_provision_runcmd:
+    - echo "hello world!"
+    - [ls, -l, /]

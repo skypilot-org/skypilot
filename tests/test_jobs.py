@@ -5,8 +5,8 @@ import sky
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
-from sky.utils import db_utils
 from sky.utils import resources_utils
+from sky.utils.db import db_utils
 
 
 @pytest.fixture
@@ -19,7 +19,7 @@ def _mock_db_conn(tmp_path, monkeypatch):
     monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE',
                         sqlalchemy_engine)
 
-    global_user_state.create_table()
+    global_user_state.create_table(sqlalchemy_engine)
 
 
 @pytest.fixture

@@ -6,7 +6,7 @@ providers supported by SkyPilot need to follow.
 import functools
 import inspect
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
 from sky import models
 from sky import sky_logging
@@ -24,8 +24,12 @@ from sky.provision import kubernetes
 from sky.provision import lambda_cloud
 from sky.provision import nebius
 from sky.provision import oci
+from sky.provision import primeintellect
 from sky.provision import runpod
 from sky.provision import scp
+from sky.provision import seeweb
+from sky.provision import shadeform
+from sky.provision import slurm
 from sky.provision import ssh
 from sky.provision import vast
 from sky.provision import vsphere
@@ -73,16 +77,24 @@ def _route_to_cloud_impl(func):
 @_route_to_cloud_impl
 def query_instances(
     provider_name: str,
+    cluster_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional['status_lib.ClusterStatus']]:
+    retry_if_missing: bool = False,
+) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """Query instances.
 
-    Returns a dictionary of instance IDs and status.
+    Returns a dictionary of instance IDs and a tuple of (status, reason for
+    being in status if any).
 
     A None status means the instance is marked as "terminated"
     or "terminating".
+
+    Args:
+        retry_if_missing: Whether to retry the call to the cloud api if the
+          cluster is not found when querying the live status on the cloud.
+          NOTE: This is currently only used on kubernetes.
     """
     raise NotImplementedError
 
@@ -138,7 +150,50 @@ def get_volume_usedby(
 
 
 @_route_to_cloud_impl
-def run_instances(provider_name: str, region: str, cluster_name_on_cloud: str,
+def refresh_volume_config(
+    provider_name: str,
+    volume_config: models.VolumeConfig,
+) -> Tuple[bool, models.VolumeConfig]:
+    """Whether need to refresh the volume config in the cloud.
+
+    Returns:
+        need_refresh: Whether need to refresh the volume config.
+        volume_config: The volume config to be refreshed.
+    """
+    return False, volume_config
+
+
+@_route_to_cloud_impl
+def get_all_volumes_usedby(
+    provider_name: str, configs: List[models.VolumeConfig]
+) -> Tuple[Dict[str, Any], Dict[str, Any], Set[str]]:
+    """Get the usedby of all volumes.
+
+    Args:
+        provider_name: Name of the provider.
+        configs: List of VolumeConfig objects.
+
+    Returns:
+        usedby_pods: Dict of usedby pods.
+        usedby_clusters: Dict of usedby clusters.
+        failed_volume_names: Set of volume names whose usedby info
+          failed to fetch.
+    """
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def map_all_volumes_usedby(
+        provider_name: str, used_by_pods: Dict[str, Any],
+        used_by_clusters: Dict[str, Any],
+        config: models.VolumeConfig) -> Tuple[List[str], List[str]]:
+    """Map the usedby resources of a volume."""
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def run_instances(provider_name: str, region: str, cluster_name: str,
+                  cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Start instances with bootstrapped configuration."""
     raise NotImplementedError

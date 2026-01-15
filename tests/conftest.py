@@ -1,21 +1,26 @@
 import fcntl
-import json
 import os
+import pathlib
+import shutil
+import signal
+import socket
 import subprocess
+import sys
 import tempfile
 import time
-from typing import List
+from typing import List, Optional, Tuple
 
+import filelock
 import pytest
 import requests
+from smoke_tests import smoke_tests_utils
 from smoke_tests.docker import docker_utils
-from sqlalchemy import exc as sqlalchemy_exc
-from sqlalchemy import orm
-from sqlalchemy import text as sqlalchemy_text
-import sqlalchemy_adapter
 
-from sky import global_user_state
+from sky import cloud_stores
 from sky import sky_logging
+from sky.utils import annotations
+from sky.utils import common_utils
+from sky.utils import context_utils
 
 # Initialize logger at the top level
 logger = sky_logging.init_logger(__name__)
@@ -27,17 +32,29 @@ from common_test_fixtures import enable_all_clouds
 from common_test_fixtures import mock_aws_backend
 from common_test_fixtures import mock_client_requests
 from common_test_fixtures import mock_controller_accessible
+from common_test_fixtures import mock_execute_in_coroutine
 from common_test_fixtures import mock_job_table_no_job
 from common_test_fixtures import mock_job_table_one_job
 from common_test_fixtures import mock_queue
 from common_test_fixtures import mock_redirect_log_file
 from common_test_fixtures import mock_services_no_service
+from common_test_fixtures import mock_services_no_service_grpc
 from common_test_fixtures import mock_services_one_service
+from common_test_fixtures import mock_services_one_service_grpc
 from common_test_fixtures import mock_stream_utils
 from common_test_fixtures import reset_global_state
 from common_test_fixtures import skyignore_dir
 
 from sky.server import common as server_common
+
+
+@pytest.fixture(autouse=True)
+def _clear_request_level_cache():
+    """Keep request-scoped caches from leaking between tests."""
+    annotations.clear_request_level_cache()
+    yield
+    annotations.clear_request_level_cache()
+
 
 # Usage: use
 #   @pytest.mark.slow
@@ -58,8 +75,9 @@ from sky.server import common as server_common
 # --managed-jobs.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
-    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
-    'vast', 'nebius', 'hyperbolic'
+    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace',
+    'primeintellect', 'runpod', 'vast', 'nebius', 'hyperbolic', 'seeweb',
+    'shadeform', 'coreweave', 'slurm'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -81,11 +99,16 @@ cloud_to_pytest_keyword = {
     'fluidstack': 'fluidstack',
     'cudo': 'cudo',
     'paperspace': 'paperspace',
+    'primeintellect': 'primeintellect',
     'do': 'do',
     'vast': 'vast',
     'runpod': 'runpod',
     'nebius': 'nebius',
-    'hyperbolic': 'hyperbolic'
+    'hyperbolic': 'hyperbolic',
+    'shadeform': 'shadeform',
+    'seeweb': 'seeweb',
+    'coreweave': 'coreweave',
+    'slurm': 'slurm',
 }
 
 
@@ -144,7 +167,7 @@ def pytest_addoption(parser):
     parser.addoption(
         '--base-branch',
         type=str,
-        default='master',
+        default=None,
         help='Base branch to test backward compatibility against',
     )
     parser.addoption(
@@ -166,6 +189,12 @@ def pytest_addoption(parser):
         help='Skip tests marked as resource_heavy',
     )
     parser.addoption(
+        '--resource-heavy',
+        action='store_true',
+        default=False,
+        help='Only run tests marked as resource_heavy',
+    )
+    parser.addoption(
         '--helm-version',
         type=str,
         default='',
@@ -185,6 +214,46 @@ def pytest_addoption(parser):
               '(The config change is made in buildkite so this is a flag to '
               'ensure the tests will not be skipped but no actual effect)'),
     )
+    parser.addoption(
+        '--grpc',
+        action='store_true',
+        default=False,
+        help='Run tests with GRPC enabled',
+    )
+    parser.addoption(
+        '--env-file',
+        type=str,
+        default=None,
+        help='Path to the env file to override the default env file',
+    )
+    parser.addoption(
+        '--plugin-yaml',
+        type=str,
+        default=None,
+        help=('Plugin YAML file (configured in Buildkite pipeline; '
+              'has no effect when running locally)'),
+    )
+    parser.addoption(
+        '--backend-test-cluster',
+        type=str,
+        default=None,
+        help=
+        'Use existing cluster for backend integration tests instead of creating a new one',
+    )
+    parser.addoption(
+        '--dependency',
+        type=str,
+        nargs='?',
+        const='',
+        default='all',
+        help=
+        ('Dependency for client-side package install. '
+         'E.g., --dependency=aws runs pip install "skypilot[aws]" on client. '
+         '--dependency=aws,azure runs pip install "skypilot[aws,azure]" on client. '
+         '--dependency (no value) installs base package only (no extras) on client. '
+         'This only affects client side; server side always installs all dependencies. '
+         'Only works in Buildkite CI; ignored if run locally.'),
+    )
 
 
 def pytest_configure(config):
@@ -196,7 +265,28 @@ def pytest_configure(config):
         config.addinivalue_line(
             'markers', f'{cloud_keyword}: mark test as {cloud} specific')
 
+    # Validate incompatible option combinations
+    if config.getoption('--remote-server'):
+        if config.getoption('--jobs-consolidation'):
+            raise ValueError(
+                '--remote-server and --jobs-consolidation are not compatible. '
+                'Jobs consolidation mode is not supported with remote server testing.'
+            )
+        if config.getoption('--postgres'):
+            raise ValueError(
+                '--remote-server and --postgres are not compatible. '
+                'Postgres backend is not supported with remote server testing.')
+
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
+
+    # Disable parallelism for smoke tests only to save memory in Buildkite.
+    # Check if any of the test paths are under smoke_tests/
+    if hasattr(config, 'args') and config.args:
+        is_smoke_test = any('smoke_tests' in str(arg) for arg in config.args)
+        if is_smoke_test and smoke_tests_utils.is_in_buildkite_env():
+            # Override xdist settings to disable parallelism
+            config.option.numprocesses = 0
+            config.option.dist = 'no'
 
 
 def _get_cloud_to_run(config) -> List[str]:
@@ -204,7 +294,7 @@ def _get_cloud_to_run(config) -> List[str]:
 
     for cloud in all_clouds_in_smoke_tests:
         if config.getoption(f'--{cloud}'):
-            if cloud == 'cloudflare':
+            if cloud in ['cloudflare', 'coreweave']:
                 cloud_to_run.append(default_clouds_to_run[0])
             else:
                 cloud_to_run.append(cloud)
@@ -230,8 +320,17 @@ def pytest_collection_modifyitems(config, items):
         reason='skipped, because --tpu option is set')
     skip_marks['local'] = pytest.mark.skip(
         reason='test requires local API server')
+    skip_marks['no_remote_server'] = pytest.mark.skip(
+        reason='skip tests marked as no_remote_server if --remote-server is set'
+    )
     skip_marks['no_resource_heavy'] = pytest.mark.skip(
-        reason='skipped, because --no-resource-heavy option is set')
+        reason=
+        'skip tests marked as resource_heavy if --no-resource-heavy is set')
+    skip_marks['resource_heavy'] = pytest.mark.skip(
+        reason=
+        'skip tests not marked as resource_heavy if --resource-heavy is set')
+    skip_marks['no_dependency'] = pytest.mark.skip(
+        reason='skip tests marked as no_dependency if --dependency is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -260,6 +359,8 @@ def pytest_collection_modifyitems(config, items):
                 # added to cloud_to_run when tested for cloudflare
                 if config.getoption('--cloudflare') and cloud == 'cloudflare':
                     continue
+                if config.getoption('--coreweave') and cloud == 'coreweave':
+                    continue
                 item.add_marker(skip_marks[cloud])
 
         if (not 'managed_jobs'
@@ -277,6 +378,24 @@ def pytest_collection_modifyitems(config, items):
         if 'resource_heavy' in marks and config.getoption(
                 '--no-resource-heavy'):
             item.add_marker(skip_marks['no_resource_heavy'])
+        # Skip tests not marked as resource_heavy if --resource-heavy is set
+        if 'resource_heavy' not in marks and config.getoption(
+                '--resource-heavy'):
+            item.add_marker(skip_marks['resource_heavy'])
+        # Skip tests marked as no_remote_server if --remote-server is set
+        if 'no_remote_server' in marks and config.getoption('--remote-server'):
+            item.add_marker(skip_marks['no_remote_server'])
+        # Skip tests marked as no_remote_server if --env-file is set and the env file contains
+        # api_server configuration. (max line length 80)
+        env_file = config.getoption('--env-file')
+        if env_file:
+            has_api_server, _ = _get_and_check_env_file(env_file)
+            if has_api_server and 'no_remote_server' in marks:
+                item.add_marker(skip_marks['no_remote_server'])
+        # Skip tests marked as no_dependency if --dependency is set
+        if 'no_dependency' in marks and config.getoption(
+                '--dependency') != 'all':
+            item.add_marker(skip_marks['no_dependency'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
@@ -324,9 +443,185 @@ def _generic_cloud(config) -> str:
     return _get_cloud_to_run(config)[0]
 
 
+@annotations.lru_cache(scope='session')
+def _get_and_check_env_file(env_file_path: str) -> Tuple[bool, Optional[str]]:
+    """Download/get env file and check if it contains api_server configuration.
+
+    Returns:
+        tuple: (has_api_server_config, local_file_path)
+    """
+    assert isinstance(
+        env_file_path,
+        str), f'env_file_path must be a string, got {type(env_file_path)}'
+
+    # Check if it's a local file or directory (same logic as prepare_env_file)
+    expanded_path = os.path.expanduser(env_file_path)
+    if os.path.exists(expanded_path):
+        # It's a local file
+        local_file_path = expanded_path
+    else:
+        # It's a cloud storage URL - download it (same logic as prepare_env_file)
+        logger.info(
+            f'Downloading env file from cloud storage for collection: {env_file_path}'
+        )
+
+        # Create temporary directory for downloaded files
+        temp_dir = tempfile.mkdtemp(prefix='skypilot_env_collection_')
+
+        # Get the appropriate CloudStorage handler for the URL
+        cloud_storage = cloud_stores.get_storage_from_path(env_file_path)
+
+        # Generate the download command - assert it's a file
+        assert not cloud_storage.is_directory(env_file_path), (
+            f'Expected file but got directory: {env_file_path}')
+        download_cmd = cloud_storage.make_sync_file_command(
+            env_file_path, temp_dir)
+
+        # Execute the download command
+        subprocess.run(download_cmd, shell=True, check=True)
+
+        # Get the filename from the original URL
+        file_name = os.path.basename(env_file_path)
+        local_file_path = os.path.join(temp_dir, file_name)
+
+    # Check if the file contains api_server configuration
+    with open(local_file_path, 'r') as f:
+        content = f.read()
+        has_api_server = 'endpoint' in content and ('api_server' in content)
+
+    return has_api_server, local_file_path
+
+
 @pytest.fixture
 def generic_cloud(request) -> str:
     return _generic_cloud(request.config)
+
+
+@pytest.fixture
+def hijack_sys_attrs(request):
+    # Make skypilot context work in smoke test client side.
+    context_utils.hijack_sys_attrs()
+    yield
+
+
+@pytest.fixture(scope='session', autouse=True)
+def setup_policy_server(request, tmp_path_factory):
+    """Setup policy server for restful policy testing."""
+    # TODO(aylei): this is a common pattern to launch global instance before
+    # test suite and cleanup after the suite, abstract this out if needed.
+    if request.config.getoption('--remote-server'):
+        # For remote server, the policy server should be accessible from the
+        # remote server host. Left as future work.
+        # TODO(aylei): support remote server with restful policy.
+        yield
+        return
+
+    has_smoke_tests = False
+    has_backward_compat_test = False
+    if hasattr(request.session, 'items'):
+        has_smoke_tests = any(
+            'smoke_tests' in item.location[0] for item in request.session.items)
+        has_backward_compat_test = any('backward_compat' in item.location[0]
+                                       for item in request.session.items)
+
+    # Only run the policy server for smoke tests and skip backward compatibility tests.
+    if not has_smoke_tests or has_backward_compat_test:
+        yield
+        return
+
+    # get the temp directory shared by all workers
+    root_tmp_dir = tmp_path_factory.getbasetemp().parent / 'policy_server'
+
+    pathlib.Path(root_tmp_dir).mkdir(parents=True, exist_ok=True)
+    fn = root_tmp_dir / 'policy_server.txt'
+    policy_server_url = ''
+    # Reference count and pid for cleanup
+    counter_file = root_tmp_dir / 'policy_server_counter.txt'
+    pid_file = root_tmp_dir / 'policy_server_pid.txt'
+
+    def ref_count(delta: int) -> int:
+        try:
+            with open(counter_file, 'r', encoding='utf-8') as f:
+                count = int(f.read().strip())
+        except (FileNotFoundError, ValueError):
+            count = 0
+        count += delta
+        with open(counter_file, 'w', encoding='utf-8') as f:
+            f.write(str(count))
+        return count
+
+    def wait_server(port: int, timeout: int = 60):
+        start_time = time.time()
+        success_count = 0
+        while time.time() - start_time < timeout:
+            try:
+                socket.create_connection(('127.0.0.1', port), timeout=1).close()
+                success_count += 1
+                if success_count > 5:
+                    return True
+            except (socket.error, OSError):
+                pass
+            time.sleep(0.5)
+        raise RuntimeError(f"Policy server not available after {timeout}s")
+
+    try:
+        policy_server_url: Optional[str] = None
+        with filelock.FileLock(str(fn) + ".lock"):
+            launch_server = True
+            if fn.is_file():
+                ref_count(1)
+                policy_server_url = fn.read_text().strip()
+                print(
+                    f'Using existing policy server {policy_server_url}, file: {fn}',
+                    file=sys.stderr,
+                    flush=True)
+                port = int(policy_server_url.split(':')[2])
+                # Healthz check the running server
+                try:
+                    wait_server(port)
+                    # The server is running, reuse it
+                    launch_server = False
+                except RuntimeError:
+                    # There is a broken state from previous crashed test, recover it
+                    print(
+                        f'Policy server {policy_server_url} is not running, launching new server',
+                        file=sys.stderr,
+                        flush=True)
+                    pathlib.Path(counter_file).unlink(missing_ok=True)
+                    launch_server = True
+
+            if launch_server:
+                # Launch the policy server
+                port = common_utils.find_free_port(start_port=10000)
+                policy_server_url = f'http://127.0.0.1:{port}'
+                print(
+                    f'Launching policy server {policy_server_url}, file: {fn}',
+                    file=sys.stderr,
+                    flush=True)
+                server_process = subprocess.Popen([
+                    'python', 'tests/admin_policy/no_op_server.py', '--host',
+                    '0.0.0.0', '--port',
+                    str(port)
+                ])
+                wait_server(port)
+                pid_file.write_text(str(server_process.pid))
+                fn.write_text(policy_server_url)
+                ref_count(1)
+        if policy_server_url is not None:
+            with smoke_tests_utils.override_sky_config(
+                    config_dict={'admin_policy': policy_server_url}):
+                yield
+        else:
+            yield
+    finally:
+        with filelock.FileLock(str(fn) + ".lock"):
+            count = ref_count(-1)
+            if count <= 0:
+                # All workers are done, run post cleanup.
+                pid = pid_file.read_text().strip()
+                if pid:
+                    os.kill(int(pid), signal.SIGKILL)
+                pathlib.Path(fn).unlink(missing_ok=True)
 
 
 @pytest.fixture(scope='session', autouse=True)
@@ -424,8 +719,10 @@ def setup_docker_container(request):
         # Use create_and_setup_new_container to create and start the container
         docker_utils.create_and_setup_new_container(
             target_container_name=docker_utils.get_container_name(),
-            host_port=docker_utils.get_host_port(),
-            container_port=46580,
+            api_server_host_port=docker_utils.get_api_server_host_port(),
+            api_server_container_port=46580,
+            metrics_host_port=docker_utils.get_metrics_host_port(),
+            metrics_container_port=9090,
             username=default_user)
 
         logger.info(f'Container {docker_utils.get_container_name()} started')
@@ -498,7 +795,8 @@ def setup_docker_container(request):
 
 @pytest.fixture(scope='session', autouse=True)
 def setup_controller_cloud_env(request):
-    """Setup controller cloud environment variable if --controller-cloud is specified."""
+    """Setup controller cloud environment variable if --controller-cloud is
+    specified."""
     if not request.config.getoption('--controller-cloud'):
         yield
         return
@@ -511,7 +809,8 @@ def setup_controller_cloud_env(request):
 
 @pytest.fixture(scope='session', autouse=True)
 def setup_postgres_backend_env(request):
-    """Setup Postgres Backend environment variable if --postgres is specified."""
+    """Setup Postgres Backend environment variable if --postgres is specified.
+    """
     if not request.config.getoption('--postgres'):
         yield
         return
@@ -519,66 +818,36 @@ def setup_postgres_backend_env(request):
     yield
 
 
-@pytest.fixture(autouse=True)
-def patch_db_create_for_parallel_tests(monkeypatch):
-    """Mock Base.metadata.create_all with file lock to prevent race conditions in parallel execution."""
-
-    # Store the original create_all method
-    original_create_all = global_user_state.Base.metadata.create_all
-
-    def create_all_with_lock(bind=None, **kwargs):
-        """Wrapper for Base.metadata.create_all with file lock to prevent race conditions."""
-        # Use file lock to ensure only one process creates tables at a time
-        # Use a constant path in ~/.sky so all test processes can see the same lock file
-        lock_file_path = os.path.expanduser('~/.sky/test_db_create_all.lock')
-
-        with open(lock_file_path, 'w') as lock_file:
-            try:
-                # Acquire exclusive lock - blocks other processes until we're done
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-
-                # Create all tables - the lock prevents race conditions during table creation
-                # SQLAlchemy's create_all() handles existing tables gracefully with checkfirst=True
-                original_create_all(bind=bind, **kwargs)
-
-            finally:
-                # Lock is automatically released when file is closed
-                pass
-
-    # Patch the method
-    monkeypatch.setattr(global_user_state.Base.metadata, 'create_all',
-                        create_all_with_lock)
-
+@pytest.fixture(scope='session', autouse=True)
+def setup_grpc_backend_env(request):
+    """Setup gRPC enabled environment variable if --grpc is specified.
+    """
+    if not request.config.getoption('--grpc'):
+        yield
+        return
+    os.environ['PYTEST_SKYPILOT_GRPC_ENABLED'] = '1'
     yield
 
 
-@pytest.fixture(autouse=True)
-def patch_casbin_adapter_for_parallel_tests(monkeypatch):
-    """Mock Casbin SQLAlchemy Adapter initialization with file lock to prevent race conditions in parallel execution."""
+@pytest.fixture(scope='session', autouse=True)
+def prepare_env_file(request):
+    """Prepare environment file for tests.
 
-    # Store the original Adapter class
-    original_adapter_init = sqlalchemy_adapter.Adapter.__init__
+    If the env-file option is a local directory or file, use it directly.
+    Otherwise, treat it as a cloud storage URL (e.g., s3://bucket/path) and
+    download from storage.
+    """
+    env_file_path = request.config.getoption('--env-file')
+    if env_file_path is None:
+        yield
+        return
 
-    def adapter_init_with_lock(self, engine, *args, **kwargs):
-        """Wrapper for sqlalchemy_adapter.Adapter.__init__ with file lock to prevent race conditions."""
-        # Use file lock to ensure only one process creates casbin tables at a time
-        # Use a constant path in ~/.sky so all test processes can see the same lock file
-        lock_file_path = os.path.expanduser('~/.sky/test_casbin_adapter.lock')
+    # Use the cached function to get/download the env file
+    # This avoids duplicate downloads if collection phase already downloaded it
+    has_api_server, local_file_path = _get_and_check_env_file(env_file_path)
 
-        with open(lock_file_path, 'w') as lock_file:
-            try:
-                # Acquire exclusive lock - blocks other processes until we're done
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-
-                # Initialize the adapter - the lock prevents race conditions during table creation
-                original_adapter_init(self, engine, *args, **kwargs)
-
-            finally:
-                # Lock is automatically released when file is closed
-                pass
-
-    # Patch the method
-    monkeypatch.setattr(sqlalchemy_adapter.Adapter, '__init__',
-                        adapter_init_with_lock)
-
-    yield
+    logger.info(f'Using env file: {local_file_path}')
+    os.environ['PYTEST_SKYPILOT_CONFIG_FILE_OVERRIDE'] = local_file_path
+    if has_api_server:
+        os.environ['PYTEST_SKYPILOT_REMOTE_SERVER_TEST'] = '1'
+    yield local_file_path

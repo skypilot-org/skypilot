@@ -311,7 +311,7 @@ export async function getEnabledClouds(workspaceName = null, expand = false) {
         // which is also a JSON string.
         enabledCloudsData = JSON.parse(resultData.return_value);
         console.log(
-          'Successfully parsed enabled_clouds data from return_value:',
+          `Successfully parsed enabled_clouds data for workspace ${workspaceName}:`,
           enabledCloudsData
         );
       } catch (parseError) {
@@ -688,6 +688,24 @@ export async function updateConfig(config) {
     return await pollForTaskCompletion(requestId, 'updateConfig');
   } catch (error) {
     console.error('Failed to update config:', error);
+    throw error;
+  }
+}
+
+// Run sky check to refresh cloud credentials
+// This is useful when refreshing the infra page to detect new clouds
+export async function runSkyCheck() {
+  try {
+    console.log('Running sky check to refresh cloud credentials');
+    const response = await apiClient.fetch('/check', {}, 'POST');
+    if (!response.ok) {
+      throw new Error(
+        `Sky check failed: ${response.statusText} (status ${response.status})`
+      );
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to run sky check:', error);
     throw error;
   }
 }

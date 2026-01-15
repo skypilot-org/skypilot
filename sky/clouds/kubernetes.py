@@ -1,9 +1,9 @@
 """Kubernetes."""
+import concurrent.futures
 import os
 import re
 import subprocess
 import tempfile
-import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
@@ -11,27 +11,27 @@ import colorama
 from sky import catalog
 from sky import clouds
 from sky import exceptions
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
+from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes.utils import is_tpu_on_gke
+from sky.provision.kubernetes.utils import KubernetesHighPerformanceNetworkType
 from sky.provision.kubernetes.utils import normalize_tpu_accelerator_name
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
-from sky.volumes import volume as volume_lib
-
-if typing.TYPE_CHECKING:
-    # Renaming to avoid shadowing variables.
-    from sky import resources as resources_lib
+from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -49,9 +49,6 @@ _FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
-    SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
-    SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
-
     # Limit the length of the cluster name to avoid exceeding the limit of 63
     # characters for Kubernetes resources. We limit to 42 characters (63-21) to
     # allow additional characters for creating ingress services to expose ports.
@@ -59,9 +56,12 @@ class Kubernetes(clouds.Cloud):
     # where the suffix is 21 characters long.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
 
+    _MAX_VOLUME_NAME_LEN_LIMIT = 253
+
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
     _DEFAULT_NUM_VCPUS = 2
+    _DEFAULT_NUM_VCPUS_WITH_GPU = 4
     _DEFAULT_MEMORY_CPU_RATIO = 1
     _DEFAULT_MEMORY_CPU_RATIO_WITH_GPU = 4  # Allocate more memory for GPU tasks
     _REPR = 'Kubernetes'
@@ -82,8 +82,8 @@ class Kubernetes(clouds.Cloud):
             ('Customized multiple network interfaces are not supported in '
              'Kubernetes.'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
-            ('Custom network tier is currently not supported in '
-             f'{_REPR}.'),
+            ('Custom network tier is not supported in this Kubernetes '
+             'cluster.'),
     }
 
     IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'
@@ -97,42 +97,52 @@ class Kubernetes(clouds.Cloud):
     # Set of contexts that has logged as temporarily unreachable
     logged_unreachable_contexts: Set[str] = set()
 
-    @property
-    def ssh_key_secret_field_name(self):
-        # Use a fresh user hash to avoid conflicts in the secret object naming.
-        # This can happen when the controller is reusing the same user hash
-        # through USER_ID_ENV_VAR but has a different SSH key.
-        fresh_user_hash = common_utils.generate_user_hash()
-        return f'ssh-publickey-{fresh_user_hash}'
-
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         # TODO(aylei): features need to be regional (per context) to make
         # multi-kubernetes selection/failover work.
         unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
-        context = resources.region
+        context = region if region is not None else resources.region
         if context is None:
-            context = kubernetes_utils.get_current_kube_config_context_name()
+            contexts = cls.existing_allowed_contexts()
+        else:
+            contexts = [context]
         unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
             'Stopping clusters is not supported on Kubernetes.')
         unsupported_features[clouds.CloudImplementationFeatures.AUTOSTOP] = (
             'Auto-stop is not supported on Kubernetes.')
-        # Allow spot instances if supported by the cluster
-        try:
-            spot_label_key, _ = kubernetes_utils.get_spot_label(context)
-            if spot_label_key is not None:
-                unsupported_features.pop(
-                    clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
-            # Allow custom network tier if supported by the cluster
-            # (e.g., Nebius clusters with high performance networking)
-            if cls._cluster_supports_high_performance_networking(context):
-                unsupported_features.pop(
-                    clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER,
-                    None)
-        except exceptions.KubeAPIUnreachableError as e:
-            cls._log_unreachable_context(context, str(e))
+        for context in contexts:
+            # Allow spot instances if supported by the cluster
+            try:
+                # Run spot label check and network type detection concurrently
+                # as they are independent operations
+                with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=2) as executor:
+                    spot_future = executor.submit(
+                        kubernetes_utils.get_spot_label, context)
+                    network_future = executor.submit(cls._detect_network_type,
+                                                     context,
+                                                     resources.network_tier)
+
+                    spot_label_key, _ = spot_future.result()
+                    if spot_label_key is not None:
+                        unsupported_features.pop(
+                            clouds.CloudImplementationFeatures.SPOT_INSTANCE,
+                            None)
+
+                    # Allow custom network tier if supported by the cluster
+                    # (e.g., Nebius clusters with high performance networking)
+                    network_type, _ = network_future.result()
+                    if network_type.supports_high_performance_networking():
+                        unsupported_features.pop(
+                            clouds.CloudImplementationFeatures.
+                            CUSTOM_NETWORK_TIER, None)
+            except exceptions.KubeAPIUnreachableError as e:
+                cls._log_unreachable_context(context, str(e))
         return unsupported_features
 
     @classmethod
@@ -184,6 +194,12 @@ class Kubernetes(clouds.Cloud):
         all_contexts = [
             ctx for ctx in all_contexts if not ctx.startswith('ssh-')
         ]
+
+        allow_all_contexts = allowed_contexts == 'all' or (
+            allowed_contexts is None and
+            env_options.Options.ALLOW_ALL_KUBERNETES_CONTEXTS.get())
+        if allow_all_contexts:
+            allowed_contexts = all_contexts
 
         if allowed_contexts is None:
             # Try kubeconfig if present
@@ -242,10 +258,15 @@ class Kubernetes(clouds.Cloud):
                 'refresh Kubernetes availability if permanent.')
 
     @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: Optional[str],
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
         del accelerators, zone, use_spot  # unused
         existing_contexts = cls.existing_allowed_contexts()
 
@@ -255,6 +276,19 @@ class Kubernetes(clouds.Cloud):
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
+        if resources is not None:
+            filtered_regions = []
+            resources_required_features = resources.get_required_cloud_features(
+            )
+            for r in regions:
+                try:
+                    cls.check_features_are_supported(
+                        resources, resources_required_features, r.name)
+                    filtered_regions.append(r)
+                except exceptions.NotSupportedError as e:
+                    logger.info(f'Filter out context: {r.name}, reason: {e}')
+                    continue
+            regions = filtered_regions
 
         # Check if requested instance type will fit in the cluster.
         # TODO(zhwu,romilb): autoscaler type needs to be regional (per
@@ -345,10 +379,12 @@ class Kubernetes(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional['resources_utils.DiskTier'] = None) -> str:
+            disk_tier: Optional['resources_utils.DiskTier'] = None,
+            region: Optional[str] = None,
+            zone: Optional[str] = None) -> str:
         # TODO(romilb): In the future, we may want to move the instance type
         #  selection + availability checking to a kubernetes_catalog module.
-        del disk_tier  # Unused.
+        del disk_tier, region, zone  # Unused.
         # We strip '+' from resource requests since Kubernetes can provision
         # exactly the requested resources.
         instance_cpus = float(
@@ -416,6 +452,7 @@ class Kubernetes(clouds.Cloud):
         num_nodes: int,
         volume_mounts: Optional[List['volume_lib.VolumeMount']],
         enable_flex_start: bool,
+        is_using_kueue: bool,
     ) -> int:
         """Calculate provision timeout based on number of nodes.
 
@@ -430,14 +467,18 @@ class Kubernetes(clouds.Cloud):
         Returns:
             Timeout in seconds
         """
+        if is_using_kueue:
+            # Return a large timeout to let kueue handle the provisioning
+            return 24 * 60 * 60  # 24 hours
+
         base_timeout = 10  # Base timeout for single node
         per_node_timeout = 0.2  # Additional seconds per node
         max_timeout = 60  # Cap at 1 minute
         if enable_flex_start:
             # Flex start takes longer to provision.
-            base_timeout = 600
+            base_timeout = 1200
             per_node_timeout = 10
-            max_timeout = 900
+            max_timeout = 2400
         elif volume_mounts is not None:
             for volume_mount in volume_mounts:
                 if (volume_mount.volume_config.type ==
@@ -512,9 +553,6 @@ class Kubernetes(clouds.Cloud):
             return image_id
 
         image_id = _get_image_id(resources)
-        # TODO(romilb): Create a lightweight image for SSH jump host
-        ssh_jump_image = catalog.get_image_id_from_tag(self.IMAGE_CPU,
-                                                       clouds='kubernetes')
 
         # Set environment variables for the pod. Note that SkyPilot env vars
         # are set separately when the task is run. These env vars are
@@ -541,7 +579,8 @@ class Kubernetes(clouds.Cloud):
                 tpu_requested = True
                 k8s_resource_key = kubernetes_utils.TPU_RESOURCE_KEY
             else:
-                k8s_resource_key = kubernetes_utils.get_gpu_resource_key()
+                k8s_resource_key = kubernetes_utils.get_gpu_resource_key(
+                    context)
         else:
             # If no GPUs are requested, we set NVIDIA_VISIBLE_DEVICES=none to
             # maintain GPU isolation. This is to override the default behavior
@@ -561,6 +600,7 @@ class Kubernetes(clouds.Cloud):
         port_mode = network_utils.get_port_mode(None, context)
 
         remote_identity = skypilot_config.get_effective_region_config(
+            # TODO(kyuds): Support SSH node pools as well.
             cloud='kubernetes',
             region=context,
             keys=('remote_identity',),
@@ -597,22 +637,22 @@ class Kubernetes(clouds.Cloud):
         if resources.use_spot:
             spot_label_key, spot_label_value = kubernetes_utils.get_spot_label()
 
+        network_type, machine_type = self._detect_network_type(
+            context, resources.network_tier)
+
         # Check if this cluster supports high performance networking and
-        # configure IPC_LOCK capability for clusters like Nebius that support it
-        k8s_ipc_lock_capability = False
+        # configure appropriate settings for different cluster types
         if (resources.network_tier is not None and
                 resources.network_tier == resources_utils.NetworkTier.BEST):
             # Only proceed if CUSTOM_NETWORK_TIER is supported by this cluster
             unsupported_features = self._unsupported_features_for_resources(
                 resources)
             if clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER \
-                not in unsupported_features:
-                k8s_ipc_lock_capability = True
-
-        if k8s_ipc_lock_capability:
-            k8s_env_vars['NCCL_IB_HCA'] = 'mlx5'
-            k8s_env_vars['UCX_NET_DEVICES'] = \
-                'mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1'  # pylint: disable=line-too-long
+                    not in unsupported_features:
+                # Add high-performance networking environment variables for
+                # clusters with high performance networking
+                network_env_vars = network_type.get_network_env_vars()
+                k8s_env_vars.update(network_env_vars)
 
         # We specify object-store-memory to be 500MB to avoid taking up too
         # much memory on the head node. 'num-cpus' should be set to limit
@@ -634,7 +674,8 @@ class Kubernetes(clouds.Cloud):
                 default_value=None))
 
         k8s_kueue_local_queue_name = (
-            skypilot_config.get_effective_region_config(
+            skypilot_config.get_effective_workspace_region_config(
+                # TODO(kyuds): Support SSH node pools as well.
                 cloud='kubernetes',
                 region=context,
                 keys=('kueue', 'local_queue_name'),
@@ -649,6 +690,7 @@ class Kubernetes(clouds.Cloud):
         if enable_flex_start_queued_provisioning or enable_flex_start:
             # DWS is only supported in GKE, check the autoscaler type.
             autoscaler_type = skypilot_config.get_effective_region_config(
+                # TODO(kyuds): Support SSH node pools as well.
                 cloud='kubernetes',
                 region=context,
                 keys=('autoscaler',),
@@ -668,12 +710,16 @@ class Kubernetes(clouds.Cloud):
         # scheduling 100s of pods.
         # We use a linear scaling formula to determine the timeout based on the
         # number of nodes.
-
+        is_using_kueue = k8s_kueue_local_queue_name is not None
         timeout = self._calculate_provision_timeout(
             num_nodes, volume_mounts, enable_flex_start or
-            enable_flex_start_queued_provisioning)
+            enable_flex_start_queued_provisioning, is_using_kueue)
+
+        # Use _REPR, instead of directly using 'kubernetes' as the config key,
+        # because it could be SSH node pool as well.
+        cloud_config_str = self._REPR.lower()
         timeout = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
+            cloud=cloud_config_str,
             region=context,
             keys=('provision_timeout',),
             default_value=timeout,
@@ -687,13 +733,8 @@ class Kubernetes(clouds.Cloud):
             'accelerator_count': str(acc_count),
             'timeout': str(timeout),
             'k8s_port_mode': port_mode.value,
-            'k8s_networking_mode': network_utils.get_networking_mode(
-                None, context=context).value,
-            'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_values': k8s_acc_label_values,
-            'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
-            'k8s_ssh_jump_image': ssh_jump_image,
             'k8s_service_account_name': k8s_service_account_name,
             'k8s_automount_sa_token': 'true',
             'k8s_fuse_device_required': fuse_device_required,
@@ -727,14 +768,17 @@ class Kubernetes(clouds.Cloud):
                 (constants.PERSISTENT_RUN_SCRIPT_DIR),
             'k8s_high_availability_restarting_signal_file':
                 (constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE),
-            'ha_recovery_log_path': constants.HA_PERSISTENT_RECOVERY_LOG_PATH,
+            'ha_recovery_log_path':
+                constants.HA_PERSISTENT_RECOVERY_LOG_PATH.format(''),
             'sky_python_cmd': constants.SKY_PYTHON_CMD,
+            'sky_unset_pythonpath_and_set_cwd':
+                constants.SKY_UNSET_PYTHONPATH_AND_SET_CWD,
             'k8s_high_availability_storage_class_name':
                 (k8s_ha_storage_class_name),
             'avoid_label_keys': avoid_label_keys,
-            'k8s_ipc_lock_capability': k8s_ipc_lock_capability,
             'k8s_enable_flex_start': enable_flex_start,
             'k8s_max_run_duration_seconds': max_run_duration_seconds,
+            'k8s_network_type': network_type.value,
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
@@ -745,13 +789,43 @@ class Kubernetes(clouds.Cloud):
         namespace = kubernetes_utils.get_kube_config_context_namespace(context)
         deploy_vars['k8s_namespace'] = namespace
 
+        # Add backward compatibility template variables for GPUDirect variants
+        deploy_vars['k8s_enable_gpudirect_tcpx'] = (
+            network_type == KubernetesHighPerformanceNetworkType.GCP_TCPX)
+        deploy_vars['k8s_enable_gpudirect_tcpxo'] = (
+            network_type == KubernetesHighPerformanceNetworkType.GCP_TCPXO)
+        rdma_enabled = (network_type ==
+                        KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA)
+        deploy_vars['k8s_enable_gpudirect_rdma'] = rdma_enabled
+        if rdma_enabled and machine_type.startswith('a4'):
+            deploy_vars['k8s_enable_gpudirect_rdma_a4'] = True
+        else:
+            deploy_vars['k8s_enable_gpudirect_rdma_a4'] = False
+
+        deploy_vars['k8s_ipc_lock_capability'] = (
+            network_type.requires_ipc_lock_capability())
+
         return deploy_vars
+
+    @staticmethod
+    def _warn_on_disk_size(resources: 'resources_lib.Resources'):
+        if resources.disk_size != resources_lib.DEFAULT_DISK_SIZE_GB:
+            logger.info(f'{colorama.Style.DIM}Disk size {resources.disk_size} '
+                        'is not supported by Kubernetes. '
+                        'To add additional disk, use volumes.'
+                        f'{colorama.Style.RESET_ALL}')
+        if resources.disk_tier is not None:
+            logger.info(f'{colorama.Style.DIM}Disk tier {resources.disk_tier} '
+                        'is not supported by Kubernetes. '
+                        'To add additional disk, use volumes.'
+                        f'{colorama.Style.RESET_ALL}')
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
     ) -> 'resources_utils.FeasibleResources':
         # TODO(zhwu): This needs to be updated to return the correct region
         # (context) that has enough resources.
+        self._warn_on_disk_size(resources)
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
@@ -760,7 +834,8 @@ class Kubernetes(clouds.Cloud):
                 accelerators=resources.accelerators,
                 use_spot=resources.use_spot,
                 region=resources.region,
-                zone=resources.zone)
+                zone=resources.zone,
+                resources=resources)
             if not regions:
                 return resources_utils.FeasibleResources([], [], None)
             resources = resources.copy(accelerators=None)
@@ -784,7 +859,9 @@ class Kubernetes(clouds.Cloud):
         default_instance_type = Kubernetes.get_default_instance_type(
             cpus=resources.cpus,
             memory=resources.memory,
-            disk_tier=resources.disk_tier)
+            disk_tier=resources.disk_tier,
+            region=resources.region,
+            zone=resources.zone)
 
         if accelerators is None:
             # For CPU only clusters, need no special handling
@@ -793,12 +870,18 @@ class Kubernetes(clouds.Cloud):
             assert len(accelerators) == 1, resources
             # GPUs requested - build instance type.
             acc_type, acc_count = list(accelerators.items())[0]
+            # If acc_type contains spaces, return empty list since Kubernetes
+            # does not support spaces in label values
+            if ' ' in acc_type:
+                return resources_utils.FeasibleResources([], [], None)
 
             # Parse into KubernetesInstanceType
             k8s_instance_type = (kubernetes_utils.KubernetesInstanceType.
                                  from_instance_type(default_instance_type))
 
             gpu_task_cpus = k8s_instance_type.cpus
+            if resources.cpus is None:
+                gpu_task_cpus = self._DEFAULT_NUM_VCPUS_WITH_GPU * acc_count
             # Special handling to bump up memory multiplier for GPU instances
             gpu_task_memory = (float(resources.memory.strip('+')) if
                                resources.memory is not None else gpu_task_cpus *
@@ -812,7 +895,8 @@ class Kubernetes(clouds.Cloud):
             accelerators=None,
             use_spot=resources.use_spot,
             region=resources.region,
-            zone=resources.zone)
+            zone=resources.zone,
+            resources=resources)
         if not available_regions:
             return resources_utils.FeasibleResources([], [], None)
         # No fuzzy lists for Kubernetes
@@ -963,7 +1047,7 @@ class Kubernetes(clouds.Cloud):
 
         all_contexts = kubernetes_utils.get_all_kube_context_names()
 
-        if region not in all_contexts:
+        if region and region not in all_contexts:
             raise ValueError(
                 f'Context {region} not found in kubeconfig. Kubernetes only '
                 'supports context names as regions. Available '
@@ -1000,6 +1084,31 @@ class Kubernetes(clouds.Cloud):
             identity = [cls.get_identity_from_context(context)]
             identities.append(identity)
         return identities
+
+    @classmethod
+    def is_volume_name_valid(cls,
+                             volume_name: str) -> Tuple[bool, Optional[str]]:
+        """Validates that the volume name is valid for this cloud.
+
+        Follows Kubernetes DNS-1123 subdomain rules:
+        - must be <= 253 characters
+        - must match: '[a-z0-9]([-a-z0-9]*[a-z0-9])?(.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*' # pylint: disable=line-too-long
+        """
+        # Max length per DNS-1123 subdomain
+        if len(volume_name) > cls._MAX_VOLUME_NAME_LEN_LIMIT:
+            return (False, f'Volume name exceeds the maximum length of '
+                    f'{cls._MAX_VOLUME_NAME_LEN_LIMIT} characters '
+                    '(DNS-1123 subdomain).')
+
+        # DNS-1123 label: [a-z0-9]([-a-z0-9]*[a-z0-9])?
+        label = r'[a-z0-9]([-a-z0-9]*[a-z0-9])?'
+        # DNS-1123 subdomain: label(\.-separated label)*
+        subdomain_pattern = rf'^{label}(\.{label})*$'
+        if re.fullmatch(subdomain_pattern, volume_name) is None:
+            return (False, 'Volume name must be a valid DNS-1123 subdomain: '
+                    'lowercase alphanumeric, "-", and "."; start/end with '
+                    'alphanumeric.')
+        return True, None
 
     @classmethod
     def is_label_valid(cls, label_key: str,
@@ -1039,28 +1148,124 @@ class Kubernetes(clouds.Cloud):
         ]
 
     @classmethod
-    @annotations.lru_cache(scope='request', maxsize=10)
-    def _cluster_supports_high_performance_networking(cls,
-                                                      context: str) -> bool:
-        """Check if the cluster supports high performance networking.
-
-        Currently detects Nebius clusters by checking for nebius.com/ labels
-        on cluster nodes.
+    def _detect_network_type(
+        cls,
+        context: str,
+        network_tier: Optional['resources_utils.NetworkTier'] = None
+    ) -> Tuple[KubernetesHighPerformanceNetworkType, str]:
+        """Detect the type of Kubernetes network based on node labels.
 
         Args:
             context: The Kubernetes context to check.
+            network_tier: The network tier requested. If None or not BEST,
+                         returns NONE (no high-performance networking).
 
         Returns:
-            True if the cluster supports high performance networking.
+            A tuple of the detected network type and the instance type.
         """
+        # If network_tier is None or not BEST, return NONE
+        if (network_tier is None or
+                network_tier != resources_utils.NetworkTier.BEST):
+            return KubernetesHighPerformanceNetworkType.NONE, ''
+
         try:
             nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
             for node in nodes:
                 if node.metadata.labels:
-                    for label_key in node.metadata.labels.keys():
+                    # Check for Nebius clusters
+                    for label_key, _ in node.metadata.labels.items():
                         if label_key.startswith('nebius.com/'):
-                            return True
+                            return (KubernetesHighPerformanceNetworkType.NEBIUS,
+                                    '')
+                        if label_key.startswith('ib.coreweave.cloud/'):
+                            return (
+                                KubernetesHighPerformanceNetworkType.COREWEAVE,
+                                '')
+
+                    # Check for GKE clusters with specific GPUDirect variants
+                    machine_family = node.metadata.labels.get(
+                        'cloud.google.com/machine-family', '')
+                    instance_type = node.metadata.labels.get(
+                        'node.kubernetes.io/instance-type', '')
+                    gke_accelerator = node.metadata.labels.get(
+                        'cloud.google.com/gke-accelerator', '')
+
+                    # Check if this is a GKE cluster with A3/A4 machine family
+                    if machine_family in ['a3', 'a4']:
+                        # Check instance type to determine specific GPUDirect
+                        # variant
+                        if 'a3-highgpu-8g' in instance_type:
+                            return (
+                                KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                                'a3-highgpu-8g')
+                        elif 'a3-edgegpu-8g' in instance_type:
+                            return (
+                                KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                                'a3-edgegpu-8g')
+                        elif 'a3-megagpu-8g' in instance_type:
+                            return (
+                                KubernetesHighPerformanceNetworkType.GCP_TCPXO,
+                                'a3-megagpu-8g')
+                        elif 'a4-highgpu-8g' in instance_type:
+                            return (KubernetesHighPerformanceNetworkType.
+                                    GCP_GPUDIRECT_RDMA, 'a4-highgpu-8g')
+                        elif 'a3-ultragpu-8g' in instance_type:
+                            return (KubernetesHighPerformanceNetworkType.
+                                    GCP_GPUDIRECT_RDMA, 'a3-ultragpu-8g')
+                        # Generic A3/A4 detection as fallback
+                        elif machine_family == 'a4':
+                            return (KubernetesHighPerformanceNetworkType.
+                                    GCP_GPUDIRECT_RDMA, 'a4')
+
+                    # Fallback: Check for GPU Direct TCPX capable instance
+                    # types with high-perf GPUs
+                    is_gpu_direct_tcpx_instance = (
+                        instance_type
+                        in gcp_constants.GPU_DIRECT_TCPX_INSTANCE_TYPES)
+                    has_high_perf_gpu = ('nvidia-h100' in gke_accelerator or
+                                         'nvidia-h200' in gke_accelerator or
+                                         'nvidia-b200' in gke_accelerator)
+
+                    if is_gpu_direct_tcpx_instance and has_high_perf_gpu:
+                        # Default to TCPX if we can't determine the specific
+                        # variant
+                        return (KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                                instance_type)
+
         except exceptions.KubeAPIUnreachableError:
             # If we can't reach the cluster, assume no high perf networking
-            return False
-        return False
+            pass
+
+        # If we cannot determine the network type based on nodes
+        # Check if the cluster has any node pools with autoscaling enabled
+        # with machine types that support high perf networking for GKE.
+        autoscaler_type = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('autoscaler',),
+            default_value=None)
+        if (autoscaler_type !=
+                kubernetes_enums.KubernetesAutoscalerType.GKE.value):
+            return KubernetesHighPerformanceNetworkType.NONE, ''
+        autoscaler = kubernetes_utils.get_autoscaler(
+            kubernetes_enums.KubernetesAutoscalerType(autoscaler_type))
+        logger.debug(f'{context} has autoscaler of type: {autoscaler_type}')
+        machine_types = autoscaler.get_available_machine_types(context)
+        # Check if any machine type supports high perf networking for GKE.
+        if 'a3-highgpu-8g' in machine_types:
+            return (KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                    'a3-highgpu-8g')
+        elif 'a3-edgegpu-8g' in machine_types:
+            return (KubernetesHighPerformanceNetworkType.GCP_TCPX,
+                    'a3-edgegpu-8g')
+        elif 'a3-megagpu-8g' in machine_types:
+            return (KubernetesHighPerformanceNetworkType.GCP_TCPXO,
+                    'a3-megagpu-8g')
+        elif 'a4-highgpu-8g' in machine_types:
+            return (KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA,
+                    'a4-highgpu-8g')
+        elif 'a3-ultragpu-8g' in machine_types:
+            return (KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA,
+                    'a3-ultragpu-8g')
+
+        return KubernetesHighPerformanceNetworkType.NONE, ''

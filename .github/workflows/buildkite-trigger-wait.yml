@@ -40,6 +40,11 @@ on:
         type: boolean
         default: true
         description: "Whether to fail the job if the Buildkite build fails"
+      sleep_seconds:
+        required: false
+        type: number
+        default: 0
+        description: "Number of seconds to sleep before triggering the build"
     secrets:
       BUILDKITE_TOKEN:
         required: true
@@ -58,6 +63,14 @@ jobs:
     outputs:
       json: ${{ steps.trigger_buildkite.outputs.json }}
     steps:
+      # Sleep before triggering if specified
+      - name: Sleep before trigger
+        if: ${{ inputs.sleep_seconds > 0 }}
+        run: |
+          echo "Sleeping for ${{ inputs.sleep_seconds }} seconds before triggering Buildkite build..."
+          sleep ${{ inputs.sleep_seconds }}
+          echo "Sleep completed, proceeding with trigger..."
+
       # Trigger Buildkite smoke tests
       - name: Trigger Buildkite Smoke Tests
         id: trigger_buildkite

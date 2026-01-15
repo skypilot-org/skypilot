@@ -4,7 +4,7 @@ Autostop and Autodown
 ============================
 
 The **autostop** (or **autodown**) feature automatically stops (or tears down) a
-cluster after it becomes idle.
+cluster after it becomes :ref:`idle <auto-stop-setting-idleness-behavior>`.
 
 With autostop, users can simply submit jobs and leave their laptops, while
 ensuring no unnecessary spending occurs. After jobs have finished, the
@@ -30,6 +30,10 @@ To schedule autostop for a cluster, set autostop in the SkyPilot YAML:
 
      # Or:
      autostop: 10m  # Stop after this many idle minutes.
+
+     # Or:
+     autostop:
+       idle_minutes: 10
 
 Alternatively, use :code:`sky autostop` or ``sky launch -i <idle minutes>``:
 
@@ -94,4 +98,44 @@ To view the status of the cluster, use ``sky dashboard`` or ``sky status``:
    mycluster    AWS (us-east-1) 2x(cpus=8, m4.2xlarge, ...)   UP       10 min         1 min ago
    mycluster2   AWS (us-east-1) 2x(cpus=8, m4.2xlarge, ...)   UP       10 min(down)   1 min ago
 
-Cluster that are autostopped/autodowned are automatically removed from the status table.
+Clusters that are autostopped/autodowned are automatically removed from the status table.
+
+.. _auto-stop-setting-idleness-behavior:
+
+Setting idleness behavior
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A cluster is considered idle if there are no in‑progress jobs (pending or running)
+and no active SSH sessions. You can change the idleness criteria in SkyPilot YAML with
+:ref:`resources.autostop.wait_for <yaml-spec-resources-autostop>`.
+
+``wait_for`` can be set as one of the followings:
+
+- ``jobs_and_ssh`` (default): Wait for in‑progress jobs and SSH connections to finish.
+- ``jobs``: Only wait for in‑progress jobs — useful for ignoring long‑running SSH or IDE connections.
+- ``none``: Wait for nothing; autostop right after ``idle_minutes`` — useful for ignoring long‑running jobs (e.g., Jupyter notebooks) and enforcing a hard time limit.
+
+Examples:
+
+.. code-block:: yaml
+
+   resources:
+     autostop:
+       idle_minutes: 10
+       wait_for: jobs_and_ssh
+
+Alternatively, pass the ``--wait-for`` flag to either ``sky autostop`` or ``sky launch``:
+
+.. code-block:: bash
+
+   # Default: Running jobs and active SSH sessions reset the idleness timer.
+   sky launch -d -c mycluster cluster.yaml -i 10 --wait-for jobs_and_ssh
+
+   # Or:
+   sky autostop mycluster -i 10 --wait-for jobs_and_ssh
+
+   # Only running jobs reset the idleness timer.
+   sky autostop mycluster -i 10 --wait-for jobs
+
+   # Hard time limit: Stop after 10 minutes, regardless of running jobs or SSH sessions.
+   sky autostop mycluster -i 10 --wait-for none

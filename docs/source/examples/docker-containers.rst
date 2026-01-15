@@ -116,7 +116,7 @@ Private registries
     These instructions do not apply if you use SkyPilot to launch on Kubernetes clusters. Instead, see :ref:`Using Images from Private Repositories in Kubernetes<kubernetes-custom-images-private-repos>` for more.
 
 When using this mode, to access Docker images hosted on private registries,
-you can provide the registry authentication details using :ref:`task environment variables <env-vars>`:
+you can use :ref:`task environment variables <env-vars>`:
 
 .. tab-set::
 
@@ -138,10 +138,12 @@ you can provide the registry authentication details using :ref:`task environment
     .. tab-item:: AWS ECR
         :sync: aws-ecr-tab
 
+        SkyPilot supports automatic AWS ECR authentication using command substitution. You can specify the authentication command directly in your YAML:
+
         .. code-block:: yaml
 
           resources:
-            image_id: docker:<your-ecr-repo>:<tag>
+            image_id: docker:<repo>:<tag>
 
           envs:
             # Values used in: docker login -u <user> -p <password> <registry server>
@@ -157,12 +159,29 @@ you can provide the registry authentication details using :ref:`task environment
           sky launch sky.yaml \
             --env SKYPILOT_DOCKER_PASSWORD="$(aws ecr get-login-password --region us-east-1)"
 
-    .. tab-item:: GCP GCR
-        :sync: gcp-artifact-registry-tab
+        .. note::
 
-        We support private GCP Artifact Registry (GCR) with a service account key.
+            If your cluster is on AWS, SkyPilot will automatically use the IAM permissions of the EC2 instance to authenticate with ECR, if the ``SKYPILOT_DOCKER_USERNAME`` and ``SKYPILOT_DOCKER_PASSWORD`` are set to empty strings:
+
+            .. code-block:: yaml
+
+              resources:
+                image_id: docker:<repo>:<tag>
+
+              envs:
+                SKYPILOT_DOCKER_USERNAME: ""
+                SKYPILOT_DOCKER_PASSWORD: ""
+                SKYPILOT_DOCKER_SERVER: <your-user-id>.dkr.ecr.<region>.amazonaws.com
+
+            **Important**: Ensure that the EC2 instance's IAM role has the necessary ECR permissions (``AmazonEC2ContainerRegistryReadOnly`` or appropriate custom policies).
+
+    .. tab-item:: GCP
+        :sync: gcp-tab
+
+        We support private GCP container registries with a service account key.
         See `GCP Artifact Registry authentication <https://cloud.google.com/artifact-registry/docs/docker/authentication?authuser=1#json-key>`_. Note that the ``SKYPILOT_DOCKER_USERNAME`` needs to be set to ``_json_key``.
 
+        For **Artifact Registry** (recommended):
 
         .. code-block:: yaml
 
@@ -174,6 +193,18 @@ you can provide the registry authentication details using :ref:`task environment
             SKYPILOT_DOCKER_PASSWORD: <gcp-service-account-key>
             SKYPILOT_DOCKER_SERVER: <location>-docker.pkg.dev
 
+        For **Container Registry (GCR)** (deprecated):
+
+        .. code-block:: yaml
+
+          resources:
+            image_id: docker:<your-gcp-project-id>/<your-image-name>:<tag>
+
+          envs:
+            SKYPILOT_DOCKER_USERNAME: _json_key
+            SKYPILOT_DOCKER_PASSWORD: <gcp-service-account-key>
+            SKYPILOT_DOCKER_SERVER: gcr.io
+
         Or, you can use ``sky launch`` with the ``--env`` flag to pass the service account key:
 
         .. code-block:: bash
@@ -183,14 +214,32 @@ you can provide the registry authentication details using :ref:`task environment
 
         .. note::
 
-            If your cluster is on GCP, SkyPilot will automatically use the IAM permissions of the instance to authenticate with GCR, if the ``SKYPILOT_DOCKER_USERNAME`` and ``SKYPILOT_DOCKER_PASSWORD`` are set to empty strings:
+            If your cluster is on GCP, SkyPilot will automatically use the IAM permissions of the instance to authenticate with the registry, if the ``SKYPILOT_DOCKER_USERNAME`` and ``SKYPILOT_DOCKER_PASSWORD`` are set to empty strings:
 
             .. code-block:: yaml
 
               envs:
                 SKYPILOT_DOCKER_USERNAME: ""
                 SKYPILOT_DOCKER_PASSWORD: ""
-                SKYPILOT_DOCKER_SERVER: <location>-docker.pkg.dev
+                SKYPILOT_DOCKER_SERVER: <location>-docker.pkg.dev  # or gcr.io
+
+        .. note::
+
+            ``RunPod`` requires Docker to authenticate to GAR using the `base64-encoded version of the key <https://contact.runpod.io/hc/en-us/articles/39403705226003-Help-to-setup-Google-Cloud-s-Artifact-Registry-GAR-with-RunPod>`_. To base64 encode the JSON key:
+
+            .. code-block:: shell
+
+              base64 -i gcp-key.json -w 0 > gcp-key.json.b64
+
+            The Docker username should also be changed to ``_json_key_base64``:
+
+            .. code-block:: yaml
+
+              envs:
+                SKYPILOT_DOCKER_USERNAME: _json_key_base64
+                ...
+
+            Note that the base64 encoding option is only available on Artifact Registry, not Container Registry (GCR).
 
 
     .. tab-item:: NVIDIA NGC

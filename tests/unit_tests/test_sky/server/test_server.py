@@ -10,10 +10,12 @@ import fastapi
 import pytest
 import uvicorn
 
+from sky import models
 from sky.server import server
+from sky.server.requests import executor
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
-from sky.utils import context
 
 
 @mock.patch('uvicorn.run')
@@ -165,7 +167,7 @@ async def test_logs():
     """Test the logs endpoint."""
     mock_cluster_job_body = mock.MagicMock()
     mock_cluster_job_body.cluster_name = 'test-cluster'
-    mock_background_tasks = mock.MagicMock()
+    background_tasks = fastapi.BackgroundTasks()
 
     # Create an event to track when logs streaming starts
     streaming_started = threading.Event()
@@ -179,10 +181,11 @@ async def test_logs():
 
     def slow_execute(*args, **kwargs):
         # Simulate slow execution
-        time.sleep(1)
+        task = asyncio.create_task(asyncio.sleep(0.1))
+        return executor.CoroutineTask(task)
 
-    with mock.patch('sky.server.requests.executor.prepare_request') as mock_prepare, \
-         mock.patch('sky.server.requests.executor.execute_request_coroutine',
+    with mock.patch('sky.server.requests.executor.prepare_request_async') as mock_prepare_async, \
+         mock.patch('sky.server.requests.executor.execute_request_in_coroutine',
                    side_effect=slow_execute) as mock_execute, \
          mock.patch('sky.server.stream_utils.stream_response',
                    side_effect=mock_stream_response) as mock_stream:
@@ -190,12 +193,12 @@ async def test_logs():
         # Mock prepare_request to return a request task
         mock_request_task = mock.MagicMock()
         mock_request_task.log_path = '/tmp/test.log'
-        mock_prepare.return_value = mock_request_task
+        mock_prepare_async.return_value = mock_request_task
 
         # Start logs endpoint in background
         logs_task = asyncio.create_task(
             server.logs(mock.MagicMock(), mock_cluster_job_body,
-                        mock_background_tasks))
+                        background_tasks))
 
         # Execute should be run in background and does not block streaming start
         streaming_started.wait(timeout=0.1)
@@ -204,14 +207,16 @@ async def test_logs():
         response = await logs_task
         assert isinstance(response, fastapi.responses.StreamingResponse)
         assert response.media_type == 'text/plain'
+        await background_tasks()
 
         # Verify the executor calls
-        mock_prepare.assert_called_once()
+        mock_prepare_async.assert_called_once()
         mock_execute.assert_called_once_with(mock_request_task)
-        mock_stream.assert_called_once_with(
-            request_id=mock.ANY,
-            logs_path=mock_request_task.log_path,
-            background_tasks=mock_background_tasks)
+        mock_stream.assert_called_once_with(mock.ANY,
+                                            mock_request_task.log_path,
+                                            mock.ANY,
+                                            polling_interval=1,
+                                            kill_request_on_disconnect=False)
 
 
 @mock.patch('sky.utils.context_utils.hijack_sys_attrs')
@@ -219,6 +224,8 @@ async def test_logs():
 def test_server_run_uses_uvloop(mock_asyncio_run, mock_hijack_sys_attrs):
     """Test that Server.run uses uvloop event loop policy."""
     from sky.server.uvicorn import Server
+
+    threads_before = len(threading.enumerate())
 
     config = uvicorn.Config(app='sky.server.server:app',
                             host='127.0.0.1',
@@ -230,18 +237,26 @@ def test_server_run_uses_uvloop(mock_asyncio_run, mock_hijack_sys_attrs):
     uvloop_available = True
 
     def setup_and_check():
-        # Call original setup to configure event loop
-        original_setup()
-        # Check if uvloop policy is now set
-        nonlocal uvloop_policy_set, uvloop_available
-        import asyncio
+        # Save previous event loop policy
+        previous_policy = asyncio.get_event_loop_policy()
         try:
-            import uvloop
-            policy = asyncio.get_event_loop_policy()
-            uvloop_policy_set = isinstance(policy, uvloop.EventLoopPolicy)
-        except ImportError:
-            # uvloop not available
-            uvloop_available = False
+            # Call original setup to configure event loop
+            original_setup()
+            # Check if uvloop policy is now set
+            nonlocal uvloop_policy_set, uvloop_available
+            try:
+                import uvloop
+                policy = asyncio.get_event_loop_policy()
+                uvloop_policy_set = isinstance(policy, uvloop.EventLoopPolicy)
+            except ImportError:
+                # uvloop not available
+                uvloop_available = False
+        finally:
+            # Restore previous event loop policy
+            # This is needed because other tests/fixtures running on the same
+            # pytest worker may not work with the uvicorn event loop policy,
+            # such as _seed_test_jobs in test_managed_jobs_service.py
+            asyncio.set_event_loop_policy(previous_policy)
 
     with mock.patch.object(config,
                            'setup_event_loop',
@@ -250,6 +265,8 @@ def test_server_run_uses_uvloop(mock_asyncio_run, mock_hijack_sys_attrs):
         server_instance.run()
 
     mock_asyncio_run.assert_called_once()
+    threads_after = len(threading.enumerate())
+    assert threads_after == threads_before
 
     # Check uvloop policy was set (if uvloop is available)
     if uvloop_available:
@@ -258,3 +275,29 @@ def test_server_run_uses_uvloop(mock_asyncio_run, mock_hijack_sys_attrs):
             "is available")
     else:
         pytest.skip("uvloop not available, skipping uvloop policy check")
+
+
+@pytest.mark.asyncio
+async def test_enabled_clouds_respect_auth_user():
+    auth_user = models.User(id='auth-user-id', name='Auth User')
+    request = mock.MagicMock()
+    request.state = mock.MagicMock()
+    request.state.request_id = 'request-id'
+    request.state.auth_user = auth_user
+
+    default_env_vars = {
+        constants.USER_ID_ENV_VAR: 'default-id',
+        constants.USER_ENV_VAR: 'default-name',
+    }
+
+    with mock.patch('sky.server.requests.payloads.request_body_env_vars',
+                    side_effect=lambda: default_env_vars.copy()), \
+         mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        await server.enabled_clouds(request, workspace='ws', expand=True)
+
+    mock_schedule.assert_awaited_once()
+    _, kwargs = mock_schedule.call_args
+    request_body = kwargs['request_body']
+    assert request_body.env_vars[constants.USER_ID_ENV_VAR] == auth_user.id
+    assert request_body.env_vars[constants.USER_ENV_VAR] == auth_user.name

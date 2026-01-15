@@ -1,6 +1,8 @@
 """Unit tests for sky/server/requests/process.py."""
 from concurrent.futures import Future
+import concurrent.futures.process
 import time
+import unittest.mock
 
 import pytest
 
@@ -20,32 +22,27 @@ def failing_task():
     raise ValueError('Task failed')
 
 
-def wait_for_workers_cleanup(executor, timeout=5):
-    """Wait for workers to be cleaned up.
-    
+def verify_workers_cleanup(executor):
+    """Verify workers to be cleaned up.
+
     Args:
         executor: The DisposableExecutor instance
-        timeout: Maximum time to wait in seconds
-    
+
     Returns:
         bool: True if workers are cleaned up, False if timeout
     """
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        with executor._lock:
-            if len(executor.workers) == 0:
-                return True
-        time.sleep(0.1)
-    return False
+    with executor._lock:
+        if len(executor.workers) == 0:
+            return True
 
 
-def wait_for_futures(futures, timeout=5):
+def wait_for_futures(futures, timeout=20):
     """Wait for futures to complete.
-    
+
     Args:
         futures: List of futures to wait for
         timeout: Maximum time to wait in seconds
-    
+
     Returns:
         bool: True if all futures completed, False if timeout
     """
@@ -93,21 +90,23 @@ def test_disposable_executor():
     """Test DisposableExecutor functionality."""
     executor = DisposableExecutor(max_workers=2)
     try:
+        futs = []
         # Test submit and has_idle_workers
         assert executor.has_idle_workers()
-        assert executor.submit(dummy_task)
+        futs.append(executor.submit(dummy_task))
 
         # Test multiple tasks
-        assert executor.submit(dummy_task)
+        futs.append(executor.submit(dummy_task))
         assert not executor.has_idle_workers()  # No idle workers when full
 
-        # Wait for tasks to complete and workers to be cleaned up
-        assert wait_for_workers_cleanup(executor), "Workers not cleaned up"
+        concurrent.futures.wait(futs)
+        assert verify_workers_cleanup(executor), "Workers not cleaned up"
         assert executor.has_idle_workers()  # Should have idle workers now
 
         # Test with failing task
-        assert executor.submit(failing_task)
-        assert wait_for_workers_cleanup(
+        failed_fut = executor.submit(failing_task)
+        concurrent.futures.wait([failed_fut])
+        assert verify_workers_cleanup(
             executor), "Failed task worker not cleaned up"
         assert executor.has_idle_workers()  # Worker should be cleaned up
     finally:
@@ -151,5 +150,52 @@ def test_burstable_executor_no_burst():
         executor.submit_until_success(dummy_task)
         # Should queue to guaranteed pool even when busy
         executor.submit_until_success(dummy_task)
+    finally:
+        executor.shutdown()
+
+
+def test_burstable_executor_pool_recovery():
+    """Test BurstableExecutor recovery from BrokenProcessPool exception."""
+
+    executor = BurstableExecutor(garanteed_workers=1, burst_workers=0)
+
+    try:
+        # Store reference to original executor
+        original_executor = executor._executor
+        submit_call_count = 0
+
+        # Mock the PoolExecutor.submit method at class level to control
+        # behavior across all instances
+        original_submit = PoolExecutor.submit
+
+        def mock_submit(self, fn, *args, **kwargs):
+            nonlocal submit_call_count
+            submit_call_count += 1
+            if submit_call_count == 1:
+                # First call raises BrokenProcessPool to simulate pool failure
+                raise concurrent.futures.process.BrokenProcessPool(
+                    "Simulated process pool failure")
+            else:
+                # Subsequent calls should work normally
+                # Call the original submit method
+                return original_submit(self, fn, *args, **kwargs)
+
+        with unittest.mock.patch.object(PoolExecutor, 'submit',
+                                        new=mock_submit):
+            # This should trigger the pool recovery logic in
+            # _submit_to_guaranteed_pool
+            future = executor.submit_until_success(dummy_task)
+            result = future.result(timeout=5.0)
+
+            # Verify the task completed successfully despite initial failure
+            assert result is True
+
+            # Verify that submit was called at least twice
+            # (initial failure + successful retry)
+            assert submit_call_count >= 2
+
+            # Verify that a new executor was created after the failure
+            assert executor._executor is not original_executor
+
     finally:
         executor.shutdown()

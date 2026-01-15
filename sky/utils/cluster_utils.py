@@ -11,7 +11,7 @@ import uuid
 from sky.skylet import constants
 from sky.utils import command_runner
 from sky.utils import common_utils
-from sky.utils import timeline
+from sky.utils import lock_events
 
 # The cluster yaml used to create the current cluster where the module is
 # called.
@@ -46,7 +46,8 @@ class SSHConfigHelper(object):
     ssh_cluster_key_path = constants.SKY_USER_FILE_PATH + '/ssh-keys/{}.key'
 
     @classmethod
-    def _get_generated_config(cls, autogen_comment: str, host_name: str,
+    def _get_generated_config(cls, autogen_comment: str,
+                              cluster_name_on_cloud: str, host_name: str,
                               ip: str, username: str, ssh_key_path: str,
                               proxy_command: Optional[str], port: int,
                               docker_proxy_command: Optional[str]):
@@ -79,6 +80,7 @@ class SSHConfigHelper(object):
               UserKnownHostsFile=/dev/null
               GlobalKnownHostsFile=/dev/null
               Port {port}
+              SetEnv {constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}={cluster_name_on_cloud}
               {proxy}
             """.rstrip())
         codegen = codegen + '\n'
@@ -107,10 +109,11 @@ class SSHConfigHelper(object):
         return auth_config['ssh_private_key']
 
     @classmethod
-    @timeline.FileLockEvent(ssh_conf_lock_path)
+    @lock_events.FileLockEvent(ssh_conf_lock_path)
     def add_cluster(
         cls,
         cluster_name: str,
+        cluster_name_on_cloud: str,
         ips: List[str],
         auth_config: Dict[str, str],
         ports: List[int],
@@ -135,6 +138,7 @@ class SSHConfigHelper(object):
             ports: List of port numbers for SSH corresponding to ips
             docker_user: If not None, use this user to ssh into the docker
             ssh_user: Override the ssh_user in auth_config
+            cluster_name_on_cloud: The cluster name as it appears in the cloud.
         """
         if ssh_user is None:
             username = auth_config['ssh_user']
@@ -144,6 +148,9 @@ class SSHConfigHelper(object):
             username = docker_user
 
         key_path = cls.generate_local_key_file(cluster_name, auth_config)
+        # Keep the unexpanded path for SSH config (with ~)
+        key_path_for_config = key_path
+        # Expand the path for internal operations that need absolute path
         key_path = os.path.expanduser(key_path)
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
                                f'{cluster_name}` to remove)')
@@ -190,11 +197,29 @@ class SSHConfigHelper(object):
         proxy_command = auth_config.get('ssh_proxy_command', None)
 
         docker_proxy_command_generator = None
+        proxy_command_for_nodes = proxy_command
         if docker_user is not None:
-            docker_proxy_command_generator = lambda ip, port: ' '.join(
-                ['ssh'] + command_runner.ssh_options_list(
-                    key_path, ssh_control_name=None, port=port) +
-                ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ip}'])
+
+            def _docker_proxy_cmd(ip: str, port: int) -> str:
+                inner_proxy = proxy_command
+                inner_port = port or 22
+                if inner_proxy is not None:
+                    inner_proxy = inner_proxy.replace('%h', ip)
+                    inner_proxy = inner_proxy.replace('%p', str(inner_port))
+                return ' '.join(['ssh'] + command_runner.ssh_options_list(
+                    key_path,
+                    ssh_control_name=None,
+                    ssh_proxy_command=inner_proxy,
+                    port=inner_port,
+                    # ProxyCommand (ssh -W) is a forwarding tunnel, not an
+                    # interactive session. ControlMaster would cache these
+                    # processes, causing them to hang and block subsequent
+                    # connections. Each ProxyCommand should be ephemeral.
+                    disable_control_master=True
+                ) + ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ip}'])
+
+            docker_proxy_command_generator = _docker_proxy_cmd
+            proxy_command_for_nodes = None
 
         codegen = ''
         # Add the nodes to the codegen
@@ -206,10 +231,14 @@ class SSHConfigHelper(object):
                 ip = 'localhost'
                 port = constants.DEFAULT_DOCKER_PORT
             node_name = cluster_name if i == 0 else cluster_name + f'-worker{i}'
+            node_proxy_command = proxy_command_for_nodes
+            if node_proxy_command is not None:
+                node_proxy_command = node_proxy_command.replace('%w', str(i))
             # TODO(romilb): Update port number when k8s supports multinode
             codegen += cls._get_generated_config(
-                sky_autogen_comment, node_name, ip, username, key_path,
-                proxy_command, port, docker_proxy_command) + '\n'
+                sky_autogen_comment, cluster_name_on_cloud, node_name, ip,
+                username, key_path_for_config, node_proxy_command, port,
+                docker_proxy_command) + '\n'
 
         cluster_config_path = os.path.expanduser(
             cls.ssh_cluster_path.format(cluster_name))
@@ -334,7 +363,7 @@ class SSHConfigHelper(object):
             cluster_name: Cluster name.
         """
 
-        with timeline.FileLockEvent(
+        with lock_events.FileLockEvent(
                 cls.ssh_conf_per_cluster_lock_path.format(cluster_name)):
             cluster_config_path = os.path.expanduser(
                 cls.ssh_cluster_path.format(cluster_name))

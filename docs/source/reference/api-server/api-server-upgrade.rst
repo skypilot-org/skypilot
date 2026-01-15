@@ -57,7 +57,7 @@ Optionally, you can watch the upgrade progress with:
 
 .. code-block:: console
 
-    $ kubectl get pod -l app=${RELEASE_NAME}-api --watch
+    $ kubectl get pod --namespace $NAMESPACE -l app=${RELEASE_NAME}-api --watch
     NAME                                       READY   STATUS            RESTARTS   AGE
     skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:0/2          0          7s
     skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:1/2          0          24s
@@ -167,7 +167,9 @@ Behavior when the API server is being upgraded:
 
 * For critical ongoing requests (e.g., launching a cluster), it waits for them to finish with a timeout.
 * For non-critical ongoing requests (e.g., log tailing), it cancels them and returns an error to ask the client to retry.
-* For new requests, it returns an error to ask the client to retry.
+* For new requests, it returns an error to ask the client to retry. New requests will be served when the new version of the API server is ready.
+
+To further reduce the waiting time during upgrade, you can use :ref:`rolling update for the API server<sky-api-server-upgrade-strategy>`.
 
 SkyPilot Python SDK and CLI will automatically retry until the new version of API server starts, and ongoing requests (e.g., log tailing) will automatically resume:
 
@@ -182,15 +184,118 @@ To ensure that all the regular critical requests can complete within the timeout
     helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
       --set apiService.terminationGracePeriodSeconds=300
 
-.. _sky-api-server-api-compatibility:
+.. _sky-api-server-upgrade-strategy:
 
-API compatbility
+Upgrade strategy
 ----------------
 
-SkyPilot maintain an internal API version which will be bumped when an incompatible API change is introduced. Client and server can only communicate when they run on the same API version.
+By default, the API server is upgraded with the ``Recreate`` strategy, which introduces waiting time for new requests during upgrade. To eliminate the waiting time, you can upgrade the API server with the ``RollingUpdate`` strategy.
 
-The version strategy of SkyPilot follows the following API compatbility guarantees:
+.. note::
+    
+    ``RollingUpdate`` is an experimental feature. There is a known limitation that some running commands might fail when the old version of the API server gets removed from the ingress backend. It is recommended to schedule the upgrade during a maintenance window.
 
-* The API version will not be bumped within a minor version, i.e. upgrading patch version is guaranteed to be compatible;
-* The API version might be bumped between minior versions, i.e. upgrading minior version should be treated as operation that breaks API compatibility;
-* There is no guarantee about the API version in the nightly build;
+The following table compares the two upgrade strategies:
+
+.. list-table:: Upgrade Strategy Comparison
+   :widths: 25 35 40
+   :header-rows: 1
+
+   * - Aspect
+     - ``Recreate``
+     - ``RollingUpdate``
+   * - **Availability**
+     - Brief downtime during upgrade
+     - Zero downtime
+   * - **Request Handling**
+     - New requests wait until upgrade completes
+     - New requests served continuously by available replicas
+   * - **Database Requirements**
+     - Can use local storage (SQLite)
+     - Must use external persistent database
+   * - **Resource Usage During Upgrade**
+     - Terminates old API server pod, then starts new one
+     - Starts new API server pod, then terminates old one
+   * - **Use Cases**
+     - Development environments, simple setups
+     - Production environments requiring high availability
+
+To use the ``RollingUpdate`` strategy, you need to:
+
+* :ref:`Back the API server with a persistent database <api-server-persistence-db>`;
+* Disable local peristence by setting :ref:`storage.enabled <helm-values-storage-enabled>` to ``false``;
+* Set :ref:`apiService.upgradeStrategy <helm-values-apiService-upgradeStrategy>` to ``RollingUpdate``;
+* Keep the ingress enabled (:ref:`ingress.enabled <helm-values-ingress-enabled>` is ``true`` by default) or :ref:`configure your ingress to improve the availability during upgrade <sky-api-server-rolling-update-ingress>`;
+
+Here's an example of deploying the API server with the ``RollingUpdate`` strategy:
+
+.. code-block:: bash
+
+    helm upgrade --install -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
+      --set apiService.upgradeStrategy=RollingUpdate \
+      --set storage.enabled=false \
+      --set apiService.dbConnectionSecretName=my-db-secret
+
+.. _sky-api-server-rolling-update-ingress:
+
+Ingress config
+--------------
+
+The SkyPilot helm chart automatically configures the ingress resource to achieve higher availability during upgrade. If you are managing the ingress resource outside of the SkyPilot helm chart, refer to the following snippet to improve the availability during upgrades:
+
+.. dropdown:: Example ingress based on nginx-ingress-controller
+
+    .. code-block:: yaml
+
+        apiVersion: networking.k8s.io/v1
+        kind: Ingress
+        metadata:
+          name: your-ingress-name
+          annotations:
+            # Enable session affinity to route the requests of the same client to the same pod during upgrade.
+            # Without session affinity, the chance that requests fail during upgrade would be higher.
+            nginx.ingress.kubernetes.io/affinity: "cookie"
+            nginx.ingress.kubernetes.io/session-cookie-name: "SKYPILOT_ROUTEID"
+            nginx.ingress.kubernetes.io/affinity-mode: "persistent"
+            nginx.ingress.kubernetes.io/session-cookie-change-on-failure: "true"
+
+.. _sky-api-server-api-compatibility:
+
+API compatibility
+-----------------
+
+Starting from ``0.10.0``, SkyPilot guarantees API compatibility between adjacent minor versions, which makes graceful upgrades across minor versions possible. 
+
+For example, assuming ``0.11.0`` is released, the following table shows one possible upgrade sequence that can upgrade the API server and clients from ``0.10.0`` to ``0.11.0`` without breaking API compatibility:
+
+.. list-table:: Upgrade across minor versions
+   :widths: 25 25 10 35
+   :header-rows: 1
+
+   * - ``Client``
+     - ``Server``
+     - ``Compatible``
+     - ``Notes``
+   * - ``0.10.0``
+     - ``0.10.0``
+     - ``Yes``
+     - Initial state
+   * - ``0.10.0``
+     - ``0.11.0``
+     - ``Yes``
+     - Upgrade the API server first
+   * - ``0.11.0``
+     - ``0.11.0``
+     - ``Yes``
+     - Gradually upgrade all clients
+
+When the client and server are running on different minor versions, SkyPilot CLI will print an upgrade hint as a reminder to upgrade the client:
+
+.. code-block:: console
+
+    $ sky status
+    The SkyPilot API server is running in version X, which is newer than your client version Y. The compatibility for your current version might be dropped in the next server upgrade.
+    Consider upgrading your client with:
+    pip install -U skypilot==X.X.X
+
+For a nightly build, its API compatibility is equivalent to its previous minor version, e.g., all nightly builds after ``0.10.0`` and before ``0.11.0`` have the same API compatibility guarantee as ``0.10.0``.

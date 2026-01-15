@@ -4,7 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
-from sky.utils.db_utils import add_column_to_table_sqlalchemy
+from sky.utils.db.db_utils import add_column_to_table_sqlalchemy
 
 
 @pytest.fixture

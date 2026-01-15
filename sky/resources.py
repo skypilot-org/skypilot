@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 
 import colorama
 
-import sky
 from sky import catalog
 from sky import check as sky_check
 from sky import clouds
@@ -19,6 +18,8 @@ from sky.clouds import cloud as sky_cloud
 from sky.provision import docker_utils
 from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.nebius import constants as nebius_constants
+from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import annotations
@@ -32,11 +33,11 @@ from sky.utils import schemas
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
-_DEFAULT_DISK_SIZE_GB = 256
+DEFAULT_DISK_SIZE_GB = 256
 
 RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
@@ -68,14 +69,18 @@ class AutostopConfig:
     # flags.
     idle_minutes: int = 0
     down: bool = False
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None
 
     def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
         if not self.enabled:
             return False
-        return {
+        config: Dict[str, Any] = {
             'idle_minutes': self.idle_minutes,
             'down': self.down,
         }
+        if self.wait_for is not None:
+            config['wait_for'] = self.wait_for.value
+        return config
 
     @classmethod
     def from_yaml_config(
@@ -103,6 +108,9 @@ class AutostopConfig:
                 autostop_config.idle_minutes = config['idle_minutes']
             if 'down' in config:
                 autostop_config.down = config['down']
+            if 'wait_for' in config:
+                autostop_config.wait_for = (
+                    autostop_lib.AutostopWaitFor.from_str(config['wait_for']))
             return autostop_config
 
         return None
@@ -211,6 +219,9 @@ class Resources:
             - strategy: the recovery strategy to use.
             - max_restarts_on_errors: the max number of restarts on user code
               errors.
+            - recover_on_exit_codes: a list of exit codes that should trigger
+              job recovery. If any task exits with a code in this list, the job
+              will be recovered regardless of max_restarts_on_errors limit.
 
           region: the region to use. Deprecated. Use `infra` instead.
           zone: the zone to use. Deprecated. Use `infra` instead.
@@ -279,7 +290,7 @@ class Resources:
         if infra is not None:
             infra_info = infra_utils.InfraInfo.from_str(infra)
             # Infra takes precedence over individually specified parameters
-            cloud = sky.CLOUD_REGISTRY.from_str(infra_info.cloud)
+            cloud = registry.CLOUD_REGISTRY.from_str(infra_info.cloud)
             region = infra_info.region
             zone = infra_info.zone
 
@@ -311,7 +322,7 @@ class Resources:
             self._disk_size = int(
                 resources_utils.parse_memory_resource(disk_size, 'disk_size'))
         else:
-            self._disk_size = _DEFAULT_DISK_SIZE_GB
+            self._disk_size = DEFAULT_DISK_SIZE_GB
 
         self._image_id: Optional[Dict[Optional[str], str]] = None
         if isinstance(image_id, str):
@@ -474,7 +485,7 @@ class Resources:
             network_tier = f', network_tier={self.network_tier.value}'
 
         disk_size = ''
-        if self.disk_size != _DEFAULT_DISK_SIZE_GB:
+        if self.disk_size != DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
 
         ports = ''
@@ -561,7 +572,8 @@ class Resources:
         if self.cloud is not None and self._instance_type is not None:
             vcpus, _ = self.cloud.get_vcpus_mem_from_instance_type(
                 self._instance_type)
-            return str(vcpus)
+            if vcpus is not None:
+                return str(vcpus)
         return None
 
     @property
@@ -571,12 +583,15 @@ class Resources:
         For example, memory='16' means each instance must have exactly 16GB
         memory; memory='16+' means each instance must have at least 16GB
         memory.
-
-        (Developer note: The memory field is only used to select the instance
-        type at launch time. Thus, Resources in the backend's ResourceHandle
-        will always have the memory field set to None.)
         """
-        return self._memory
+        if self._memory is not None:
+            return self._memory
+        if self.cloud is not None and self._instance_type is not None:
+            _, memory = self.cloud.get_vcpus_mem_from_instance_type(
+                self._instance_type)
+            if memory is not None:
+                return str(memory)
+        return None
 
     @property
     @annotations.lru_cache(scope='global', maxsize=1)
@@ -797,8 +812,13 @@ class Resources:
 
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
+                # TODO(syang): GCP TPU names are supported on both GCP and
+                # kubernetes (GKE), but this logic automatically assumes
+                # GCP TPUs can only be used on GCP.
+                # Fix the logic such that GCP TPU names can failover between
+                # GCP and kubernetes.
                 if self.cloud is None:
-                    if kubernetes_utils.is_tpu_on_gke(acc):
+                    if kubernetes_utils.is_tpu_on_gke(acc, normalize=False):
                         self._cloud = clouds.Kubernetes()
                     else:
                         self._cloud = clouds.GCP()
@@ -813,7 +833,8 @@ class Resources:
 
                 use_tpu_vm = accelerator_args.get('tpu_vm', True)
                 if (self.cloud.is_same_cloud(clouds.GCP()) and
-                        not kubernetes_utils.is_tpu_on_gke(acc)):
+                        not kubernetes_utils.is_tpu_on_gke(acc,
+                                                           normalize=False)):
                     if 'runtime_version' not in accelerator_args:
 
                         def _get_default_runtime_version() -> str:
@@ -951,15 +972,18 @@ class Resources:
             valid_volumes.append(volume)
         self._volumes = valid_volumes
 
-    def override_autostop_config(self,
-                                 down: bool = False,
-                                 idle_minutes: Optional[int] = None) -> None:
+    def override_autostop_config(
+            self,
+            down: bool = False,
+            idle_minutes: Optional[int] = None,
+            wait_for: Optional[autostop_lib.AutostopWaitFor] = None) -> None:
         """Override autostop config to the resource.
 
         Args:
             down: If true, override the autostop config to use autodown.
             idle_minutes: If not None, override the idle minutes to autostop or
                 autodown.
+            wait_for: If not None, override the wait mode.
         """
         if not down and idle_minutes is None:
             return
@@ -969,6 +993,8 @@ class Resources:
             self._autostop_config.down = down
         if idle_minutes is not None:
             self._autostop_config.idle_minutes = idle_minutes
+        if wait_for is not None:
+            self._autostop_config.wait_for = wait_for
 
     def is_launchable(self) -> bool:
         """Returns whether the resource is launchable."""
@@ -1085,7 +1111,7 @@ class Resources:
         regions = self.cloud.regions_with_offering(self._instance_type,
                                                    self.accelerators,
                                                    self._use_spot, self._region,
-                                                   self._zone)
+                                                   self._zone, self)
         if self._image_id is not None and None not in self._image_id:
             regions = [r for r in regions if r.name in self._image_id]
 
@@ -1241,10 +1267,14 @@ class Resources:
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:
             return None
-        if len(self.image_id) == 1 and self.region in self.image_id:
-            image_id = self.image_id[self.region]
-            if image_id.startswith('docker:'):
-                return image_id[len('docker:'):]
+        # Handle dict image_id
+        if len(self.image_id) == 1:
+            # Check if the single key matches the region or is None (any region)
+            image_key = list(self.image_id.keys())[0]
+            if image_key == self.region or image_key is None:
+                image_id = self.image_id[image_key]
+                if image_id.startswith('docker:'):
+                    return image_id[len('docker:'):]
         return None
 
     def _try_validate_image_id(self) -> None:
@@ -1254,15 +1284,19 @@ class Resources:
             ValueError: if the attribute is invalid.
         """
 
-        if (self._network_tier == resources_utils.NetworkTier.BEST and
-                isinstance(self._cloud, clouds.GCP)):
-            # Handle GPU Direct TCPX requirement for docker images
-            if self._image_id is None:
-                # No custom image specified - use the default GPU Direct image
-                self._image_id = {
-                    self._region: gcp_constants.GCP_GPU_DIRECT_IMAGE_ID
-                }
-            else:
+        if self._network_tier == resources_utils.NetworkTier.BEST:
+            if isinstance(self._cloud, clouds.GCP):
+                # Handle GPU Direct TCPX requirement for docker images
+                if self._image_id is None:
+                    self._image_id = {
+                        self._region: gcp_constants.GCP_GPU_DIRECT_IMAGE_ID
+                    }
+            elif isinstance(self._cloud, clouds.Nebius):
+                if self._image_id is None:
+                    self._image_id = {
+                        self._region: nebius_constants.INFINIBAND_IMAGE_ID
+                    }
+            elif self._image_id:
                 # Custom image specified - validate it's a docker image
                 # Check if any of the specified images are not docker images
                 non_docker_images = []
@@ -1274,14 +1308,13 @@ class Resources:
                 if non_docker_images:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
-                            f'When using network_tier=BEST on GCP, image_id '
+                            f'When using network_tier=BEST, image_id '
                             f'must be a docker image. '
                             f'Found non-docker images: '
                             f'{", ".join(non_docker_images)}. '
                             f'Please either: (1) use a docker image '
                             f'(prefix with "docker:"), or '
-                            f'(2) leave image_id empty to use the default '
-                            f'GPU Direct TCPX image.')
+                            f'(2) leave image_id empty to use the default')
 
         if self._image_id is None:
             return
@@ -1305,19 +1338,33 @@ class Resources:
                     clouds.CloudImplementationFeatures.IMAGE_ID
                 })
         except exceptions.NotSupportedError as e:
+            # Provide a more helpful error message for Lambda cloud
+            if self.cloud.is_same_cloud(clouds.Lambda()):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Lambda cloud only supports Docker images. '
+                        'Please prefix your image with "docker:" '
+                        '(e.g., image_id: docker:your-image-name).') from e
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'image_id is only supported for AWS/GCP/Azure/IBM/OCI/'
-                    'Kubernetes, please explicitly specify the cloud.') from e
+                    'Kubernetes. For Lambda cloud, use "docker:" prefix for '
+                    'Docker images.') from e
 
         if self._region is not None:
-            if self._region not in self._image_id:
+            # If the image_id has None as key (region-agnostic),
+            # use it for any region
+            if None in self._image_id:
+                # Replace None key with the actual region
+                self._image_id = {self._region: self._image_id[None]}
+            elif self._region not in self._image_id:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'image_id {self._image_id} should contain the image '
                         f'for the specified region {self._region}.')
-            # Narrow down the image_id to the specified region.
-            self._image_id = {self._region: self._image_id[self._region]}
+            else:
+                # Narrow down the image_id to the specified region.
+                self._image_id = {self._region: self._image_id[self._region]}
 
         # Check the image_id's are valid.
         for region, image_id in self._image_id.items():
@@ -1484,7 +1531,7 @@ class Resources:
         if self.accelerators is not None:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
                 self.accelerators, self.use_spot, self._region, self._zone)
-        return hourly_cost * hours
+        return float(hourly_cost * hours)
 
     def get_accelerators_str(self) -> str:
         accelerators = self.accelerators
@@ -1605,6 +1652,7 @@ class Resources:
         other: Union[List['Resources'], 'Resources'],
         requested_num_nodes: int = 1,
         check_ports: bool = False,
+        check_cloud: bool = True,
     ) -> bool:
         """Returns whether this resources is less demanding than the other.
 
@@ -1614,24 +1662,29 @@ class Resources:
             requested_num_nodes: Number of nodes that the current task
               requests from the cluster.
             check_ports: Whether to check the ports field.
+            check_cloud: Whether we check the cloud/region/zone fields. Useful
+              for resources that don't have cloud specified, like some launched
+              resources.
         """
         if isinstance(other, list):
             resources_list = [self.less_demanding_than(o) for o in other]
             return requested_num_nodes <= sum(resources_list)
 
-        assert other.cloud is not None, 'Other cloud must be specified'
+        if check_cloud:
+            assert other.cloud is not None, 'Other cloud must be specified'
 
-        if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
-            return False
-        # self.cloud <= other.cloud
+            if self.cloud is not None and not self.cloud.is_same_cloud(
+                    other.cloud):
+                return False
+            # self.cloud <= other.cloud
 
-        if self.region is not None and self.region != other.region:
-            return False
-        # self.region <= other.region
+            if self.region is not None and self.region != other.region:
+                return False
+            # self.region <= other.region
 
-        if self.zone is not None and self.zone != other.zone:
-            return False
-        # self.zone <= other.zone
+            if self.zone is not None and self.zone != other.zone:
+                return False
+            # self.zone <= other.zone
 
         if self.image_id is not None:
             if other.image_id is None:
@@ -1703,8 +1756,10 @@ class Resources:
             # On Kubernetes, we can't launch a task that requires FUSE on a pod
             # that wasn't initialized with FUSE support at the start.
             # Other clouds don't have this limitation.
-            if other.cloud.is_same_cloud(clouds.Kubernetes()):
-                return False
+            if check_cloud:
+                assert other.cloud is not None
+                if other.cloud.is_same_cloud(clouds.Kubernetes()):
+                    return False
 
         # self <= other
         return True
@@ -1730,6 +1785,8 @@ class Resources:
         if (blocked.accelerators is not None and
                 self.accelerators != blocked.accelerators):
             is_matched = False
+        if blocked.use_spot is not None and self.use_spot != blocked.use_spot:
+            is_matched = False
         return is_matched
 
     def is_empty(self) -> bool:
@@ -1742,13 +1799,108 @@ class Resources:
             self._accelerators is None,
             self._accelerator_args is None,
             not self._use_spot_specified,
-            self._disk_size == _DEFAULT_DISK_SIZE_GB,
+            self._disk_size == DEFAULT_DISK_SIZE_GB,
             self._disk_tier is None,
             self._network_tier is None,
             self._image_id is None,
             self._ports is None,
             self._docker_login_config is None,
         ])
+
+    def __add__(self, other: Optional['Resources']) -> Optional['Resources']:
+        """Add two Resources objects together.
+
+        Args:
+            other: Another Resources object to add (may be None)
+
+        Returns:
+            New Resources object with summed resources, or None if other is None
+        """
+        if other is None:
+            return self
+
+        # Sum CPUs
+        self_cpus = _parse_value(self.cpus)
+        other_cpus = _parse_value(other.cpus)
+        total_cpus = None
+        if self_cpus is not None or other_cpus is not None:
+            total_cpus = (self_cpus or 0) + (other_cpus or 0)
+
+        # Sum memory
+        self_memory = _parse_value(self.memory)
+        other_memory = _parse_value(other.memory)
+        total_memory = None
+        if self_memory is not None or other_memory is not None:
+            total_memory = (self_memory or 0) + (other_memory or 0)
+
+        # Sum accelerators
+        total_accelerators = {}
+        if self.accelerators:
+            for acc_type, count in self.accelerators.items():
+                total_accelerators[acc_type] = float(count)
+        if other.accelerators:
+            for acc_type, count in other.accelerators.items():
+                if acc_type not in total_accelerators:
+                    total_accelerators[acc_type] = 0
+                total_accelerators[acc_type] += float(count)
+
+        return Resources(
+            cpus=str(total_cpus) if total_cpus is not None else None,
+            memory=str(total_memory) if total_memory is not None else None,
+            accelerators=total_accelerators if total_accelerators else None)
+
+    def __sub__(self, other: Optional['Resources']) -> 'Resources':
+        """Subtract another Resources object from this one.
+
+        Args:
+            other: Resources to subtract (may be None)
+
+        Returns:
+            New Resources object with subtracted resources. If the result for a
+            resource is negative, it will be set to 0.
+        """
+        if other is None:
+            return self
+
+        # Subtract CPUs
+        self_cpus = _parse_value(self.cpus)
+        other_cpus = _parse_value(other.cpus)
+        free_cpus = None
+        if self_cpus is not None:
+            if other_cpus is not None:
+                free_cpus = max(0, self_cpus - other_cpus)
+            else:
+                free_cpus = self_cpus
+
+        # Subtract memory
+        self_memory = _parse_value(self.memory)
+        other_memory = _parse_value(other.memory)
+        free_memory = None
+        if self_memory is not None:
+            if other_memory is not None:
+                free_memory = max(0, self_memory - other_memory)
+            else:
+                free_memory = self_memory
+
+        # Subtract accelerators
+        free_accelerators = {}
+        if self.accelerators:
+            for acc_type, total_count in self.accelerators.items():
+                used_count = (other.accelerators.get(acc_type, 0)
+                              if other.accelerators else 0)
+                free_count = max(0, float(total_count) - float(used_count))
+                if free_count > 0:
+                    free_accelerators[acc_type] = free_count
+
+        # If all resources are exhausted, return None
+        # Check if we have any free resources
+        free_cpus = None if free_cpus == 0 else free_cpus
+        free_memory = None if free_memory == 0 else free_memory
+        free_accelerators = None if not free_accelerators else free_accelerators
+
+        return Resources(cpus=free_cpus,
+                         memory=free_memory,
+                         accelerators=free_accelerators)
 
     def copy(self, **override) -> 'Resources':
         """Returns a copy of the given Resources."""
@@ -1777,7 +1929,7 @@ class Resources:
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
             cpus=override.pop('cpus', self._cpus),
-            memory=override.pop('memory', self.memory),
+            memory=override.pop('memory', self._memory),
             accelerators=override.pop('accelerators', self.accelerators),
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
@@ -2231,7 +2383,7 @@ class Resources:
             accelerator_args = state.pop('accelerator_args', None)
             state['_accelerator_args'] = accelerator_args
 
-            disk_size = state.pop('disk_size', _DEFAULT_DISK_SIZE_GB)
+            disk_size = state.pop('disk_size', DEFAULT_DISK_SIZE_GB)
             state['_disk_size'] = disk_size
 
         if version < 2:
@@ -2414,3 +2566,18 @@ def _maybe_add_docker_prefix_to_image_id(
     for k, v in image_id_dict.items():
         if not v.startswith('docker:'):
             image_id_dict[k] = f'docker:{v}'
+
+
+def _parse_value(val):
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        # Remove '+' suffix if present
+        val = val.rstrip('+')
+        try:
+            return float(val)
+        except ValueError:
+            return None
+    return None

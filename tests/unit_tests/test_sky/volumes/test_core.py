@@ -8,6 +8,7 @@ import pytest
 from sky import global_user_state
 from sky import models
 from sky import provision
+from sky.schemas.api import responses
 from sky.utils import status_lib
 from sky.volumes.server import core
 
@@ -20,22 +21,60 @@ class TestVolumeCore:
         # Mock volume data
         mock_volumes = [{
             'name': 'test-volume-1',
-            'handle': mock.MagicMock(cloud='aws', spec=models.VolumeConfig),
-            'status': status_lib.VolumeStatus.IN_USE
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock.MagicMock(name='test-volume-1',
+                                     cloud='aws',
+                                     type='k8s-pvc',
+                                     region='us-east-1',
+                                     zone='us-east-1a',
+                                     size='100Gi',
+                                     config={},
+                                     name_on_cloud='test-volume-1-abc123',
+                                     spec=models.VolumeConfig),
+            'status': status_lib.VolumeStatus.IN_USE,
+            'is_ephemeral': False
         }, {
             'name': 'test-volume-2',
-            'handle': mock.MagicMock(cloud='gcp', spec=models.VolumeConfig),
-            'status': status_lib.VolumeStatus.IN_USE
+            'launched_at': 1234567891,
+            'user_hash': 'user456',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock.MagicMock(name='test-volume-2',
+                                     cloud='gcp',
+                                     type='k8s-pvc',
+                                     region='us-central1',
+                                     zone='us-central1-a',
+                                     size='200Gi',
+                                     config={},
+                                     name_on_cloud='test-volume-2-def456',
+                                     spec=models.VolumeConfig),
+            'status': status_lib.VolumeStatus.IN_USE,
+            'is_ephemeral': False
         }]
 
         # Mock global_user_state
         mock_get_volumes = mock.MagicMock(return_value=mock_volumes)
         monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
 
-        # Mock provision.get_volume_usedby
-        mock_get_usedby = mock.MagicMock(
-            return_value=([], []))  # No clusters using volume
-        monkeypatch.setattr(provision, 'get_volume_usedby', mock_get_usedby)
+        # Mock provision.get_all_volumes_usedby
+        mock_get_all_usedby = mock.MagicMock(return_value=({}, {}, set()))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock_get_all_usedby)
+
+        # Mock provision.map_all_volumes_usedby
+        mock_map_all_usedby = mock.MagicMock(return_value=([], []))
+        monkeypatch.setattr(provision, 'map_all_volumes_usedby',
+                            mock_map_all_usedby)
+
+        # Mock global_user_state.get_all_users
+        mock_get_all_users = mock.MagicMock(return_value=[])
+        monkeypatch.setattr(global_user_state, 'get_all_users',
+                            mock_get_all_users)
 
         # Mock global_user_state.get_volume_by_name
         mock_get_volume_by_name = mock.MagicMock(side_effect=mock_volumes)
@@ -57,7 +96,6 @@ class TestVolumeCore:
 
         # Verify calls
         mock_get_volumes.assert_called_once()
-        assert mock_get_usedby.call_count == 2
         # Should be called for both volumes
         assert mock_update_status.call_count == 2
         expected_calls = [
@@ -71,23 +109,66 @@ class TestVolumeCore:
         # Mock volume data
         mock_volumes = [{
             'name': 'test-volume-1',
-            'handle': mock.MagicMock(cloud='aws', spec=models.VolumeConfig),
-            'status': status_lib.VolumeStatus.READY
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock.MagicMock(name='test-volume-1',
+                                     cloud='aws',
+                                     type='k8s-pvc',
+                                     region='us-east-1',
+                                     zone='us-east-1a',
+                                     size='100Gi',
+                                     config={},
+                                     name_on_cloud='test-volume-1-abc123',
+                                     spec=models.VolumeConfig),
+            'status': status_lib.VolumeStatus.READY,
+            'is_ephemeral': False
         }, {
             'name': 'test-volume-2',
-            'handle': mock.MagicMock(cloud='gcp', spec=models.VolumeConfig),
-            'status': status_lib.VolumeStatus.READY
+            'launched_at': 1234567891,
+            'user_hash': 'user456',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock.MagicMock(name='test-volume-2',
+                                     cloud='gcp',
+                                     type='k8s-pvc',
+                                     region='us-central1',
+                                     zone='us-central1-a',
+                                     size='200Gi',
+                                     config={},
+                                     name_on_cloud='test-volume-2-def456',
+                                     spec=models.VolumeConfig),
+            'status': status_lib.VolumeStatus.READY,
+            'is_ephemeral': False
         }]
 
         # Mock global_user_state
         mock_get_volumes = mock.MagicMock(return_value=mock_volumes)
         monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
 
-        # Mock provision.get_volume_usedby
-        mock_get_usedby = mock.MagicMock(return_value=(['pod1', 'pod2'], [
-            'cluster1', 'cluster2'
-        ]))  # No clusters using volume
-        monkeypatch.setattr(provision, 'get_volume_usedby', mock_get_usedby)
+        # Mock provision.get_all_volumes_usedby
+        config_name = 'mock-config'
+        mock_get_all_usedby = mock.MagicMock(return_value=({
+            config_name: ['pod1', 'pod2']
+        }, {
+            config_name: ['cluster1', 'cluster2']
+        }, set()))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock_get_all_usedby)
+
+        # Mock provision.map_all_volumes_usedby
+        mock_map_all_usedby = mock.MagicMock(
+            return_value=(['pod1', 'pod2'], ['cluster1', 'cluster2']))
+        monkeypatch.setattr(provision, 'map_all_volumes_usedby',
+                            mock_map_all_usedby)
+
+        # Mock global_user_state.get_all_users
+        mock_get_all_users = mock.MagicMock(return_value=[])
+        monkeypatch.setattr(global_user_state, 'get_all_users',
+                            mock_get_all_users)
 
         # Mock global_user_state.get_volume_by_name
         mock_get_volume_by_name = mock.MagicMock(side_effect=mock_volumes)
@@ -109,7 +190,6 @@ class TestVolumeCore:
 
         # Verify calls
         mock_get_volumes.assert_called_once()
-        assert mock_get_usedby.call_count == 2
         # Should be called for both volumes
         assert mock_update_status.call_count == 2
         expected_calls = [
@@ -143,18 +223,42 @@ class TestVolumeCore:
         # Mock volume data
         mock_volumes = [{
             'name': 'test-volume',
-            'handle': mock.MagicMock(cloud='aws', spec=models.VolumeConfig),
-            'status': status_lib.VolumeStatus.READY
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock.MagicMock(name='test-volume',
+                                     cloud='aws',
+                                     type='k8s-pvc',
+                                     region='us-east-1',
+                                     zone='us-east-1a',
+                                     size='100Gi',
+                                     config={},
+                                     name_on_cloud='test-volume-abc123',
+                                     spec=models.VolumeConfig),
+            'status': status_lib.VolumeStatus.READY,
+            'is_ephemeral': False
         }]
 
         # Mock global_user_state
         mock_get_volumes = mock.MagicMock(return_value=mock_volumes)
         monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
 
-        # Mock provision.get_volume_usedby
-        mock_get_usedby = mock.MagicMock(
-            return_value=([], []))  # No clusters using volume
-        monkeypatch.setattr(provision, 'get_volume_usedby', mock_get_usedby)
+        # Mock provision.get_all_volumes_usedby
+        mock_get_all_usedby = mock.MagicMock(return_value=({}, {}, set()))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock_get_all_usedby)
+
+        # Mock provision.map_all_volumes_usedby
+        mock_map_all_usedby = mock.MagicMock(return_value=([], []))
+        monkeypatch.setattr(provision, 'map_all_volumes_usedby',
+                            mock_map_all_usedby)
+
+        # Mock global_user_state.get_all_users
+        mock_get_all_users = mock.MagicMock(return_value=[])
+        monkeypatch.setattr(global_user_state, 'get_all_users',
+                            mock_get_all_users)
 
         # Mock global_user_state.get_volume_by_name to return None
         mock_get_volume_by_name = mock.MagicMock(return_value=None)
@@ -171,7 +275,7 @@ class TestVolumeCore:
 
         # Verify calls
         mock_get_volumes.assert_called_once()
-        mock_get_usedby.assert_called_once()
+        mock_get_all_usedby.assert_called_once()
 
     def test_volume_list_success(self, monkeypatch):
         """Test volume_list with successful volume retrieval."""
@@ -184,7 +288,8 @@ class TestVolumeCore:
             'last_attached_at': 1234567891,
             'last_use': 'sky volumes apply',
             'status': status_lib.VolumeStatus.READY,
-            'handle': mock.MagicMock(type='k8s-pvc',
+            'handle': mock.MagicMock(name='test-volume-1',
+                                     type='k8s-pvc',
                                      cloud='aws',
                                      region='us-east-1',
                                      zone='us-east-1a',
@@ -200,7 +305,8 @@ class TestVolumeCore:
             'last_attached_at': None,
             'last_use': None,
             'status': None,
-            'handle': mock.MagicMock(type='k8s-pvc',
+            'handle': mock.MagicMock(name='test-volume-2',
+                                     type='k8s-pvc',
                                      cloud='gcp',
                                      region='us-central1',
                                      zone=None,
@@ -213,10 +319,20 @@ class TestVolumeCore:
         # Mock global_user_state
         mock_get_volumes = mock.MagicMock(return_value=mock_volumes)
         monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
-        # Mock provision.get_volume_usedby
-        mock_get_usedby = mock.MagicMock(
+        # Mock provision.get_all_volumes_usedby
+        config_name = 'mock-config'
+        mock_get_all_usedby = mock.MagicMock(return_value=({
+            config_name: ['pod1', 'pod2']
+        }, {
+            config_name: ['cluster1', 'cluster2']
+        }, set()))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock_get_all_usedby)
+
+        mock_map_all_usedby = mock.MagicMock(
             return_value=(['pod1', 'pod2'], ['cluster1', 'cluster2']))
-        monkeypatch.setattr(provision, 'get_volume_usedby', mock_get_usedby)
+        monkeypatch.setattr(provision, 'map_all_volumes_usedby',
+                            mock_map_all_usedby)
 
         # Call the function
         result = core.volume_list()
@@ -280,7 +396,9 @@ class TestVolumeCore:
         mock_volume = {
             'name': 'test-volume',
             'status': status_lib.VolumeStatus.READY,
-            'handle': mock.MagicMock(cloud='aws', spec=models.VolumeConfig)
+            'handle': mock.MagicMock(name='test-volume',
+                                     cloud='aws',
+                                     spec=models.VolumeConfig)
         }
 
         # Mock global_user_state
@@ -324,13 +442,28 @@ class TestVolumeCore:
         with pytest.raises(ValueError, match='Volume test-volume not found.'):
             core.volume_delete(['test-volume'])
 
+    def test_volume_delete_volume_not_found_ignore(self, monkeypatch):
+        """Test volume_delete with non-existent volume and ignore_not_found=True."""
+        # Mock global_user_state to return None
+        mock_get_volume_by_name = mock.MagicMock(return_value=None)
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock_get_volume_by_name)
+
+        # Call the function with ignore_not_found=True - should not raise exception
+        core.volume_delete(['test-volume'], ignore_not_found=True)
+
+        # Verify get_volume_by_name was called
+        mock_get_volume_by_name.assert_called_once_with('test-volume')
+
     def test_volume_delete_volume_in_use(self, monkeypatch):
         """Test volume_delete with volume that is in use."""
         # Mock volume data that is in use
         mock_volume = {
             'name': 'test-volume',
             'status': status_lib.VolumeStatus.IN_USE,
-            'handle': mock.MagicMock(cloud='aws', spec=models.VolumeConfig)
+            'handle': mock.MagicMock(name='test-volume',
+                                     cloud='aws',
+                                     spec=models.VolumeConfig)
         }
 
         # Mock global_user_state
@@ -353,7 +486,9 @@ class TestVolumeCore:
         mock_volume = {
             'name': 'test-volume',
             'status': status_lib.VolumeStatus.IN_USE,
-            'handle': mock.MagicMock(cloud='aws', spec=models.VolumeConfig)
+            'handle': mock.MagicMock(name='test-volume',
+                                     cloud='aws',
+                                     spec=models.VolumeConfig)
         }
 
         # Mock global_user_state
@@ -393,17 +528,109 @@ class TestVolumeCore:
                            match='Volume test-volume has no handle.'):
             core.volume_delete(['test-volume'])
 
+    def test_volume_delete_with_purge(self, monkeypatch):
+        """Test volume_delete with purge=True when deletion fails."""
+        # Mock volume data
+        mock_volume = {
+            'name': 'test-volume',
+            'status': status_lib.VolumeStatus.READY,
+            'handle': mock.MagicMock(name='test-volume',
+                                     cloud='aws',
+                                     spec=models.VolumeConfig)
+        }
+
+        # Mock global_user_state
+        mock_get_volume_by_name = mock.MagicMock(return_value=mock_volume)
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock_get_volume_by_name)
+
+        mock_delete_volume = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'delete_volume',
+                            mock_delete_volume)
+
+        # Mock provision.delete_volume to raise an exception
+        mock_provision_delete = mock.MagicMock(
+            side_effect=Exception('Deletion failed'))
+        monkeypatch.setattr(provision, 'delete_volume', mock_provision_delete)
+
+        # Mock provision.get_volume_usedby
+        mock_get_usedby = mock.MagicMock(return_value=([], []))
+        monkeypatch.setattr(provision, 'get_volume_usedby', mock_get_usedby)
+
+        # Mock filelock
+        mock_filelock = mock.MagicMock()
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock_filelock)
+
+        # Call the function with purge=True
+        core.volume_delete(['test-volume'], purge=True)
+
+        # Verify calls
+        mock_get_volume_by_name.assert_called_with('test-volume')
+        mock_provision_delete.assert_called_once()
+        # Even though provision.delete_volume failed, global_user_state.delete_volume
+        # should still be called because purge=True
+        mock_delete_volume.assert_called_once_with('test-volume')
+
+    def test_volume_delete_without_purge_fails(self, monkeypatch):
+        """Test volume_delete without purge=True when deletion fails."""
+        # Mock volume data
+        mock_volume = {
+            'name': 'test-volume',
+            'status': status_lib.VolumeStatus.READY,
+            'handle': mock.MagicMock(name='test-volume',
+                                     cloud='aws',
+                                     spec=models.VolumeConfig)
+        }
+
+        # Mock global_user_state
+        mock_get_volume_by_name = mock.MagicMock(return_value=mock_volume)
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock_get_volume_by_name)
+
+        mock_delete_volume = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'delete_volume',
+                            mock_delete_volume)
+
+        # Mock provision.delete_volume to raise an exception
+        mock_provision_delete = mock.MagicMock(
+            side_effect=Exception('Deletion failed'))
+        monkeypatch.setattr(provision, 'delete_volume', mock_provision_delete)
+
+        # Mock provision.get_volume_usedby
+        mock_get_usedby = mock.MagicMock(return_value=([], []))
+        monkeypatch.setattr(provision, 'get_volume_usedby', mock_get_usedby)
+
+        # Mock filelock
+        mock_filelock = mock.MagicMock()
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock_filelock)
+
+        # Call the function with purge=False (default) and expect Exception
+        with pytest.raises(Exception, match='Deletion failed'):
+            core.volume_delete(['test-volume'])
+
+        # Verify calls
+        mock_get_volume_by_name.assert_called_with('test-volume')
+        mock_provision_delete.assert_called_once()
+        # global_user_state.delete_volume should NOT be called because purge=False
+        mock_delete_volume.assert_not_called()
+
     def test_volume_delete_multiple_volumes(self, monkeypatch):
         """Test volume_delete with multiple volumes."""
         # Mock volume data for multiple volumes
         mock_volumes = [{
             'name': 'test-volume-1',
             'status': status_lib.VolumeStatus.READY,
-            'handle': mock.MagicMock(cloud='aws', spec=models.VolumeConfig)
+            'handle': mock.MagicMock(name='test-volume-1',
+                                     cloud='aws',
+                                     spec=models.VolumeConfig)
         }, {
             'name': 'test-volume-2',
             'status': status_lib.VolumeStatus.READY,
-            'handle': mock.MagicMock(cloud='gcp', spec=models.VolumeConfig)
+            'handle': mock.MagicMock(name='test-volume-2',
+                                     cloud='gcp',
+                                     spec=models.VolumeConfig)
         }]
 
         # Mock global_user_state
@@ -443,7 +670,9 @@ class TestVolumeCore:
         mock_cloud.max_cluster_name_length.return_value = 63
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
-        monkeypatch.setattr('sky.volumes.server.core.sky.CLOUD_REGISTRY',
+        mock_cloud.validate_region_zone.return_value = ('us-east-1',
+                                                        'us-east-1a')
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
         # Mock common_utils.make_cluster_name_on_cloud
@@ -498,7 +727,9 @@ class TestVolumeCore:
         mock_cloud.max_cluster_name_length.return_value = 63
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
-        monkeypatch.setattr('sky.volumes.server.core.sky.CLOUD_REGISTRY',
+        mock_cloud.validate_region_zone.return_value = ('us-east-1',
+                                                        'us-east-1a')
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
         # Mock global_user_state to return existing volume
@@ -537,7 +768,9 @@ class TestVolumeCore:
         mock_cloud.max_cluster_name_length.return_value = 63
         mock_cloud_registry = mock.MagicMock()
         mock_cloud_registry.from_str.return_value = mock_cloud
-        monkeypatch.setattr('sky.volumes.server.core.sky.CLOUD_REGISTRY',
+        mock_cloud.validate_region_zone.return_value = ('us-east-1',
+                                                        'us-east-1a')
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
                             mock_cloud_registry)
 
         # Mock common_utils.make_cluster_name_on_cloud
@@ -599,10 +832,15 @@ class TestVolumeCore:
         # Mock global_user_state
         mock_get_volumes = mock.MagicMock(return_value=[{
             'name': 'test-volume',
-            'handle': mock.MagicMock(cloud='aws', spec=models.VolumeConfig),
+            'handle': mock.MagicMock(
+                name='test-volume', cloud='aws', spec=models.VolumeConfig),
             'status': status_lib.VolumeStatus.READY
         }])
         monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
+        # Mock provision.get_all_volumes_usedby
+        mock_get_all_usedby = mock.MagicMock(return_value=({}, {}, set()))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock_get_all_usedby)
         # Mock provision.get_volume_usedby
         mock_get_usedby = mock.MagicMock(return_value=([], []))
         monkeypatch.setattr(provision, 'get_volume_usedby', mock_get_usedby)
@@ -610,7 +848,8 @@ class TestVolumeCore:
         mock_get_volume_by_name = mock.MagicMock(
             return_value={
                 'name': 'test-volume',
-                'handle': mock.MagicMock(cloud='aws', spec=models.VolumeConfig),
+                'handle': mock.MagicMock(
+                    name='test-volume', cloud='aws', spec=models.VolumeConfig),
                 'status': status_lib.VolumeStatus.READY
             })
         monkeypatch.setattr(global_user_state, 'get_volume_by_name',
@@ -628,17 +867,429 @@ class TestVolumeCore:
         # Provide a dummy volume with a handle so the lock is used
         dummy_volume = {
             'name': 'test-volume',
-            'handle': mock.MagicMock(cloud='aws', spec=models.VolumeConfig),
-            'status': status_lib.VolumeStatus.READY
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock.MagicMock(name='test-volume',
+                                     cloud='aws',
+                                     type='k8s-pvc',
+                                     region='us-east-1',
+                                     zone='us-east-1a',
+                                     size='100Gi',
+                                     config={},
+                                     name_on_cloud='test-volume-abc123',
+                                     spec=models.VolumeConfig),
+            'status': status_lib.VolumeStatus.READY,
+            'is_ephemeral': False
         }
         mock_get_volumes = mock.MagicMock(return_value=[dummy_volume])
         monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
-        # Mock provision.get_volume_usedby to return non-empty so status is not updated
-        monkeypatch.setattr(provision, 'get_volume_usedby',
-                            mock.MagicMock(return_value=(['in-use'], [])))
+
+        # Mock provision.get_all_volumes_usedby
+        config_name = 'mock-config'
+        mock_get_all_usedby = mock.MagicMock(return_value=({
+            config_name: ['pod1']
+        }, {}, set()))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock_get_all_usedby)
+
+        # Mock provision.map_all_volumes_usedby to return non-empty so status is IN_USE
+        mock_map_all_usedby = mock.MagicMock(return_value=(['pod1'], []))
+        monkeypatch.setattr(provision, 'map_all_volumes_usedby',
+                            mock_map_all_usedby)
+
+        # Mock global_user_state.get_all_users
+        mock_get_all_users = mock.MagicMock(return_value=[])
+        monkeypatch.setattr(global_user_state, 'get_all_users',
+                            mock_get_all_users)
+
+        # Mock global_user_state.get_volume_by_name
+        mock_get_volume_by_name = mock.MagicMock(return_value=dummy_volume)
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock_get_volume_by_name)
+
+        # Mock global_user_state.update_volume_status
+        mock_update_status = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'update_volume_status',
+                            mock_update_status)
+
         # Call the function - should not raise exception
         core.volume_refresh()
         # Verify filelock was used as a context manager
         mock_filelock.assert_called()
         instance = mock_filelock.return_value
         assert instance.__enter__.called
+
+    def test_volume_apply_with_use_existing(self, monkeypatch):
+        """Test volume_apply with use_existing=True to register existing volume."""
+        # Mock cloud registry
+        mock_cloud = mock.MagicMock()
+        mock_cloud.max_cluster_name_length.return_value = 63
+        mock_cloud_registry = mock.MagicMock()
+        mock_cloud_registry.from_str.return_value = mock_cloud
+        mock_cloud.validate_region_zone.return_value = ('us-east-1',
+                                                        'us-east-1a')
+        mock_cloud.__str__.return_value = 'aws'
+        monkeypatch.setattr('sky.utils.registry.CLOUD_REGISTRY',
+                            mock_cloud_registry)
+
+        # Mock common_utils.make_cluster_name_on_cloud
+        mock_make_name = mock.MagicMock(return_value='test-volume-123')
+        monkeypatch.setattr(
+            'sky.volumes.server.core.common_utils.make_cluster_name_on_cloud',
+            mock_make_name)
+
+        # Mock global_user_state
+        mock_get_volume_by_name = mock.MagicMock(
+            return_value=None)  # Volume doesn't exist
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock_get_volume_by_name)
+
+        mock_add_volume = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'add_volume', mock_add_volume)
+
+        # Mock provision.apply_volume
+        mock_provision_apply = mock.MagicMock(return_value=mock.MagicMock())
+        monkeypatch.setattr(provision, 'apply_volume', mock_provision_apply)
+
+        # Mock filelock
+        mock_filelock = mock.MagicMock()
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock_filelock)
+
+        # Mock uuid (should not be called when use_existing=True)
+        mock_uuid = mock.MagicMock()
+        mock_uuid.uuid4.return_value = '1234567890abcdef'
+        monkeypatch.setattr('sky.volumes.server.core.uuid', mock_uuid)
+
+        # Call the function with use_existing=True
+        volume_name = 'my-existing-volume'
+        core.volume_apply(name=volume_name,
+                          volume_type='k8s-pvc',
+                          cloud='k8s',
+                          region='us-east-1',
+                          zone='us-east-1a',
+                          size='100Gi',
+                          config={'storage_class': 'gp2'},
+                          use_existing=True)
+
+        # Verify calls
+        mock_cloud_registry.from_str.assert_called_once_with('k8s')
+        mock_get_volume_by_name.assert_called_once_with(volume_name)
+        mock_provision_apply.assert_called_once()
+        mock_add_volume.assert_called_once()
+
+        # Verify that make_cluster_name_on_cloud was NOT called
+        # when use_existing=True
+        mock_make_name.assert_not_called()
+
+        # Verify that uuid.uuid4 was NOT called when use_existing=True
+        mock_uuid.uuid4.assert_not_called()
+
+        # Verify that the VolumeConfig was created with name_on_cloud = name
+        call_args = mock_provision_apply.call_args
+        config_arg = call_args[0][1]  # Second positional argument is the config
+        assert config_arg.name_on_cloud == volume_name
+
+    def test_volume_refresh_with_usedby_fetch_failed(self, monkeypatch):
+        """Test volume_refresh skips volumes with usedby_fetch_failed=True."""
+        # Mock volume_list to return a volume with usedby_fetch_failed=True
+        mock_volume_record = responses.VolumeRecord(
+            name='test-volume-failed',
+            type='k8s-pvc',
+            launched_at=1234567890,
+            cloud='aws',
+            region='us-east-1',
+            zone='us-east-1a',
+            size='100Gi',
+            config={},
+            name_on_cloud='test-volume-failed-abc123',
+            user_hash='user123',
+            user_name='',
+            workspace='default',
+            last_attached_at=None,
+            last_use=None,
+            status='READY',
+            usedby_pods=[],
+            usedby_clusters=[],
+            is_ephemeral=False,
+            usedby_fetch_failed=True  # This triggers the skip logic
+        )
+
+        mock_volume_list = mock.MagicMock(return_value=[mock_volume_record])
+        # Patch volume_list in the core module namespace
+        monkeypatch.setattr('sky.volumes.server.core.volume_list',
+                            mock_volume_list)
+
+        # Mock filelock
+        mock_filelock = mock.MagicMock()
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock_filelock)
+
+        # Mock global_user_state.update_volume_status
+        mock_update_status = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'update_volume_status',
+                            mock_update_status)
+
+        # Call the function - should skip the volume and not update status
+        core.volume_refresh()
+
+        # Verify volume_list was called
+        mock_volume_list.assert_called_once_with(is_ephemeral=False)
+
+        # Verify that update_volume_status was NOT called
+        # (since the volume was skipped due to usedby_fetch_failed=True)
+        mock_update_status.assert_not_called()
+
+    def test_volume_list_with_get_all_volumes_usedby_exception(
+            self, monkeypatch):
+        """Test volume_list when get_all_volumes_usedby raises an exception."""
+        # Mock volume data
+        mock_handle = mock.MagicMock(cloud='aws',
+                                     type='k8s-pvc',
+                                     region='us-east-1',
+                                     zone='us-east-1a',
+                                     size='100Gi',
+                                     config={},
+                                     name_on_cloud='test-volume-1-abc123',
+                                     spec=models.VolumeConfig)
+        mock_handle.name = 'test-volume-1'  # Set name attribute explicitly
+        mock_volumes = [{
+            'name': 'test-volume-1',
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock_handle,
+            'status': status_lib.VolumeStatus.READY,
+            'is_ephemeral': False
+        }]
+
+        # Mock global_user_state
+        mock_get_volumes = mock.MagicMock(return_value=mock_volumes)
+        monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
+
+        # Mock provision.get_all_volumes_usedby to raise an exception
+        mock_get_all_usedby = mock.MagicMock(
+            side_effect=Exception('Failed to fetch usedby info'))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock_get_all_usedby)
+
+        # Mock global_user_state.get_all_users
+        mock_get_all_users = mock.MagicMock(return_value=[])
+        monkeypatch.setattr(global_user_state, 'get_all_users',
+                            mock_get_all_users)
+
+        # Call the function
+        result = core.volume_list()
+
+        # Verify result
+        assert len(result) == 1
+        vol = result[0]
+        assert vol['name'] == 'test-volume-1'
+        # Verify that usedby_fetch_failed is True when exception occurs
+        assert vol['usedby_fetch_failed'] is True
+        # Verify that usedby_pods and usedby_clusters are empty lists
+        assert vol['usedby_pods'] == []
+        assert vol['usedby_clusters'] == []
+
+        # Verify get_all_volumes_usedby was called
+        mock_get_all_usedby.assert_called_once()
+
+    def test_volume_list_with_get_all_volumes_usedby_exception_multiple_volumes(
+            self, monkeypatch):
+        """Test volume_list with exception for multiple volumes on same cloud."""
+        # Mock volume data with multiple volumes on same cloud
+        mock_handle1 = mock.MagicMock(cloud='aws',
+                                      type='k8s-pvc',
+                                      region='us-east-1',
+                                      zone='us-east-1a',
+                                      size='100Gi',
+                                      config={},
+                                      name_on_cloud='test-volume-1-abc123',
+                                      spec=models.VolumeConfig)
+        mock_handle1.name = 'test-volume-1'  # Set name attribute explicitly
+        mock_handle2 = mock.MagicMock(cloud='aws',
+                                      type='k8s-pvc',
+                                      region='us-east-1',
+                                      zone='us-east-1a',
+                                      size='200Gi',
+                                      config={},
+                                      name_on_cloud='test-volume-2-def456',
+                                      spec=models.VolumeConfig)
+        mock_handle2.name = 'test-volume-2'  # Set name attribute explicitly
+        mock_volumes = [{
+            'name': 'test-volume-1',
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock_handle1,
+            'status': status_lib.VolumeStatus.READY,
+            'is_ephemeral': False
+        }, {
+            'name': 'test-volume-2',
+            'launched_at': 1234567891,
+            'user_hash': 'user456',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock_handle2,
+            'status': status_lib.VolumeStatus.READY,
+            'is_ephemeral': False
+        }]
+
+        # Mock global_user_state
+        mock_get_volumes = mock.MagicMock(return_value=mock_volumes)
+        monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
+
+        # Mock provision.get_all_volumes_usedby to raise an exception
+        mock_get_all_usedby = mock.MagicMock(
+            side_effect=Exception('Failed to fetch usedby info'))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock_get_all_usedby)
+
+        # Mock global_user_state.get_all_users
+        mock_get_all_users = mock.MagicMock(return_value=[])
+        monkeypatch.setattr(global_user_state, 'get_all_users',
+                            mock_get_all_users)
+
+        # Call the function
+        result = core.volume_list()
+
+        # Verify result - both volumes should have usedby_fetch_failed=True
+        assert len(result) == 2
+        for vol in result:
+            assert vol['usedby_fetch_failed'] is True
+            assert vol['usedby_pods'] == []
+            assert vol['usedby_clusters'] == []
+
+    def test_volume_refresh_with_config_refresh_multiple_volumes(
+            self, monkeypatch):
+        """Test volume_refresh with multiple volumes, some needing refresh."""
+        # Mock volume data
+        mock_handle1 = mock.MagicMock(
+            name='test-volume-1',
+            cloud='k8s',
+            type='k8s-pvc',
+            region=None,  # Needs refresh
+            zone='us-east-1a',
+            size='100Gi',
+            config={},
+            name_on_cloud='test-volume-1-abc123',
+            spec=models.VolumeConfig)
+        mock_handle2 = mock.MagicMock(
+            name='test-volume-2',
+            cloud='k8s',
+            type='k8s-pvc',
+            region='us-east-1',  # Doesn't need refresh
+            zone='us-east-1a',
+            size='200Gi',
+            config={},
+            name_on_cloud='test-volume-2-def456',
+            spec=models.VolumeConfig)
+        mock_volumes = [{
+            'name': 'test-volume-1',
+            'launched_at': 1234567890,
+            'user_hash': 'user123',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock_handle1,
+            'status': status_lib.VolumeStatus.READY,
+            'is_ephemeral': False
+        }, {
+            'name': 'test-volume-2',
+            'launched_at': 1234567891,
+            'user_hash': 'user456',
+            'workspace': 'default',
+            'last_attached_at': None,
+            'last_use': None,
+            'handle': mock_handle2,
+            'status': status_lib.VolumeStatus.READY,
+            'is_ephemeral': False
+        }]
+
+        # Mock global_user_state
+        mock_get_volumes = mock.MagicMock(return_value=mock_volumes)
+        monkeypatch.setattr(global_user_state, 'get_volumes', mock_get_volumes)
+
+        # Mock provision.get_all_volumes_usedby
+        mock_get_all_usedby = mock.MagicMock(return_value=({}, {}, set()))
+        monkeypatch.setattr(provision, 'get_all_volumes_usedby',
+                            mock_get_all_usedby)
+
+        # Mock provision.map_all_volumes_usedby
+        mock_map_all_usedby = mock.MagicMock(return_value=([], []))
+        monkeypatch.setattr(provision, 'map_all_volumes_usedby',
+                            mock_map_all_usedby)
+
+        # Mock global_user_state.get_all_users
+        mock_get_all_users = mock.MagicMock(return_value=[])
+        monkeypatch.setattr(global_user_state, 'get_all_users',
+                            mock_get_all_users)
+
+        # Mock global_user_state.get_volume_by_name
+        def get_volume_side_effect(name):
+            for vol in mock_volumes:
+                if vol['name'] == name:
+                    return vol
+            return None
+
+        mock_get_volume_by_name = mock.MagicMock(
+            side_effect=get_volume_side_effect)
+        monkeypatch.setattr(global_user_state, 'get_volume_by_name',
+                            mock_get_volume_by_name)
+
+        # Mock global_user_state.update_volume_status
+        mock_update_status = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'update_volume_status',
+                            mock_update_status)
+
+        # Mock global_user_state.update_volume_config
+        mock_update_config = mock.MagicMock()
+        monkeypatch.setattr(global_user_state, 'update_volume_config',
+                            mock_update_config)
+
+        # Mock provision.refresh_volume_config
+        refreshed_handle1 = mock.MagicMock(
+            name='test-volume-1',
+            cloud='k8s',
+            type='k8s-pvc',
+            region='in-cluster',  # Updated
+            zone='us-east-1a',
+            size='100Gi',
+            config={},
+            name_on_cloud='test-volume-1-abc123',
+            spec=models.VolumeConfig)
+
+        def refresh_side_effect(cloud, handle):
+            if handle == mock_handle1:
+                return (True, refreshed_handle1)
+            else:
+                return (False, handle)
+
+        mock_refresh_volume_config = mock.MagicMock(
+            side_effect=refresh_side_effect)
+        monkeypatch.setattr(provision, 'refresh_volume_config',
+                            mock_refresh_volume_config)
+
+        # Mock filelock
+        mock_filelock = mock.MagicMock()
+        monkeypatch.setattr('sky.volumes.server.core.filelock.FileLock',
+                            mock_filelock)
+
+        # Call the function
+        core.volume_refresh()
+
+        # Verify calls
+        mock_get_volumes.assert_called_once()
+        # refresh_volume_config should be called for both volumes
+        assert mock_refresh_volume_config.call_count == 2
+        # update_volume_config should only be called for volume-1 (need_refresh=True)
+        mock_update_config.assert_called_once_with('test-volume-1',
+                                                   refreshed_handle1)

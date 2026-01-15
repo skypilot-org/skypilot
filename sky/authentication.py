@@ -19,38 +19,34 @@ controller. (Lambda cloud is an exception, due to the limitation of the cloud
 provider. See the comments in setup_lambda_authentication)
 """
 import copy
-import functools
 import os
 import re
 import socket
 import subprocess
 import sys
-import typing
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict
 import uuid
 
 import colorama
-import filelock
 
 from sky import clouds
 from sky import exceptions
-from sky import global_user_state
 from sky import sky_logging
-from sky import skypilot_config
-from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import ibm
-from sky.adaptors import kubernetes
 from sky.adaptors import runpod
+from sky.adaptors import seeweb as seeweb_adaptor
+from sky.adaptors import shadeform as shadeform_adaptor
 from sky.adaptors import vast
 from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.lambda_cloud import lambda_utils
+from sky.provision.primeintellect import utils as primeintellect_utils
+from sky.utils import auth_utils
 from sky.utils import common_utils
-from sky.utils import config_utils
-from sky.utils import kubernetes_enums
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -59,158 +55,36 @@ logger = sky_logging.init_logger(__name__)
 # using Cloud Client Libraries for Python, where possible, for new code
 # development.
 
-MAX_TRIALS = 64
-# TODO(zhwu): Support user specified key pair.
-# We intentionally not have the ssh key pair to be stored in
-# ~/.sky/api_server/clients, i.e. sky.server.common.API_SERVER_CLIENT_DIR,
-# because ssh key pair need to persist across API server restarts, while
-# the former dir is empheral.
-_SSH_KEY_PATH_PREFIX = '~/.sky/clients/{user_hash}/ssh'
-
-if typing.TYPE_CHECKING:
-    import yaml
-else:
-    yaml = adaptors_common.LazyImport('yaml')
-
-
-def get_ssh_key_and_lock_path(
-        user_hash: Optional[str] = None) -> Tuple[str, str, str]:
-    if user_hash is None:
-        user_hash = common_utils.get_user_hash()
-    user_ssh_key_prefix = _SSH_KEY_PATH_PREFIX.format(user_hash=user_hash)
-
-    os.makedirs(os.path.expanduser(user_ssh_key_prefix),
-                exist_ok=True,
-                mode=0o700)
-    private_key_path = os.path.join(user_ssh_key_prefix, 'sky-key')
-    public_key_path = os.path.join(user_ssh_key_prefix, 'sky-key.pub')
-    lock_path = os.path.join(user_ssh_key_prefix, '.__internal-sky-key.lock')
-    return private_key_path, public_key_path, lock_path
-
-
-def _generate_rsa_key_pair() -> Tuple[str, str]:
-    # Keep the import of the cryptography local to avoid expensive
-    # third-party imports when not needed.
-    # pylint: disable=import-outside-toplevel
-    from cryptography.hazmat.backends import default_backend
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric import rsa
-
-    key = rsa.generate_private_key(backend=default_backend(),
-                                   public_exponent=65537,
-                                   key_size=2048)
-
-    private_key = key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.TraditionalOpenSSL,
-        encryption_algorithm=serialization.NoEncryption()).decode(
-            'utf-8').strip()
-
-    public_key = key.public_key().public_bytes(
-        serialization.Encoding.OpenSSH,
-        serialization.PublicFormat.OpenSSH).decode('utf-8').strip()
-
-    return public_key, private_key
-
-
-def _save_key_pair(private_key_path: str, public_key_path: str,
-                   private_key: str, public_key: str) -> None:
-    key_dir = os.path.dirname(private_key_path)
-    os.makedirs(key_dir, exist_ok=True, mode=0o700)
-
-    with open(
-            private_key_path,
-            'w',
-            encoding='utf-8',
-            opener=functools.partial(os.open, mode=0o600),
-    ) as f:
-        f.write(private_key)
-
-    with open(public_key_path,
-              'w',
-              encoding='utf-8',
-              opener=functools.partial(os.open, mode=0o644)) as f:
-        f.write(public_key)
-
-    global_user_state.set_ssh_keys(common_utils.get_user_hash(), public_key,
-                                   private_key)
-
-
-def get_or_generate_keys() -> Tuple[str, str]:
-    """Returns the absolute private and public key paths."""
-    private_key_path, public_key_path, lock_path = get_ssh_key_and_lock_path()
-    private_key_path = os.path.expanduser(private_key_path)
-    public_key_path = os.path.expanduser(public_key_path)
-    lock_path = os.path.expanduser(lock_path)
-
-    lock_dir = os.path.dirname(lock_path)
-    # We should have the folder ~/.sky/generated/ssh to have 0o700 permission,
-    # as the ssh configs will be written to this folder as well in
-    # backend_utils.SSHConfigHelper
-    os.makedirs(lock_dir, exist_ok=True, mode=0o700)
-    with filelock.FileLock(lock_path, timeout=10):
-        if not os.path.exists(private_key_path):
-            ssh_public_key, ssh_private_key, exists = (
-                global_user_state.get_ssh_keys(common_utils.get_user_hash()))
-            if not exists:
-                ssh_public_key, ssh_private_key = _generate_rsa_key_pair()
-            _save_key_pair(private_key_path, public_key_path, ssh_private_key,
-                           ssh_public_key)
-    assert os.path.exists(public_key_path), (
-        'Private key found, but associated public key '
-        f'{public_key_path} does not exist.')
-    return private_key_path, public_key_path
-
-
-def create_ssh_key_files_from_db(private_key_path: Optional[str] = None):
-    if private_key_path is None:
-        user_hash = common_utils.get_user_hash()
-    else:
-        # Assume private key path is in the format of
-        # ~/.sky/clients/<user_hash>/ssh/sky-key
-        separated_path = os.path.normpath(private_key_path).split(os.path.sep)
-        assert separated_path[-1] == 'sky-key'
-        assert separated_path[-2] == 'ssh'
-        user_hash = separated_path[-3]
-
-    private_key_path_generated, public_key_path, lock_path = (
-        get_ssh_key_and_lock_path(user_hash))
-    assert private_key_path == os.path.expanduser(private_key_path_generated), (
-        f'Private key path {private_key_path} does not '
-        f'match the generated path {private_key_path_generated}')
-    private_key_path = os.path.expanduser(private_key_path)
-    public_key_path = os.path.expanduser(public_key_path)
-    lock_path = os.path.expanduser(lock_path)
-
-    lock_dir = os.path.dirname(lock_path)
-    # We should have the folder ~/.sky/generated/ssh to have 0o700 permission,
-    # as the ssh configs will be written to this folder as well in
-    # backend_utils.SSHConfigHelper
-    os.makedirs(lock_dir, exist_ok=True, mode=0o700)
-    with filelock.FileLock(lock_path, timeout=10):
-        if not os.path.exists(private_key_path):
-            ssh_public_key, ssh_private_key, exists = (
-                global_user_state.get_ssh_keys(user_hash))
-            if not exists:
-                raise RuntimeError(f'SSH keys not found for user {user_hash}')
-            _save_key_pair(private_key_path, public_key_path, ssh_private_key,
-                           ssh_public_key)
-    assert os.path.exists(public_key_path), (
-        'Private key found, but associated public key '
-        f'{public_key_path} does not exist.')
-
 
 def configure_ssh_info(config: Dict[str, Any]) -> Dict[str, Any]:
-    _, public_key_path = get_or_generate_keys()
+    _, public_key_path = auth_utils.get_or_generate_keys()
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
-    config_str = common_utils.dump_yaml_str(config)
+    config_str = yaml_utils.dump_yaml_str(config)
     config_str = config_str.replace('skypilot:ssh_user',
                                     config['auth']['ssh_user'])
     config_str = config_str.replace('skypilot:ssh_public_key_content',
                                     public_key)
-    config = yaml.safe_load(config_str)
+    config = yaml_utils.safe_load(config_str)
     return config
+
+
+def parse_gcp_project_oslogin(project):
+    """Helper function to parse GCP project metadata."""
+    common_metadata = project.get('commonInstanceMetadata', {})
+    if not isinstance(common_metadata, dict):
+        common_metadata = {}
+
+    metadata_items = common_metadata.get('items', [])
+    if not isinstance(metadata_items, list):
+        metadata_items = []
+
+    project_oslogin = next(
+        (item for item in metadata_items
+         if isinstance(item, dict) and item.get('key') == 'enable-oslogin'),
+        {}).get('value', 'False')
+
+    return project_oslogin
 
 
 # Snippets of code inspired from
@@ -221,7 +95,7 @@ def configure_ssh_info(config: Dict[str, Any]) -> Dict[str, Any]:
 # Retry for the GCP as sometimes there will be connection reset by peer error.
 @common_utils.retry
 def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    _, public_key_path = get_or_generate_keys()
+    _, public_key_path = auth_utils.get_or_generate_keys()
     config = copy.deepcopy(config)
 
     project_id = config['provider']['project_id']
@@ -270,10 +144,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                      'Please check your network connection.')
         raise
 
-    project_oslogin: str = next(  # type: ignore
-        (item for item in project['commonInstanceMetadata'].get('items', [])
-         if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
-
+    project_oslogin = parse_gcp_project_oslogin(project)
     if project_oslogin.lower() == 'true':
         logger.info(
             f'OS Login is enabled for GCP project {project_id}. Running '
@@ -289,7 +160,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         os_login_username = None
         if proc.returncode == 0:
             try:
-                profile = yaml.safe_load(proc.stdout)
+                profile = yaml_utils.safe_load(proc.stdout)
                 username = profile['posixAccounts'][0]['username']
                 if username:
                     os_login_username = username
@@ -349,11 +220,11 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
-    get_or_generate_keys()
+    auth_utils.get_or_generate_keys()
 
     # Ensure ssh key is registered with Lambda Cloud
     lambda_client = lambda_utils.LambdaCloudClient()
-    _, public_key_path = get_or_generate_keys()
+    _, public_key_path = auth_utils.get_or_generate_keys()
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
     prefix = f'sky-key-{common_utils.get_user_hash()}'
@@ -370,7 +241,7 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     and updates config file.
     keys default location: '~/.ssh/sky-key' and '~/.ssh/sky-key.pub'
     """
-    private_key_path, _ = get_or_generate_keys()
+    private_key_path, _ = auth_utils.get_or_generate_keys()
 
     def _get_unique_key_name():
         suffix_len = 10
@@ -379,7 +250,7 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     client = ibm.client(region=config['provider']['region'])
     resource_group_id = config['provider']['resource_group_id']
 
-    _, public_key_path = get_or_generate_keys()
+    _, public_key_path = auth_utils.get_or_generate_keys()
     with open(os.path.abspath(os.path.expanduser(public_key_path)),
               'r',
               encoding='utf-8') as file:
@@ -420,116 +291,30 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     context = kubernetes_utils.get_context_from_config(config['provider'])
-
-    # Default ssh session is established with kubectl port-forwarding with
-    # ClusterIP service.
-    nodeport_mode = kubernetes_enums.KubernetesNetworkingMode.NODEPORT
-    port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
-    network_mode_str = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
-        region=context,
-        keys=('networking',),
-        default_value=port_forward_mode.value)
-    try:
-        network_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
-            network_mode_str)
-    except ValueError as e:
-        # Add message saying "Please check: ~/.sky/config.yaml" to the error
-        # message.
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(str(e) +
-                             ' Please check: ~/.sky/config.yaml.') from None
-    _, public_key_path = get_or_generate_keys()
-
-    # Add the user's public key to the SkyPilot cluster.
-    secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
-    secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
     namespace = kubernetes_utils.get_namespace_from_config(config['provider'])
-    k8s = kubernetes.kubernetes
-    with open(public_key_path, 'r', encoding='utf-8') as f:
-        public_key = f.read()
-        if not public_key.endswith('\n'):
-            public_key += '\n'
-
-        # Generate metadata
-        secret_metadata = {
-            'name': secret_name,
-            'labels': {
-                'parent': 'skypilot'
-            }
-        }
-        custom_metadata = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
-            region=context,
-            keys=('custom_metadata',),
-            default_value={})
-        config_utils.merge_k8s_configs(secret_metadata, custom_metadata)
-
-        secret = k8s.client.V1Secret(
-            metadata=k8s.client.V1ObjectMeta(**secret_metadata),
-            string_data={secret_field_name: public_key})
-    try:
-        if kubernetes_utils.check_secret_exists(secret_name, namespace,
-                                                context):
-            logger.debug(f'Key {secret_name} exists in the cluster, '
-                         'patching it...')
-            kubernetes.core_api(context).patch_namespaced_secret(
-                secret_name, namespace, secret)
-        else:
-            logger.debug(f'Key {secret_name} does not exist in the cluster, '
-                         'creating it...')
-            kubernetes.core_api(context).create_namespaced_secret(
-                namespace, secret)
-    except kubernetes.api_exception() as e:
-        if e.status == 409 and e.reason == 'AlreadyExists':
-            logger.debug(f'Key {secret_name} was created concurrently, '
-                         'patching it...')
-            kubernetes.core_api(context).patch_namespaced_secret(
-                secret_name, namespace, secret)
-        else:
-            raise e
-
-    private_key_path, _ = get_or_generate_keys()
-    if network_mode == nodeport_mode:
-        ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-        service_type = kubernetes_enums.KubernetesServiceType.NODEPORT
-        # Setup service for SSH jump pod. We create the SSH jump service here
-        # because we need to know the service IP address and port to set the
-        # ssh_proxy_command in the autoscaler config.
-        kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace, context,
-                                            service_type)
-        ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
-            ssh_jump_name,
-            nodeport_mode,
-            private_key_path=private_key_path,
-            context=context,
-            namespace=namespace)
-    elif network_mode == port_forward_mode:
-        # Using `kubectl port-forward` creates a direct tunnel to the pod and
-        # does not require a ssh jump pod.
-        kubernetes_utils.check_port_forward_mode_dependencies()
-        # TODO(romilb): This can be further optimized. Instead of using the
-        #   head node as a jump pod for worker nodes, we can also directly
-        #   set the ssh_target to the worker node. However, that requires
-        #   changes in the downstream code to return a mapping of node IPs to
-        #   pod names (to be used as ssh_target) and updating the upstream
-        #   SSHConfigHelper to use a different ProxyCommand for each pod.
-        #   This optimization can reduce SSH time from ~0.35s to ~0.25s, tested
-        #   on GKE.
-        ssh_target = config['cluster_name'] + '-head'
-        ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
-            ssh_target,
-            port_forward_mode,
-            private_key_path=private_key_path,
-            context=context,
-            namespace=namespace)
-    else:
-        # This should never happen because we check for this in from_str above.
-        raise ValueError(f'Unsupported networking mode: {network_mode_str}')
+    private_key_path, _ = auth_utils.get_or_generate_keys()
+    # Using `kubectl port-forward` creates a direct tunnel to the pod and
+    # does not require a ssh jump pod.
+    kubernetes_utils.check_port_forward_mode_dependencies()
+    # TODO(romilb): This can be further optimized. Instead of using the
+    #   head node as a jump pod for worker nodes, we can also directly
+    #   set the ssh_target to the worker node. However, that requires
+    #   changes in the downstream code to return a mapping of node IPs to
+    #   pod names (to be used as ssh_target) and updating the upstream
+    #   SSHConfigHelper to use a different ProxyCommand for each pod.
+    #   This optimization can reduce SSH time from ~0.35s to ~0.25s, tested
+    #   on GKE.
+    pod_name = config['cluster_name'] + '-head'
+    ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
+        pod_name,
+        private_key_path=private_key_path,
+        context=context,
+        namespace=namespace)
     config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
     config['auth']['ssh_private_key'] = private_key_path
 
-    return config
+    # Add the user's public key to the SkyPilot cluster.
+    return configure_ssh_info(config)
 
 
 # ---------------------------------- RunPod ---------------------------------- #
@@ -538,7 +323,7 @@ def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     - Generates a new SSH key pair if one does not exist.
     - Adds the public SSH key to the user's RunPod account.
     """
-    _, public_key_path = get_or_generate_keys()
+    _, public_key_path = auth_utils.get_or_generate_keys()
     with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
         public_key = pub_key_file.read().strip()
         runpod.runpod.cli.groups.ssh.functions.add_ssh_key(public_key)
@@ -551,7 +336,7 @@ def setup_vast_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     - Generates a new SSH key pair if one does not exist.
     - Adds the public SSH key to the user's Vast account.
     """
-    _, public_key_path = get_or_generate_keys()
+    _, public_key_path = auth_utils.get_or_generate_keys()
     with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
         public_key = pub_key_file.read().strip()
         current_key_list = vast.vast().show_ssh_keys()  # pylint: disable=assignment-from-no-return
@@ -565,7 +350,7 @@ def setup_vast_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
-    _, public_key_path = get_or_generate_keys()
+    _, public_key_path = auth_utils.get_or_generate_keys()
 
     client = fluidstack_utils.FluidstackClient()
     public_key = None
@@ -578,7 +363,7 @@ def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     """Sets up SSH authentication for Hyperbolic."""
-    _, public_key_path = get_or_generate_keys()
+    _, public_key_path = auth_utils.get_or_generate_keys()
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
 
@@ -592,3 +377,106 @@ def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['auth']['ssh_public_key'] = public_key_path
 
     return configure_ssh_info(config)
+
+
+def setup_shadeform_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Shadeform.
+    - Generates a new SSH key pair if one does not exist.
+    - Adds the public SSH key to the user's Shadeform account.
+
+    Note: This assumes there is a Shadeform Python SDK available.
+    If no official SDK exists, this function would need to use direct API calls.
+    """
+
+    _, public_key_path = auth_utils.get_or_generate_keys()
+    ssh_key_id = None
+
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read().strip()
+
+    try:
+        # Add SSH key to Shadeform using our utility functions
+        ssh_key_id = shadeform_adaptor.add_ssh_key_to_shadeform(public_key)
+
+    except ImportError as e:
+        # If required dependencies are missing
+        logger.warning(
+            f'Failed to add Shadeform SSH key due to missing dependencies: '
+            f'{e}. Manually configure SSH keys in your Shadeform account.')
+
+    except Exception as e:
+        logger.warning(f'Failed to set up Shadeform authentication: {e}')
+        raise exceptions.CloudUserIdentityError(
+            'Failed to set up SSH authentication for Shadeform. '
+            f'Please ensure your Shadeform credentials are configured: {e}'
+        ) from e
+
+    if ssh_key_id is None:
+        raise Exception('Failed to add SSH key to Shadeform')
+
+    # Configure SSH info in the config
+    config['auth']['ssh_public_key'] = public_key_path
+    config['auth']['ssh_key_id'] = ssh_key_id
+
+    return configure_ssh_info(config)
+
+
+def setup_primeintellect_authentication(
+        config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Prime Intellect.
+    - Generates a new SSH key pair if one does not exist.
+    - Adds the public SSH key to the user's Prime Intellect account.
+    """
+    # Ensure local SSH keypair exists and fetch public key content
+    _, public_key_path = auth_utils.get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read().strip()
+
+    # Register the public key with Prime Intellect (no-op if already exists)
+    client = primeintellect_utils.PrimeIntellectAPIClient()
+    client.get_or_add_ssh_key(public_key)
+
+    # Set up auth section for Ray template
+    config.setdefault('auth', {})
+    # Default username for Prime Intellect images
+    config['auth']['ssh_user'] = 'ubuntu'
+    config['auth']['ssh_public_key'] = public_key_path
+
+    return configure_ssh_info(config)
+
+
+def setup_seeweb_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Registers the public key with Seeweb and notes the remote name."""
+    # 1. local key pair
+    auth_utils.get_or_generate_keys()
+
+    # 2. public key
+    _, public_key_path = auth_utils.get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read().strip()
+
+    # 3. Seeweb API client
+    client = seeweb_adaptor.client()
+
+    # 4. Check if key is already registered
+    prefix = f'sky-key-{common_utils.get_user_hash()}'
+    remote_name = None
+    for k in client.fetch_ssh_keys():
+        if k.key.strip() == public_key:
+            remote_name = k.label  # already present
+            break
+
+    # 5. doesn't exist, choose a unique name and create it
+    if remote_name is None:
+        suffix = 1
+        remote_name = prefix
+        existing_names = {k.label for k in client.fetch_ssh_keys()}
+        while remote_name in existing_names:
+            suffix += 1
+            remote_name = f'{prefix}-{suffix}'
+        client.create_ssh_key(label=remote_name, key=public_key)
+
+    # 6. Put the remote name in cluster-config (like for Lambda)
+    config['auth']['remote_key_name'] = remote_name
+
+    return config

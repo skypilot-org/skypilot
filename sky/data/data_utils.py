@@ -19,9 +19,11 @@ from sky import sky_logging
 from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
+from sky.adaptors import coreweave
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
+from sky.adaptors import oci
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
@@ -358,6 +360,30 @@ def verify_ibm_cos_bucket(name: str) -> bool:
     return get_ibm_cos_bucket_region(name) != ''
 
 
+def verify_oci_bucket(name: str) -> bool:
+    """Helper method that checks if the OCI bucket exists
+
+    Args:
+      name: str; Name of OCI Bucket (without oci:// prefix)
+
+    Returns:
+      bool: True if the bucket exists, False otherwise
+    """
+    try:
+        # Get OCI client and check if bucket exists
+        client = oci.get_object_storage_client()
+        namespace = client.get_namespace(
+            compartment_id=oci.get_oci_config()['tenancy']).data
+
+        # Try to get the bucket
+        client.get_bucket(namespace_name=namespace, bucket_name=name)
+        return True
+    except Exception:  # pylint: disable=broad-except
+        # If any exception occurs (bucket not found, permission issues, etc.),
+        # return False
+        return False
+
+
 def _get_ibm_cos_bucket_region(region, bucket_name):
     """helper function of get_ibm_cos_bucket_region
 
@@ -599,6 +625,8 @@ class Rclone:
         IBM = 'IBM'
         R2 = 'R2'
         AZURE = 'AZURE'
+        NEBIUS = 'NEBIUS'
+        COREWEAVE = 'COREWEAVE'
 
         def get_profile_name(self, bucket_name: str) -> str:
             """Gets the Rclone profile name for a given bucket.
@@ -615,7 +643,9 @@ class Rclone:
                 Rclone.RcloneStores.GCS: 'sky-gcs',
                 Rclone.RcloneStores.IBM: 'sky-ibm',
                 Rclone.RcloneStores.R2: 'sky-r2',
-                Rclone.RcloneStores.AZURE: 'sky-azure'
+                Rclone.RcloneStores.AZURE: 'sky-azure',
+                Rclone.RcloneStores.NEBIUS: 'sky-nebius',
+                Rclone.RcloneStores.COREWEAVE: 'sky-coreweave'
             }
             return f'{profile_prefix[self]}-{bucket_name}'
 
@@ -646,18 +676,32 @@ class Rclone:
                 assert bucket_name is not None
                 rclone_profile_name = self.get_profile_name(bucket_name)
             if self is Rclone.RcloneStores.S3:
-                aws_credentials = (
-                    aws.session().get_credentials().get_frozen_credentials())
-                access_key_id = aws_credentials.access_key
-                secret_access_key = aws_credentials.secret_key
-                config = textwrap.dedent(f"""\
-                    [{rclone_profile_name}]
-                    type = s3
-                    provider = AWS
-                    access_key_id = {access_key_id}
-                    secret_access_key = {secret_access_key}
-                    acl = private
-                    """)
+                if clouds.AWS.should_use_env_auth_for_s3():
+                    # Use environment-based auth for SSO, IAM roles, etc.
+                    # This allows rclone to use the AWS SDK credential chain
+                    # which properly handles temporary credentials and
+                    # container credentials (Pod Identity, IRSA, etc.)
+                    config = textwrap.dedent(f"""\
+                        [{rclone_profile_name}]
+                        type = s3
+                        provider = AWS
+                        env_auth = true
+                        acl = private
+                        """)
+                else:
+                    # Use static credentials for shared-credentials-file
+                    aws_credentials = (aws.session().get_credentials().
+                                       get_frozen_credentials())
+                    access_key_id = aws_credentials.access_key
+                    secret_access_key = aws_credentials.secret_key
+                    config = textwrap.dedent(f"""\
+                        [{rclone_profile_name}]
+                        type = s3
+                        provider = AWS
+                        access_key_id = {access_key_id}
+                        secret_access_key = {secret_access_key}
+                        acl = private
+                        """)
             elif self is Rclone.RcloneStores.GCS:
                 config = textwrap.dedent(f"""\
                     [{rclone_profile_name}]
@@ -702,6 +746,43 @@ class Rclone:
                     type = azureblob
                     account = {storage_account_name}
                     key = {storage_account_key}
+                    """)
+            elif self is Rclone.RcloneStores.NEBIUS:
+                nebius_session = nebius.session()
+                nebius_credentials = nebius.get_nebius_credentials(
+                    nebius_session)
+                # Get endpoint URL from the client
+                client = nebius.client('s3')
+                endpoint_url = client.meta.endpoint_url
+                access_key_id = nebius_credentials.access_key
+                secret_access_key = nebius_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = Other
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    endpoint = {endpoint_url}
+                    acl = private
+                    """)
+            elif self is Rclone.RcloneStores.COREWEAVE:
+                coreweave_session = coreweave.session()
+                coreweave_credentials = coreweave.get_coreweave_credentials(
+                    coreweave_session)
+                # Get endpoint URL from the client
+                endpoint_url = coreweave.get_endpoint()
+                access_key_id = coreweave_credentials.access_key
+                secret_access_key = coreweave_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = Other
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    endpoint = {endpoint_url}
+                    region = auto
+                    acl = private
+                    force_path_style = false
                     """)
             else:
                 with ux_utils.print_exception_no_traceback():
@@ -863,3 +944,72 @@ def split_oci_path(oci_path: str) -> Tuple[str, str]:
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
+
+
+def create_coreweave_client() -> Client:
+    """Create CoreWeave S3 client."""
+    return coreweave.client('s3')
+
+
+def split_coreweave_path(coreweave_path: str) -> Tuple[str, str]:
+    """Splits CoreWeave Path into Bucket name and Relative Path to Bucket
+
+    Args:
+      coreweave_path: str; CoreWeave Path, e.g. cw://imagenet/train/
+    """
+    path_parts = coreweave_path.replace('cw://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
+def verify_coreweave_bucket(name: str, retry: int = 0) -> bool:
+    """Verify CoreWeave bucket exists and is accessible.
+
+    Retries head_bucket operation up to retry times with 5 second intervals
+    to handle DNS propagation delays or temporary connectivity issues.
+    """
+    coreweave_client = create_coreweave_client()
+    max_retries = retry + 1  # 5s * (retry+1) = total seconds to retry
+    retry_count = 0
+
+    while retry_count < max_retries:
+        try:
+            coreweave_client.head_bucket(Bucket=name)
+            if retry_count > 0:
+                logger.debug(
+                    f'Successfully verified bucket {name} after '
+                    f'{retry_count} retries ({retry_count * 5} seconds)')
+            return True
+
+        except coreweave.botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # pylint: disable=line-too-long:
+            error_code = e.response['Error']['Code']
+            if error_code == '403':
+                logger.error(f'Access denied to bucket {name}')
+                return False
+            elif error_code == '404':
+                logger.debug(f'Bucket {name} does not exist')
+            else:
+                logger.debug(
+                    f'Unexpected error checking CoreWeave bucket {name}: {e}')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(
+                f'Unexpected error checking CoreWeave bucket {name}: {e}')
+
+        # Common retry logic for all transient errors
+        retry_count += 1
+        if retry_count < max_retries:
+            logger.debug(f'Error checking CoreWeave bucket {name} '
+                         f'(attempt {retry_count}/{max_retries}). '
+                         f'Retrying in 5 seconds...')
+            time.sleep(5)
+        else:
+            attempt_str = 'attempt'
+            if max_retries > 1:
+                attempt_str += 's'
+            logger.error(f'Failed to verify CoreWeave bucket {name} after '
+                         f'{max_retries} {attempt_str}.')
+            return False
+
+    # Should not reach here, but just in case
+    return False

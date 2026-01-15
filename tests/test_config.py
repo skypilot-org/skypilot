@@ -2,6 +2,7 @@
 import copy
 import os
 import pathlib
+import shutil
 import textwrap
 from unittest import mock
 
@@ -14,15 +15,12 @@ from sky.server.requests import payloads
 from sky.sky_logging import INFO
 from sky.skylet import constants
 from sky.utils import annotations
-from sky.utils import common_utils
 from sky.utils import config_utils
-from sky.utils import kubernetes_enums
+from sky.utils import yaml_utils
 
 DISK_ENCRYPTED = True
 VPC_NAME = 'vpc-12345678'
 PROXY_COMMAND = 'ssh -W %h:%p -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no'
-NODEPORT_MODE_NAME = kubernetes_enums.KubernetesNetworkingMode.NODEPORT.value
-PORT_FORWARD_MODE_NAME = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value
 RUN_DURATION = 30
 RUN_DURATION_OVERRIDE = 10
 PROVISION_TIMEOUT = 600
@@ -60,12 +58,11 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
                     provision_timeout: {PROVISION_TIMEOUT}
 
             kubernetes:
-                networking: {NODEPORT_MODE_NAME}
                 pod_config:
+                    metadata:
+                        annotations:
+                            my_annotation: my_value
                     spec:
-                        metadata:
-                            annotations:
-                                my_annotation: my_value
                         runtimeClassName: nvidia    # Custom runtimeClassName for GPU pods.
                         imagePullSecrets:
                             - name: my-secret     # Pull images from a private registry using a secret
@@ -81,27 +78,26 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
 def _create_task_yaml_file(task_file_path: pathlib.Path) -> None:
     task_file_path.write_text(
         textwrap.dedent(f"""\
-        experimental:
-            config_overrides:
-                docker:
-                    run_options:
-                        - -v /tmp:/tmp
-                kubernetes:
-                    pod_config:
-                        metadata:
-                            labels:
-                                test-key: test-value
-                            annotations:
-                                abc: def
-                        spec:
-                            imagePullSecrets:
-                                - name: my-secret-2
-                    provision_timeout: 100
-                gcp:
-                    managed_instance_group:
-                        run_duration: {RUN_DURATION_OVERRIDE}
-                nvidia_gpus:
-                    disable_ecc: true
+        config:
+            docker:
+                run_options:
+                    - -v /tmp:/tmp
+            kubernetes:
+                pod_config:
+                    metadata:
+                        labels:
+                            test-key: test-value
+                        annotations:
+                            abc: def
+                    spec:
+                        imagePullSecrets:
+                            - name: my-secret-2
+                provision_timeout: 100
+            gcp:
+                managed_instance_group:
+                    run_duration: {RUN_DURATION_OVERRIDE}
+            nvidia_gpus:
+                disable_ecc: true
         resources:
             image_id: docker:ubuntu:latest
 
@@ -113,20 +109,19 @@ def _create_task_yaml_file(task_file_path: pathlib.Path) -> None:
 def _create_invalid_config_yaml_file(task_file_path: pathlib.Path) -> None:
     task_file_path.write_text(
         textwrap.dedent("""\
-        experimental:
-            config_overrides:
-                kubernetes:
-                    pod_config:
-                        metadata:
-                            labels:
-                                test-key: test-value
-                            annotations:
-                                abc: def
-                        spec:
-                            containers:
-                                - name:
-                            imagePullSecrets:
-                                - name: my-secret-2
+        config:
+            kubernetes:
+                pod_config:
+                    metadata:
+                        labels:
+                            test-key: test-value
+                        annotations:
+                            abc: def
+                    spec:
+                        containers:
+                            - name:
+                        imagePullSecrets:
+                            - name: my-secret-2
 
         setup: echo 'Setting up...'
         run: echo 'Running...'
@@ -318,22 +313,17 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
                                       None) == PROXY_COMMAND
     assert skypilot_config.get_nested(('gcp', 'vpc_name'), None) == VPC_NAME
-    assert skypilot_config.get_nested(('kubernetes', 'networking'),
-                                      None) == NODEPORT_MODE_NAME
     # Check set_nested() will copy the config dict and return a new dict
     new_config = skypilot_config.set_nested(('aws', 'ssh_proxy_command'),
                                             'new_value')
     assert new_config['aws']['ssh_proxy_command'] == 'new_value'
     assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
                                       None) == PROXY_COMMAND
-    new_config = skypilot_config.set_nested(('kubernetes', 'networking'),
-                                            PORT_FORWARD_MODE_NAME)
-    assert skypilot_config.get_nested(('kubernetes', 'networking'),
-                                      None) == NODEPORT_MODE_NAME
+
     # Check that dumping the config to a file with the new None can be reloaded
     new_config2 = skypilot_config.set_nested(('aws', 'ssh_proxy_command'), None)
     new_config_path = tmp_path / 'new_config.yaml'
-    common_utils.dump_yaml(new_config_path, new_config2)
+    yaml_utils.dump_yaml(new_config_path, new_config2)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', new_config_path)
     skypilot_config.reload_config()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
@@ -348,7 +338,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     del new_config3['aws']['ssh_proxy_command']
     del new_config3['aws']['use_internal_ips']
     new_config_path = tmp_path / 'new_config3.yaml'
-    common_utils.dump_yaml(new_config_path, new_config3)
+    yaml_utils.dump_yaml(new_config_path, new_config3)
     monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH', new_config_path)
     skypilot_config.reload_config()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
@@ -406,12 +396,12 @@ def test_k8s_config_with_override(monkeypatch, tmp_path,
     task.set_resources_override({'cloud': sky.Kubernetes()})
     request_id = sky.launch(task, cluster_name=cluster_name, dryrun=True)
     sky.stream_and_get(request_id)
-    cluster_yaml = pathlib.Path(
-        f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser().rename(
-            tmp_path / (cluster_name + '.yml'))
+    cluster_yaml = shutil.move(
+        pathlib.Path(f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser(),
+        tmp_path / (cluster_name + '.yml'))
 
     # Load the cluster YAML
-    cluster_config = common_utils.read_yaml(cluster_yaml)
+    cluster_config = yaml_utils.read_yaml(cluster_yaml)
     head_node_type = cluster_config['head_node_type']
     cluster_pod_config = cluster_config['available_node_types'][head_node_type][
         'node_config']
@@ -463,12 +453,12 @@ def test_gcp_config_with_override(monkeypatch, tmp_path,
     task.set_resources_override({'cloud': sky.GCP(), 'accelerators': 'L4'})
     request_id = sky.launch(task, cluster_name=cluster_name, dryrun=True)
     sky.stream_and_get(request_id)
-    cluster_yaml = pathlib.Path(
-        f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser().rename(
-            tmp_path / (cluster_name + '.yml'))
+    cluster_yaml = shutil.move(
+        pathlib.Path(f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser(),
+        tmp_path / (cluster_name + '.yml'))
 
     # Load the cluster YAML
-    cluster_config = common_utils.read_yaml(cluster_yaml)
+    cluster_config = yaml_utils.read_yaml(cluster_yaml)
     assert cluster_config['provider']['vpc_name'] == VPC_NAME
     assert '-v /tmp:/tmp' in cluster_config['docker'][
         'run_options'], cluster_config
@@ -542,6 +532,31 @@ def test_get_override_skypilot_config_from_client(mock_to_dict, mock_logger,
 
         # Verify disallowed keys are not trimmed at client-side
         assert result['aws']['security_group'] == 'test-sg'
+
+
+@annotations.client_api
+def test_get_override_skypilot_config_from_client_get_latest_config(tmp_path):
+    """Test that get_override_skypilot_config_from_client returns the loaded config path."""
+    old_path = tmp_path / 'old_config.yaml'
+    old_path.write_text(
+        textwrap.dedent(f"""\
+        kubernetes:
+            ports: loadbalancer
+        """))
+    new_path = tmp_path / 'new_config.yaml'
+    new_path.write_text(
+        textwrap.dedent(f"""\
+        kubernetes:
+            ports: ingress
+        """))
+    with mock.patch('os.environ.get', return_value=old_path):
+        skypilot_config.reload_config()
+        result_old = payloads.get_override_skypilot_config_from_client()
+        assert result_old['kubernetes']['ports'] == 'loadbalancer'
+    with mock.patch('os.environ.get', return_value=new_path):
+        skypilot_config.reload_config()
+        result_new = payloads.get_override_skypilot_config_from_client()
+        assert result_new['kubernetes']['ports'] == 'ingress'
 
 
 def test_override_skypilot_config(monkeypatch, tmp_path):
@@ -802,7 +817,7 @@ def test_parse_dotlist():
 def test_override_skypilot_config_with_disallowed_keys(monkeypatch, tmp_path):
     """Test override_skypilot_config with disallowed keys."""
     with mock.patch('sky.skypilot_config.logger') as mock_logger:
-        mock_logger.level = INFO
+        mock_logger.getEffectiveLevel.return_value = INFO
         os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
         # Create original config file
         config_path = tmp_path / 'config.yaml'
@@ -951,6 +966,314 @@ def test_kubernetes_context_configs(monkeypatch, tmp_path) -> None:
             }
         }
     }
+
+    contexts = kubernetes_utils.get_custom_config_k8s_contexts()
+    assert len(contexts) == 2
+    assert contexts[0] == 'contextA'
+    assert contexts[1] == 'contextB'
+
+
+def test_kubernetes_context_configs_mutation(monkeypatch, tmp_path) -> None:
+    """Test that the nested config works when part of the config is mutated."""
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    with open(tmp_path / 'context_configs.yaml', 'w', encoding='utf-8') as f:
+        f.write(f"""\
+        kubernetes:
+            custom_metadata:
+                labels:
+                    global_label: global_value
+            context_configs:
+                contextA:
+                    custom_metadata:
+                        labels:
+                            contextA_label: contextA_value
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'context_configs.yaml')
+    skypilot_config.reload_config()
+
+    # test custom_metadata property
+    context_a_custom_metadata = skypilot_config.get_effective_region_config(
+        cloud='kubernetes', region='contextA', keys=('custom_metadata',))
+    assert context_a_custom_metadata == {
+        'labels': {
+            'global_label': 'global_value',
+            'contextA_label': 'contextA_value'
+        }
+    }
+
+    # mutate per-context config and check if it's updated
+    context_a_custom_labels = skypilot_config.get_nested(
+        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
+         'labels'), {})
+    context_a_custom_labels['contextA_label'] = 'contextA_value_updated'
+    mutated_config = skypilot_config.set_nested(
+        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
+         'labels'), context_a_custom_labels)
+
+    context_a_custom_metadata = config_utils.get_cloud_config_value_from_dict(
+        dict_config=mutated_config,
+        cloud='kubernetes',
+        region='contextA',
+        keys=('custom_metadata',))
+    assert context_a_custom_metadata == {
+        'labels': {
+            'global_label': 'global_value',
+            'contextA_label': 'contextA_value_updated'
+        }
+    }
+
+    # mutate global config and check if it's updated
+    global_custom_labels = skypilot_config.get_nested(
+        ('kubernetes', 'custom_metadata', 'labels'), {})
+    global_custom_labels['global_label'] = 'global_value_updated'
+    mutated_config = skypilot_config.set_nested(
+        ('kubernetes', 'custom_metadata', 'labels'), global_custom_labels)
+    context_a_custom_metadata = config_utils.get_cloud_config_value_from_dict(
+        dict_config=mutated_config,
+        cloud='kubernetes',
+        region='contextA',
+        keys=('custom_metadata',))
+    assert context_a_custom_metadata == {
+        'labels': {
+            'global_label': 'global_value_updated',
+            'contextA_label': 'contextA_value'
+        }
+    }
+
+    # mutate label defined by global config in per-context config
+    context_a_custom_labels = skypilot_config.get_nested(
+        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
+         'labels'), {})
+    context_a_custom_labels['global_label'] = 'global_value_contextA_specific'
+    mutated_config = skypilot_config.set_nested(
+        ('kubernetes', 'context_configs', 'contextA', 'custom_metadata',
+         'labels'), context_a_custom_labels)
+    context_a_custom_metadata = config_utils.get_cloud_config_value_from_dict(
+        dict_config=mutated_config,
+        cloud='kubernetes',
+        region='contextA',
+        keys=('custom_metadata',))
+    assert context_a_custom_metadata == {
+        'labels': {
+            'global_label': 'global_value_contextA_specific',
+            'contextA_label': 'contextA_value'
+        }
+    }
+
+
+def test_standardized_region_configs(monkeypatch, tmp_path) -> None:
+    """Test that nested per-region standardized config works
+
+    Current clouds: Nebius, OCI"""
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    with open(tmp_path / 'region_configs.yaml', 'w', encoding='utf-8') as f:
+        f.write(f"""\
+        nebius:
+            use_internal_ips: true
+            ssh_proxy_command:
+                eu-north1: ssh -W %h:%p user@host
+            region_configs:
+                eu-north1:
+                    project_id: project-e00
+                    fabric: fabric-3
+                eu-west1:
+                    project_id: project-e01
+                    fabric: fabric-5
+                    filesystems:
+                        - filesystem_id: computefilesystem-e00aaaaa01bbbbbbbb
+                          mount_path: /mnt/fsnew
+                          attach_mode: READ_WRITE
+                        - filesystem_id: computefilesystem-e00ccccc02dddddddd
+                          mount_path: /mnt/fsnew2
+                          attach_mode: READ_ONLY
+
+        oci:
+            region_configs:
+                default:
+                    vcn_ocid: vcn_ocid_default
+                    vcn_subnet: vcn_subnet_default
+                ap-seoul-1:
+                    vcn_ocid: vcn_ocid1
+                    vcn_subnet: vcn_subnet1
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'region_configs.yaml')
+    skypilot_config.reload_config()
+
+    # nebius: test project_id property
+    eu_n1_proj = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-north1', keys=('project_id',))
+    assert eu_n1_proj == 'project-e00'
+    eu_w1_proj = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-west1', keys=('project_id',))
+    assert eu_w1_proj == 'project-e01'
+
+    # nebius: test fabric property
+    eu_n1_fabric = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-north1', keys=('fabric',))
+    assert eu_n1_fabric == 'fabric-3'
+    eu_w1_fabric = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-west1', keys=('fabric',))
+    assert eu_w1_fabric == 'fabric-5'
+
+    # nebius: test use_internal_ips property
+    eu_n1_ip = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-north1', keys=('use_internal_ips',))
+    assert eu_n1_ip == True
+    eu_w1_ip = skypilot_config.get_effective_region_config(
+        cloud='nebius', region='eu-west1', keys=('use_internal_ips',))
+    assert eu_w1_ip == True
+    generic = skypilot_config.get_effective_region_config(
+        cloud='nebius', region=None, keys=('use_internal_ips',))
+    assert generic == True
+
+    # nebius: test ssh_proxy_command defaults
+    ssh_proxy = skypilot_config.get_effective_region_config(
+        cloud='nebius', region=None, keys=('ssh_proxy_command',))
+    assert ssh_proxy['eu-north1'] == 'ssh -W %h:%p user@host'
+    assert 'eu-west1' not in ssh_proxy
+
+    # nebius: test filesystems
+    no_filesystem = skypilot_config.get_effective_region_config(
+        cloud='nebius',
+        region='eu-north1',
+        keys=('filesystems',),
+        default_value=[])
+    assert len(no_filesystem) == 0
+
+    filesystems = skypilot_config.get_effective_region_config(
+        cloud='nebius',
+        region='eu-west1',
+        keys=('filesystems',),
+        default_value=[])
+    assert len(filesystems) == 2
+
+    # oci: test general
+    vcn_ocid = skypilot_config.get_effective_region_config(cloud='oci',
+                                                           region='default',
+                                                           keys=('vcn_ocid',),
+                                                           default_value=None)
+    assert vcn_ocid == 'vcn_ocid_default'
+
+    vcn_ocid = skypilot_config.get_effective_region_config(cloud='oci',
+                                                           region='ap-seoul-1',
+                                                           keys=('vcn_ocid',),
+                                                           default_value=None)
+    assert vcn_ocid == 'vcn_ocid1'
+
+    vcn_ocid = skypilot_config.get_effective_region_config(
+        cloud='oci',
+        region='not_valid_region',
+        keys=('vcn_ocid',),
+        default_value=None)
+    assert vcn_ocid is None
+
+
+def test_kubernetes_kueue_configs(monkeypatch, tmp_path) -> None:
+    """Test that the nested config works."""
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    with open(tmp_path / 'context_configs.yaml', 'w', encoding='utf-8') as f:
+        f.write(f"""\
+        kubernetes:
+            kueue:
+                local_queue_name: default-queue
+            context_configs:
+                contextA:
+                    kueue:
+                        local_queue_name: contextA-queue
+                contextB:
+                    kueue:
+                        local_queue_name: contextB-queue
+        workspaces:
+            workspaceA:
+                kubernetes:
+                    kueue:
+                        local_queue_name: workspaceA-queue
+                    context_configs:
+                        contextA:
+                            kueue:
+                                local_queue_name: workspaceA-contextA-queue
+            workspaceB:
+                kubernetes:
+                    context_configs:
+                        contextA:
+                            kueue:
+                                local_queue_name: workspaceB-contextA-queue
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'context_configs.yaml')
+    skypilot_config.reload_config()
+
+    # default workspace
+    default_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        region=None,
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='default')
+    assert default_queue == 'default-queue'
+    contextA_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        region='contextA',
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='default')
+    assert contextA_queue == 'contextA-queue'
+    contextB_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        region='contextB',
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='default')
+    assert contextB_queue == 'contextB-queue'
+
+    # workspace A
+    workspaceA_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='workspaceA')
+    assert workspaceA_queue == 'workspaceA-queue'
+    workspaceA_contextA_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        region='contextA',
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='workspaceA')
+    assert workspaceA_contextA_queue == 'workspaceA-contextA-queue'
+    # fall back to workspace default
+    workspaceA_contextB_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        region='contextB',
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='workspaceA')
+    assert workspaceA_contextB_queue == 'workspaceA-queue'
+
+    # workspace B
+    # fall back to non-workspaced default
+    workspaceB_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='workspaceB')
+    assert workspaceB_queue == 'default-queue'
+    workspaceB_contextA_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        region='contextA',
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='workspaceB')
+    assert workspaceB_contextA_queue == 'workspaceB-contextA-queue'
+    # fall back to non-workspaced context B
+    workspaceB_contextB_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        region='contextB',
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='workspaceB')
+    assert workspaceB_contextB_queue == 'contextB-queue'
 
     contexts = kubernetes_utils.get_custom_config_k8s_contexts()
     assert len(contexts) == 2

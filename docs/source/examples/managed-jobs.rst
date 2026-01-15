@@ -34,8 +34,7 @@ To start a managed job, use :code:`sky jobs launch`:
   ├── To cancel the job:                sky jobs cancel 1
   ├── To stream job logs:               sky jobs logs 1
   ├── To stream controller logs:        sky jobs logs --controller 1
-  ├── To view all managed jobs:         sky jobs queue
-  └── To view managed job dashboard:    sky jobs dashboard
+  └── To view all managed jobs:         sky jobs queue
 
 The job is launched on a temporary SkyPilot cluster, managed end-to-end, and automatically cleaned up.
 
@@ -150,7 +149,7 @@ Work with managed jobs
 
 For a list of all commands and options, run :code:`sky jobs --help` or read the :ref:`CLI reference <cli>`.
 
-See a list of all managed jobs:
+See a list of managed jobs:
 
 .. code-block:: console
 
@@ -163,6 +162,8 @@ See a list of all managed jobs:
   ID NAME     RESOURCES           SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
   2  roberta  1x [A100:8][Spot]   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
   1  bert-qa  1x [V100:1][Spot]   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
+
+This command shows 50 managed jobs by default, use ``--limit <num>`` to show more jobs or use ``--all`` to show all jobs.
 
 Stream the logs of a running managed job:
 
@@ -323,6 +324,34 @@ can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the 
 
 This will restart the job, up to 3 times (for a total of 4 attempts), if your code has any non-zero exit code. Each restart runs on a newly provisioned temporary cluster.
 
+Recovering on specific exit codes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You can also specify a list of exit codes that should always trigger recovery, regardless of the :code:`max_restarts_on_errors` limit. This is useful when certain exit codes indicate transient errors that should always be retried (e.g., NCCL timeouts, specific GPU driver issues).
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100:8
+    job_recovery:
+      max_restarts_on_errors: 3
+      # Always recover if the job exits with code 33 or 34.
+      # In a multi-node job, recovery is triggered if any node exits with a code in [33, 34].
+      # Can also use a single integer: recover_on_exit_codes: 33
+      recover_on_exit_codes: [33, 34]
+
+In this configuration:
+
+- If the job exits with code 33 or 34, it will be recovered. Restarts triggered by these specific exit codes do not count towards the `max_restarts_on_errors` limit.
+- For any other non-zero exit code, the job will be recovered up to 3 times (as specified by :code:`max_restarts_on_errors`)
+
+.. note::
+  For multi-node jobs, recovery is triggered if **any** node exits with a code in :code:`recover_on_exit_codes`.
+
+.. warning::
+
+  You should **not** use exit code 137 in :code:`recover_on_exit_codes`. This code is used internally by SkyPilot and including it may interfere with proper recovery behavior.
+
 
 When will my job be recovered?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -334,7 +363,7 @@ Here's how various kinds of failures will be handled by SkyPilot:
    :header-rows: 0
 
    * - User code fails (:code:`setup` or :code:`run` commands have non-zero exit code):
-     - If :code:`max_restarts_on_errors` is set, restart up to that many times. If :code:`max_restarts_on_errors` is not set, or we run out of restarts, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
+     - If the exit code is in :code:`recover_on_exit_codes`, always restart. Otherwise, if :code:`max_restarts_on_errors` is set, restart up to that many times. If neither condition is met, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
    * - Instances are preempted or underlying hardware fails:
      - Tear down the old temporary cluster and provision a new one in another region, then restart the job.
    * - Can't find available resources due to cloud quota or capacity restrictions:
@@ -354,6 +383,10 @@ Scaling to many jobs
 --------------------
 
 You can easily manage dozens, hundreds, or thousands of managed jobs at once. This is a great fit for batch jobs such as **data processing**, **batch inference**, or **hyperparameter sweeps**. To see an example launching many jobs in parallel, see :ref:`many-jobs`.
+
+.. tip::
+
+  For workloads that can reuse the same environment across many jobs, consider using :ref:`Pools <pool>`. Pools provide faster cold-starts by maintaining a set of pre-provisioned workers that can be reused across job submissions.
 
 .. TODO(cooperc): code block or dashboard showcasing UX of many jobs (thousand-scale)
 
@@ -430,7 +463,7 @@ dashes :code:`---`. Each task has its own :code:`resources`, :code:`setup`, and
 
 To pass data between the tasks, use a shared file mount. In this example, the :code:`train` task writes its output to the :code:`/checkpoint` file mount, which the :code:`eval` task is then able to read from.
 
-To submit the pipeline, the same command :code:`sky jobs launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky jobs queue` or :code:`sky jobs dashboard`.
+To submit the pipeline, the same command :code:`sky jobs launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky jobs queue` or :code:`sky dashboard`.
 
 .. code-block:: console
 
@@ -453,15 +486,31 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
   "sky-managed-2022-10-06-05-17-09-750781_pipeline_eval_8-1".
 
 
+File uploads for managed jobs
+-----------------------------
+
+For managed jobs, SkyPilot uses an intermediate bucket to store files used in the task, such as local :code:`file_mounts` and the :code:`workdir`.
+
+If you do not configure a bucket, SkyPilot will automatically create a temporary bucket named :code:`skypilot-filemounts-{username}-{run_id}` for each job launch. SkyPilot automatically deletes the bucket after the job completes.
+
+**Object store access is not necessary to use managed jobs.** If cloud object storage is not available (e.g., Kubernetes deployments), SkyPilot automatically falls back to a two-hop upload that copies files to the jobs controller and then downloads them to the jobs.
+
+.. tip::
+
+  To force disable using cloud buckets even when available, set :ref:`jobs.force_disable_cloud_bucket <config-yaml-jobs-force-disable-cloud-bucket>` in your config:
+
+  .. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    jobs:
+      force_disable_cloud_bucket: true
+
 .. _intermediate-bucket:
 
 Setting the job files bucket
-----------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-For managed jobs, SkyPilot requires an intermediate bucket to store files used in the task, such as local file mounts, temporary files, and the workdir.
-If you do not configure a bucket, SkyPilot will automatically create a temporary bucket named :code:`skypilot-filemounts-{username}-{run_id}` for each job launch. SkyPilot automatically deletes the bucket after the job completes.
-
-Alternatively, you can pre-provision a bucket and use it as an intermediate for storing file by setting :code:`jobs.bucket` in :code:`~/.sky/config.yaml`:
+If you want to use a pre-provisioned bucket for storing intermediate files, set :code:`jobs.bucket` in :code:`~/.sky/config.yaml`:
 
 .. code-block:: yaml
 
@@ -492,26 +541,48 @@ When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (
 .. tip::
   Multiple users can share the same intermediate bucket. Each user's jobs will have their own unique job-specific directories, ensuring that files are kept separate and organized.
 
-
 .. _jobs-controller:
 
 How it works: The jobs controller
 ---------------------------------
 
-The jobs controller is a small on-demand CPU VM or pod running in the cloud that manages all jobs of a user.
+The jobs controller is a small on-demand CPU VM or pod created by SkyPilot to manage all jobs.
 It is automatically launched when the first managed job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all managed jobs finish and no new managed job is submitted in that duration).
 Thus, **no user action is needed** to manage its lifecycle.
 
-You can see the controller with :code:`sky status` and refresh its status by using the :code:`-r/--refresh` flag.
+.. note::
+  If you are using a SkyPilot API server, you can run the controller within the same pod as your API server by enabling :ref:`consolidation mode <jobs-consolidation-mode>`.
+
+You can see the controller with :code:`sky status -u` and refresh its status by using the :code:`-r/--refresh` flag.
 
 While the cost of the jobs controller is negligible (~$0.25/hour when running and less than $0.004/hour when stopped),
 you can still tear it down manually with
-:code:`sky down <job-controller-name>`, where the ``<job-controller-name>`` can be found in the output of :code:`sky status`.
+:code:`sky down <job-controller-name>`, where the ``<job-controller-name>`` can be found in the output of :code:`sky status -u`.
 
 .. note::
   Tearing down the jobs controller loses all logs and status information for the finished managed jobs. It is only allowed when there are no in-progress managed jobs to ensure no resource leakage.
 
 To adjust the size of the jobs controller instance, see :ref:`jobs-controller-custom-resources`.
+
+.. _managed-jobs-high-availability-controller:
+
+High availability controller
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+High availability mode ensures the controller for Managed Jobs remains resilient to failures by running it as a Kubernetes Deployment with automatic restarts and persistent storage. This helps maintain management capabilities even if the controller pod crashes or the node fails.
+
+To enable high availability for Managed Jobs, simply set the ``high_availability`` flag to ``true`` under ``jobs.controller`` in your ``~/.sky/config.yaml``, and ensure the controller runs on Kubernetes:
+
+.. code-block:: yaml
+    :emphasize-lines: 4-5
+
+    jobs:
+      controller:
+        resources:
+          cloud: kubernetes
+        high_availability: true
+
+This will deploy the controller as a Kubernetes Deployment with persistent storage, allowing automatic recovery on failures. For prerequisites, setup steps, and recovery behavior, see the detailed page: :ref:`high-availability-controller`.
 
 
 Setup and best practices
@@ -537,9 +608,9 @@ To set up credentials:
 Customizing jobs controller resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You may want to customize the resources of the jobs controller for several reasons:
+You may want to customize the jobs controller resources for several reasons:
 
-#. Increasing the maximum number of jobs that can be run concurrently, which is based on the instance size of the controller. (Default: 90, see :ref:`best practices <jobs-controller-sizing>`)
+#. Increasing the maximum number of jobs that can be run concurrently, which is based on the controller's memory allocation. (Default: ~600, see :ref:`best practices <jobs-controller-sizing>`)
 #. Use a lower-cost controller (if you have a low number of concurrent managed jobs).
 #. Enforcing the jobs controller to run on a specific location. (Default: cheapest location)
 #. Changing the disk_size of the jobs controller to store more logs. (Default: 50GB)
@@ -559,7 +630,7 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
         # Bump cpus to allow more managed jobs to be launched concurrently. (Default: 4+)
         cpus: 8+
         # Bump memory to allow more managed jobs to be running at once.
-        # By default, it scales with CPU (8x).
+        # By default, it scales with CPU (4x).
         memory: 64+
         # Specify the disk_size in GB of the jobs controller.
         disk_size: 100
@@ -571,17 +642,17 @@ The :code:`resources` field has the same spec as a normal SkyPilot job; see `her
   stopped or live).  For them to take effect, tear down the existing controller
   first, which requires all in-progress jobs to finish or be canceled.
 
-To see your current jobs controller, use :code:`sky status`.
+To see your current jobs controller, use :code:`sky status -u`.
 
 .. code-block:: console
 
-  $ sky status --refresh
+  $ sky status -u --refresh
 
   Clusters
   NAME                          INFRA             RESOURCES                                  STATUS   AUTOSTOP  LAUNCHED
   my-cluster-1                  AWS (us-east-1)   1x(cpus=16, m6i.4xlarge, ...)              STOPPED  -         1 week ago
   my-other-cluster              GCP (us-central1) 1x(cpus=16, n2-standard-16, ...)           STOPPED  -         1 week ago
-  sky-jobs-controller-919df126  AWS (us-east-1)   1x(cpus=2, r6i.xlarge, disk_size=50)       STOPPED  10m       1 day ago
+  sky-jobs-controller-919df126  AWS (us-east-1)   1x(cpus=4, m6i.xlarge, disk_size=50)       STOPPED  10m       1 day ago
 
   Managed jobs
   No in-progress managed jobs.
@@ -589,7 +660,7 @@ To see your current jobs controller, use :code:`sky status`.
   Services
   No live services.
 
-In this example, you can see the jobs controller (:code:`sky-jobs-controller-919df126`) is an r6i.xlarge on AWS, which is the default size.
+In this example, you can see the jobs controller (:code:`sky-jobs-controller-919df126`) is an m6i.xlarge on AWS, which is the default size.
 
 To tear down the current controller, so that new resource config is picked up, use :code:`sky down`.
 
@@ -617,54 +688,116 @@ Best practices for scaling up the jobs controller
 
 The number of active jobs that the controller supports is based on the controller size. There are two limits that apply:
 
-- **Actively launching job count**: maxes out at ``4 * vCPU count``.
+- **Actively launching job count**: limit is ``8 * floor((memory - 2GiB) / 3.59GiB)``, with a maximum of 512 jobs.
   A job counts towards this limit when it is first starting, launching instances, or recovering.
 
-  - The default controller size has 4 CPUs, meaning **16 jobs** can be actively launching at once.
+  - The default controller size has 16 GiB memory, meaning **24 jobs** can be actively launching at once.
 
-- **Running job count**: maxes out at ``memory / 350MiB``, up to a max of ``2000`` jobs.
+- **Running job count**: limit is ``200 * floor((memory - 2GiB) / 3.59GiB)``, with a maximum of 2000 jobs.
 
-  - The default controller size has 32GiB of memory, meaning around **90 jobs** can be running in parallel.
+  - The default controller size supports up to **600 jobs** running in parallel.
 
-The default size is appropriate for most moderate use cases, but if you need to run hundreds or thousands of jobs at once, you should increase the controller size.
+The default size is appropriate for most moderate use cases, but if you need to run hundreds or thousands of jobs at once, you should increase the controller size. Each additional ~3.6 GiB of controller memory adds capacity for 8 concurrent launches and 200 concurrently running jobs.
 
-For maximum parallelism, the following configuration is recommended:
+Increase CPU modestly as memory grows to keep controller responsiveness high, but note that the hard parallelism limits are driven by available memory.
+A ratio of 4 GiB memory per CPU works well in our testing.
+
+For absolute maximum parallelism, the following per-cloud configurations are recommended:
+
+.. tab-set::
+
+    .. tab-item:: AWS
+
+        .. code-block:: yaml
+
+            jobs:
+              controller:
+                resources:
+                  infra: aws
+                  cpus: 192
+                  memory: 4x
+                  disk_size: 500
+
+    .. tab-item:: GCP
+
+        .. code-block:: yaml
+
+            jobs:
+              controller:
+                resources:
+                  infra: gcp
+                  cpus: 128
+                  memory: 4x
+                  disk_size: 500
+
+    .. tab-item:: Azure
+
+        .. code-block:: yaml
+
+            jobs:
+              controller:
+                resources:
+                  infra: azure
+                  cpus: 96
+                  memory: 4x
+                  disk_size: 500
+
+.. note::
+  Remember to tear down your controller to apply these changes, as described above.
+
+With this configuration, you can launch up to 512 jobs at once. Once the jobs are launched, up to 2000 jobs can be running in parallel.
+
+.. _jobs-consolidation-mode:
+
+Run the controller within the API server
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you have deployed a :ref:`remote API server <sky-api-server>`, you can avoid needing to launch a separate VM/pod for the controller. We call this deployment mode "consolidation mode", as the API server and jobs controller are consolidated onto the same pod.
+
+.. warning::
+  Because the jobs controller must stay alive to manage running jobs, it's required to use an external API server to enable consolidation mode.
+
+.. image:: ../images/jobs-consolidation-mode.svg
+  :width: 800
+  :alt: Architecture diagram of SkyPilot remote API server with and without consolidation mode
+  :align: center
+
+Consolidating the API server and the jobs controller has a few advantages:
+
+- 6x faster job submission.
+- Consistent cloud/Kubernetes credentials across the API server and jobs controller.
+- Persistent managed job state using the same database as the API server, e.g., PostgreSQL.
+- No extra VM/pod is needed for the jobs controller, saving cost.
+
+To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml-jobs-controller-consolidation-mode>` in the API server config.
 
 .. code-block:: yaml
 
   jobs:
     controller:
-      resources:
-        # In our testing, aws > gcp > azure
-        infra: aws
-        cpus: 128
-        # Azure does not have 128+ CPU instances, so use 96 instead
-        # cpus: 96
-        memory: 600+
-        disk_size: 500
+      consolidation_mode: true
+      # any specified resources will be ignored
 
 .. note::
-  Remember to tear down your controller to apply these changes, as described above.
+  You must **restart the API server** after making this change for it to take effect.
 
-With this configuration, you'll get the following performance:
+  .. code-block:: bash
 
-.. list-table::
-   :widths: 1 2 2 2
-   :header-rows: 1
+     # Update NAMESPACE / RELEASE_NAME if you are using custom values.
+     NAMESPACE=skypilot
+     RELEASE_NAME=skypilot
+     # Restart the API server to pick up the config change
+     kubectl -n $NAMESPACE rollout restart deployment $RELEASE_NAME-api-server
 
-   * - Cloud
-     - Instance type
-     - Launching jobs
-     - Running jobs
-   * - AWS
-     - r6i.32xlarge
-     - **512 launches at once**
-     - **2000 running at once**
-   * - GCP
-     - n2-highmem-128
-     - **512 launches at once**
-     - **2000 running at once**
-   * - Azure
-     - Standard_E96s_v5
-     - **384 launches at once**
-     - **1930 running at once**
+  See :ref:`more about the Kubernetes upgrade strategy of the API server <sky-api-server-graceful-upgrade>`.
+
+.. warning::
+
+  When using consolidation mode with a remote  :ref:`SkyPilot API server with RollingUpdate upgrade strategy <sky-api-server-upgrade-strategy>`, any file mounts or workdirs that upload local files/folders of the managed jobs will be lost during a rolling update. To address that, use :ref:`bucket <sky-storage>`, :ref:`volume <volumes-on-kubernetes>`, or :ref:`git <sync-code-and-project-files-git>`; or, configure a cloud bucket for all local files via :ref:`config-yaml-jobs-bucket` in your :ref:`SkyPilot config <config-yaml>` to persist them.
+
+  .. code-block::
+    
+    jobs:
+      bucket: s3://xxx
+
+The jobs controller will use a bit of overhead - it reserves an extra 2GB of memory for itself, which may reduce the amount of requests your API server can handle. To counteract, you can increase the amount of CPU and memory allocated to the API server: See :ref:`sky-api-server-resources-tuning`.

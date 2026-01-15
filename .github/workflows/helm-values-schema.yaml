@@ -1,0 +1,39 @@
+name: Helm Chart Values Schema
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'charts/**'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'charts/**'
+  workflow_dispatch:
+
+jobs:
+  helm-values-schema:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Helm
+      uses: azure/setup-helm@v4
+      with:
+        version: '3.14.0'
+        
+    - name: Install helm values schema generator plugin
+      run: |
+        helm plugin install https://github.com/losisin/helm-values-schema-json.git
+        
+    - name: Validate if schema is up to date
+      run: |
+        cd charts/skypilot
+        helm schema -o values.new.schema.json
+        result=$(diff values.schema.json values.new.schema.json || true)
+        if [ -n "$result" ]; then
+          echo "Helm chart values schema is not up to date. Please install the plugin with 'helm plugin install https://github.com/losisin/helm-values-schema-json.git' and run 'helm schema' to generate the latest schema."
+          exit 1
+        fi

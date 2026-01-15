@@ -1,0 +1,26 @@
+# Job configuration for batch text classification
+# This runs on the pool workers to classify a partition of the dataset
+#
+# Usage:
+#   sky jobs launch -p text-classify --num-jobs 10 classify.yaml
+
+
+resources:
+  accelerators: H100:1
+
+name: batch-classify
+
+run: |
+  echo "Starting classification job (rank ${SKYPILOT_JOB_RANK} of ${SKYPILOT_NUM_JOBS})"
+  source .venv/bin/activate
+  
+  # Run the classification script
+  # Note: If you don't have cloud storage, change --output-dir to ~/sky_workdir
+  python classify.py \
+    --job-rank ${SKYPILOT_JOB_RANK} \
+    --num-jobs ${SKYPILOT_NUM_JOBS} \
+    --output-dir /results \
+    --model-path /tmp/model
+  
+  echo "Classification complete! Results saved to S3 bucket mounted at /results/results_rank_${SKYPILOT_JOB_RANK}.jsonl"
+

@@ -7,6 +7,9 @@ envs:
   MY_LOCAL_PATH: tmp-workdir
   MODEL_SIZE: 13b
 
+secrets:
+  SECRETE_BUCKET_NAME: null
+
 resources:
   infra: gcp
 
@@ -34,7 +37,7 @@ file_mounts:
     mode: MOUNT
 
   /another-dir2:
-    name: $MY_BUCKET-2
+    name: $SECRETE_BUCKET_NAME-2
     source: ["~/${MY_LOCAL_PATH}"]
     store: gcs
     mode: MOUNT

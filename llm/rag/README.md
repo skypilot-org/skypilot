@@ -100,7 +100,7 @@ Saving embeddings to: embeddings_0_1000.parquet
 We leverage SkyPilot's managed jobs feature to enable parallel processing across multiple regions and cloud providers. 
 SkyPilot handles job state management and automatic recovery from failures when using spot instances. 
 Managed jobs are cost-efficient and streamline the processing of the partitioned dataset. 
-You can check all the jobs by running `sky jobs dashboard`.
+You can check all the jobs by running `sky dashboard`.
 <p align="center">
 <img src="https://i.imgur.com/EviKuQx.png" alt="job dashboard" style="width: 70%;">
 </p>

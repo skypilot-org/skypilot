@@ -2,9 +2,11 @@
 
 import contextlib
 import contextvars
+import functools
 import os
 import tempfile
-from typing import Iterator, Optional
+import typing
+from typing import Any, Callable, Iterator, Optional, TypeVar
 
 _TEMP_DIR: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     'temp_store_dir', default=None)
@@ -49,3 +51,20 @@ def mkdtemp(suffix: Optional[str] = None,
         os.makedirs(dir, exist_ok=True)
 
     return tempfile.mkdtemp(suffix=suffix, prefix=prefix, dir=dir)
+
+
+F = TypeVar('F', bound=Callable[..., Any])
+
+
+def with_tempdir(func: F) -> F:
+    """Decorator that wraps a function call with tempdir() context manager.
+
+    Refer to `tempdir` for more details.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with tempdir():
+            return func(*args, **kwargs)
+
+    return typing.cast(F, wrapper)

@@ -1,5 +1,4 @@
 """Vsphere cloud implementation."""
-import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
@@ -9,7 +8,6 @@ from sky.adaptors import common as adaptors_common
 from sky.provision.vsphere import vsphere_utils
 from sky.provision.vsphere.vsphere_utils import get_vsphere_credentials
 from sky.provision.vsphere.vsphere_utils import initialize_vsphere_data
-from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -18,7 +16,7 @@ if typing.TYPE_CHECKING:
 
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
-    from sky.volumes import volume as volume_lib
+    from sky.utils import volume as volume_lib
 else:
     requests = adaptors_common.LazyImport('requests')
 
@@ -75,7 +73,9 @@ class Vsphere(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         features = cls._CLOUD_UNSUPPORTED_FEATURES
         return features
@@ -92,6 +92,7 @@ class Vsphere(clouds.Cloud):
         use_spot: bool,
         region: Optional[str],
         zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
         del accelerators, zone  # unused
         regions = catalog.get_region_zones_for_instance_type(
@@ -149,15 +150,18 @@ class Vsphere(clouds.Cloud):
         return 'vSphere'
 
     @classmethod
-    def get_default_instance_type(
-        cls,
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        disk_tier: Optional[resources_utils.DiskTier] = None,
-    ) -> Optional[str]:
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[
+                                      resources_utils.DiskTier] = None,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> Optional[str]:
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 region=region,
+                                                 zone=zone,
                                                  clouds=_CLOUD_VSPHERE)
 
     @classmethod
@@ -240,6 +244,8 @@ class Vsphere(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
+                region=resources.region,
+                zone=resources.zone,
             )
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
@@ -273,19 +279,16 @@ class Vsphere(clouds.Cloud):
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         vSphere's compute service."""
-
-        try:
-            # pylint: disable=import-outside-toplevel,unused-import
-            # Check pyVmomi installation.
-            import pyVmomi
-        except (ImportError, subprocess.CalledProcessError) as e:
-            return False, (
-                'vSphere dependencies are not installed. '
-                'Run the following commands:'
-                f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[vSphere]'
-                f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
-                'For more details. See https://docs.skypilot.co/en/latest/getting-started/installation.html#vmware-vsphere'  # pylint: disable=line-too-long
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+        dependency_error_msg = (
+            'vSphere dependencies are not installed. '
+            'Run the following commands:'
+            f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[vSphere]'
+            f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
+            'For more details. See https://docs.skypilot.co/en/latest/getting-started/installation.html#vmware-vsphere'  # pylint: disable=line-too-long
+        )
+        # Check pyVmomi installation.
+        if not adaptors_common.can_import_modules(['pyVmomi']):
+            return False, dependency_error_msg
 
         required_keys = ['name', 'username', 'password', 'clusters']
         skip_key = 'skip_verification'

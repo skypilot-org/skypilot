@@ -6,13 +6,12 @@ import click
 import colorama
 
 from sky import backends
+from sky.schemas.api import responses
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
-
-if typing.TYPE_CHECKING:
-    from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.provision.kubernetes import utils as kubernetes_utils
@@ -44,7 +43,7 @@ class StatusColumn:
         return val
 
 
-def show_status_table(cluster_records: List[_ClusterRecord],
+def show_status_table(cluster_records: List[responses.StatusResponse],
                       show_all: bool,
                       show_user: bool,
                       query_clusters: Optional[List[str]] = None,
@@ -81,6 +80,7 @@ def show_status_table(cluster_records: List[_ClusterRecord],
                          _get_command,
                          truncate=not show_all,
                          show_by_default=False),
+            StatusColumn('LAST_EVENT', _get_last_event, show_by_default=False),
         ]
 
     columns = []
@@ -103,11 +103,9 @@ def show_status_table(cluster_records: List[_ClusterRecord],
 
     if query_clusters:
         cluster_names = {record['name'] for record in cluster_records}
-        not_found_clusters = [
-            repr(cluster)
-            for cluster in query_clusters
-            if cluster not in cluster_names
-        ]
+        not_found_clusters = ux_utils.get_non_matched_query(
+            query_clusters, cluster_names)
+        not_found_clusters = [repr(cluster) for cluster in not_found_clusters]
         if not_found_clusters:
             cluster_str = 'Cluster'
             if len(not_found_clusters) > 1:
@@ -224,8 +222,25 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
 # exist in those cases.
 _get_name = (lambda cluster_record, _: cluster_record['name'])
 _get_user_hash = (lambda cluster_record, _: cluster_record['user_hash'])
-_get_user_name = (
-    lambda cluster_record, _: cluster_record.get('user_name', '-'))
+
+
+def get_user_display_name(user_name: str, user_id: Optional[str] = None) -> str:
+    """ Appends SA to the user name if the user is a service account. """
+    if user_id and user_id.lower().startswith('sa-'):
+        return f'{user_name} (SA)'
+    return user_name
+
+
+def _get_user_name(cluster_record: _ClusterRecord,
+                   truncate: bool = True) -> str:
+    del truncate
+    user_name = cluster_record.get('user_name', '-')
+    if user_name == '-':
+        return user_name
+    user_hash = cluster_record.get('user_hash')
+    return get_user_display_name(user_name, user_hash)
+
+
 _get_launched = (lambda cluster_record, _: log_utils.readable_time_duration(
     cluster_record['launched_at']))
 _get_duration = (lambda cluster_record, _: log_utils.readable_time_duration(
@@ -281,8 +296,14 @@ def _get_resources(cluster_record: _ClusterRecord,
             if resources_str_full is not None:
                 resources_str = resources_str_full
         if resources_str is None:
-            resources_str = resources_utils.get_readable_resources_repr(
-                handle, simplify=truncate)
+            resources_str_simple, resources_str_full = (
+                resources_utils.get_readable_resources_repr(
+                    handle, simplified_only=truncate))
+            if truncate:
+                resources_str = resources_str_simple
+            else:
+                assert resources_str_full is not None
+                resources_str = resources_str_full
 
         return resources_str
     return '-'
@@ -312,6 +333,14 @@ def _get_head_ip(cluster_record: _ClusterRecord, truncate: bool = True) -> str:
     if handle.head_ip is None:
         return '-'
     return handle.head_ip
+
+
+def _get_last_event(cluster_record: _ClusterRecord,
+                    truncate: bool = True) -> str:
+    del truncate
+    if cluster_record.get('last_event', None) is None:
+        return 'No recorded events.'
+    return cluster_record['last_event']
 
 
 def _is_pending_autostop(cluster_record: _ClusterRecord) -> bool:
@@ -401,7 +430,7 @@ def _get_estimated_cost_for_cost_report(
 
 
 def show_kubernetes_cluster_status_table(
-        clusters: List['kubernetes_utils.KubernetesSkyPilotClusterInfo'],
+        clusters: List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
         show_all: bool) -> None:
     """Compute cluster table values and display for Kubernetes clusters."""
     status_columns = [

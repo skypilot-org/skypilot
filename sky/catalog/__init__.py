@@ -91,7 +91,7 @@ def list_accelerator_counts(
     region_filter: Optional[str] = None,
     quantity_filter: Optional[int] = None,
     clouds: CloudFilter = None,
-) -> Dict[str, List[int]]:
+) -> Dict[str, List[float]]:
     """Lists all accelerators offered by Sky and available counts.
 
     Returns: A dictionary of canonical accelerator names mapped to a list
@@ -107,12 +107,12 @@ def list_accelerator_counts(
                                   require_price=False)
     if not isinstance(results, list):
         results = [results]
-    accelerator_counts: Dict[str, Set[int]] = collections.defaultdict(set)
+    accelerator_counts: Dict[str, Set[float]] = collections.defaultdict(set)
     for result in results:
         for gpu, items in result.items():
             for item in items:
                 accelerator_counts[gpu].add(item.accelerator_count)
-    ret: Dict[str, List[int]] = {}
+    ret: Dict[str, List[float]] = {}
     for gpu, counts in accelerator_counts.items():
         ret[gpu] = sorted(counts)
     return ret
@@ -127,12 +127,9 @@ def list_accelerator_realtime(
     case_sensitive: bool = True,
 ) -> Tuple[Dict[str, List[int]], Dict[str, int], Dict[str, int]]:
     """Lists all accelerators offered by Sky with their realtime availability.
-
     Realtime availability is the total number of accelerators in the cluster
     and number of accelerators available at the time of the call.
-
     Used for fixed size cluster settings, such as Kubernetes.
-
     Returns:
         A tuple of three dictionaries mapping canonical accelerator names to:
         - A list of available counts. (e.g., [1, 2, 4])
@@ -153,7 +150,7 @@ def list_accelerator_realtime(
     for gpu, items in qtys_map.items():
         for item in items:
             accelerator_counts[gpu].append(item.accelerator_count)
-        accelerator_counts[gpu] = sorted(accelerator_counts[gpu])
+        accelerator_counts[gpu] = sorted(set(accelerator_counts[gpu]))
     return (accelerator_counts, total_accelerators_capacity,
             total_accelerators_available)
 
@@ -221,6 +218,8 @@ def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
                               disk_tier: Optional[
                                   resources_utils.DiskTier] = None,
+                              region: Optional[str] = None,
+                              zone: Optional[str] = None,
                               clouds: CloudFilter = None) -> Optional[str]:
     """Returns the cloud's default instance type for given #vCPUs and memory.
 
@@ -234,7 +233,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
     the given CPU and memory requirement.
     """
     return _map_clouds_catalog(clouds, 'get_default_instance_type', cpus,
-                               memory, disk_tier)
+                               memory, disk_tier, region, zone)
 
 
 def get_accelerators_from_instance_type(
@@ -242,6 +241,13 @@ def get_accelerators_from_instance_type(
         clouds: CloudFilter = None) -> Optional[Dict[str, Union[int, float]]]:
     """Returns the accelerators from a instance type."""
     return _map_clouds_catalog(clouds, 'get_accelerators_from_instance_type',
+                               instance_type)
+
+
+def get_arch_from_instance_type(instance_type: str,
+                                clouds: CloudFilter = None) -> Optional[str]:
+    """Returns the arch from a instance type."""
+    return _map_clouds_catalog(clouds, 'get_arch_from_instance_type',
                                instance_type)
 
 
@@ -324,6 +330,7 @@ def get_common_gpus() -> List[str]:
         'A10G',
         'A100',
         'A100-80GB',
+        'B200',
         'H100',
         'H200',
         'L4',

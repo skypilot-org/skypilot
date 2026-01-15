@@ -1,3 +1,4 @@
+import asyncio
 import io
 import os
 import pathlib
@@ -19,7 +20,7 @@ def test_zip_files_and_folders(skyignore_dir):
             actual_zipped_files = zipf.namelist()
 
         expected_zipped_files = [
-            'ln-keep.py', 'ln-dir-keep.py', 'dir/subdir/ln-keep.py',
+            '', 'ln-keep.py', 'ln-dir-keep.py', 'dir/subdir/ln-keep.py',
             constants.SKY_IGNORE_FILE, 'dir/subdir/remove.py', 'keep.py',
             'dir/keep.txt', 'dir/keep.a', 'dir/subdir/keep.b', 'ln-folder',
             'empty-folder/', 'dir/', 'dir/subdir/', 'dir/subdir/remove_dir/'
@@ -57,7 +58,7 @@ def test_unzip_file(skyignore_dir, tmp_path):
         temp_dir_path = pathlib.Path(temp_dir)
 
         # Call server.unzip_file
-        server.unzip_file(zip_path, temp_dir_path)
+        asyncio.run(server.unzip_file(zip_path, temp_dir_path))
 
         # Verify the zip file was deleted
         assert not zip_path.exists()

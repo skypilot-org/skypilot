@@ -18,12 +18,13 @@ We use GitHub to track issues and features. For new contributors, we recommend l
 
 Follow the steps below to set up a local development environment for contributing to SkyPilot.
 
-#### Create a conda environment
-To avoid package conflicts, create and activate a clean conda environment:
+#### Create a virtual environment
+To avoid package conflicts, create and activate a clean virtual environment using [uv](https://docs.astral.sh/uv/):
 ```bash
-# SkyPilot requires 3.7 <= python <= 3.11.
-conda create -y -n sky python=3.10
-conda activate sky
+# SkyPilot requires python 3.8-3.11.
+# --seed is required to ensure pip is installed (needed for building wheels)
+uv venv --seed --python 3.11
+source .venv/bin/activate
 ```
 
 #### Install SkyPilot
@@ -37,19 +38,30 @@ cd skypilot
 git remote add upstream https://github.com/skypilot-org/skypilot.git
 
 # Install SkyPilot in editable mode
-pip install -e ".[all]"
+uv pip install -e ".[all]"
 # Alternatively, install specific cloud support only:
-# pip install -e ".[aws,azure,gcp,lambda]"
+# uv pip install -e ".[aws,azure,gcp,lambda]"
 
 # Install development dependencies
-pip install -r requirements-dev.txt
+uv pip install -r requirements-dev.txt
 ```
 
 #### (Optional) Install `pre-commit`
 You can also install `pre-commit` hooks to help automatically format your code on commit:
 ```bash
-pip install pre-commit
+uv pip install pre-commit
 pre-commit install
+```
+
+### Generating Python files from protobuf
+Whenever any protobuf file is changed (in `sky/schemas/proto`), run this to regenerate the Python files:
+```bash
+python -m grpc_tools.protoc \
+        --proto_path=sky/schemas/generated=sky/schemas/proto \
+        --python_out=. \
+        --grpc_python_out=. \
+        --pyi_out=. \
+        sky/schemas/proto/*.proto
 ```
 
 ### Testing
@@ -82,7 +94,7 @@ pytest tests/test_smoke.py --generic-cloud azure
 For profiling code, use:
 
 ```
-pip install py-spy # py-spy is a sampling profiler for Python programs
+uv pip install py-spy # py-spy is a sampling profiler for Python programs
 py-spy record -t -o sky.svg -- python -m sky.cli status # Or some other command
 py-spy top -- python -m sky.cli status # Get a live top view
 py-spy -h # For more options
@@ -147,50 +159,77 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
 - `export SKYPILOT_DEBUG=1` to show debugging logs (use logging.DEBUG level).
 - `export SKYPILOT_MINIMIZE_LOGGING=1` to minimize logging. Useful when trying to avoid multiple lines of output, such as for demos.
 
-### Test API server on Helm chart deployment
+### Testing the API server
+
+#### Local API server (recommended for development)
+
+For most development work, test with the local API server:
+
+```bash
+# Always restart API server after code changes to pick up changes
+sky api stop
+sky api start
+
+# Verify server is running
+sky api status
+```
+
+#### Mocking remote API server locally
+
+To test remote API server behavior locally:
+
+```bash
+# Start local API server (runs on port 46580 by default)
+sky api stop
+sky api start
+
+# Forward to a different port to simulate remote server
+socat TCP-LISTEN:46590,fork TCP:127.0.0.1:46580 &
+
+# Connect to the forwarded port as if it were a remote server
+sky api login -e http://127.0.0.1:46590
+```
+
+#### Test API server on Helm chart deployment
 
 By default, the [Helm Chart Deployment](https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html) will use the latest released API Server. To test the local change on API Server, you can follow the steps below.
 
-First, start the API Server:
+First, prepare and build the local changes:
 
 ```bash
 # Ensure the helm repository is added and up to date
 helm repo add skypilot https://helm.skypilot.co
 helm repo update
 
+# Build the local changes
+helm dependency build ./charts/skypilot
+
+# Build the local SkyPilot changes
+DOCKER_IMAGE=my-docker-repo/image-name:v1 # change the tag to deploy the new changes
+docker buildx build --push --platform linux/amd64  -t $DOCKER_IMAGE -f Dockerfile .
+```
+
+Then start the API Server with new changes:
+
+```bash
 # The following variables will be used throughout the guide
 # NAMESPACE is the namespace to deploy the API server in
 NAMESPACE=skypilot
 # RELEASE_NAME is the name of the helm release, must be unique within the namespace
 RELEASE_NAME=skypilot
 # Set up basic username/password HTTP auth, or use OAuth2 proxy
-WEB_USERNAME=skypilot
-WEB_PASSWORD=yourpassword
+WEB_USERNAME=sk
+WEB_PASSWORD=pw
 AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
 # Deploy the API server
-helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
   --namespace $NAMESPACE \
   --create-namespace \
-  --set ingress.authCredentials=$AUTH_STRING
+  --set ingress.authCredentials=$AUTH_STRING \
+  --set apiService.image=$DOCKER_IMAGE
 ```
 
-Then build the local changes and deploy the new changes to the API Server:
-
-```bash
-DOCKER_IMAGE=my-docker-repo/image-name:v1 # change the tag to deploy the new changes
-docker buildx build --push --platform linux/amd64  -t $DOCKER_IMAGE -f Dockerfile .
-
-# Build the local changes
-helm dependency build ./charts/skypilot
-
-# Deploy the new changes to the API Server
-helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
-              --namespace $NAMESPACE \
-              --reuse-values \
-              --set apiService.image=$DOCKER_IMAGE
-```
-
-> Notice that the tag should change every time you build the local changes.
+> Notice that the tag should change every time you build the local changes. When new changes are made to the code, repeat the previous steps to build the new changes and deploy the new changes to the API Server.
 
 Then, watch the status until the `READY` shows `1/1` and `STATUS` shows `Running`:
 
@@ -272,21 +311,67 @@ By convention, we define API payloads in `sky/server/api/payloads.py` and there 
 - When receiving a payload from an older version without the new field, the default value is used for the missing new field.
 - When receiving a payload from a newer version with a new field, the value of the new field is ignored.
 
-However, when the value of the new field is taken from an user input (e.g. CLI flag), we should add a warning message to inform the user that the new field is ignored. An API version bump is required in this case. For example:
+However, when the value of the new field is taken from user input (e.g. CLI flag), we should warn (or throw an error) to inform the user that the new field is not supported on the current api server version. Calling `versions.get_remote_api_version()` in `sky/client/cli/command.py` will return `None` until we check the api server status which can be triggered by adding a `@server_common.check_server_healthy_or_start` decorator around the cli entry point. For example:
+
 
 ```python
 from sky.server import versions
 
 @click.option('--newflag', default=None)
+# Must have this or the version will be None!
+@server_common.check_server_healthy_or_start
 def cli_entry_point(newflag: Optional[str] = None):
     # The new flag is set but the server does not support the new field yet
     if newflag is not None and versions.get_remote_api_version() < 12:
         logger.warning('The new flag is ignored because the server does not support it yet.')
 ```
 
+We can also just check for the unsupported field in the sdk and surface the error in the cli.
+
+We should also be careful when adding new fields that are not directly visible in
+`sky/server/api/payloads.py`, but is also being sent from the client to the server. This
+is mainly for validating objects from the client.
+As an example, this request body contains a single field, the string representation of a DAG.
+
+```
+class ValidateBody(DagRequestBodyWithRequestOptions):
+    """The request body for the validate endpoint."""
+    dag: str
+```
+
+A DAG consists of Tasks, so when adding new fields to Task, we should also handle backwards
+compatibility in the serialization, otherwise the server may not recognize the new field
+from the client and return an error during validation.
+
+
+#### Adding new fields to API response body
+
+##### Adding new fields to the existing objects in the API response body
+
+When adding new fields to the existing objects that are serialized in API response bodies (such as resource handles), special care must be taken to ensure older clients can deserialize objects from newer servers. This commonly occurs with objects that are pickled and sent over the API.
+
+For example, if you add a new field like `SSHTunnelInfo` to `CloudVmRayResourceHandle`, older clients without this class definition will fail during deserialization with errors like:
+```
+AttributeError: Can't get attribute 'SSHTunnelInfo' on <module 'sky.backends.cloud_vm_ray_backend'>
+```
+
+To handle this:
+
+1. **Server-side encoding**: Modify the relevant encoders in `sky/server/requests/serializers/encoders.py` to
+remove or clean problematic fields before serialization when serving older clients.
+
+2. **Exception handling**: Update `sky/exceptions.py` if exceptions containing these objects also need
+backwards compatibility processing.
+
+See the `prepare_handle_for_backwards_compatibility` function and its usage for a concrete example of this.
+
+##### Adding new fields to the API response body
+
+When you need to add a brand-new field to the response body or change the response type (e.g., from `List` to `Dict`), prefer introducing a new API instead. See [Refactoring existing APIs](#refactoring-existing-apis) for details.
+
 #### Refactoring existing APIs
 
-Refactoring existing APIs can be tricky. It is recommended to add an new API instead. Then the compatibility issue can be addressed in the same way as [Adding new APIs](#adding-new-apis), e.g.:
+Refactoring existing APIs can be tricky. It is recommended to add a new API instead. Then the compatibility issue can be addressed in the same way as [Adding new APIs](#adding-new-apis), e.g.:
 
 - `constants.py`:
 

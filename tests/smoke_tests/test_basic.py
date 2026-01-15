@@ -23,10 +23,11 @@ import json
 import os
 import pathlib
 import subprocess
-import sys
 import tempfile
 import textwrap
+import threading
 import time
+from typing import Generator
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -36,12 +37,15 @@ from sky import skypilot_config
 from sky.skylet import constants
 from sky.skylet import events
 from sky.utils import common_utils
+from sky.utils import yaml_utils
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
 @pytest.mark.no_vast  #requires GCP and AWS set up
 @pytest.mark.no_fluidstack  #requires GCP and AWS set up
 @pytest.mark.no_hyperbolic  #requires GCP and AWS set up
+@pytest.mark.no_shadeform  #requires GCP and AWS set up
+@pytest.mark.no_seeweb  #requires GCP and AWS set up
 def test_example_app():
     test = smoke_tests_utils.Test(
         'example_app',
@@ -52,16 +56,94 @@ def test_example_app():
 
 # ---------- A minimal task ----------
 def test_minimal(generic_cloud: str):
+    disk_size_param, validate_launch_output = smoke_tests_utils.get_disk_size_and_validate_launch_output(
+        generic_cloud)
     name = smoke_tests_utils.get_cluster_name()
+    check_raylet_cmd = '"prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"'
+    if generic_cloud == 'slurm':
+        check_raylet_cmd = 'true'
     test = smoke_tests_utils.Test(
         'minimal',
         [
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {disk_size_param} tests/test_yamls/minimal.yaml) && {validate_launch_output}',
             # Output validation done.
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
             # Test launch output again on existing cluster
-            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {disk_size_param} tests/test_yamls/minimal.yaml) && {validate_launch_output}',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
+            # Check the logs downloading
+            f'log_path=$(sky logs {name} 1 --sync-down | grep "Job 1 logs:" | sed -E "s/^.*Job 1 logs: (.*)\\x1b\\[0m/\\1/g") && echo "$log_path" '
+            # We need to explicitly expand the log path as it starts with ~, and linux does not automatically
+            # expand it when having it in a variable.
+            '  && expanded_log_path=$(eval echo "$log_path") && echo "$expanded_log_path" '
+            '  && test -f $expanded_log_path/run.log',
+            # Ensure the raylet process has the correct file descriptor limit.
+            f'sky exec {name} {check_raylet_cmd}',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
+            # Install jq for the next test.
+            f'sky exec {name} \'sudo apt-get update && sudo apt-get install -y jq\'',
+            # Check the cluster info
+            f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cluster_name | grep {name}\'',
+            f'sky logs {name} 5 --status',  # Ensure the job succeeded.
+            f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cloud | grep -i {generic_cloud}\'',
+            f'sky logs {name} 6 --status',  # Ensure the job succeeded.
+            # Test '-c' for exec
+            f'sky exec -c {name} echo',
+            f'sky logs {name} 7 --status',
+            f'sky exec echo -c {name}',
+            f'sky logs {name} 8 --status',
+            f'sky exec -c {name} echo hi test',
+            f'sky logs {name} 9 | grep "hi test"',
+            f'sky exec {name} && exit 1 || true',
+            f'sky exec -c {name} && exit 1 || true',
+            f's=$(sky cost-report --all) && echo $s && echo $s | grep {name} && echo $s | grep "Total Cost"',
+        ],
+        f'sky down -y {name}',
+        smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def test_refresh_during_launch(generic_cloud: str):
+    name1 = smoke_tests_utils.get_cluster_name()
+    name2 = name1 + '-2'
+    test = smoke_tests_utils.Test(
+        'refresh_during_launch',
+        [
+            # Launch one cluster.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name1} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Launch another cluster asynchronously.
+            f'SKYPILOT_DEBUG=0 sky launch -y --async -c {name2} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            # Refresh the cluster while the cluster is launching.
+            'sky status --refresh',
+            'sky status --refresh',
+            'sky status --refresh',
+            'sky status --refresh',
+            'sky status --refresh',
+            'sky status --refresh',
+            'sky status --refresh',
+            'sky status --refresh',
+        ],
+        f'sky down -y {name1} {name2}',
+        smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_minimal_arm64(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'minimal_arm',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} --instance-type m6g.large tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Output validation done.
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
+            # Test launch output again on existing cluster
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} --instance-type m6g.large tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check the logs downloading
@@ -89,6 +171,95 @@ def test_minimal(generic_cloud: str):
             f'sky logs {name} 9 | grep "hi test"',
             f'sky exec {name} && exit 1 || true',
             f'sky exec -c {name} && exit 1 || true',
+        ],
+        f'sky down -y {name}',
+        smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- A minimal task with git repository workdir ----------
+def test_minimal_with_git_workdir(generic_cloud: str):
+    disk_size_param, validate_launch_output = smoke_tests_utils.get_disk_size_and_validate_launch_output(
+        generic_cloud)
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'minimal_with_git_workdir',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {disk_size_param} tests/test_yamls/minimal.yaml) && {validate_launch_output}',
+            # Output validation done.
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
+            # Check the current branch
+            f'sky exec {name} \'git status | grep master || exit 1\'',
+            # Checkout to releases/0.10.0
+            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref releases/0.10.0 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {disk_size_param} tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "releases/0\.10\.0" || exit 1\'',
+            # Checkout to default branch
+            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {disk_size_param} tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep master || exit 1\'',
+            # Checkout to releases/0.10.0
+            f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref releases/0.10.0 tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "releases/0\.10\.0" || exit 1\'',
+            # Checkout to tag v0.10.0
+            f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref v0.10.0 tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "v0\.10\.0" || exit 1\'',
+            # Checkout to commit 41c25f40
+            f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref 41c25f40 tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "41c25f40" || exit 1\'',
+            # Checkout to default branch
+            f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep master || exit 1\'',
+        ],
+        f'sky down -y {name}',
+        smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_runpod
+@pytest.mark.no_slurm  # Slurm does not support containers yet
+def test_minimal_with_git_workdir_docker(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'minimal_with_git_workdir',
+        [
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --image-id docker:ubuntu:20.04 --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Output validation done.
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
+            # Check the current branch
+            f'sky exec {name} \'git status | grep master || exit 1\'',
+            # Checkout to releases/0.10.0
+            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --image-id docker:ubuntu:20.04 --git-url https://github.com/skypilot-org/skypilot.git --git-ref releases/0.10.0 --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "releases/0\.10\.0" || exit 1\'',
+            # Checkout to default branch
+            f'SKYPILOT_DEBUG=0 sky launch -y -c {name} --image-id docker:ubuntu:20.04 --git-url https://github.com/skypilot-org/skypilot.git --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep master || exit 1\'',
+            # Checkout to releases/0.10.0
+            f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref releases/0.10.0 tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "releases/0\.10\.0" || exit 1\'',
+            # Checkout to tag v0.10.0
+            f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref v0.10.0 tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "v0\.10\.0" || exit 1\'',
+            # Checkout to commit 41c25f40
+            f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git --git-ref 41c25f40 tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep "41c25f40" || exit 1\'',
+            # Checkout to default branch
+            f'sky exec {name} --git-url https://github.com/skypilot-org/skypilot.git tests/test_yamls/minimal.yaml',
+            # Check the current branch
+            f'sky exec {name} \'git status | grep master || exit 1\'',
         ],
         f'sky down -y {name}',
         smoke_tests_utils.get_timeout(generic_cloud),
@@ -130,7 +301,10 @@ def test_launch_fast(generic_cloud: str):
 @pytest.mark.no_lambda_cloud
 @pytest.mark.no_ibm
 @pytest.mark.no_kubernetes
+@pytest.mark.no_slurm
 @pytest.mark.no_hyperbolic
+@pytest.mark.no_shadeform
+@pytest.mark.no_seeweb
 def test_launch_fast_with_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
@@ -160,6 +334,57 @@ def test_launch_fast_with_autostop(generic_cloud: str):
         ],
         f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud) + autostop_timeout,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# See cloud exclusion explanations in test_autostop
+@pytest.mark.no_fluidstack
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_ibm
+@pytest.mark.no_kubernetes
+@pytest.mark.no_hyperbolic
+@pytest.mark.no_shadeform
+@pytest.mark.no_seeweb
+def test_start_preserves_autostop(generic_cloud: str):
+    """Test that sky start preserves the autostop setting from the database."""
+    name = smoke_tests_utils.get_cluster_name()
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+    test = smoke_tests_utils.Test(
+        'test_start_preserves_autostop',
+        [
+            # Launch cluster with autostop of 1 minute
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} -i 1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 1 --status',
+            f'sky status -r {name} | grep UP',
+            # Verify autostop is set
+            f'sky status | grep {name} | grep "1m"',
+
+            # Wait for cluster to be STOPPED from autostop
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+
+            # Start the cluster without explicitly setting autostop - it should preserve the previous setting
+            f'sky start -y {name}',
+            # Wait for cluster to be UP
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+            # Verify autostop is still set (preserved from database)
+            f'sky status | grep {name} | grep "1m"',
+
+            # Wait for cluster to be STOPPED again from autostop (proving it was preserved)
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud) +
+        2 * autostop_timeout,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -205,8 +430,10 @@ def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
+@pytest.mark.no_slurm  # Slurm does not support stopping instances
 @pytest.mark.no_vast  # This requires port opening
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
+@pytest.mark.no_shadeform  #Shadeform does not support stopping instances in SkyPilot implementation
 def test_stale_job(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -229,6 +456,7 @@ def test_stale_job(generic_cloud: str):
 
 
 @pytest.mark.no_vast
+@pytest.mark.no_shadeform
 @pytest.mark.aws
 def test_aws_stale_job_manual_restart():
     name = smoke_tests_utils.get_cluster_name()
@@ -239,16 +467,13 @@ def test_aws_stale_job_manual_restart():
         'aws_stale_job_manual_restart',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-            f'sky launch -y -c {name} --infra aws/us-east-2 {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
                 cmd=
-                (f'id=`aws ec2 describe-instances --region {region} --filters '
-                 f'Name=tag:ray-cluster-name,Values={name_on_cloud} '
-                 f'--query Reservations[].Instances[].InstanceId '
-                 f'--output text` && '
+                (f'id={smoke_tests_utils.AWS_GET_INSTANCE_ID.format(region=region, name_on_cloud=name_on_cloud)} && '
                  f'aws ec2 stop-instances --region {region} '
                  f'--instance-ids $id')),
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
@@ -271,6 +496,62 @@ def test_aws_stale_job_manual_restart():
 
 
 @pytest.mark.no_vast
+@pytest.mark.no_shadeform
+@pytest.mark.aws
+def test_aws_manual_restart_recovery():
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.AWS.max_cluster_name_length())
+    region = 'us-east-2'
+    test = smoke_tests_utils.Test(
+        'test_aws_manual_restart_recovery',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                'aws', name, skip_remote_server_check=True),
+            f'sky launch -y -c {name} --infra aws/{region} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            f'sky autostop {name} -y -i 1',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=180),
+            # Restart the cluster manually.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=(
+                    f'id=`aws ec2 describe-instances --region {region} --filters '
+                    f'Name=tag:ray-cluster-name,Values={name_on_cloud} '
+                    f'--query Reservations[].Instances[].InstanceId '
+                    f'--output text` && '
+                    # Wait for the instance to be stopped before restarting.
+                    f'aws ec2 wait instance-stopped --region {region} '
+                    f'--instance-ids $id && '
+                    # Start the instance.
+                    f'aws ec2 start-instances --region {region} '
+                    f'--instance-ids $id && '
+                    # Wait for the instance to be running.
+                    f'aws ec2 wait instance-running --region {region} '
+                    f'--instance-ids $id'),
+                skip_remote_server_check=True),
+            # Status refresh should time out, as the restarted
+            # instance would get a new IP address.
+            # We should see a warning message on how to recover
+            # from this state.
+            f'sky status -r {name} | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."',
+            # Recover the cluster.
+            f'sky start -y {name}',
+            # Wait for the cluster to be up.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=300),
+        ],
+        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_vast
+@pytest.mark.no_shadeform
 @pytest.mark.gcp
 def test_gcp_stale_job_manual_restart():
     name = smoke_tests_utils.get_cluster_name()
@@ -308,9 +589,10 @@ def test_gcp_stale_job_manual_restart():
 
 # ---------- Check Sky's environment variables; workdir. ----------
 @pytest.mark.no_fluidstack  # Requires amazon S3
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
+@pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet.
 def test_env_check(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
@@ -331,15 +613,13 @@ def test_env_check(generic_cloud: str):
 
 
 # ---------- CLI logs ----------
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_logs instead.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet.
+@pytest.mark.no_shadeform  # Shadeform does not support num_nodes > 1 yet
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
+@pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet.
 def test_cli_logs(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
-    if generic_cloud == 'kubernetes':
-        # Kubernetes does not support multi-node
-        num_nodes = 1
     timestamp = time.time()
     test = smoke_tests_utils.Test('cli_logs', [
         f'sky launch -y -c {name} --infra {generic_cloud} --num-nodes {num_nodes} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo {timestamp} 1"',
@@ -411,8 +691,9 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
             cluster_exist = False
             status_request_id = (
                 smoke_tests_utils.get_dashboard_cluster_status_request_id())
-            status_response = (smoke_tests_utils.get_response_from_request_id(
-                status_request_id))
+            status_response = (
+                smoke_tests_utils.get_response_from_request_id_dashboard(
+                    status_request_id))
             for cluster in status_response:
                 if cluster['name'] == name:
                     cluster_exist = True
@@ -420,6 +701,84 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
             assert cluster_exist, status_response
         finally:
             sky.get(sky.down(name))
+
+
+def test_cluster_labels_in_status(generic_cloud: str):
+    """Test that labels in cluster YAML are stored and returned in status."""
+    from sky.client import sdk
+    from sky.utils.common import StatusRefreshMode
+
+    name = smoke_tests_utils.get_cluster_name()
+    expected_labels = {'test-label': 'test-value', 'project': 'smoke-test'}
+
+    def check_labels_in_status():
+        """Check that labels are present in the cluster status."""
+        # Get the cluster status using SDK
+        status_request_id = sdk.status([name],
+                                       refresh=StatusRefreshMode.NONE,
+                                       all_users=True)
+        cluster_records = sdk.stream_and_get(status_request_id)
+
+        # Find our cluster in the status
+        cluster_record = None
+        for cluster in cluster_records:
+            if cluster.get('name') == name:
+                cluster_record = cluster
+                break
+
+        if cluster_record is None:
+            yield f'Cluster {name} not found in status'
+            return
+
+        if 'labels' not in cluster_record:
+            yield 'labels field missing from cluster record'
+            return
+
+        if cluster_record['labels'] is None:
+            yield 'labels field is None'
+            return
+
+        if cluster_record['labels'] != expected_labels:
+            yield (f"Expected labels {expected_labels}, "
+                   f"got {cluster_record['labels']}")
+            return
+
+        # Success - labels are correct
+        return
+
+    # Create YAML with labels
+    yaml_content = textwrap.dedent("""\
+        resources:
+          cpus: 2+
+          labels:
+            test-label: test-value
+            project: smoke-test
+
+        run: |
+          echo "Hello from labeled cluster"
+          sleep 5
+        """)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'cluster_labels_in_status',
+            [
+                f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}',
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=name,
+                    cluster_status=[sky.ClusterStatus.UP],
+                    timeout=600),
+                lambda: check_labels_in_status(),
+            ],
+            teardown=f'sky down -y {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 # The sky launch CLI has some additional checks to make sure the cluster is up/
@@ -450,6 +809,7 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
 
 
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support autostop and host controllers
+@pytest.mark.no_seeweb  # Seeweb does not support host controllers
 def test_jobs_launch_and_logs(generic_cloud: str):
     # The first `with` is to override the sky api endpoint env if --remote-server
     # is specified, so the test knows it's running on the remote server, thats
@@ -473,8 +833,9 @@ def test_jobs_launch_and_logs(generic_cloud: str):
             # Check the job status from the dashboard
             queue_request_id = (
                 smoke_tests_utils.get_dashboard_jobs_queue_request_id())
-            queue_response = (smoke_tests_utils.get_response_from_request_id(
-                queue_request_id))
+            queue_response = (
+                smoke_tests_utils.get_response_from_request_id_dashboard(
+                    queue_request_id))
             job_exist = False
             for job in queue_response:
                 if job['job_id'] == job_id:
@@ -528,7 +889,7 @@ class TestYamlSpecs:
 
     def _check_equivalent(self, yaml_path):
         """Check if the yaml is equivalent after load and dump again."""
-        origin_task_config = common_utils.read_yaml(yaml_path)
+        origin_task_config = yaml_utils.read_yaml(yaml_path)
 
         task = sky.Task.from_yaml(yaml_path)
         new_task_config = task.to_yaml_config()
@@ -551,10 +912,12 @@ class TestYamlSpecs:
 
 # ---------- Testing Multiple Accelerators ----------
 @pytest.mark.no_vast  # Vast has low availability for K80 GPUs
+@pytest.mark.no_shadeform  # Shadeform does not support K80 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack does not support K80 gpus for now
 @pytest.mark.no_paperspace  # Paperspace does not support K80 gpus
 @pytest.mark.no_nebius  # Nebius does not support K80s
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
+@pytest.mark.no_seeweb  # Seeweb does not support K80s
 def test_multiple_accelerators_ordered():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -570,10 +933,12 @@ def test_multiple_accelerators_ordered():
 
 
 @pytest.mark.no_vast  # Vast has low availability for T4 GPUs
+@pytest.mark.no_shadeform  # Shadeform does not support T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
+@pytest.mark.no_seeweb  # Seeweb does not support T4
 def test_multiple_accelerators_ordered_with_default():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -589,10 +954,12 @@ def test_multiple_accelerators_ordered_with_default():
 
 
 @pytest.mark.no_vast  # Vast has low availability for T4 GPUs
+@pytest.mark.no_shadeform  # Shadeform does not support T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
+@pytest.mark.no_seeweb  # Seeweb does not support T4
 def test_multiple_accelerators_unordered():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -607,10 +974,12 @@ def test_multiple_accelerators_unordered():
 
 
 @pytest.mark.no_vast  # Vast has low availability for T4 GPUs
+@pytest.mark.no_shadeform  # Shadeform does not support T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 @pytest.mark.no_hyperbolic  # Hyperbolic only supports one GPU type per instance
+@pytest.mark.no_seeweb  # Seeweb does not support T4
 def test_multiple_accelerators_unordered_with_default():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -628,6 +997,8 @@ def test_multiple_accelerators_unordered_with_default():
 @pytest.mark.no_vast  # Requires other clouds to be enabled
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
 @pytest.mark.no_hyperbolic  # Requires other clouds to be enabled
+@pytest.mark.no_shadeform  # Requires other clouds to be enabled
+@pytest.mark.no_seeweb  # Requires other clouds to be enabled
 def test_multiple_resources():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -649,10 +1020,14 @@ def unreachable_context():
     to it. So this must be session scoped that the kubeconfig is modified before
     the local API server starts.
     """
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        yield
+        return
     # Get kubeconfig path from environment variable or use default
     kubeconfig_path = os.environ.get('KUBECONFIG',
                                      os.path.expanduser('~/.kube/config'))
     if not os.path.exists(kubeconfig_path):
+        yield
         return
     import shutil
 
@@ -690,6 +1065,7 @@ def unreachable_context():
 
 
 @pytest.mark.kubernetes
+@pytest.mark.no_dependency
 def test_kubernetes_context_failover(unreachable_context):
     """Test if the kubernetes context failover works.
 
@@ -707,6 +1083,11 @@ def test_kubernetes_context_failover(unreachable_context):
       # Set the namespace to test-namespace
       kubectl config set-context kind-skypilot --namespace=test-namespace --context kind-skypilot
     """
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip('Skipping test because the Kubernetes configs and '
+                    'credentials are located on the remote API server '
+                    'and not the machine where the test is running')
+
     # Get context that is not kind-skypilot
     contexts = subprocess.check_output('kubectl config get-contexts -o name',
                                        shell=True).decode('utf-8').split('\n')
@@ -773,6 +1154,11 @@ def test_kubernetes_context_failover(unreachable_context):
                 f'sky launch -y -c {name}-4 --gpus H100 --cpus 1 --infra kubernetes/{unreachable_context} echo hi && exit 1 || true',
                 # Test failover from unreachable context
                 f'sky launch -y -c {name}-5 --cpus 1 echo hi',
+                # switch back to kind-skypilot where GPU cluster is launched
+                f'kubectl config use-context kind-skypilot',
+                # test if sky status-kubernetes shows H100
+                f'sky status-kubernetes | grep H100 || '
+                '{ echo "sky status-kubernetes does not show H100." && exit 1; }',
             ],
             f'sky down -y {name}-1 {name}-3 {name}-5',
             env={
@@ -784,13 +1170,95 @@ def test_kubernetes_context_failover(unreachable_context):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
+@pytest.mark.no_dependency
+def test_kubernetes_get_nodes():
+    """Test the correctness of get_kubernetes_nodes,
+    as we parse the JSON ourselves and not using the Kubernetes Python client deserializer.
+    """
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip('Skipping test because the Kubernetes configs and '
+                    'credentials are located on the remote API server '
+                    'and not the machine where the test is running')
+    from sky.adaptors import kubernetes
+    from sky.provision.kubernetes import utils as kubernetes_utils
+
+    nodes = kubernetes_utils.get_kubernetes_nodes(context=None)
+    preloaded_nodes = kubernetes.core_api().list_node().items
+
+    for node, preloaded_node in zip(nodes, preloaded_nodes):
+        assert node.metadata.name == preloaded_node.metadata.name
+        assert node.metadata.labels == preloaded_node.metadata.labels
+
+        assert node.status.allocatable == preloaded_node.status.allocatable
+        assert node.status.capacity == preloaded_node.status.capacity
+        node_addresses = [{
+            'type': addr.type,
+            'address': addr.address
+        } for addr in node.status.addresses]
+        preloaded_addresses = [{
+            'type': addr.type,
+            'address': addr.address
+        } for addr in preloaded_node.status.addresses]
+        assert node_addresses == preloaded_addresses
+
+
+@pytest.mark.no_aws
+@pytest.mark.no_gcp
+@pytest.mark.no_nebius
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_runpod
+@pytest.mark.no_azure
+def test_kubernetes_slurm_show_gpus(generic_cloud: str):
+    assert generic_cloud in ('kubernetes', 'slurm')
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_show_gpus',
+        [(
+            f's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra {generic_cloud}) && '
+            'echo "$s" && '
+            # Verify either:
+            # 1. We have at least one GPU entry with utilization info
+            #    Match pattern: "<GPU_TYPE>  <qty>  <X> of <Y> free"
+            #    Example      :    H100   1, 2, 4, 8   16 of 16 free
+            # OR
+            # 2. The cluster has no GPUs, and the expected message is shown
+            '(echo "$s" | grep -A 1 "REQUESTABLE_QTY_PER_NODE" | '
+            'grep -E "^[A-Z0-9]+[[:space:]]+[0-9, ]+[[:space:]]+[0-9]+ of [0-9]+ free" || '
+            f'echo "$s" | grep "No GPUs found in any {generic_cloud.capitalize()} clusters")'
+        )],
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_kubernetes
+@pytest.mark.no_slurm
+def test_show_gpus(generic_cloud: str):
+    # Check that output contains GPU table headers and common GPU types
+    check_cmd = ('echo "$s" && '
+                 'echo "$s" | grep "COMMON_GPU" && '
+                 'echo "$s" | grep "AVAILABLE_QUANTITIES" && '
+                 'echo "$s" | grep -E "A100|H100|H200|L4|T4|B200"')
+    test = smoke_tests_utils.Test(
+        'show_gpus',
+        [
+            (f's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra {generic_cloud}) && '
+             f'{check_cmd}'),
+            (f's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra {generic_cloud} --all) && '
+             f'{check_cmd}'),
+        ],
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_seeweb  # Seeweb fails to provision resources
 def test_launch_and_exec_async(generic_cloud: str):
     """Test if the launch and exec commands work correctly with --async."""
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'launch_and_exec_async',
         [
-            f'sky launch -c {name} -y --async',
+            f'sky launch -c {name} --infra {generic_cloud} -y --async',
             # Async exec.
             f'sky exec {name} echo --async',
             # Async exec and cancel immediately.
@@ -800,6 +1268,11 @@ def test_launch_and_exec_async(generic_cloud: str):
              'sed -E "s/.*run: (sky api cancel .*).*/\\1/") && '
              'echo "Extracted cancel command: $cancel_cmd" && '
              '$cancel_cmd'),
+            # Wait for cluster to be UP before sync exec.
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=300),
             # Sync exec must succeed after command end.
             (
                 f's=$(sky exec {name} echo) && echo "$s" && '
@@ -826,6 +1299,7 @@ def test_launch_and_exec_async(generic_cloud: str):
 
 @pytest.mark.no_hyperbolic  # Hyperbolic fails to provision resources
 @pytest.mark.no_kubernetes  # Kubernetes runs to UP state too fast
+@pytest.mark.no_shadeform  # Shadeform instances can't be deleted immediately after launch
 def test_cancel_launch_and_exec_async(generic_cloud: str):
     """Test if async launch and exec commands work correctly when cluster is shutdown"""
     name = smoke_tests_utils.get_cluster_name()
@@ -1153,3 +1627,418 @@ def test_cli_output(generic_cloud: str):
                 'echo "$s" | grep -- "$border" | wc -l | grep 3'),
         ])
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_sky_down_with_multiple_sgs():
+    """Test that sky down works with multiple security groups.
+
+    The goal is to ensure that when we run sky down we get the typical
+    terminating output with no extra output. If the output changes please
+    update the test.
+    """
+    name_one = smoke_tests_utils.get_cluster_name()
+    vpc_one = "DO_NOT_DELETE"
+    name_two = smoke_tests_utils.get_cluster_name() + '-2'
+    vpc_two = "DO_NOT_DELETE_lloyd-airgapped-plus-gateway"
+
+    validate_terminating_output = (
+        f'printf "%s" "$s" && echo "\n===Validating terminating output===" && '
+        # Ensure each terminating line is present.
+        f'printf "%s" "$s" | grep "Terminating cluster {name_one}...done" && '
+        f'printf "%s" "$s" | grep "Terminating cluster {name_two}...done" && '
+        # Ensure the last line is present.
+        f'printf "%s" "$s" | grep "Terminating 2 clusters" && '
+        # Ensure there are 5 lines because multiple clusters are being down-ed.
+        # The expected lines include operation header, two per-cluster lines,
+        # Summary line, and succeeded/failed line. Note: when down-ing a single
+        # cluster, 3 lines are printed.
+        f'echo "$s" | sed "/^$/d" | wc -l | grep 5')
+
+    test = smoke_tests_utils.Test(
+        'sky_down_with_multiple_sgs',
+        [
+            # Launch cluster one.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name_one} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} --config aws.vpc_name={vpc_one} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Launch cluster two.
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name_two} --infra aws/us-west-1 {smoke_tests_utils.LOW_RESOURCE_ARG} --config aws.vpc_name={vpc_two} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            # Run sky down and validate the output.
+            f's=$(SKYPILOT_DEBUG=0 sky down -y {name_one} {name_two} 2>&1) && {validate_terminating_output}',
+        ],
+        teardown=f'sky down -y {name_one} {name_two}',
+        timeout=smoke_tests_utils.get_timeout('aws'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def test_launch_with_failing_setup(generic_cloud: str):
+    """Test that failing setup outputs the right error message."""
+    name = smoke_tests_utils.get_cluster_name()
+
+    cluster_yaml = textwrap.dedent("""
+    num_nodes: 3
+
+    setup: |
+        echo "Running setup."
+        if [ "$SKYPILOT_SETUP_NODE_RANK" -eq 0 ]; then
+            echo "I'm a bad worker, failing..."
+            exit 1
+        fi
+        if [ "$SKYPILOT_SETUP_NODE_RANK" -eq 1 ]; then
+            echo "I'm a good worker, passing..."
+        fi
+        if [ "$SKYPILOT_SETUP_NODE_RANK" -eq 2 ]; then
+            echo "I'm a bad worker, failing..."
+            exit 1
+        fi
+
+    run: |
+        echo "Finished"
+    """)
+
+    validate_output = (
+        f'printf "%s" "$s" && echo "\n===Validating terminating output===" && '
+        f'printf "%s" "$s" | grep "See error logs above for more details." && '
+        f'printf "%s" "$s" | grep "setup failed. Failed workers: (pid="')
+
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+        f.write(cluster_yaml.encode('utf-8'))
+        f.flush()
+
+        test = smoke_tests_utils.Test(
+            'launch_with_failing_setup',
+            [
+                f's=$(SKYPILOT_DEBUG=1 sky launch -c {name} -y --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name} | tee /dev/stderr) && {validate_output}'
+            ],
+            teardown=f'sky down -y {name}',
+            timeout=smoke_tests_utils.get_timeout(generic_cloud),
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server
+@pytest.mark.no_dependency
+def test_loopback_access_with_basic_auth(generic_cloud: str):
+    """Test that loopback access works."""
+    server_config_content = textwrap.dedent(f"""\
+        jobs:
+            controller:
+                consolidation_mode: true
+    """)
+    with tempfile.NamedTemporaryFile(prefix='server_config_',
+                                     delete=False,
+                                     mode='w') as f:
+        f.write(server_config_content)
+        server_config_path = f.name
+
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'loopback_access',
+        [
+            # Without consolidation mode, loopback access should not be allowed.
+            f'export {constants.ENV_VAR_ENABLE_BASIC_AUTH}=true && {smoke_tests_utils.SKY_API_RESTART}',
+            f's=$(SKYPILOT_DEBUG=0 sky status 2>&1 || true) && echo "$s" | grep "401 Client Error: Unauthorized for url: http://127.0.0.1:46580"',
+            # With consolidation mode, loopback access should be allowed.
+            f'export {constants.ENV_VAR_ENABLE_BASIC_AUTH}=true && export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={server_config_path} && {smoke_tests_utils.SKY_API_RESTART}',
+            f's=$(SKYPILOT_DEBUG=0 sky status) && echo "$s" | grep "Clusters"',
+            f'sky jobs launch -y -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=120),
+            f'sky jobs logs --no-follow | grep "hi"',
+        ],
+        teardown=f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# TODO(aylei): this test should not be retried in buildkite, failure indicates a
+# concurrency issue in our code.
+def test_launch_and_cancel_race_condition(generic_cloud: str):
+    """Test that launch and cancel race condition is handled correctly."""
+    name = smoke_tests_utils.get_cluster_name()
+
+    threads = []
+    exceptions = []
+
+    def launch_and_cancel(idx: int):
+        try:
+            cluster_name = f'{name}-{idx}'
+
+            # Create a minimal task
+            task = sky.Task(run='sleep 120')
+            task.set_resources(
+                sky.Resources(infra=generic_cloud,
+                              **smoke_tests_utils.LOW_RESOURCE_PARAM))
+
+            # Launch async
+            request_id = sky.launch(task, cluster_name=cluster_name)
+
+            # Cancel immediately
+            cancelled_request_ids = sky.get(
+                sky.api_cancel(request_ids=[request_id]))
+            assert len(cancelled_request_ids) == 1, \
+                f'Expected to cancel 1 request, got {len(cancelled_request_ids)}'
+            assert cancelled_request_ids[0] == request_id, \
+                f'Expected to cancel request {request_id}, got {cancelled_request_ids[0]}'
+
+            # Clean up
+            sky.down(cluster_name)
+        except Exception as e:  # pylint: disable=broad-except
+            exceptions.append((idx, e))
+
+    def run_parallel_launch_and_cancel() -> Generator[str, None, None]:
+        yield 'Running 20 parallel launch and cancel operations using SDK'
+        # Run multiple launch and cancel in parallel to introduce request queuing.
+        # This can trigger race conditions more frequently.
+        for i in range(20):
+            thread = threading.Thread(target=launch_and_cancel,
+                                      args=(i,),
+                                      daemon=True)
+            threads.append(thread)
+            thread.start()
+
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+
+        # Check for exceptions
+        if exceptions:
+            raise Exception(
+                f'Exceptions occurred in {len(exceptions)} threads: {exceptions}'
+            )
+
+    test = smoke_tests_utils.Test(
+        'launch_and_cancel_race_condition',
+        [
+            run_parallel_launch_and_cancel,
+            # Sleep shortly, so that if there is any leaked cluster it can be shown in sky status.
+            'sleep 10',
+            # Verify the cluster(s) are not created.
+            f'sky status "{name}*" | grep "not found"',
+        ],
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # This case need to check the local process status
+def test_cancel_logs_request(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    proxy_command_pattern = '[s]sh -tt'
+    if generic_cloud == 'kubernetes':
+        proxy_command_pattern = '[k]ubectl exec'
+    test = smoke_tests_utils.Test(
+        'cancel_logs_request',
+        [
+            f'sky launch -c {name} --cloud {generic_cloud} \'for i in {{1..102400}}; do echo "Repeat $i"; sleep 1; done\' -y {smoke_tests_utils.LOW_RESOURCE_ARG} --async',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+            f'sky logs {name} & pid=$!; sleep 30; kill -s TERM $pid || true; wait $pid || true',
+            # After cancelling the logs request, all the exec proxy process should be killed
+            f'sleep 10; ps aux | grep "{proxy_command_pattern}"; ! pgrep -f "{proxy_command_pattern}"'
+        ],
+        f'sky down -y {name} || true',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_aws
+@pytest.mark.no_gcp
+@pytest.mark.no_nebius
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_runpod
+@pytest.mark.no_azure
+def test_kubernetes_slurm_ssh_proxy_connection(generic_cloud: str):
+    """Test Kubernetes/Slurm SSH proxy connection.
+    """
+    cluster_name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_ssh_proxy_connection',
+        [
+            # Launch a minimal Kubernetes/Slurm cluster for SSH proxy testing
+            f'sky launch -y -c {cluster_name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH test cluster ready"',
+            # Run an SSH command on the cluster.
+            f'ssh {cluster_name} echo "SSH command executed"',
+        ],
+        f'sky down -y {cluster_name}',
+        timeout=15 * 60,  # 15 minutes timeout
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# Only checks for processes in local machine, so skip remote server test.
+# TODO(kevin): Add metrics for number of open SSH tunnels and refactor this test to use it.
+@pytest.mark.no_remote_server
+@pytest.mark.no_slurm  # Slurm does not support gRPC skylet yet
+def test_no_ssh_tunnel_process_leak_after_teardown(generic_cloud: str):
+    """Test that no SSH tunnel process leaks after teardown."""
+    cluster_name = smoke_tests_utils.get_cluster_name()
+    grep_ssh_tunnel_proc = f'ps aux | grep -E "ssh|port-forward" | grep 46590 | grep "{cluster_name if generic_cloud == "kubernetes" else "$IP"}" | grep -v grep'
+
+    test = smoke_tests_utils.Test(
+        'no_ssh_tunnel_process_leak_after_teardown',
+        [
+            # TODO(kevin): remove SKYPILOT_ENABLE_GRPC=1 after it becomes the default.
+            f'SKYPILOT_ENABLE_GRPC=1 sky launch -y -c {cluster_name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo hi',
+            f'IP=$(sky status --ip {cluster_name}) && echo "=== Before ===" && {grep_ssh_tunnel_proc} || exit 1 && '
+            f'SKYPILOT_DEBUG=0 sky down -y {cluster_name} && '
+            # Should not find any ssh tunnel process after teardown. If found, exit with error.
+            f'echo "=== After ===" && ! {grep_ssh_tunnel_proc} && echo "No SSH tunnel process found"',
+        ],
+        f'sky down -y {cluster_name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_cluster_setup_num_gpus():
+    """Test that the number of GPUs is set correctly in the setup script."""
+
+    setup_yaml = textwrap.dedent(f"""
+    resources:
+        accelerators: {{L4:2}}
+
+    setup: |
+        if [[ "$SKYPILOT_SETUP_NUM_GPUS_PER_NODE" != "2" ]]; then
+            exit 1
+        fi
+
+    run: |
+        echo "Done."
+    """)
+
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+        f.write(setup_yaml.encode('utf-8'))
+        f.flush()
+        name = smoke_tests_utils.get_cluster_name()
+
+        test = smoke_tests_utils.Test(
+            'test_cluster_setup_num_gpus',
+            [
+                f's=$(sky launch -y -c {name} {f.name} -y); echo "$s"; echo; echo; echo "$s" | grep "Job finished (status: SUCCEEDED)"',
+            ],
+            timeout=smoke_tests_utils.get_timeout('gcp'),
+            teardown=f'sky down -y {name}',
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+def test_cancel_job_reliability(generic_cloud: str):
+    """Test that sky cancel properly terminates running jobs."""
+    name = smoke_tests_utils.get_cluster_name()
+
+    # Create a temporary YAML file with a long-running sleep command
+    cancel_test_yaml = textwrap.dedent("""
+    run: |
+        sleep 10000
+    """)
+
+    # Helper function to check process count with timeout
+    def check_process_count(expected_lines: int, timeout: int = 30) -> str:
+        """Check that ps aux | grep 'sleep 10000' shows expected number of lines.
+
+        Note: ps aux | grep includes the grep process itself, so:
+        - 3 lines = sleep process + grep process + ssh process to check the process count
+        - 2 line = grep process (sleep is gone) + ssh process to check the process count
+
+        Returns a command that will check the process count with retries.
+        """
+        return (
+            f'for i in $(seq 1 {timeout}); do '
+            f'  s=$(ssh {name} "ps aux | grep \'sleep 10000\'" 2>/dev/null); '
+            f'  count=$(echo "$s" | wc -l || echo 0); '
+            f'  if [ "$count" -eq {expected_lines} ]; then '
+            f'    echo "Found {expected_lines} line(s) as expected"; '
+            f'    exit 0; '
+            f'  fi; '
+            f'  echo "Waiting for {expected_lines} line(s), found $count, attempt $i/{timeout}"; '
+            f'  echo "Output was: $s"; '
+            f'  sleep 1; '
+            f'done; '
+            f'echo "ERROR: Expected {expected_lines} line(s) but found $count"; '
+            f'exit 1')
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+        f.write(cancel_test_yaml)
+        f.flush()
+
+        disk_size_param, _ = smoke_tests_utils.get_disk_size_and_validate_launch_output(
+            generic_cloud)
+
+        # Build commands for the test
+        commands = [
+            # Launch the cluster
+            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {disk_size_param} {f.name} -d',
+            check_process_count(3, timeout=30),
+            f'sky cancel {name} 1 -y',
+            check_process_count(2, timeout=30),
+        ]
+
+        num_iterations = 10
+        # Run the cancel test num_iterations times
+        # Note: Job 1 is from the cluster launch, so exec jobs start at job 2
+        for iteration in range(1, num_iterations):
+            job_num = iteration + 1  # Job 1 is from cluster launch
+            commands.extend([
+                # Launch a new job with the sleep command
+                f'sky exec {name} --infra {generic_cloud} {f.name} -d',
+                # Check that we see 3 lines (sleep process + grep process itself + ssh process to check the process count)
+                check_process_count(3, timeout=30),
+                # Cancel the job
+                f'sky cancel {name} {job_num} -y',
+                # Check that we now see only 2 lines (grep process + ssh process to check the process count)
+                check_process_count(2, timeout=30),
+            ])
+
+        test = smoke_tests_utils.Test(
+            'test_cancel_job_reliability',
+            commands,
+            f'sky down -y {name}',
+            timeout=smoke_tests_utils.get_timeout(generic_cloud) *
+            2,  # Longer timeout for 10 iterations
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+def test_docker_pass_redacted(generic_cloud: str):
+    fake_token = 'dckr_pat_fakefakefake'
+    cluster_yaml = textwrap.dedent(f"""
+    name: test_docker_pass
+
+    resources:
+      cloud: {generic_cloud}
+      region: us-west-1
+      image_id: docker:lab3522/ubuntu:latest
+      cpus: 2+
+      memory: 4GB+
+
+    secrets:
+      SKYPILOT_DOCKER_USERNAME: lab3522
+      SKYPILOT_DOCKER_PASSWORD: {fake_token}
+      SKYPILOT_DOCKER_SERVER: docker.io
+
+    run: echo "Test completed"
+    """)
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+        f.write(cluster_yaml.encode('utf-8'))
+        f.flush()
+        name = smoke_tests_utils.get_cluster_name()
+        test = smoke_tests_utils.Test(
+            'test_docker_pass_redacted',
+            [
+                # Make sure the docker password is not in the output.
+                f's=$(sky launch -y -c {name} {f.name} -y 2>&1); echo "$s"; ! echo "$s" | grep -q "{fake_token}"',
+            ],
+            timeout=smoke_tests_utils.get_timeout(generic_cloud),
+            teardown=f'sky down -y {name}',
+        )
+        smoke_tests_utils.run_one_test(test)

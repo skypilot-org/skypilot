@@ -3,8 +3,9 @@
 See `Stage` for a Task's life cycle.
 """
 import enum
+import logging
 import typing
-from typing import List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import colorama
 
@@ -14,7 +15,10 @@ from sky import clouds
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
+from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.server.requests import request_names
+from sky.skylet import autostop_lib
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
@@ -23,11 +27,13 @@ from sky.utils import dag_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
+from sky.utils import tempstore
 from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
+    from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -108,16 +114,18 @@ def _execute(
     stages: Optional[List[Stage]] = None,
     cluster_name: Optional[str] = None,
     detach_setup: bool = False,
-    detach_run: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     skip_unnecessary_provisioning: bool = False,
+    *,  #keyword only separator
     # Internal only:
     # pylint: disable=invalid-name
+    _request_name: request_names.AdminPolicyRequestName,
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
+    job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
 
@@ -152,8 +160,6 @@ def _execute(
         job itself. You can safely ctrl-c to detach from logging, and it will
         not interrupt the setup process. To see the logs again after detaching,
         use `sky logs`. To cancel setup, cancel the job via `sky cancel`.
-      detach_run: If True, as soon as a job is submitted, return from this
-        function and do not stream execution logs.
       idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
@@ -170,20 +176,20 @@ def _execute(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
+    if _request_name == request_names.AdminPolicyRequestName.CLUSTER_LAUNCH:
+        if _is_launched_by_jobs_controller:
+            _request_name = (
+                request_names.AdminPolicyRequestName.JOBS_LAUNCH_CLUSTER)
+        elif _is_launched_by_sky_serve_controller:
+            _request_name = (
+                request_names.AdminPolicyRequestName.SERVE_LAUNCH_REPLICA)
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    dag.resolve_and_validate_volumes()
-    if (not _is_launched_by_jobs_controller and
-            not _is_launched_by_sky_serve_controller):
-        # Only process pre-mount operations on API server.
-        dag.pre_mount_volumes()
     for task in dag.tasks:
-        if task.storage_mounts is not None:
-            for storage in task.storage_mounts.values():
-                # Ensure the storage is constructed.
-                storage.construct()
         for resource in task.resources:
             # For backward compatibility, we need to override the autostop
-            # config at server-side for legacy clients.
+            # config at server-side for legacy clients. This should be set
+            # before admin policy to make the admin policy get the final
+            # value of autostop config.
             # TODO(aylei): remove this after we bump the API version.
             resource.override_autostop_config(
                 down=down, idle_minutes=idle_minutes_to_autostop)
@@ -192,12 +198,23 @@ def _execute(
                 idle_minutes_to_autostop = resource.autostop_config.idle_minutes
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag,
+            request_name=_request_name,
             request_options=admin_policy.RequestOptions(
                 cluster_name=cluster_name,
                 idle_minutes_to_autostop=idle_minutes_to_autostop,
                 down=down,
                 dryrun=dryrun,
             )) as dag:
+        dag.resolve_and_validate_volumes()
+        if (not _is_launched_by_jobs_controller and
+                not _is_launched_by_sky_serve_controller):
+            # Only process pre-mount operations on API server.
+            dag.pre_mount_volumes()
+        for task in dag.tasks:
+            if task.storage_mounts is not None:
+                for storage in task.storage_mounts.values():
+                    # Ensure the storage is constructed.
+                    storage.construct()
         return _execute_dag(
             dag,
             dryrun=dryrun,
@@ -209,14 +226,14 @@ def _execute(
             stages=stages,
             cluster_name=cluster_name,
             detach_setup=detach_setup,
-            detach_run=detach_run,
             no_setup=no_setup,
             clone_disk_from=clone_disk_from,
             skip_unnecessary_provisioning=skip_unnecessary_provisioning,
             _quiet_optimizer=_quiet_optimizer,
             _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
             _is_launched_by_sky_serve_controller=
-            _is_launched_by_sky_serve_controller)
+            _is_launched_by_sky_serve_controller,
+            job_logger=job_logger)
 
 
 def _execute_dag(
@@ -230,7 +247,6 @@ def _execute_dag(
     stages: Optional[List[Stage]],
     cluster_name: Optional[str],
     detach_setup: bool,
-    detach_run: bool,
     no_setup: bool,
     clone_disk_from: Optional[str],
     skip_unnecessary_provisioning: bool,
@@ -238,6 +254,7 @@ def _execute_dag(
     _quiet_optimizer: bool,
     _is_launched_by_jobs_controller: bool,
     _is_launched_by_sky_serve_controller: bool,
+    job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute a DAG.
 
@@ -248,7 +265,7 @@ def _execute_dag(
     task = dag.tasks[0]
 
     if any(r.job_recovery is not None for r in task.resources):
-        logger.warning(
+        job_logger.warning(
             f'{colorama.Style.DIM}The task has `job_recovery` specified, '
             'but is launched as an unmanaged job. It will be ignored.'
             'To enable job recovery, use managed jobs: sky jobs launch.'
@@ -256,8 +273,10 @@ def _execute_dag(
 
     cluster_exists = False
     if cluster_name is not None:
-        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-        cluster_exists = cluster_record is not None
+        # We use launched_at to check if the cluster exists, because this
+        # db query is faster than get_cluster_from_name.
+        cluster_exists = global_user_state.cluster_with_name_exists(
+            cluster_name)
         # TODO(woosuk): If the cluster exists, print a warning that
         # `cpus` and `memory` are not used as a job scheduling constraint,
         # unlike `gpus`.
@@ -308,11 +327,13 @@ def _execute_dag(
 
         idle_minutes_to_autostop: Optional[int] = None
         down = False
+        wait_for: Optional[autostop_lib.AutostopWaitFor] = None
         if resource_autostop_config is not None:
             if resource_autostop_config.enabled:
                 idle_minutes_to_autostop = (
                     resource_autostop_config.idle_minutes)
                 down = resource_autostop_config.down
+                wait_for = resource_autostop_config.wait_for
             else:
                 # Autostop is explicitly disabled, so cancel it if it's
                 # already set.
@@ -327,10 +348,10 @@ def _execute_dag(
                 # itself have no task running and start the auto{stop,down}
                 # process, before the task is submitted in the EXEC stage.
                 verb = 'torn down' if down else 'stopped'
-                logger.info(f'{colorama.Style.DIM}The cluster will '
-                            f'be {verb} after 1 minutes of idleness '
-                            '(after all jobs finish).'
-                            f'{colorama.Style.RESET_ALL}')
+                job_logger.info(f'{colorama.Style.DIM}The cluster will '
+                                f'be {verb} after 1 minutes of idleness '
+                                '(after all jobs finish).'
+                                f'{colorama.Style.RESET_ALL}')
                 idle_minutes_to_autostop = 1
             if Stage.DOWN in stages:
                 stages.remove(Stage.DOWN)
@@ -349,16 +370,17 @@ def _execute_dag(
         task = _maybe_clone_disk_from_cluster(clone_disk_from, cluster_name,
                                               task)
 
+    is_managed = (_is_launched_by_jobs_controller or
+                  _is_launched_by_sky_serve_controller)
+
     if not cluster_exists:
         # If spot is launched on serve or jobs controller, we don't need to
         # print out the hint.
-        if (Stage.PROVISION in stages and task.use_spot and
-                not _is_launched_by_jobs_controller and
-                not _is_launched_by_sky_serve_controller):
+        if (Stage.PROVISION in stages and task.use_spot and not is_managed):
             yellow = colorama.Fore.YELLOW
             bold = colorama.Style.BRIGHT
             reset = colorama.Style.RESET_ALL
-            logger.info(
+            job_logger.info(
                 f'{yellow}Launching a spot job that does not '
                 f'automatically recover from preemptions. To '
                 'get automatic recovery, use managed job instead: '
@@ -377,7 +399,7 @@ def _execute_dag(
                     controller = controller_utils.Controllers.from_name(
                         cluster_name)
                     if controller is not None:
-                        logger.info(
+                        job_logger.info(
                             f'Choosing resources for {controller.value.name}...'
                         )
                     dag = optimizer.Optimizer.optimize(dag,
@@ -386,6 +408,26 @@ def _execute_dag(
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
+    # Note on race vs. lock: OPTIMIZE typically runs outside the per-cluster
+    # lock. After the backend acquires the lock and refreshes state, the
+    # original "do we need to optimize?" decision may be stale (e.g., the
+    # cluster just got terminated). To compensate without moving the optimizer
+    # into the backend, we inject a small planner the backend can call under
+    # the lock only when no reusable snapshot and no caller plan exist.
+    planner: Optional[Callable[['sky.Task'], 'resources_lib.Resources']] = None
+    if isinstance(backend,
+                  backends.CloudVmRayBackend) and Stage.OPTIMIZE in stages:
+
+        def _planner(_t: 'sky.Task'):
+            new_dag = optimizer.Optimizer.optimize(dag,
+                                                   minimize=optimize_target,
+                                                   quiet=_quiet_optimizer)
+            new_task = new_dag.tasks[0]
+            assert new_task.best_resources is not None, new_task
+            return new_task.best_resources.assert_launchable()
+
+        planner = _planner
+
     backend.register_info(
         dag=dag,
         optimize_target=optimize_target,
@@ -393,7 +435,9 @@ def _execute_dag(
         # That's because we want to do commands in task.setup and task.run again
         # after K8S pod recovers from a crash.
         # See `kubernetes-ray.yml.j2` for more details.
-        dump_final_script=is_controller_high_availability_supported)
+        dump_final_script=is_controller_high_availability_supported,
+        is_managed=is_managed,
+        planner=planner)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
@@ -418,7 +462,7 @@ def _execute_dag(
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
                             'Stage.PROVISION must be included in stages.')
-            logger.info('Dryrun finished.')
+            job_logger.info('Dryrun finished.')
             return None, None
 
         do_workdir = (Stage.SYNC_WORKDIR in stages and not dryrun and
@@ -427,39 +471,52 @@ def _execute_dag(
                           (task.file_mounts is not None or
                            task.storage_mounts is not None))
         if do_workdir or do_file_mounts:
-            logger.info(ux_utils.starting_message('Syncing files.'))
+            job_logger.info(ux_utils.starting_message('Syncing files.'))
 
         if do_workdir:
-            backend.sync_workdir(handle, task.workdir)
+            if cluster_name is not None:
+                global_user_state.add_cluster_event(
+                    cluster_name, status_lib.ClusterStatus.INIT,
+                    'Syncing files to cluster',
+                    global_user_state.ClusterEventType.STATUS_CHANGE)
+            envs_and_secrets = task_lib.get_plaintext_envs_and_secrets(
+                task.envs_and_secrets)
+            backend.sync_workdir(handle, task.workdir, envs_and_secrets)
 
         if do_file_mounts:
+            if cluster_name is not None:
+                global_user_state.add_cluster_event(
+                    cluster_name, status_lib.ClusterStatus.UP,
+                    'Syncing file mounts',
+                    global_user_state.ClusterEventType.STATUS_CHANGE)
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
 
         if no_setup:
-            logger.info('Setup commands skipped.')
+            job_logger.info('Setup commands skipped.')
         elif Stage.SETUP in stages and not dryrun:
             if skip_unnecessary_provisioning and provisioning_skipped:
-                logger.debug('Unnecessary provisioning was skipped, so '
-                             'skipping setup as well.')
+                job_logger.debug('Unnecessary provisioning was skipped, so '
+                                 'skipping setup as well.')
             else:
+                if cluster_name is not None:
+                    global_user_state.add_cluster_event(
+                        cluster_name, status_lib.ClusterStatus.UP,
+                        'Running setup commands to install dependencies',
+                        global_user_state.ClusterEventType.STATUS_CHANGE)
                 backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages and not dryrun:
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
-                backend.set_autostop(handle,
-                                     idle_minutes_to_autostop,
-                                     down=down)
+                backend.set_autostop(handle, idle_minutes_to_autostop, wait_for,
+                                     down)
 
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
-                job_id = backend.execute(handle,
-                                         task,
-                                         detach_run,
-                                         dryrun=dryrun)
+                job_id = backend.execute(handle, task, dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
@@ -476,6 +533,9 @@ def _execute_dag(
 
 @timeline.event
 @usage_lib.entrypoint
+# A launch routine will share tempfiles between steps, so we init a tempdir
+# for the launch routine and gc the entire dir after launch.
+@tempstore.with_tempdir
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
@@ -489,12 +549,16 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    *,  #keyword only separator
     # Internal only:
     # pylint: disable=invalid-name
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
+    _request_name: request_names.AdminPolicyRequestName = request_names.
+    AdminPolicyRequestName.CLUSTER_LAUNCH,
+    job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launches a cluster or task.
@@ -640,7 +704,6 @@ def launch(
     # see the setup logs when inspecting the launch process to know
     # excatly what the job is waiting for.
     detach_setup = controller_utils.Controllers.from_name(cluster_name) is None
-
     return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
@@ -653,7 +716,6 @@ def launch(
         stages=stages,
         cluster_name=cluster_name,
         detach_setup=detach_setup,
-        detach_run=True,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
@@ -662,7 +724,12 @@ def launch(
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
-    )
+        _request_name=_request_name,
+        job_logger=job_logger)
+
+
+# needed for backward compatibility. Remove by v0.12.0
+cluster_launch = launch
 
 
 @usage_lib.entrypoint
@@ -673,6 +740,7 @@ def exec(  # pylint: disable=redefined-builtin
     down: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
+    job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Executes a task on an existing cluster.
@@ -747,5 +815,6 @@ def exec(  # pylint: disable=redefined-builtin
             Stage.EXEC,
         ],
         cluster_name=cluster_name,
-        detach_run=True,
+        job_logger=job_logger,
+        _request_name=request_names.AdminPolicyRequestName.CLUSTER_EXEC,
     )

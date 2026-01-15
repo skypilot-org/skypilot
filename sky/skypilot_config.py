@@ -52,6 +52,7 @@ import contextlib
 import copy
 import json
 import os
+import pathlib
 import tempfile
 import threading
 import typing
@@ -63,7 +64,6 @@ from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext import declarative
-from sqlalchemy.pool import NullPool
 
 from sky import exceptions
 from sky import sky_logging
@@ -72,9 +72,11 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import context
-from sky.utils import db_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
+from sky.utils.db import db_utils
+from sky.utils.db import migration_utils
 from sky.utils.kubernetes import config_map_utils
 
 if typing.TYPE_CHECKING:
@@ -119,7 +121,8 @@ _PROJECT_CONFIG_PATH = '.sky.yaml'
 
 API_SERVER_CONFIG_KEY = 'api_server_config'
 
-_DB_USE_LOCK = threading.Lock()
+_SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
+_SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 Base = declarative.declarative_base()
 
@@ -225,7 +228,7 @@ def _get_config_from_path(path: Optional[str]) -> config_utils.Config:
     return parse_and_validate_config_file(path)
 
 
-def _resolve_user_config_path() -> Optional[str]:
+def resolve_user_config_path() -> Optional[str]:
     # find the user config file path, None if not resolved.
     user_config_path = _get_config_file_path(ENV_VAR_GLOBAL_CONFIG)
     if user_config_path:
@@ -250,7 +253,7 @@ def _resolve_user_config_path() -> Optional[str]:
 
 def get_user_config() -> config_utils.Config:
     """Returns the user config."""
-    return _get_config_from_path(_resolve_user_config_path())
+    return _get_config_from_path(resolve_user_config_path())
 
 
 def _resolve_project_config_path() -> Optional[str]:
@@ -333,6 +336,35 @@ def get_nested(keys: Tuple[str, ...],
         disallowed_override_keys=None)
 
 
+def get_effective_workspace_region_config(
+        cloud: str,
+        keys: Tuple[str, ...],
+        region: Optional[str] = None,
+        default_value: Optional[Any] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Any:
+    if workspace is None:
+        workspace = get_active_workspace()
+    workspaced_config_value = None
+    workspace_cloud_config = get_nested(keys=(
+        'workspaces',
+        workspace,
+    ),
+                                        default_value=None)
+    if workspace_cloud_config is not None:
+        workspaced_config_value = config_utils.get_cloud_config_value_from_dict(
+            dict_config=workspace_cloud_config,
+            cloud=cloud,
+            keys=keys,
+            region=region,
+            default_value=None,
+            override_configs=override_configs)
+    if workspaced_config_value is not None:
+        return workspaced_config_value
+    return get_effective_region_config(cloud, keys, region, default_value,
+                                       override_configs)
+
+
 def get_effective_region_config(
         cloud: str,
         keys: Tuple[str, ...],
@@ -413,10 +445,17 @@ def local_active_workspace_ctx(workspace: str) -> Iterator[None]:
 def get_active_workspace(force_user_workspace: bool = False) -> str:
     context_workspace = getattr(_active_workspace_context, 'workspace', None)
     if not force_user_workspace and context_workspace is not None:
-        logger.debug(f'Get context workspace: {context_workspace}')
+        logger.debug(f'Got context workspace: {context_workspace}')
         return context_workspace
-    return get_nested(keys=('active_workspace',),
-                      default_value=constants.SKYPILOT_DEFAULT_WORKSPACE)
+    active_workspace = get_nested(keys=('active_workspace',),
+                                  default_value=None)
+    if active_workspace is None:
+        logger.debug(f'No active workspace found, using default workspace: '
+                     f'{constants.SKYPILOT_DEFAULT_WORKSPACE}')
+        active_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
+    else:
+        logger.debug(f'Got active workspace: {active_workspace}')
+    return active_workspace
 
 
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
@@ -472,7 +511,7 @@ def safe_reload_config() -> None:
         reload_config()
 
 
-def reload_config() -> None:
+def reload_config(init_db: bool = False) -> None:
     internal_config_path = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if internal_config_path is not None:
         # {ENV_VAR_SKYPILOT_CONFIG} is used internally.
@@ -484,7 +523,7 @@ def reload_config() -> None:
         return
 
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        _reload_config_as_server()
+        _reload_config_as_server(init_db=init_db)
     else:
         _reload_config_as_client()
 
@@ -492,11 +531,17 @@ def reload_config() -> None:
 def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
     config = config_utils.Config()
     try:
-        config_dict = common_utils.read_yaml(config_path)
+        config_dict = yaml_utils.read_yaml(config_path)
         config = config_utils.Config.from_dict(config_dict)
+        # pop the db url from the config, and set it to the env var.
+        # this is to avoid db url (considered a sensitive value)
+        # being printed with the rest of the config.
+        db_url = config.pop_nested(('db',), None)
+        if db_url:
+            os.environ[constants.ENV_VAR_DB_CONNECTION_URI] = db_url
         if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
             logger.debug(f'Config loaded from {config_path}:\n'
-                         f'{common_utils.dump_yaml_str(dict(config))}')
+                         f'{yaml_utils.dump_yaml_str(dict(config))}')
     except yaml.YAMLError as e:
         logger.error(f'Error in loading config file ({config_path}):', e)
     if config:
@@ -507,10 +552,10 @@ def parse_and_validate_config_file(config_path: str) -> config_utils.Config:
 
 
 def _parse_dotlist(dotlist: List[str]) -> config_utils.Config:
-    """Parse a comma-separated list of key-value pairs into a dictionary.
+    """Parse a single key-value pair into a dictionary.
 
     Args:
-        dotlist: A comma-separated list of key-value pairs.
+        dotlist: A single key-value pair.
 
     Returns:
         A config_utils.Config object with the parsed key-value pairs.
@@ -525,7 +570,7 @@ def _parse_dotlist(dotlist: List[str]) -> config_utils.Config:
         if len(key) == 0 or len(value) == 0:
             raise ValueError(f'Invalid config override: {arg}. '
                              'Please use the format: key=value')
-        value = yaml.safe_load(value)
+        value = yaml_utils.safe_load(value)
         nested_keys = tuple(key.split('.'))
         config.set_nested(nested_keys, value)
     return config
@@ -549,54 +594,79 @@ def _reload_config_from_internal_file(internal_config_path: str) -> None:
     _set_loaded_config_path(config_path)
 
 
-def _reload_config_as_server() -> None:
+def _create_table(engine: sqlalchemy.engine.Engine):
+    """Initialize the config database with migrations."""
+    migration_utils.safe_alembic_upgrade(
+        engine, migration_utils.SKYPILOT_CONFIG_DB_NAME,
+        migration_utils.SKYPILOT_CONFIG_VERSION)
+
+
+def _initialize_and_get_db() -> sqlalchemy.engine.Engine:
+    """Initialize and return the config database engine.
+
+    This function should only be called by the API Server during initialization.
+    Client-side code should never call this function.
+    """
+    assert os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None, (
+        'initialize_and_get_db() can only be called by the API Server')
+
+    global _SQLALCHEMY_ENGINE
+
+    if _SQLALCHEMY_ENGINE is not None:
+        return _SQLALCHEMY_ENGINE
+
+    with _SQLALCHEMY_ENGINE_LOCK:
+        if _SQLALCHEMY_ENGINE is not None:
+            return _SQLALCHEMY_ENGINE
+
+        # We only store config in the DB when using Postgres,
+        # so no need to pass in db_name here.
+        engine = db_utils.get_engine(None)
+
+        # Run migrations if needed
+        _create_table(engine)
+
+        _SQLALCHEMY_ENGINE = engine
+        return _SQLALCHEMY_ENGINE
+
+
+def _reload_config_as_server(init_db: bool = False) -> None:
     # Reset the global variables, to avoid using stale values.
     _set_loaded_config(config_utils.Config())
     _set_loaded_config_path(None)
 
     server_config_path = _resolve_server_config_path()
-    db_url_from_env = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
     server_config = _get_config_from_path(server_config_path)
-    if db_url_from_env:
-        server_config.set_nested(('db',), db_url_from_env)
-
-    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-        logger.debug(f'server config: \n'
-                     f'{common_utils.dump_yaml_str(dict(server_config))}')
-
-    db_url = server_config.get_nested(('db',), None)
-    if db_url and len(server_config.keys()) > 1:
-        raise ValueError(
-            'if db config is specified, no other config is allowed')
+    # Get the db url from the env var. _get_config_from_path should have moved
+    # the db url specified in config file to the env var.
+    db_url = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
 
     if db_url:
-        with _DB_USE_LOCK:
-            sqlalchemy_engine = sqlalchemy.create_engine(db_url,
-                                                         poolclass=NullPool)
-            Base.metadata.create_all(bind=sqlalchemy_engine)
+        if len(server_config.keys()) > 1:
+            raise ValueError(
+                'If db config is specified, no other config is allowed')
+        logger.debug('retrieving config from database')
 
-            def _get_config_yaml_from_db(
-                    key: str) -> Optional[config_utils.Config]:
-                assert sqlalchemy_engine is not None
-                with orm.Session(sqlalchemy_engine) as session:
-                    row = session.query(config_yaml_table).filter_by(
-                        key=key).first()
-                if row:
-                    db_config = config_utils.Config(yaml.safe_load(row.value))
-                    db_config.pop_nested(('db',), None)
-                    return db_config
-                return None
+        if init_db:
+            _initialize_and_get_db()
 
-            db_config = _get_config_yaml_from_db(API_SERVER_CONFIG_KEY)
-            if db_config:
-                if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
-                    logger.debug(
-                        f'Config loaded from db:\n'
-                        f'{common_utils.dump_yaml_str(dict(db_config))}')
-                server_config = overlay_skypilot_config(server_config,
-                                                        db_config)
-            # Close the engine to avoid connection leaks
-            sqlalchemy_engine.dispose()
+        def _get_config_yaml_from_db(key: str) -> Optional[config_utils.Config]:
+            assert _SQLALCHEMY_ENGINE is not None
+            with orm.Session(_SQLALCHEMY_ENGINE) as session:
+                row = session.query(config_yaml_table).filter_by(
+                    key=key).first()
+            if row:
+                db_config = config_utils.Config(yaml_utils.safe_load(row.value))
+                db_config.pop_nested(('db',), None)
+                return db_config
+            return None
+
+        db_config = _get_config_yaml_from_db(API_SERVER_CONFIG_KEY)
+        if db_config:
+            server_config = overlay_skypilot_config(server_config, db_config)
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(f'server config: \n'
+                     f'{yaml_utils.dump_yaml_str(dict(server_config))}')
     _set_loaded_config(server_config)
     _set_loaded_config_path(server_config_path)
 
@@ -607,7 +677,7 @@ def _reload_config_as_client() -> None:
     _set_loaded_config_path(None)
 
     overrides: List[config_utils.Config] = []
-    user_config_path = _resolve_user_config_path()
+    user_config_path = resolve_user_config_path()
     user_config = _get_config_from_path(user_config_path)
     if user_config:
         overrides.append(user_config)
@@ -624,7 +694,7 @@ def _reload_config_as_client() -> None:
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
         logger.debug(
             f'client config (before task and CLI overrides): \n'
-            f'{common_utils.dump_yaml_str(dict(overlaid_client_config))}')
+            f'{yaml_utils.dump_yaml_str(dict(overlaid_client_config))}')
     _set_loaded_config(overlaid_client_config)
     _set_loaded_config_path([user_config_path, project_config_path])
 
@@ -649,7 +719,7 @@ def loaded_config_path_serialized() -> Optional[str]:
 
 
 # Load on import, synchronization is guaranteed by python interpreter.
-reload_config()
+reload_config(init_db=True)
 
 
 def loaded() -> bool:
@@ -679,6 +749,10 @@ def override_skypilot_config(
 
     disallowed_diff_keys = []
     for key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS:
+        if key == ('db',):
+            # since db key is popped out of server config, the key is expected
+            # to be different between client and server.
+            continue
         value = override_configs.pop_nested(key, default_value=None)
         if (value is not None and
                 value != original_config.get_nested(key, default_value=None)):
@@ -730,9 +804,9 @@ def override_skypilot_config(
                 'Failed to override the SkyPilot config on API '
                 'server with your local SkyPilot config:\n'
                 '=== SkyPilot config on API server ===\n'
-                f'{common_utils.dump_yaml_str(dict(original_config))}\n'
+                f'{yaml_utils.dump_yaml_str(dict(original_config))}\n'
                 '=== Your local SkyPilot config ===\n'
-                f'{common_utils.dump_yaml_str(dict(override_configs))}\n'
+                f'{yaml_utils.dump_yaml_str(dict(override_configs))}\n'
                 f'Details: {e}') from e
     finally:
         _set_loaded_config(original_config)
@@ -759,7 +833,7 @@ def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
                                          mode='w',
                                          prefix='mutated-skypilot-config-',
                                          suffix='.yaml') as temp_file:
-            common_utils.dump_yaml(temp_file.name, dict(**new_configs))
+            yaml_utils.dump_yaml(temp_file.name, dict(**new_configs))
         # Modify the env var of current process or context so that the
         # new config will be used by spawned sub-processes.
         # Note that this code modifies os.environ directly because it
@@ -778,11 +852,42 @@ def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
         yield
 
 
+@contextlib.contextmanager
+def remove_queue_name_from_config() -> Iterator[None]:
+    """Removes the local_queue_name from the config."""
+    config = to_dict()
+
+    def update_to_none_if_set(keys: Tuple[str, ...]) -> None:
+        if config.get_nested(keys, None) is not None:
+            logger.debug(f'removing local queue name: setting {keys} to None')
+            config.set_nested(keys, None)
+
+    def remove_from_context_configs(keys: Tuple[str, ...]) -> None:
+        for context_name, _ in config.get_nested((*keys, 'context_configs'),
+                                                 {}).items():
+            update_to_none_if_set((*keys, 'context_configs', context_name,
+                                   'kueue', 'local_queue_name'))
+
+    # remove from global config
+    update_to_none_if_set(('kubernetes', 'kueue', 'local_queue_name'))
+    remove_from_context_configs(('kubernetes',))
+    # remove from all workspaces configs
+    for workspace_name, _ in config.get_nested(('workspaces',), {}).items():
+        update_to_none_if_set(('workspaces', workspace_name, 'kubernetes',
+                               'kueue', 'local_queue_name'))
+        remove_from_context_configs(
+            ('workspaces', workspace_name, 'kubernetes'))
+    logger.debug(
+        f'config without local queue: {yaml_utils.dump_yaml_str(dict(config))}')
+    with replace_skypilot_config(config):
+        yield
+
+
 def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
     """Composes the skypilot CLI config.
     CLI config can either be:
     - A path to a config file
-    - A comma-separated list of key-value pairs
+    - A single key-value pair
     """
 
     if not cli_config:
@@ -798,13 +903,14 @@ def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
             config_source = maybe_config_path
             # cli_config is a path to a config file
             parsed_config = parse_and_validate_config_file(maybe_config_path)
-        else:  # cli_config is a comma-separated list of key-value pairs
+        else:  # cli_config is a single key-value pair
             parsed_config = _parse_dotlist(cli_config)
         _validate_config(parsed_config, config_source)
     except ValueError as e:
         raise ValueError(f'Invalid config override: {cli_config}. '
                          f'Check if config file exists or if the dotlist '
-                         f'is formatted as: key1=value1,key2=value2') from e
+                         f'is formatted as: key1=value1,key2=value2.\n'
+                         f'Details: {e}') from e
     logger.debug('CLI overrides config syntax check passed.')
 
     return parsed_config
@@ -823,7 +929,7 @@ def apply_cli_config(cli_config: Optional[List[str]]) -> Dict[str, Any]:
     parsed_config = _compose_cli_config(cli_config)
     if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
         logger.debug(f'applying following CLI overrides: \n'
-                     f'{common_utils.dump_yaml_str(dict(parsed_config))}')
+                     f'{yaml_utils.dump_yaml_str(dict(parsed_config))}')
     _set_loaded_config(
         overlay_skypilot_config(original_config=_get_loaded_config(),
                                 override_configs=parsed_config))
@@ -847,51 +953,47 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
 
     global_config_path = _resolve_server_config_path()
     if global_config_path is None:
-        global_config_path = get_user_config_path()
+        # Fallback to ~/.sky/config.yaml, and make sure it exists.
+        global_config_path = os.path.expanduser(get_user_config_path())
+        pathlib.Path(global_config_path).touch(exist_ok=True)
 
     db_updated = False
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        existing_db_url = get_nested(('db',), None)
+        existing_db_url = os.environ.get(constants.ENV_VAR_DB_CONNECTION_URI)
+        new_db_url = config.pop_nested(('db',), None)
+        if new_db_url and new_db_url != existing_db_url:
+            raise ValueError('Cannot change db url while server is running')
         if existing_db_url:
-            new_db_url = config.get_nested(('db',), None)
-            if new_db_url and new_db_url != existing_db_url:
-                raise ValueError('Cannot change db url while server is running')
-            with _DB_USE_LOCK:
-                sqlalchemy_engine = sqlalchemy.create_engine(existing_db_url,
-                                                             poolclass=NullPool)
-                Base.metadata.create_all(bind=sqlalchemy_engine)
 
-                def _set_config_yaml_to_db(key: str,
-                                           config: config_utils.Config):
-                    assert sqlalchemy_engine is not None
-                    config.pop_nested(('db',), None)
-                    config_str = common_utils.dump_yaml_str(dict(config))
-                    with orm.Session(sqlalchemy_engine) as session:
-                        if (sqlalchemy_engine.dialect.name ==
-                                db_utils.SQLAlchemyDialect.SQLITE.value):
-                            insert_func = sqlite.insert
-                        elif (sqlalchemy_engine.dialect.name ==
-                              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
-                            insert_func = postgresql.insert
-                        else:
-                            raise ValueError('Unsupported database dialect')
-                        insert_stmnt = insert_func(config_yaml_table).values(
-                            key=key, value=config_str)
-                        do_update_stmt = insert_stmnt.on_conflict_do_update(
-                            index_elements=[config_yaml_table.c.key],
-                            set_={config_yaml_table.c.value: config_str})
-                        session.execute(do_update_stmt)
-                        session.commit()
+            def _set_config_yaml_to_db(key: str, config: config_utils.Config):
+                # reload_config(init_db=True) is called when this module is
+                # imported, so the database engine must already be initialized.
+                assert _SQLALCHEMY_ENGINE is not None
+                config_str = yaml_utils.dump_yaml_str(dict(config))
+                with orm.Session(_SQLALCHEMY_ENGINE) as session:
+                    if (_SQLALCHEMY_ENGINE.dialect.name ==
+                            db_utils.SQLAlchemyDialect.SQLITE.value):
+                        insert_func = sqlite.insert
+                    elif (_SQLALCHEMY_ENGINE.dialect.name ==
+                          db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+                        insert_func = postgresql.insert
+                    else:
+                        raise ValueError('Unsupported database dialect')
+                    insert_stmnt = insert_func(config_yaml_table).values(
+                        key=key, value=config_str)
+                    do_update_stmt = insert_stmnt.on_conflict_do_update(
+                        index_elements=[config_yaml_table.c.key],
+                        set_={config_yaml_table.c.value: config_str})
+                    session.execute(do_update_stmt)
+                    session.commit()
 
-                logger.debug('saving api_server config to db')
-                _set_config_yaml_to_db(API_SERVER_CONFIG_KEY, config)
-                db_updated = True
-                # Close the engine to avoid connection leaks
-                sqlalchemy_engine.dispose()
+            logger.debug('saving api_server config to db')
+            _set_config_yaml_to_db(API_SERVER_CONFIG_KEY, config)
+            db_updated = True
 
     if not db_updated:
         # save to the local file (PVC in Kubernetes, local file otherwise)
-        common_utils.dump_yaml(global_config_path, dict(config))
+        yaml_utils.dump_yaml(global_config_path, dict(config))
 
         if config_map_utils.is_running_in_kubernetes():
             # In Kubernetes, sync the PVC config to ConfigMap for user

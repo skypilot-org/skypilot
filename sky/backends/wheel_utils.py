@@ -16,6 +16,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from typing import Optional, Tuple
 
@@ -27,13 +28,14 @@ import sky
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.server import common
+from sky.utils import directory_utils
 
 logger = sky_logging.init_logger(__name__)
 
 # Local wheel path is same as the remote path.
 WHEEL_DIR = pathlib.Path(os.path.expanduser(backend_utils.SKY_REMOTE_PATH))
 _WHEEL_LOCK_PATH = WHEEL_DIR.parent / '.wheels_lock'
-SKY_PACKAGE_PATH = pathlib.Path(sky.__file__).parent.parent / 'sky'
+SKY_PACKAGE_PATH = pathlib.Path(directory_utils.get_sky_dir())
 
 # NOTE: keep the same as setup.py's setuptools.setup(name=..., ...).
 _PACKAGE_WHEEL_NAME = 'skypilot'
@@ -98,6 +100,13 @@ def _build_sky_wheel() -> pathlib.Path:
                 # modify the commit hash in the file later.
                 # Symlink other files/folders.
                 target.symlink_to(item, target_is_directory=item.is_dir())
+
+        # Symlink sky_templates directory from repo root
+        sky_templates_src = SKY_PACKAGE_PATH.parent / 'sky_templates'
+        if sky_templates_src.exists():
+            sky_templates_target = tmp_dir / 'sky_templates'
+            sky_templates_target.symlink_to(sky_templates_src,
+                                            target_is_directory=True)
         setup_files_dir = SKY_PACKAGE_PATH / 'setup_files'
 
         setup_content = (setup_files_dir / 'setup.py').read_text()
@@ -132,19 +141,45 @@ def _build_sky_wheel() -> pathlib.Path:
         # It is important to normalize the path, otherwise 'pip wheel' would
         # treat the directory as a file and generate an empty wheel.
         norm_path = str(tmp_dir) + os.sep
+        # TODO(#5046): Consider adding native UV support for building wheels.
+        # Use `python -m pip` instead of `pip3` for better compatibility across
+        # different environments (conda, venv, UV, system Python, etc.)
         try:
-            # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture
-            # of the output.
             subprocess.run([
-                'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
+                sys.executable, '-m', 'pip', 'wheel', '--no-deps', norm_path,
+                '--wheel-dir',
                 str(tmp_dir)
             ],
-                           stdout=subprocess.DEVNULL,
-                           stderr=subprocess.PIPE,
-                           check=True)
+                           capture_output=True,
+                           check=True,
+                           text=True)
         except subprocess.CalledProcessError as e:
-            raise RuntimeError('Failed to build pip wheel for SkyPilot. '
-                               f'Error message: {e.stderr.decode()}') from e
+            error_msg = e.stderr
+            if 'No module named pip' in error_msg:
+                # pip module not found - provide helpful suggestions based on
+                # the available package managers
+                if shutil.which('uv'):
+                    msg = ('pip module not found. Since you have UV installed, '
+                           'you can install pip by running:\n'
+                           '  uv pip install pip')
+                elif shutil.which('conda'):
+                    msg = (
+                        'pip module not found. Since you have conda installed, '
+                        'you can install pip by running:\n'
+                        '  conda install pip')
+                else:
+                    msg = ('pip module not found. Please install pip for your '
+                           f'Python environment ({sys.executable}).')
+            else:
+                # Other pip errors
+                msg = f'pip wheel command failed. Error: {error_msg}'
+            raise RuntimeError('Failed to build pip wheel for SkyPilot.\n' +
+                               msg) from e
+        except FileNotFoundError as e:
+            # Python executable not found (extremely rare)
+            raise RuntimeError(
+                f'Failed to build pip wheel for SkyPilot. '
+                f'Python executable not found: {sys.executable}') from e
 
         try:
             wheel_path = next(tmp_dir.glob(_WHEEL_PATTERN))
@@ -216,6 +251,17 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         # protocol. "compare, update and clone" has to be atomic to avoid
         # race conditions.
         last_modification_time = _get_latest_modification_time(SKY_PACKAGE_PATH)
+        # Also check sky_templates directory modification time
+        sky_templates_path = SKY_PACKAGE_PATH.parent / 'sky_templates'
+        if sky_templates_path.exists():
+            sky_templates_mtime = _get_latest_modification_time(
+                sky_templates_path)
+            if (last_modification_time is not None and
+                    sky_templates_mtime is not None):
+                last_modification_time = max(last_modification_time,
+                                             sky_templates_mtime)
+            elif last_modification_time is None:
+                last_modification_time = sky_templates_mtime
         last_wheel_modification_time = _get_latest_modification_time(WHEEL_DIR)
 
         # Only build wheels if the wheel is outdated, wheel does not exist

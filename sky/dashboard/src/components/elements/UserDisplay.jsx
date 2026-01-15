@@ -26,7 +26,7 @@ export const UserDisplay = ({
   username,
   userHash,
   className = 'flex items-center gap-1',
-  linkClassName = 'text-blue-600 hover:underline',
+  linkClassName = 'text-gray-700 hover:text-blue-600 hover:underline',
   showBadge = true,
 }) => {
   const isServiceAcc = isServiceAccount(userHash);

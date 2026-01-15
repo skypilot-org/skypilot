@@ -1,5 +1,5 @@
-Welcome to SkyPilot!
-====================
+SkyPilot: Run AI on Any Infrastructure
+======================================
 
 
 .. raw:: html
@@ -15,6 +15,6 @@ Welcome to SkyPilot!
    :hidden:
 
    Docs <docs/index>
+   Case Studies <https://blog.skypilot.co/case-studies/>
    Blog <https://blog.skypilot.co/>
-   Community <https://blog.skypilot.co/community/>
 

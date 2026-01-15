@@ -34,7 +34,7 @@ import {
 } from '@/components/ui/dialog';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import Link from 'next/link';
-import { TimestampWithTooltip } from '@/components/utils';
+import { TimestampWithTooltip, LastUpdatedTimestamp } from '@/components/utils';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
@@ -49,12 +49,22 @@ export function Volumes() {
   const [volumeToDelete, setVolumeToDelete] = useState(null);
   const [deleteError, setDeleteError] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [preloadingComplete, setPreloadingComplete] = useState(false);
+  const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
   const handleRefresh = () => {
     dashboardCache.invalidate(getVolumes);
-    if (refreshDataRef.current) {
-      refreshDataRef.current();
-    }
+    // Reset preloading state so VolumesTable can fetch fresh data immediately
+    setPreloadingComplete(false);
+    // Trigger a new preload cycle
+    cachePreloader.preloadForPage('volumes', { force: true }).then(() => {
+      setPreloadingComplete(true);
+      setLastFetchedTime(new Date());
+      // Call refresh after preloading is complete
+      if (refreshDataRef.current) {
+        refreshDataRef.current();
+      }
+    });
   };
 
   const handleDeleteVolumeClick = (volume) => {
@@ -91,7 +101,19 @@ export function Volumes() {
   };
 
   useEffect(() => {
-    cachePreloader.preloadForPage('volumes');
+    const preloadData = async () => {
+      try {
+        // Await cache preloading for volumes page
+        await cachePreloader.preloadForPage('volumes');
+      } catch (error) {
+        console.error('Error preloading volumes data:', error);
+      } finally {
+        // Signal completion even on error so the table can load
+        setPreloadingComplete(true);
+        setLastFetchedTime(new Date());
+      }
+    };
+    preloadData();
   }, []);
 
   return (
@@ -105,12 +127,15 @@ export function Volumes() {
             Volumes
           </Link>
         </div>
-        <div className="flex items-center">
+        <div className="flex items-center gap-3">
           {loading && (
-            <div className="flex items-center mr-2">
+            <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
               <span className="ml-2 text-gray-500 text-sm">Loading...</span>
             </div>
+          )}
+          {!loading && lastFetchedTime && (
+            <LastUpdatedTimestamp timestamp={lastFetchedTime} />
           )}
           <button
             onClick={handleRefresh}
@@ -129,6 +154,7 @@ export function Volumes() {
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
         onDeleteVolume={handleDeleteVolumeClick}
+        preloadingComplete={preloadingComplete}
       />
 
       {/* Delete Confirmation Dialog */}
@@ -176,6 +202,7 @@ function VolumesTable({
   setLoading,
   refreshDataRef,
   onDeleteVolume,
+  preloadingComplete,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -219,19 +246,26 @@ function VolumesTable({
     setData([]);
     let isCurrent = true;
 
-    fetchData();
+    // Only start fetching data after preloading is complete
+    if (preloadingComplete) {
+      fetchData();
 
-    const interval = setInterval(() => {
-      if (isCurrent) {
-        fetchData();
-      }
-    }, refreshInterval);
+      const interval = setInterval(() => {
+        if (isCurrent && window.document.visibilityState === 'visible') {
+          fetchData();
+        }
+      }, refreshInterval);
+
+      return () => {
+        isCurrent = false;
+        clearInterval(interval);
+      };
+    }
 
     return () => {
       isCurrent = false;
-      clearInterval(interval);
     };
-  }, [refreshInterval, fetchData]);
+  }, [refreshInterval, fetchData, preloadingComplete]);
 
   // Reset to first page when data changes
   useEffect(() => {
@@ -292,118 +326,120 @@ function VolumesTable({
   return (
     <div>
       <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('name')}
-              >
-                Name{getSortDirection('name')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('infra')}
-              >
-                Infra{getSortDirection('infra')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('status')}
-              >
-                Status{getSortDirection('status')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('size')}
-              >
-                Size{getSortDirection('size')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('user_name')}
-              >
-                User{getSortDirection('user_name')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('last_attached_at')}
-              >
-                Last Use{getSortDirection('last_attached_at')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('type')}
-              >
-                Type{getSortDirection('type')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                onClick={() => requestSort('usedby_clusters')}
-              >
-                Used By{getSortDirection('usedby_clusters')}
-              </TableHead>
-              <TableHead>Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading && isInitialLoad ? (
+        <div className="overflow-x-auto rounded-lg">
+          <Table className="min-w-full">
+            <TableHeader>
               <TableRow>
-                <TableCell
-                  colSpan={11}
-                  className="text-center py-6 text-gray-500"
+                <TableHead
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  onClick={() => requestSort('name')}
                 >
-                  <div className="flex justify-center items-center">
-                    <CircularProgress size={20} className="mr-2" />
-                    <span>Loading...</span>
-                  </div>
-                </TableCell>
+                  Name{getSortDirection('name')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  onClick={() => requestSort('infra')}
+                >
+                  Infra{getSortDirection('infra')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  onClick={() => requestSort('status')}
+                >
+                  Status{getSortDirection('status')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  onClick={() => requestSort('size')}
+                >
+                  Size{getSortDirection('size')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  onClick={() => requestSort('user_name')}
+                >
+                  User{getSortDirection('user_name')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  onClick={() => requestSort('last_attached_at')}
+                >
+                  Last Use{getSortDirection('last_attached_at')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  onClick={() => requestSort('type')}
+                >
+                  Type{getSortDirection('type')}
+                </TableHead>
+                <TableHead
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  onClick={() => requestSort('usedby_clusters')}
+                >
+                  Used By{getSortDirection('usedby_clusters')}
+                </TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
-            ) : paginatedData.length > 0 ? (
-              paginatedData.map((volume) => (
-                <TableRow key={volume.name}>
-                  <TableCell className="font-medium">{volume.name}</TableCell>
-                  <TableCell>{volume.infra || 'N/A'}</TableCell>
-                  <TableCell>
-                    <StatusBadge status={volume.status} />
-                  </TableCell>
-                  <TableCell>{formatSize(volume.size)}</TableCell>
-                  <TableCell>{volume.user_name || 'N/A'}</TableCell>
-                  <TableCell>
-                    {formatTimestamp(volume.last_attached_at)}
-                  </TableCell>
-                  <TableCell>{volume.type || 'N/A'}</TableCell>
-                  <TableCell>
-                    <UsedByCell
-                      clusters={volume.usedby_clusters}
-                      pods={volume.usedby_pods}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => onDeleteVolume(volume)}
-                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                      title="Delete volume"
-                    >
-                      <Trash2Icon className="w-4 h-4" />
-                    </Button>
+            </TableHeader>
+            <TableBody>
+              {loading || !preloadingComplete ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={11}
+                    className="text-center py-6 text-gray-500"
+                  >
+                    <div className="flex justify-center items-center">
+                      <CircularProgress size={20} className="mr-2" />
+                      <span>Loading...</span>
+                    </div>
                   </TableCell>
                 </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={11}
-                  className="text-center py-6 text-gray-500"
-                >
-                  No volumes found
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+              ) : paginatedData.length > 0 ? (
+                paginatedData.map((volume) => (
+                  <TableRow key={volume.name}>
+                    <TableCell className="font-medium">{volume.name}</TableCell>
+                    <TableCell>{volume.infra || 'N/A'}</TableCell>
+                    <TableCell>
+                      <StatusBadge status={volume.status} />
+                    </TableCell>
+                    <TableCell>{formatSize(volume.size)}</TableCell>
+                    <TableCell>{volume.user_name || 'N/A'}</TableCell>
+                    <TableCell>
+                      {formatTimestamp(volume.last_attached_at)}
+                    </TableCell>
+                    <TableCell>{volume.type || 'N/A'}</TableCell>
+                    <TableCell>
+                      <UsedByCell
+                        clusters={volume.usedby_clusters}
+                        pods={volume.usedby_pods}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onDeleteVolume(volume)}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        title="Delete volume"
+                      >
+                        <Trash2Icon className="w-4 h-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell
+                    colSpan={11}
+                    className="text-center py-6 text-gray-500"
+                  >
+                    No volumes found
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </Card>
 
       {/* Pagination controls */}
@@ -587,4 +623,5 @@ VolumesTable.propTypes = {
     current: PropTypes.func,
   }).isRequired,
   onDeleteVolume: PropTypes.func.isRequired,
+  preloadingComplete: PropTypes.bool.isRequired,
 };

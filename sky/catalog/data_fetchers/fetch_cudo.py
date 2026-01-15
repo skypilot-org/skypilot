@@ -9,7 +9,7 @@ import os
 
 import cudo_compute
 
-import sky.provision.cudo.cudo_utils as utils
+from sky.provision.cudo import cudo_utils as utils
 
 VMS_CSV = 'cudo/vms.csv'
 

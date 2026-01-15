@@ -3,6 +3,7 @@
 Kubernetes does not require a catalog of instances, but we need an image catalog
 mapping SkyPilot image tags to corresponding container image tags.
 """
+import collections
 import re
 import typing
 from typing import Dict, List, Optional, Set, Tuple
@@ -167,12 +168,25 @@ def _list_accelerators(
     accelerators_qtys: Set[Tuple[str, int]] = set()
     keys = lf.get_label_keys()
     nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
-    pods = None
-    if realtime:
-        # Get the pods to get the real-time GPU usage
+
+    # Check if any nodes have accelerators before fetching pods
+    has_accelerator_nodes = False
+    for node in nodes:
+        for key in keys:
+            if key in node.metadata.labels:
+                has_accelerator_nodes = True
+                break
+        if has_accelerator_nodes:
+            break
+
+    # Only fetch pods if we have accelerator nodes and realtime is requested
+    allocated_qty_by_node: Dict[str, int] = collections.defaultdict(int)
+    error_on_get_allocated_gpu_qty_by_node = False
+    if realtime and has_accelerator_nodes:
+        # Get the allocated GPU quantity by each node
         try:
-            pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(
-                context=context)
+            allocated_qty_by_node = (
+                kubernetes_utils.get_allocated_gpu_qty_by_node(context=context))
         except kubernetes.api_exception() as e:
             if e.status == 403:
                 logger.warning(
@@ -180,6 +194,7 @@ def _list_accelerators(
                     '(forbidden). Please check if your account has '
                     'necessary permissions to list pods. Realtime GPU '
                     'availability information may be incorrect.')
+                error_on_get_allocated_gpu_qty_by_node = True
             else:
                 raise
     # Total number of GPUs in the cluster
@@ -189,11 +204,17 @@ def _list_accelerators(
     min_quantity_filter = quantity_filter if quantity_filter else 1
 
     for node in nodes:
+        # Check if node is ready
+        node_is_ready = node.is_ready()
+
         for key in keys:
             if key in node.metadata.labels:
-                allocated_qty = 0
                 accelerator_name = lf.get_accelerator_from_label_value(
                     node.metadata.labels.get(key))
+
+                # Heterogenous cluster may have some nodes with empty labels.
+                if not accelerator_name:
+                    continue
 
                 # Exclude multi-host TPUs from being processed.
                 # TODO(Doyoung): Remove the logic when adding support for
@@ -210,9 +231,9 @@ def _list_accelerators(
                 # Generate the accelerator quantities
                 accelerator_count = (
                     kubernetes_utils.get_node_accelerator_count(
-                        node.status.allocatable))
+                        context, node.status.allocatable))
 
-                if accelerator_name and accelerator_count > 0:
+                if accelerator_count > 0:
                     # TPUs are counted in a different way compared to GPUs.
                     # Multi-node GPUs can be split into smaller units and be
                     # provisioned, but TPUs are considered as an atomic unit.
@@ -242,28 +263,23 @@ def _list_accelerators(
                         total_accelerators_capacity[
                             accelerator_name] += quantized_count
 
-                if pods is None:
-                    # If we can't get the pods, we can't get the GPU usage
-                    total_accelerators_available[accelerator_name] = -1
-                    continue
-
-                for pod in pods:
-                    # Get all the pods running on the node
-                    if (pod.spec.node_name == node.metadata.name and
-                            pod.status.phase in ['Running', 'Pending']):
-                        # Iterate over all the containers in the pod and sum
-                        # the GPU requests
-                        for container in pod.spec.containers:
-                            if container.resources.requests:
-                                allocated_qty += (
-                                    kubernetes_utils.get_node_accelerator_count(
-                                        container.resources.requests))
-
-                accelerators_available = accelerator_count - allocated_qty
                 # Initialize the total_accelerators_available to make sure the
                 # key exists in the dictionary.
                 total_accelerators_available[accelerator_name] = (
                     total_accelerators_available.get(accelerator_name, 0))
+
+                # Skip availability counting for not-ready nodes
+                if not node_is_ready:
+                    continue
+
+                if error_on_get_allocated_gpu_qty_by_node:
+                    # If we can't get the allocated GPU quantity by each node,
+                    # we can't get the GPU usage.
+                    total_accelerators_available[accelerator_name] = -1
+                    continue
+
+                allocated_qty = allocated_qty_by_node[node.metadata.name]
+                accelerators_available = accelerator_count - allocated_qty
 
                 if accelerators_available >= min_quantity_filter:
                     quantized_availability = min_quantity_filter * (

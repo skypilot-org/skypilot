@@ -1,5 +1,6 @@
 import tempfile
 import textwrap
+import traceback
 
 import click
 from click import testing as cli_testing
@@ -14,7 +15,7 @@ from sky import global_user_state
 from sky.client.cli import command
 from sky.utils import common
 from sky.utils import controller_utils
-from sky.utils import db_utils
+from sky.utils.db import db_utils
 
 
 def test_job_nonexist_strategy():
@@ -46,7 +47,7 @@ def _mock_db_conn(tmp_path, monkeypatch):
     monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE',
                         sqlalchemy_engine)
 
-    global_user_state.create_table()
+    global_user_state.create_table(sqlalchemy_engine)
 
 
 def _generate_tmp_yaml(tmp_path, filename: str) -> str:
@@ -258,7 +259,13 @@ class TestJobsOperations:
             result.output)
 
     def test_down_jobs_controller_no_job(self, mock_job_table_no_job,
-                                         mock_client_requests):
+                                         mock_client_requests,
+                                         mock_services_no_service_grpc):
+        # TODO (kyuds): after migrating to grpc for jobs, prob better to use
+        # a new monkeypatch. This is reusing.
+        # A lot of monkeypatch allows tests to be simulated via a bunch of
+        # side-effects (like this, mock_job_table_no_job) also "patches"
+        # sky serve cluster queries.
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.down, [common.JOB_CONTROLLER_NAME],
                                    input='n')
@@ -267,13 +274,14 @@ class TestJobsOperations:
         assert isinstance(result.exception,
                           SystemExit), (result.exception, result.output)
 
-    def test_down_jobs_controller_one_job(self):
+    def test_down_jobs_controller_one_job(self, mock_services_no_service_grpc):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.down, [common.JOB_CONTROLLER_NAME],
                                    input='n')
         assert 'WARNING: Tearing down the managed jobs controller.' in result.output, (
             result.exception, result.output, result.exc_info)
-        assert isinstance(result.exception, exceptions.NotSupportedError)
+        assert isinstance(result.exception, exceptions.NotSupportedError), (
+            f'{traceback.format_tb(result.exception.__traceback__)}')
 
         result = cli_runner.invoke(command.down, ['sky-jobs-con*'])
         assert not result.exception
@@ -344,7 +352,8 @@ class TestServeOperations:
             result.output)
 
     def test_down_serve_controller_one_service(self, mock_controller_accessible,
-                                               mock_services_one_service):
+                                               mock_services_one_service,
+                                               mock_services_one_service_grpc):
         cli_runner = cli_testing.CliRunner()
 
         result = cli_runner.invoke(command.down,
@@ -369,7 +378,8 @@ class TestServeOperations:
         assert 'Aborted' in result.output
 
     def test_down_serve_controller_no_service(self, mock_controller_accessible,
-                                              mock_services_no_service):
+                                              mock_services_no_service,
+                                              mock_services_no_service_grpc):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.down,
                                    [common.SKY_SERVE_CONTROLLER_NAME],

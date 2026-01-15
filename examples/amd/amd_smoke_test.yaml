@@ -1,0 +1,12 @@
+name: amd-smoke-test
+
+resources:
+  cloud: kubernetes
+  image_id: docker:rocm/pytorch-training:v25.6
+  accelerators: MI300:1
+
+run: |
+  which rocm-smi
+  echo 'export PATH=$PATH:/opt/rocm/bin' >> ~/.bashrc
+  source ~/.bashrc
+  rocm-smi

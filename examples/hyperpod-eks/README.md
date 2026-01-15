@@ -99,7 +99,7 @@ sky jobs queue
 Or, find the jobs in a dashboard:
 
 ```bash
-sky jobs dashboard
+sky dashboard
 ```
 
 

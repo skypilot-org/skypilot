@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Layout } from '@/components/elements/layout';
 import { Card } from '@/components/ui/card';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -7,15 +6,22 @@ import { useClusterDetails } from '@/data/connectors/clusters';
 import {
   CustomTooltip as Tooltip,
   formatFullTimestamp,
+  LogFilter,
 } from '@/components/utils';
-import { RotateCwIcon } from 'lucide-react';
+import { RotateCwIcon, Download } from 'lucide-react';
 import { CircularProgress } from '@mui/material';
-import { streamClusterJobLogs } from '@/data/connectors/clusters';
+import {
+  streamClusterJobLogs,
+  downloadJobLogs,
+} from '@/data/connectors/clusters';
 import { StatusBadge } from '@/components/elements/StatusBadge';
-import { LogFilter, formatLogs } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { UserDisplay } from '@/components/elements/UserDisplay';
+import { CheckIcon, CopyIcon } from 'lucide-react';
+import PropTypes from 'prop-types';
+import { useLogStreamer } from '@/hooks/useLogStreamer';
+import { useCallback } from 'react';
 
 // Custom header component with buttons inline
 function JobHeader({
@@ -79,9 +85,8 @@ export function JobDetailPage() {
     useClusterDetails({ cluster });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
-  const [logs, setLogs] = useState([]);
-  const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+  const [logsRefreshToken, setLogsRefreshToken] = useState(0);
 
   const PENDING_STATUSES = useMemo(() => ['INIT', 'PENDING', 'SETTING_UP'], []);
 
@@ -92,62 +97,41 @@ export function JobDetailPage() {
   }, [clusterJobData, job, PENDING_STATUSES]);
 
   // Update isInitialLoad when data is first loaded
-  React.useEffect(() => {
+  useEffect(() => {
     if (!loading && isInitialLoad) {
       setIsInitialLoad(false);
     }
   }, [loading, isInitialLoad]);
 
-  const handleRefreshLogs = () => {
-    setIsRefreshingLogs((prev) => !prev);
-    setLogs([]);
-  };
-
-  useEffect(() => {
-    let active = true;
-
-    if (!cluster || !job || isPending) {
-      setIsLoadingLogs(false);
-      return () => {
-        active = false;
-      };
-    }
-
-    setIsLoadingLogs(true);
-
-    streamClusterJobLogs({
+  const logStreamArgs = useMemo(
+    () => ({
       clusterName: cluster,
       jobId: job,
-      onNewLog: (log) => {
-        if (active) {
-          const strippedLog = formatLogs(log);
-          setLogs((prevLogs) => [...prevLogs, strippedLog]);
-        }
-      },
       workspace: clusterData?.workspace,
-    })
-      .then(() => {
-        if (active) {
-          setIsLoadingLogs(false);
-        }
-      })
-      .catch((error) => {
-        if (active) {
-          console.error('Error streaming logs:', error);
-          setIsLoadingLogs(false);
-        }
-      });
+    }),
+    [cluster, job, clusterData?.workspace]
+  );
 
-    return () => {
-      active = false;
-    };
-  }, [cluster, job, isRefreshingLogs, isPending, clusterData]);
+  const handleStreamError = useCallback((error) => {
+    console.error('Error streaming cluster logs:', error);
+  }, []);
+
+  const { lines: displayLines, isLoading: isLoadingLogs } = useLogStreamer({
+    streamFn: streamClusterJobLogs,
+    streamArgs: logStreamArgs,
+    enabled: Boolean(cluster && job) && !isPending,
+    refreshTrigger: logsRefreshToken,
+    onError: handleStreamError,
+  });
+
+  const handleRefreshLogs = () => {
+    setLogsRefreshToken((token) => token + 1);
+  };
 
   // Handle manual refresh
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
-    setIsRefreshingLogs((prev) => !prev);
-    setLogs([]);
+    setLogsRefreshToken((token) => token + 1);
     try {
       if (refreshData) {
         await refreshData();
@@ -281,6 +265,41 @@ export function JobDetailPage() {
                         </div>
                       </div>
                     )}
+                    <div>
+                      <div className="text-gray-600 font-medium text-base">
+                        Git Commit
+                      </div>
+                      <div className="text-base mt-1 flex items-center">
+                        {jobData.git_commit && jobData.git_commit !== '-' ? (
+                          <span className="flex items-center mr-2">
+                            {jobData.git_commit}
+                            <Tooltip
+                              content={isCopied ? 'Copied!' : 'Copy commit'}
+                              className="text-muted-foreground"
+                            >
+                              <button
+                                onClick={async () => {
+                                  await navigator.clipboard.writeText(
+                                    jobData.git_commit
+                                  );
+                                  setIsCopied(true);
+                                  setTimeout(() => setIsCopied(false), 2000);
+                                }}
+                                className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                              >
+                                {isCopied ? (
+                                  <CheckIcon className="w-4 h-4 text-green-600" />
+                                ) : (
+                                  <CopyIcon className="w-4 h-4" />
+                                )}
+                              </button>
+                            </Tooltip>
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </Card>
@@ -297,20 +316,39 @@ export function JobDetailPage() {
                       logs.)
                     </span>
                   </div>
-                  <Tooltip
-                    content="Refresh logs"
-                    className="text-muted-foreground"
-                  >
-                    <button
-                      onClick={handleRefreshLogs}
-                      disabled={isLoadingLogs}
-                      className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                  <div className="flex items-center space-x-3">
+                    <Tooltip
+                      content="Download full logs"
+                      className="text-muted-foreground"
                     >
-                      <RotateCwIcon
-                        className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
-                      />
-                    </button>
-                  </Tooltip>
+                      <button
+                        onClick={() =>
+                          downloadJobLogs({
+                            clusterName: cluster,
+                            jobIds: job ? [job] : null,
+                            workspace: clusterData?.workspace,
+                          })
+                        }
+                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip
+                      content="Refresh logs"
+                      className="text-muted-foreground"
+                    >
+                      <button
+                        onClick={handleRefreshLogs}
+                        disabled={isLoadingLogs}
+                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                      >
+                        <RotateCwIcon
+                          className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
+                        />
+                      </button>
+                    </Tooltip>
+                  </div>
                 </div>
                 <div className="p-4">
                   {isPending ? (
@@ -326,7 +364,7 @@ export function JobDetailPage() {
                     </div>
                   ) : (
                     <div className="max-h-96 overflow-y-auto">
-                      <LogFilter logs={logs.join('')} />
+                      <LogFilter logs={displayLines} />
                     </div>
                   )}
                 </div>
@@ -338,5 +376,16 @@ export function JobDetailPage() {
     </>
   );
 }
+
+JobHeader.propTypes = {
+  cluster: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  job: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  jobData: PropTypes.shape({
+    job: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  }),
+  onRefresh: PropTypes.func,
+  isRefreshing: PropTypes.bool,
+  loading: PropTypes.bool,
+};
 
 export default JobDetailPage;

@@ -18,15 +18,19 @@ from sky import exceptions
 from sky import global_user_state
 from sky import logs
 from sky import provision
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
 from sky.backends import backend_utils
+from sky.jobs.server import utils as server_jobs_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
+from sky.provision import volume as provision_volume
 from sky.skylet import constants
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import message_utils
 from sky.utils import resources_utils
@@ -56,6 +60,11 @@ def _bulk_provision(
     region_name = region.name
 
     start = time.time()
+
+    provision_volume.provision_ephemeral_volumes(cloud, region_name,
+                                                 cluster_name.name_on_cloud,
+                                                 bootstrap_config)
+
     # TODO(suquark): Should we cache the bootstrapped result?
     #  Currently it is not necessary as bootstrapping takes
     #  only ~3s, caching it seems over-engineering and could
@@ -67,6 +76,7 @@ def _bulk_provision(
 
     provision_record = provision.run_instances(provider_name,
                                                region_name,
+                                               str(cluster_name),
                                                cluster_name.name_on_cloud,
                                                config=config)
 
@@ -74,7 +84,8 @@ def _bulk_provision(
     logger.debug(f'\nWaiting for instances of {cluster_name!r} to be ready...')
     rich_utils.force_update_status(
         ux_utils.spinner_message('Launching - Checking instance status',
-                                 str(provision_logging.config.log_path)))
+                                 str(provision_logging.config.log_path),
+                                 cluster_name=str(cluster_name)))
     # AWS would take a very short time (<<1s) updating the state of the
     # instance.
     time.sleep(1)
@@ -97,6 +108,12 @@ def _bulk_provision(
     logger.debug(
         f'\nProvisioning {cluster_name!r} took {time.time() - start:.2f} '
         f'seconds.')
+
+    # Add cluster event for provisioning completion.
+    global_user_state.add_cluster_event(
+        str(cluster_name), status_lib.ClusterStatus.INIT,
+        f'Instances launched on {cloud.display_name()} in {region}',
+        global_user_state.ClusterEventType.STATUS_CHANGE)
 
     return provision_record
 
@@ -140,9 +157,9 @@ def bulk_provision(
             logger.debug(f'SkyPilot version: {sky.__version__}; '
                          f'commit: {sky.__commit__}')
             logger.debug(_TITLE.format('Provisioning'))
-            logger.debug(
-                'Provision config:\n'
-                f'{json.dumps(dataclasses.asdict(bootstrap_config), indent=2)}')
+            redacted_config = bootstrap_config.get_redacted_config()
+            logger.debug('Provision config:\n'
+                         f'{json.dumps(redacted_config, indent=2)}')
             return _bulk_provision(cloud, region, cluster_name,
                                    bootstrap_config)
         except exceptions.NoClusterLaunchedError:
@@ -158,7 +175,7 @@ def bulk_provision(
             # This error is a user error instead of a provisioning failure.
             # And there is no possibility to fix it by teardown.
             raise
-        except Exception:  # pylint: disable=broad-except
+        except Exception as exc:  # pylint: disable=broad-except
             zone_str = 'all zones'
             if zones:
                 zone_str = ','.join(zone.name for zone in zones)
@@ -180,14 +197,18 @@ def bulk_provision(
                         provider_config=original_config['provider'])
                     break
                 except NotImplementedError as e:
-                    verb = 'terminate' if terminate else 'stop'
+                    assert not terminate, (
+                        'Terminating must be supported by all clouds')
+                    exc_msg = common_utils.format_exception(exc).replace(
+                        '\n', ' ')
                     # If the underlying cloud does not support stopping
                     # instances, we should stop failover as well.
                     raise provision_common.StopFailoverError(
-                        'During provisioner\'s failover, '
-                        f'{terminate_str.lower()} {cluster_name!r} failed. '
-                        f'We cannot {verb} the resources launched, as it is '
-                        f'not supported by {cloud}. Please try launching the '
+                        f'Provisioning cluster {cluster_name.display_name} '
+                        f'failed: {exc_msg}. Failover is stopped for safety '
+                        'because the cluster was previously in UP state but '
+                        f'{cloud} does not support stopping instances to '
+                        'preserve the cluster state. Please try launching the '
                         'cluster again, or terminate it with: '
                         f'sky down {cluster_name.display_name}') from e
                 except Exception as e:  # pylint: disable=broad-except
@@ -222,6 +243,7 @@ def teardown_cluster(cloud_name: str, cluster_name: resources_utils.ClusterName,
         provision.terminate_instances(cloud_name, cluster_name.name_on_cloud,
                                       provider_config)
         metadata_utils.remove_cluster_metadata(cluster_name.name_on_cloud)
+        provision_volume.delete_ephemeral_volumes(provider_config)
     else:
         provision.stop_instances(cloud_name, cluster_name.name_on_cloud,
                                  provider_config)
@@ -414,17 +436,26 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
 
 
 def _post_provision_setup(
-        cloud_name: str, cluster_name: resources_utils.ClusterName,
-        handle_cluster_yaml: str,
+        launched_resources: resources_lib.Resources,
+        cluster_name: resources_utils.ClusterName, handle_cluster_yaml: str,
         provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str]) -> provision_common.ClusterInfo:
     config_from_yaml = global_user_state.get_cluster_yaml_dict(
         handle_cluster_yaml)
     provider_config = config_from_yaml.get('provider')
+    cloud_name = repr(launched_resources.cloud)
     cluster_info = provision.get_cluster_info(cloud_name,
                                               provision_record.region,
                                               cluster_name.name_on_cloud,
                                               provider_config=provider_config)
+
+    # Update cluster info in handle so cluster instance ids are set. This
+    # allows us to expose provision logs to debug nodes that failed during post
+    # provision setup.
+    handle = global_user_state.get_handle_from_cluster_name(
+        cluster_name.display_name)
+    handle.cached_cluster_info = cluster_info
+    global_user_state.update_cluster_handle(cluster_name.display_name, handle)
 
     if cluster_info.num_instances > 1:
         # Only worker nodes have logs in the per-instance log directory. Head
@@ -454,19 +485,21 @@ def _post_provision_setup(
     docker_config = config_from_yaml.get('docker', {})
 
     with rich_utils.safe_status(
-            ux_utils.spinner_message(
-                'Launching - Waiting for SSH access',
-                provision_logging.config.log_path)) as status:
+            ux_utils.spinner_message('Launching - Waiting for SSH access',
+                                     provision_logging.config.log_path,
+                                     cluster_name=str(cluster_name))) as status:
         # If on Kubernetes, skip SSH check since the pods are guaranteed to be
         # ready by the provisioner, and we use kubectl instead of SSH to run the
         # commands and rsync on the pods. SSH will still be ready after a while
         # for the users to SSH into the pod.
-        if cloud_name.lower() != 'kubernetes':
+        is_k8s_cloud = cloud_name.lower() in ['kubernetes', 'ssh']
+        is_slurm_cloud = cloud_name.lower() == 'slurm'
+        if not is_k8s_cloud and not is_slurm_cloud:
             logger.debug(
                 f'\nWaiting for SSH to be available for {cluster_name!r} ...')
             wait_for_ssh(cluster_info, ssh_credentials)
             logger.debug(f'SSH Connection ready for {cluster_name!r}')
-        vm_str = 'Instance' if cloud_name.lower() != 'kubernetes' else 'Pod'
+        vm_str = 'Instance' if not is_k8s_cloud else 'Pod'
         plural = '' if len(cluster_info.instances) == 1 else 's'
         verb = 'is' if len(cluster_info.instances) == 1 else 'are'
         indent_str = (ux_utils.INDENT_SYMBOL
@@ -485,7 +518,8 @@ def _post_provision_setup(
             status.update(
                 ux_utils.spinner_message(
                     'Launching - Initializing docker container',
-                    provision_logging.config.log_path))
+                    provision_logging.config.log_path,
+                    cluster_name=str(cluster_name)))
             docker_user = instance_setup.initialize_docker(
                 cluster_name.name_on_cloud,
                 docker_config=docker_config,
@@ -502,6 +536,25 @@ def _post_provision_setup(
             logger.info(f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}'
                         f'Docker container is up.{colorama.Style.RESET_ALL}')
 
+        # Check version compatibility for jobs controller clusters
+        if cluster_name.display_name.startswith(common.JOB_CONTROLLER_PREFIX):
+            # TODO(zeping): remove this in v0.12.0
+            # This only happens in upgrade from <0.9.3 to > 0.10.0
+            # After 0.10.0 no incompatibility issue
+            # See https://github.com/skypilot-org/skypilot/pull/6096
+            # For more details
+            status.update(
+                ux_utils.spinner_message(
+                    'Checking controller version compatibility'))
+
+            try:
+                server_jobs_utils.check_version_mismatch_and_non_terminal_jobs()
+            except exceptions.ClusterNotUpError:
+                # Controller is not up yet during initial provisioning, that
+                # also means no non-terminal jobs, so no incompatibility in
+                # this case.
+                pass
+
         # We mount the metadata with sky wheel for speedup.
         # NOTE: currently we mount all credentials for all nodes, because
         # (1) jobs controllers need permission to launch/down nodes of
@@ -515,7 +568,8 @@ def _post_provision_setup(
 
         runtime_preparation_str = (ux_utils.spinner_message(
             'Preparing SkyPilot runtime ({step}/3 - {step_name})',
-            provision_logging.config.log_path))
+            provision_logging.config.log_path,
+            cluster_name=str(cluster_name)))
         status.update(
             runtime_preparation_str.format(step=1, step_name='initializing'))
         instance_setup.internal_file_mounts(cluster_name.name_on_cloud,
@@ -582,10 +636,15 @@ def _post_provision_setup(
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
 
+        skip_ray_setup = False
         ray_port = constants.SKY_REMOTE_RAY_PORT
         head_ray_needs_restart = True
         ray_cluster_healthy = False
-        if (not provision_record.is_instance_just_booted(
+        if (launched_resources.cloud is not None and
+                not launched_resources.cloud.uses_ray()):
+            skip_ray_setup = True
+            logger.debug('Skip Ray cluster setup as cloud does not use Ray.')
+        elif (not provision_record.is_instance_just_booted(
                 head_instance.instance_id)):
             # Check if head node Ray is alive
             (ray_port, ray_cluster_healthy,
@@ -610,7 +669,9 @@ def _post_provision_setup(
                              'async setup to complete...')
                 time.sleep(1)
 
-        if head_ray_needs_restart:
+        if skip_ray_setup:
+            logger.debug('Skip Ray cluster setup on the head node.')
+        elif head_ray_needs_restart:
             logger.debug('Starting Ray on the entire cluster.')
             instance_setup.start_ray_on_head_node(
                 cluster_name.name_on_cloud,
@@ -633,7 +694,9 @@ def _post_provision_setup(
         # We don't need to restart ray on worker nodes if the ray cluster is
         # already healthy, i.e. the head node has expected number of nodes
         # connected to the ray cluster.
-        if cluster_info.num_instances > 1 and not ray_cluster_healthy:
+        if skip_ray_setup:
+            logger.debug('Skip Ray cluster setup on the worker nodes.')
+        elif cluster_info.num_instances > 1 and not ray_cluster_healthy:
             instance_setup.start_ray_on_worker_nodes(
                 cluster_name.name_on_cloud,
                 no_restart=not head_ray_needs_restart,
@@ -653,24 +716,27 @@ def _post_provision_setup(
         if logging_agent:
             status.update(
                 ux_utils.spinner_message('Setting up logging agent',
-                                         provision_logging.config.log_path))
+                                         provision_logging.config.log_path,
+                                         cluster_name=str(cluster_name)))
             instance_setup.setup_logging_on_cluster(logging_agent, cluster_name,
                                                     cluster_info,
                                                     ssh_credentials)
 
-        instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
-                                                 cluster_info, ssh_credentials)
+        instance_setup.start_skylet_on_head_node(cluster_name, cluster_info,
+                                                 ssh_credentials,
+                                                 launched_resources)
 
     logger.info(
         ux_utils.finishing_message(f'Cluster launched: {cluster_name}.',
-                                   provision_logging.config.log_path))
+                                   provision_logging.config.log_path,
+                                   cluster_name=str(cluster_name)))
     return cluster_info
 
 
 @timeline.event
 def post_provision_runtime_setup(
-        cloud_name: str, cluster_name: resources_utils.ClusterName,
-        handle_cluster_yaml: str,
+        launched_resources: resources_lib.Resources,
+        cluster_name: resources_utils.ClusterName, handle_cluster_yaml: str,
         provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str],
         log_dir: str) -> provision_common.ClusterInfo:
@@ -691,7 +757,7 @@ def post_provision_runtime_setup(
         try:
             logger.debug(_TITLE.format('System Setup After Provision'))
             return _post_provision_setup(
-                cloud_name,
+                launched_resources,
                 cluster_name,
                 handle_cluster_yaml=handle_cluster_yaml,
                 provision_record=provision_record,

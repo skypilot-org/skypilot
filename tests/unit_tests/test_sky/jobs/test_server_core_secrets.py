@@ -9,6 +9,7 @@ This test ensures that:
 import os
 import tempfile
 
+from pydantic import SecretStr
 import pytest
 
 from sky import dag as dag_lib
@@ -46,8 +47,8 @@ class TestManagedJobSecrets:
         # Simulate what happens in jobs/server/core.py
 
         # 1. For display/logging (should be redacted for security)
-        user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag,
-                                                            redact_secrets=True)
+        user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(
+            dag, use_user_specified_yaml=True)
 
         # 2. For actual job execution (should have real secrets)
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
@@ -103,10 +104,10 @@ class TestManagedJobSecrets:
         default_config = task.to_yaml_config()
 
         # Explicit non-redaction (for execution)
-        execution_config = task.to_yaml_config(redact_secrets=False)
+        execution_config = task.to_yaml_config(use_user_specified_yaml=False)
 
         # Explicit redaction (for display/logging)
-        display_config = task.to_yaml_config(redact_secrets=True)
+        display_config = task.to_yaml_config(use_user_specified_yaml=True)
 
         # Verify default behavior preserves secrets for job execution
         assert default_config['secrets'][
@@ -148,11 +149,11 @@ class TestManagedJobSecrets:
 
         # Explicit non-redacted string dumping (for execution)
         execution_yaml_str = dag_utils.dump_chain_dag_to_yaml_str(
-            dag, redact_secrets=False)
+            dag, use_user_specified_yaml=False)
 
         # Explicit redacted string dumping (for display/logging)
         display_yaml_str = dag_utils.dump_chain_dag_to_yaml_str(
-            dag, redact_secrets=True)
+            dag, use_user_specified_yaml=True)
 
         # File dumping (for execution) - should preserve secrets
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
@@ -213,8 +214,8 @@ class TestManagedJobSecrets:
         # Simulate what jobs/server/core.py does:
 
         # 1. Create user_dag_str for display/logging (redacted for security)
-        user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag,
-                                                            redact_secrets=True)
+        user_dag_str = dag_utils.dump_chain_dag_to_yaml_str(
+            dag, use_user_specified_yaml=True)
 
         # 2. Create execution YAML for the actual job (real secrets)
         with tempfile.NamedTemporaryFile(prefix='managed-dag-',
@@ -267,11 +268,14 @@ class TestManagedJobSecrets:
             loaded_task = loaded_dag.tasks[0]
 
             # The loaded task must have real secrets for execution
-            assert loaded_task.secrets['API_KEY'] == 'sk-prod-api-key-12345'
-            assert loaded_task.secrets[
-                'DB_PASSWORD'] == 'prod-database-secret-password'
-            assert loaded_task.secrets[
-                'WANDB_API_KEY'] == 'wandb-secret-key-67890'
+            assert task_lib.get_plaintext_secrets(
+                loaded_task.secrets)['API_KEY'] == 'sk-prod-api-key-12345'
+            assert task_lib.get_plaintext_secrets(
+                loaded_task.secrets
+            )['DB_PASSWORD'] == 'prod-database-secret-password'
+            assert task_lib.get_plaintext_secrets(
+                loaded_task.secrets
+            )['WANDB_API_KEY'] == 'wandb-secret-key-67890'
 
             # Environment variables should be preserved
             assert loaded_task.envs['MODEL_NAME'] == 'my-model'
@@ -310,10 +314,10 @@ class TestManagedJobSecrets:
         dag.add_edge(task1, task2)
 
         # Test display vs execution separation
-        display_yaml = dag_utils.dump_chain_dag_to_yaml_str(dag,
-                                                            redact_secrets=True)
+        display_yaml = dag_utils.dump_chain_dag_to_yaml_str(
+            dag, use_user_specified_yaml=True)
         execution_yaml = dag_utils.dump_chain_dag_to_yaml_str(
-            dag, redact_secrets=False)
+            dag, use_user_specified_yaml=False)
 
         # Display should redact all secrets
         assert '<redacted>' in display_yaml
@@ -334,11 +338,14 @@ class TestManagedJobSecrets:
         loaded_tasks = loaded_dag.tasks
 
         assert len(loaded_tasks) == 2
-        assert loaded_tasks[0].secrets['DATA_API_KEY'] == 'data-api-secret-key'
-        assert loaded_tasks[0].secrets['S3_SECRET'] == 's3-access-secret'
-        assert loaded_tasks[1].secrets[
-            'MODEL_API_KEY'] == 'model-api-secret-key'
-        assert loaded_tasks[1].secrets['WANDB_KEY'] == 'wandb-logging-secret'
+        assert task_lib.get_plaintext_secrets(
+            loaded_tasks[0].secrets)['DATA_API_KEY'] == 'data-api-secret-key'
+        assert task_lib.get_plaintext_secrets(
+            loaded_tasks[0].secrets)['S3_SECRET'] == 's3-access-secret'
+        assert task_lib.get_plaintext_secrets(
+            loaded_tasks[1].secrets)['MODEL_API_KEY'] == 'model-api-secret-key'
+        assert task_lib.get_plaintext_secrets(
+            loaded_tasks[1].secrets)['WANDB_KEY'] == 'wandb-logging-secret'
 
     def test_mixed_envs_and_secrets_job_execution(self):
         """Test that envs and secrets are handled correctly for job execution.
@@ -363,7 +370,7 @@ class TestManagedJobSecrets:
         execution_config = task.to_yaml_config()
 
         # Test display behavior (explicit redaction)
-        display_config = task.to_yaml_config(redact_secrets=True)
+        display_config = task.to_yaml_config(use_user_specified_yaml=True)
 
         # Execution config should have real secrets and envs
         assert execution_config['envs'][

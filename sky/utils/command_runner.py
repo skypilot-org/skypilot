@@ -1,23 +1,47 @@
 """Runner for commands to be executed on the cluster."""
 import enum
+import fcntl
 import hashlib
 import os
 import pathlib
+import pty
+import re
 import shlex
+import signal
+import socket
 import sys
+import tempfile
+import termios
+import threading
 import time
-from typing import Any, Callable, Iterable, List, Optional, Tuple, Type, Union
+from typing import (Any, Callable, Dict, Iterable, List, Optional, Tuple, Type,
+                    Union)
+import uuid
 
+import colorama
+
+from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.utils import auth_utils
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import control_master_utils
+from sky.utils import env_options
+from sky.utils import git as git_utils
+from sky.utils import interactive_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
+
+# Global lock to serialize interactive SSH auth attempts from multiple
+# threads in a single request.
+_INTERACTIVE_AUTH_LOCK = threading.Lock()
+
+# Pattern to extract home directory from command output
+_HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
 
 # Rsync options
 # TODO(zhwu): This will print a per-file progress bar (with -P),
@@ -38,9 +62,23 @@ RSYNC_FILTER_GITIGNORE = f'--filter=\'dir-merge,- {constants.GIT_IGNORE_FILE}\''
 # The git exclude file to support.
 GIT_EXCLUDE = '.git/info/exclude'
 RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
+# Owner and group metadata is not needed for downloads.
+RSYNC_NO_OWNER_NO_GROUP_OPTION = '--no-owner --no-group'
 
 _HASH_MAX_LENGTH = 10
 _DEFAULT_CONNECT_TIMEOUT = 30
+
+DEFAULT_SSH_CONTROL_NAME = '__default__'
+
+# SSH authentication failure patterns to detect when interactive auth retry
+# is needed.
+_SSH_AUTH_FAILURE_PATTERNS = [
+    # https://github.com/openssh/openssh-portable/blob/master/sshconnect2.c#L542
+    # https://github.com/openssh/openssh-portable/blob/master/sshconnect2.c#L1047
+    'Permission denied',
+    # https://github.com/openssh/openssh-portable/blob/master/sshconnect2.c#L479
+    'Authentication failed',
+]
 
 
 def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
@@ -53,10 +91,110 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     return path
 
 
+def _is_skypilot_managed_key(key_path: str) -> bool:
+    """Check if SSH key follows SkyPilot's managed key format.
+
+    SkyPilot-managed keys follow the pattern: ~/.sky/clients/<hash>/ssh/sky-key
+    External keys (like ~/.ssh/id_rsa) do not follow this pattern.
+
+    Args:
+        key_path: Path to the SSH private key.
+
+    Returns:
+        True if the key follows SkyPilot's managed format, False otherwise.
+    """
+    parts = os.path.normpath(key_path).split(os.path.sep)
+    return len(parts) >= 2 and parts[-1] == 'sky-key' and parts[-2] == 'ssh'
+
+
 # Disable sudo for root user. This is useful when the command is running in a
 # docker container, i.e. image_id is a docker image.
 ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD = (
     '{ [ "$(whoami)" == "root" ] && function sudo() { "$@"; } || true; }')
+
+
+def _proxyjump_to_proxycommand(proxy_jump: str,
+                               ssh_log_file: Optional[str] = None) -> str:
+    """Convert ProxyJump spec to an equivalent implicit ProxyCommand.
+
+    This mirrors OpenSSH's behavior when converting ProxyJump to ProxyCommand:
+        ProxyJump ubuntu@machine
+        -> ssh -l ubuntu -W '[%h]:%p' machine
+
+    For multi-hop (comma-separated), earlier hops are passed via -J to the
+    last hop's SSH, which runs -W to the final destination.
+    """
+    hops = [h.strip() for h in proxy_jump.split(',') if h.strip()]
+    if not hops:
+        raise ValueError(f'Invalid ProxyJump: {proxy_jump!r}')
+
+    def parse_hop(dest: str) -> Tuple[Optional[str], str, Optional[int]]:
+        # Parse [user@]host[:port]
+        user = None
+        hostport = dest
+        if '@' in dest:
+            user, hostport = dest.split('@', 1)
+            if not user:
+                raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
+        if not hostport:
+            raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
+        host = hostport
+        port = None
+        if hostport.startswith('['):
+            # Bracketed IPv6 case. Only parse a port if the closing bracket is
+            # immediately followed by ":" (i.e., "[...]:<port>").
+            end_bracket = hostport.find(']')
+            if end_bracket == -1:
+                raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
+            rest = hostport[end_bracket + 1:]
+            # After the closing bracket, only "" or ":<port>" is valid.
+            if rest != '' and not rest.startswith(':'):
+                raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
+            if ']:' in hostport:
+                maybe_host, port_str = hostport.rsplit(':', 1)
+                if not port_str.isdigit():
+                    raise ValueError(f'Invalid port: {port_str} in {dest}')
+                host = maybe_host
+                port = int(port_str)
+            # Normalize bracketed IPv6 host by stripping "[...]" so the final
+            # ssh command uses a plain host argument (e.g., "2001:db8::1").
+            if host.startswith('[') and host.endswith(']'):
+                host = host[1:-1]
+        elif hostport.count(':') == 1:
+            # Non-IPv6 host case (hostname or IPv4) with exactly one ":".
+            # We treat this as host:port iff the suffix is a numeric port.
+            maybe_host, port_str = hostport.rsplit(':', 1)
+            if not port_str.isdigit():
+                raise ValueError(f'Invalid port: {port_str} in {dest}')
+            host = maybe_host
+            port = int(port_str)
+        if not host:
+            raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
+        return user, host, port
+
+    # For multi-hop, use -J for earlier hops and last hop as the target
+    *prev_hops, last_hop = hops
+
+    cmd = ['ssh']
+    if ssh_log_file is not None:
+        cmd += ['-E', ssh_log_file]
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            cmd += ['-v']
+    if prev_hops:
+        cmd += ['-J', ','.join(prev_hops)]
+    user, host, port = parse_hop(last_hop)
+    if user:
+        cmd += ['-l', user]
+    if port is not None:
+        cmd += ['-p', str(port)]
+    # Redirect stderr to /dev/null to avoid hanging.
+    # The ProxyCommand inherits the parent ssh's stderr pipe.
+    # Without this, the tunnel might hold the pipe open, causing
+    # log_lib.process_subprocess_stream() to hang waiting for stderr EOF.
+    # Anyways only stdin and stdout is used for -W host:port.
+    cmd += ['-W', '\'[%h]:%p\'', host, '2>/dev/null']
+
+    return ' '.join(cmd)
 
 
 def ssh_options_list(
@@ -64,10 +202,13 @@ def ssh_options_list(
     ssh_control_name: Optional[str],
     *,
     ssh_proxy_command: Optional[str] = None,
+    ssh_proxy_jump: Optional[str] = None,
     docker_ssh_proxy_command: Optional[str] = None,
     connect_timeout: Optional[int] = None,
     port: int = 22,
     disable_control_master: Optional[bool] = False,
+    escape_percent_expand: bool = False,
+    ssh_log_file: Optional[str] = None,
 ) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     if connect_timeout is None:
@@ -107,26 +248,27 @@ def ssh_options_list(
     # SSH Control will have a severe delay when using docker_ssh_proxy_command.
     # TODO(tian): Investigate why.
     #
-    # We disable ControlMaster when ssh_proxy_command is used, because the
-    # master connection will be idle although the connection might be shared
-    # by other ssh commands that is not idle. In that case, user's custom proxy
-    # command may drop the connection due to idle timeout, since it will only
-    # see the idle master connection. It is an issue even with the
+    # We disable ControlMaster when ssh_proxy_command is used,
+    # because the master connection will be idle although the connection might
+    # be shared by other ssh commands that is not idle. In that case, user's
+    # custom proxy command may drop the connection due to idle timeout, since it
+    # will only see the idle master connection. It is an issue even with the
     # ServerAliveInterval set, since the keepalive message may not be recognized
     # by the custom proxy command, such as AWS SSM Session Manager.
     #
-    # We also do not use ControlMaster when we use `kubectl port-forward`
-    # to access Kubernetes pods over SSH+Proxycommand. This is because the
-    # process running ProxyCommand is kept running as long as the ssh session
-    # is running and the ControlMaster keeps the session, which results in
-    # 'ControlPersist' number of seconds delay per ssh commands ran.
+    # Similarly for ssh_proxy_jump, where we've also observed flakiness that may
+    # occassionally cause ssh to error with exit code 255.
     if (ssh_control_name is not None and docker_ssh_proxy_command is None and
-            ssh_proxy_command is None and not disable_control_master):
+            ssh_proxy_command is None and ssh_proxy_jump is None and
+            not disable_control_master):
+        control_path = f'{_ssh_control_path(ssh_control_name)}/%C'
+        if escape_percent_expand:
+            control_path = control_path.replace('%', '%%')
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
             'ControlMaster': 'auto',
-            'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
+            'ControlPath': control_path,
             'ControlPersist': '300s',
         })
     ssh_key_option = [
@@ -142,10 +284,26 @@ def ssh_options_list(
 
     if ssh_proxy_command is not None:
         logger.debug(f'--- Proxy: {ssh_proxy_command} ---')
+        if ssh_proxy_jump is not None:
+            logger.warning('Both ProxyCommand and ProxyJump are specified. '
+                           'ProxyCommand will take precedence.')
         arg_dict.update({
             # Due to how log_lib.run_with_log() works (using shell=True) we
             # must quote this value.
             'ProxyCommand': shlex.quote(ssh_proxy_command),
+        })
+    elif ssh_proxy_jump is not None:
+        # Convert ProxyJump to an implicit ProxyCommand, mirroring OpenSSH's
+        # behavior. This allows us to inject -E <log_file> because otherwise
+        # OpenSSH does not pass the log file to the derived ProxyCommand and
+        # we could only log it to stderr (with -v), which can be noisy.
+        # See: https://github.com/openssh/openssh-portable/blob/a6f8f793d427a831be1b350741faa4f34066d55f/ssh.c#L1355-L1382 # pylint: disable=line-too-long
+        derived_proxy_command = _proxyjump_to_proxycommand(
+            ssh_proxy_jump, ssh_log_file)
+        logger.debug(f'--- ProxyJump: {ssh_proxy_jump} -> '
+                     f'ProxyCommand: {derived_proxy_command} ---')
+        arg_dict.update({
+            'ProxyCommand': shlex.quote(derived_proxy_command),
         })
 
     return ssh_key_option + [
@@ -177,6 +335,28 @@ class CommandRunner:
     def node_id(self) -> str:
         return '-'.join(str(x) for x in self.node)
 
+    def _get_remote_home_dir(self) -> str:
+        # Use pattern matching to extract home directory.
+        # Some container images print MOTD when login shells start, which can
+        # contaminate command output. We use a unique pattern to extract the
+        # actual home directory reliably.
+        rc, output, stderr = self.run('echo "SKYPILOT_HOME_DIR: $(echo ~)"',
+                                      require_outputs=True,
+                                      separate_stderr=True,
+                                      stream_logs=False)
+        if rc != 0:
+            raise ValueError('Failed to get remote home directory: '
+                             f'{output + stderr}')
+
+        # Extract home directory using pattern matching
+        home_dir_match = _HOME_DIR_PATTERN.search(output)
+        if home_dir_match:
+            remote_home_dir = home_dir_match.group(1)
+        else:
+            raise ValueError('Failed to find remote home directory identifier: '
+                             f'{output + stderr}')
+        return remote_home_dir
+
     def _get_command_to_run(
         self,
         cmd: Union[str, List[str]],
@@ -184,6 +364,8 @@ class CommandRunner:
         separate_stderr: bool,
         skip_num_lines: int,
         source_bashrc: bool = False,
+        use_login: bool = True,
+        run_in_background: bool = False,
     ) -> str:
         """Returns the command to run."""
         if isinstance(cmd, list):
@@ -194,7 +376,7 @@ class CommandRunner:
             '/bin/bash',
             '--login',
             '-c',
-        ]
+        ] if use_login else ['/bin/bash', '-c']
         if source_bashrc:
             command += [
                 # Need this `-i` option to make sure `source ~/.bashrc` work.
@@ -214,7 +396,11 @@ class CommandRunner:
             ]
         if not separate_stderr:
             command.append('2>&1')
+        if run_in_background:
+            command = ['nohup'] + command + ['&']
         if not process_stream and skip_num_lines:
+            assert not run_in_background, (
+                'run_in_background and skip_num_lines cannot be used together')
             command += [
                 # A hack to remove the following bash warnings (twice):
                 #  bash: cannot set terminal process group
@@ -227,6 +413,27 @@ class CommandRunner:
 
         command_str = ' '.join(command)
         return command_str
+
+    def _get_remote_home_dir_with_retry(
+        self,
+        max_retry: int,
+        get_remote_home_dir: Callable[[], str],
+    ) -> str:
+        """Returns the remote home directory with retry."""
+        backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=5)
+        retries_left = max_retry
+        assert retries_left > 0, f'max_retry {max_retry} must be positive.'
+        while retries_left >= 0:
+            try:
+                return get_remote_home_dir()
+            except Exception:  # pylint: disable=broad-except
+                if retries_left == 0:
+                    raise
+                sleep_time = backoff.current_backoff()
+                logger.warning(f'Failed to get remote home dir '
+                               f'- retrying in {sleep_time} seconds.')
+                retries_left -= 1
+                time.sleep(sleep_time)
 
     def _rsync(
             self,
@@ -247,23 +454,8 @@ class CommandRunner:
         if prefix_command is not None:
             rsync_command.append(prefix_command)
         rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
-
-        def _get_remote_home_dir_with_retry():
-            backoff = common_utils.Backoff(initial_backoff=1,
-                                           max_backoff_factor=5)
-            retries_left = max_retry
-            assert retries_left > 0, f'max_retry {max_retry} must be positive.'
-            while retries_left >= 0:
-                try:
-                    return get_remote_home_dir()
-                except Exception:  # pylint: disable=broad-except
-                    if retries_left == 0:
-                        raise
-                    sleep_time = backoff.current_backoff()
-                    logger.warning(f'Failed to get remote home dir '
-                                   f'- retrying in {sleep_time} seconds.')
-                    retries_left -= 1
-                    time.sleep(sleep_time)
+        if not up:
+            rsync_command.append(RSYNC_NO_OWNER_NO_GROUP_OPTION)
 
         # --filter
         # The source is a local path, so we need to resolve it.
@@ -297,7 +489,9 @@ class CommandRunner:
                     pathlib.Path(target).expanduser().resolve())
             else:
                 if target.startswith('~'):
-                    remote_home_dir = _get_remote_home_dir_with_retry()
+                    remote_home_dir = self._get_remote_home_dir_with_retry(
+                        max_retry=max_retry,
+                        get_remote_home_dir=get_remote_home_dir)
                     resolved_target = target.replace('~', remote_home_dir)
             full_source_str = str(resolved_source)
             if resolved_source.is_dir():
@@ -316,7 +510,9 @@ class CommandRunner:
             else:
                 resolved_target = os.path.expanduser(target)
                 if source.startswith('~'):
-                    remote_home_dir = _get_remote_home_dir_with_retry()
+                    remote_home_dir = self._get_remote_home_dir_with_retry(
+                        max_retry=max_retry,
+                        get_remote_home_dir=get_remote_home_dir)
                     resolved_source = source.replace('~', remote_home_dir)
             rsync_command.extend([
                 f'{maybe_dest_prefix}{resolved_source!r}',
@@ -365,6 +561,7 @@ class CommandRunner:
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
+            run_in_background: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Runs the command on the cluster.
 
@@ -383,7 +580,7 @@ class CommandRunner:
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
-
+            run_in_background: Whether to run the command in the background.
 
         Returns:
             returncode
@@ -439,17 +636,119 @@ class CommandRunner:
         """Close the cached connection to the remote machine."""
         pass
 
-    def port_forward_command(self,
-                             port_forward: List[Tuple[int, int]],
-                             connect_timeout: int = 1) -> List[str]:
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
         """Command for forwarding ports from localhost to the remote machine.
 
         Args:
             port_forward: A list of ports to forward from the localhost to the
                 remote host.
             connect_timeout: The timeout for the connection.
+            ssh_mode: The mode to use for ssh.
+                See SSHMode for more details.
         """
         raise NotImplementedError
+
+    @timeline.event
+    def git_clone(
+        self,
+        target_dir: str,
+        *,
+        # Advanced options.
+        log_path: str = os.devnull,
+        stream_logs: bool = True,
+        connect_timeout: Optional[int] = None,
+        max_retry: int = 1,
+        envs_and_secrets: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """Clones a Git repository on the remote machine using git_clone.sh.
+
+        Note: Git environment variables (GIT_URL, GIT_BRANCH, GIT_TOKEN, etc.)
+        must be set before calling this function.
+
+        Args:
+            target_dir: Target directory where the repository will be cloned.
+            log_path: Redirect stdout/stderr to the log_path.
+            stream_logs: Stream logs to the stdout/stderr.
+            connect_timeout: timeout in seconds for the connection.
+            max_retry: The maximum number of retries for the rsync command.
+              This value should be non-negative.
+            envs_and_secrets: Environment variables and secrets to be set
+              before running the script.
+        Raises:
+            exceptions.CommandError: git clone command failed.
+        """
+        # Find the git_clone.sh script path
+        git_clone_script_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), 'git_clone.sh')
+
+        if not os.path.exists(git_clone_script_path):
+            error_msg = f'git_clone.sh {git_clone_script_path} not found'
+            logger.error(error_msg)
+            raise exceptions.CommandError(1, '', error_msg, None)
+
+        # Remote script path (use a unique name to avoid conflicts)
+        script_hash = hashlib.md5(
+            f'{self.node_id}_{target_dir}'.encode()).hexdigest()[:8]
+        remote_script_path = f'/tmp/sky_git_clone_{script_hash}.sh'
+
+        # Step 1: Transfer the script to remote machine using rsync
+        logger.debug(
+            f'Transferring git_clone.sh to {self.node_id}:{remote_script_path}')
+        self.rsync(
+            source=git_clone_script_path,
+            target=remote_script_path,
+            up=True,
+            log_path=log_path,
+            stream_logs=False  # Don't spam logs for script transfer
+        )
+
+        # Step 2: Execute the script on remote machine
+        if target_dir.startswith('~'):
+            remote_home_dir = self._get_remote_home_dir_with_retry(
+                max_retry=max_retry,
+                get_remote_home_dir=self._get_remote_home_dir)
+            target_dir = target_dir.replace('~', remote_home_dir)
+        quoted_target_dir = shlex.quote(target_dir)
+        quoted_script_path = shlex.quote(remote_script_path)
+        cmd = ''
+        log_cmd = ''
+        if envs_and_secrets:
+            for key, value in envs_and_secrets.items():
+                value = shlex.quote(value)
+                cmd += f'export {key}={value} && '
+                if (key == git_utils.GIT_TOKEN_ENV_VAR or
+                        key == git_utils.GIT_SSH_KEY_ENV_VAR):
+                    log_cmd += f'export {key}=******** && '
+                else:
+                    log_cmd += f'export {key}={value} && '
+        exec_cmd = (f'bash {quoted_script_path} {quoted_target_dir} '
+                    f'&& rm -f {quoted_script_path}')
+        cmd += exec_cmd
+        log_cmd += exec_cmd
+
+        logger.debug(f'Running git clone script on {self.node_id}: {log_cmd}')
+
+        backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
+        assert max_retry > 0, f'max_retry {max_retry} must be positive.'
+        while max_retry >= 0:
+            returncode = self.run(cmd,
+                                  log_path=log_path,
+                                  stream_logs=stream_logs,
+                                  connect_timeout=connect_timeout,
+                                  require_outputs=False)
+            if returncode == 0:
+                break
+            max_retry -= 1
+            time.sleep(backoff.current_backoff())
+
+        if returncode != 0:
+            error_msg = f'Git clone failed on {self.node_id}: {target_dir}'
+            logger.error(error_msg)
+            raise exceptions.CommandError(returncode, log_cmd, error_msg, None)
 
 
 class SSHCommandRunner(CommandRunner):
@@ -459,16 +758,19 @@ class SSHCommandRunner(CommandRunner):
         self,
         node: Tuple[str, int],
         ssh_user: str,
-        ssh_private_key: str,
-        ssh_control_name: Optional[str] = '__default__',
+        ssh_private_key: Optional[str],
+        ssh_control_name: Optional[str] = DEFAULT_SSH_CONTROL_NAME,
         ssh_proxy_command: Optional[str] = None,
+        ssh_proxy_jump: Optional[str] = None,
         docker_user: Optional[str] = None,
         disable_control_master: Optional[bool] = False,
+        port_forward_execute_remote_command: Optional[bool] = False,
+        enable_interactive_auth: bool = False,
     ):
         """Initialize SSHCommandRunner.
 
         Example Usage:
-            runner = SSHCommandRunner(ip, ssh_user, ssh_private_key)
+            runner = SSHCommandRunner((ip, port), ssh_user, ssh_private_key)
             runner.run('ls -l', mode=SshMode.NON_INTERACTIVE)
             runner.rsync(source, target, up=True)
 
@@ -483,6 +785,8 @@ class SSHCommandRunner(CommandRunner):
             ssh_proxy_command: Optional, the value to pass to '-o
                 ProxyCommand'. Useful for communicating with clusters without
                 public IPs using a "jump server".
+            ssh_proxy_jump: Optional, the value to pass to '-o ProxyJump' flag.
+                Similar to ssh_proxy_command, but more modern.
             port: The port to use for ssh.
             docker_user: The docker user to use for ssh. If specified, the
                 command will be run inside a docker container which have a ssh
@@ -490,6 +794,10 @@ class SSHCommandRunner(CommandRunner):
             disable_control_master: bool; specifies either or not the ssh
                 command will utilize ControlMaster. We currently disable
                 it for k8s instance.
+            port_forward_execute_remote_command: bool; specifies whether to
+                add -N to the port forwarding command. This is useful if you
+                want to run a command on the remote machine to make sure the
+                SSH tunnel is established.
         """
         super().__init__(node)
         ip, port = node
@@ -498,49 +806,96 @@ class SSHCommandRunner(CommandRunner):
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
+        self._ssh_proxy_jump = ssh_proxy_jump
         self.disable_control_master = (
             disable_control_master or
             control_master_utils.should_disable_control_master())
+        # Ensure SSH key is available. For SkyPilot-managed keys, create from
+        # database. For external keys (e.g., Slurm clusters), verify existence.
+        if ssh_private_key is not None and _is_skypilot_managed_key(
+                ssh_private_key):
+            auth_utils.create_ssh_key_files_from_db(ssh_private_key)
+        elif ssh_private_key is not None:
+            # Externally managed key - just verify it exists
+            expanded_key_path = os.path.expanduser(ssh_private_key)
+            if not os.path.exists(expanded_key_path):
+                raise FileNotFoundError(
+                    f'SSH private key not found: {expanded_key_path}')
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')
-            # Already checked in resources
-            assert ssh_proxy_command is None, (
-                'ssh_proxy_command is not supported when using docker.')
+            # When connecting via docker, the outer SSH hop points to the
+            # container's sshd (localhost). Preserve the user proxy for the
+            # inner hop that reaches the host VM, and clear the outer proxy to
+            # avoid forwarding localhost through the jump host.
+            inner_proxy_command = ssh_proxy_command
+            inner_proxy_port = port or 22
+            self._ssh_proxy_command = None
             self.ip = 'localhost'
             self.ssh_user = docker_user
             self.port = constants.DEFAULT_DOCKER_PORT
+            if inner_proxy_command is not None:
+                # Replace %h/%p placeholders with actual host values, since the
+                # final destination from the perspective of the user proxy is
+                # the host VM (ip, inner_proxy_port).
+                inner_proxy_command = inner_proxy_command.replace('%h', ip)
+                inner_proxy_command = inner_proxy_command.replace(
+                    '%p', str(inner_proxy_port))
             self._docker_ssh_proxy_command = lambda ssh: ' '.join(
-                ssh + ssh_options_list(ssh_private_key, None
-                                      ) + ['-W', '%h:%p', f'{ssh_user}@{ip}'])
+                ssh + ssh_options_list(ssh_private_key,
+                                       None,
+                                       ssh_proxy_command=inner_proxy_command,
+                                       port=inner_proxy_port,
+                                       disable_control_master=self.
+                                       disable_control_master) +
+                ['-W', '%h:%p', f'{ssh_user}@{ip}'])
         else:
             self.ip = ip
             self.ssh_user = ssh_user
             self.port = port
             self._docker_ssh_proxy_command = None
+        self.port_forward_execute_remote_command = (
+            port_forward_execute_remote_command)
+        self.enable_interactive_auth = enable_interactive_auth
 
-    def port_forward_command(self,
-                             port_forward: List[Tuple[int, int]],
-                             connect_timeout: int = 1) -> List[str]:
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
         """Command for forwarding ports from localhost to the remote machine.
 
         Args:
             port_forward: A list of ports to forward from the local port to the
                 remote port.
             connect_timeout: The timeout for the ssh connection.
+            ssh_mode: The mode to use for ssh.
+                See SSHMode for more details.
 
         Returns:
             The command for forwarding ports from localhost to the remote
             machine.
         """
-        return self.ssh_base_command(ssh_mode=SshMode.INTERACTIVE,
+        return self.ssh_base_command(ssh_mode=ssh_mode,
                                      port_forward=port_forward,
                                      connect_timeout=connect_timeout)
 
-    def ssh_base_command(self, *, ssh_mode: SshMode,
+    def ssh_base_command(self,
+                         *,
+                         ssh_mode: SshMode,
                          port_forward: Optional[List[Tuple[int, int]]],
-                         connect_timeout: Optional[int]) -> List[str]:
+                         connect_timeout: Optional[int],
+                         ssh_log_file: Optional[str] = None) -> List[str]:
         ssh = ['ssh']
+        if ssh_log_file is not None:
+            # -E is needed to capture debug logs from the ControlMaster process
+            # which is forked from the main ssh process.
+            # However, this does not work out of the box with ProxyJump,
+            # since the -E flag is not passed to the ssh proxy subprocess.
+            # For that we have to do some extra work in ssh_options_list.
+            ssh += ['-E', ssh_log_file]
+            if env_options.Options.SHOW_DEBUG_INFO.get():
+                ssh += ['-v']
         if ssh_mode == SshMode.NON_INTERACTIVE:
             # Disable pseudo-terminal allocation. Otherwise, the output of
             # ssh will be corrupted by the user's input.
@@ -550,9 +905,13 @@ class SSHCommandRunner(CommandRunner):
             ssh += ['-tt']
         if port_forward is not None:
             for local, remote in port_forward:
-                logger.info(
+                logger.debug(
                     f'Forwarding local port {local} to remote port {remote}.')
-                ssh += ['-NL', f'{local}:localhost:{remote}']
+                if self.port_forward_execute_remote_command:
+                    ssh += ['-L']
+                else:
+                    ssh += ['-NL']
+                ssh += [f'{local}:localhost:{remote}']
         if self._docker_ssh_proxy_command is not None:
             docker_ssh_proxy_command = self._docker_ssh_proxy_command(ssh)
         else:
@@ -561,12 +920,134 @@ class SSHCommandRunner(CommandRunner):
             self.ssh_private_key,
             self.ssh_control_name,
             ssh_proxy_command=self._ssh_proxy_command,
+            ssh_proxy_jump=self._ssh_proxy_jump,
             docker_ssh_proxy_command=docker_ssh_proxy_command,
             port=self.port,
             connect_timeout=connect_timeout,
-            disable_control_master=self.disable_control_master) + [
-                f'{self.ssh_user}@{self.ip}'
+            disable_control_master=self.disable_control_master,
+            ssh_log_file=ssh_log_file) + [f'{self.ssh_user}@{self.ip}']
+
+    def _retry_with_interactive_auth(
+            self, session_id: str, command: List[str], log_path: str,
+            require_outputs: bool, process_stream: bool, stream_logs: bool,
+            executable: str,
+            **kwargs) -> Union[int, Tuple[int, str, str], Tuple[int, int]]:
+        """Retries command with interactive auth.
+
+        This handles SSH connections requiring keyboard-interactive
+        authentication (e.g., 2FA) by using a PTY for auth prompts and
+        establishing a persistent ControlMaster socket (if enabled) that
+        other SSH sessions can reuse without re-authenticating.
+
+        The PTY is bridged to a websocket connection that allows the client
+        to handle interactive authentication. Command output flows through
+        normal stdout/stderr pipes, which gets printed to log_path.
+
+        See ssh_options_list for when ControlMaster is not enabled.
+        """
+        with _INTERACTIVE_AUTH_LOCK:
+            extra_options = [
+                # Override ControlPersist to reduce frequency of manual user
+                # intervention. The default from ssh_options_list is only 5m.
+                #
+                # NOTE: When used with ProxyJump, the connection can die
+                # earlier than expected, so it is recommended to also enable
+                # ControlMaster on the jump host's SSH config. It is hard to
+                # tell why exactly, because enabling -v makes this problem
+                # disappear for some reasons.
+                '-o',
+                'ControlPersist=1d',
             ]
+            if self._ssh_proxy_jump is not None:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}When using ProxyJump, it is '
+                    'recommended to also enable ControlMaster on the '
+                    'jump host\'s SSH config to keep the authenticated '
+                    f'connection alive for longer.{colorama.Fore.RESET}')
+            command = command[:1] + extra_options + command[1:]
+
+            # Create PTY for SSH. PTY slave for stdin from user, PTY master
+            # for password/auth prompts from SSH.
+            pty_m_fd, pty_s_fd = pty.openpty()
+
+            # Create Unix socket to pass PTY master fd to websocket handler
+            fd_socket_path = interactive_utils.get_pty_socket_path(session_id)
+            if os.path.exists(fd_socket_path):
+                os.unlink(fd_socket_path)
+            fd_server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            fd_server.bind(fd_socket_path)
+            fd_server.listen(1)
+            fd_server.settimeout(60)
+
+            # Signal client to initiate websocket for interactive auth
+            interactive_signal = f'<sky-interactive session="{session_id}"/>'
+            print(interactive_signal, flush=True)
+
+            def handle_unix_socket_connection():
+                """Background thread to handle Unix socket connection."""
+                conn = None
+                try:
+                    # Wait for websocket handler to connect.
+                    conn, _ = fd_server.accept()
+                    # Send PTY master fd through Unix socket.
+                    interactive_utils.send_fd(conn, pty_m_fd)
+                    # We don't need to block here to wait for the websocket
+                    # handler, as SSH will continue by itself once auth
+                    # is complete.
+                except socket.timeout:
+                    logger.debug(
+                        'Timeout waiting for interactive auth connection')
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.error(f'Error in Unix socket connection: '
+                                 f'{common_utils.format_exception(e)}')
+                finally:
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:  # pylint: disable=broad-except
+                            pass
+                    try:
+                        os.close(pty_m_fd)
+                    except Exception:  # pylint: disable=broad-except
+                        pass
+
+            unix_sock_thread = threading.Thread(
+                target=handle_unix_socket_connection, daemon=True)
+            unix_sock_thread.start()
+
+            try:
+
+                def setup_pty_session():
+                    # Set PTY as controlling terminal so SSH can access /dev/tty
+                    # for keyboard-interactive auth. Without this:
+                    # "can't open /dev/tty: Device not configured"
+                    fcntl.ioctl(pty_s_fd, termios.TIOCSCTTY, 0)
+                    # Ignore SIGHUP so ControlMaster survives when PTY closes.
+                    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+                    # Ignore SIGTERM so ControlMaster survives subprocess_daemon
+                    # killing the process group.
+                    if self._ssh_proxy_jump is not None:
+                        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+                return log_lib.run_with_log(' '.join(command),
+                                            log_path,
+                                            require_outputs=require_outputs,
+                                            stream_logs=stream_logs,
+                                            process_stream=process_stream,
+                                            shell=True,
+                                            executable=executable,
+                                            preexec_fn=setup_pty_session,
+                                            **kwargs)
+            except Exception as e:
+                raise RuntimeError(f'Exception in setup: {e}') from e
+            finally:
+                # Clean up PTY fds and sockets.
+                fd_server.close()
+                if os.path.exists(fd_socket_path):
+                    os.unlink(fd_socket_path)
+                # Note: pty_m_fd is closed by handle_unix_socket_connection.
+                # Do NOT close it here - the FD number may have been reused.
+                os.close(pty_s_fd)
 
     def close_cached_connection(self) -> None:
         """Close the cached connection to the remote machine.
@@ -608,6 +1089,7 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
+            run_in_background: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -632,27 +1114,39 @@ class SSHCommandRunner(CommandRunner):
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
+            run_in_background: Whether to run the command in the background.
 
         Returns:
             returncode
             or
             A tuple of (returncode, stdout, stderr).
         """
+        if self.enable_interactive_auth:
+            fd, ssh_log_file = tempfile.mkstemp(prefix='sky_ssh_',
+                                                suffix='.log')
+            os.close(fd)
+        else:
+            ssh_log_file = None
+
         base_ssh_command = self.ssh_base_command(
             ssh_mode=ssh_mode,
             port_forward=port_forward,
-            connect_timeout=connect_timeout)
+            connect_timeout=connect_timeout,
+            ssh_log_file=ssh_log_file)
+
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
             command = base_ssh_command + cmd
             proc = subprocess_utils.run(command, shell=False, check=False)
             return proc.returncode, '', ''
 
-        command_str = self._get_command_to_run(cmd,
-                                               process_stream,
-                                               separate_stderr,
-                                               skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc)
+        command_str = self._get_command_to_run(
+            cmd,
+            process_stream,
+            separate_stderr,
+            skip_num_lines=skip_num_lines,
+            source_bashrc=source_bashrc,
+            run_in_background=run_in_background)
         command = base_ssh_command + [shlex.quote(command_str)]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
@@ -670,14 +1164,63 @@ class SSHCommandRunner(CommandRunner):
             else:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
-        return log_lib.run_with_log(' '.join(command),
-                                    log_path,
-                                    require_outputs=require_outputs,
-                                    stream_logs=stream_logs,
-                                    process_stream=process_stream,
-                                    shell=True,
-                                    executable=executable,
-                                    **kwargs)
+
+        try:
+            result = log_lib.run_with_log(' '.join(command),
+                                          log_path,
+                                          require_outputs=require_outputs,
+                                          stream_logs=stream_logs,
+                                          process_stream=process_stream,
+                                          shell=True,
+                                          executable=executable,
+                                          **kwargs)
+            if not self.enable_interactive_auth:
+                return result
+
+            if require_outputs:
+                returncode, _, _ = result
+            else:
+                returncode = result
+
+            if returncode != 255:
+                return result
+
+            # Check SSH verbose log file for auth failure patterns.
+            # This is more reliable than checking stderr, which may be empty
+            # when ControlMaster or ProxyJump is used.
+            has_auth_failure = False
+            ssh_log_content = ''
+            if ssh_log_file is not None:
+                try:
+                    with open(ssh_log_file, 'r', encoding='utf-8') as f:
+                        ssh_log_content = f.read()
+                    has_auth_failure = any(
+                        pattern in ssh_log_content
+                        for pattern in _SSH_AUTH_FAILURE_PATTERNS)
+                except OSError:
+                    # Fall back to retrying with interactive auth to be safe.
+                    has_auth_failure = True
+
+            if not has_auth_failure:
+                # No auth failure detected; don't attempt interactive auth.
+                if require_outputs:
+                    returncode, stdout, stderr = result
+                    return returncode, stdout, stderr + '\n' + ssh_log_content
+                return result
+
+            session_id = str(uuid.uuid4())
+            return self._retry_with_interactive_auth(session_id, command,
+                                                     log_path, require_outputs,
+                                                     process_stream,
+                                                     stream_logs, executable,
+                                                     **kwargs)
+        finally:
+            # Clean up the SSH verbose log file.
+            if ssh_log_file is not None:
+                try:
+                    os.unlink(ssh_log_file)
+                except OSError:
+                    pass
 
     @timeline.event
     def rsync(
@@ -690,6 +1233,7 @@ class SSHCommandRunner(CommandRunner):
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        get_remote_home_dir: Callable[[], str] = lambda: '~',
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -702,6 +1246,8 @@ class SSHCommandRunner(CommandRunner):
             stream_logs: Stream logs to the stdout/stderr.
             max_retry: The maximum number of retries for the rsync command.
               This value should be non-negative.
+            get_remote_home_dir: A callable that returns the remote home
+              directory. Defaults to '~'.
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -715,6 +1261,7 @@ class SSHCommandRunner(CommandRunner):
                 self.ssh_private_key,
                 self.ssh_control_name,
                 ssh_proxy_command=self._ssh_proxy_command,
+                ssh_proxy_jump=self._ssh_proxy_jump,
                 docker_ssh_proxy_command=docker_ssh_proxy_command,
                 port=self.port,
                 disable_control_master=self.disable_control_master))
@@ -726,7 +1273,8 @@ class SSHCommandRunner(CommandRunner):
                     rsh_option=rsh_option,
                     log_path=log_path,
                     stream_logs=stream_logs,
-                    max_retry=max_retry)
+                    max_retry=max_retry,
+                    get_remote_home_dir=get_remote_home_dir)
 
 
 class KubernetesCommandRunner(CommandRunner):
@@ -766,9 +1314,11 @@ class KubernetesCommandRunner(CommandRunner):
         else:
             return f'pod/{self.pod_name}'
 
-    def port_forward_command(self,
-                             port_forward: List[Tuple[int, int]],
-                             connect_timeout: int = 1) -> List[str]:
+    def port_forward_command(
+            self,
+            port_forward: List[Tuple[int, int]],
+            connect_timeout: int = 1,
+            ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
         """Command for forwarding ports from localhost to the remote machine.
 
         Args:
@@ -776,14 +1326,25 @@ class KubernetesCommandRunner(CommandRunner):
                 remote port. Currently, only one port is supported, i.e. the
                 list should have only one element.
             connect_timeout: The timeout for the ssh connection.
+            ssh_mode: The mode to use for ssh.
+                See SSHMode for more details.
         """
+        del ssh_mode  # unused
         assert port_forward and len(port_forward) == 1, (
             'Only one port is supported for Kubernetes port-forward.')
         kubectl_args = [
             '--pod-running-timeout', f'{connect_timeout}s', '-n', self.namespace
         ]
+        # The same logic to either set `--context` to the k8s context where
+        # the sky cluster is hosted, or `--kubeconfig` to /dev/null for
+        # in-cluster k8s is used below in the `run()` method.
         if self.context:
             kubectl_args += ['--context', self.context]
+        # If context is none, it means the cluster is hosted on in-cluster k8s.
+        # In this case, we need to set KUBECONFIG to /dev/null to avoid looking
+        # for the cluster in whatever active context is set in the kubeconfig.
+        else:
+            kubectl_args += ['--kubeconfig', '/dev/null']
         local_port, remote_port = port_forward[0]
         local_port_str = f'{local_port}' if local_port is not None else ''
 
@@ -814,6 +1375,7 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
+            run_in_background: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'kubectl exec' to run 'cmd' on a pod or deployment by its
         name and namespace.
@@ -838,7 +1400,7 @@ class KubernetesCommandRunner(CommandRunner):
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
-
+            run_in_background: Whether to run the command in the background.
 
         Returns:
             returncode
@@ -875,11 +1437,13 @@ class KubernetesCommandRunner(CommandRunner):
             kubectl_base_command.append('-i')
         kubectl_base_command += [*kubectl_args, '--']
 
-        command_str = self._get_command_to_run(cmd,
-                                               process_stream,
-                                               separate_stderr,
-                                               skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc)
+        command_str = self._get_command_to_run(
+            cmd,
+            process_stream,
+            separate_stderr,
+            skip_num_lines=skip_num_lines,
+            source_bashrc=source_bashrc,
+            run_in_background=run_in_background)
         command = kubectl_base_command + [
             # It is important to use /bin/bash -c here to make sure we quote the
             # command to be run properly. Otherwise, directly appending commands
@@ -941,23 +1505,10 @@ class KubernetesCommandRunner(CommandRunner):
             exceptions.CommandError: rsync command failed.
         """
 
-        def get_remote_home_dir() -> str:
-            # Use `echo ~` to get the remote home directory, instead of pwd or
-            # echo $HOME, because pwd can be `/` when the remote user is root
-            # and $HOME is not always set.
-            rc, remote_home_dir, stderr = self.run('echo ~',
-                                                   require_outputs=True,
-                                                   separate_stderr=True,
-                                                   stream_logs=False)
-            if rc != 0:
-                raise ValueError('Failed to get remote home directory: '
-                                 f'{remote_home_dir + stderr}')
-            remote_home_dir = remote_home_dir.strip()
-            return remote_home_dir
-
         # Build command.
-        helper_path = os.path.join(os.path.abspath(os.path.dirname(__file__)),
-                                   'kubernetes', 'rsync_helper.sh')
+        helper_path = shlex.quote(
+            os.path.join(os.path.abspath(os.path.dirname(__file__)),
+                         'kubernetes', 'rsync_helper.sh'))
         namespace_context = f'{self.namespace}+{self.context}'
         # Avoid rsync interpreting :, /, and + in namespace_context as the
         # default delimiter for options and arguments.
@@ -979,7 +1530,7 @@ class KubernetesCommandRunner(CommandRunner):
             # rsync with `kubectl` as the rsh command will cause ~/xx parsed as
             # /~/xx, so we need to replace ~ with the remote home directory. We
             # only need to do this when ~ is at the beginning of the path.
-            get_remote_home_dir=get_remote_home_dir)
+            get_remote_home_dir=self._get_remote_home_dir)
 
 
 class LocalProcessCommandRunner(CommandRunner):
@@ -1006,15 +1557,19 @@ class LocalProcessCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
+            run_in_background: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Use subprocess to run the command."""
         del port_forward, ssh_mode, connect_timeout  # Unused.
 
-        command_str = self._get_command_to_run(cmd,
-                                               process_stream,
-                                               separate_stderr,
-                                               skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc)
+        command_str = self._get_command_to_run(
+            cmd,
+            process_stream,
+            separate_stderr,
+            skip_num_lines=skip_num_lines,
+            source_bashrc=source_bashrc,
+            use_login=False,
+            run_in_background=run_in_background)
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
         os.makedirs(log_dir, exist_ok=True)
@@ -1070,3 +1625,145 @@ class LocalProcessCommandRunner(CommandRunner):
                     log_path=log_path,
                     stream_logs=stream_logs,
                     max_retry=max_retry)
+
+
+class SlurmCommandRunner(SSHCommandRunner):
+    """Runner for Slurm commands.
+
+    SlurmCommandRunner sends commands over an SSH connection through the Slurm
+    controller, to the virtual instances.
+    """
+
+    def __init__(
+        self,
+        node: Tuple[str, int],
+        ssh_user: str,
+        ssh_private_key: Optional[str],
+        *,
+        sky_dir: str,
+        skypilot_runtime_dir: str,
+        job_id: str,
+        slurm_node: str,
+        **kwargs,
+    ):
+        """Initialize SlurmCommandRunner.
+
+        Example Usage:
+            runner = SlurmCommandRunner(
+                (ip, port),
+                ssh_user,
+                ssh_private_key,
+                sky_dir=sky_dir,
+                skypilot_runtime_dir=skypilot_runtime_dir,
+                job_id=job_id,
+                slurm_node=slurm_node)
+            runner.run('ls -l', mode=SshMode.NON_INTERACTIVE)
+            runner.rsync(source, target, up=True)
+
+        Args:
+            node: (ip, port) The IP address and port of the remote machine
+              (login node).
+            ssh_user: SSH username.
+            ssh_private_key: Path to SSH private key.
+            sky_dir: The private directory for the SkyPilot cluster on the
+              Slurm cluster.
+            skypilot_runtime_dir: The directory for the SkyPilot runtime
+              on the Slurm cluster.
+            job_id: The Slurm job ID for this instance.
+            slurm_node: The Slurm node hostname for this instance
+              (compute node).
+            **kwargs: Additional arguments forwarded to SSHCommandRunner
+              (e.g., ssh_proxy_command).
+        """
+        super().__init__(node, ssh_user, ssh_private_key, **kwargs)
+        self.sky_dir = sky_dir
+        self.skypilot_runtime_dir = skypilot_runtime_dir
+        self.job_id = job_id
+        self.slurm_node = slurm_node
+
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        log_path: str = os.devnull,
+        stream_logs: bool = True,
+        max_retry: int = 1,
+    ) -> None:
+        """Rsyncs files to/from the Slurm compute node using srun as transport.
+        """
+        ssh_command = ' '.join(
+            self.ssh_base_command(ssh_mode=SshMode.NON_INTERACTIVE,
+                                  port_forward=None,
+                                  connect_timeout=None))
+
+        # The script parses job_id+node_list from $1 (node_destination)
+        # shifts past $1, and then SSHs to login node, and runs srun with
+        # the remaining arguments.
+        script_content = f"""#!/bin/bash
+job_id=$(echo "$1" | cut -d+ -f1)
+node_list=$(echo "$1" | cut -d+ -f2)
+shift
+exec {ssh_command} srun --unbuffered --quiet --overlap \
+    --jobid="$job_id" --nodelist="$node_list" --nodes=1 --ntasks=1 "$@"
+"""
+        encoded_info = f'{self.job_id}+{self.slurm_node}'
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh',
+                                         delete=False) as f:
+            f.write(script_content)
+            rsh_script_path = f.name
+        try:
+            os.chmod(rsh_script_path, 0o755)
+            self._rsync(source,
+                        target,
+                        node_destination=encoded_info,
+                        up=up,
+                        rsh_option=rsh_script_path,
+                        log_path=log_path,
+                        stream_logs=stream_logs,
+                        max_retry=max_retry,
+                        get_remote_home_dir=lambda: self.sky_dir)
+        finally:
+            try:
+                os.unlink(rsh_script_path)
+            except OSError as e:
+                logger.warning('Failed to remove temporary rsh script '
+                               f'{rsh_script_path}: '
+                               f'{common_utils.exception_to_string(e)}')
+
+    @timeline.event
+    @context_utils.cancellation_guard
+    def run(self, cmd: Union[str, List[str]],
+            **kwargs) -> Union[int, Tuple[int, str, str]]:
+        """Run Slurm-supported user commands over an SSH connection.
+
+        Args:
+            cmd: The Slurm-supported user command to run.
+
+        Returns:
+            returncode
+            or
+            A tuple of (returncode, stdout, stderr).
+        """
+        # Override $HOME so that each SkyPilot cluster's state is isolated
+        # from one another. We rely on the assumption that ~ is exclusively
+        # used by a cluster, and in Slurm that is not the case, as $HOME
+        # could be part of a shared filesystem.
+        # And similarly for SKY_RUNTIME_DIR. See constants.\
+        # SKY_RUNTIME_DIR_ENV_VAR_KEY for more details.
+        cmd = (
+            f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
+            f'"{self.skypilot_runtime_dir}" && '
+            # Set the uv cache directory to /tmp/uv_cache_$(id -u) to speed up
+            # package installation while avoiding permission conflicts when
+            # multiple users share the same host. Otherwise it defaults to
+            # ~/.cache/uv.
+            f'export UV_CACHE_DIR=/tmp/uv_cache_$(id -u) && '
+            f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
+
+        cmd = (f'srun --unbuffered --quiet --overlap --jobid={self.job_id} '
+               f'--nodelist={self.slurm_node} '
+               f'--nodes=1 --ntasks=1 bash -c {shlex.quote(cmd)}')
+
+        return super().run(cmd, **kwargs)

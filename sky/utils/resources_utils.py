@@ -5,7 +5,7 @@ import itertools
 import json
 import math
 import typing
-from typing import Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from sky import skypilot_config
 from sky.skylet import constants
@@ -181,57 +181,83 @@ def simplify_ports(ports: List[str]) -> List[str]:
 
 
 def format_resource(resource: 'resources_lib.Resources',
-                    simplify: bool = False) -> str:
+                    simplified_only: bool = False) -> Tuple[str, Optional[str]]:
     resource = resource.assert_launchable()
-    vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
-        resource.instance_type)
+    is_k8s = resource.cloud.canonical_name() == 'kubernetes'
+    vcpu, mem = None, None
+    if resource.accelerators is None or is_k8s or not simplified_only:
+        vcpu, mem = resource.cloud.get_vcpus_mem_from_instance_type(
+            resource.instance_type)
 
-    components = []
+    elements_simple = []
+    elements_full = []
 
     if resource.accelerators is not None:
         acc, count = list(resource.accelerators.items())[0]
-        components.append(f'gpus={acc}:{count}')
+        elements_simple.append(f'gpus={acc}:{count}')
+        elements_full.append(f'gpus={acc}:{count}')
 
-    is_k8s = str(resource.cloud).lower() == 'kubernetes'
-    if (resource.accelerators is None or is_k8s or not simplify):
+    if (resource.accelerators is None or is_k8s):
         if vcpu is not None:
-            components.append(f'cpus={int(vcpu)}')
+            elements_simple.append(f'cpus={common_utils.format_float(vcpu)}')
+            elements_full.append(f'cpus={common_utils.format_float(vcpu)}')
         if mem is not None:
-            components.append(f'mem={int(mem)}')
+            elements_simple.append(f'mem={common_utils.format_float(mem)}')
+            elements_full.append(f'mem={common_utils.format_float(mem)}')
+    elif not simplified_only:
+        if vcpu is not None:
+            elements_full.append(f'cpus={common_utils.format_float(vcpu)}')
+        if mem is not None:
+            elements_full.append(f'mem={common_utils.format_float(mem)}')
 
-    instance_type = resource.instance_type
-    if simplify:
-        instance_type = common_utils.truncate_long_string(instance_type, 15)
-    if not is_k8s:
-        components.append(instance_type)
-    if simplify:
-        components.append('...')
-    else:
+    is_slurm = resource.cloud.canonical_name() == 'slurm'
+    if not is_k8s and not is_slurm:
+        instance_type_full = resource.instance_type
+        instance_type_simple = common_utils.truncate_long_string(
+            instance_type_full, 15)
+        elements_simple.append(instance_type_simple)
+        elements_full.append(instance_type_full)
+    elements_simple.append('...')
+    if not simplified_only:
         image_id = resource.image_id
         if image_id is not None:
             if None in image_id:
-                components.append(f'image_id={image_id[None]}')
+                elements_full.append(f'image_id={image_id[None]}')
             else:
-                components.append(f'image_id={image_id}')
-        components.append(f'disk={resource.disk_size}')
+                elements_full.append(f'image_id={image_id}')
+        elements_full.append(f'disk={resource.disk_size}')
         disk_tier = resource.disk_tier
         if disk_tier is not None:
-            components.append(f'disk_tier={disk_tier.value}')
+            elements_full.append(f'disk_tier={disk_tier.value}')
         ports = resource.ports
         if ports is not None:
-            components.append(f'ports={ports}')
+            elements_full.append(f'ports={ports}')
 
     spot = '[spot]' if resource.use_spot else ''
-    return f'{spot}({"" if not components else ", ".join(components)})'
+    resources_str_simple = (
+        f'{spot}({"" if not elements_simple else ", ".join(elements_simple)})')
+    if simplified_only:
+        return resources_str_simple, None
+    else:
+        resources_str_full = (
+            f'{spot}({"" if not elements_full else ", ".join(elements_full)})')
+        return resources_str_simple, resources_str_full
 
 
-def get_readable_resources_repr(handle: 'backends.CloudVmRayResourceHandle',
-                                simplify: bool = False) -> str:
+def get_readable_resources_repr(
+        handle: 'backends.CloudVmRayResourceHandle',
+        simplified_only: bool = False) -> Tuple[str, Optional[str]]:
+    resource_str_simple, resource_str_full = format_resource(
+        handle.launched_resources, simplified_only)
+    if not simplified_only:
+        assert resource_str_full is not None
     if (handle.launched_nodes is not None and
             handle.launched_resources is not None):
-        return (f'{handle.launched_nodes}x'
-                f'{format_resource(handle.launched_resources, simplify)}')
-    return _DEFAULT_MESSAGE_HANDLE_INITIALIZING
+        return (f'{handle.launched_nodes}x{resource_str_simple}',
+                None if simplified_only else
+                f'{handle.launched_nodes}x{resource_str_full}')
+    return (_DEFAULT_MESSAGE_HANDLE_INITIALIZING,
+            _DEFAULT_MESSAGE_HANDLE_INITIALIZING)
 
 
 def make_ray_custom_resources_str(
@@ -435,3 +461,27 @@ def parse_time_minutes(time: str) -> int:
                 continue
 
     raise ValueError(f'Invalid time format: {time}')
+
+
+def normalize_any_of_resources_config(
+        any_of: List[Dict[str, Any]]) -> Tuple[str, ...]:
+    """Normalize a list of any_of resources config to a canonical form.
+
+    Args:
+        any_of: A list of any_of resources config.
+
+    Returns:
+        A normalized tuple representation that can be compared for equality.
+        Two lists with the same resource configurations in different orders
+        will produce the same normalized result.
+    """
+    if not any_of:
+        return tuple()
+
+    # Convert each config to JSON string with sorted keys, then sort the list
+    normalized_configs = [
+        json.dumps(config, sort_keys=True, separators=(',', ':'))
+        for config in any_of
+    ]
+
+    return tuple(sorted(normalized_configs))
