@@ -774,11 +774,6 @@ async def token(request: fastapi.Request,
         })
 
 
-# ======================== Auth Session Endpoints ========================
-# These endpoints implement the polling-based CLI login flow that replaces
-# the localhost callback mechanism blocked by Chrome's Private Network Access.
-
-
 @app.get('/api/v1/auth/token')
 async def poll_auth_token(
         code_verifier: Optional[str] = None) -> fastapi.responses.Response:
@@ -852,7 +847,6 @@ async def authorize_page(
     This page requires authentication (via auth proxy). The code_challenge
     query param is read by JavaScript and sent to the POST endpoint.
     """
-    # Try to get user from request state (set by OAuth2 middleware) or headers
     user = request.state.auth_user
     if user is None:
         user = _get_auth_user_header(request)
