@@ -2498,8 +2498,8 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
         click.echo(f'{colorama.Fore.GREEN}Browser opened at {auth_url}'
                    f'{colorama.Style.RESET_ALL}\n'
                    f'Please click "Authorize" to complete login.\n'
-                   f'{colorama.Style.DIM}Press ctrl+c to enter token manually.'
-                   f'{colorama.Style.RESET_ALL}')
+                   f'{colorama.Style.DIM}Press ctrl+c to fall back to legacy '
+                   f'auth method.{colorama.Style.RESET_ALL}')
 
         # Poll for token
         start_time = time.time()
