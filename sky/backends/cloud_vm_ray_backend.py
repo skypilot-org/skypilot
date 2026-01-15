@@ -20,6 +20,7 @@ import time
 import typing
 from typing import (Any, Callable, Dict, Iterable, Iterator, List, Literal,
                     Optional, Set, Tuple, Union)
+import uuid
 
 import colorama
 import psutil
@@ -4461,7 +4462,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               handle: CloudVmRayResourceHandle,
                               job_id: Optional[int] = None,
                               job_name: Optional[str] = None,
-                              system: Optional[Union[str,
+                              system: Optional[Union[uuid.UUID,
                                                      Literal[True]]] = None,
                               controller: bool = False,
                               follow: bool = True,
@@ -4470,7 +4471,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert job_name is None or job_id is None, (job_name, job_id)
         # TODO(kevin): Migrate stream_logs to gRPC
         code = managed_jobs.ManagedJobCodeGen.stream_logs(
-            job_name, job_id, follow, controller, tail, system)
+            job_name, job_id, follow, controller, tail, str(system))
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
@@ -4496,7 +4497,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle: CloudVmRayResourceHandle,
             job_id: Optional[int] = None,
             job_name: Optional[str] = None,
-            system: Optional[Union[str, Literal[True]]] = None,
+            system: Optional[Union[uuid.UUID, Literal[True]]] = None,
             controller: bool = False,
             local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
         """Sync down logs for a managed job.
@@ -4528,9 +4529,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                'Failed to sync down logs.',
                                                stderr)
             system_array = message_utils.decode_payload(job_ids_payload)
-            system_array = ['controller_' + s for s in system_array]
         elif system is not None:
-            system_array = [system]
+            system_array = [str(system)]
         else:
             system_array = None
 
@@ -4678,9 +4678,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise
 
         if system_array is not None:
-            for job_id in run_timestamps.keys():
+            for system_uuid in run_timestamps.keys():
                 remote_log = os.path.join(managed_jobs.JOBS_CONTROLLER_LOGS_DIR,
-                                          f'{job_id}.log')
+                                          f'controller_{system_uuid}.log')
                 local_log_dir = os.path.join(local_dir, 'managed_jobs',
                                              job_id)  # type: ignore
                 os.makedirs(os.path.dirname(os.path.expanduser(local_log_dir)),

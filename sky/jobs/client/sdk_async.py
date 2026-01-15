@@ -1,6 +1,7 @@
 """Async SDK functions for managed jobs."""
 import typing
 from typing import Dict, List, Literal, Optional, overload, Tuple, Union
+import uuid
 
 from sky import backends
 from sky import sky_logging
@@ -105,12 +106,13 @@ async def cancel(
 
 
 @usage_lib.entrypoint
-async def tail_logs(cluster_name: str,
-                    job_id: Optional[int],
-                    follow: bool,
-                    tail: int = 0,
-                    output_stream: Optional['io.TextIOBase'] = None,
-                    system: Optional[Union[str, Literal[True]]] = None) -> int:
+async def tail_logs(
+        cluster_name: str,
+        job_id: Optional[int],
+        follow: bool,
+        tail: int = 0,
+        output_stream: Optional['io.TextIOBase'] = None,
+        system: Optional[Union[uuid.UUID, Literal[True]]] = None) -> int:
     """Async version of tail_logs() that tails the logs of a job."""
     return await context_utils.to_thread(
         sdk.tail_logs,
@@ -129,7 +131,7 @@ async def download_logs(
     job_id: Optional[int],
     refresh: bool,
     controller: bool,
-    system: Union[str, Literal[True]],
+    system: Union[uuid.UUID, Literal[True]],
     local_dir: str = constants.SKY_LOGS_DIRECTORY,
 ) -> Dict[str, str]:
     ...

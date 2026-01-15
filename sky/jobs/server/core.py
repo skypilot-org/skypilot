@@ -1111,7 +1111,7 @@ def cancel(name: Optional[str] = None,
 @usage_lib.entrypoint
 def tail_logs(name: Optional[str],
               job_id: Optional[int],
-              system: Optional[Union[str, Literal[True]]],
+              system: Optional[Union[uuid.UUID, Literal[True]]],
               follow: bool,
               controller: bool,
               refresh: bool,
@@ -1174,7 +1174,7 @@ def download_logs(
         job_id: Optional[int],
         refresh: bool,
         controller: bool,
-        system: Optional[Union[str, Literal[True]]],
+        system: Optional[Union[uuid.UUID, Literal[True]]],
         local_dir: str = skylet_constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
     """Sync down logs of managed jobs.
 

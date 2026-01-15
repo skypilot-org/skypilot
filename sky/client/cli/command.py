@@ -5305,7 +5305,7 @@ def jobs_cancel(
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
               controller: bool, refresh: bool, sync_down: bool,
-              system: Optional[Union[str, Literal[True]]]):
+              system: Optional[Union[uuid.UUID, Literal[True]]]):
     """Tail or sync down the log of a managed job.
 
     Args:
@@ -5322,15 +5322,14 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
         raise click.UsageError(
             'Cannot specify both --controller and --system at the same time.')
 
-    if system and system == 'True':
+    if system == 'True':
         # AFAIK click can not handle Union[str, bool] so system will get auto
         # converted to a str. We just convert it back to a bool here. Not the
         # cleanest but it works.
         system = True
     elif isinstance(system, str):
         try:
-            parsed_uuid = uuid.UUID(system)
-            system = 'controller_' + str(parsed_uuid)
+            system = uuid.UUID(system)
         except (ValueError, TypeError) as e:
             raise click.UsageError(
                 f'Error: Invalid value for \'[SYSTEM]\': \'{system}\' is not '

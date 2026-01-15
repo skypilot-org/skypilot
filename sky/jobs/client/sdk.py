@@ -3,6 +3,7 @@ import json
 import typing
 from typing import (Any, Dict, List, Literal, Optional, overload, Sequence,
                     Tuple, Union)
+import uuid
 
 import click
 
@@ -331,14 +332,16 @@ def cancel(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
-def tail_logs(name: Optional[str] = None,
-              job_id: Optional[int] = None,
-              follow: bool = True,
-              controller: bool = False,
-              refresh: bool = False,
-              tail: Optional[int] = None,
-              output_stream: Optional['io.TextIOBase'] = None,
-              system: Optional[str] = None) -> Optional[int]:
+def tail_logs(
+        name: Optional[str] = None,
+        job_id: Optional[int] = None,
+        follow: bool = True,
+        controller: bool = False,
+        refresh: bool = False,
+        tail: Optional[int] = None,
+        output_stream: Optional['io.TextIOBase'] = None,
+        system: Optional[Union[uuid.UUID,
+                               Literal[True]]] = None) -> Optional[int]:
     """Tails logs of managed jobs.
 
     You can provide either a job name or a job ID or a system UUID to tail
@@ -403,7 +406,7 @@ def download_logs(
     job_id: Optional[int],
     refresh: bool,
     controller: bool,
-    system: Union[str, Literal[True]],
+    system: Union[uuid.UUID, Literal[True]],
     local_dir: str = constants.SKY_LOGS_DIRECTORY,
 ) -> Dict[str, str]:
     ...

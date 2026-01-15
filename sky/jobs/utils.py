@@ -1281,19 +1281,15 @@ def stream_controller_logs(controller_uuid: Union[str, Literal[True]],
             print(uuid, flush=True)
         return '', exceptions.JobExitCode.SUCCEEDED
 
-    controller_uuid: str = controller_uuid  # type: ignore
-    assert controller_uuid.startswith('controller_')
-
-    controller_log_path = controller_log_file_for_job(controller_uuid)
+    controller_log_identifier = f'controller_{controller_uuid}'
+    controller_log_path = controller_log_file_for_job(controller_log_identifier)
     if not os.path.exists(controller_log_path):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'Controller log file {controller_log_path} not found.')
 
     # command was started with this pid
-    pid = find_controller_pid_by_uuid(
-        controller_uuid[len('controller_'):] if controller_uuid.
-        startswith('controller_') else controller_uuid)
+    pid = find_controller_pid_by_uuid(controller_uuid)
 
     with open(controller_log_path, 'r', encoding='utf-8') as f:
         for line in f:
