@@ -21,6 +21,10 @@ SEP = r'\x1f'
 # Matches PartitionName=<name> and captures until the next field
 _PARTITION_NAME_REGEX = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
 
+# Regex pattern to extract MAXTIME from scontrol output
+# Matches MaxTime=<time> and captures the time
+_MAXTIME_REGEX = re.compile(r'MaxTime=((?:\d+-)?\d{1,2}:\d{2}:\d{2}|UNLIMITED)')
+
 # Default timeout for waiting for job nodes to be allocated, in seconds.
 _SLURM_DEFAULT_PROVISION_TIMEOUT = 10
 
@@ -36,6 +40,9 @@ class SlurmPartition(NamedTuple):
     """Information about the Slurm partitions."""
     name: str
     is_default: bool
+    # The maximum time a job can run in seconds.
+    # None if the maximum time is unlimited.
+    maxtime: Optional[int]
 
 
 # TODO(kevin): Add more API types for other client functions.
@@ -49,6 +56,27 @@ class NodeInfo(NamedTuple):
     # The default partition contains a '*' at the end of the name.
     # It is the caller's responsibility to strip the '*' if needed.
     partition: str
+
+
+def _parse_maxtime(line: str) -> Optional[int]:
+    """Parse the maximum time a job can run from the scontrol output."""
+    maxtime_match = _MAXTIME_REGEX.search(line)
+    if not maxtime_match:
+        return None
+    maxtime_str = maxtime_match.group(1).strip()
+    if maxtime_str == 'UNLIMITED':
+        return None
+
+    # Convert maxTime from '[days-]hours:minutes:seconds' to seconds.
+    # Example: "2-12:30:05" => (2*86400) + (12*3600) + (30*60) + 5
+    days = 0
+    time_part = maxtime_str
+    if '-' in maxtime_str:
+        days_part, time_part = maxtime_str.split('-', 1)
+        days = int(days_part)
+
+    h, m, s = map(int, time_part.split(':'))
+    return days * 86400 + h * 3600 + m * 60 + s
 
 
 class SlurmClient:
@@ -567,11 +595,14 @@ class SlurmClient:
             match = _PARTITION_NAME_REGEX.search(line)
             if 'Default=YES' in line:
                 is_default = True
+            maxtime = _parse_maxtime(line)
             if match:
                 partition = match.group(1).strip()
                 if partition:
                     partitions.append(
-                        SlurmPartition(name=partition, is_default=is_default))
+                        SlurmPartition(name=partition,
+                                       is_default=is_default,
+                                       maxtime=maxtime))
         return partitions
 
     def get_default_partition(self) -> Optional[str]:

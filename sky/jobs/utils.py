@@ -2316,11 +2316,13 @@ class ManagedJobCodeGen:
         from sky.jobs import utils
         from sky.jobs import state as managed_job_state
         from sky.jobs import constants as managed_job_constants
-        from sky.server import plugins
-
-        plugins.load_plugins(plugins.ExtensionContext())
 
         managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
+
+        # Plugins are only loaded for managed jobs version 13 and above.
+        if managed_job_version >= 13:
+            from sky.server import plugins
+            plugins.load_plugins(plugins.ExtensionContext())
         """)
 
     @classmethod

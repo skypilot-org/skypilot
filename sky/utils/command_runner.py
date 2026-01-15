@@ -256,13 +256,11 @@ def ssh_options_list(
     # ServerAliveInterval set, since the keepalive message may not be recognized
     # by the custom proxy command, such as AWS SSM Session Manager.
     #
-    # We also do not use ControlMaster when we use `kubectl port-forward`
-    # to access Kubernetes pods over SSH+Proxycommand. This is because the
-    # process running ProxyCommand is kept running as long as the ssh session
-    # is running and the ControlMaster keeps the session, which results in
-    # 'ControlPersist' number of seconds delay per ssh commands ran.
+    # Similarly for ssh_proxy_jump, where we've also observed flakiness that may
+    # occassionally cause ssh to error with exit code 255.
     if (ssh_control_name is not None and docker_ssh_proxy_command is None and
-            ssh_proxy_command is None and not disable_control_master):
+            ssh_proxy_command is None and ssh_proxy_jump is None and
+            not disable_control_master):
         control_path = f'{_ssh_control_path(ssh_control_name)}/%C'
         if escape_percent_expand:
             control_path = control_path.replace('%', '%%')
