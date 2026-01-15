@@ -18,6 +18,7 @@ import {
   ChevronRightIcon,
   CopyIcon,
   CheckIcon,
+  ExternalLinkIcon,
 } from 'lucide-react';
 import yaml from 'js-yaml';
 import {
@@ -25,7 +26,11 @@ import {
   NonCapitalizedTooltip,
   formatFullTimestamp,
 } from '@/components/utils';
-import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
+import {
+  checkGrafanaAvailability,
+  getGrafanaUrl,
+  buildGrafanaUrl,
+} from '@/utils/grafana';
 import {
   SSHInstructionsModal,
   VSCodeInstructionsModal,
@@ -760,6 +765,26 @@ function ActiveTab({
                   )}
                   <h3 className="text-lg font-semibold">GPU Metrics</h3>
                 </button>
+                <Tooltip content="Open in Grafana">
+                  <button
+                    onClick={() => {
+                      const clusterParam =
+                        matchedClusterName ||
+                        clusterData?.cluster_name_on_cloud ||
+                        clusterData?.cluster;
+                      window.open(
+                        buildGrafanaUrl(
+                          `/d/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics?orgId=1&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&timezone=browser&var-cluster=${encodeURIComponent(clusterParam)}&var-node=$__all&var-gpu=$__all`
+                        ),
+                        '_blank'
+                      );
+                    }}
+                    className="p-1.5 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                    aria-label="Open in Grafana"
+                  >
+                    <ExternalLinkIcon className="w-4 h-4" />
+                  </button>
+                </Tooltip>
               </div>
               {isGpuMetricsExpanded && (
                 <div className="p-5">
