@@ -102,8 +102,7 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
         if self == KubernetesHighPerformanceNetworkType.NEBIUS:
             # Nebius cluster with InfiniBand - use InfiniBand optimizations
             return {
-                'NCCL_IB_HCA':
-                    'mlx5',
+                'NCCL_IB_HCA': 'mlx5',
                 'UCX_NET_DEVICES': ('mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,'
                                     'mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1')
             }
