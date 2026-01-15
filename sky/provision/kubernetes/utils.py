@@ -3205,11 +3205,12 @@ def get_kubernetes_node_info(
         # Resolve context before calling the provider so it can be cached
         resolved_context = (context if context is not None else
                             get_current_kube_config_context_name())
-        result = plugin_extensions.NodeInfoSource.get(resolved_context)
-        if result is not None:
-            logger.debug(f'Got node info from external provider for '
-                         f'{resolved_context}')
-            return result
+        if resolved_context is not None:
+            result = plugin_extensions.NodeInfoSource.get(resolved_context)
+            if result is not None:
+                logger.debug(f'Got node info from external provider for '
+                             f'{resolved_context}')
+                return result
         # Fall through to direct Kubernetes API query if provider returns None
 
     nodes = get_kubernetes_nodes(context=context)
