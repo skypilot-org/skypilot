@@ -76,36 +76,26 @@ class AuthSessionStore:
         """Poll a session for its token using code_verifier.
 
         Computes code_challenge from code_verifier to look up the session.
-        If found and valid, consumes the session and returns the token.
+        If found and valid, atomically consumes the session and returns the
+        token. Uses DELETE ... RETURNING for atomicity (requires SQLite 3.35+,
+        which is already required by the API server).
 
         Returns:
             The token if session exists and is valid, None otherwise.
         """
         code_challenge = common_utils.compute_code_challenge(code_verifier)
+        expiry_threshold = time.time() - SESSION_EXPIRATION_SECONDS
 
         with self._get_cursor() as cursor:
             self._ensure_table(cursor)
 
+            # Atomically delete and return token if not expired
             cursor.execute(
-                f'SELECT token, created_at FROM {_AUTH_SESSIONS_TABLE} '
-                f'WHERE code_challenge = ?', (code_challenge,))
+                f'DELETE FROM {_AUTH_SESSIONS_TABLE} '
+                f'WHERE code_challenge = ? AND created_at > ? '
+                f'RETURNING token', (code_challenge, expiry_threshold))
             row = cursor.fetchone()
-
-            if row is None:
-                return None
-
-            token, created_at = row
-            if time.time() - created_at > SESSION_EXPIRATION_SECONDS:
-                cursor.execute(
-                    f'DELETE FROM {_AUTH_SESSIONS_TABLE} '
-                    f'WHERE code_challenge = ?', (code_challenge,))
-                return None
-
-            # Consume and return token
-            cursor.execute(
-                f'DELETE FROM {_AUTH_SESSIONS_TABLE} WHERE code_challenge = ?',
-                (code_challenge,))
-            return token
+            return row[0] if row else None
 
 
 # Global session store instance
