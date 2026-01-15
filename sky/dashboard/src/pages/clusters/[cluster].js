@@ -772,9 +772,20 @@ function ActiveTab({
                         matchedClusterName ||
                         clusterData?.cluster_name_on_cloud ||
                         clusterData?.cluster;
+                      const dashboardPath =
+                        '/d/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics';
+                      const queryParams = new URLSearchParams({
+                        orgId: '1',
+                        from: timeRange.from,
+                        to: timeRange.to,
+                        timezone: 'browser',
+                        'var-cluster': clusterParam,
+                        'var-node': '$__all',
+                        'var-gpu': '$__all',
+                      });
                       window.open(
                         buildGrafanaUrl(
-                          `/d/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics?orgId=1&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&timezone=browser&var-cluster=${encodeURIComponent(clusterParam)}&var-node=$__all&var-gpu=$__all`
+                          `${dashboardPath}?${queryParams.toString()}`
                         ),
                         '_blank'
                       );
