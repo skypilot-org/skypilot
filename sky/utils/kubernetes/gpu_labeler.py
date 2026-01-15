@@ -6,6 +6,7 @@ import subprocess
 from typing import Dict, Optional, Tuple
 
 import colorama
+import jinja2
 import yaml
 
 from sky.adaptors import kubernetes
@@ -79,17 +80,15 @@ def label(context: Optional[str] = None, wait_for_completion: bool = True):
 
     # Apply the RBAC manifest using kubectl since it contains multiple resources
     with rich_utils.client_status('Setting up GPU labeling'):
-        rbac_manifest_path = os.path.join(manifest_dir,
-                                          'k8s_gpu_labeler_setup.yaml')
+        rbac_template_path = os.path.join(manifest_dir,
+                                          'k8s_gpu_labeler_setup.yaml.j2')
         try:
-            # Read the manifest and replace the placeholder with actual GPU names
-            with open(rbac_manifest_path, 'r', encoding='utf-8') as f:
-                manifest_content = f.read()
-            # Replace placeholder with the canonical GPU names list
-            gpu_names_str = repr(kubernetes_constants.CANONICAL_GPU_NAMES)
-            manifest_content = manifest_content.replace(
-                'CANONICAL_GPU_NAMES_PLACEHOLDER', gpu_names_str)
-            # Apply via stdin to use the modified content
+            # Render the Jinja2 template with canonical GPU names
+            with open(rbac_template_path, 'r', encoding='utf-8') as f:
+                template = jinja2.Template(f.read())
+            manifest_content = template.render(
+                canonical_gpu_names=kubernetes_constants.CANONICAL_GPU_NAMES)
+            # Apply via stdin to use the rendered content
             apply_command = ['kubectl', 'apply', '-f', '-']
             if context:
                 apply_command += ['--context', context]
