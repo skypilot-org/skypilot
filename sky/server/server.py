@@ -916,13 +916,8 @@ def _get_authorize_success_html() -> str:
     """Return HTML for successful authorization."""
     html_dir = pathlib.Path(__file__).parent / 'html'
     success_page_path = html_dir / 'authorize_success.html'
-    try:
-        with open(success_page_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except FileNotFoundError:
-        return """<!DOCTYPE html>
-<html><body><h1>Authorization Complete</h1>
-<p>You can close this tab.</p></body></html>"""
+    with open(success_page_path, 'r', encoding='utf-8') as f:
+        return f.read()
 
 
 @app.post('/check')
