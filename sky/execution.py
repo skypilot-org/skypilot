@@ -17,8 +17,7 @@ from sky import optimizer
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.data import data_utils
-from sky.data import storage as storage_lib
+
 from sky.server.requests import request_names
 from sky.skylet import autostop_lib
 from sky.usage import usage_lib
@@ -226,26 +225,8 @@ def _execute(
                     # the storage is S3 and the task is on Azure).
                     # TODO(romilb): We should improve this logic to be more
                     # generic.
-                    is_new_bucket = (storage.source is None or
-                                     isinstance(storage.source, list) or
-                                     (isinstance(storage.source, str) and
-                                      storage.source.startswith('file://')))
-                    is_matching_cloud_store = (
-                        isinstance(storage.source, str) and
-                        ((store_type == storage_lib.StoreType.S3 and
-                          storage.source.startswith('s3://')) or
-                         (store_type == storage_lib.StoreType.GCS and
-                          storage.source.startswith('gs://')) or
-                         (store_type == storage_lib.StoreType.AZURE and
-                          data_utils.is_az_container_endpoint(storage.source))
-                         or (store_type == storage_lib.StoreType.R2 and
-                             storage.source.startswith('r2://')) or
-                         (store_type == storage_lib.StoreType.IBM and
-                          storage.source.startswith('cos://')) or
-                         (store_type == storage_lib.StoreType.OCI and
-                          storage.source.startswith('oci://'))))
-
-                    if is_new_bucket or is_matching_cloud_store:
+                    if task_lib.Task.should_construct_storage_with_region(
+                            storage, store_type):
                         storage.construct(region=region)
                     else:
                         storage.construct()

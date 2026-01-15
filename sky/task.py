@@ -1429,6 +1429,42 @@ class Task:
         store_type = storage_lib.StoreType.from_cloud(storage_cloud_str)
         return store_type, storage_region
 
+    @staticmethod
+    def should_construct_storage_with_region(
+            storage: 'storage_lib.Storage',
+            store_type: 'storage_lib.StoreType') -> bool:
+        """Returns whether the storage should be constructed with a region.
+
+        This is used to pass the region to the storage constructor if the store
+        type inferred from the task's resources matches the storage's store
+        type.
+        """
+        if (storage.source is None or isinstance(storage.source, list) or
+            (isinstance(storage.source, str) and
+             storage.source.startswith('file://'))):
+            return True
+
+        if isinstance(storage.source, str):
+            if (store_type == storage_lib.StoreType.S3 and
+                    storage.source.startswith('s3://')):
+                return True
+            if (store_type == storage_lib.StoreType.GCS and
+                    storage.source.startswith('gs://')):
+                return True
+            if (store_type == storage_lib.StoreType.AZURE and
+                    data_utils.is_az_container_endpoint(storage.source)):
+                return True
+            if (store_type == storage_lib.StoreType.R2 and
+                    storage.source.startswith('r2://')):
+                return True
+            if (store_type == storage_lib.StoreType.IBM and
+                    storage.source.startswith('cos://')):
+                return True
+            if (store_type == storage_lib.StoreType.OCI and
+                    storage.source.startswith('oci://')):
+                return True
+        return False
+
     def sync_storage_mounts(self) -> None:
         """(INTERNAL) Eagerly syncs storage mounts to cloud storage.
 
@@ -1459,26 +1495,8 @@ class Task:
                 # type might not handle the storage's store type (e.g., if
                 # the storage is S3 and the task is on Azure).
                 # TODO(romilb): We should improve this logic to be more generic.
-                is_new_bucket = (storage.source is None or
-                                 isinstance(storage.source, list) or
-                                 (isinstance(storage.source, str) and
-                                  storage.source.startswith('file://')))
-                is_matching_cloud_store = (
-                    isinstance(storage.source, str) and
-                    ((store_type == storage_lib.StoreType.S3 and
-                      storage.source.startswith('s3://')) or
-                     (store_type == storage_lib.StoreType.GCS and
-                      storage.source.startswith('gs://')) or
-                     (store_type == storage_lib.StoreType.AZURE and
-                      data_utils.is_az_container_endpoint(storage.source)) or
-                     (store_type == storage_lib.StoreType.R2 and
-                      storage.source.startswith('r2://')) or
-                     (store_type == storage_lib.StoreType.IBM and
-                      storage.source.startswith('cos://')) or
-                     (store_type == storage_lib.StoreType.OCI and
-                      storage.source.startswith('oci://'))))
-
-                if is_new_bucket or is_matching_cloud_store:
+                if self.should_construct_storage_with_region(
+                        storage, store_type):
                     storage.construct(region=store_region)
                 else:
                     storage.construct()
