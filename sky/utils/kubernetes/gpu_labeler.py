@@ -9,6 +9,7 @@ import colorama
 import yaml
 
 from sky.adaptors import kubernetes
+from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import directory_utils
 from sky.utils import rich_utils
@@ -81,13 +82,25 @@ def label(context: Optional[str] = None, wait_for_completion: bool = True):
         rbac_manifest_path = os.path.join(manifest_dir,
                                           'k8s_gpu_labeler_setup.yaml')
         try:
-            apply_command = ['kubectl', 'apply', '-f', rbac_manifest_path]
+            # Read the manifest and replace the placeholder with actual GPU names
+            with open(rbac_manifest_path, 'r', encoding='utf-8') as f:
+                manifest_content = f.read()
+            # Replace placeholder with the canonical GPU names list
+            gpu_names_str = repr(kubernetes_constants.CANONICAL_GPU_NAMES)
+            manifest_content = manifest_content.replace(
+                'CANONICAL_GPU_NAMES_PLACEHOLDER', gpu_names_str)
+            # Apply via stdin to use the modified content
+            apply_command = ['kubectl', 'apply', '-f', '-']
             if context:
                 apply_command += ['--context', context]
-            subprocess.check_output(apply_command)
+            subprocess.run(apply_command,
+                           input=manifest_content.encode(),
+                           check=True,
+                           capture_output=True)
         except subprocess.CalledProcessError as e:
             output = e.output.decode('utf-8')
-            print('Error setting up GPU labeling: ' + output)
+            stderr = e.stderr.decode('utf-8')
+            print('Error setting up GPU labeling: ' + output + stderr)
             return
 
     jobs_to_node_names: Dict[str, str] = {}
