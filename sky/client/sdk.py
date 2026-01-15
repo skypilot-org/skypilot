@@ -2705,7 +2705,7 @@ def api_login(endpoint: Optional[str] = None,
         remote_api_version_str = api_server_info.api_version
         if remote_api_version_str is not None:
             try:
-                if int(remote_api_version_str) >= 27:
+                if int(remote_api_version_str) >= 28:
                     token = _try_polling_auth(endpoint)
             except ValueError:
                 pass  # Invalid version string, skip polling auth
