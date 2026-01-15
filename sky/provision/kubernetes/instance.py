@@ -218,8 +218,12 @@ def _get_pvc_binding_status(namespace: str, context: Optional[str],
                         f'involvedObject.name={pvc_name},'
                         'involvedObject.kind=PersistentVolumeClaim'),
                     _request_timeout=kubernetes.API_TIMEOUT)
+                # Sort events by creation timestamp to get the most recent
+                sorted_events = sorted(
+                    pvc_events.items,
+                    key=lambda e: e.metadata.creation_timestamp)
                 event_messages = []
-                for event in pvc_events.items:
+                for event in sorted_events:
                     if event.type == 'Warning' or event.reason in (
                             'ProvisioningFailed', 'WaitForFirstConsumer'):
                         msg = event.message or ''
