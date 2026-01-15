@@ -830,6 +830,10 @@ async def authorize_auth_session(
     if not code_challenge:
         raise fastapi.HTTPException(status_code=400,
                                     detail='code_challenge is required')
+    # Validate format: base64url-encoded SHA256, 43 chars of A-Za-z0-9_-
+    if not re.match(r'^[A-Za-z0-9_-]{43}$', code_challenge):
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='Invalid code_challenge format')
 
     auth_token = _generate_auth_token(request)
 
@@ -842,20 +846,12 @@ async def authorize_auth_session(
 
 @app.get('/auth/authorize')
 async def authorize_page(
-        request: fastapi.Request,
-        code_challenge: Optional[str] = None) -> fastapi.responses.Response:
+        request: fastapi.Request) -> fastapi.responses.Response:
     """Serve the authorization page where users click to authorize the CLI.
 
-    This page requires authentication (via auth proxy). No session is created
-    until the user clicks Authorize.
-
-    Query params:
-        code_challenge: Base64url-encoded SHA256 hash of the code verifier
+    This page requires authentication (via auth proxy). The code_challenge
+    query param is read by JavaScript and sent to the POST endpoint.
     """
-    if not code_challenge:
-        raise fastapi.HTTPException(status_code=400,
-                                    detail='code_challenge is required')
-
     # Try to get user from request state (set by OAuth2 middleware) or headers
     user = request.state.auth_user
     if user is None:
@@ -868,8 +864,6 @@ async def authorize_page(
     with open(authorize_page_path, 'r', encoding='utf-8') as f:
         html_content = f.read()
 
-    html_content = html_content.replace('CODE_CHALLENGE_PLACEHOLDER',
-                                        html.escape(code_challenge))
     html_content = html_content.replace('USER_PLACEHOLDER', user_info)
 
     return fastapi.responses.HTMLResponse(

@@ -147,9 +147,13 @@
     </div>
 
     <script>
-        const codeChallenge = 'CODE_CHALLENGE_PLACEHOLDER';
         const authorizeBtn = document.getElementById('authorize-btn');
         const errorMessage = document.getElementById('error-message');
+
+        function getCodeChallenge() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('code_challenge');
+        }
 
         function showMessage(title, message) {
             document.body.innerHTML = `
@@ -173,7 +177,7 @@
                     method: 'POST',
                     credentials: 'include',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({code_challenge: codeChallenge})
+                    body: JSON.stringify({code_challenge: getCodeChallenge()})
                 });
 
                 if (response.ok) {
