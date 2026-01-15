@@ -17,10 +17,10 @@ from sky import optimizer
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.server.requests import request_names
-from sky.skylet import autostop_lib
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.server.requests import request_names
+from sky.skylet import autostop_lib
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
@@ -237,10 +237,9 @@ def _execute(
                          (store_type == storage_lib.StoreType.GCS and
                           storage.source.startswith('gs://')) or
                          (store_type == storage_lib.StoreType.AZURE and
-                          data_utils.is_az_container_endpoint(
-                              storage.source)) or
-                         (store_type == storage_lib.StoreType.R2 and
-                          storage.source.startswith('r2://')) or
+                          data_utils.is_az_container_endpoint(storage.source))
+                         or (store_type == storage_lib.StoreType.R2 and
+                             storage.source.startswith('r2://')) or
                          (store_type == storage_lib.StoreType.IBM and
                           storage.source.startswith('cos://')) or
                          (store_type == storage_lib.StoreType.OCI and
