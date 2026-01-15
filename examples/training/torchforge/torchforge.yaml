@@ -1,0 +1,131 @@
+# SkyPilot configuration for TorchForge GRPO training
+#
+# TorchForge is a PyTorch-native agentic RL library built on Monarch, TorchTitan, and vLLM.
+# This configuration runs GRPO (Grouped Relative Policy Optimization) training on GSM8K.
+#
+# Usage:
+#   # Train Qwen3-1.7B (default, requires 3+ GPUs)
+#   sky launch -c torchforge torchforge.yaml
+#
+#   # Train Llama 3.1 8B (requires 5+ GPUs and HF token)
+#   sky launch -c torchforge-llama torchforge.yaml \
+#     --env HF_TOKEN=<your-token> \
+#     --env MODEL=meta-llama/Meta-Llama-3.1-8B-Instruct \
+#     --env CONFIG_FILE=apps/grpo/llama3_8b.yaml \
+#     --env MIN_GPUS=5
+#
+# To view logs:
+#   sky logs torchforge
+#
+# To SSH into the cluster:
+#   ssh torchforge
+#
+# To terminate:
+#   sky down torchforge
+
+name: torchforge-grpo
+
+resources:
+  accelerators: H100:3
+  disk_size: 512  # GB, for model weights and checkpoints
+  # Use a CUDA 12.8 compatible image with Python 3.10+
+  image_id: docker:pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
+
+envs:
+  # Model configuration
+  MODEL: "Qwen/Qwen3-1.7B"
+  CONFIG_FILE: "apps/grpo/qwen3_1_7b.yaml"
+  # Hugging Face token for gated models (e.g., Llama)
+  HF_TOKEN: ""
+  # W&B configuration (set to "online" to enable logging)
+  WANDB_MODE: "disabled"
+  # Training steps (set to small number for testing)
+  MAX_STEPS: ""
+
+setup: |
+  set -ex
+
+  echo "=== Setting up TorchForge environment ==="
+
+  # Install system dependencies for RDMA/InfiniBand (optional, for multi-node)
+  apt-get update
+  apt-get install -y git curl libibverbs1 rdma-core || true
+
+  # Clone TorchForge repository
+  if [ ! -d "torchforge" ]; then
+    git clone https://github.com/meta-pytorch/torchforge.git
+  fi
+  cd torchforge
+
+  # Install PyTorch 2.9.0 with CUDA 12.8 support
+  echo "=== Installing PyTorch ==="
+  pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu128
+
+  # Install vLLM requirements and vLLM from PyTorch preview index
+  echo "=== Installing vLLM ==="
+  pip install -r .github/packaging/vllm_reqs_12_8.txt
+  pip install six "setuptools<80"
+  pip install vllm --no-cache-dir --index-url https://download.pytorch.org/whl/preview/forge
+
+  # Install TorchStore
+  echo "=== Installing TorchStore ==="
+  pip install "git+https://github.com/meta-pytorch/torchstore.git@no-monarch-2025.12.17"
+
+  # Install Monarch
+  echo "=== Installing Monarch ==="
+  pip install torchmonarch-nightly
+
+  # Install TorchForge
+  echo "=== Installing TorchForge ==="
+  pip install -e ".[dev]"
+
+  # Verify installation
+  echo "=== Verifying installation ==="
+  python -c "import torch; print(f'PyTorch {torch.__version__} (CUDA: {torch.cuda.is_available()})')"
+  python -c "import vllm; print(f'vLLM {vllm.__version__}')"
+  python -c "import monarch; print('Monarch imported successfully')"
+  python -c "import forge; print('TorchForge imported successfully')"
+
+  echo "=== Setup complete ==="
+
+run: |
+  set -ex
+  cd torchforge
+
+  echo "=== Starting TorchForge GRPO Training ==="
+  echo "Model: $MODEL"
+  echo "Config: $CONFIG_FILE"
+  echo "GPUs available: $(nvidia-smi -L | wc -l)"
+
+  # Set up Hugging Face authentication if token provided
+  if [ -n "$HF_TOKEN" ]; then
+    echo "Setting up Hugging Face authentication..."
+    huggingface-cli login --token "$HF_TOKEN" --add-to-git-credential
+  fi
+
+  # Set W&B mode
+  export WANDB_MODE="${WANDB_MODE:-disabled}"
+
+  # Disable torch.compile for stability (optional, remove for production)
+  # export TORCH_COMPILE_DISABLE=1
+
+  # Configure environment for single-node training
+  export TORCHSTORE_RDMA_ENABLED=0
+
+  # Build the training command
+  TRAIN_CMD="python -m apps.grpo.main --config $CONFIG_FILE"
+
+  # Override model if specified
+  if [ -n "$MODEL" ] && [ "$MODEL" != "Qwen/Qwen3-1.7B" ]; then
+    TRAIN_CMD="$TRAIN_CMD model=$MODEL"
+  fi
+
+  # Override max steps if specified (useful for testing)
+  if [ -n "$MAX_STEPS" ]; then
+    TRAIN_CMD="$TRAIN_CMD trainer.training.steps=$MAX_STEPS"
+  fi
+
+  echo "Running: $TRAIN_CMD"
+  eval $TRAIN_CMD
+
+  echo "=== Training complete ==="
