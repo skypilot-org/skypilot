@@ -10,10 +10,11 @@ Exposing Services on Kubernetes
     :ref:`Opening Ports <ports>` explains how to expose services in your task through SkyPilot.
 
 SkyServe and SkyPilot clusters can :ref:`open ports <ports>` to expose services. For SkyPilot
-clusters running on Kubernetes, we support either of two modes to expose ports:
+clusters running on Kubernetes, we support three modes to expose ports:
 
 * :ref:`LoadBalancer Service <kubernetes-loadbalancer>` (default)
 * :ref:`Nginx Ingress <kubernetes-ingress>`
+* :ref:`Pod IP <kubernetes-podip>` (internal network only)
 
 
 By default, SkyPilot creates a `LoadBalancer Service <https://kubernetes.io/docs/concepts/services-networking/service/>`__ on your Kubernetes cluster to expose the port.
@@ -174,3 +175,47 @@ Use :code:`sky status --endpoints <cluster>` to view the full endpoint URLs for 
 .. note::
 
     When exposing a port under a sub-path such as an ingress, services expecting root path access, (e.g., Jupyter notebooks) may face issues. To resolve this, configure the service to operate under a different base URL. For Jupyter, use `--NotebookApp.base_url <https://jupyter-notebook.readthedocs.io/en/5.7.4/config.html>`_ flag during launch. Alternatively, consider using :ref:`LoadBalancer <kubernetes-loadbalancer>` mode.
+
+
+.. _kubernetes-podip:
+
+Pod IP Mode
+-----------
+
+This mode exposes ports using the Pod's internal IP address directly, without creating any Kubernetes Service or Ingress resources. This is useful for internal network deployments where services only need to be accessed from within the Kubernetes cluster.
+
+To use this mode, update your :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/config.yaml`:
+
+.. code-block:: yaml
+
+    kubernetes:
+      ports: podip
+
+When using this mode:
+
+- Ports are exposed directly on the Pod's internal IP address
+- **No LoadBalancer or NodePort services are created**
+- Services are **only accessible from within the Kubernetes cluster network**
+- This is ideal for :ref:`internal/airgapped environments <airgap>` or when external access is not needed
+
+To access the endpoints, use :code:`sky status --endpoints <cluster>`:
+
+.. code-block:: console
+
+    $ sky status --endpoints mycluster
+    8888: 10.244.0.15:8888
+
+The returned IP is the Pod's internal IP, accessible from other pods or nodes within the cluster.
+
+.. note::
+
+    Pod IP mode is particularly useful for:
+
+    - **Internal SkyServe deployments**: When your service consumers are also running inside the same Kubernetes cluster
+    - **Air-gapped environments**: When external network access is restricted or not available
+    - **Development and testing**: When you don't need external access to your services
+    - **Multi-tenant clusters**: When you want to limit service exposure to the cluster network only
+
+.. warning::
+
+    Pod IPs are ephemeral and may change if the pod is rescheduled. For stable internal endpoints, consider using :ref:`internal load balancers <kubernetes-loadbalancer>` instead.
