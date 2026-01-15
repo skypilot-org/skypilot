@@ -26,8 +26,7 @@
 name: torchforge-grpo
 
 resources:
-  accelerators: H100:3
-  disk_size: 512  # GB, for model weights and checkpoints
+  accelerators: {H100:3, H200:3}  # 3+ GPUs for Qwen3-1.7B
   # Use a CUDA 12.8 compatible image with Python 3.10+
   image_id: docker:pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
 
@@ -59,7 +58,7 @@ setup: |
 
   # Install PyTorch 2.9.0 with CUDA 12.8 support
   echo "=== Installing PyTorch ==="
-  pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu128
+  pip install torch==2.9.0 torchvision --index-url https://download.pytorch.org/whl/cu128
 
   # Install vLLM requirements and vLLM from PyTorch preview index
   echo "=== Installing vLLM ==="
@@ -105,6 +104,9 @@ run: |
 
   # Set W&B mode
   export WANDB_MODE="${WANDB_MODE:-disabled}"
+
+  # Set USER environment variable if not set (required for config)
+  export USER="${USER:-root}"
 
   # Disable torch.compile for stability (optional, remove for production)
   # export TORCH_COMPILE_DISABLE=1
