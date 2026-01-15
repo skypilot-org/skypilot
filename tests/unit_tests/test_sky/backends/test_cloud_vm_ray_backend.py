@@ -840,3 +840,776 @@ class TestIsMessageTooLong:
         mixed = "too long and request-uri too large"
         assert cloud_vm_ray_backend._is_message_too_long(255, output=mixed)
         assert cloud_vm_ray_backend._is_message_too_long(1, output=mixed)
+
+
+class TestGangSchedulingStatus:
+    """Tests for GangSchedulingStatus enum."""
+
+    def test_enum_values(self):
+        """Test GangSchedulingStatus has expected enum values."""
+        from sky.backends.cloud_vm_ray_backend import GangSchedulingStatus
+        assert GangSchedulingStatus.CLUSTER_READY.value == 0
+        assert GangSchedulingStatus.GANG_FAILED.value == 1
+        assert GangSchedulingStatus.HEAD_FAILED.value == 2
+
+    def test_enum_members(self):
+        """Test all expected members exist."""
+        from sky.backends.cloud_vm_ray_backend import GangSchedulingStatus
+        members = list(GangSchedulingStatus)
+        assert len(members) == 3
+        assert GangSchedulingStatus.CLUSTER_READY in members
+        assert GangSchedulingStatus.GANG_FAILED in members
+        assert GangSchedulingStatus.HEAD_FAILED in members
+
+    def test_enum_comparison(self):
+        """Test enum comparison works correctly."""
+        from sky.backends.cloud_vm_ray_backend import GangSchedulingStatus
+        assert GangSchedulingStatus.CLUSTER_READY == GangSchedulingStatus.CLUSTER_READY
+        assert GangSchedulingStatus.CLUSTER_READY != GangSchedulingStatus.GANG_FAILED
+
+
+class TestGetClusterConfigTemplate:
+    """Tests for _get_cluster_config_template function."""
+
+    def test_aws_template(self):
+        """Test AWS cloud returns correct template."""
+        from sky import clouds
+        cloud = clouds.AWS()
+        template = cloud_vm_ray_backend._get_cluster_config_template(cloud)
+        assert template == 'aws-ray.yml.j2'
+
+    def test_gcp_template(self):
+        """Test GCP cloud returns correct template."""
+        from sky import clouds
+        cloud = clouds.GCP()
+        template = cloud_vm_ray_backend._get_cluster_config_template(cloud)
+        assert template == 'gcp-ray.yml.j2'
+
+    def test_azure_template(self):
+        """Test Azure cloud returns correct template."""
+        from sky import clouds
+        cloud = clouds.Azure()
+        template = cloud_vm_ray_backend._get_cluster_config_template(cloud)
+        assert template == 'azure-ray.yml.j2'
+
+    def test_kubernetes_template(self):
+        """Test Kubernetes cloud returns correct template."""
+        from sky import clouds
+        cloud = clouds.Kubernetes()
+        template = cloud_vm_ray_backend._get_cluster_config_template(cloud)
+        assert template == 'kubernetes-ray.yml.j2'
+
+    def test_lambda_template(self):
+        """Test Lambda cloud returns correct template."""
+        from sky import clouds
+        cloud = clouds.Lambda()
+        template = cloud_vm_ray_backend._get_cluster_config_template(cloud)
+        assert template == 'lambda-ray.yml.j2'
+
+    def test_unknown_cloud_raises_keyerror(self):
+        """Test unknown cloud raises KeyError."""
+
+        class FakeCloud:
+            pass
+
+        fake_cloud = FakeCloud()
+        with pytest.raises(KeyError):
+            cloud_vm_ray_backend._get_cluster_config_template(fake_cloud)
+
+
+class TestAddToBlockedResources:
+    """Tests for _add_to_blocked_resources function."""
+
+    def test_adds_new_resource(self):
+        """Test adding a new resource to blocked set."""
+        blocked = set()
+        mock_resource = MagicMock()
+        mock_resource.should_be_blocked_by = MagicMock(return_value=False)
+
+        cloud_vm_ray_backend._add_to_blocked_resources(blocked, mock_resource)
+        assert mock_resource in blocked
+
+    def test_does_not_add_duplicate(self):
+        """Test that duplicate resources are not added."""
+        existing_resource = MagicMock()
+        new_resource = MagicMock()
+        # new_resource is blocked by existing_resource
+        new_resource.should_be_blocked_by = MagicMock(return_value=True)
+
+        blocked = {existing_resource}
+        cloud_vm_ray_backend._add_to_blocked_resources(blocked, new_resource)
+
+        # Should not have added new_resource
+        assert len(blocked) == 1
+        assert existing_resource in blocked
+        assert new_resource not in blocked
+
+    def test_adds_different_resource(self):
+        """Test adding different resources works."""
+        resource1 = MagicMock()
+        resource1.should_be_blocked_by = MagicMock(return_value=False)
+        resource2 = MagicMock()
+        resource2.should_be_blocked_by = MagicMock(return_value=False)
+
+        blocked = set()
+        cloud_vm_ray_backend._add_to_blocked_resources(blocked, resource1)
+        cloud_vm_ray_backend._add_to_blocked_resources(blocked, resource2)
+
+        assert len(blocked) == 2
+        assert resource1 in blocked
+        assert resource2 in blocked
+
+
+class TestRetryingVmProvisionerToProvisionConfig:
+    """Tests for RetryingVmProvisioner.ToProvisionConfig."""
+
+    def test_creation_with_required_args(self):
+        """Test ToProvisionConfig creation with minimal args."""
+        mock_resources = MagicMock()
+        config = cloud_vm_ray_backend.RetryingVmProvisioner.ToProvisionConfig(
+            cluster_name='test-cluster',
+            resources=mock_resources,
+            num_nodes=2,
+            prev_cluster_status=None,
+            prev_handle=None,
+            prev_cluster_ever_up=False,
+            prev_config_hash=None)
+
+        assert config.cluster_name == 'test-cluster'
+        assert config.resources == mock_resources
+        assert config.num_nodes == 2
+        assert config.prev_cluster_status is None
+        assert config.prev_handle is None
+        assert config.prev_cluster_ever_up is False
+        assert config.prev_config_hash is None
+
+    def test_creation_with_all_args(self):
+        """Test ToProvisionConfig creation with all args."""
+        from sky.utils import status_lib
+
+        mock_resources = MagicMock()
+        mock_handle = MagicMock()
+
+        config = cloud_vm_ray_backend.RetryingVmProvisioner.ToProvisionConfig(
+            cluster_name='test-cluster',
+            resources=mock_resources,
+            num_nodes=4,
+            prev_cluster_status=status_lib.ClusterStatus.STOPPED,
+            prev_handle=mock_handle,
+            prev_cluster_ever_up=True,
+            prev_config_hash='abc123')
+
+        assert config.cluster_name == 'test-cluster'
+        assert config.resources == mock_resources
+        assert config.num_nodes == 4
+        assert config.prev_cluster_status == status_lib.ClusterStatus.STOPPED
+        assert config.prev_handle == mock_handle
+        assert config.prev_cluster_ever_up is True
+        assert config.prev_config_hash == 'abc123'
+
+    def test_cluster_name_required(self):
+        """Test that cluster_name is required."""
+        mock_resources = MagicMock()
+        with pytest.raises(AssertionError):
+            cloud_vm_ray_backend.RetryingVmProvisioner.ToProvisionConfig(
+                cluster_name=None,
+                resources=mock_resources,
+                num_nodes=1,
+                prev_cluster_status=None,
+                prev_handle=None,
+                prev_cluster_ever_up=False,
+                prev_config_hash=None)
+
+
+class TestRetryingVmProvisionerInit:
+    """Tests for RetryingVmProvisioner initialization."""
+
+    def test_init_with_minimal_args(self):
+        """Test provisioner initialization with minimal arguments."""
+        import pathlib
+
+        mock_dag = MagicMock()
+        mock_target = MagicMock()
+        local_wheel = pathlib.Path('/tmp/wheel.whl')
+
+        provisioner = cloud_vm_ray_backend.RetryingVmProvisioner(
+            log_dir='/tmp/logs',
+            dag=mock_dag,
+            optimize_target=mock_target,
+            requested_features=set(),
+            local_wheel_path=local_wheel,
+            wheel_hash='abc123')
+
+        assert provisioner.log_dir == '/tmp/logs'
+        assert provisioner._dag == mock_dag
+        assert provisioner._optimize_target == mock_target
+        assert len(provisioner._blocked_resources) == 0
+
+    def test_init_with_blocked_resources(self):
+        """Test provisioner initialization with blocked resources."""
+        import pathlib
+
+        mock_dag = MagicMock()
+        mock_target = MagicMock()
+        local_wheel = pathlib.Path('/tmp/wheel.whl')
+        blocked = [MagicMock(), MagicMock()]
+
+        provisioner = cloud_vm_ray_backend.RetryingVmProvisioner(
+            log_dir='/tmp/logs',
+            dag=mock_dag,
+            optimize_target=mock_target,
+            requested_features=set(),
+            local_wheel_path=local_wheel,
+            wheel_hash='abc123',
+            blocked_resources=blocked)
+
+        assert len(provisioner._blocked_resources) == 2
+
+    def test_init_expands_log_dir(self):
+        """Test that log_dir is expanded."""
+        import pathlib
+
+        mock_dag = MagicMock()
+        mock_target = MagicMock()
+        local_wheel = pathlib.Path('/tmp/wheel.whl')
+
+        provisioner = cloud_vm_ray_backend.RetryingVmProvisioner(
+            log_dir='~/logs',
+            dag=mock_dag,
+            optimize_target=mock_target,
+            requested_features=set(),
+            local_wheel_path=local_wheel,
+            wheel_hash='abc123')
+
+        # Should be expanded
+        assert '~' not in provisioner.log_dir
+
+
+class TestRetryingVmProvisionerInsufficientResourcesMsg:
+    """Tests for RetryingVmProvisioner._insufficient_resources_msg."""
+
+    def test_message_with_zone(self):
+        """Test insufficient resources message with zone specified."""
+        import pathlib
+
+        from sky import clouds
+
+        mock_dag = MagicMock()
+        mock_target = MagicMock()
+        local_wheel = pathlib.Path('/tmp/wheel.whl')
+
+        provisioner = cloud_vm_ray_backend.RetryingVmProvisioner(
+            log_dir='/tmp/logs',
+            dag=mock_dag,
+            optimize_target=mock_target,
+            requested_features=set(),
+            local_wheel_path=local_wheel,
+            wheel_hash='abc123')
+
+        mock_resources = MagicMock()
+        mock_resources.zone = 'us-east-1a'
+        mock_resources.region = 'us-east-1'
+        mock_resources.cloud = clouds.AWS()
+
+        message = provisioner._insufficient_resources_msg(
+            to_provision=mock_resources,
+            requested_resources={'gpu': 4},
+            insufficient_resources=['GPU quota exceeded'])
+
+        assert 'us-east-1a' in message
+        assert 'GPU quota exceeded' in message
+
+    def test_message_with_region_only(self):
+        """Test insufficient resources message with region only."""
+        import pathlib
+
+        from sky import clouds
+
+        mock_dag = MagicMock()
+        mock_target = MagicMock()
+        local_wheel = pathlib.Path('/tmp/wheel.whl')
+
+        provisioner = cloud_vm_ray_backend.RetryingVmProvisioner(
+            log_dir='/tmp/logs',
+            dag=mock_dag,
+            optimize_target=mock_target,
+            requested_features=set(),
+            local_wheel_path=local_wheel,
+            wheel_hash='abc123')
+
+        mock_resources = MagicMock()
+        mock_resources.zone = None
+        mock_resources.region = 'us-west-2'
+        mock_resources.cloud = clouds.AWS()
+
+        message = provisioner._insufficient_resources_msg(
+            to_provision=mock_resources,
+            requested_resources={'cpu': 8},
+            insufficient_resources=None)
+
+        assert 'us-west-2' in message
+
+    def test_message_without_insufficient_resources(self):
+        """Test message when insufficient_resources is None."""
+        import pathlib
+
+        from sky import clouds
+
+        mock_dag = MagicMock()
+        mock_target = MagicMock()
+        local_wheel = pathlib.Path('/tmp/wheel.whl')
+
+        provisioner = cloud_vm_ray_backend.RetryingVmProvisioner(
+            log_dir='/tmp/logs',
+            dag=mock_dag,
+            optimize_target=mock_target,
+            requested_features=set(),
+            local_wheel_path=local_wheel,
+            wheel_hash='abc123')
+
+        mock_resources = MagicMock()
+        mock_resources.zone = 'us-east-1a'
+        mock_resources.region = 'us-east-1'
+        mock_resources.cloud = clouds.AWS()
+
+        message = provisioner._insufficient_resources_msg(
+            to_provision=mock_resources,
+            requested_resources={'cpu': 4},
+            insufficient_resources=None)
+
+        assert 'Failed to acquire resources' in message
+
+
+class TestFailoverCloudErrorHandlerV1:
+    """Tests for FailoverCloudErrorHandlerV1 error handling."""
+
+    def test_handle_errors_finds_known_errors(self):
+        """Test _handle_errors extracts known error strings."""
+        is_known = lambda s: 'quota' in s.lower()
+
+        errors = cloud_vm_ray_backend.FailoverCloudErrorHandlerV1._handle_errors(
+            stdout='Some output\nQuota exceeded\nMore output',
+            stderr='',
+            is_error_str_known=is_known)
+
+        assert len(errors) == 1
+        assert 'Quota exceeded' in errors[0]
+
+    def test_handle_errors_finds_errors_in_stderr(self):
+        """Test _handle_errors extracts errors from stderr."""
+        is_known = lambda s: 'error' in s.lower()
+
+        errors = cloud_vm_ray_backend.FailoverCloudErrorHandlerV1._handle_errors(
+            stdout='',
+            stderr='Error: insufficient capacity',
+            is_error_str_known=is_known)
+
+        assert len(errors) == 1
+        assert 'Error' in errors[0]
+
+    def test_handle_errors_rsync_not_found(self):
+        """Test _handle_errors raises for rsync not found."""
+        is_known = lambda s: False
+
+        with pytest.raises(RuntimeError) as exc_info:
+            cloud_vm_ray_backend.FailoverCloudErrorHandlerV1._handle_errors(
+                stdout='',
+                stderr='rsync: command not found',
+                is_error_str_known=is_known)
+
+        assert 'rsync' in str(exc_info.value)
+
+    def test_handle_errors_unknown_error_raises(self):
+        """Test _handle_errors raises RuntimeError for unknown errors."""
+        is_known = lambda s: False
+
+        with pytest.raises(RuntimeError) as exc_info:
+            cloud_vm_ray_backend.FailoverCloudErrorHandlerV1._handle_errors(
+                stdout='Some unknown output',
+                stderr='Some unknown error',
+                is_error_str_known=is_known)
+
+        assert 'Errors occurred during provision' in str(exc_info.value)
+
+
+class TestFailoverCloudErrorHandlerV2Detailed:
+    """More detailed tests for FailoverCloudErrorHandlerV2."""
+
+    def test_default_handler_exists(self):
+        """Test _default_handler method exists and is callable."""
+        handler = cloud_vm_ray_backend.FailoverCloudErrorHandlerV2
+        assert callable(handler._default_handler)
+
+    def test_gcp_handler_exists(self):
+        """Test _gcp_handler method exists."""
+        handler = cloud_vm_ray_backend.FailoverCloudErrorHandlerV2
+        assert hasattr(handler, '_gcp_handler')
+
+    def test_aws_handler_exists(self):
+        """Test _aws_handler method exists."""
+        handler = cloud_vm_ray_backend.FailoverCloudErrorHandlerV2
+        assert hasattr(handler, '_aws_handler')
+
+    def test_azure_handler_exists(self):
+        """Test _azure_handler method exists."""
+        handler = cloud_vm_ray_backend.FailoverCloudErrorHandlerV2
+        assert hasattr(handler, '_azure_handler')
+
+    def test_lambda_handler_exists(self):
+        """Test _lambda_handler method exists."""
+        handler = cloud_vm_ray_backend.FailoverCloudErrorHandlerV2
+        assert hasattr(handler, '_lambda_handler')
+
+    def test_scp_handler_exists(self):
+        """Test _scp_handler method exists."""
+        handler = cloud_vm_ray_backend.FailoverCloudErrorHandlerV2
+        assert hasattr(handler, '_scp_handler')
+
+
+class TestCloudVmRayBackendCheckResourcesFitCluster:
+    """Tests for CloudVmRayBackend.check_resources_fit_cluster."""
+
+    def test_resources_fit_cluster(self, monkeypatch):
+        """Test that matching resources pass validation."""
+        from sky import exceptions
+        from sky import global_user_state
+        from sky.usage import usage_lib
+
+        # Mock all dependencies
+        monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
+                            lambda self, *args, **kwargs: None)
+        monkeypatch.setattr(usage_lib.messages.usage,
+                            'update_cluster_resources', lambda *args: None)
+        monkeypatch.setattr(usage_lib.messages.usage, 'update_cluster_status',
+                            lambda *args: None)
+        monkeypatch.setattr(global_user_state, 'get_status_from_cluster_name',
+                            lambda *args: None)
+
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+
+        # Create mock handle with matching resources
+        mock_handle = MagicMock()
+        mock_handle.cluster_name = 'test-cluster'
+        mock_handle.launched_nodes = 2
+
+        mock_launched_resources = MagicMock()
+        mock_launched_resources.region = 'us-east-1'
+        mock_handle.launched_resources = mock_launched_resources
+
+        # Create task with resources that fit
+        mock_task_resource = MagicMock()
+        mock_task_resource.less_demanding_than = MagicMock(return_value=True)
+
+        mock_task = MagicMock()
+        mock_task.num_nodes = 1
+        mock_task.resources = [mock_task_resource]
+
+        result = backend.check_resources_fit_cluster(mock_handle, mock_task)
+        assert result == mock_task_resource
+
+    def test_resources_mismatch_raises(self, monkeypatch):
+        """Test that mismatched resources raise ResourcesMismatchError."""
+        from sky import exceptions
+        from sky import global_user_state
+        from sky.usage import usage_lib
+
+        # Mock all dependencies
+        monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
+                            lambda self, *args, **kwargs: None)
+        monkeypatch.setattr(usage_lib.messages.usage,
+                            'update_cluster_resources', lambda *args: None)
+        monkeypatch.setattr(usage_lib.messages.usage, 'update_cluster_status',
+                            lambda *args: None)
+        monkeypatch.setattr(global_user_state, 'get_status_from_cluster_name',
+                            lambda *args: None)
+
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+
+        # Create mock handle
+        mock_handle = MagicMock()
+        mock_handle.cluster_name = 'test-cluster'
+        mock_handle.launched_nodes = 1
+
+        mock_launched_resources = MagicMock()
+        mock_launched_resources.region = 'us-east-1'
+        mock_launched_resources.zone = None
+        mock_handle.launched_resources = mock_launched_resources
+
+        # Create task with resources that DON'T fit
+        mock_task_resource = MagicMock()
+        mock_task_resource.less_demanding_than = MagicMock(return_value=False)
+        mock_task_resource.region = None
+        mock_task_resource.zone = None
+        mock_task_resource.requires_fuse = False
+
+        mock_task = MagicMock()
+        mock_task.num_nodes = 1
+        mock_task.resources = [mock_task_resource]
+
+        with pytest.raises(exceptions.ResourcesMismatchError):
+            backend.check_resources_fit_cluster(mock_handle, mock_task)
+
+
+class TestCloudVmRayBackendSyncWorkdir:
+    """Tests for CloudVmRayBackend workdir sync methods."""
+
+    def test_sync_git_workdir_method_exists(self, monkeypatch):
+        """Test _sync_git_workdir method exists on backend."""
+        monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
+                            lambda self, *args, **kwargs: None)
+
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        assert hasattr(backend, '_sync_git_workdir')
+        assert callable(backend._sync_git_workdir)
+
+    def test_sync_path_workdir_method_exists(self, monkeypatch):
+        """Test _sync_path_workdir method exists on backend."""
+        monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
+                            lambda self, *args, **kwargs: None)
+
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        assert hasattr(backend, '_sync_path_workdir')
+        assert callable(backend._sync_path_workdir)
+
+    def test_sync_workdir_method_exists(self, monkeypatch):
+        """Test _sync_workdir method exists on backend."""
+        monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
+                            lambda self, *args, **kwargs: None)
+
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        assert hasattr(backend, '_sync_workdir')
+        assert callable(backend._sync_workdir)
+
+
+class TestCloudVmRayResourceHandleStateManagement:
+    """Tests for CloudVmRayResourceHandle state serialization."""
+
+    def test_getstate_returns_dict(self):
+        """Test __getstate__ returns expected dictionary."""
+        mock_resources = MagicMock()
+        handle = CloudVmRayResourceHandle(cluster_name='test-cluster',
+                                          cluster_name_on_cloud='test-cloud',
+                                          cluster_yaml=None,
+                                          launched_nodes=1,
+                                          launched_resources=mock_resources)
+
+        state = handle.__getstate__()
+        assert isinstance(state, dict)
+        assert 'cluster_name' in state
+        assert state['cluster_name'] == 'test-cluster'
+
+    def test_setstate_restores_object(self):
+        """Test __setstate__ correctly restores object."""
+        mock_resources = MagicMock()
+        original = CloudVmRayResourceHandle(cluster_name='test-cluster',
+                                            cluster_name_on_cloud='test-cloud',
+                                            cluster_yaml=None,
+                                            launched_nodes=2,
+                                            launched_resources=mock_resources)
+
+        state = original.__getstate__()
+
+        # Create new handle and restore state
+        restored = CloudVmRayResourceHandle.__new__(CloudVmRayResourceHandle)
+        restored.__setstate__(state)
+
+        assert restored.cluster_name == 'test-cluster'
+        # get_cluster_name_on_cloud() returns the cloud name
+        assert restored.get_cluster_name_on_cloud() == 'test-cloud'
+        assert restored.launched_nodes == 2
+
+
+class TestCloudVmRayResourceHandleIPs:
+    """Tests for CloudVmRayResourceHandle IP handling."""
+
+    def test_num_ips_per_node_non_tpu(self):
+        """Test num_ips_per_node returns 1 for non-TPU clusters."""
+        # Create proper mock resources with accelerators=None (non-TPU)
+        mock_resources = MagicMock()
+        mock_resources.accelerators = None
+
+        handle = CloudVmRayResourceHandle(
+            cluster_name='test-cluster',
+            cluster_name_on_cloud='test-cloud',
+            cluster_yaml=None,
+            launched_nodes=2,
+            launched_resources=mock_resources,
+            stable_internal_external_ips=[
+                ('10.0.0.1', '1.2.3.4'),
+                ('10.0.0.2', '1.2.3.5'),
+            ])
+
+        # For non-TPU clusters, num_ips_per_node is always 1
+        assert handle.num_ips_per_node == 1
+
+    def test_num_ips_per_node_with_gpu(self):
+        """Test num_ips_per_node returns 1 for GPU clusters."""
+        mock_resources = MagicMock()
+        mock_resources.accelerators = {'A100': 4}
+
+        handle = CloudVmRayResourceHandle(
+            cluster_name='test-cluster',
+            cluster_name_on_cloud='test-cloud',
+            cluster_yaml=None,
+            launched_nodes=3,
+            launched_resources=mock_resources,
+            stable_internal_external_ips=[('10.0.0.1', '1.2.3.4'),
+                                          ('10.0.0.2', '1.2.3.5'),
+                                          ('10.0.0.3', '1.2.3.6')])
+
+        # GPU clusters also return 1 IP per node
+        assert handle.num_ips_per_node == 1
+
+    def test_num_ips_per_node_property_exists(self):
+        """Test num_ips_per_node property exists."""
+        mock_resources = MagicMock()
+        mock_resources.accelerators = None
+
+        handle = CloudVmRayResourceHandle(cluster_name='test-cluster',
+                                          cluster_name_on_cloud='test-cloud',
+                                          cluster_yaml=None,
+                                          launched_nodes=1,
+                                          launched_resources=mock_resources,
+                                          stable_internal_external_ips=None)
+
+        assert hasattr(handle, 'num_ips_per_node')
+        assert isinstance(handle.num_ips_per_node, int)
+
+
+class TestCloudVmRayBackendRegisterInfo:
+    """Tests for CloudVmRayBackend.register_info method."""
+
+    def test_register_info_sets_attributes(self, monkeypatch):
+        """Test register_info sets backend attributes."""
+        monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
+                            lambda self, *args, **kwargs: None)
+
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        backend.register_info(dump_final_script=True, is_managed=True)
+
+        assert backend._dump_final_script is True
+        assert backend._is_managed is True
+
+    def test_register_info_rejects_unknown_kwargs(self, monkeypatch):
+        """Test register_info raises for unknown kwargs."""
+        monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
+                            lambda self, *args, **kwargs: None)
+
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+
+        with pytest.raises(AssertionError):
+            backend.register_info(unknown_arg=True)
+
+
+class TestCloudVmRayBackendConstants:
+    """Tests for CloudVmRayBackend module constants."""
+
+    def test_nodes_launching_progress_timeout(self):
+        """Test NODES_LAUNCHING_PROGRESS_TIMEOUT has expected values."""
+        from sky import clouds
+
+        timeout_dict = cloud_vm_ray_backend._NODES_LAUNCHING_PROGRESS_TIMEOUT
+        assert clouds.AWS in timeout_dict
+        assert clouds.GCP in timeout_dict
+        assert clouds.Azure in timeout_dict
+        assert clouds.Kubernetes in timeout_dict
+
+        # Timeouts should be positive integers
+        for cloud, timeout in timeout_dict.items():
+            assert timeout > 0
+
+    def test_retry_until_up_gap(self):
+        """Test retry gap constant is reasonable."""
+        gap = cloud_vm_ray_backend._RETRY_UNTIL_UP_INIT_GAP_SECONDS
+        assert gap == 30
+
+    def test_fetch_ip_max_attempts(self):
+        """Test max IP fetch attempts constant."""
+        max_attempts = cloud_vm_ray_backend._FETCH_IP_MAX_ATTEMPTS
+        assert max_attempts == 3
+
+    def test_max_ray_up_retry(self):
+        """Test max ray up retry constant."""
+        max_retry = cloud_vm_ray_backend._MAX_RAY_UP_RETRY
+        assert max_retry == 5
+
+    def test_teardown_wait_constants(self):
+        """Test teardown wait constants are reasonable."""
+        max_attempts = cloud_vm_ray_backend._TEARDOWN_WAIT_MAX_ATTEMPTS
+        wait_between = cloud_vm_ray_backend._TEARDOWN_WAIT_BETWEEN_ATTEMPS_SECONDS
+
+        assert max_attempts == 10
+        assert wait_between == 1
+
+
+class TestCloudVmRayBackendPatterns:
+    """Tests for regex patterns in CloudVmRayBackend."""
+
+    def test_job_id_pattern(self):
+        """Test JOB_ID_PATTERN matches expected format."""
+        pattern = cloud_vm_ray_backend._JOB_ID_PATTERN
+        match = pattern.search('Job ID: 12345')
+        assert match is not None
+        assert match.group(1) == '12345'
+
+    def test_job_id_pattern_no_match(self):
+        """Test JOB_ID_PATTERN doesn't match invalid format."""
+        pattern = cloud_vm_ray_backend._JOB_ID_PATTERN
+        match = pattern.search('Job: abc')
+        assert match is None
+
+    def test_log_dir_pattern(self):
+        """Test LOG_DIR_PATTERN matches expected format."""
+        pattern = cloud_vm_ray_backend._LOG_DIR_PATTERN
+        match = pattern.search('Log Dir: /tmp/logs/job_123')
+        assert match is not None
+        assert match.group(1) == '/tmp/logs/job_123'
+
+    def test_log_dir_pattern_no_match(self):
+        """Test LOG_DIR_PATTERN doesn't match invalid format."""
+        pattern = cloud_vm_ray_backend._LOG_DIR_PATTERN
+        match = pattern.search('Logs: /tmp/logs')
+        assert match is None
+
+
+class TestIsTunnelHealthy:
+    """Tests for _is_tunnel_healthy function."""
+
+    def test_tunnel_healthy_with_connectable_port(self):
+        """Test tunnel is healthy when port is connectable."""
+        # _is_tunnel_healthy actually tries to connect to the port
+        # Mock socket to simulate successful connection
+        tunnel = SSHTunnelInfo(port=10000, pid=12345)
+
+        with patch('socket.socket') as mock_socket:
+            mock_sock_instance = MagicMock()
+            mock_socket.return_value.__enter__.return_value = mock_sock_instance
+            mock_sock_instance.connect.return_value = None
+
+            result = cloud_vm_ray_backend._is_tunnel_healthy(tunnel)
+            assert result is True
+
+    def test_tunnel_unhealthy_when_connection_fails(self):
+        """Test tunnel is unhealthy when connection fails."""
+        tunnel = SSHTunnelInfo(port=10000, pid=999999999)
+
+        with patch('socket.socket') as mock_socket:
+            mock_sock_instance = MagicMock()
+            mock_socket.return_value.__enter__.return_value = mock_sock_instance
+            mock_sock_instance.connect.side_effect = socket.error("Connection refused")
+
+            result = cloud_vm_ray_backend._is_tunnel_healthy(tunnel)
+            assert result is False
+
+
+class TestLocalResourcesHandle:
+    """Tests for LocalResourcesHandle class."""
+
+    def test_local_resources_handle_exists(self):
+        """Test LocalResourcesHandle class exists."""
+        assert hasattr(cloud_vm_ray_backend, 'LocalResourcesHandle')
+
+    def test_local_resources_handle_inherits_from_base(self):
+        """Test LocalResourcesHandle inherits from CloudVmRayResourceHandle."""
+        assert issubclass(cloud_vm_ray_backend.LocalResourcesHandle,
+                          CloudVmRayResourceHandle)
