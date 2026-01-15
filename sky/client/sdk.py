@@ -2849,17 +2849,29 @@ def api_logout() -> None:
 @annotations.client_api
 def realtime_slurm_gpu_availability(
         name_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None) -> server_common.RequestId:
+        quantity_filter: Optional[int] = None,
+        slurm_cluster_name: Optional[str] = None) -> server_common.RequestId:
     """Gets the real-time Slurm GPU availability.
 
     Args:
         name_filter: Optional name filter for GPUs.
         quantity_filter: Optional quantity filter for GPUs.
+        slurm_cluster_name: Optional Slurm cluster name to filter by.
 
     Returns:
         The request ID of the Slurm GPU availability request.
     """
+    remote_api_version = versions.get_remote_api_version()
+    # TODO(kevin): remove this in v0.13.0
+    if (slurm_cluster_name is not None and remote_api_version is not None and
+            remote_api_version < 27):
+        logger.warning(
+            'The Slurm cluster filter is not supported in your API server; '
+            'the server will ignore it and show all Slurm clusters. '
+            'Please upgrade the API server to enable it.')
+
     body = payloads.SlurmGpuAvailabilityRequestBody(
+        slurm_cluster_name=slurm_cluster_name,
         name_filter=name_filter,
         quantity_filter=quantity_filter,
     )
