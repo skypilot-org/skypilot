@@ -552,16 +552,12 @@ The :code:`resources` field has the same spec as a normal SkyPilot job; see `her
 Internal network deployments
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-For deploying SkyServe in internal or air-gapped networks, especially on Kubernetes, SkyPilot provides several options:
+For air-gapped or internal networks on Kubernetes, you can configure SkyServe to avoid creating external LoadBalancers:
 
-- **Pod IP mode**: Expose services using internal Pod IPs only (no external LoadBalancer)
-- **Internal load balancers**: Use cloud-provider internal load balancers for stable internal endpoints
-- **Nginx Ingress**: Configure Nginx Ingress with internal-only access
+.. code-block:: yaml
 
-These options are particularly useful when:
+    # ~/.sky/config.yaml
+    kubernetes:
+      ports: podip  # Use internal Pod IPs only
 
-- Your service consumers are running inside the same Kubernetes cluster
-- External network access is restricted or not available
-- You want to keep all traffic within your VPC/cluster network
-
-For detailed configuration instructions, see :ref:`SkyServe in Internal Networks <airgap-skyserve>`.
+This keeps all service endpoints internal to the cluster. For more options including internal load balancers, see :ref:`SkyServe in Internal Networks <airgap-skyserve>`.
