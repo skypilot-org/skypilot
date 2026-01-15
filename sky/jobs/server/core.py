@@ -524,15 +524,19 @@ def launch(
                     # intermediate bucket and newly created bucket should be in
                     # workspace A.
                     if consolidation_mode_job_id is None:
-                        return execution.launch(
-                            task=controller_task,
-                            cluster_name=controller_name,
-                            stream_logs=stream_logs,
-                            retry_until_up=True,
-                            fast=True,
-                            _request_name=request_names.AdminPolicyRequestName.
-                            JOBS_LAUNCH_CONTROLLER,
-                            _disable_controller_check=True)
+                        # Job controller is not placed in kueue, as the
+                        # controller pod is considered a "system" pod
+                        # and is not subject to queue limits or preemption.
+                        with skypilot_config.remove_queue_name_from_config():
+                            return execution.launch(
+                                task=controller_task,
+                                cluster_name=controller_name,
+                                stream_logs=stream_logs,
+                                retry_until_up=True,
+                                fast=True,
+                                _request_name=request_names.
+                                AdminPolicyRequestName.JOBS_LAUNCH_CONTROLLER,
+                                _disable_controller_check=True)
                     # Manually launch the scheduler in consolidation mode.
                     local_handle = backend_utils.is_controller_accessible(
                         controller=controller, stopped_message='')
@@ -557,8 +561,9 @@ def launch(
                         for k, v in controller_task.envs.items()
                     ]
                     run_script = '\n'.join(env_cmds + [run_script])
-                    log_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
-                                           'managed_jobs')
+                    log_dir = os.path.expanduser(
+                        os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
+                                     'managed_jobs'))
                     os.makedirs(log_dir, exist_ok=True)
                     log_path = os.path.join(
                         log_dir, f'submit-job-{consolidation_mode_job_id}.log')

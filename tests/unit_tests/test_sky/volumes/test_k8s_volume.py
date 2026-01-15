@@ -1410,3 +1410,52 @@ class TestGetPVCSpec:
 
         with pytest.raises(AssertionError):
             k8s_volume._get_pvc_spec('my-namespace', config)
+
+
+class TestRefreshVolumeConfig:
+    """Tests for refresh_volume_config function."""
+
+    @patch('sky.provision.kubernetes.volume.kubernetes.in_cluster_context_name')
+    def test_refresh_volume_config_region_none(self, mock_in_cluster_context):
+        """When region is None, it should be set from in-cluster context."""
+        mock_in_cluster_context.return_value = 'in-cluster-context'
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region=None,
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+            config={},
+        )
+
+        need_refresh, new_config = k8s_volume.refresh_volume_config(config)
+
+        assert need_refresh is True
+        assert new_config.region == 'in-cluster-context'
+        # The original object should also be updated in place
+        assert config.region == 'in-cluster-context'
+        mock_in_cluster_context.assert_called_once()
+
+    def test_refresh_volume_config_region_set(self):
+        """When region is already set, it should be kept and no refresh needed."""
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='existing-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+            config={},
+        )
+
+        need_refresh, new_config = k8s_volume.refresh_volume_config(config)
+
+        assert need_refresh is False
+        assert new_config.region == 'existing-context'
+        assert config.region == 'existing-context'

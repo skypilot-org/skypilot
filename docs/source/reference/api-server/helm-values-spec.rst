@@ -112,6 +112,7 @@ Below is the available helm value keys and the default value of each key:
 
   :ref:`ingress <helm-values-ingress>`:
     :ref:`enabled <helm-values-ingress-enabled>`: true
+    :ref:`unified <helm-values-ingress-unified>`: false
     :ref:`authSecret <helm-values-ingress-authSecret>`: null
     :ref:`authCredentials <helm-values-ingress-authCredentials>`: null
     :ref:`host <helm-values-ingress-host>`: null
@@ -1251,6 +1252,20 @@ Default: ``true``
 
   ingress:
     enabled: true
+
+.. _helm-values-ingress-unified:
+
+``ingress.unified``
+^^^^^^^^^^^^^^^^^^^
+
+Use a single ingress resource for the API server and other auxiliary services. Dedicated ingresses for these services will be skipped, e.g. grafana and oauth2-proxy.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  ingress:
+    unified: false
 
 .. _helm-values-ingress-authSecret:
 

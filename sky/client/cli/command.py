@@ -3806,7 +3806,8 @@ def show_gpus(
 
     def _get_slurm_realtime_gpu_tables(
         name_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None
+        quantity_filter: Optional[int] = None,
+        slurm_cluster_name: Optional[str] = None,
     ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
                Optional['prettytable.PrettyTable']]:
         """Get Slurm GPU availability tables.
@@ -3825,7 +3826,9 @@ def show_gpus(
 
         realtime_gpu_availability_lists = sdk.stream_and_get(
             sdk.realtime_slurm_gpu_availability(
-                name_filter=name_filter, quantity_filter=quantity_filter))
+                name_filter=name_filter,
+                quantity_filter=quantity_filter,
+                slurm_cluster_name=slurm_cluster_name))
         if not realtime_gpu_availability_lists:
             err_msg = 'No GPUs found in any Slurm partition. '
             debug_msg = 'To further debug, run: sky check slurm '
@@ -4203,7 +4206,8 @@ def show_gpus(
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
                     slurm_realtime_infos, total_table = (
-                        _get_slurm_realtime_gpu_tables())
+                        _get_slurm_realtime_gpu_tables(
+                            slurm_cluster_name=region))
                 except ValueError as e:
                     if not cloud_is_slurm:
                         # Make it a note if cloud is not slurm
@@ -4334,7 +4338,8 @@ def show_gpus(
             try:
                 slurm_realtime_infos, total_table = (
                     _get_slurm_realtime_gpu_tables(name_filter=name,
-                                                   quantity_filter=quantity))
+                                                   quantity_filter=quantity,
+                                                   slurm_cluster_name=region))
 
                 yield from _format_slurm_realtime_gpu(total_table,
                                                       slurm_realtime_infos,
@@ -6635,6 +6640,9 @@ def api_start(deploy: bool, host: str, foreground: bool,
                   host=host,
                   foreground=foreground,
                   enable_basic_auth=enable_basic_auth)
+    api_server_url = server_common.get_server_url(host)
+    api_server_info = server_common.get_api_server_status(api_server_url)
+    server_common.check_and_print_upgrade_hint(api_server_info, api_server_url)
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
@@ -6906,6 +6914,8 @@ def api_info():
                f'version: {api_server_info.version}\n'
                f'{ux_utils.INDENT_SYMBOL}User: {user.name} ({user.id})\n'
                f'{ux_utils.INDENT_LAST_SYMBOL}{location}')
+    # Show upgrade hint if available
+    server_common.check_and_print_upgrade_hint(api_server_info, url)
 
 
 @cli.group(cls=_NaturalOrderGroup)
