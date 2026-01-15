@@ -885,9 +885,9 @@ async def authorize_page(
         code_challenge)
 
     if session.status != 'pending':
-        # Session already authorized - show success message
+        # Session already authorized
         return fastapi.responses.HTMLResponse(
-            content=_get_authorize_success_html(),
+            content='<h1>Already Authorized</h1><p>You can close this tab.</p>',
             headers={'Cache-Control': 'no-cache, no-transform'})
 
     user = _get_auth_user_header(request)
@@ -910,14 +910,6 @@ async def authorize_page(
     return fastapi.responses.HTMLResponse(
         content=html_content,
         headers={'Cache-Control': 'no-cache, no-transform'})
-
-
-def _get_authorize_success_html() -> str:
-    """Return HTML for successful authorization."""
-    html_dir = pathlib.Path(__file__).parent / 'html'
-    success_page_path = html_dir / 'authorize_success.html'
-    with open(success_page_path, 'r', encoding='utf-8') as f:
-        return f.read()
 
 
 @app.post('/check')
