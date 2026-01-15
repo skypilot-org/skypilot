@@ -3734,7 +3734,8 @@ def show_gpus(
                     continue
 
                 node_is_ready = getattr(node_info, 'is_ready', True)
-                if not node_is_ready:
+                node_is_cordoned = getattr(node_info, 'is_cordoned', False)
+                if not node_is_ready or node_is_cordoned:
                     not_ready_counts[accelerator_type] += accelerator_count
             return not_ready_counts
 
@@ -3966,7 +3967,7 @@ def show_gpus(
                                 f'{taint["key"]}:{taint["effect"]}')
                     if taints_strs:
                         taints_str = ', '.join(taints_strs)
-                        extra_info.append(f'Taints: {taints_str}')
+                        extra_info.append(f'Taints: [{taints_str}]')
                 node_is_cordoned = getattr(node_info, 'is_cordoned', False)
                 if node_is_cordoned:
                     extra_info.append('Node Cordoned')

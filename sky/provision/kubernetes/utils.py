@@ -3265,8 +3265,8 @@ def get_kubernetes_node_info(
             )
             continue
 
-        if not node_is_ready:
-            # If node is not ready, report 0 available GPUs
+        if not node_is_ready or node.is_cordoned():
+            # If node is not ready or cordoned, report 0 available GPUs
             accelerators_available = 0
         elif not has_accelerator_nodes or error_on_get_allocated_resources:
             accelerators_available = -1
