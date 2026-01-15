@@ -2,6 +2,7 @@
 
 Tests verify correct GPU detection from Kubernetes labels.
 """
+import pytest
 
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes.utils import GFDLabelFormatter
