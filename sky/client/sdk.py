@@ -2489,7 +2489,7 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
         code_verifier = common_utils.base64_url_encode(secrets.token_bytes(32))
         code_challenge = common_utils.compute_code_challenge(code_verifier)
 
-        # Open browser to authorization page (session created on page load)
+        # Open browser to authorization page
         auth_url = f'{endpoint}/auth/authorize?code_challenge={code_challenge}'
         if not webbrowser.open(auth_url):
             logger.debug('Failed to open browser.')
@@ -2513,11 +2513,8 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
                 data = resp.json()
                 if data.get('status') == 'authorized' and 'token' in data:
                     return data['token']
-            elif resp.status_code == 202:
-                continue  # Still pending
-            elif resp.status_code == 404:
-                continue  # Session not found, keep polling
-            else:
+            elif resp.status_code != 404:
+                # 404 means user hasn't clicked Authorize yet, keep polling
                 logger.debug(f'Poll failed: {resp.status_code}')
                 return None
 
