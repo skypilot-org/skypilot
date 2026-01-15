@@ -41,6 +41,9 @@ def test_get_kubernetes_node_info():
         'cloud.google.com/gke-accelerator-count': '4'
     }
     mock_gpu_node_1.status.allocatable = {'nvidia.com/gpu': '4'}
+    mock_gpu_node_1.is_ready.return_value = True
+    mock_gpu_node_1.is_cordoned.return_value = False
+    mock_gpu_node_1.get_non_cordon_taints.return_value = []
 
     mock_gpu_node_2 = mock.MagicMock()
     mock_gpu_node_2.metadata.name = 'node-2'
@@ -51,6 +54,9 @@ def test_get_kubernetes_node_info():
         'cloud.google.com/gke-tpu-topology': '2x4'
     }
     mock_gpu_node_2.status.allocatable = {'google.com/tpu': '8'}
+    mock_gpu_node_2.is_ready.return_value = True
+    mock_gpu_node_2.is_cordoned.return_value = False
+    mock_gpu_node_2.get_non_cordon_taints.return_value = []
 
     mock_pod_1 = mock.MagicMock()
     mock_pod_1.spec.node_name = 'node-1'
@@ -118,6 +124,9 @@ def test_get_kubernetes_node_info():
         'cloud.google.com/gke-tpu-node-pool-type': 'multi-host'
     }
     mock_tpu_node_1.status.allocatable = {'google.com/tpu': '4'}
+    mock_tpu_node_1.is_ready.return_value = True
+    mock_tpu_node_1.is_cordoned.return_value = False
+    mock_tpu_node_1.get_non_cordon_taints.return_value = []
 
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
                    return_value=[mock_gpu_node_1, mock_tpu_node_1]), \
@@ -150,6 +159,9 @@ def test_get_kubernetes_node_info():
     mock_cpu_node_1.status.addresses = [
         mock.MagicMock(type='InternalIP', address='10.0.0.1')
     ]
+    mock_cpu_node_1.is_ready.return_value = True
+    mock_cpu_node_1.is_cordoned.return_value = False
+    mock_cpu_node_1.get_non_cordon_taints.return_value = []
 
     mock_cpu_node_2 = mock.MagicMock()
     mock_cpu_node_2.metadata.name = 'node-5'
@@ -158,6 +170,9 @@ def test_get_kubernetes_node_info():
     mock_cpu_node_2.status.addresses = [
         mock.MagicMock(type='InternalIP', address='10.0.0.2')
     ]
+    mock_cpu_node_2.is_ready.return_value = True
+    mock_cpu_node_2.is_cordoned.return_value = False
+    mock_cpu_node_2.get_non_cordon_taints.return_value = []
 
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
                    return_value=[mock_cpu_node_1, mock_cpu_node_2]), \
@@ -685,10 +700,16 @@ def test_heterogenous_gpu_detection():
         'gpu.nvidia.com/vram': '81'
     }
     mock_node1.status.allocatable = {'nvidia.com/gpu': '2'}
+    mock_node1.is_ready.return_value = True
+    mock_node1.is_cordoned.return_value = False
+    mock_node1.get_non_cordon_taints.return_value = []
 
     mock_node2 = mock.MagicMock()
     mock_node2.metadata.name = 'node2'
     mock_node2.metadata.labels = {'cloud.google.com/gke-accelerator': ''}
+    mock_node2.is_ready.return_value = True
+    mock_node2.is_cordoned.return_value = False
+    mock_node2.get_non_cordon_taints.return_value = []
 
     mock_container1 = mock.MagicMock()
     mock_container1.resources.requests = 0
@@ -736,6 +757,9 @@ def test_low_priority_pod_filtering():
     mock_node.status.addresses = [
         mock.MagicMock(type='InternalIP', address='10.0.0.1')
     ]
+    mock_node.is_ready.return_value = True
+    mock_node.is_cordoned.return_value = False
+    mock_node.get_non_cordon_taints.return_value = []
 
     # Mock regular pod requesting 2 GPUs
     mock_regular_pod = mock.MagicMock()
