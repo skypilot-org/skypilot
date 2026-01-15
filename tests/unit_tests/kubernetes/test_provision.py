@@ -783,5 +783,3 @@ def test_raise_pod_scheduling_errors_pvc_unbound(monkeypatch):
     # Verify that PVC binding issue is mentioned in the error
     assert 'PVC binding issue' in error_str or 'unbound' in error_str
     assert 'test-pvc' in error_str or 'PersistentVolumeClaims' in error_str
-
-

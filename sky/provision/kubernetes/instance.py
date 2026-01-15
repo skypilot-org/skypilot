@@ -162,13 +162,12 @@ def _lack_resource_msg(resource: str,
     return msg
 
 
-def _format_pvc_binding_error(pvc_details: Optional[str],
-                              pvc_names: List[str],
+def _format_pvc_binding_error(pvc_details: Optional[str], pvc_names: List[str],
                               namespace: str) -> str:
     """Format a PVC binding error message.
 
     Args:
-        pvc_details: Optional details about the PVC issue (e.g., event messages).
+        pvc_details: Optional details about the PVC issue (e.g., event messages)
             If None, a generic message is used.
         pvc_names: List of PVC names that have binding issues.
         namespace: Kubernetes namespace.
@@ -380,9 +379,8 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                              in event_message)
             if pvc_error is not None or has_pvc_issue:
                 pvc_msg = pvc_error if pvc_error else (
-                    _format_pvc_binding_error(pvc_details=None,
-                                              pvc_names=[],
-                                              namespace=namespace))
+                    _format_pvc_binding_error(
+                        pvc_details=None, pvc_names=[], namespace=namespace))
                 raise config_lib.KubernetesError(
                     f'{pvc_msg}\n'
                     f'Pod status: {pod_status} '
