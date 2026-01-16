@@ -36,8 +36,10 @@ tool_version_check "ruff" "$RUFF_VERSION" "$(grep "^ruff==" requirements-dev.txt
 tool_version_check "mypy" "$MYPY_VERSION" "$(grep mypy requirements-dev.txt | cut -d'=' -f3)"
 tool_version_check "black" "$BLACK_VERSION" "$(grep black requirements-dev.txt | cut -d'=' -f3)"
 
-# Directories to format/lint
-DIRS=(sky tests examples llm docs)
+# Directories to format (yapf/isort ran on all)
+FORMAT_DIRS=(sky tests examples llm docs)
+# Directories to lint (pylint only ran on sky/)
+LINT_DIRS=(sky)
 
 # Get merge base for changed file detection
 MERGEBASE="$(git merge-base origin/master HEAD 2>/dev/null || echo "")"
@@ -53,23 +55,23 @@ black "${BLACK_INCLUDES[@]}"
 echo '=== SkyPilot Ruff Linter ==='
 # Ruff check with auto-fix (replaces pylint + isort)
 if [[ "$1" == '--files' ]]; then
-    # Format specific files
+    # Lint specific files
     ruff check --fix "${@:2}"
 elif [[ "$1" == '--all' ]]; then
-    # Format all files
-    ruff check --fix "${DIRS[@]}"
+    # Lint all files in lint dirs
+    ruff check --fix "${LINT_DIRS[@]}"
 else
-    # Format only changed files
+    # Lint only changed files in lint dirs
     if [[ -n "$MERGEBASE" ]]; then
-        changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' 2>/dev/null || true)
+        changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- 'sky/*.py' 'sky/**/*.py' 2>/dev/null || true)
         if [[ -n "$changed_files" ]]; then
             echo "$changed_files" | xargs ruff check --fix
         else
-            echo 'Ruff linter skipped: no Python files changed.'
+            echo 'Ruff linter skipped: no Python files changed in sky/.'
         fi
     else
-        # No merge base, format all
-        ruff check --fix "${DIRS[@]}"
+        # No merge base, lint all
+        ruff check --fix "${LINT_DIRS[@]}"
     fi
 fi
 
@@ -78,7 +80,7 @@ echo '=== SkyPilot Ruff Formatter ==='
 if [[ "$1" == '--files' ]]; then
     ruff format "${@:2}"
 elif [[ "$1" == '--all' ]]; then
-    ruff format "${DIRS[@]}"
+    ruff format "${FORMAT_DIRS[@]}"
 else
     if [[ -n "$MERGEBASE" ]]; then
         changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' 2>/dev/null || true)
@@ -88,7 +90,7 @@ else
             echo 'Ruff formatter skipped: no Python files changed.'
         fi
     else
-        ruff format "${DIRS[@]}"
+        ruff format "${FORMAT_DIRS[@]}"
     fi
 fi
 
