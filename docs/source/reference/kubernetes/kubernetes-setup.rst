@@ -428,6 +428,7 @@ SkyPilot resources on your cluster.
     :align: center
     :alt: Kubernetes dashboard
 
+|
 
 As a demo, we provide a sample Kubernetes dashboard deployment manifest that you can deploy with:
 
