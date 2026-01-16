@@ -58,13 +58,10 @@ select = [
     "B",      # flake8-bugbear
     "Q",      # flake8-quotes
     "PLE",    # Pylint errors
-    "PLW",    # Pylint warnings (partial)
-    "PLC",    # Pylint conventions (partial)
+    "PLW",    # Pylint warnings
+    "PLC",    # Pylint conventions
     "UP",     # pyupgrade
     "G",      # flake8-logging-format
-    "PIE",    # flake8-pie
-    "RET",    # flake8-return
-    "SIM",    # flake8-simplify
     "RUF",    # Ruff-specific
 ]
 
@@ -75,23 +72,10 @@ ignore = [
     "PLR",
 
     # ==========================================================================
-    # consider-using-enumerate (C0200)
-    # ==========================================================================
-    "SIM113",
-
-    # ==========================================================================
     # consider-using-f-string (C0209) - marked FIXME in pylint config
     # ==========================================================================
     "UP031",  # printf-style string formatting
     "UP032",  # f-string instead of format()
-
-    # ==========================================================================
-    # fixme (W0511) - TODO/FIXME comments allowed
-    # ==========================================================================
-    "FIX001",  # Line contains FIXME
-    "FIX002",  # Line contains TODO
-    "FIX003",  # Line contains XXX
-    "FIX004",  # Line contains HACK
 
     # ==========================================================================
     # global-statement (W0603)
@@ -99,55 +83,12 @@ ignore = [
     "PLW0603",
 
     # ==========================================================================
-    # implicit-str-concat (W0401)
-    # ==========================================================================
-    "ISC001",
-
-    # ==========================================================================
-    # inconsistent-return-statements (R1710)
-    # ==========================================================================
-    "RET501",  # Unnecessary explicit return None
-    "RET502",  # Implicit return None in function with other returns
-    "RET503",  # Missing explicit return at end of function
-
-    # ==========================================================================
     # logging-format-interpolation (W1202) - marked FIXME in pylint config
     # logging-fstring-interpolation (W1203) - marked FIXME in pylint config
+    # Pylint wants lazy % formatting, but these are disabled so all styles allowed
     # ==========================================================================
     "G001",  # Logging statement uses str.format
-    "G002",  # Logging statement uses %
-    "G003",  # Logging statement uses +
     "G004",  # Logging statement uses f-string
-
-    # ==========================================================================
-    # misplaced-comparison-constant (C0122) - Yoda conditions
-    # ==========================================================================
-    "SIM300",
-
-    # ==========================================================================
-    # missing-function-docstring (C0116)
-    # ==========================================================================
-    "D103",
-
-    # ==========================================================================
-    # no-else-break (R1723)
-    # ==========================================================================
-    "RET508",
-
-    # ==========================================================================
-    # no-else-continue (R1724)
-    # ==========================================================================
-    "RET507",
-
-    # ==========================================================================
-    # no-else-raise (R1720)
-    # ==========================================================================
-    "RET506",
-
-    # ==========================================================================
-    # no-else-return (R1705)
-    # ==========================================================================
-    "RET505",
 
     # ==========================================================================
     # unnecessary-lambda-assignment (C3001) - marked FIXME in pylint config
@@ -155,19 +96,9 @@ ignore = [
     "E731",
 
     # ==========================================================================
-    # unnecessary-pass (W0107)
-    # ==========================================================================
-    "PIE790",
-
-    # ==========================================================================
     # useless-object-inheritance (R0205)
     # ==========================================================================
     "UP004",
-
-    # ==========================================================================
-    # wrong-import-order (C0411) - handled separately by isort
-    # ==========================================================================
-    "I001",
 
     # ==========================================================================
     # Line length - handled by yapf formatter
@@ -175,7 +106,7 @@ ignore = [
     "E501",
 
     # ==========================================================================
-    # Trailing whitespace - handled by yapf formatter
+    # Whitespace rules - handled by yapf formatter
     # ==========================================================================
     "W291",  # Trailing whitespace
     "W292",  # No newline at end of file
@@ -187,8 +118,8 @@ ignore = [
     "B008",  # Function call in default argument (common pattern in codebase)
 ]
 
-# Match pylint dummy-variables-rgx pattern
-dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?)|unused_.*|dummy_.*)$"
+# Match pylint dummy-variables-rgx: ^\*{0,2}(_$|unused_|dummy_)
+dummy-variable-rgx = "^\\*{0,2}(_$|unused_|dummy_)"
 
 [tool.ruff.lint.flake8-quotes]
 # Match pylint-quotes plugin settings:
