@@ -23,6 +23,22 @@ export const evaluateCondition = (item, filter) => {
 
   const propertyLower = property.toLowerCase();
 
+  // Special handling for infra filtering - use full_infra for comparison
+  // since the filter dropdown shows full values but item.infra is truncated
+  if (propertyLower === 'infra') {
+    const itemValue = (item.full_infra || item.infra)?.toString().toLowerCase();
+    const filterValue = value.toString().toLowerCase();
+
+    switch (operator) {
+      case '=':
+        return itemValue === filterValue;
+      case ':':
+        return itemValue?.includes(filterValue);
+      default:
+        return true;
+    }
+  }
+
   // Special handling for labels filtering
   if (propertyLower === 'labels') {
     const labels = item.labels || {};
