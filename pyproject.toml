@@ -139,9 +139,10 @@ ignore = [
     "W293",  # Blank line contains whitespace
 
     # ==========================================================================
-    # Additional compatibility rules
+    # Function call in default argument - common pattern in codebase
+    # (e.g., def foo(bar=SomeClass()) is intentional in many places)
     # ==========================================================================
-    "B008",  # Function call in default argument (common pattern in codebase)
+    "B008",
 ]
 
 # Match pylint dummy-variables-rgx: ^\*{0,2}(_$|unused_|dummy_)
