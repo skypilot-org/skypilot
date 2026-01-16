@@ -557,6 +557,11 @@ export function useClusterData(options = {}) {
     return unsubscribe;
   }, []);
 
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [filtersKey]);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
