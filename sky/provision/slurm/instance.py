@@ -210,11 +210,16 @@ def _create_virtual_instance(
         ])
         container_init_script = textwrap.dedent("""\
             set -e
+            PACKAGES="ca-certificates rsync curl git wget fuse"
             if command -v apt-get >/dev/null 2>&1; then
                 apt-get update
-                apt-get install -y ca-certificates rsync curl git
+                apt-get install -y $PACKAGES
             elif command -v yum >/dev/null 2>&1; then
-                yum install -y ca-certificates rsync curl git
+                yum install -y $PACKAGES fuse-libs
+            elif command -v dnf >/dev/null 2>&1; then
+                dnf install -y $PACKAGES fuse-libs
+            elif command -v apk >/dev/null 2>&1; then
+                apk add --no-cache $PACKAGES
             fi
             """)
         container_marker_file = (f'{sky_home_dir}/'

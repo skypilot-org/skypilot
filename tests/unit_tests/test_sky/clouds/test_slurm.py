@@ -349,11 +349,21 @@ class TestGRESGPUParsing:
 class TestCreateVirtualInstance:
     """Test slurm_instance._create_virtual_instance() script generation."""
 
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
     @patch('sky.provision.slurm.instance.command_runner.SSHCommandRunner')
-    def test_container_script_format(self, mock_ssh_runner, mock_slurm_client):
+    def test_container_script_format(self, mock_ssh_runner, mock_slurm_client,
+                                     mock_get_partition_info):
         """Test that sbatch provision script stays host-native."""
+        from sky.adaptors.slurm import SlurmPartition
         from sky.provision import common
+
+        # Mock get_partition_info to return a valid partition
+        mock_get_partition_info.return_value = SlurmPartition(
+            name='gpu',
+            is_default=False,
+            maxtime=7 * 24 * 60 * 60,  # 7 days in seconds
+        )
 
         # Mock the SlurmClient
         mock_client = mock.MagicMock()
@@ -493,11 +503,16 @@ touch {sky_home_dir}/.sky_slurm_cluster
 touch {sky_home_dir}/.hushlogin
 echo "Initializing container {container_name} on all nodes..."
 srun --overlap --nodes=1 --ntasks-per-node=1 --container-image={container_image} --container-name={container_name}:create --container-mounts="{container_mounts}" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
+PACKAGES="ca-certificates rsync curl git wget fuse"
 if command -v apt-get >/dev/null 2>&1; then
     apt-get update
-    apt-get install -y ca-certificates rsync curl git
+    apt-get install -y $PACKAGES
 elif command -v yum >/dev/null 2>&1; then
-    yum install -y ca-certificates rsync curl git
+    yum install -y $PACKAGES fuse-libs
+elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y $PACKAGES fuse-libs
+elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache $PACKAGES
 fi
 touch {ready_signal} && sleep infinity' &
 touch {sky_home_dir}/.sky_slurm_container
@@ -513,12 +528,21 @@ wait
             f"Expected lines: {len(expected_script.splitlines())}\n"
             f"Actual lines: {len(written_script.splitlines())}\n")
 
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
     @patch('sky.provision.slurm.instance.command_runner.SSHCommandRunner')
     def test_non_container_script_format(self, mock_ssh_runner,
-                                         mock_slurm_client):
+                                         mock_slurm_client,
+                                         mock_get_partition_info):
         """Test that non-container sbatch script is properly formatted."""
+        from sky.adaptors.slurm import SlurmPartition
         from sky.provision import common
+
+        mock_get_partition_info.return_value = SlurmPartition(
+            name='cpus',
+            is_default=False,
+            maxtime=7 * 24 * 60 * 60,
+        )
 
         # Mock the SlurmClient
         mock_client = mock.MagicMock()

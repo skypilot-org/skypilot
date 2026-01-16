@@ -1799,12 +1799,12 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
         if isinstance(cmd, list):
             cmd = ' '.join(cmd)
 
-        # Build inner command with environment setup
+        # Build inner command with environment setup.
         if in_container:
             assert self.container_args is not None, (
                 '_run_via_srun with in_container=True called but '
                 'container_args not set')
-            inner_cmd = f'{self._ENV_SETUP} && bash -c {shlex.quote(cmd)}'
+            inner_cmd = f'{self._ENV_SETUP} && {cmd}'
             extra_srun_args = f'{self.container_args} '
         else:
             inner_cmd = (
@@ -1812,7 +1812,7 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                 f'"{self.skypilot_runtime_dir}" && '
                 f'{self._ENV_SETUP} && '
                 f'cd {self.sky_dir} && export HOME="$PWD" && '
-                f'bash -c {shlex.quote(cmd)}')
+                f'{cmd}')
             extra_srun_args = ''
 
         srun_cmd = (
