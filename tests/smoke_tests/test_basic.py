@@ -418,9 +418,10 @@ def test_launch_waits_for_autostopping(generic_cloud: str):
                     timeout=autostop_timeout),
 
                 # Launch while autostopping - should wait for autostop to
-                # complete, then restart
-                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo after_autostop") && '
-                'echo "$s" && echo "$s" | grep "Waiting for autostop to complete"',
+                # complete, then restart. Use script to capture terminal output
+                # including spinner messages (which use ANSI escape codes).
+                f'SCRIPT_OUT=$(mktemp) && script -q "$SCRIPT_OUT" -c "SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} \'echo after_autostop\'" && '
+                'grep -a "Waiting for autostop to complete" "$SCRIPT_OUT" && rm -f "$SCRIPT_OUT"',
 
                 # Verify cluster is UP and job ran
                 f'sky logs {name} 2 --status',
