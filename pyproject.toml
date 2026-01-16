@@ -37,6 +37,14 @@ use_parentheses = true
 line-length = 80
 target-version = "py38"
 
+# Pylint rules disabled in .pylintrc that have NO ruff equivalent:
+# (These require type checking, cross-file analysis, or are Python 2 era)
+# - abstract-method, arguments-differ, attribute-defined-outside-init
+# - c-extension-no-member, duplicate-code, import-error, invalid-str-codec
+# - locally-disabled, no-init, no-member, no-name-in-module, signature-differs
+# - suppressed-message, useless-suppression
+# - Plus ~40 Python 2 compatibility rules (obsolete)
+
 # Exclude paths matching pylint config and format.sh:
 # - .pylintrc: ignore=third_party,ray_patches,providers (base names match anywhere)
 # - format.sh: --ignore-paths 'sky/schemas/generated|sky/skylet/providers/ibm'
