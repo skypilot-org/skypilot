@@ -510,8 +510,9 @@ def test_autostopping_behaviors(generic_cloud: str):
     """
     name = smoke_tests_utils.get_cluster_name()
     autostop_timeout = 600 if generic_cloud == 'azure' else 250
-    # Make hook long enough to run all tests while cluster is in AUTOSTOPPING
-    hook_duration = 300
+    # Hook needs to be long enough for tests to complete, but shorter than
+    # autostop_timeout so we can wait for STOPPED status
+    hook_duration = 120
 
     minimal_yaml_path = 'tests/test_yamls/minimal.yaml'
     yaml_config = yaml_utils.read_yaml(minimal_yaml_path)
