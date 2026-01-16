@@ -14,6 +14,7 @@ from sky.provision import constants
 from sky.provision.slurm import utils as slurm_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -22,6 +23,11 @@ logger = sky_logging.init_logger(__name__)
 
 PROVISION_SCRIPTS_DIRECTORY_NAME = '.sky_provision'
 PROVISION_SCRIPTS_DIRECTORY = f'~/{PROVISION_SCRIPTS_DIRECTORY_NAME}'
+
+
+def _sbatch_log_path(job_id: str) -> str:
+    return f'{PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-{job_id}.out'
+
 
 POLL_INTERVAL_SECONDS = 2
 # Default KillWait is 30 seconds, so we add some buffer time here.
@@ -248,8 +254,8 @@ def _create_virtual_instance(
     provision_script = f"""\
 #!/bin/bash
 #SBATCH --job-name={cluster_name_on_cloud}
-#SBATCH --output={PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-%j.out
-#SBATCH --error={PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-%j.out
+#SBATCH --output={_sbatch_log_path('%j')}
+#SBATCH --error={_sbatch_log_path('%j')}
 #SBATCH --nodes={num_nodes}
 #SBATCH --time={max_time}
 #SBATCH --wait-all-nodes=1
@@ -330,19 +336,24 @@ touch {sky_home_dir}/.hushlogin
     # Wait for the sbatch script to create the cluster's sky directories,
     # to avoid a race condition where post-provision commands try to
     # access the directories before they are created.
-    ready_check_cmd = (f'end=$((SECONDS+{_SKY_DIR_CREATION_TIMEOUT_SECONDS})); '
+    # Tail the slurm log in the background for visibility into init process.
+    slurm_log = f'~/{_sbatch_log_path(job_id)}'
+    stream_logs = env_options.Options.SHOW_DEBUG_INFO.get()
+    ready_check_cmd = (f'tail -f {slurm_log} 2>/dev/null & TAIL_PID=$!; '
+                       f'end=$((SECONDS+{_SKY_DIR_CREATION_TIMEOUT_SECONDS})); '
                        f'while [ ! -f {ready_signal} ]; do '
                        'if (( SECONDS >= end )); then '
-                       'exit 1; fi; '
+                       'kill $TAIL_PID 2>/dev/null; exit 1; fi; '
                        'sleep 0.5; '
-                       'done')
+                       'done; '
+                       'kill $TAIL_PID 2>/dev/null')
     rc, stdout, stderr = login_node_runner.run(ready_check_cmd,
                                                require_outputs=True,
-                                               stream_logs=False)
+                                               stream_logs=stream_logs)
     subprocess_utils.handle_returncode(
         rc,
-        ready_check_cmd,
-        'Failed to verify sky directories creation.',
+        ready_check_cmd, f'Failed to verify SLURM job initialization. '
+        f'See sbatch logs for details: {slurm_log}',
         stderr=f'{stdout}\n{stderr}')
 
     return common.ProvisionRecord(provider_name='slurm',
