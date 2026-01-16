@@ -79,6 +79,13 @@ def _create_virtual_instance(
         ssh_proxy_jump=ssh_proxy_jump,
     )
 
+    slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
+    partition_info = slurm_utils.get_partition_info(slurm_cluster, partition)
+    if partition_info is None:
+        raise ValueError(f'Partition info for {partition} not found '
+                         f'for SLURM cluster {slurm_cluster}')
+    max_time = slurm_utils.format_slurm_duration(partition_info.maxtime)
+
     # COMPLETING state occurs when a job is being terminated - during this
     # phase, slurmd sends SIGTERM to tasks, waits for KillWait period, sends
     # SIGKILL if needed, runs epilog scripts, and notifies slurmctld. This
@@ -240,7 +247,7 @@ def _create_virtual_instance(
 #SBATCH --output={PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-%j.out
 #SBATCH --error={PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-%j.out
 #SBATCH --nodes={num_nodes}
-#SBATCH --time=7-00:00:00
+#SBATCH --time={max_time}
 #SBATCH --wait-all-nodes=1
 # Let the job be terminated rather than requeued implicitly.
 #SBATCH --no-requeue
