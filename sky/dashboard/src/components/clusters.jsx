@@ -1134,7 +1134,9 @@ export function ClusterTable({
           <Table className="min-w-full">
             <TableHeader>
               <TableRow>
-                {visibleColumns.map((col) => React.cloneElement(col.renderHeader(), { key: col.id }))}
+                {visibleColumns.map((col) =>
+                  React.cloneElement(col.renderHeader(), { key: col.id })
+                )}
               </TableRow>
             </TableHeader>
 
@@ -1155,7 +1157,11 @@ export function ClusterTable({
                 paginatedData.map((item, index) => {
                   return (
                     <TableRow key={index}>
-                      {visibleColumns.map((col) => React.cloneElement(col.renderCell(item), { key: col.id }))}
+                      {visibleColumns.map((col) =>
+                        React.cloneElement(col.renderCell(item), {
+                          key: col.id,
+                        })
+                      )}
                     </TableRow>
                   );
                 })

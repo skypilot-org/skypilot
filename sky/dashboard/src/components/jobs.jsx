@@ -54,7 +54,11 @@ import { useMobile } from '@/hooks/useMobile';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { PluginSlot } from '@/plugins/PluginSlot';
-import { useTableColumns } from '@/plugins/PluginProvider';
+import {
+  useTableColumns,
+  usePluginComponents,
+  useMergedTableColumns,
+} from '@/plugins/PluginProvider';
 import {
   FilterDropdown,
   Filters,
@@ -850,12 +854,6 @@ export function ManagedJobsTable({
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
-  // Get plugin columns
-  const pluginColumns = useTableColumns('jobs', {
-    shouldShowWorkspace,
-    shouldShowPool,
-  });
-
   // Define base columns with their order
   const baseColumns = [
     {
@@ -1124,7 +1122,6 @@ export function ManagedJobsTable({
           {item.details ? (
             <TruncatedDetails
               text={item.details}
-              queueName={item.kueue_queue_name}
               rowId={item.id}
               expandedRowId={expandedRowId}
               setExpandedRowId={setExpandedRowId}
@@ -1152,57 +1149,77 @@ export function ManagedJobsTable({
     },
   ];
 
-  // Add plugin columns to the array
-  const pluginColumnDefs = pluginColumns.map((col) => ({
-    id: col.id,
-    order: col.header.order,
-    isPlugin: true,
-    pluginColumn: col,
-    renderHeader: () => {
-      const baseClasses = col.header.sortKey
-        ? 'sortable whitespace-nowrap'
-        : 'whitespace-nowrap';
-      const className = `${baseClasses}${col.header.className ? ' ' + col.header.className : ''}`;
-      return (
-        <TableHead
-          className={className}
-          onClick={
-            col.header.sortKey
-              ? () => requestSort(col.header.sortKey)
-              : undefined
-          }
-        >
-          {col.header.label}
-          {col.header.sortKey ? getSortDirection(col.header.sortKey) : ''}
-        </TableHead>
-      );
-    },
-    renderCell: (item) => {
-      const context = { item, shouldShowWorkspace, shouldShowPool };
-      const cellContent = col.cell.render(item, context);
-      return (
-        <TableCell className={col.cell.className || ''}>
-          {cellContent}
-        </TableCell>
-      );
-    },
-  }));
-
-  // Merge base and plugin columns, sort by order
-  const allColumns = [...baseColumns, ...pluginColumnDefs].sort(
-    (a, b) => a.order - b.order
+  // Transform function to convert plugin columns to the format expected by the table
+  const transformPluginColumn = React.useCallback(
+    (col) => ({
+      id: col.id,
+      order: col.header.order,
+      isPlugin: true,
+      pluginColumn: col,
+      renderHeader: () => {
+        const baseClasses = col.header.sortKey
+          ? 'sortable whitespace-nowrap'
+          : 'whitespace-nowrap';
+        const className = `${baseClasses}${col.header.className ? ' ' + col.header.className : ''}`;
+        return (
+          <TableHead
+            className={className}
+            onClick={
+              col.header.sortKey
+                ? () => requestSort(col.header.sortKey)
+                : undefined
+            }
+          >
+            {col.header.label}
+            {col.header.sortKey ? getSortDirection(col.header.sortKey) : ''}
+          </TableHead>
+        );
+      },
+      renderCell: (item) => {
+        const context = {
+          item,
+          shouldShowWorkspace,
+          shouldShowPool,
+          expandedRowId,
+          setExpandedRowId,
+          expandedRowRef,
+        };
+        const cellContent = col.cell.render(item, context);
+        return (
+          <TableCell className={col.cell.className || ''}>
+            {cellContent}
+          </TableCell>
+        );
+      },
+    }),
+    [
+      requestSort,
+      getSortDirection,
+      shouldShowWorkspace,
+      shouldShowPool,
+      expandedRowId,
+      setExpandedRowId,
+      expandedRowRef,
+    ]
   );
 
-  // Filter out conditional columns that shouldn't be shown
-  const visibleColumns = allColumns.filter(
-    (col) =>
-      !col.conditional ||
-      (col.conditional &&
-        ((col.id === 'workspace' && shouldShowWorkspace) ||
-          (col.id === 'pool' && shouldShowPool)))
+  // Merge base and plugin columns using the plugin system
+  // Plugin columns with the same ID as base columns will automatically replace them
+  const visibleColumns = useMergedTableColumns(
+    'jobs',
+    baseColumns,
+    {
+      shouldShowColumn: (columnId) => {
+        // Handle conditional columns
+        if (columnId === 'workspace') return shouldShowWorkspace;
+        if (columnId === 'pool') return shouldShowPool;
+        return true;
+      },
+    },
+    transformPluginColumn
   );
 
-  // Calculate dynamic colSpan
+  // Calculate dynamic colSpan (used for expanded rows)
   const totalColSpan = visibleColumns.length;
 
   return (
@@ -1402,7 +1419,6 @@ export function ManagedJobsTable({
                       {expandedRowId === item.id && (
                         <ExpandedDetailsRow
                           text={item.details}
-                          queueName={item.kueue_queue_name}
                           colSpan={totalColSpan}
                           innerRef={expandedRowRef}
                         />
@@ -1870,11 +1886,9 @@ export function ClusterJobs({
                       >
                         <TruncatedDetails
                           text={item.job || 'Unnamed job'}
-                          queueName={item.kueue_queue_name}
                           rowId={item.id}
                           expandedRowId={expandedRowId}
                           setExpandedRowId={setExpandedRowId}
-                          infra={item.full_infra || item.infra}
                         />
                       </Link>
                     </TableCell>
@@ -1904,10 +1918,8 @@ export function ClusterJobs({
                   {expandedRowId === item.id && (
                     <ExpandedDetailsRow
                       text={item.job || 'Unnamed job'}
-                      queueName={null}
                       colSpan={8}
                       innerRef={expandedRowRef}
-                      infra={item.full_infra || item.infra}
                     />
                   )}
                 </React.Fragment>
@@ -2016,7 +2028,7 @@ export function ClusterJobs({
   );
 }
 
-function ExpandedDetailsRow({ text, colSpan, innerRef, infra, queueName }) {
+function ExpandedDetailsRow({ text, colSpan, innerRef }) {
   return (
     <TableRow className="expanded-details">
       <TableCell colSpan={colSpan}>
@@ -2031,7 +2043,7 @@ function ExpandedDetailsRow({ text, colSpan, innerRef, infra, queueName }) {
                 className="mt-1 text-sm text-gray-700"
                 style={{ whiteSpace: 'pre-wrap' }}
               >
-                {parseTextWithKueueLinks(text, queueName, infra)}
+                {text}
               </p>
             </div>
           </div>
@@ -2041,14 +2053,7 @@ function ExpandedDetailsRow({ text, colSpan, innerRef, infra, queueName }) {
   );
 }
 
-function TruncatedDetails({
-  text,
-  rowId,
-  expandedRowId,
-  setExpandedRowId,
-  infra,
-  queueName,
-}) {
+function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
   const safeText = text || '';
   const lines = safeText.split('\n');
   const isMultiLine = lines.length > 1;
@@ -2067,9 +2072,7 @@ function TruncatedDetails({
 
   return (
     <div className="truncated-details relative max-w-full flex items-center">
-      <span className="truncate">
-        {parseTextWithKueueLinks(displayText, queueName, infra)}
-      </span>
+      <span className="truncate">{displayText}</span>
       {(isTruncated || isMultiLine) && (
         <button
           ref={buttonRef}
