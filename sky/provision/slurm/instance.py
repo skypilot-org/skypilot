@@ -1,6 +1,5 @@
 """Slurm instance provisioning."""
 
-import re
 import shlex
 import tempfile
 import textwrap
@@ -223,7 +222,7 @@ def _create_virtual_instance(
             fi
             """)
         container_marker_file = (f'{sky_home_dir}/'
-                                  f'{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
+                                 f'{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
         # Run container init, touch ready signal, then sleep infinity to keep
         # container running. Use --overlap so subsequent sruns can share the
         # allocation. Background with & so sbatch continues.
@@ -632,9 +631,8 @@ def cleanup_ports(
     del cluster_name_on_cloud, ports, provider_config
     pass
 
-def _build_pyxis_args(
-    cluster_name_on_cloud: str,
-) -> str:
+
+def _build_pyxis_args(cluster_name_on_cloud: str,) -> str:
     """Build pyxis/enroot container args for srun.
 
     Uses :exec flag to attach to the already-running container (started with
@@ -642,7 +640,9 @@ def _build_pyxis_args(
     --container-writable are preserved from when the container was created.
     """
     container_name = slurm_utils.pyxis_container_name(cluster_name_on_cloud)
-    return f'--container-remap-root --container-name={shlex.quote(container_name)}:exec'
+    quoted_name = shlex.quote(container_name)
+    return f'--container-remap-root --container-name={quoted_name}:exec'
+
 
 def get_command_runners(
     cluster_info: common.ClusterInfo,
@@ -700,8 +700,7 @@ def get_command_runners(
     container_args = None
     if rc == 0:
         container_args = _build_pyxis_args(
-            cluster_name_on_cloud=cluster_name_on_cloud,
-        )
+            cluster_name_on_cloud=cluster_name_on_cloud,)
 
     runners = [
         command_runner.SlurmCommandRunner(

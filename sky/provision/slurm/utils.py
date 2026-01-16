@@ -46,12 +46,12 @@ def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
 
 
 def pyxis_container_name(cluster_name_on_cloud: str) -> str:
-    """Get the name of the pyxis container that gets passed to --container-name."""
+    """Get the pyxis container name that gets passed to --container-name."""
     return cluster_name_on_cloud
 
 
 def enroot_container_name_global_scope(cluster_name_on_cloud: str) -> str:
-    """Get the name of the enroot container created by pyxis when container_scope=global."""
+    """Get enroot container name when container_scope=global."""
     # Not publicly documented, but see:
     # https://github.com/NVIDIA/pyxis/blob/fb9c2d5a08a778346dd398d670deeb5a569904e5/pyxis_slurmstepd.c#L1104
     # Added in commit:
@@ -740,27 +740,31 @@ def srun_sshd_command(
         # See slurm-ray.yml.j2 for why we use Dropbear instead of OpenSSH.
         # Dropbear's -i (inetd) mode expects a socket fd on stdin, but srun
         # provides pipes. socat bridges stdin/stdout to a TCP socket.
-        ssh_bootstrap_cmd = (
-            'PORT=$((30000 + RANDOM % 30000)); '
-            'DROPBEAR=$(command -v /usr/local/bin/dropbear); '
-            '$DROPBEAR -F -E -s -R -p 127.0.0.1:$PORT & '
-            'DROPBEAR_PID=$!; '
-            'trap "kill $DROPBEAR_PID 2>/dev/null" EXIT; '
-            'sleep 0.1; '
-            'socat STDIO TCP:127.0.0.1:$PORT')
+        ssh_bootstrap_cmd = ('PORT=$((30000 + RANDOM % 30000)); '
+                             'DROPBEAR=$(command -v /usr/local/bin/dropbear); '
+                             '$DROPBEAR -F -E -s -R -p 127.0.0.1:$PORT & '
+                             'DROPBEAR_PID=$!; '
+                             'trap "kill $DROPBEAR_PID 2>/dev/null" EXIT; '
+                             'sleep 0.1; '
+                             'socat STDIO TCP:127.0.0.1:$PORT')
         return shlex.join([
             'srun',
             '--overlap',
             '--quiet',
             '--unbuffered',
-            '--jobid', job_id,
+            '--jobid',
+            job_id,
             '--nodes=1',
             '--ntasks=1',
             '--ntasks-per-node=1',
-            '-w', target_node,
+            '-w',
+            target_node,
             '--container-remap-root',
-            f'--container-name={pyxis_container_name(cluster_name_on_cloud)}:exec',
-            '/bin/bash', '-c', ssh_bootstrap_cmd,
+            f'--container-name='
+            f'{pyxis_container_name(cluster_name_on_cloud)}:exec',
+            '/bin/bash',
+            '-c',
+            ssh_bootstrap_cmd,
         ])
     else:
         # Non-container: OpenSSH sshd

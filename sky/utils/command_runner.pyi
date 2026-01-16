@@ -43,6 +43,12 @@ class SshMode(enum.Enum):
     LOGIN = ...
 
 
+class CommandStage(enum.Enum):
+    DEFAULT = ...
+    SETUP = ...
+    EXEC = ...
+
+
 class CommandRunner:
     node_id: str
 
@@ -101,6 +107,9 @@ class CommandRunner:
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
+    def get_remote_home_dir(self) -> str:
+        ...
+
     def rsync(self,
               source: str,
               target: str,
@@ -108,7 +117,8 @@ class CommandRunner:
               up: bool,
               log_path: str = ...,
               stream_logs: bool = ...,
-              max_retry: int = ...) -> None:
+              max_retry: int = ...,
+              stage: CommandStage = ...) -> None:
         ...
 
     def port_forward_command(
@@ -228,7 +238,8 @@ class SSHCommandRunner(CommandRunner):
               log_path: str = ...,
               stream_logs: bool = ...,
               max_retry: int = ...,
-              get_remote_home_dir: Callable[[], str] = ...) -> None:
+              get_remote_home_dir: Callable[[], str] = ...,
+              stage: CommandStage = ...) -> None:
         ...
 
     def port_forward_command(
@@ -310,7 +321,8 @@ class KubernetesCommandRunner(CommandRunner):
               up: bool,
               log_path: str = ...,
               stream_logs: bool = ...,
-              max_retry: int = ...) -> None:
+              max_retry: int = ...,
+              stage: CommandStage = ...) -> None:
         ...
 
     def port_forward_command(
@@ -327,6 +339,7 @@ class SlurmCommandRunner(SSHCommandRunner):
     skypilot_runtime_dir: str
     job_id: str
     slurm_node: str
+    container_args: Optional[str]
 
     def __init__(
         self,
@@ -338,6 +351,7 @@ class SlurmCommandRunner(SSHCommandRunner):
         skypilot_runtime_dir: str,
         job_id: str,
         slurm_node: str,
+        container_args: Optional[str] = ...,
         **kwargs,
     ) -> None:
         ...

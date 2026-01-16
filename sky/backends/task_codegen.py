@@ -818,7 +818,8 @@ class SlurmCodeGen(TaskCodeGen):
 
         container_flags = ''
         if self._container_name is not None:
-            # --container-remap-root must be passed on every srun to get correct $HOME
+            # --container-remap-root must be passed on every srun to get
+            # correct $HOME
             container_flags = (
                 ' --container-remap-root'
                 f' --container-name={shlex.quote(self._container_name)}:exec')

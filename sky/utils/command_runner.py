@@ -1270,6 +1270,7 @@ class SSHCommandRunner(CommandRunner):
         Raises:
             exceptions.CommandError: rsync command failed.
         """
+        del stage  # unused
         if self._docker_ssh_proxy_command is not None:
             docker_ssh_proxy_command = self._docker_ssh_proxy_command(['ssh'])
         else:
@@ -1524,6 +1525,7 @@ class KubernetesCommandRunner(CommandRunner):
         Raises:
             exceptions.CommandError: rsync command failed.
         """
+        del stage  # unused
 
         # Build command.
         helper_path = shlex.quote(
@@ -1741,7 +1743,8 @@ class SlurmCommandRunner(SSHCommandRunner):
                                   connect_timeout=None))
 
         if in_container:
-            extra_srun_args = f'{self.container_args} ' if self.container_args else ''
+            extra_srun_args = (f'{self.container_args} '
+                               if self.container_args else '')
             remote_home_dir = '/root'  # TODO(kevin): Dont hardcode this.
         else:
             extra_srun_args = ''
@@ -1803,12 +1806,11 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
             inner_cmd = f'{self._ENV_SETUP} && {cmd}'
             extra_srun_args = f'{self.container_args} '
         else:
-            inner_cmd = (
-                f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
-                f'"{self.skypilot_runtime_dir}" && '
-                f'{self._ENV_SETUP} && '
-                f'cd {self.sky_dir} && export HOME="$PWD" && '
-                f'{cmd}')
+            inner_cmd = (f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
+                         f'"{self.skypilot_runtime_dir}" && '
+                         f'{self._ENV_SETUP} && '
+                         f'cd {self.sky_dir} && export HOME="$PWD" && '
+                         f'{cmd}')
             extra_srun_args = ''
 
         srun_cmd = (
