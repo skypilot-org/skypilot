@@ -44,6 +44,14 @@ target-version = "py38"
 # - locally-disabled, no-init, no-member, no-name-in-module, signature-differs
 # - suppressed-message, useless-suppression
 # - Plus ~40 Python 2 compatibility rules (obsolete)
+#
+# Pylint rules disabled in .pylintrc with ruff equivalents NOT in select:
+# (No need to ignore since the rule sets aren't enabled)
+# - consider-using-enumerate (SIM113), fixme (FIX), implicit-str-concat (ISC001)
+# - inconsistent-return-statements (RET501-503), logging-*-interpolation (G001/G004)
+# - misplaced-comparison-constant (SIM300), missing-function-docstring (D103)
+# - no-else-break/continue/raise/return (RET505-508), unnecessary-pass (PIE790)
+# - wrong-import-order (I001)
 
 # Exclude paths matching pylint config and format.sh:
 # - .pylintrc: ignore=third_party,ray_patches,providers (base names match anywhere)
