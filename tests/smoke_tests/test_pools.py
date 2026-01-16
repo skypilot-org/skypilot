@@ -2161,3 +2161,82 @@ def test_pool_one_job_per_worker_no_resources(generic_cloud: str):
         )
 
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_secrets_preserved_on_worker_update(generic_cloud: str):
+    """Test that secrets provided via CLI are preserved when updating pool workers.
+    
+    This test:
+    1. Creates a pool with a secret defined as null in YAML but set via CLI
+    2. Verifies the secret is accessible in setup commands on worker 1
+    3. Updates worker count to 2
+    4. Verifies the secret is accessible in setup commands on worker 2
+    """
+
+    def check_for_secret_in_worker_logs(pool_name: str, worker_id: int,
+                                        secret_value: str):
+        """Check that worker logs contain the expected secret value."""
+        return (
+            f's=$(sky jobs pool logs {pool_name} {worker_id} --no-follow 2>&1); '
+            f'echo "$s"; '
+            f'if ! echo "$s" | grep "{secret_value}"; then '
+            f'  echo "ERROR: Worker {worker_id} logs do not contain expected secret value: {secret_value}"; '
+            f'  exit 1; '
+            f'fi; '
+            f'echo "Worker {worker_id} logs contain expected secret value: {secret_value}"'
+        )
+
+    secret_value = 'test-secret-value-12345'
+    secret_name = 'FAKE_GITLAB_TOKEN'
+
+    # Create pool config with secret as null in YAML
+    pool_config = textwrap.dedent(f"""
+    secrets:
+        {secret_name}: null
+
+    pool:
+        workers: 1
+
+    resources:
+        infra: {generic_cloud}
+
+    setup: |
+        echo "Secret value: ${{{secret_name}}}"
+        echo "Setup complete"
+    """)
+
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        write_yaml(pool_yaml, pool_config)
+        pool_name = f'{smoke_tests_utils.get_cluster_name()}-pool'
+
+        test = smoke_tests_utils.Test(
+            'test_pool_secrets_preserved_on_worker_update',
+            [
+                # Launch pool with secret provided via CLI
+                f's=$(sky jobs pool apply -p {pool_name} {pool_yaml.name} --secret {secret_name}={secret_value} -y); '
+                f'echo "$s"; '
+                f'echo; echo; echo "$s" | grep "Successfully created pool"',
+                # Wait for pool to be ready
+                wait_until_pool_ready(pool_name, timeout=timeout),
+                # Wait for worker 1 to be ready
+                wait_until_worker_status(
+                    pool_name, 'READY', timeout=timeout, num_occurrences=1),
+                # Check that worker 1 logs contain the secret value
+                check_for_secret_in_worker_logs(pool_name, 1, secret_value),
+                # Update workers to 2
+                _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS.format(
+                    pool_name=pool_name, num_workers=2),
+                # Wait for both workers to be ready
+                wait_until_num_workers(pool_name, 2, timeout=timeout),
+                wait_until_worker_status(
+                    pool_name, 'READY', timeout=timeout, num_occurrences=2),
+                # Check that worker 2 logs also contain the secret value
+                check_for_secret_in_worker_logs(pool_name, 2, secret_value),
+            ],
+            timeout=timeout,
+            teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
+        )
+
+        smoke_tests_utils.run_one_test(test)

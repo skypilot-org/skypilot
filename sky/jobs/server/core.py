@@ -587,8 +587,9 @@ def launch(
                         for k, v in controller_task.envs.items()
                     ]
                     run_script = '\n'.join(env_cmds + [run_script])
-                    log_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
-                                           'managed_jobs')
+                    log_dir = os.path.expanduser(
+                        os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
+                                     'managed_jobs'))
                     os.makedirs(log_dir, exist_ok=True)
                     log_path = os.path.join(
                         log_dir, f'submit-job-{consolidation_mode_job_id}.log')
