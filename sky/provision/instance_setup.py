@@ -21,13 +21,13 @@ from sky.usage import constants as usage_constants
 from sky.usage import usage_lib
 from sky.utils import accelerator_registry
 from sky.utils import command_runner
-from sky.utils.command_runner import CommandStage
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils.command_runner import CommandStage
 
 logger = sky_logging.init_logger(__name__)
 
@@ -252,12 +252,13 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                             'Retrying setup in 10 seconds.')
                 time.sleep(10)
                 retry_cnt += 1
-                returncode, stdout, stderr = runner.run(cmd,
-                                                        stream_logs=False,
-                                                        log_path=log_path,
-                                                        require_outputs=True,
-                                                        source_bashrc=True,
-                                                        stage=CommandStage.SETUP)
+                returncode, stdout, stderr = runner.run(
+                    cmd,
+                    stream_logs=False,
+                    log_path=log_path,
+                    require_outputs=True,
+                    source_bashrc=True,
+                    stage=CommandStage.SETUP)
                 if not returncode:
                     break
 

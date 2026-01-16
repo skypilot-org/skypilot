@@ -63,7 +63,6 @@ from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import cluster_utils
 from sky.utils import command_runner
-from sky.utils.command_runner import CommandStage
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context_utils
@@ -83,6 +82,7 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
 from sky.utils import yaml_utils
+from sky.utils.command_runner import CommandStage
 from sky.utils.plugin_extensions import ExternalFailureSource
 
 if typing.TYPE_CHECKING:

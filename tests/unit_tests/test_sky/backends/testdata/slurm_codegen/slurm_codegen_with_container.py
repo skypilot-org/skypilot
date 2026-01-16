@@ -487,25 +487,36 @@ if script or False:
         # allocation. See:
         # https://support.schedmd.com/show_bug.cgi?id=14298
         # https://github.com/huggingface/datatrove/issues/248
-        bash_cmd = shlex.quote(' '.join([
-            'unset SKY_RUNTIME_DIR;',
-            constants.SKY_SLURM_PYTHON_CMD,
-            '-m sky.skylet.executor.slurm',
-            runner_args,
-        ]))
+        #
+        # Write the runner command to a script file to avoid
+        # "Argument list too long" errors. Use home directory
+        # (typically NFS-mounted) so the script is accessible from
+        # all nodes in the Slurm allocation.
+        runner_script_prefix = 'sky_setup_runner_' if is_setup else 'sky_task_runner_'
+        with tempfile.NamedTemporaryFile('w', prefix=runner_script_prefix, suffix='.sh', delete=False, dir=os.path.expanduser('~')) as f:
+            f.write('#!/bin/bash\n')
+            f.write('unset SKY_RUNTIME_DIR\n')
+            f.write(f'exec {constants.SKY_SLURM_PYTHON_CMD} -m sky.skylet.executor.slurm {runner_args}\n')
+            runner_script_path = f.name
         srun_cmd = (
             "unset $(env | awk -F= '/^SLURM_/ {print $1}') && "
             f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid=12345 '
-            f'--job-name=sky-2{job_suffix} --ntasks-per-node=1 --container-name=test-cluster:exec {extra_flags} '
-            f'/bin/bash -c {bash_cmd}'
+            f'--job-name=sky-2{job_suffix} --ntasks-per-node=1 --container-remap-root --container-name=test-cluster:exec {extra_flags} '
+            f'/bin/bash {shlex.quote(runner_script_path)}'
         )
-        return srun_cmd, script_path
+
+        def cleanup():
+            if script_path is not None:
+                os.remove(script_path)
+            os.remove(runner_script_path)
+
+        return srun_cmd, cleanup
 
     def run_thread_func():
         # This blocks until Slurm allocates resources (--exclusive)
         # --mem=0 to match RayCodeGen's behavior where we don't explicitly request memory.
         run_flags = f'--nodes=1 --cpus-per-task=1 --mem=0 {gpu_arg} --exclusive'
-        srun_cmd, task_script_path = build_task_runner_cmd(
+        srun_cmd, cleanup = build_task_runner_cmd(
             script, run_flags, '/sky/logs/tasks', sky_env_vars_dict,
             task_name='hello',
             alloc_signal=alloc_signal_file,
@@ -520,8 +531,7 @@ if script or False:
             print(line, end='', flush=True)
         proc.wait()
 
-        if task_script_path is not None:
-            os.remove(task_script_path)
+        cleanup()
         return {'return_code': proc.returncode, 'pid': proc.pid}
 
     run_thread_result = {'result': None}
@@ -562,7 +572,7 @@ if script or False:
         # --overlap as we have already secured allocation with the srun for the run section,
         # and otherwise this srun would get blocked and deadlock.
         setup_flags = f'--overlap --nodes=None'
-        setup_srun, setup_script_path = build_task_runner_cmd(
+        setup_srun, setup_cleanup = build_task_runner_cmd(
             None, setup_flags, None, None,
             is_setup=True
         )
@@ -576,8 +586,7 @@ if script or False:
             print(line, end='', flush=True)
         setup_proc.wait()
 
-        if setup_script_path is not None:
-            os.remove(setup_script_path)
+        setup_cleanup()
 
         setup_returncode = setup_proc.returncode
         if setup_returncode != 0:
