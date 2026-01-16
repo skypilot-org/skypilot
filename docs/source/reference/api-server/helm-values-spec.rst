@@ -27,10 +27,6 @@ Values
 
 Below is the available helm value keys and the default value of each key:
 
-..
-  Omitted values:
-  * storage.accessMode: accessMode other than ReadWriteOnce is not tested yet.
-
 .. parsed-literal::
 
   :ref:`global <helm-values-global>`:
@@ -422,6 +418,11 @@ Upgrade strategy for the API server deployment. Available options are:
 - ``RollingUpdate``: Create a new pod first, wait for it to be ready, then delete the old one (zero downtime).
 
 When set to ``RollingUpdate``, an external database must be configured via :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>` or :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>`.
+
+For persistent storage with RollingUpdate:
+
+- If :ref:`storage.enabled=true <helm-values-storage-enabled>`, use :ref:`storage.accessMode <helm-values-storage-accessMode>` =ReadWriteMany with an RWX-capable storage class (e.g., NFS-backed storage). This sets the ``SKYPILOT_API_SERVER_STORAGE_ENABLED`` environment variable, ensuring managed job logs and file mounts persist across rolling updates.
+- If ``storage.enabled=false``, file mounts and logs will be lost on pod restart. Consider configuring ``jobs.bucket`` in the SkyPilot config to persist file mounts to cloud storage.
 
 Default: ``"Recreate"``
 
@@ -1143,6 +1144,19 @@ Default: ``null``
 
 Enable persistent storage for the API server, setting this to ``false`` is prone to data loss and should only be used for testing.
 
+When enabled, SkyPilot creates a PersistentVolumeClaim (PVC) to persist:
+
+- **Managed job logs**: Accessible via ``sky jobs logs <job_id>`` and ``sky jobs logs --controller <job_id>``
+- **File mounts**: Local files uploaded during managed job submission
+
+.. note::
+
+  Setting ``storage.enabled=true`` sets the environment variable ``SKYPILOT_API_SERVER_STORAGE_ENABLED=true`` on the API server pod. This ensures that managed job logs and file mounts persist across API server restarts and rolling updates.
+
+  Transient logs (api_server logs, sky-* cluster logs) are NOT persisted to minimize storage usage.
+
+For RollingUpdate upgrade strategy, see :ref:`apiService.upgradeStrategy <helm-values-apiService-upgradeStrategy>` for storage access mode requirements.
+
 Default: ``true``
 
 .. code-block:: yaml
@@ -1169,14 +1183,31 @@ Default: ``""``
 ``storage.accessMode``
 ^^^^^^^^^^^^^^^^^^^^^^
 
-Access mode for the persistent storage volume. Can be set to ``ReadWriteOnce`` or ``ReadWriteMany`` depending on what is supported by the storage class.
+Access mode for the persistent storage volume. Available options:
+
+- ``ReadWriteOnce`` (RWO): The volume can be mounted as read-write by a single node. This is the default and works with most storage classes. Compatible with ``Recreate`` upgrade strategy. **Not compatible with RollingUpdate upgrade strategy** since the PVC cannot be mounted by both old and new pods simultaneously during rolling updates.
+
+- ``ReadWriteMany`` (RWX): The volume can be mounted as read-write by multiple nodes. Compatible with both ``Recreate`` and ``RollingUpdate`` upgrade strategies. Requires an RWX-capable storage class such as:
+
+  - GKE: Filestore-backed storage class
+  - EKS: EFS CSI driver
+  - AKS: Azure Files
+  - On-prem: NFS provisioner
+
+For more details on upgrade strategies, see :ref:`apiService.upgradeStrategy <helm-values-apiService-upgradeStrategy>`.
 
 Default: ``ReadWriteOnce``
 
 .. code-block:: yaml
 
+  # For Recreate upgrade strategy (default), ReadWriteOnce is sufficient
   storage:
     accessMode: ReadWriteOnce
+
+  # For RollingUpdate upgrade strategy with persistent storage, use ReadWriteMany
+  storage:
+    accessMode: ReadWriteMany
+    storageClassName: <your-rwx-storage-class>
 
 .. _helm-values-storage-size:
 
