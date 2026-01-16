@@ -144,11 +144,11 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '30'
+SKYLET_VERSION = '30'  # conditional plugin loading for jobs bwcompat
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 4
+SKYLET_LIB_VERSION = 4  # add wait_for param to set_autostop
 SKYLET_VERSION_FILE = '.sky/skylet_version'
 SKYLET_LOG_FILE = '.sky/skylet.log'
 SKYLET_PID_FILE = '.sky/skylet_pid'
@@ -541,6 +541,11 @@ IS_SKYPILOT_SERVE_CONTROLLER = 'IS_SKYPILOT_SERVE_CONTROLLER'
 # Environment variable that is set to 'true' if rolling update strategy is
 # enabled for the API server deployment.
 SKYPILOT_ROLLING_UPDATE_ENABLED = 'SKYPILOT_ROLLING_UPDATE_ENABLED'
+# Environment variable that is set to 'true' if persistent storage is enabled
+# for the API server deployment (via Helm storage.enabled=true).
+# This enables persistence of managed job logs and file mounts across rolling
+# updates.
+SKYPILOT_API_SERVER_STORAGE_ENABLED = 'SKYPILOT_API_SERVER_STORAGE_ENABLED'
 
 SERVE_OVERRIDE_CONCURRENT_LAUNCHES = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SERVE_OVERRIDE_CONCURRENT_LAUNCHES')

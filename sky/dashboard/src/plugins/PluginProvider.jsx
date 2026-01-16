@@ -95,7 +95,7 @@ function resolveScriptUrl(jsPath) {
   }
 }
 
-function loadPluginScript(jsPath) {
+function loadPluginScript(jsPath, requiresEarlyInit = false) {
   if (typeof window === 'undefined') {
     return null;
   }
@@ -113,6 +113,7 @@ function loadPluginScript(jsPath) {
     script.type = 'text/javascript';
     script.async = true;
     script.src = resolved;
+    if (requiresEarlyInit) script.dataset.requiresEarlyInit = 'true';
     script.onload = () => resolve();
     script.onerror = (error) => {
       console.warn(
@@ -330,14 +331,14 @@ export function PluginProvider({ children }) {
       if (cancelled) {
         return;
       }
-      manifest
-        .map((pluginDescriptor) => extractJsPath(pluginDescriptor))
-        .filter(Boolean)
-        .forEach((jsPath) => {
-          if (!cancelled) {
-            loadPluginScript(jsPath);
-          }
-        });
+      manifest.forEach((pluginDescriptor) => {
+        const jsPath = extractJsPath(pluginDescriptor);
+        if (jsPath && !cancelled) {
+          const requiresEarlyInit =
+            pluginDescriptor.requires_early_init === true;
+          loadPluginScript(jsPath, requiresEarlyInit);
+        }
+      });
     };
     void bootstrapPlugins();
 

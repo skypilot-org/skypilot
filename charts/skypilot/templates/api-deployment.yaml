@@ -11,8 +11,8 @@ spec:
   {{- if and (not .Values.apiService.dbConnectionSecretName) (not .Values.apiService.dbConnectionString) }}
   {{- fail "External database must be configured via .apiService.dbConnectionSecretName or .apiService.dbConnectionString when using RollingUpdate strategy" }}
   {{- end }}
-  {{- if .Values.storage.enabled }}
-  {{- fail "Local storage is not supported when using RollingUpdate strategy. Use recreate upgrade strategy or set storage.enabled to false." }}
+  {{- if and .Values.storage.enabled (ne .Values.storage.accessMode "ReadWriteMany") }}
+  {{- fail "Local storage with ReadWriteOnce access mode is not supported when using RollingUpdate strategy. Either use Recreate upgrade strategy, set storage.enabled to false, or use ReadWriteMany access mode with a compatible storage class (e.g., NFS-backed storage like Google Filestore)." }}
   {{- end }}
   strategy:
     type: RollingUpdate
@@ -136,6 +136,8 @@ spec:
         - name: SKYPILOT_ROLLING_UPDATE_ENABLED
           value: "true"
         {{- end }}
+        - name: SKYPILOT_API_SERVER_STORAGE_ENABLED
+          value: {{ .Values.storage.enabled | quote }}
         {{- if .Values.apiService.metrics.enabled }}
         - name: SKY_API_SERVER_METRICS_ENABLED
           value: "true"
@@ -263,6 +265,14 @@ spec:
         - name: state-volume
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
           subPath: .ssh
+        # Mount only the specific subdirectories needed for managed job logs, not the entire sky_logs folder
+        # This avoids persisting transient cluster logs (sky-*) and api_server logs
+        - name: state-volume
+          mountPath: /root/sky_logs/jobs_controller # Controller logs for `sky jobs logs --controller`
+          subPath: sky_logs/jobs_controller
+        - name: state-volume
+          mountPath: /root/sky_logs/managed_jobs # Task execution logs for managed jobs
+          subPath: sky_logs/managed_jobs
         {{- end }}
         - name: skypilot-config
           mountPath: /var/skypilot/config

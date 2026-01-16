@@ -365,7 +365,7 @@ def _init_db_async(func):
             # this may happen multiple times since there is no locking
             # here but thats fine, this is just a short circuit for the
             # common case.
-            await context_utils.to_thread(initialize_and_get_db_async)
+            await asyncio.to_thread(initialize_and_get_db_async)
 
         return await func(*args, **kwargs)
 
