@@ -3735,7 +3735,9 @@ def show_gpus(
 
                 node_is_ready = getattr(node_info, 'is_ready', True)
                 node_is_cordoned = getattr(node_info, 'is_cordoned', False)
-                if not node_is_ready or node_is_cordoned:
+                node_taints = getattr(node_info, 'taints', None) or []
+                node_is_tainted = len(node_taints) > 0
+                if not node_is_ready or node_is_cordoned or node_is_tainted:
                     not_ready_counts[accelerator_type] += accelerator_count
             return not_ready_counts
 
@@ -3954,20 +3956,21 @@ def show_gpus(
                 # Add extra info if node is cordoned, tainted, or not ready
                 taints = getattr(node_info, 'taints', None)
                 if taints:
-                    # key=value:effect if value is not empty
-                    # key:effect if value is empty
-                    taints_strs = []
+                    # Group taints by effect: 'NoSchedule Taint [key1, key2],
+                    # NoExecute Taint [key3]'
+                    taints_by_effect: Dict[str, List[str]] = {}
                     for taint in taints:
-                        if taint.get('value'):
-                            taints_strs.append(
-                                f'{taint["key"]}={taint.get("value")}:'
-                                f'{taint["effect"]}')
-                        else:
-                            taints_strs.append(
-                                f'{taint["key"]}:{taint["effect"]}')
+                        effect = taint['effect']
+                        key = taint['key']
+                        if effect not in taints_by_effect:
+                            taints_by_effect[effect] = []
+                        taints_by_effect[effect].append(key)
+                    taints_strs = []
+                    for effect, keys in taints_by_effect.items():
+                        taints_strs.append(
+                            f'{effect} Taint [{", ".join(keys)}]')
                     if taints_strs:
-                        taints_str = ', '.join(taints_strs)
-                        extra_info.append(f'Taints: [{taints_str}]')
+                        extra_info.append(', '.join(taints_strs))
                 node_is_cordoned = getattr(node_info, 'is_cordoned', False)
                 if node_is_cordoned:
                     extra_info.append('Node Cordoned')

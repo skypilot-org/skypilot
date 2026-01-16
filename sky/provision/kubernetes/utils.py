@@ -1288,16 +1288,45 @@ class V1Node:
         """Check if the node is cordoned based on its spec.unschedulable."""
         return self.spec.unschedulable
 
-    def get_non_cordon_taints(self) -> List[Dict[str, Any]]:
-        """Get the taints on the node except the cordon taint."""
-        return [{
-            'key': t.key,
-            'value': t.value if t.value else None,
-            'effect': t.effect
-        }
-                for t in self.spec.taints
-                if not (t.key == 'node.kubernetes.io/unschedulable' and
-                        t.effect == 'NoSchedule')]
+    def get_taints(
+        self,
+        exclude_cordon: bool = False,
+        exclude_not_ready: bool = False,
+        exclude_effects: Optional[List[str]] = None,
+        exclude_keys: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get the taints on the node.
+
+        Args:
+            exclude_cordon: Whether to exclude the cordon taint.
+            exclude_not_ready: Whether to exclude the not ready taint.
+            exclude_effects: The taint effects to exclude,
+              e.g. ['PreferNoSchedule'].
+            exclude_keys: The taint keys to exclude.
+
+        Returns:
+            List[Dict[str, Any]]: The taints on the node.
+        """
+        taints = []
+        for t in self.spec.taints:
+            if (exclude_cordon and
+                    t.key == 'node.kubernetes.io/unschedulable' and
+                    t.effect == 'NoSchedule'):
+                continue
+            if (exclude_not_ready and
+                    t.key == 'node.kubernetes.io/unreachable' and
+                (t.effect == 'NoSchedule' or t.effect == 'NoExecute')):
+                continue
+            if exclude_effects and t.effect in exclude_effects:
+                continue
+            if exclude_keys and t.key in exclude_keys:
+                continue
+            taints.append({
+                'key': t.key,
+                'value': t.value if t.value else None,
+                'effect': t.effect
+            })
+        return taints
 
 
 @annotations.lru_cache(scope='request', maxsize=10)
@@ -3117,6 +3146,15 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
     return unlabeled_nodes
 
 
+def get_handled_taint_keys() -> List[str]:
+    """Get the taint keys that will be handled automatically by SkyPilot."""
+    keys = [TPU_RESOURCE_KEY, *SUPPORTED_GPU_RESOURCE_KEYS.values()]
+    custom_key = os.getenv('CUSTOM_GPU_RESOURCE_KEY', None)
+    if custom_key:
+        keys.append(custom_key)
+    return keys
+
+
 def get_kubernetes_node_info(
         context: Optional[str] = None) -> models.KubernetesNodesInfo:
     """Gets the resource information for all the nodes in the cluster.
@@ -3247,6 +3285,11 @@ def get_kubernetes_node_info(
 
         # Check if node is ready
         node_is_ready = node.is_ready()
+        node_taints = node.get_taints(exclude_cordon=True,
+                                      exclude_not_ready=True,
+                                      exclude_effects=['PreferNoSchedule'],
+                                      exclude_keys=get_handled_taint_keys())
+        node_is_tainted = len(node_taints) > 0
 
         if accelerator_count == 0:
             node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
@@ -3261,12 +3304,12 @@ def get_kubernetes_node_info(
                 memory_free_gb=memory_free_gb,
                 is_ready=node_is_ready,
                 is_cordoned=node.is_cordoned(),
-                taints=node.get_non_cordon_taints(),
+                taints=node_taints,
             )
             continue
 
-        if not node_is_ready or node.is_cordoned():
-            # If node is not ready or cordoned, report 0 available GPUs
+        if not node_is_ready or node.is_cordoned() or node_is_tainted:
+            # If node is not ready, cordoned, or tainted, report 0 available GPUs
             accelerators_available = 0
         elif not has_accelerator_nodes or error_on_get_allocated_resources:
             accelerators_available = -1
@@ -3293,7 +3336,7 @@ def get_kubernetes_node_info(
             memory_free_gb=memory_free_gb,
             is_ready=node_is_ready,
             is_cordoned=node.is_cordoned(),
-            taints=node.get_non_cordon_taints(),
+            taints=node_taints,
         )
     hint = ''
     if has_multi_host_tpu:

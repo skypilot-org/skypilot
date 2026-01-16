@@ -43,7 +43,7 @@ def test_get_kubernetes_node_info():
     mock_gpu_node_1.status.allocatable = {'nvidia.com/gpu': '4'}
     mock_gpu_node_1.is_ready.return_value = True
     mock_gpu_node_1.is_cordoned.return_value = False
-    mock_gpu_node_1.get_non_cordon_taints.return_value = []
+    mock_gpu_node_1.get_taints.return_value = []
 
     mock_gpu_node_2 = mock.MagicMock()
     mock_gpu_node_2.metadata.name = 'node-2'
@@ -56,7 +56,7 @@ def test_get_kubernetes_node_info():
     mock_gpu_node_2.status.allocatable = {'google.com/tpu': '8'}
     mock_gpu_node_2.is_ready.return_value = True
     mock_gpu_node_2.is_cordoned.return_value = False
-    mock_gpu_node_2.get_non_cordon_taints.return_value = []
+    mock_gpu_node_2.get_taints.return_value = []
 
     mock_pod_1 = mock.MagicMock()
     mock_pod_1.spec.node_name = 'node-1'
@@ -126,7 +126,7 @@ def test_get_kubernetes_node_info():
     mock_tpu_node_1.status.allocatable = {'google.com/tpu': '4'}
     mock_tpu_node_1.is_ready.return_value = True
     mock_tpu_node_1.is_cordoned.return_value = False
-    mock_tpu_node_1.get_non_cordon_taints.return_value = []
+    mock_tpu_node_1.get_taints.return_value = []
 
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
                    return_value=[mock_gpu_node_1, mock_tpu_node_1]), \
@@ -161,7 +161,7 @@ def test_get_kubernetes_node_info():
     ]
     mock_cpu_node_1.is_ready.return_value = True
     mock_cpu_node_1.is_cordoned.return_value = False
-    mock_cpu_node_1.get_non_cordon_taints.return_value = []
+    mock_cpu_node_1.get_taints.return_value = []
 
     mock_cpu_node_2 = mock.MagicMock()
     mock_cpu_node_2.metadata.name = 'node-5'
@@ -172,7 +172,7 @@ def test_get_kubernetes_node_info():
     ]
     mock_cpu_node_2.is_ready.return_value = True
     mock_cpu_node_2.is_cordoned.return_value = False
-    mock_cpu_node_2.get_non_cordon_taints.return_value = []
+    mock_cpu_node_2.get_taints.return_value = []
 
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
                    return_value=[mock_cpu_node_1, mock_cpu_node_2]), \
@@ -237,7 +237,7 @@ def test_get_kubernetes_node_info():
     ]
     mock_cordoned_node.is_ready.return_value = True
     mock_cordoned_node.is_cordoned.return_value = True
-    mock_cordoned_node.get_non_cordon_taints.return_value = []
+    mock_cordoned_node.get_taints.return_value = []
 
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
                    return_value=[mock_cordoned_node]), \
@@ -271,7 +271,7 @@ def test_get_kubernetes_node_info():
     ]
     mock_tainted_node.is_ready.return_value = True
     mock_tainted_node.is_cordoned.return_value = False
-    mock_tainted_node.get_non_cordon_taints.return_value = [{
+    mock_tainted_node.get_taints.return_value = [{
         'key': 'dedicated',
         'value': 'gpu',
         'effect': 'NoSchedule'
@@ -325,7 +325,7 @@ def test_get_kubernetes_node_info():
     ]
     mock_cordoned_and_tainted.is_ready.return_value = True
     mock_cordoned_and_tainted.is_cordoned.return_value = True
-    mock_cordoned_and_tainted.get_non_cordon_taints.return_value = [{
+    mock_cordoned_and_tainted.get_taints.return_value = [{
         'key': 'maintenance',
         'value': 'true',
         'effect': 'NoSchedule'
@@ -370,7 +370,7 @@ def test_get_kubernetes_node_info():
     ]
     mock_cpu_cordoned.is_ready.return_value = True
     mock_cpu_cordoned.is_cordoned.return_value = True
-    mock_cpu_cordoned.get_non_cordon_taints.return_value = []
+    mock_cpu_cordoned.get_taints.return_value = []
 
     with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
                    return_value=[mock_cpu_cordoned]), \
@@ -702,14 +702,14 @@ def test_heterogenous_gpu_detection():
     mock_node1.status.allocatable = {'nvidia.com/gpu': '2'}
     mock_node1.is_ready.return_value = True
     mock_node1.is_cordoned.return_value = False
-    mock_node1.get_non_cordon_taints.return_value = []
+    mock_node1.get_taints.return_value = []
 
     mock_node2 = mock.MagicMock()
     mock_node2.metadata.name = 'node2'
     mock_node2.metadata.labels = {'cloud.google.com/gke-accelerator': ''}
     mock_node2.is_ready.return_value = True
     mock_node2.is_cordoned.return_value = False
-    mock_node2.get_non_cordon_taints.return_value = []
+    mock_node2.get_taints.return_value = []
 
     mock_container1 = mock.MagicMock()
     mock_container1.resources.requests = 0
@@ -759,7 +759,7 @@ def test_low_priority_pod_filtering():
     ]
     mock_node.is_ready.return_value = True
     mock_node.is_cordoned.return_value = False
-    mock_node.get_non_cordon_taints.return_value = []
+    mock_node.get_taints.return_value = []
 
     # Mock regular pod requesting 2 GPUs
     mock_regular_pod = mock.MagicMock()
@@ -2681,3 +2681,247 @@ class TestCheckInstanceFits:
             assert fits is False
             assert reason is not None
             assert 'Requested TPU type was not found' in reason
+
+
+class TestV1Node(unittest.TestCase):
+    """Tests for V1Node dataclass and its methods."""
+
+    def _create_v1node(self,
+                       name: str = 'test-node',
+                       labels: Optional[dict] = None,
+                       conditions: Optional[list] = None,
+                       unschedulable: bool = False,
+                       taints: Optional[list] = None) -> utils.V1Node:
+        """Helper to create a V1Node for testing."""
+        if labels is None:
+            labels = {}
+        if conditions is None:
+            conditions = []
+        if taints is None:
+            taints = []
+
+        return utils.V1Node(metadata=utils.V1ObjectMeta(name=name,
+                                                        labels=labels),
+                            status=utils.V1NodeStatus(
+                                allocatable={
+                                    'cpu': '4',
+                                    'memory': '16Gi'
+                                },
+                                capacity={
+                                    'cpu': '4',
+                                    'memory': '16Gi'
+                                },
+                                addresses=[
+                                    utils.V1NodeAddress(type='InternalIP',
+                                                        address='10.0.0.1')
+                                ],
+                                conditions=[
+                                    utils.V1NodeCondition(type=c['type'],
+                                                          status=c['status'])
+                                    for c in conditions
+                                ]),
+                            spec=utils.V1NodeSpec(unschedulable=unschedulable,
+                                                  taints=[
+                                                      utils.V1Taint(
+                                                          key=t['key'],
+                                                          effect=t['effect'],
+                                                          value=t.get('value'))
+                                                      for t in taints
+                                                  ]))
+
+    def test_is_ready_true(self):
+        """Test is_ready returns True when node has Ready condition with status True."""
+        node = self._create_v1node(conditions=[{
+            'type': 'Ready',
+            'status': 'True'
+        }])
+        assert node.is_ready() is True
+
+    def test_is_ready_false(self):
+        """Test is_ready returns False when node has Ready condition with status False."""
+        node = self._create_v1node(conditions=[{
+            'type': 'Ready',
+            'status': 'False'
+        }])
+        assert node.is_ready() is False
+
+    def test_is_ready_no_condition(self):
+        """Test is_ready returns False when node has no Ready condition."""
+        node = self._create_v1node(conditions=[{
+            'type': 'DiskPressure',
+            'status': 'False'
+        }])
+        assert node.is_ready() is False
+
+    def test_is_ready_unknown_status(self):
+        """Test is_ready returns False when Ready condition has Unknown status."""
+        node = self._create_v1node(conditions=[{
+            'type': 'Ready',
+            'status': 'Unknown'
+        }])
+        assert node.is_ready() is False
+
+    def test_is_cordoned_true(self):
+        """Test is_cordoned returns True when unschedulable is True."""
+        node = self._create_v1node(unschedulable=True)
+        assert node.is_cordoned() is True
+
+    def test_is_cordoned_false(self):
+        """Test is_cordoned returns False when unschedulable is False."""
+        node = self._create_v1node(unschedulable=False)
+        assert node.is_cordoned() is False
+
+    def test_get_taints_all(self):
+        """Test get_taints returns all taints by default."""
+        node = self._create_v1node(taints=[
+            {
+                'key': 'nvidia.com/gpu',
+                'effect': 'NoSchedule',
+                'value': 'true'
+            },
+            {
+                'key': 'dedicated',
+                'effect': 'NoExecute',
+                'value': 'gpu'
+            },
+        ])
+        taints = node.get_taints()
+        assert len(taints) == 2
+        assert taints[0]['key'] == 'nvidia.com/gpu'
+        assert taints[1]['key'] == 'dedicated'
+
+    def test_get_taints_exclude_cordon(self):
+        """Test get_taints excludes cordon taint when exclude_cordon=True."""
+        node = self._create_v1node(taints=[
+            {
+                'key': 'node.kubernetes.io/unschedulable',
+                'effect': 'NoSchedule'
+            },
+            {
+                'key': 'dedicated',
+                'effect': 'NoSchedule',
+                'value': 'gpu'
+            },
+        ])
+        taints = node.get_taints(exclude_cordon=True)
+        assert len(taints) == 1
+        assert taints[0]['key'] == 'dedicated'
+
+    def test_get_taints_exclude_not_ready_noschedule(self):
+        """Test get_taints excludes not ready taint with NoSchedule effect."""
+        node = self._create_v1node(taints=[
+            {
+                'key': 'node.kubernetes.io/unreachable',
+                'effect': 'NoSchedule'
+            },
+            {
+                'key': 'dedicated',
+                'effect': 'NoSchedule',
+                'value': 'gpu'
+            },
+        ])
+        taints = node.get_taints(exclude_not_ready=True)
+        assert len(taints) == 1
+        assert taints[0]['key'] == 'dedicated'
+
+    def test_get_taints_exclude_not_ready_noexecute(self):
+        """Test get_taints excludes not ready taint with NoExecute effect."""
+        node = self._create_v1node(taints=[
+            {
+                'key': 'node.kubernetes.io/unreachable',
+                'effect': 'NoExecute'
+            },
+            {
+                'key': 'dedicated',
+                'effect': 'NoSchedule',
+                'value': 'gpu'
+            },
+        ])
+        taints = node.get_taints(exclude_not_ready=True)
+        assert len(taints) == 1
+        assert taints[0]['key'] == 'dedicated'
+
+    def test_get_taints_exclude_not_ready_keeps_other_effects(self):
+        """Test get_taints keeps unreachable taint with other effects."""
+        node = self._create_v1node(taints=[
+            {
+                'key': 'node.kubernetes.io/unreachable',
+                'effect': 'PreferNoSchedule'
+            },
+            {
+                'key': 'dedicated',
+                'effect': 'NoSchedule',
+                'value': 'gpu'
+            },
+        ])
+        taints = node.get_taints(exclude_not_ready=True)
+        assert len(taints) == 2
+        keys = [t['key'] for t in taints]
+        assert 'node.kubernetes.io/unreachable' in keys
+
+    def test_get_taints_exclude_effects(self):
+        """Test get_taints excludes taints with specified effects."""
+        node = self._create_v1node(taints=[
+            {
+                'key': 'nvidia.com/gpu',
+                'effect': 'NoSchedule'
+            },
+            {
+                'key': 'dedicated',
+                'effect': 'PreferNoSchedule'
+            },
+            {
+                'key': 'critical',
+                'effect': 'NoExecute'
+            },
+        ])
+        taints = node.get_taints(exclude_effects=['PreferNoSchedule'])
+        assert len(taints) == 2
+        effects = [t['effect'] for t in taints]
+        assert 'PreferNoSchedule' not in effects
+
+    def test_get_taints_exclude_keys(self):
+        """Test get_taints excludes taints with specified keys."""
+        node = self._create_v1node(taints=[
+            {
+                'key': 'nvidia.com/gpu',
+                'effect': 'NoSchedule'
+            },
+            {
+                'key': 'dedicated',
+                'effect': 'NoSchedule'
+            },
+        ])
+        taints = node.get_taints(exclude_keys=['nvidia.com/gpu'])
+        assert len(taints) == 1
+        assert taints[0]['key'] == 'dedicated'
+
+    def test_get_taints_empty(self):
+        """Test get_taints returns empty list when node has no taints."""
+        node = self._create_v1node(taints=[])
+        taints = node.get_taints()
+        assert len(taints) == 0
+
+
+class TestGetHandledTaintKeys(unittest.TestCase):
+    """Tests for get_handled_taint_keys function."""
+
+    def test_default_keys(self):
+        """Test that default keys include TPU and GPU resource keys."""
+        with mock.patch.dict(os.environ, {}, clear=True):
+            # Remove CUSTOM_GPU_RESOURCE_KEY if it exists
+            if 'CUSTOM_GPU_RESOURCE_KEY' in os.environ:
+                del os.environ['CUSTOM_GPU_RESOURCE_KEY']
+            keys = utils.get_handled_taint_keys()
+            assert utils.TPU_RESOURCE_KEY in keys
+            assert 'nvidia.com/gpu' in keys
+            assert 'amd.com/gpu' in keys
+
+    def test_custom_key_included(self):
+        """Test that custom GPU resource key is included when env var is set."""
+        with mock.patch.dict(os.environ,
+                             {'CUSTOM_GPU_RESOURCE_KEY': 'custom.io/gpu'}):
+            keys = utils.get_handled_taint_keys()
+            assert 'custom.io/gpu' in keys
+            assert utils.TPU_RESOURCE_KEY in keys
+            assert 'nvidia.com/gpu' in keys
