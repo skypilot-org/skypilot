@@ -34,34 +34,35 @@ export async function applyEnhancements(data, dataSource, context = {}) {
 
   // Execute enhancements sequentially (each receives data from previous)
   for (const enhancement of enhancements) {
+    const dataBeforeEnhancement = enhancedData;
     try {
-      enhancedData = await enhancement.enhance(
-        enhancedData,
+      const result = await enhancement.enhance(
+        dataBeforeEnhancement,
         enhancementContext
       );
 
       // Validate that enhancement returned an array
-      if (!Array.isArray(enhancedData)) {
+      if (!Array.isArray(result)) {
         console.error(
-          `[Plugin] Data enhancement ${enhancement.id} did not return an array`
+          `[Plugin] Data enhancement ${enhancement.id} did not return an array. Skipping.`
         );
-        enhancedData = data; // Fallback to previous data
         continue;
       }
 
       // Validate that array length matches (enhancements should not add/remove items)
-      if (enhancedData.length !== data.length) {
+      if (result.length !== dataBeforeEnhancement.length) {
         console.warn(
-          `[Plugin] Data enhancement ${enhancement.id} changed array length from ${data.length} to ${enhancedData.length}. This is not recommended.`
+          `[Plugin] Data enhancement ${enhancement.id} changed array length from ${dataBeforeEnhancement.length} to ${result.length}. This is not recommended.`
         );
       }
+      enhancedData = result;
     } catch (error) {
       console.error(
         `[Plugin] Data enhancement ${enhancement.id} failed:`,
         error
       );
-      // Continue with previous data if enhancement fails
-      // Don't break the chain - other enhancements should still run
+      // On error, enhancedData is not updated, so it remains as it was before this failed enhancement.
+      // This correctly skips the failed enhancement and continues the chain.
     }
   }
 

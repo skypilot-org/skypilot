@@ -659,5 +659,5 @@ export function useTableColumns(tableName, context = {}) {
       }
       return true;
     });
-  }, [tableName, tableColumns, context]);
+  }, [tableName, tableColumns, JSON.stringify(context)]);
 }

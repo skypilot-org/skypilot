@@ -1369,7 +1369,9 @@ export function ManagedJobsTable({
           <Table className="min-w-full">
             <TableHeader>
               <TableRow>
-                {visibleColumns.map((col) => col.renderHeader())}
+                {visibleColumns.map((col) =>
+                  React.cloneElement(col.renderHeader(), { key: col.id })
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1390,7 +1392,11 @@ export function ManagedJobsTable({
                   {paginatedData.map((item) => (
                     <React.Fragment key={item.task_job_id}>
                       <TableRow>
-                        {visibleColumns.map((col) => col.renderCell(item))}
+                        {visibleColumns.map((col) =>
+                          React.cloneElement(col.renderCell(item), {
+                            key: col.id,
+                          })
+                        )}
                       </TableRow>
                       {expandedRowId === item.id && (
                         <ExpandedDetailsRow
@@ -1894,7 +1900,7 @@ export function ClusterJobs({
                   {expandedRowId === item.id && (
                     <ExpandedDetailsRow
                       text={item.job || 'Unnamed job'}
-                      colSpan={9}
+                      colSpan={8}
                       innerRef={expandedRowRef}
                     />
                   )}

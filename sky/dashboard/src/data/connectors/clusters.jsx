@@ -204,8 +204,6 @@ export async function getClusterHistory(clusterHash = null, days = 30) {
       dashboardCache,
       rawData: history, // Raw backend response for field extraction
     });
-
-    console.log('Processed cluster history data:', enhancedHistory); // Debug log
     return enhancedHistory;
   } catch (error) {
     console.error('Error fetching cluster history:', error);
