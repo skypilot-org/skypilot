@@ -3667,8 +3667,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     runner.rsync(source=setup_sh_path,
                                  target=target_dir,
                                  up=True,
-                                 stream_logs=False,
-                                 stage=CommandStage.EXEC)
+                                 stream_logs=False)
 
             # Always dump the full setup script to the persistent path first
             # In high availability mode, we need to dump the full setup script
