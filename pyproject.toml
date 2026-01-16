@@ -102,8 +102,7 @@ ignore = [
 "llm/**" = ["T20"]
 
 [tool.ruff.lint.isort]
-# Match isort's Google profile:
-# https://pycqa.github.io/isort/docs/configuration/profiles.html
+# Match isort's Google profile behavior
 force-single-line = true
 single-line-exclusions = ["typing"]
 force-sort-within-sections = true
