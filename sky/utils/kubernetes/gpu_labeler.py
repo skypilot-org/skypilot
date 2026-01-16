@@ -27,12 +27,13 @@ def cleanup(context: Optional[str] = None) -> Tuple[bool, str]:
     invoked if --cleanup is passed to the script.
     """
     # Delete any existing GPU labeler Kubernetes resources:
-    del_command = ('kubectl delete pods,services,deployments,jobs,daemonsets,'
-                   'replicasets,configmaps,secrets,pv,pvc,clusterrole,'
-                   'serviceaccount,clusterrolebinding -n kube-system '
-                   '-l job=sky-gpu-labeler')
+    del_command = 'kubectl '
     if context:
-        del_command += f' --context {context}'
+        del_command += f'--context {context} '
+    del_command += ('delete pods,services,deployments,jobs,daemonsets,'
+                    'replicasets,configmaps,secrets,pv,pvc,clusterrole,'
+                    'serviceaccount,clusterrolebinding -n kube-system '
+                    '-l job=sky-gpu-labeler')
     success = False
     reason = ''
     with rich_utils.client_status('Cleaning up existing GPU labeling '
@@ -89,9 +90,10 @@ def label(context: Optional[str] = None, wait_for_completion: bool = True):
             manifest_content = template.render(
                 canonical_gpu_names=kubernetes_constants.CANONICAL_GPU_NAMES)
             # Apply via stdin to use the rendered content
-            apply_command = ['kubectl', 'apply', '-f', '-']
+            apply_command = ['kubectl']
             if context:
                 apply_command += ['--context', context]
+            apply_command += ['apply', '-f', '-']
             subprocess.run(apply_command,
                            input=manifest_content.encode(),
                            check=True,
