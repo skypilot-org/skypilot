@@ -785,7 +785,8 @@ def add_or_update_cluster(cluster_name: str,
         if existing_cluster_hash is not None:
             count = session.query(cluster_table).filter_by(
                 name=cluster_name, cluster_hash=existing_cluster_hash).update({
-                    **conditional_values, cluster_table.c.handle: handle,
+                    **conditional_values,
+                    cluster_table.c.handle: handle,
                     cluster_table.c.status: status.value,
                     cluster_table.c.status_updated_at: status_updated_at,
                     cluster_table.c.cloud: cloud,
