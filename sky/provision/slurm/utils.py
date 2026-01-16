@@ -701,7 +701,7 @@ def srun_sshd_command(
     job_id: str,
     target_node: str,
     unix_user: str,
-    cluster_name_on_cloud: str,  # pylint: disable=unused-argument
+    cluster_name_on_cloud: str,
     is_container_image: bool,
 ) -> str:
     """Build srun command for launching sshd -i inside a Slurm job.
@@ -728,13 +728,17 @@ def srun_sshd_command(
         # See slurm-ray.yml.j2 for why we use Dropbear instead of OpenSSH.
         # Dropbear's -i (inetd) mode expects a socket fd on stdin, but srun
         # provides pipes. socat bridges stdin/stdout to a TCP socket.
-        ssh_bootstrap_cmd = ('PORT=$((30000 + RANDOM % 30000)); '
-                             'DROPBEAR=$(command -v /usr/local/bin/dropbear); '
-                             '$DROPBEAR -F -E -s -R -p 127.0.0.1:$PORT & '
-                             'DROPBEAR_PID=$!; '
-                             'trap "kill $DROPBEAR_PID 2>/dev/null" EXIT; '
-                             'sleep 0.1; '
-                             'socat STDIO TCP:127.0.0.1:$PORT')
+        ssh_bootstrap_cmd = (
+            'PORT=$((30000 + RANDOM % 30000)); '
+            'DROPBEAR=$(command -v /usr/local/bin/dropbear); '
+            'if [ -z "$DROPBEAR" ]; then '
+            'echo "dropbear not found" >&2; exit 1; fi; '
+            '"$DROPBEAR" -F -s -R -p "127.0.0.1:$PORT" & '
+            'DROPBEAR_PID=$!; '
+            'trap "kill $DROPBEAR_PID 2>/dev/null" EXIT; '
+            'for i in $(seq 1 50); do '
+            'ss -tln | grep -q ":$PORT" && break; sleep 0.1; done; '
+            'socat STDIO TCP:127.0.0.1:$PORT')
         return shlex.join([
             'srun',
             '--overlap',
