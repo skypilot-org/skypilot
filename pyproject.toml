@@ -103,6 +103,8 @@ ignore = [
 
 [tool.ruff.lint.isort]
 # Match isort's Google profile behavior
+# NOTE: Ruff doesn't support group_by_package yet, so import ordering may
+# differ slightly from isort. See: https://github.com/astral-sh/ruff/issues/13389
 force-single-line = true
 single-line-exclusions = ["typing"]
 force-sort-within-sections = true
