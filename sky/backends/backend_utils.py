@@ -3857,8 +3857,9 @@ def get_endpoints(cluster: str,
                 f'Cluster {cluster!r} not found.', cluster_status=None)
     assert len(cluster_records) == 1, cluster_records
     cluster_record = cluster_records[0]
-    if (not skip_status_check and
-            cluster_record['status'] != status_lib.ClusterStatus.UP):
+    if (not skip_status_check and cluster_record['status']
+            not in (status_lib.ClusterStatus.UP,
+                    status_lib.ClusterStatus.AUTOSTOPPING)):
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
                 f'Cluster {cluster_record["name"]!r} '
