@@ -1342,7 +1342,7 @@ def autostop(
         None
 
     Request Raises:
-        sky.exceptions.ArgumentValidationError: if arguments are invalid.
+        ValueError: if arguments are invalid.
         sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
@@ -1353,8 +1353,7 @@ def autostop(
             user identity.
     """
     if hook_timeout is not None and hook is None:
-        raise exceptions.ArgumentValidationError(
-            'hook_timeout can only be set if hook is set.')
+        raise ValueError('hook_timeout can only be set if hook is set.')
 
     remote_api_version = versions.get_remote_api_version()
     if wait_for is not None and (remote_api_version is None or
