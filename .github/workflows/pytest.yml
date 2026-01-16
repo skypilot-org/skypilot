@@ -175,3 +175,61 @@ jobs:
           export GITHUB_REF="${{ steps.set_env.outputs.branch }}"
           export TEST_ANALYTICS_COMMIT_MESSAGE="${{ steps.set_env.outputs.message }}"
           SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal ${{ matrix.test-path }}
+
+  aws-integration-test:
+    # AWS moto-based integration tests - tests AWS functionality without real credentials
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10"]
+        test-path:
+          - tests/integration_tests/aws
+        include:
+          - test-path: tests/integration_tests/aws
+            test-name: "AWS Moto Integration Tests"
+    name: "Python Tests - ${{ matrix.test-name }}"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          uv venv --seed ~/test-env
+          source ~/test-env/bin/activate
+          uv pip install --prerelease=allow "azure-cli>=2.65.0"
+          uv pip install -e ".[all]"
+          uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 moto==5.1.2 buildkite-test-collector
+      - name: Set branch name and commit message
+        id: set_env
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+            {
+              echo "message<<EOF"
+              echo "${{ github.event.pull_request.title }}"
+              echo "EOF"
+            } >> $GITHUB_OUTPUT
+          else
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            {
+              echo "message<<EOF"
+              if [ "${{ github.event_name }}" == "merge_group" ]; then
+                echo "${{ github.event.merge_group.head_commit.message }}"
+              else
+                echo "${{ github.event.head_commit.message }}"
+              fi
+              echo "EOF"
+            } >> $GITHUB_OUTPUT
+          fi
+      - name: Run tests with pytest
+        env:
+          BUILDKITE_ANALYTICS_TOKEN: ${{ secrets.BUILDKITE_ANALYTICS_TOKEN }}
+        run: |
+          source ~/test-env/bin/activate
+          export GITHUB_REF="${{ steps.set_env.outputs.branch }}"
+          export TEST_ANALYTICS_COMMIT_MESSAGE="${{ steps.set_env.outputs.message }}"
+          SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 4 --dist worksteal ${{ matrix.test-path }}
