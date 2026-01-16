@@ -151,7 +151,9 @@ def iam():
 
 
 def billing():
-    from nebius.api.nebius.billing import v1alpha1 as billing_v1alpha1  # noqa: PLC0415
+    from nebius.api.nebius.billing import (
+        v1alpha1 as billing_v1alpha1,  # noqa: PLC0415
+    )
     return billing_v1alpha1
 
 

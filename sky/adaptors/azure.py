@@ -477,5 +477,7 @@ def create_security_rule(**kwargs):
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def deployment_mode():
     """Azure deployment mode."""
-    from azure.mgmt.resource.resources.models import DeploymentMode  # noqa: PLC0415
+    from azure.mgmt.resource.resources.models import (
+        DeploymentMode,  # noqa: PLC0415
+    )
     return DeploymentMode

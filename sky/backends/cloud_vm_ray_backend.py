@@ -4858,7 +4858,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if (isinstance(cloud, clouds.IBM) and terminate and
                 prev_cluster_status == status_lib.ClusterStatus.STOPPED):
             from sky.adaptors import ibm  # noqa: PLC0415
-            from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider  # noqa: PLC0415
+            from sky.skylet.providers.ibm.vpc_provider import (
+                IBMVPCProvider,  # noqa: PLC0415
+            )
 
             config_provider = global_user_state.get_cluster_yaml_dict(
                 handle.cluster_yaml)['provider']

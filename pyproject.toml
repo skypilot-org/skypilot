@@ -81,6 +81,10 @@ ignore = [
     "Q003",
 ]
 
+[tool.ruff.lint.pycodestyle]
+# Ignore long lines in TODO/FIXME comments (matches pylint behavior)
+ignore-overlong-task-comments = true
+
 # Per-file ignores for specific patterns
 [tool.ruff.lint.per-file-ignores]
 # Allow unused imports and late imports in __init__.py files

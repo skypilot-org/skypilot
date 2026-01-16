@@ -96,7 +96,9 @@ def gcp_auth_refresh_error_exception():
 def get_credentials(cred_type: str, credentials_field: str):
     """Get GCP credentials."""
     from google.oauth2 import service_account  # noqa: PLC0415
-    from google.oauth2.credentials import Credentials as OAuthCredentials  # noqa: PLC0415
+    from google.oauth2.credentials import (
+        Credentials as OAuthCredentials,  # noqa: PLC0415
+    )
 
     if cred_type == 'service_account':
         # If parsing the gcp_credentials failed, then the user likely made a

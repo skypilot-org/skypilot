@@ -87,7 +87,9 @@ def patch() -> None:
     from ray.autoscaler._private import command_runner  # noqa: PLC0415
     _run_patch(command_runner.__file__, _to_absolute('command_runner.py.patch'))
 
-    from ray.autoscaler._private import resource_demand_scheduler  # noqa: PLC0415
+    from ray.autoscaler._private import (
+        resource_demand_scheduler,  # noqa: PLC0415
+    )
     _run_patch(resource_demand_scheduler.__file__,
                _to_absolute('resource_demand_scheduler.py.patch'))
 
