@@ -216,7 +216,7 @@ def _retry_on_server_unavailable(max_wait_seconds: int = 600,
                                 _readable_error_msg(e.message)):
                             if time.time() - start_time > max_wait_seconds:
 
-                                raise exceptions.ServerTemporarilyUnavailableError(
+                                raise exceptions.ServerTemporarilyUnavailableError(  # noqa: E501
                                     'Timeout waiting for the API server to be '
                                     f'available after {max_wait_seconds}s.') \
                                     from e

@@ -589,7 +589,7 @@ class QueryHelper:
                 )
 
 
-        list_nsg_rules_resp = net_client.list_network_security_group_security_rules(
+        list_nsg_rules_resp = net_client.list_network_security_group_security_rules(  # noqa: E501
             network_security_group_id=nsg_id,
             direction='INGRESS',
             sort_by='TIMECREATED',

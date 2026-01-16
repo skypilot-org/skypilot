@@ -341,7 +341,7 @@ def up(
 
                 if controller_handle.is_grpc_enabled_with_flag:
                     try:
-                        lb_port = serve_rpc_utils.RpcRunner.wait_service_registration(
+                        lb_port = serve_rpc_utils.RpcRunner.wait_service_registration(  # noqa: E501
                             controller_handle, service_name, controller_job_id,
                             pool)
                     except exceptions.SkyletMethodNotImplementedError:

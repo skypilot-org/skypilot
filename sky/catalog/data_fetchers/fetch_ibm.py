@@ -126,7 +126,7 @@ def create_catalog(region_profile: Dict[str, Tuple[List, List]],
                 if 'gpu_manufacturer' in profile:
                     gpu_manufacturer = profile['gpu_manufacturer']['values'][0]
                 # TODO: How to fetch prices?
-                #       The pricing API doesn't return prices for instance.profile.
+                #       The pricing API doesn't return prices for instance.profile.  # noqa: E501
                 #       https://cloud.ibm.com/docs/account?topic=account-getting-pricing-api
                 #       https://globalcatalog.cloud.ibm.com/api/v1?q=kind:instance.profile
                 #       https://globalcatalog.cloud.ibm.com/api/v1/gx2-16x128x1v100/plan

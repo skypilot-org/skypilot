@@ -78,8 +78,8 @@ def with_oci_env(f):
     def wrapper(*args, **kwargs):
 
         enter_env_cmds = [
-            'conda info --envs | grep "sky-oci-cli-env" || conda create -n sky-oci-cli-env python=3.10 -y',
-            '. $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true',
+            'conda info --envs | grep "sky-oci-cli-env" || conda create -n sky-oci-cli-env python=3.10 -y',  # noqa: E501
+            '. $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true',  # noqa: E501
             'conda activate sky-oci-cli-env', 'pip install oci-cli',
             'export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True'
         ]

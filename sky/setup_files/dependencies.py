@@ -234,7 +234,7 @@ cloud_dependencies: Dict[str, List[str]] = {
         # https://peps.python.org/pep-0440/#direct-references
         # We have the instruction for its installation in our
         # docs instead.
-        # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
+        # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long  # noqa: E501
     ],
     'nebius': [
         # Nebius requires grpcio and protobuf, so we need to include

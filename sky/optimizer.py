@@ -1024,7 +1024,7 @@ class Optimizer:
                             best_resources, simplified_only=True)[0]
 
                         logger.info(
-                            f'{colorama.Style.DIM}🔍 Multiple {cloud} instances '
+                            f'{colorama.Style.DIM}🔍 Multiple {cloud} instances '  # noqa: E501
                             f'satisfy {acc_name}:{int(acc_count)}. '
                             f'The cheapest {candidate_str} is considered '
                             f'among: {", ".join(instance_list)}.'
@@ -1425,4 +1425,4 @@ def _fill_in_launchable_resources(
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)
-    return launchable, cloud_candidates, sorted(all_fuzzy_candidates), resource_hints
+    return launchable, cloud_candidates, sorted(all_fuzzy_candidates), resource_hints  # noqa: E501

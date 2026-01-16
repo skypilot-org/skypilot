@@ -11,7 +11,7 @@ KUBERNETES_IN_CLUSTER_NAMESPACE_ENV_VAR = 'SKYPILOT_IN_CLUSTER_NAMESPACE'
 SKY_K8S_EXEC_AUTH_WRAPPER = 'sky-kube-exec-wrapper'
 
 # PATH envvar for kubectl exec auth execve
-SKY_K8S_EXEC_AUTH_PATH = '$HOME/skypilot-runtime/bin:$HOME/google-cloud-sdk/bin:$PATH'
+SKY_K8S_EXEC_AUTH_PATH = '$HOME/skypilot-runtime/bin:$HOME/google-cloud-sdk/bin:$PATH'  # noqa: E501
 
 # cache directory for kubeconfig with modified exec auth
 SKY_K8S_EXEC_AUTH_KUBECONFIG_CACHE = '~/.sky/generated/kubeconfigs'

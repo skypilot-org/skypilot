@@ -294,7 +294,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             run_env='host')
 
         # Change the default port of sshd from 22 to DEFAULT_DOCKER_PORT.
-        # Append the host VM's authorized_keys to the container's authorized_keys.
+        # Append the host VM's authorized_keys to the container's authorized_keys.  # noqa: E501
         # This allows any machine that can ssh into the host VM to ssh into the
         # container.
         # Last command here is to eliminate the error

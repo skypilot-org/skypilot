@@ -1708,7 +1708,7 @@ class Task:
                 return self._to_yaml_config(redact_secrets=True)
             config = yaml_utils.safe_load(self._user_specified_yaml)
             if config.get('secrets') is not None:
-                config['secrets'] = dict.fromkeys(config['secrets'], '<redacted>')
+                config['secrets'] = dict.fromkeys(config['secrets'], '<redacted>')  # noqa: E501
             return config
         return self._to_yaml_config()
 

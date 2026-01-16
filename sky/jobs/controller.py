@@ -199,7 +199,7 @@ class JobController:
 
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
-        #   Example value: sky-2022-10-04-22-46-52-467694_my-spot-name_spot_id-17-0
+        #   Example value: sky-2022-10-04-22-46-52-467694_my-spot-name_spot_id-17-0  # noqa: E501
         job_id_env_vars = []
         for i, task in enumerate(self._dag.tasks):
             if len(self._dag.tasks) <= 1:

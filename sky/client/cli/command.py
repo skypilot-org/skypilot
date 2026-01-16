@@ -4406,7 +4406,7 @@ def show_gpus(
         if not list_accelerators_result:
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
-            cloud_str = f' on {cloud_obj}.' if cloud_name else ' in cloud catalogs.'
+            cloud_str = f' on {cloud_obj}.' if cloud_name else ' in cloud catalogs.'  # noqa: E501
             yield f'Resources \'{name}\'{quantity_str} not found{cloud_str} '
             yield 'To show available accelerators, run: sky show-gpus --all'
             return

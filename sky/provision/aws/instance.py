@@ -263,7 +263,7 @@ def _create_instances(
                 for i in range(1, max_efa_interfaces):
                     interface_type = 'efa-only'
                     # Special handling for P5 instances
-                    # Refer to https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-acc-inst-types.html#efa-for-p5 for more details.
+                    # Refer to https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-acc-inst-types.html#efa-for-p5 for more details.  # noqa: E501
                     if (instance_type == 'p5.48xlarge' or
                             instance_type == 'p5e.48xlarge'):
                         interface_type = 'efa' if i % 4 == 0 else 'efa-only'

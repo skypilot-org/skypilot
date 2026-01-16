@@ -17,7 +17,7 @@ VMS_CSV = 'cudo/vms.csv'
 def get_gpu_info(count, model):
     mem = utils.cudo_gpu_mem[model]
 
-    # {'Name': 'A4000', 'Manufacturer': 'NVIDIA', 'Count': 1.0, 'MemoryInfo': {'SizeInMiB': 16384}}], 'TotalGpuMemoryInMiB': 16384}"
+    # {'Name': 'A4000', 'Manufacturer': 'NVIDIA', 'Count': 1.0, 'MemoryInfo': {'SizeInMiB': 16384}}], 'TotalGpuMemoryInMiB': 16384}"  # noqa: E501
     info = {
         'Gpus': [{
             'Name': model,

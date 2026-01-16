@@ -33,7 +33,7 @@ def bootstrap_instances(
     if vcn is None:
 
         raise exceptions.ResourcesUnavailableError(
-            'Failed to create a new VCN, possibly you hit the resource limitation.'
+            'Failed to create a new VCN, possibly you hit the resource limitation.'  # noqa: E501
         )
 
     node_config = config.node_config
