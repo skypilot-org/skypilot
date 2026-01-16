@@ -38,13 +38,13 @@ line-length = 80
 target-version = "py38"
 
 # Exclude paths matching pylint config and format.sh:
-# - .pylintrc: ignore=third_party,ray_patches,providers (base names)
+# - .pylintrc: ignore=third_party,ray_patches,providers (base names match anywhere)
 # - format.sh: --ignore-paths 'sky/schemas/generated|sky/skylet/providers/ibm'
 extend-exclude = [
     "build/**",
-    "third_party/**",
-    "ray_patches/**",
-    "providers/**",
+    "**/third_party/**",
+    "**/ray_patches/**",
+    "**/providers/**",
     "sky/schemas/generated/**",
     "sky/skylet/providers/ibm/**",
 ]
@@ -121,6 +121,7 @@ dummy-variable-rgx = "^\\*{0,2}(_$|unused_|dummy_)"
 inline-quotes = "single"
 multiline-quotes = "double"
 docstring-quotes = "double"
+avoid-escape = false  # pylint-quotes doesn't check this
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 # Match pylint deprecated-modules setting
