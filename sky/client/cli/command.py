@@ -1821,6 +1821,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     # Do not show job queue if user specifies clusters, and if user
     # specifies --ip or --endpoint(s).
     show_managed_jobs = show_managed_jobs and not any([clusters, ip, endpoints])
+    show_pools = show_pools and not any([clusters, ip, endpoints])
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
