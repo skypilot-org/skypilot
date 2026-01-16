@@ -263,7 +263,7 @@ spec:
         {{- if and .Values.storage.enabled (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
         # For RollingUpdate with storage enabled, use emptyDir for ~/.sky to avoid
         # running SQLite on NFS. Only persist the clients directory for file mounts.
-        # An ephemeral volums is still required since we have to share ~/.sky between
+        # An ephemeral volume is still required since we have to share ~/.sky between
         # containers.
         - name: sky-ephemeral
           mountPath: /root/.sky
