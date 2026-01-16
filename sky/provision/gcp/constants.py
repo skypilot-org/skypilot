@@ -1,4 +1,5 @@
 """Constants used by the GCP provisioner."""
+# ruff: noqa: E501
 import textwrap
 
 VERSION = 'v1'

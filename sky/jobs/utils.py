@@ -4,6 +4,7 @@ NOTE: whenever an API change is made in this file, we need to bump the
 jobs.constants.MANAGED_JOBS_VERSION and handle the API change in the
 ManagedJobCodeGen.
 """
+# ruff: noqa: E501
 import asyncio
 import collections
 from datetime import datetime

@@ -1,4 +1,5 @@
 """Kubernetes utilities for SkyPilot."""
+# ruff: noqa: E501
 import collections
 import copy
 import dataclasses

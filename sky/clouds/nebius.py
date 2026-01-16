@@ -1,4 +1,5 @@
 """ Nebius Cloud. """
+# ruff: noqa: E501
 import json
 import os
 import typing

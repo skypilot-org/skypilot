@@ -1,4 +1,5 @@
 """Resources: compute requirements of Tasks."""
+# ruff: noqa: E501
 import collections
 import dataclasses
 import re

@@ -91,52 +91,11 @@ ignore-overlong-task-comments = true
 # Tests can have more relaxed rules
 "tests/**" = ["F401", "F403", "B", "E402"]  # unused-import, undefined-local-with-import-star, bugbear, module-import-not-at-top-of-file
 # Template file with placeholders that get string-formatted
-"sky/backends/monkey_patches/*.py" = ["F821", "ARG001", "E501"]  # undefined-name, unused-function-argument, line-too-long
+"sky/backends/monkey_patches/*.py" = ["F821", "ARG001"]  # undefined-name, unused-function-argument
 # Signal handlers must accept (signum, frame) even if unused
 "sky/server/requests/executor.py" = ["ARG001"]  # unused-function-argument
 # Provision decorators use provider_name for routing
 "sky/provision/__init__.py" = ["ARG001"]  # unused-function-argument
-# Files with many long lines (originally had cascading pylint disable=line-too-long)
-"sky/backends/task_codegen.py" = ["E501"]  # line-too-long (78 violations)
-"sky/backends/backend_utils.py" = ["E501"]  # line-too-long (59 violations)
-"sky/clouds/aws.py" = ["E501"]  # line-too-long (50 violations)
-"sky/ssh_node_pools/deploy/deploy.py" = ["E501"]  # line-too-long (38 violations)
-"sky/clouds/gcp.py" = ["E501"]  # line-too-long (38 violations)
-"sky/provision/kubernetes/utils.py" = ["E501"]  # line-too-long (24 violations)
-"sky/data/mounting_utils.py" = ["E501"]  # line-too-long (15 violations)
-"sky/skylet/job_lib.py" = ["E501"]  # line-too-long (13 violations)
-"sky/backends/cloud_vm_ray_backend.py" = ["E501"]  # line-too-long (13 violations)
-"sky/clouds/azure.py" = ["E501"]  # line-too-long (12 violations)
-"sky/provision/gcp/constants.py" = ["E501"]  # line-too-long (10 violations)
-"sky/logs/agent.py" = ["E501"]  # line-too-long (7 violations)
-"sky/clouds/lambda_cloud.py" = ["E501"]  # line-too-long (7 violations)
-"sky/utils/controller_utils.py" = ["E501"]  # line-too-long (6 violations)
-"sky/jobs/client/sdk.py" = ["E501"]  # line-too-long (6 violations)
-"sky/clouds/utils/scp_utils.py" = ["E501"]  # line-too-long (6 violations)
-"sky/adaptors/azure.py" = ["E501"]  # line-too-long (6 violations)
-"sky/skylet/constants.py" = ["E501"]  # line-too-long (5 violations)
-"sky/provision/kubernetes/instance.py" = ["E501"]  # line-too-long (5 violations)
-"sky/utils/kubernetes/kubernetes_deploy_utils.py" = ["E501"]  # line-too-long (4 violations)
-"sky/provision/gcp/instance_utils.py" = ["E501"]  # line-too-long (4 violations)
-"sky/jobs/server/core.py" = ["E501"]  # line-too-long (4 violations)
-"sky/clouds/nebius.py" = ["E501"]  # line-too-long (4 violations)
-"sky/server/requests/requests.py" = ["E501"]  # line-too-long (3 violations)
-"sky/provision/paperspace/utils.py" = ["E501"]  # line-too-long (3 violations)
-"sky/provision/oci/instance.py" = ["E501"]  # line-too-long (3 violations)
-"sky/jobs/utils.py" = ["E501"]  # line-too-long (3 violations)
-"sky/catalog/data_fetchers/fetch_aws.py" = ["E501"]  # line-too-long (3 violations)
-"sky/adaptors/cloudflare.py" = ["E501"]  # line-too-long (3 violations)
-# Files with long lines in docstrings/strings (noqa doesn't work inside strings)
-"sky/admin_policy.py" = ["E501"]  # docstring example code
-"sky/catalog/data_fetchers/fetch_runpod.py" = ["E501"]  # GraphQL query
-"sky/clouds/kubernetes.py" = ["E501"]  # regex example in docstring
-"sky/provision/slurm/instance.py" = ["E501"]  # bash script strings
-"sky/provision/vsphere/common/custom_script.py" = ["E501"]  # bash script
-"sky/resources.py" = ["E501"]  # docstring
-"sky/skylet/autostop_lib.py" = ["E501"]  # docstring
-"sky/skylet/log_lib.py" = ["E501"]  # bash script string
-"sky/utils/cluster_utils.py" = ["E501"]  # SSH config string
-"sky/utils/message_utils.py" = ["E501"]  # docstring example
 
 [tool.ruff.lint.isort]
 # Match isort's Google profile behavior

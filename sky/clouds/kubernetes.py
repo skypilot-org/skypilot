@@ -1,4 +1,5 @@
 """Kubernetes."""
+# ruff: noqa: E501
 import concurrent.futures
 import os
 import re

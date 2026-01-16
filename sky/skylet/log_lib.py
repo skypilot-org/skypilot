@@ -2,6 +2,7 @@
 
 This is a remote utility module that provides logging functionality.
 """
+# ruff: noqa: E501
 import collections
 import copy
 import functools

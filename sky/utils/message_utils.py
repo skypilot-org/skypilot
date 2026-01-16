@@ -1,4 +1,5 @@
 """Utilities for encoding and decoding messages."""
+# ruff: noqa: E501
 import json
 import re
 import typing

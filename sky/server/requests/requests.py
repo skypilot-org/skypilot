@@ -1,4 +1,5 @@
 """Utilities for REST API."""
+# ruff: noqa: E501
 import asyncio
 import atexit
 import contextlib

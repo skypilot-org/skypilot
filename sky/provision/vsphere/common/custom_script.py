@@ -1,4 +1,5 @@
 """Vsphere custom script."""
+# ruff: noqa: E501
 CUSTOMIZED_SCRIPT = """#!/bin/bash
 if [ x$1 = x"precustomization" ]; then
     sudo mkdir -p /home/user_placeholder/.ssh

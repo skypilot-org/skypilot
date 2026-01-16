@@ -1,4 +1,5 @@
 """Interface for admin-defined policy for user requests."""
+# ruff: noqa: E501
 import abc
 import dataclasses
 import typing

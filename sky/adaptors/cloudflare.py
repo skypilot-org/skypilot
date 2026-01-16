@@ -1,4 +1,5 @@
 """Cloudflare cloud adaptors"""
+# ruff: noqa: E501
 
 import contextlib
 import os

@@ -1,4 +1,5 @@
 """Helper functions for object store mounting in Sky Storage"""
+# ruff: noqa: E501
 import hashlib
 import os
 import random

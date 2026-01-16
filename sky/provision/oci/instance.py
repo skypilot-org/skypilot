@@ -5,6 +5,7 @@ History:
  - Hysun He (hysun.he@oracle.com) @ Nov.13, 2024: Implement open_ports
    and cleanup_ports for supporting SkyServe.
 """
+# ruff: noqa: E501
 
 import copy
 from datetime import datetime

@@ -1,4 +1,5 @@
 """Code generator for task execution."""
+# ruff: noqa: E501
 
 import copy
 import inspect

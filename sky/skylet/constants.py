@@ -1,4 +1,5 @@
 """Constants for SkyPilot."""
+# ruff: noqa: E501
 from typing import List, Tuple
 
 from packaging import version

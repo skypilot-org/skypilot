@@ -1,4 +1,5 @@
 """Utility functions for cluster yaml file."""
+# ruff: noqa: E501
 
 import functools
 import glob

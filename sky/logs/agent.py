@@ -1,4 +1,5 @@
 """Base class for all logging agents."""
+# ruff: noqa: E501
 import abc
 import os
 import shlex

@@ -1,4 +1,5 @@
 """SDK functions for managed jobs."""
+# ruff: noqa: E501
 import json
 import typing
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union

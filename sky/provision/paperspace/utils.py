@@ -1,4 +1,5 @@
 """Paperspace API client wrapper for SkyPilot."""
+# ruff: noqa: E501
 
 import json
 import os

@@ -1,4 +1,5 @@
 """Autostop utilities."""
+# ruff: noqa: E501
 import enum
 import pickle
 import shlex

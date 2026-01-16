@@ -1,4 +1,5 @@
 """Google Cloud Platform."""
+# ruff: noqa: E501
 import enum
 import json
 import os

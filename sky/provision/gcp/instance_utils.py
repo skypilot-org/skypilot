@@ -1,4 +1,5 @@
 """Utilities for GCP instances."""
+# ruff: noqa: E501
 import copy
 import enum
 import functools

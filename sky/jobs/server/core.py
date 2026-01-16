@@ -1,4 +1,5 @@
 """SDK functions for managed jobs."""
+# ruff: noqa: E501
 import concurrent.futures
 import copy
 import ipaddress

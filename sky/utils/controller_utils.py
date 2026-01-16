@@ -1,4 +1,5 @@
 """Util constants/functions for SkyPilot Controllers."""
+# ruff: noqa: E501
 import copy
 import dataclasses
 import enum

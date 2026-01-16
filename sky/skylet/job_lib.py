@@ -2,6 +2,7 @@
 
 This is a remote utility module that provides job queue functionality.
 """
+# ruff: noqa: E501
 import enum
 import functools
 import getpass

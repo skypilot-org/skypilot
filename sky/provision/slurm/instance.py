@@ -1,4 +1,5 @@
 """Slurm instance provisioning."""
+# ruff: noqa: E501
 
 import tempfile
 import textwrap

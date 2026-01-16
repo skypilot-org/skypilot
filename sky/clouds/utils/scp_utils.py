@@ -2,6 +2,7 @@
 
 This module contains a set of rest api functions accessing SCP Open-API.
 """
+# ruff: noqa: E501
 import base64
 from functools import wraps
 import hashlib

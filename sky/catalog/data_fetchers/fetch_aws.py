@@ -1,6 +1,7 @@
 """A script that queries AWS API to get instance types and pricing information.
 This script takes about 1 minute to finish.
 """
+# ruff: noqa: E501
 import argparse
 import collections
 import datetime

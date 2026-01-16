@@ -1,4 +1,5 @@
 """Utility functions for deploying local Kubernetes kind clusters."""
+# ruff: noqa: E501
 import os
 import random
 import shlex

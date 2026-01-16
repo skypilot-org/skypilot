@@ -10,6 +10,7 @@ If --gpu-ids is provided, only fetches details for
 the specified GPU IDs (comma-separated). Otherwise, fetches all available GPUs.
 This flag is intended for testing and debugging individual GPU configurations.
 """
+# ruff: noqa: E501
 
 import argparse
 import json

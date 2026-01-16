@@ -1,4 +1,5 @@
 """Kubernetes instance provisioning."""
+# ruff: noqa: E501
 import copy
 import datetime
 import json

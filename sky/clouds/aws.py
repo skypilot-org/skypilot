@@ -1,4 +1,5 @@
 """Amazon Web Services."""
+# ruff: noqa: E501
 import enum
 import fnmatch
 import functools
