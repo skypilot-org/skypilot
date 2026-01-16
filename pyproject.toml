@@ -89,6 +89,8 @@ ignore = [
     "B011",
     # C401: set(x for x in ...) - style preference
     "C401",
+    # C420: dict comprehension vs dict.fromkeys - comprehension more readable
+    "C420",
 ]
 
 # Per-file ignores for specific patterns
