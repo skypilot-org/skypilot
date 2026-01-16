@@ -487,28 +487,22 @@ if script or False:
         # allocation. See:
         # https://support.schedmd.com/show_bug.cgi?id=14298
         # https://github.com/huggingface/datatrove/issues/248
-        #
-        # Write the runner command to a script file to avoid
-        # "Argument list too long" errors. Use home directory
-        # (typically NFS-mounted) so the script is accessible from
-        # all nodes in the Slurm allocation.
-        runner_script_prefix = 'sky_setup_runner_' if is_setup else 'sky_task_runner_'
-        with tempfile.NamedTemporaryFile('w', prefix=runner_script_prefix, suffix='.sh', delete=False, dir=os.path.expanduser('~')) as f:
-            f.write('#!/bin/bash\n')
-            f.write('unset SKY_RUNTIME_DIR\n')
-            f.write(f'exec {constants.SKY_SLURM_PYTHON_CMD} -m sky.skylet.executor.slurm {runner_args}\n')
-            runner_script_path = f.name
+        bash_cmd = shlex.quote(' '.join([
+            'unset SKY_RUNTIME_DIR;',
+            constants.SKY_SLURM_PYTHON_CMD,
+            '-m sky.skylet.executor.slurm',
+            runner_args,
+        ]))
         srun_cmd = (
             "unset $(env | awk -F= '/^SLURM_/ {print $1}') && "
             f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid=12345 '
             f'--job-name=sky-2{job_suffix} --ntasks-per-node=1 --container-remap-root --container-name=test-cluster:exec {extra_flags} '
-            f'/bin/bash {shlex.quote(runner_script_path)}'
+            f'/bin/bash -c {bash_cmd}'
         )
 
         def cleanup():
             if script_path is not None:
                 os.remove(script_path)
-            os.remove(runner_script_path)
 
         return srun_cmd, cleanup
 

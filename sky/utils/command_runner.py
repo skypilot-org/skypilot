@@ -1857,12 +1857,16 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
         stage: CommandStage = CommandStage.DEFAULT,
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
-        result = self._run_via_srun(cmd, in_container=False, **kwargs)
-
-        if stage == CommandStage.SETUP and self.container_args:
-            returncode = result if isinstance(result, int) else result[0]
-            if returncode != 0:
-                return result
+        if stage == CommandStage.SETUP:
+            result = self._run_via_srun(cmd, in_container=False, **kwargs)
+            if self.container_args:
+                returncode = result if isinstance(result, int) else result[0]
+                if returncode != 0:
+                    return result
+                result = self._run_via_srun(cmd, in_container=True, **kwargs)
+        elif stage == CommandStage.EXEC or not self.container_args:
+            result = self._run_via_srun(cmd, in_container=False, **kwargs)
+        else:
             result = self._run_via_srun(cmd, in_container=True, **kwargs)
 
         return result

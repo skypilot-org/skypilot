@@ -205,9 +205,9 @@ def _create_virtual_instance(
             set -e
             if command -v apt-get >/dev/null 2>&1; then
                 apt-get update
-                apt-get install -y ca-certificates rsync curl 
+                apt-get install -y ca-certificates rsync curl git
             elif command -v yum >/dev/null 2>&1; then
-                yum install -y ca-certificates rsync curl
+                yum install -y ca-certificates rsync curl git
             fi
             """)
         container_marker_file = (f'{sky_home_dir}/'

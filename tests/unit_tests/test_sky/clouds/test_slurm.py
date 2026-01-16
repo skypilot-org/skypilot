@@ -495,9 +495,9 @@ echo "Initializing container {container_name} on all nodes..."
 srun --overlap --nodes=1 --ntasks-per-node=1 --container-image={container_image} --container-name={container_name}:create --container-mounts="{container_mounts}" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
 if command -v apt-get >/dev/null 2>&1; then
     apt-get update
-    apt-get install -y ca-certificates rsync curl
+    apt-get install -y ca-certificates rsync curl git
 elif command -v yum >/dev/null 2>&1; then
-    yum install -y ca-certificates rsync curl
+    yum install -y ca-certificates rsync curl git
 fi
 touch {ready_signal} && sleep infinity' &
 touch {sky_home_dir}/.sky_slurm_container
