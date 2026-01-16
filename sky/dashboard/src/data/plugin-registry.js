@@ -1,6 +1,6 @@
 /**
  * Plugin Data Provider Registry
- * 
+ *
  * This module provides a global registry for plugin data providers.
  * It's imported early in the app lifecycle so plugins can register
  * their providers before components mount.
@@ -18,9 +18,9 @@ const registrationListeners = [];
 export function registerDataProvider(id, provider) {
   console.log(`[PluginRegistry] Registering data provider: ${id}`);
   dataProviders[id] = provider;
-  
+
   // Notify listeners
-  registrationListeners.forEach(listener => {
+  registrationListeners.forEach((listener) => {
     try {
       listener(id, provider);
     } catch (e) {
@@ -70,12 +70,12 @@ if (typeof window !== 'undefined') {
     hasDataProvider,
     onProviderRegistration,
   };
-  
+
   // Also expose the specific setter for clusters (backward compatibility)
   window.__skySetClusterDataProvider = (provider) => {
     registerDataProvider('clusters', provider);
   };
-  
+
   console.log('[PluginRegistry] Initialized and exposed on window');
 }
 
