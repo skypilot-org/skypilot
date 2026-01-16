@@ -746,6 +746,9 @@ export function ContextDetails({
                       <th className="p-3 text-left font-medium text-gray-600">
                         GPU Utilization
                       </th>
+                      <th className="p-3 text-left font-medium text-gray-600">
+                        Node Status
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -787,9 +790,21 @@ export function ContextDetails({
                         }
                       }
 
-                      // Build utilization string with extra info for cordoned/tainted/not ready nodes
-                      let utilizationStr = `${node.gpu_free} of ${node.gpu_total} free`;
-                      const extraInfo = [];
+                      // Build utilization string
+                      const utilizationStr = `${node.gpu_free} of ${node.gpu_total} free`;
+
+                      // Build node status string
+                      const statusInfo = [];
+
+                      // Add not ready info
+                      if (node.is_ready === false) {
+                        statusInfo.push('NotReady');
+                      }
+
+                      // Add cordoned info
+                      if (node.is_cordoned === true) {
+                        statusInfo.push('Cordoned');
+                      }
 
                       // Add taint info grouped by effect
                       const taints = node.taints || [];
@@ -808,23 +823,15 @@ export function ContextDetails({
                             `${effect} Taint [${keys.join(', ')}]`
                         );
                         if (taintStrs.length > 0) {
-                          extraInfo.push(taintStrs.join(', '));
+                          statusInfo.push(taintStrs.join(', '));
                         }
                       }
 
-                      // Add cordoned info
-                      if (node.is_cordoned === true) {
-                        extraInfo.push('Node Cordoned');
-                      }
-
-                      // Add not ready info
-                      if (node.is_ready === false) {
-                        extraInfo.push('Node NotReady');
-                      }
-
-                      if (extraInfo.length > 0) {
-                        utilizationStr += ` (${extraInfo.join(', ')})`;
-                      }
+                      const nodeStatusStr =
+                        statusInfo.length > 0
+                          ? statusInfo.join(', ')
+                          : 'Healthy';
+                      const isNodeHealthy = statusInfo.length === 0;
 
                       return (
                         <tr
@@ -848,6 +855,15 @@ export function ContextDetails({
                           </td>
                           <td className="p-3 whitespace-nowrap text-gray-700">
                             {utilizationStr}
+                          </td>
+                          <td
+                            className={`p-3 whitespace-nowrap ${
+                              isNodeHealthy
+                                ? 'text-green-600'
+                                : 'text-orange-500'
+                            }`}
+                          >
+                            {nodeStatusStr}
                           </td>
                         </tr>
                       );

@@ -3893,7 +3893,7 @@ def show_gpus(
             context_title_str: str = 'CONTEXT') -> str:
         node_table = log_utils.create_table([
             context_title_str, 'NODE', 'vCPU', 'Memory (GB)', 'GPU',
-            'GPU UTILIZATION'
+            'GPU UTILIZATION', 'NODE STATUS'
         ])
 
         no_permissions_str = '<no permissions>'
@@ -3952,8 +3952,18 @@ def show_gpus(
                 utilization_str = (
                     f'{available} of '
                     f'{node_info.total["accelerator_count"]} free')
-                extra_info = []
-                # Add extra info if node is cordoned, tainted, or not ready
+
+                # Build node status string
+                status_info = []
+                # Check if node is ready (defaults to True for backward
+                # compatibility with older server versions)
+                node_is_ready = getattr(node_info, 'is_ready', True)
+                if not node_is_ready:
+                    status_info.append('NotReady')
+                node_is_cordoned = getattr(node_info, 'is_cordoned', False)
+                if node_is_cordoned:
+                    status_info.append('Cordoned')
+                # Add taint info grouped by effect
                 taints = getattr(node_info, 'taints', None)
                 if taints:
                     # Group taints by effect: 'NoSchedule Taint [key1, key2],
@@ -3970,20 +3980,13 @@ def show_gpus(
                         taints_strs.append(
                             f'{effect} Taint [{", ".join(keys)}]')
                     if taints_strs:
-                        extra_info.append(', '.join(taints_strs))
-                node_is_cordoned = getattr(node_info, 'is_cordoned', False)
-                if node_is_cordoned:
-                    extra_info.append('Node Cordoned')
-                # Check if node is ready (defaults to True for backward
-                # compatibility with older server versions)
-                node_is_ready = getattr(node_info, 'is_ready', True)
-                if not node_is_ready:
-                    extra_info.append('Node NotReady')
-                if extra_info:
-                    utilization_str += f' ({", ".join(extra_info)})'
+                        status_info.append(', '.join(taints_strs))
+
+                status_str = ', '.join(
+                    status_info) if status_info else 'Healthy'
                 node_table.add_row([
                     context_name, node_name, cpu_str, memory_str, acc_type,
-                    utilization_str
+                    utilization_str, status_str
                 ])
 
         k8s_per_node_acc_message = (f'{cloud_str} per-node GPU availability')
