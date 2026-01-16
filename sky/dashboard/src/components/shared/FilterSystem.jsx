@@ -28,7 +28,7 @@ export const evaluateCondition = (item, filter) => {
   if (propertyLower === 'infra') {
     const itemValue = (item.full_infra || item.infra)?.toString().toLowerCase();
     const filterValue = value.toString().toLowerCase();
-    
+
     switch (operator) {
       case '=':
         return itemValue === filterValue;

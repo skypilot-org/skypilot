@@ -32,7 +32,11 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { getClusters, getClusterHistory, useClusterData } from '@/data/connectors/clusters';
+import {
+  getClusters,
+  getClusterHistory,
+  useClusterData,
+} from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
@@ -655,7 +659,10 @@ export function ClusterTable({
       pushWithoutDuplication(optionValues.user, cluster.user);
       pushWithoutDuplication(optionValues.workspace, cluster.workspace);
       // Use full_infra for filter values so they match database values
-      pushWithoutDuplication(optionValues.infra, cluster.full_infra || cluster.infra);
+      pushWithoutDuplication(
+        optionValues.infra,
+        cluster.full_infra || cluster.infra
+      );
 
       // Extract labels - add only key:value pairs
       const labels = cluster.labels || {};
@@ -710,7 +717,24 @@ export function ClusterTable({
     // For server-side pagination, server already handles filtering - just apply sorting
     // For client-side pagination, we filter/sort the full data then paginate
     const dataToProcess = isServerPagination ? hookData : allData;
-    const filteredData = isServerPagination ? dataToProcess : filterData(dataToProcess, filters);
+
+    if (!isServerPagination) {
+      const historicalCount = (allData || []).filter(
+        (c) => c.isHistorical
+      ).length;
+      console.log(
+        '[ClusterTable] Client-side - allData length:',
+        (allData || []).length,
+        ', historical:',
+        historicalCount,
+        ', filters:',
+        filters.length
+      );
+    }
+
+    const filteredData = isServerPagination
+      ? dataToProcess
+      : filterData(dataToProcess, filters);
 
     return sortData(filteredData, sortConfig.key, sortConfig.direction);
   }, [hookData, allData, sortConfig, filters, isServerPagination]);
@@ -738,17 +762,20 @@ export function ClusterTable({
   };
 
   // Calculate pagination
-  // The hook handles pagination internally and returns correct total for both
-  // server-side and client-side pagination modes
-  const totalPages = hookTotalPages || Math.ceil(total / limit) || 1;
-  // Use total from hook - it's set correctly in both server and client paths
-  const displayTotal = total;
+  // For server-side: use hook's total (server already filtered)
+  // For client-side: use sortedData.length (filtered in component)
+  const displayTotal = isServerPagination ? total : sortedData.length;
+  const totalPages = isServerPagination
+    ? hookTotalPages || Math.ceil(total / limit) || 1
+    : Math.ceil(sortedData.length / limit) || 1;
   const startIndex = (page - 1) * limit;
   const endIndex = startIndex + limit;
-  
-  // Hook handles pagination internally for both server and client paths
-  // sortedData is already the current page with filters/sorting applied
-  const paginatedData = sortedData;
+
+  // For server-side pagination, sortedData is already the current page
+  // For client-side pagination, we need to slice after filtering/sorting
+  const paginatedData = isServerPagination
+    ? sortedData
+    : sortedData.slice(startIndex, endIndex);
 
   // Page navigation handlers - use hook's setPage
   const goToPreviousPage = () => {
@@ -1210,7 +1237,11 @@ export function ClusterTable({
                 variant="ghost"
                 size="icon"
                 onClick={goToNextPage}
-                disabled={isServerPagination ? !hasNext : (page === totalPages || totalPages === 0)}
+                disabled={
+                  isServerPagination
+                    ? !hasNext
+                    : page === totalPages || totalPages === 0
+                }
                 className="text-gray-500 h-8 w-8 p-0"
               >
                 <svg
