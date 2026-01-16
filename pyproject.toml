@@ -87,6 +87,8 @@ ignore = [
     "C408",
     # B011: assert False - can be intentional
     "B011",
+    # C401: set(x for x in ...) - style preference
+    "C401",
 ]
 
 # Per-file ignores for specific patterns
