@@ -299,9 +299,6 @@ storage:
 
 
 ingress:
-  # Whether to use a unified ingress resource for the API server and other services like Grafana.
-  # @schema type: [boolean]
-  unified: false
   enabled: true
   # Name of the secret containing basic auth credentials for ingress. If not specified, a new secret will be created using authCredentials
   # Example:
@@ -697,9 +694,6 @@ grafana:
     # If you set hosts to null, the Grafana Helm chart will use its default value ([chart-example.local]).
     # To match all hosts, set hosts to an empty array ([]).
     hosts: []
-    # Custom annotations for the ingress
-    annotations: null
-
   grafana.ini:
     server:
       domain: localhost

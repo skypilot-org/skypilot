@@ -146,8 +146,8 @@ def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
         'for your file mounts; or, configure a bucket in your SkyPilot config '
         'under `jobs.bucket`; or, enable persistent storage in Helm with '
         '`storage.enabled=true`. See: https://docs.skypilot.co/en/latest/'
-        f'reference/kubernetes/kubernetes-deployment.html{colorama.Style.RESET_ALL}'
-    )
+        'reference/kubernetes/kubernetes-deployment.html'
+        f'{colorama.Style.RESET_ALL}')
 
 
 def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
