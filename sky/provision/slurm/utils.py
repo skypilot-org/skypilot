@@ -724,9 +724,32 @@ def srun_sshd_command(
     user_home_ssh_dir = f'~{unix_user}/.ssh'
 
     if is_container_image:
-        # Container SSH requires dropbear support. See the stacked PR.
-        raise NotImplementedError(
-            'Container SSH is not yet supported in this branch.')
+        # Dropbear + socat bridge for container mode.
+        # See slurm-ray.yml.j2 for why we use Dropbear instead of OpenSSH.
+        # Dropbear's -i (inetd) mode expects a socket fd on stdin, but srun
+        # provides pipes. socat bridges stdin/stdout to a TCP socket.
+        ssh_bootstrap_cmd = (
+            'PORT=$((30000 + RANDOM % 30000)); '
+            'DROPBEAR=$(command -v /usr/local/bin/dropbear); '
+            '$DROPBEAR -F -E -s -R -p 127.0.0.1:$PORT & '
+            'DROPBEAR_PID=$!; '
+            'trap "kill $DROPBEAR_PID 2>/dev/null" EXIT; '
+            'sleep 0.1; '
+            'socat STDIO TCP:127.0.0.1:$PORT')
+        return shlex.join([
+            'srun',
+            '--overlap',
+            '--quiet',
+            '--unbuffered',
+            '--jobid', job_id,
+            '--nodes=1',
+            '--ntasks=1',
+            '--ntasks-per-node=1',
+            '-w', target_node,
+            '--container-remap-root',
+            f'--container-name={pyxis_container_name(cluster_name_on_cloud)}:exec',
+            '/bin/bash', '-c', ssh_bootstrap_cmd,
+        ])
 
     # Non-container: OpenSSH sshd
     return shlex.join([

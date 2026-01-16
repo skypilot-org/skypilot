@@ -747,6 +747,17 @@ def cleanup_ports(
     del cluster_name_on_cloud, ports, provider_config
     pass
 
+def _build_pyxis_args(
+    cluster_name_on_cloud: str,
+) -> str:
+    """Build pyxis/enroot container args for srun.
+
+    Uses :exec flag to attach to the already-running container (started with
+    sleep infinity in sbatch). Container settings like --container-remap-root,
+    --container-writable are preserved from when the container was created.
+    """
+    container_name = slurm_utils.pyxis_container_name(cluster_name_on_cloud)
+    return f'--container-remap-root --container-name={shlex.quote(container_name)}:exec'
 
 def _build_pyxis_args(cluster_name_on_cloud: str) -> str:
     """Build pyxis/enroot container args for srun.

@@ -64,6 +64,7 @@ from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import cluster_utils
 from sky.utils import command_runner
+from sky.utils.command_runner import CommandStage
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context_utils
@@ -3666,7 +3667,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     runner.rsync(source=setup_sh_path,
                                  target=target_dir,
                                  up=True,
-                                 stream_logs=False)
+                                 stream_logs=False,
+                                 stage=CommandStage.EXEC)
 
             # Always dump the full setup script to the persistent path first
             # In high availability mode, we need to dump the full setup script
@@ -4459,6 +4461,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     target=os.path.expanduser(local_log_dir),
                     up=False,
                     stream_logs=False,
+                    stage=CommandStage.EXEC,
                 )
             except exceptions.CommandError as e:
                 if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
@@ -4792,6 +4795,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         target=f'{local_log_dir}/controller.log',
                         up=False,
                         stream_logs=False,
+                        stage=CommandStage.EXEC,
                     )
                 except exceptions.CommandError as e:
                     if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
@@ -5488,6 +5492,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             require_outputs=require_outputs,
             separate_stderr=separate_stderr,
             source_bashrc=source_bashrc,
+            stage=CommandStage.EXEC,
             **kwargs,
         )
 
