@@ -59,7 +59,10 @@ exclude = [
 # N: pep8-naming (naming conventions)
 # C4: flake8-comprehensions
 # T20: flake8-print (print statements)
-select = ["F", "E", "W", "I", "B", "Q", "C4", "BLE"]
+select = ["F", "E", "W", "I", "B", "Q", "C4", "BLE", "ARG"]
+
+# Match pylint's dummy variable pattern: _, __, _var, unused_*, dummy_*
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?)|unused_.*|dummy_.*)$"
 
 # Ignore rules that were disabled in pylint or cause too many changes
 ignore = [
@@ -83,6 +86,9 @@ ignore = [
     "Q003",
     # B011: assert False - can be intentional
     "B011",
+    # ARG002/ARG003: unused method arguments - many are intentional overrides
+    # Ruff only exempts @typing.override (Python 3.12+), but we support 3.8+
+    "ARG002", "ARG003",
 ]
 
 # Per-file ignores for specific patterns
@@ -97,7 +103,11 @@ ignore = [
 "examples/**" = ["T20"]
 "llm/**" = ["T20"]
 # Template file with placeholders that get string-formatted
-"sky/backends/monkey_patches/*.py" = ["F821"]
+"sky/backends/monkey_patches/*.py" = ["F821", "ARG001"]
+# Signal handlers must accept (signum, frame) even if unused
+"sky/server/requests/executor.py" = ["ARG001"]
+# Provision decorators use provider_name for routing
+"sky/provision/__init__.py" = ["ARG001"]
 
 [tool.ruff.lint.isort]
 # Match isort's Google profile behavior

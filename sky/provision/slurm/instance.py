@@ -390,6 +390,7 @@ def run_instances(
         cluster_name_on_cloud: str,
         config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Run instances for the given cluster (Slurm in this case)."""
+    del cluster_name  # Unused, but required to match interface
     return _create_virtual_instance(region, cluster_name_on_cloud, config)
 
 

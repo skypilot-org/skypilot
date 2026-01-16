@@ -4622,7 +4622,7 @@ class NebiusStore(S3CompatibleStore):
         return S3CompatibleConfig(
             store_type='NEBIUS',
             url_prefix='nebius://',
-            client_factory=lambda region: data_utils.create_nebius_client(),
+            client_factory=lambda _region: data_utils.create_nebius_client(),
             resource_factory=lambda name: nebius.resource('s3').Bucket(name),
             split_path=data_utils.split_nebius_path,
             verify_bucket=data_utils.verify_nebius_bucket,
@@ -4668,7 +4668,7 @@ class CoreWeaveStore(S3CompatibleStore):
         return S3CompatibleConfig(
             store_type='COREWEAVE',
             url_prefix='cw://',
-            client_factory=lambda region: data_utils.create_coreweave_client(),
+            client_factory=lambda _region: data_utils.create_coreweave_client(),
             resource_factory=lambda name: coreweave.resource('s3').Bucket(name),
             split_path=data_utils.split_coreweave_path,
             verify_bucket=data_utils.verify_coreweave_bucket,

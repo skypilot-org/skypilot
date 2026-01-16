@@ -327,6 +327,7 @@ def _list_accelerators(
 def validate_region_zone(
     region_name: Optional[str],
     zone_name: Optional[str],
-    clouds: CloudFilter = None
+    _clouds: CloudFilter = None
 ) -> Tuple[Optional[str], Optional[str]]:
+    del _clouds  # Unused, but required to match interface
     return (region_name, zone_name)

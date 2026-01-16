@@ -234,7 +234,7 @@ def silent(should_silence: bool = True):
     # Turn off logger
     _root_logger.setLevel(logging.ERROR)
     _logging_config.is_silent = True
-    print = lambda *args, **kwargs: None
+    print = lambda *_args, **_kwargs: None
     try:
         yield
     finally:
