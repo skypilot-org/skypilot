@@ -720,20 +720,20 @@ export function ManagedJobsTable({
     });
   }, [data, poolsData, setValueList]);
 
-  const requestSort = (key) => {
+  const requestSort = React.useCallback((key) => {
     let direction = 'ascending';
     if (sortConfig.key === key && sortConfig.direction === 'ascending') {
       direction = 'descending';
     }
     setSortConfig({ key, direction });
-  };
+  }, [sortConfig]);
 
-  const getSortDirection = (key) => {
+  const getSortDirection = React.useCallback((key) => {
     if (sortConfig.key === key) {
       return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
     }
     return '';
-  };
+  }, [sortConfig]);
 
   // Calculate active and finished counts
   const counts = React.useMemo(() => {
