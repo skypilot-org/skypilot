@@ -505,8 +505,8 @@ def test_autostopping_behaviors(generic_cloud: str):
 
     This test verifies:
     1. Task submission (sky exec) is rejected on AUTOSTOPPING cluster
-    2. SSH access still works (for debugging/intervention)
-    3. sky url command works (cluster is accessible)
+    2. Endpoint access (sky status --endpoint) still works
+    3. SSH access still works (for debugging/intervention)
     """
     name = smoke_tests_utils.get_cluster_name()
     autostop_timeout = 600 if generic_cloud == 'azure' else 250
@@ -529,10 +529,9 @@ def test_autostopping_behaviors(generic_cloud: str):
         test = smoke_tests_utils.Test(
             'test_autostopping_behaviors',
             [
-                # Launch cluster with a URL endpoint to test sky url
+                # Launch cluster with a port to test endpoint access
                 f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} '
-                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {f.name} '
-                f'--ports 8080 --no-setup-cloud-identity) && '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {f.name} --ports 8080) && '
                 f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
                 f'sky status -r {name} | grep UP',
 
@@ -547,12 +546,12 @@ def test_autostopping_behaviors(generic_cloud: str):
                 f's=$(sky exec {name} "echo test" 2>&1); echo "$s"; '
                 f'echo "$s" | grep "autostopping"',
 
-                # Test 2: sky url should work (cluster is still accessible)
-                f's=$(sky url {name} 2>&1) && echo "$s" | grep "{name}"',
+                # Test 2: sky status --endpoint should work (cluster is still accessible)
+                f'sky status {name} --endpoint 8080',
 
                 # Test 3: SSH access should still work (using direct SSH command)
                 # This is useful for debugging/intervention during autostop
-                f's=$(sky ssh {name} --command "echo ssh_works" 2>&1) && echo "$s" | grep "ssh_works"',
+                f's=$(ssh {name} "echo ssh_works" 2>&1) && echo "$s" | grep "ssh_works"',
 
                 # Verify cluster is still in AUTOSTOPPING state after tests
                 f'sky status -r {name} | grep AUTOSTOPPING',
