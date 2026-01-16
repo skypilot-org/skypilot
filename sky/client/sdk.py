@@ -1367,13 +1367,6 @@ def autostop(
         logger.warning('Autostop hook is not supported in your API server. '
                        'Please upgrade to a newer API server to use it.')
 
-    # Hook timeout support requires API version 28 or higher
-    if hook_timeout is not None and (remote_api_version is None or
-                                     remote_api_version < 28):
-        logger.warning(
-            'Autostop hook timeout is not supported in your API '
-            'server. Please upgrade to a newer API server to use it.')
-
     body = payloads.AutostopBody(
         cluster_name=cluster_name,
         idle_minutes=idle_minutes,
