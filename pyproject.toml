@@ -83,6 +83,10 @@ ignore = [
     "B007",
     # Q003: avoid escaped quotes - keep existing style
     "Q003",
+    # C408: unnecessary dict() call - style preference, keep existing
+    "C408",
+    # B011: assert False - can be intentional
+    "B011",
 ]
 
 # Per-file ignores for specific patterns
@@ -98,13 +102,13 @@ ignore = [
 "llm/**" = ["T20"]
 
 [tool.ruff.lint.isort]
-# Match the existing codebase import style as closely as possible
-force-single-line = false
+# Match isort's Google profile:
+# https://pycqa.github.io/isort/docs/configuration/profiles.html
+force-single-line = true
+single-line-exclusions = ["typing"]
 force-sort-within-sections = true
-combine-as-imports = true
+order-by-type = false
 known-first-party = ["sky"]
-# Keep standard library imports on single line like "from typing import X, Y, Z"
-lines-after-imports = 2
 
 [tool.ruff.lint.flake8-quotes]
 # Match pylint-quotes configuration
