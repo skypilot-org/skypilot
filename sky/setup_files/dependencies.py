@@ -53,6 +53,9 @@ install_requires = [
     'ijson',
     'orjson',
     'requests',
+    # fsspec is used for unified file system access (local, http, s3, gcs, etc.)
+    # This enables loading YAML configs from cloud storage URLs.
+    'fsspec',
     # SkyPilot inherits from uvicorn.Server to customize the behavior of
     # uvicorn, so we need to pin uvicorn version to avoid potential break
     # changes.
