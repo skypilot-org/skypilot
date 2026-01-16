@@ -18,7 +18,7 @@ def get_unverified_context():
     """
     context = None
     if hasattr(ssl, '_create_unverified_context'):
-        context = ssl._create_unverified_context()  # noqa: SLF001
+        context = ssl._create_unverified_context()  # noqa: private-member-access
     return context
 
 

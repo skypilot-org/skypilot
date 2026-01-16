@@ -373,7 +373,7 @@ def update_workspace(workspace_name: str, config: Dict[str,
     # Validate the workspace by running sky check for it
     try:
         sky_check.check(quiet=True, workspace=workspace_name)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: blind-except
         logger.warning(f'Workspace {workspace_name} configuration saved but '
                        f'validation check failed: {e}')
         # Don't fail the update if the check fails, just warn
@@ -421,7 +421,7 @@ def create_workspace(workspace_name: str, config: Dict[str,
     # Validate the workspace by running sky check for it
     try:
         sky_check.check(quiet=True, workspace=workspace_name)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: blind-except
         logger.warning(f'Workspace {workspace_name} configuration saved but '
                        f'validation check failed: {e}')
         # Don't fail the update if the check fails, just warn
@@ -595,7 +595,7 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     # Validate the configuration by running sky check
     try:
         sky_check.check(quiet=True)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: blind-except
         logger.warning(f'Configuration saved but '
                        f'validation check failed: {e}')
         # Don't fail the update if the check fails, just warn

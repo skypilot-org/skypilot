@@ -105,7 +105,7 @@ def create_catalog(api_key=None) -> None:
                 # Convert GpuInfo to string format
                 entry['GpuInfo'] = json.dumps(entry['GpuInfo'],
                                               ensure_ascii=False).replace(
-                                                  '"', "'")  # noqa: Q000
+                                                  '"', "'")  # noqa: bad-quotes-inline-string
                 writer.writerow(entry)
     except (IOError, OSError) as e:
         raise HyperbolicCatalogError(

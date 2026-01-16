@@ -70,8 +70,8 @@ def check_compute_credentials() -> bool:
             seeweb_client.fetch_servers()
         except pydantic.ValidationError:
             # Fallback: fetch raw JSON to validate authentication
-            base_url = seeweb_client._Api__generate_base_url()  # noqa: SLF001  # type: ignore
-            headers = seeweb_client._Api__generate_authentication_headers(  # noqa: SLF001
+            base_url = seeweb_client._Api__generate_base_url()  # noqa: private-member-access# type: ignore
+            headers = seeweb_client._Api__generate_authentication_headers(  # noqa: private-member-access
             )  # type: ignore
             url = f'{base_url}/servers'
             resp = requests.get(url, headers=headers, timeout=15)
@@ -126,8 +126,8 @@ def client():
             return orig_fetch_servers(timeout=timeout)
         except pydantic.ValidationError:
             # Fallback path: fetch raw JSON, drop snapshot fields, then validate
-            base_url = api._Api__generate_base_url()  # noqa: SLF001  # type: ignore
-            headers = api._Api__generate_authentication_headers(  # noqa: SLF001
+            base_url = api._Api__generate_base_url()  # noqa: private-member-access# type: ignore
+            headers = api._Api__generate_authentication_headers(  # noqa: private-member-access
             )  # type: ignore
             url = f'{base_url}/servers'
             resp = requests.get(url, headers=headers, timeout=timeout or 15)
@@ -144,7 +144,7 @@ def client():
                             group_name, str) else str(group_name)
             except (KeyError, TypeError, ValueError):
                 pass
-            server_list_response_cls = ecsapi._server._ServerListResponse  # noqa: SLF001
+            server_list_response_cls = ecsapi._server._ServerListResponse  # noqa: private-member-access
             servers_response = server_list_response_cls.model_validate(data)
             return servers_response.server
 
@@ -156,8 +156,8 @@ def client():
             return orig_delete_server(server_name, timeout=timeout)
         except pydantic.ValidationError:
             # Fallback: perform raw DELETE and interpret not_found as success
-            base_url = api._Api__generate_base_url()  # noqa: SLF001  # type: ignore
-            headers = api._Api__generate_authentication_headers(  # noqa: SLF001
+            base_url = api._Api__generate_base_url()  # noqa: private-member-access# type: ignore
+            headers = api._Api__generate_authentication_headers(  # noqa: private-member-access
             )  # type: ignore
             url = f'{base_url}/servers/{server_name}'
             resp = requests.delete(url, headers=headers, timeout=timeout or 15)

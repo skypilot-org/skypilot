@@ -100,7 +100,7 @@ def websocket_aware(
 
             try:
                 response = await self.dispatch(request, call_next)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:  # noqa: blind-except
                 logger.error('Exception occurred in middleware dispatch for '
                              f'WebSocket scope: {e}')
                 return WebSocketDecision.ERROR

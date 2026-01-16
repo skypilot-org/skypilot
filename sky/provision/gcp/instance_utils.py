@@ -448,7 +448,7 @@ class GCPComputeInstance(GCPInstance):
             # Retry the wait() call until it succeeds or times out.
             # This is because the wait() call is only best effort, and does not
             # guarantee that the operation is done when it returns.
-            # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait # noqa: E501
+            # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait # noqa: line-too-long
             remaining_timeout = max(timeout - (time.time() - wait_start), 1)
             result = call_operation(operation_caller.wait, remaining_timeout)
             if result['status'] == 'DONE':
@@ -557,7 +557,7 @@ class GCPComputeInstance(GCPInstance):
         rule = cls.load_resource().firewalls().list(
             project=project_id, filter=f'name={firewall_rule_name}').execute()
         # For the return value format, please refer to
-        # https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.firewalls.html#list # noqa: E501
+        # https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.firewalls.html#list # noqa: line-too-long
         if 'items' not in rule:
             logger.warning(f'Firewall rule {firewall_rule_name} not found. '
                            'Skip cleanup.')
@@ -824,7 +824,7 @@ class GCPComputeInstance(GCPInstance):
         #   \'{  "type": "PERSISTENT",  "boot": true,  "initializeParams": {
         #    "diskSizeGb": "256",    "diskType"...\'. Boot disk must have a
         #    source specified'
-        # https://cloud.google.com/compute/docs/reference/rest/v1/instances/bulkInsert # noqa: E501
+        # https://cloud.google.com/compute/docs/reference/rest/v1/instances/bulkInsert # noqa: line-too-long
         if config.get('sourceMachineImage') is not None:
             return False
         # bulkInsert does not support attaching existing
@@ -852,7 +852,7 @@ class GCPComputeInstance(GCPInstance):
         def _handle_http_error(e):
             # NOTE: Error example:
             # {
-            #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.", # noqa: E501
+            #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.", # noqa: line-too-long
             #   'domain': 'usageLimits',
             #   'reason': 'quotaExceeded'
             # }
@@ -1078,7 +1078,7 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
                                  f'instanceTemplates/{instance_template_name}')
         if not mig_exists:
             # Create a new MIG with size 0 and resize it later for triggering
-            # DWS, according to the doc: https://cloud.google.com/compute/docs/instance-groups/create-mig-with-gpu-vms # noqa: E501
+            # DWS, according to the doc: https://cloud.google.com/compute/docs/instance-groups/create-mig-with-gpu-vms # noqa: line-too-long
             operation = mig_utils.create_managed_instance_group(
                 project_id,
                 zone,
@@ -1359,8 +1359,8 @@ class GCPTPUVMInstance(GCPInstance):
         instance: str,
         tag: str,
     ) -> None:
-        # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes  # noqa: E501
-        # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes/patch  # noqa: E501
+        # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes  # noqa: line-too-long
+        # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes/patch  # noqa: line-too-long
         del project_id, zone  # unused
         try:
             response = cls.load_resource().projects().locations().nodes().get(
@@ -1513,7 +1513,7 @@ class GCPTPUVMInstance(GCPInstance):
             except gcp.http_error_exception() as e:
                 # NOTE: Error example:
                 # {
-                #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.", # noqa: E501
+                #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.", # noqa: line-too-long
                 #   'domain': 'usageLimits',
                 #   'reason': 'quotaExceeded'
                 # }
@@ -1575,7 +1575,7 @@ class GCPTPUVMInstance(GCPInstance):
             # Retry the wait() call until it succeeds or times out.
             # This is because the wait() call is only best effort, and does not
             # guarantee that the operation is done when it returns.
-            # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait # noqa: E501
+            # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait # noqa: line-too-long
             for i, operation in enumerate(operations):
                 if success[i]:
                     continue

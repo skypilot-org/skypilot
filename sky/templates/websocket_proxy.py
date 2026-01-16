@@ -52,8 +52,8 @@ async def main(url: str, timestamps_supported: bool, login_url: str) -> None:
 async def run_websocket_proxy(websocket: ClientConnection,
                               timestamps_supported: bool) -> None:
     if os.isatty(sys.stdin.fileno()):
-        import termios  # noqa: PLC0415
-        import tty  # noqa: PLC0415
+        import termios  # noqa: import-outside-toplevel
+        import tty  # noqa: import-outside-toplevel
         old_settings = termios.tcgetattr(sys.stdin.fileno())
         tty.setraw(sys.stdin.fileno())
     else:
@@ -152,7 +152,7 @@ async def stdin_to_websocket(reader: asyncio.StreamReader,
             async with websocket_lock:
                 await websocket.send(data)
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: blind-except
         print(f'Error in stdin_to_websocket: {e}', file=sys.stderr)
     finally:
         async with websocket_lock:

@@ -310,7 +310,7 @@ class QueryHelper:
         sg = None  # Service gateway
 
         try:
-            # noqa: E501
+            # noqa: line-too-long
             create_vcn_response = net_client.create_vcn(
                 create_vcn_details=oci_adaptor.oci.core.models.CreateVcnDetails(
                     compartment_id=skypilot_compartment,
@@ -588,7 +588,7 @@ class QueryHelper:
                                       skip_source_dest_check=False),
                 )
 
-        # noqa: E501
+        # noqa: line-too-long
         list_nsg_rules_resp = net_client.list_network_security_group_security_rules(
             network_security_group_id=nsg_id,
             direction='INGRESS',

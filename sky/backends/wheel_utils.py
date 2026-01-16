@@ -123,7 +123,7 @@ def _build_sky_wheel() -> pathlib.Path:
                 if f.name == 'MANIFEST.in':
                     # Remove the line `sky/dashboard/out`, so we do not
                     # include the dashboard files in the internal wheel
-                    import fileinput  # noqa: PLC0415
+                    import fileinput  # noqa: import-outside-toplevel
                     with fileinput.input(tmp_dir / f.name,
                                          inplace=True) as file:
                         for line in file:

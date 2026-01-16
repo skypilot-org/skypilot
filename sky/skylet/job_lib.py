@@ -393,12 +393,12 @@ def add_job(job_name: str,
     # job_id will autoincrement with the null value
     if int(constants.SKYLET_VERSION) >= 28:
         _DB.cursor.execute(
-            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?, null)',  # noqa: E501
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?, null)',  # noqa: line-too-long
             (job_name, username, job_submitted_at, JobStatus.INIT.value,
              run_timestamp, None, resources_str, metadata))
     else:
         _DB.cursor.execute(
-            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)',  # noqa: E501
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)',  # noqa: line-too-long
             (job_name, username, job_submitted_at, JobStatus.INIT.value,
              run_timestamp, None, resources_str, metadata))
     _DB.conn.commit()
@@ -1274,7 +1274,7 @@ class JobLibCodeGen:
                   managed_job_id: Optional[int],
                   follow: bool = True,
                   tail: int = 0) -> str:
-        # noqa: E501
+        # noqa: line-too-long
 
         code = [
             # We use != instead of is not because 1 is not None will print a warning:
@@ -1345,8 +1345,8 @@ class JobLibCodeGen:
     def get_job_exit_codes(cls, job_id: Optional[int] = None) -> str:
         """Generate shell command to retrieve exit codes."""
         code = [
-            f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',  # noqa: E501
-            'exit_codes = job_lib.get_exit_codes(job_id) if job_id is not None and int(constants.SKYLET_VERSION) >= 28 else {}',  # noqa: E501
+            f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',  # noqa: line-too-long
+            'exit_codes = job_lib.get_exit_codes(job_id) if job_id is not None and int(constants.SKYLET_VERSION) >= 28 else {}',  # noqa: line-too-long
             'print(exit_codes, flush=True)',
         ]
         return cls._build(code)

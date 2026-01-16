@@ -236,7 +236,7 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
                             # that update_managed_jobs_statuses won't think they
                             # have failed.
                             state.reset_jobs_for_recovery()
-                        except Exception as e:  # noqa: BLE001
+                        except Exception as e:  # noqa: blind-except
                             logger.error(f'Failed to stop the api server: {e}')
                             pass
                         else:
@@ -349,7 +349,7 @@ async def scheduled_launch(
         yield
         return
 
-    assert starting_lock == starting_signal._lock, (  # noqa: SLF001  # type: ignore
+    assert starting_lock == starting_signal._lock, (  # noqa: private-member-access# type: ignore
         'starting_lock and starting_signal must use the same lock')
 
     while True:

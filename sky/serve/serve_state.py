@@ -527,7 +527,7 @@ def get_services() -> List[Dict[str, Any]]:
         rows = session.execute(query).fetchall()
     records = []
     for row in rows:
-        records.append(_get_service_from_row(row._mapping))  # noqa: SLF001
+        records.append(_get_service_from_row(row._mapping))  # noqa: private-member-access
     return records
 
 
@@ -549,7 +549,7 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
         query = _build_services_with_latest_version_query(service_name)
         rows = session.execute(query).fetchall()
     for row in rows:
-        return _get_service_from_row(row._mapping)  # noqa: SLF001
+        return _get_service_from_row(row._mapping)  # noqa: private-member-access
     return None
 
 

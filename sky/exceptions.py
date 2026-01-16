@@ -459,7 +459,7 @@ class AWSAzFetchingError(SkyPilotExcludeArgsBaseException):
                     'Failed to retrieve availability zones. '
                     'Please ensure that the `ec2:DescribeAvailabilityZones` '
                     'action is enabled for your AWS account in IAM. '
-                    'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html.'  # noqa: E501
+                    'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html.'  # noqa: line-too-long
                 )
             else:
                 raise ValueError(f'Unknown reason {self}')
@@ -553,7 +553,7 @@ class JobExitCode(enum.IntEnum):
                         status: Optional['job_lib.JobStatus']) -> 'JobExitCode':
         """Convert a job status to an exit code."""
         # Import here to avoid circular imports
-        from sky.skylet import job_lib  # noqa: PLC0415
+        from sky.skylet import job_lib  # noqa: import-outside-toplevel
 
         if status is None:
             return cls.NOT_FOUND
@@ -580,7 +580,7 @@ class JobExitCode(enum.IntEnum):
             status: Optional['managed_jobs.ManagedJobStatus']) -> 'JobExitCode':
         """Convert a managed job status to an exit code."""
         # Import here to avoid circular imports
-        from sky import jobs as managed_jobs  # noqa: PLC0415
+        from sky import jobs as managed_jobs  # noqa: import-outside-toplevel
 
         if status is None:
             return cls.NOT_FOUND

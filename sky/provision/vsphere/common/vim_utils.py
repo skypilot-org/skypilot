@@ -181,7 +181,7 @@ def list_hosts_with_devices_info(hosts, vcenter_name, datacenter_name,
             'Cluster': cluster_name,
             'Datacenter': datacenter_name,
             'vCenter': vcenter_name,
-            'MoRefID': host._moId,  # noqa: SLF001
+            'MoRefID': host._moId,  # noqa: private-member-access
             'Accelerators': [],
             'GpuInfo': None,
         }
@@ -251,7 +251,7 @@ def get_obj_by_mo_id(content, vimtype, moid):
     container = content.viewManager.CreateContainerView(content.rootFolder,
                                                         vimtype, True)
     for c in container.view:
-        if c._GetMoId() == moid:  # noqa: SLF001
+        if c._GetMoId() == moid:  # noqa: private-member-access
             obj = c
             break
     container.Destroy()
@@ -262,13 +262,13 @@ def delete_object(content, mo):
     """    Deletes a vsphere managed object and
     waits for the deletion to complete
     """
-    logger.info('Deleting {0}'.format(mo._GetMoId()))  # noqa: SLF001
+    logger.info('Deleting {0}'.format(mo._GetMoId()))  # noqa: private-member-access
     try:
         wait_for_tasks(content, [mo.Destroy()])
-        logger.info('Deleted {0}'.format(mo._GetMoId()))  # noqa: SLF001
-    except Exception:  # noqa: BLE001
+        logger.info('Deleted {0}'.format(mo._GetMoId()))  # noqa: private-member-access
+    except Exception:  # noqa: blind-except
         logger.info('Unexpected error while deleting managed object {0}'.format(
-            mo._GetMoId()))  # noqa: SLF001
+            mo._GetMoId()))  # noqa: private-member-access
         return False
     return True
 
@@ -279,13 +279,13 @@ def poweron_vm(content, mo):
     if not isinstance(mo, vsphere_adaptor.get_vim().VirtualMachine):
         return False
 
-    logger.info('Powering on vm {0}'.format(mo._GetMoId()))  # noqa: SLF001
+    logger.info('Powering on vm {0}'.format(mo._GetMoId()))  # noqa: private-member-access
     try:
         wait_for_tasks(content, [mo.PowerOn()])
-        logger.info('{0} powered on successfully'.format(mo._GetMoId()))  # noqa: SLF001
-    except Exception:  # noqa: BLE001
+        logger.info('{0} powered on successfully'.format(mo._GetMoId()))  # noqa: private-member-access
+    except Exception:  # noqa: blind-except
         logger.info('Unexpected error while powering on vm {0}'.format(
-            mo._GetMoId()))  # noqa: SLF001
+            mo._GetMoId()))  # noqa: private-member-access
         return False
     return True
 
@@ -320,13 +320,13 @@ def poweroff_vm(content, mo):
     if not isinstance(mo, vsphere_adaptor.get_vim().VirtualMachine):
         return False
 
-    logger.info('Powering off vm {0}'.format(mo._GetMoId()))  # noqa: SLF001
+    logger.info('Powering off vm {0}'.format(mo._GetMoId()))  # noqa: private-member-access
     try:
         wait_for_tasks(content, [mo.PowerOff()])
-        logger.info('{0} powered off successfully'.format(mo._GetMoId()))  # noqa: SLF001
-    except Exception:  # noqa: BLE001
+        logger.info('{0} powered off successfully'.format(mo._GetMoId()))  # noqa: private-member-access
+    except Exception:  # noqa: blind-except
         logger.info('Unexpected error while powering off vm {0}'.format(
-            mo._GetMoId()))  # noqa: SLF001
+            mo._GetMoId()))  # noqa: private-member-access
         return False
     return True
 
@@ -390,7 +390,7 @@ def get_cluster_name_by_id(self, content, name):
     cluster_obj = get_objs_by_names(
         content, [vsphere_adaptor.get_vim().ClusterComputeResource], [name])
     if cluster_obj is not None:
-        self.mo_id = cluster_obj['name']._GetMoId()  # noqa: SLF001
+        self.mo_id = cluster_obj['name']._GetMoId()  # noqa: private-member-access
         logger.info('Cluster MoId: {0}'.format(self.mo_id))
     else:
         logger.info('Cluster: {0} not found'.format(self.cluster_name))

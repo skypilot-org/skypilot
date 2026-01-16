@@ -15,7 +15,7 @@ INFINIBAND_ENV_VARS = {
                         'mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1')
 }
 
-# noqa: E501
+# noqa: line-too-long
 INFINIBAND_IMAGE_ID = 'docker:cr.eu-north1.nebius.cloud/nebius-benchmarks/nccl-tests:2.23.4-ubu22.04-cu12.4'
 
 # Docker run options for InfiniBand support

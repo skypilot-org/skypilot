@@ -265,7 +265,7 @@ class SCPClient:
         for port in ports:
             services.append({'serviceType': 'TCP', 'serviceValue': port})
         if self._security_group_rule_not_exist(sg_id, direction, ports):
-            url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}/rules'  # noqa: E501
+            url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}/rules'  # noqa: line-too-long
             if direction == 'IN':
                 target_address = 'sourceIpAddresses'
             else:
@@ -385,7 +385,7 @@ class SCPClient:
         return str(signature)
 
     def get_nic(self, instance_id) -> List[dict]:
-        url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{instance_id}/nics'  # noqa: E501
+        url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{instance_id}/nics'  # noqa: line-too-long
         return self._get(url)
 
     def get_external_ip(self, instance_id, ip):
@@ -432,7 +432,7 @@ class SCPClient:
         return self._get(url)
 
     def get_firewall_rule_info(self, firewall_id, rule_id):
-        url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules/{rule_id}'  # noqa: E501
+        url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules/{rule_id}'  # noqa: line-too-long
         return self._get(url, contents_key=None)
 
     def get_firewalls(self):
@@ -445,11 +445,11 @@ class SCPClient:
         return [content['serviceZoneName'] for content in zone_contents]
 
     def start_instance(self, instance_id):
-        url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{instance_id}/start'  # noqa: E501
+        url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{instance_id}/start'  # noqa: line-too-long
         return self._post(url=url, request_body={})
 
     def stop_instance(self, instance_id):
-        url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{instance_id}/stop'  # noqa: E501
+        url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{instance_id}/stop'  # noqa: line-too-long
         return self._post(url=url, request_body={})
 
     def get_security_group_rules(self, sg_id):
@@ -506,7 +506,7 @@ class SCPClient:
         return self._get(url=url, contents_key=None)
 
     def get_internet_gateway_info(self, internet_gateway_id):
-        url = f'{API_ENDPOINT}/internet-gateway/v2/internet-gateways/{internet_gateway_id}'  # noqa: E501
+        url = f'{API_ENDPOINT}/internet-gateway/v2/internet-gateways/{internet_gateway_id}'  # noqa: line-too-long
         return self._get(url=url, contents_key=None)
 
     def get_key_pairs(self):

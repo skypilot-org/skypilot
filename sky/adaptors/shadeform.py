@@ -22,7 +22,7 @@ def import_package(func):
         global _shadeform_sdk
         if _shadeform_sdk is None:
             try:
-                import shadeform as _shadeform  # noqa: PLC0415
+                import shadeform as _shadeform  # noqa: import-outside-toplevel
                 _shadeform_sdk = _shadeform
             except ImportError:
                 raise ImportError(

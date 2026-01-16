@@ -71,6 +71,6 @@ def rest_request(method: str,
         if resp.text:
             try:
                 return resp.json()
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: blind-except
                 return resp.text
         return None

@@ -145,13 +145,13 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     if instance_id:
                         created_in_this_vpc = True
                         return instance_id, 'created'
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:  # noqa: blind-except
                 logger.error(f'run_instances error ({instance_name}): {e}')
             finally:
                 if not created_in_this_vpc:
                     try:
                         _delete_security_group(sg_id)
-                    except Exception:  # noqa: BLE001
+                    except Exception:  # noqa: blind-except
                         pass
 
         raise RuntimeError(f'instance creation error: {instance_name}')
@@ -170,7 +170,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             for e in as_completed(execution):
                 try:
                     instance_ids_statuses.append(e.result())
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:  # noqa: blind-except
                     logger.error(f'run_instances error: {e}')
 
     wait_time = time.time() + 600
@@ -276,7 +276,7 @@ def _get_or_create_vpc_subnets(zone_id):
                     time.sleep(5)
 
             break
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             time.sleep(10)
             logger.error(f'vpc creation error: {e}')
             continue
@@ -370,7 +370,7 @@ def _create_security_group(zone_id, vpc, cnt):
         scp_utils.SCPClient().add_security_group_rule(sg_id, 'OUT', None, cnt)
 
         return sg_id
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: blind-except
         _undo_functions(undo_func_stack)
         logger.error(f'security group creation error: {e}')
         return None
@@ -419,7 +419,7 @@ def _create_instance(vpc_id, instance_config, cnt):
             lambda: _delete_firewall_rule(firewall_id, out_rule_id))
         return instance_id
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: blind-except
         _undo_functions(undo_func_stack)
         logger.error(f'instance creation error: {e}')
         return None
@@ -467,7 +467,7 @@ def _add_firewall_rule(firewall_id, internal_ip, direction,
                         return rule_id
             else:
                 return None
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             attempts += 1
             time.sleep(10)
             logger.error(f'add firewall rule error: {e}')
@@ -485,7 +485,7 @@ def _delete_firewall_rule(firewall_id, rule_ids):
             scp_utils.SCPClient().delete_firewall_rule(firewall_id, rule_ids)
             if not _remaining_firewall_rule(firewall_id, rule_ids):
                 return
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             attempts += 1
             time.sleep(5)
             logger.error(f'delete firewall rule error: {e}')
@@ -554,7 +554,7 @@ def stop_instances(
                 if info['virtualServerState'] == 'STOPPED':
                     return instance_id
                 time.sleep(2)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             logger.error(f'stop_instances error: {e}')
 
     with ThreadPoolExecutor(max_workers=min(len(instances), 32)) as ex:
@@ -592,7 +592,7 @@ def terminate_instances(
             _delete_firewall_rule(firewall_id, rule_ids)
             _delete_instance(instance_id)
             _delete_security_group(sg_id)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             logger.error(f'terminate_instances error: {e}')
 
     with ThreadPoolExecutor(max_workers=min(len(instances), 32)) as ex:

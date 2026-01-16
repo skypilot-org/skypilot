@@ -730,7 +730,7 @@ cluster_launch = launch
 
 
 @usage_lib.entrypoint
-def exec(  # noqa: A001
+def exec(  # noqa: builtin-variable-shadowing
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: str,
     dryrun: bool = False,

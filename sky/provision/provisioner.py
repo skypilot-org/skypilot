@@ -336,7 +336,7 @@ def _wait_ssh_connection_direct(ip: str,
                                                  ssh_proxy_command)
     except socket.timeout:  # this is the most expected exception
         stderr = f'Timeout: SSH connection to {ip} is not ready.'
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: blind-except
         stderr = f'Error: {common_utils.format_exception(e)}'
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_probe_timeout, ssh_proxy_command)

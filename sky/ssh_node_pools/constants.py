@@ -1,5 +1,5 @@
 """Constants for SSH Node Pools"""
-# noqa: E501
+# noqa: line-too-long
 import os
 
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')

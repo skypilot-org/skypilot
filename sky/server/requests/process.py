@@ -84,7 +84,7 @@ def _disposable_worker(fn, initializer, initargs, result_queue, args, kwargs):
             initializer(*initargs)
         result = fn(*args, **kwargs)
         result_queue.put(result)
-    except BaseException as e:  # noqa: BLE001
+    except BaseException as e:  # noqa: blind-except
         result_queue.put(e)
 
 
@@ -94,7 +94,7 @@ class DisposableExecutor:
     This is a workaround for Python 3.10 since `max_tasks_per_child` of
     ProcessPoolExecutor was introduced in 3.11. There is no way to control
     the worker lifetime in 3.10.
-    Ref: https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures.ProcessPoolExecutor # noqa: E501
+    Ref: https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures.ProcessPoolExecutor # noqa: line-too-long
     TODO(aylei): use the official `max_tasks_per_child` when upgrade to 3.11
     """
 

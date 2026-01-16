@@ -100,7 +100,7 @@ def _default_ec2_resource(
         # For version < 1 (variable does not exist), we do not have
         # `max_attempts` in the `aws.resource` call, so we need to reload the
         # module to get the latest `aws.resource` function.
-        import importlib  # noqa: PLC0415
+        import importlib  # noqa: import-outside-toplevel
         importlib.reload(aws)
     return aws.resource('ec2',
                         region_name=region,
@@ -131,7 +131,7 @@ def _ec2_call_with_retry_on_server_error(ec2_fail_fast_fn: Callable[..., _T],
             break
         except aws.botocore_exceptions().ClientError as e:
             # Retry server side errors, as they are likely to be transient.
-            # https://docs.aws.amazon.com/AWSEC2/latest/APIReference/errors-overview.html#api-error-codes-table-server # noqa: E501
+            # https://docs.aws.amazon.com/AWSEC2/latest/APIReference/errors-overview.html#api-error-codes-table-server # noqa: line-too-long
             error_code = e.response['Error']['Code']
             if error_code in [
                     'RequestLimitExceeded', 'ServerInternal',
@@ -263,7 +263,7 @@ def _create_instances(
                 for i in range(1, max_efa_interfaces):
                     interface_type = 'efa-only'
                     # Special handling for P5 instances
-                    # Refer to https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-acc-inst-types.html#efa-for-p5 for more details. # noqa: E501
+                    # Refer to https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-acc-inst-types.html#efa-for-p5 for more details. # noqa: line-too-long
                     if (instance_type == 'p5.48xlarge' or
                             instance_type == 'p5e.48xlarge'):
                         interface_type = 'efa' if i % 4 == 0 else 'efa-only'

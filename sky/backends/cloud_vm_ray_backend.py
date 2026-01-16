@@ -261,7 +261,7 @@ def _is_message_too_long(returncode: int,
                       encoding='utf-8') as f:
                 content = f.read()
                 return _check_output_for_match_str(content)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             # We don't crash the setup if we cannot read the log file.
             # Instead, we should retry the setup with dumping the script
             # to a file to be safe.
@@ -452,7 +452,7 @@ class FailoverCloudErrorHandlerV1:
         # Determining whether head node launch *may* have been requested based
         # on outputs is tricky. We are conservative here by choosing an "early
         # enough" output line in the following:
-        # https://github.com/ray-project/ray/blob/03b6bc7b5a305877501110ec04710a9c57011479/python/ray/autoscaler/_private/commands.py#L704-L737  # noqa: E501
+        # https://github.com/ray-project/ray/blob/03b6bc7b5a305877501110ec04710a9c57011479/python/ray/autoscaler/_private/commands.py#L704-L737  # noqa: line-too-long
         # This is okay, because we mainly want to use the return value of this
         # func to skip cleaning up never-launched clusters that encountered VPC
         # errors; their launch should not have printed any such outputs.
@@ -542,7 +542,7 @@ class FailoverCloudErrorHandlerV2:
                     'UNSUPPORTED_OPERATION',
                     'insufficientCapacity',
             ]:  # Per zone.
-                # Return codes can be found at https://cloud.google.com/compute/docs/troubleshooting/troubleshooting-vm-creation # noqa: E501
+                # Return codes can be found at https://cloud.google.com/compute/docs/troubleshooting/troubleshooting-vm-creation # noqa: line-too-long
                 # However, UNSUPPORTED_OPERATION is observed empirically
                 # when VM is preempted during creation.  This seems to be
                 # not documented by GCP.
@@ -566,13 +566,13 @@ class FailoverCloudErrorHandlerV2:
             elif code in [3, 8, 9]:
                 # Error code 3 means TPU is preempted during creation.
                 # Example:
-                # {'code': 3, 'message': 'Cloud TPU received a bad request. update is not supported while in state PREEMPTED [EID: 0x73013519f5b7feb2]'} # noqa: E501
+                # {'code': 3, 'message': 'Cloud TPU received a bad request. update is not supported while in state PREEMPTED [EID: 0x73013519f5b7feb2]'} # noqa: line-too-long
                 # Error code 8 means TPU resources is out of
                 # capacity. Example:
-                # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # noqa: E501
+                # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # noqa: line-too-long
                 # Error code 9 means TPU resources is insufficient reserved
                 # capacity. Example:
-                # {'code': 9, 'message': 'Insufficient reserved capacity. Contact customer support to increase your reservation. [EID: 0x2f8bc266e74261a]'} # noqa: E501
+                # {'code': 9, 'message': 'Insufficient reserved capacity. Contact customer support to increase your reservation. [EID: 0x2f8bc266e74261a]'} # noqa: line-too-long
                 _add_to_blocked_resources(
                     blocked_resources,
                     launchable_resources.copy(zone=zone.name))
@@ -634,14 +634,14 @@ class FailoverCloudErrorHandlerV2:
                     'having the required permissions and the user '
                     'account does not have enough permission to '
                     'update it. Please contact your administrator and '
-                    'check out: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html\n'  # noqa: E501
+                    'check out: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html\n'  # noqa: line-too-long
                     f'Details: {message}')
                 _add_to_blocked_resources(
                     blocked_resources,
                     launchable_resources.copy(region=None, zone=None))
             elif 'is not found or access is unauthorized' in message:
                 # Parse HttpError for unauthorized regions. Example:
-                # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # noqa: E501
+                # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # noqa: line-too-long
                 # Details: "Location us-east1-d is not found or access is
                 # unauthorized.">
                 _add_to_blocked_resources(
@@ -997,7 +997,7 @@ class RetryingVmProvisioner(object):
             need_provision = to_provision.cloud.check_quota_available(
                 to_provision)
 
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             need_provision = True
             logger.info(f'Error occurred when trying to check quota. '
                         f'Proceeding assuming quotas are available. Error: '
@@ -1214,7 +1214,7 @@ class RetryingVmProvisioner(object):
                         prev_cluster_ever_up=prev_cluster_ever_up,
                         log_dir=self.log_dir,
                         ports_to_open_on_launch=ports_to_open_on_launch)
-                    # NOTE: We will handle the logic of '_ensure_cluster_ray_started' # noqa: E501
+                    # NOTE: We will handle the logic of '_ensure_cluster_ray_started' # noqa: line-too-long
                     # in 'provision_utils.post_provision_runtime_setup()' in the
                     # caller.
                     resources_vars = (
@@ -1252,7 +1252,7 @@ class RetryingVmProvisioner(object):
                     FailoverCloudErrorHandlerV2.update_blocklist_on_error(
                         self._blocked_resources, to_provision, region, zones, e)
                     continue
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:  # noqa: blind-except
                     # NOTE: We try to cleanup the cluster even if the previous
                     # cluster does not exist. Also we are fast at
                     # cleaning up clusters now if there is no existing node..
@@ -1421,7 +1421,7 @@ class RetryingVmProvisioner(object):
             # Downside is existing tasks on the cluster will keep running
             # (which may be ok with the semantics of 'sky launch' twice).
             # Tracked in https://github.com/ray-project/ray/issues/20402.
-            # Ref: https://github.com/ray-project/ray/blob/releases/2.4.0/python/ray/autoscaler/sdk/sdk.py#L16-L49  # noqa: E501
+            # Ref: https://github.com/ray-project/ray/blob/releases/2.4.0/python/ray/autoscaler/sdk/sdk.py#L16-L49  # noqa: line-too-long
             script_path = write_ray_up_script_with_patched_launch_hash_fn(
                 cluster_config_file, ray_up_kwargs={'no_restart': True})
 
@@ -1450,7 +1450,7 @@ class RetryingVmProvisioner(object):
                 require_outputs=True,
                 # Disable stdin to avoid ray outputs mess up the terminal with
                 # misaligned output when multithreading/multiprocessing are used
-                # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264  # noqa: E501
+                # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264  # noqa: line-too-long
                 stdin=subprocess.DEVNULL)
             return returncode, stdout, stderr
 
@@ -1644,7 +1644,7 @@ class RetryingVmProvisioner(object):
             env=dict(os.environ, RAY_USAGE_STATS_ENABLED='0'),
             # Disable stdin to avoid ray outputs mess up the terminal with
             # misaligned output when multithreading/multiprocessing is used.
-            # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # noqa: E501
+            # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # noqa: line-too-long
             stdin=subprocess.DEVNULL)
 
     @timeline.event
@@ -1823,7 +1823,7 @@ class RetryingVmProvisioner(object):
                     ])
                 # Set the max width of REASON column to 80 to avoid the table
                 # being wrapped in a unreadable way.
-                table._max_width = {'REASON': 80}  # noqa: SLF001
+                table._max_width = {'REASON': 80}  # noqa: private-member-access
                 raise exceptions.ResourcesUnavailableError(
                     _RESOURCES_UNAVAILABLE_LOG + '\n' + table.get_string(),
                     failover_history=failover_history)
@@ -2328,7 +2328,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                         tunnel = self._open_and_update_skylet_tunnel()
                         return grpc.insecure_channel(f'localhost:{tunnel.port}',
                                                      options=grpc_options)
-                    except Exception as e:  # noqa: BLE001
+                    except Exception as e:  # noqa: blind-except
                         # Failed to open tunnel, release the lock and retry.
                         logger.warning(f'Failed to open tunnel for cluster '
                                        f'{self.cluster_name!r}: '
@@ -2397,7 +2397,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 subprocess_utils.kill_children_processes(proc.pid)
         except psutil.NoSuchProcess:
             pass
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             logger.warning(
                 f'Failed to cleanup SSH tunnel process {tunnel_info.pid}: {e}')
 
@@ -2942,7 +2942,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         example_resource.region != launched_resources.region):
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesMismatchError(
-                            f'Task requested resources {example_resource} in region '  # noqa: E501
+                            f'Task requested resources {example_resource} in region '  # noqa: line-too-long
                             f'{example_resource.region!r}'
                             ', but the existing cluster '
                             f'is in region {launched_resources.region!r}.')
@@ -2953,7 +2953,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 'does not have zone specified.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesMismatchError(
-                            f'Task requested resources {example_resource} in zone '  # noqa: E501
+                            f'Task requested resources {example_resource} in zone '  # noqa: line-too-long
                             f'{example_resource.zone!r},'
                             'but the existing cluster '
                             f'{zone_str}')
@@ -3693,7 +3693,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # in the script already.
                     # Skip an empty line and two lines due to the /bin/bash -i
                     # and source ~/.bashrc in the setup_cmd.
-                    #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # noqa: E501
+                    #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # noqa: line-too-long
                     #   bash: no job control in this shell
                     skip_num_lines=3)
                 return returncode
@@ -4165,7 +4165,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # controller is trying to terminate a cluster.
                 requests_lib.kill_cluster_requests(handle.cluster_name,
                                                    exclude_request_to_kill)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:  # noqa: blind-except
                 # We allow the failure to kill other launch requests, because
                 # it is not critical to the cluster teardown.
                 logger.warning(
@@ -4332,7 +4332,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # TODO(aylei): backward compatibility for legacy runtime that
             # returns run_timestamp only, remove after 0.12.0
             (dir if constants.SKY_LOGS_DIRECTORY in dir else os.path.join(
-                constants.SKY_LOGS_DIRECTORY, dir)) for dir in dirs  # noqa: A001
+                constants.SKY_LOGS_DIRECTORY, dir)) for dir in dirs  # noqa: builtin-variable-shadowing
         ]
         # Include cluster name in local log directory path to avoid conflicts
         # when the same job_id exists on different clusters
@@ -4724,7 +4724,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """
         try:
             handle.close_skylet_ssh_tunnel()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             # Not critical to the cluster teardown, just log a warning.
             logger.warning(
                 'Failed to close Skylet SSH tunnel for cluster '
@@ -4743,7 +4743,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # controller is trying to terminate a cluster.
             requests_lib.kill_cluster_requests(handle.cluster_name,
                                                exclude_request_to_kill)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             # We allow the failure to kill other launch requests, because
             # it is not critical to the cluster teardown.
             logger.warning(
@@ -4857,8 +4857,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if (isinstance(cloud, clouds.IBM) and terminate and
                 prev_cluster_status == status_lib.ClusterStatus.STOPPED):
-            from sky.adaptors import ibm  # noqa: PLC0415
-            from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider  # noqa: PLC0415
+            from sky.adaptors import ibm  # noqa: import-outside-toplevel
+            from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider  # noqa: import-outside-toplevel
 
             config_provider = global_user_state.get_cluster_yaml_dict(
                 handle.cluster_yaml)['provider']
@@ -4875,7 +4875,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(
                     ':', 1)[-1]
                 vpc_found = True
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: blind-except
                 logger.critical('failed to locate vpc for ibm cloud')
                 returncode = -1
 
@@ -4912,7 +4912,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         # Disable stdin to avoid ray outputs mess up the
                         # terminal with misaligned output when multithreading/
                         # multiprocessing are used.
-                        # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # noqa: E501
+                        # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # noqa: line-too-long
                         stdin=subprocess.DEVNULL)
         if returncode != 0:
             if purge:
@@ -5245,7 +5245,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     lambda: SkyletClient(handle.get_grpc_channel()
                                         ).is_autostopping(request))
                 return response.is_autostopping
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:  # noqa: blind-except
                 # The cluster may have been terminated, causing the gRPC call
                 # to timeout and fail.
                 logger.debug(f'Failed to check if cluster is autostopping: {e}')
@@ -5475,7 +5475,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                 if _get_pod_config(desired_cluster_yaml_obj) != _get_pod_config(
                         cluster_yaml_obj):
-                    # noqa: E501
+                    # noqa: line-too-long
                     logger.warning(
                         f'{colorama.Fore.YELLOW}WARNING: Kubernetes pod config mismatch detected. Task requires different '
                         f'pod config than the existing cluster. The existing '
@@ -5537,7 +5537,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 vol_name = vol_mount.get('VolumeNameOnCloud')
                                 if vol_name:
                                     existing_volume_names.add(vol_name)
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:  # noqa: blind-except
                     # If we can't get the existing volume mounts, log debug
                     # and skip the warning check
                     logger.debug(f'Failed to check existing volume mounts: {e}',

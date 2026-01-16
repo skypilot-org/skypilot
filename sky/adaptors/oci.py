@@ -76,7 +76,7 @@ def with_oci_env(f):
 
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
-        # noqa: E501
+        # noqa: line-too-long
         enter_env_cmds = [
             'conda info --envs | grep "sky-oci-cli-env" || conda create -n sky-oci-cli-env python=3.10 -y',
             '. $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true',

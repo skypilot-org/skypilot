@@ -43,7 +43,7 @@ class InternalRequestDaemon:
     should_skip: Callable[[], bool] = _default_should_skip
 
     def refresh_log_level(self) -> int:
-        import logging  # noqa: PLC0415
+        import logging  # noqa: import-outside-toplevel
 
         try:
             # Refresh config within the while loop.
@@ -105,7 +105,7 @@ class InternalRequestDaemon:
 
 def refresh_cluster_status_event():
     """Periodically refresh the cluster status."""
-    from sky.backends import backend_utils  # noqa: PLC0415
+    from sky.backends import backend_utils  # noqa: import-outside-toplevel
 
     logger.info('=== Refreshing cluster status ===')
     # This periodically refresh will hold the lock for the cluster being
@@ -120,7 +120,7 @@ def refresh_cluster_status_event():
 
 def refresh_volume_status_event():
     """Periodically refresh the volume status."""
-    from sky.volumes.server import core  # noqa: PLC0415
+    from sky.volumes.server import core  # noqa: import-outside-toplevel
 
     # Disable logging for periodic refresh to avoid the usage message being
     # sent multiple times.
@@ -151,8 +151,8 @@ atexit.register(_release_managed_job_consolidation_mode_lock)
 
 def managed_job_status_refresh_event():
     """Refresh the managed job status for controller consolidation mode."""
-    from sky.jobs import constants as managed_job_constants  # noqa: PLC0415
-    from sky.jobs import utils as managed_job_utils  # noqa: PLC0415
+    from sky.jobs import constants as managed_job_constants  # noqa: import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils  # noqa: import-outside-toplevel
 
     global _managed_job_consolidation_mode_lock
     if _managed_job_consolidation_mode_lock is None:
@@ -198,7 +198,7 @@ def managed_job_status_refresh_event():
         signal_file.unlink()
 
     # After recovery, we start the event loop.
-    from sky.skylet import events  # noqa: PLC0415
+    from sky.skylet import events  # noqa: import-outside-toplevel
     refresh_event = events.ManagedJobEvent()
     logger.info('=== Running managed job event ===')
     refresh_event.run()
@@ -207,20 +207,20 @@ def managed_job_status_refresh_event():
 
 def should_skip_managed_job_status_refresh():
     """Check if the managed job status refresh event should be skipped."""
-    from sky.jobs import utils as managed_job_utils  # noqa: PLC0415
+    from sky.jobs import utils as managed_job_utils  # noqa: import-outside-toplevel
     return not managed_job_utils.is_consolidation_mode()
 
 
 def _serve_status_refresh_event(pool: bool):
     """Refresh the sky serve status for controller consolidation mode."""
-    from sky.serve import serve_utils  # noqa: PLC0415
+    from sky.serve import serve_utils  # noqa: import-outside-toplevel
 
     # We run the recovery logic before starting the event loop as those two are
     # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
     serve_utils.ha_recovery_for_consolidation_mode(pool=pool)
 
     # After recovery, we start the event loop.
-    from sky.skylet import events  # noqa: PLC0415
+    from sky.skylet import events  # noqa: import-outside-toplevel
     event = events.ServiceUpdateEvent(pool=pool)
     noun = 'pool' if pool else 'serve'
     logger.info(f'=== Running {noun} status refresh event ===')
@@ -230,7 +230,7 @@ def _serve_status_refresh_event(pool: bool):
 
 def _should_skip_serve_status_refresh_event(pool: bool):
     """Check if the serve status refresh event should be skipped."""
-    from sky.serve import serve_utils  # noqa: PLC0415
+    from sky.serve import serve_utils  # noqa: import-outside-toplevel
     return not serve_utils.is_consolidation_mode(pool=pool)
 
 

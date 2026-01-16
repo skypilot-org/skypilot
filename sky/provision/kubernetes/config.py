@@ -574,7 +574,7 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
                          'Please check the permissions of the SkyPilot service '
                          'account or contact your cluster admin to create the '
                          'DaemonSet manually. '
-                         'Reference: https://docs.skypilot.co/reference/kubernetes/kubernetes-setup.html#kubernetes-setup-fuse')  # noqa: E501
+                         'Reference: https://docs.skypilot.co/reference/kubernetes/kubernetes-setup.html#kubernetes-setup-fuse')  # noqa: line-too-long
             raise
         else:
             raise

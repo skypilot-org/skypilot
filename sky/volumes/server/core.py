@@ -124,7 +124,7 @@ def volume_list(
                 cloud_to_used_by_pods[cloud] = used_by_pods
                 cloud_to_used_by_clusters[cloud] = used_by_clusters
                 cloud_to_failed_volume_names[cloud] = failed_volume_names
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:  # noqa: blind-except
                 logger.warning(
                     f'Failed to get usedby info for volumes on {cloud}: {e}')
                 cloud_to_used_by_pods[cloud] = {}

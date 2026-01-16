@@ -72,24 +72,24 @@ def patch() -> None:
     # from an isolated python process, because once imported
     # the python module would persist in the memory.
 
-    from ray._private import log_monitor  # noqa: PLC0415
+    from ray._private import log_monitor  # noqa: import-outside-toplevel
     _run_patch(log_monitor.__file__, _to_absolute('log_monitor.py.patch'))
 
-    from ray._private import worker  # noqa: PLC0415
+    from ray._private import worker  # noqa: import-outside-toplevel
     _run_patch(worker.__file__, _to_absolute('worker.py.patch'))
 
-    from ray.dashboard.modules.job import cli  # noqa: PLC0415
+    from ray.dashboard.modules.job import cli  # noqa: import-outside-toplevel
     _run_patch(cli.__file__, _to_absolute('cli.py.patch'))
 
-    from ray.autoscaler._private import autoscaler  # noqa: PLC0415
+    from ray.autoscaler._private import autoscaler  # noqa: import-outside-toplevel
     _run_patch(autoscaler.__file__, _to_absolute('autoscaler.py.patch'))
 
-    from ray.autoscaler._private import command_runner  # noqa: PLC0415
+    from ray.autoscaler._private import command_runner  # noqa: import-outside-toplevel
     _run_patch(command_runner.__file__, _to_absolute('command_runner.py.patch'))
 
-    from ray.autoscaler._private import resource_demand_scheduler  # noqa: PLC0415
+    from ray.autoscaler._private import resource_demand_scheduler  # noqa: import-outside-toplevel
     _run_patch(resource_demand_scheduler.__file__,
                _to_absolute('resource_demand_scheduler.py.patch'))
 
-    from ray.autoscaler._private import updater  # noqa: PLC0415
+    from ray.autoscaler._private import updater  # noqa: import-outside-toplevel
     _run_patch(updater.__file__, _to_absolute('updater.py.patch'))

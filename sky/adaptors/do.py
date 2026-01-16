@@ -14,7 +14,7 @@ _LAZY_MODULES = (pydo, azure)
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def exceptions():
     """Azure exceptions."""
-    from azure.core import exceptions as azure_exceptions  # noqa: PLC0415
+    from azure.core import exceptions as azure_exceptions  # noqa: import-outside-toplevel
     return azure_exceptions
 
 

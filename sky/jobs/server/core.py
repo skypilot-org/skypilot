@@ -498,7 +498,7 @@ def launch(
             controller_task.set_resources(controller_resources)
 
             controller_task.managed_job_dag = dag_copy
-            controller_task._metadata = metadata  # noqa: SLF001
+            controller_task._metadata = metadata  # noqa: private-member-access
 
             job_identity = ''
             if job_rank is not None:
@@ -779,8 +779,8 @@ def queue(refresh: bool,
                 'region': (str) region of the cluster,
                 'user_name': (Optional[str]) job creator's user name,
                 'user_hash': (str) job creator's user hash,
-                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # noqa: E501
-                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # noqa: E501
+                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # noqa: line-too-long
+                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # noqa: line-too-long
             }
         ]
     Raises:
@@ -853,8 +853,8 @@ def queue_v2(
                     'region': (str) region of the cluster,
                     'user_name': (Optional[str]) job creator's user name,
                     'user_hash': (str) job creator's user hash,
-                    'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # noqa: E501
-                    'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # noqa: E501
+                    'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # noqa: line-too-long
+                    'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # noqa: line-too-long
                 }
             ]
         total: int, total number of jobs after filter
@@ -1009,7 +1009,7 @@ def queue_v2(
 @usage_lib.entrypoint
 def cancel(name: Optional[str] = None,
            job_ids: Optional[List[int]] = None,
-           all: bool = False,  # noqa: A002
+           all: bool = False,  # noqa: builtin-argument-shadowing
            all_users: bool = False,
            pool: Optional[str] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -1221,7 +1221,7 @@ def pool_apply(
 @usage_lib.entrypoint
 def pool_down(
     pool_names: Optional[Union[str, List[str]]] = None,
-    all: bool = False,  # noqa: A002
+    all: bool = False,  # noqa: builtin-argument-shadowing
     purge: bool = False,
 ) -> None:
     """Delete a pool."""

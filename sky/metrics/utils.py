@@ -433,7 +433,7 @@ async def get_metrics_for_context(context: str) -> str:
     # Query both DCGM metrics and kube_pod_labels metrics
     # This ensures the dashboard can perform joins to filter by skypilot cluster
     match_patterns = [
-        '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # noqa: E501
+        '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # noqa: line-too-long
         'kube_pod_labels',
         'node_cpu_seconds_total{mode="idle"}'
     ]

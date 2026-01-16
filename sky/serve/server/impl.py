@@ -341,7 +341,7 @@ def up(
 
                 if controller_handle.is_grpc_enabled_with_flag:
                     try:
-                        lb_port = serve_rpc_utils.RpcRunner.wait_service_registration(  # noqa: E501
+                        lb_port = serve_rpc_utils.RpcRunner.wait_service_registration(  # noqa: line-too-long
                             controller_handle, service_name, controller_job_id,
                             pool)
                     except exceptions.SkyletMethodNotImplementedError:
@@ -711,7 +711,7 @@ def apply(
 
 def down(
     service_names: Optional[Union[str, List[str]]] = None,
-    all: bool = False,  # noqa: A002
+    all: bool = False,  # noqa: builtin-argument-shadowing
     purge: bool = False,
     pool: bool = False,
 ) -> None:

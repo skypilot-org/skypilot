@@ -164,7 +164,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                 username = profile['posixAccounts'][0]['username']
                 if username:
                     os_login_username = username
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:  # noqa: blind-except
                 logger.debug('Failed to parse gcloud os-login profile.\n'
                              f'{common_utils.format_exception(e)}')
                 pass

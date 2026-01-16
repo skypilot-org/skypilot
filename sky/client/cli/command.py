@@ -1237,7 +1237,7 @@ def launch(
               type=str,
               help='Git reference (branch, tag, or commit hash) to use.')
 @usage_lib.entrypoint
-def exec(  # noqa: A001
+def exec(  # noqa: builtin-variable-shadowing
     cluster: Optional[str],
     cluster_option: Optional[str],
     entrypoint: Tuple[str, ...],
@@ -1435,7 +1435,7 @@ def _handle_jobs_queue_request(
             if pool_status_request_id is not None:
                 try:
                     return sdk.stream_and_get(pool_status_request_id)
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: blind-except
                     # If getting pool status fails, just continue without it
                     return None
             return None
@@ -1487,7 +1487,7 @@ def _handle_jobs_queue_request(
                     records[0]['status'] == status_lib.ClusterStatus.STOPPED):
                 controller = controller_utils.Controllers.JOBS_CONTROLLER.value
                 msg = controller.default_hint_if_non_existent
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: blind-except
             # This is to an best effort to find the latest controller status to
             # print more helpful message, so we can ignore any exception to
             # print the original error.
@@ -1498,7 +1498,7 @@ def _handle_jobs_queue_request(
                 'issues. Try again later. '
                 f'Details: {common_utils.format_exception(e, use_bracket=True)}'
             )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: blind-except
         msg = ''
         if env_options.Options.SHOW_DEBUG_INFO.get():
             msg += traceback.format_exc()
@@ -1571,7 +1571,7 @@ def _handle_services_request(
                 controller = (
                     controller_utils.Controllers.SKY_SERVE_CONTROLLER.value)
                 msg = controller.default_hint_if_non_existent
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: blind-except
             # This is to an best effort to find the latest controller status to
             # print more helpful message, so we can ignore any exception to
             # print the original error.
@@ -1580,7 +1580,7 @@ def _handle_services_request(
             msg = (f'Failed to fetch {noun} statuses due to connection issues. '
                    'Please try again later. Details: '
                    f'{common_utils.format_exception(e, use_bracket=True)}')
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: blind-except
         msg = (f'Failed to fetch {noun} statuses: '
                f'{common_utils.format_exception(e, use_bracket=True)}')
     else:
@@ -2116,7 +2116,7 @@ def status_kubernetes(verbose: bool):
               help='Show clusters from the last N days. Default is 30 days. '
               'If set to 0, show all clusters.')
 @usage_lib.entrypoint
-def cost_report(all: bool, days: int):  # noqa: A002
+def cost_report(all: bool, days: int):  # noqa: builtin-argument-shadowing
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show estimated costs for launched clusters.
 
@@ -2435,7 +2435,7 @@ def logs(
 @usage_lib.entrypoint
 def cancel(
     cluster: str,
-    all: bool,  # noqa: A002
+    all: bool,  # noqa: builtin-argument-shadowing
     all_users: bool,
     jobs: List[int],
     yes: bool,
@@ -2483,7 +2483,7 @@ def cancel(
             matching_clusters = [
                 c for c in all_clusters if fnmatch.fnmatch(c, cluster)
             ]
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: blind-except
             raise click.UsageError(
                 f'No clusters match pattern: {cluster!r}') from None
     else:
@@ -2562,7 +2562,7 @@ def cancel(
 @usage_lib.entrypoint
 def stop(
     clusters: List[str],
-    all: bool,  # noqa: A002
+    all: bool,  # noqa: builtin-argument-shadowing
     all_users: bool,
     yes: bool,
     async_call: bool,
@@ -2639,7 +2639,7 @@ def stop(
 @usage_lib.entrypoint
 def autostop(
     clusters: List[str],
-    all: bool,  # noqa: A002
+    all: bool,  # noqa: builtin-argument-shadowing
     all_users: bool,
     idle_minutes: Optional[int],
     wait_for: Optional[str],
@@ -2770,7 +2770,7 @@ def autostop(
 @usage_lib.entrypoint
 def start(
     clusters: List[str],
-    all: bool,  # noqa: A002
+    all: bool,  # noqa: builtin-argument-shadowing
     yes: bool,
     idle_minutes_to_autostop: Optional[int],
     wait_for: Optional[str],
@@ -2980,7 +2980,7 @@ def start(
 @usage_lib.entrypoint
 def down(
     clusters: List[str],
-    all: bool,  # noqa: A002
+    all: bool,  # noqa: builtin-argument-shadowing
     all_users: bool,
     yes: bool,
     purge: bool,
@@ -3544,7 +3544,7 @@ def check(infra_list: Tuple[str],
 @usage_lib.entrypoint
 def show_gpus(
         accelerator_str: Optional[str],
-        all: bool,  # noqa: A002
+        all: bool,  # noqa: builtin-argument-shadowing
         infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
@@ -4371,8 +4371,8 @@ def show_gpus(
                                   case_sensitive=False,
                                   all_regions=all_regions))
         # Import here to save module load speed.
-        # noqa: E501
-        from sky.catalog import common as catalog_common  # noqa: PLC0415
+        # noqa: line-too-long
+        from sky.catalog import common as catalog_common  # noqa: import-outside-toplevel
 
         # For each gpu name (count not included):
         #   - Group by cloud
@@ -4511,7 +4511,7 @@ def storage_ls(verbose: bool):
               help='Skip confirmation prompt.')
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
-def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  # noqa: A002
+def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  # noqa: builtin-argument-shadowing
     """Delete storage objects.
 
     Examples:
@@ -4559,7 +4559,7 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
     for name, request_id in request_ids.items():
         try:
             _async_call_or_wait(request_id, async_call, 'sky.storage')
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             logger.error(f'{colorama.Fore.RED}Error deleting storage {name}: '
                          f'{common_utils.format_exception(e, use_bracket=True)}'
                          f'{colorama.Style.RESET_ALL}')
@@ -4621,7 +4621,7 @@ def volumes_apply(
         entrypoint: Optional[Tuple[str, ...]],
         name: Optional[str],
         infra: Optional[str],
-        type: Optional[str],  # noqa: A002
+        type: Optional[str],  # noqa: builtin-argument-shadowing
         size: Optional[str],
         use_existing: Optional[bool],
         yes: bool,
@@ -4642,7 +4642,7 @@ def volumes_apply(
         sky volumes apply --name pvc2 --infra k8s --type k8s-pvc --size 100Gi
         --use-existing
     """
-    from sky.volumes import volume as volume_lib  # noqa: PLC0415
+    from sky.volumes import volume as volume_lib  # noqa: import-outside-toplevel
 
     volume_config_dict: Dict[str, Any] = {}
     if entrypoint is not None and len(entrypoint) > 0:
@@ -4760,7 +4760,7 @@ def volumes_ls(verbose: bool):
 @usage_lib.entrypoint
 def volumes_delete(
         names: List[str],
-        all: bool,  # noqa: A002
+        all: bool,  # noqa: builtin-argument-shadowing
         purge: bool,
         yes: bool,
         async_call: bool):
@@ -4809,7 +4809,7 @@ def volumes_delete(
         try:
             _async_call_or_wait(volumes_sdk.delete(names, purge=purge),
                                 async_call, 'sky.volumes.delete')
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             logger.error(f'{colorama.Fore.RED}Error deleting volumes {names}: '
                          f'{str(e)}{colorama.Style.RESET_ALL}')
 
@@ -5062,7 +5062,7 @@ def jobs_launch(
 @flags.all_option('Show all jobs.')
 @usage_lib.entrypoint
 def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
-               all_users: bool, all: bool, limit: int):  # noqa: A002
+               all_users: bool, all: bool, limit: int):  # noqa: builtin-argument-shadowing
     """Show statuses of managed jobs.
 
     Each managed jobs can have one of the following statuses:
@@ -5142,7 +5142,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
         def get_pool_status():
             try:
                 return managed_jobs.pool_status(pool_names=None)
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: blind-except
                 # If pool_status fails, we'll just skip the worker information
                 return None
 
@@ -5200,7 +5200,7 @@ def jobs_cancel(
     name: Optional[str],
     pool: Optional[str],
     job_ids: Tuple[int],
-    all: bool,  # noqa: A002
+    all: bool,  # noqa: builtin-argument-shadowing
     yes: bool,
     all_users: bool,
 ):
@@ -5522,7 +5522,7 @@ def jobs_pool_status(verbose: bool, pool_names: List[str], show_all: bool):
 @usage_lib.entrypoint
 def jobs_pool_down(
     pool_names: List[str],
-    all: bool,  # noqa: A002
+    all: bool,  # noqa: builtin-argument-shadowing
     purge: bool,
     yes: bool,
     async_call: bool,
@@ -5542,7 +5542,7 @@ def jobs_pool_down(
                                f'Provided {argument_str!r}.')
 
     def _get_nonterminal_jobs(pool_names: List[str],
-                              all: bool) -> List[responses.ManagedJobRecord]:  # noqa: A002
+                              all: bool) -> List[responses.ManagedJobRecord]:  # noqa: builtin-argument-shadowing
         # Get nonterminal jobs for this pool using managed_jobs.queue
         request_id, queue_result_version = cli_utils.get_managed_job_queue(
             refresh=False,
@@ -5636,7 +5636,7 @@ def jobs_pool_down(
                         f'anyway.{colorama.Style.RESET_ALL}')
                 else:
                     click.echo('All jobs cancelled.')
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: blind-except
         # If API call fails, log warning but continue with pool down
         logger.warning(
             f'Failed to check for running jobs in pool(s): {pool_names!r}: {e}.'
@@ -6377,7 +6377,7 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
 @usage_lib.entrypoint
 def serve_down(
     service_names: List[str],
-    all: bool,  # noqa: A002
+    all: bool,  # noqa: builtin-argument-shadowing
     purge: bool,
     yes: bool,
     replica_id: Optional[int],
@@ -6708,7 +6708,7 @@ def api_logs(request_id: Optional[str], server_logs: bool,
 @flags.all_users_option('Cancel all requests from all users.')
 @flags.yes_option()
 @usage_lib.entrypoint
-def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool,  # noqa: A002
+def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool,  # noqa: builtin-argument-shadowing
                yes: bool):
     """Cancel a request running on SkyPilot API server."""
     if all or all_users:

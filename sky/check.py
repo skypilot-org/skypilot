@@ -85,7 +85,7 @@ def check_capabilities(
     capabilities: Optional[List[sky_cloud.CloudCapability]] = None,
     workspace: Optional[str] = None,
 ) -> Dict[str, Dict[str, List[sky_cloud.CloudCapability]]]:
-    from sky.workspaces import core  # noqa: PLC0415
+    from sky.workspaces import core  # noqa: import-outside-toplevel
 
     echo = (lambda *_args, **_kwargs: None
            ) if quiet else lambda *args, **kwargs: click.echo(
@@ -138,7 +138,7 @@ def check_capabilities(
                     ok, reason = cloud.check_credentials(capability)
                 except exceptions.NotSupportedError:
                     return None
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: blind-except
                     ok, reason = False, traceback.format_exc()
                 if not isinstance(reason, dict):
                     reason = reason.strip() if reason else None
@@ -351,7 +351,7 @@ def check_capabilities(
                 dim=True) + click.style('sky check', bold=True) + '\n' +
             click.style(
                 'If any problems remain, refer to detailed docs at: '
-                'https://docs.skypilot.co/en/latest/getting-started/installation.html',  # noqa: E501
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html',  # noqa: line-too-long
                 dim=True))
 
     return all_workspaces_results

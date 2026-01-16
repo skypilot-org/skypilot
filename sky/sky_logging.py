@@ -85,7 +85,7 @@ class EnvAwareHandler(rich_utils.RichSafeStreamHandler):
 
     @level.setter
     def level(self, level):
-        self._level = logging._checkLevel(level)  # noqa: SLF001  # type: ignore[attr-defined]
+        self._level = logging._checkLevel(level)  # noqa: private-member-access# type: ignore[attr-defined]
 
 
 _root_logger = logging.getLogger('sky')
@@ -101,7 +101,7 @@ DIM_FORMATTER = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT, dim=True)
 # This is to make controlled logging via is_silent() possible:
 # in some situation we would like to disable any
 # printing/logging.
-print = builtins.print  # noqa: A001
+print = builtins.print  # noqa: builtin-variable-shadowing
 
 
 def _setup_logger():
@@ -234,12 +234,12 @@ def silent(should_silence: bool = True):
     # Turn off logger
     _root_logger.setLevel(logging.ERROR)
     _logging_config.is_silent = True
-    print = lambda *_args, **_kwargs: None  # noqa: A001
+    print = lambda *_args, **_kwargs: None  # noqa: builtin-variable-shadowing
     try:
         yield
     finally:
         # Restore logger
-        print = previous_print  # noqa: A001
+        print = previous_print  # noqa: builtin-variable-shadowing
         _root_logger.setLevel(previous_level)
         _logging_config.is_silent = previous_is_silent
 

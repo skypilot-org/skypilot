@@ -53,7 +53,7 @@ async def volume_validate(
         _: fastapi.Request,
         volume_validate_body: payloads.VolumeValidateBody) -> None:
     """Validates a volume."""
-    from sky.volumes import volume as volume_lib  # noqa: PLC0415
+    from sky.volumes import volume as volume_lib  # noqa: import-outside-toplevel
 
     try:
         volume_config = {
@@ -67,7 +67,7 @@ async def volume_validate(
         }
         volume = volume_lib.Volume.from_yaml_config(volume_config)
         volume.validate()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: blind-except
         requests_lib.set_exception_stacktrace(e)
         raise fastapi.HTTPException(status_code=400,
                                     detail=exceptions.serialize_exception(e))

@@ -169,7 +169,7 @@ class PolicyInterface:
         return f'{self.__class__.__name__}'
 
 
-# noqa: E501
+# noqa: line-too-long
 class AdminPolicy(PolicyInterface):
     """Abstract interface of an admin-defined policy for all user requests.
 
@@ -272,7 +272,7 @@ class RestfulAdminPolicy(PolicyTemplate):
         try:
             mutated_user_request = MutatedUserRequest.decode(
                 response.json(), user_request)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.RestfulPolicyError(
                     f'Failed to decode response from admin policy URL '

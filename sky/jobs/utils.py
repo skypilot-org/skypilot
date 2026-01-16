@@ -152,7 +152,7 @@ def terminate_cluster(
     max_retry: int = 6,
 ) -> None:
     """Terminate the cluster."""
-    from sky import core  # noqa: PLC0415
+    from sky import core  # noqa: import-outside-toplevel
     retry_cnt = 0
     # In some cases, e.g. botocore.exceptions.NoCredentialsError due to AWS
     # metadata service throttling, the failed sky.down attempt can take 10-11
@@ -314,7 +314,7 @@ def ha_recovery_for_consolidation_mode() -> None:
                         logger.debug(message)
                         f.write(message)
                         continue
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: blind-except
                     # _controller_process_alive may raise if psutil fails; we
                     # should not crash the recovery logic because of this.
                     message = ('Error checking controller pid '
@@ -447,7 +447,7 @@ def controller_process_alive(record: managed_job_state.ControllerPidRecord,
         else:
             # If we can't check the create_time try to check the cmdline instead
             cmd_str = ' '.join(process.cmdline())
-            # noqa: E501
+            # noqa: line-too-long
             # Pre-#7051 cmdline: /path/to/python -u -m sky.jobs.controller <dag.yaml_path> --job-id <job_id>
             # Post-#7051 cmdline: /path/to/python -u -msky.jobs.controller
             if ('-m sky.jobs.controller' not in cmd_str and

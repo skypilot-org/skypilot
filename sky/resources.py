@@ -211,7 +211,7 @@ class Resources:
             False.
           job_recovery: the job recovery strategy to use for the managed
             job to recover the cluster from preemption. Refer to
-            `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/jobs/recovery_strategy.py>`__ # noqa: E501
+            `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/jobs/recovery_strategy.py>`__ # noqa: line-too-long
             for more details.
             When a dict is provided, it can have the following fields:
 
@@ -1439,7 +1439,7 @@ class Resources:
                     continue
                 # TODO(hailong): check instance local SSD
                 # support for instance_type.
-                # Refer to https://cloud.google.com/compute/docs/disks/local-ssd#machine-series-lssd # noqa: E501
+                # Refer to https://cloud.google.com/compute/docs/disks/local-ssd#machine-series-lssd # noqa: line-too-long
                 self.cloud.check_disk_tier_enabled(self.instance_type,
                                                    volume['disk_tier'])
             if (need_region_or_zone and self._region is None and

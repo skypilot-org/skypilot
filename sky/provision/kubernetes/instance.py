@@ -236,7 +236,7 @@ def _get_pvc_binding_status(namespace: str, context: Optional[str],
                     # Take the most recent event message
                     pending_info += f' - {event_messages[-1]}'
                 pending_pvcs.append((pvc_name, pending_info))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             logger.debug(f'Failed to get PVC {pvc_name} status: {e}')
             continue
 
@@ -267,7 +267,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
         # the error message from the pod that is already scheduled.
         if pod_status != 'Pending':
             continue
-        pod_name = pod._metadata._name  # noqa: SLF001
+        pod_name = pod._metadata._name  # noqa: private-member-access
         events = kubernetes.core_api(context).list_namespaced_event(
             namespace,
             field_selector=(f'involvedObject.name={pod_name},'
@@ -315,7 +315,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                     # TODO(Doyoung): Update the error message raised
                     # with the multi-host TPU support.
                     gpu_resource_key = kubernetes_utils.get_gpu_resource_key(
-                        context)  # noqa: E501
+                        context)  # noqa: line-too-long
                     if ((f'Insufficient {gpu_resource_key}' in event_message) or
                         ('didn\'t match Pod\'s node affinity/selector'
                          in event_message) and pod.spec.node_selector):
@@ -451,7 +451,7 @@ def _cluster_had_autoscale_event(namespace, context, search_start) -> bool:
         return _detect_cluster_event_reason_occurred(namespace, context,
                                                      search_start,
                                                      'TriggeredScaleUp')
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: blind-except
         logger.debug(f'Error occurred while detecting cluster autoscaler: {e}')
         return False
 
@@ -482,7 +482,7 @@ def _cluster_maybe_autoscaling(namespace, context, search_start) -> bool:
         return _detect_cluster_event_reason_occurred(namespace, context,
                                                      search_start,
                                                      'FailedScheduling')
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: blind-except
         logger.debug(f'Error occurred while detecting cluster autoscaler: {e}')
         return False
 
@@ -605,7 +605,7 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
         _raise_pod_scheduling_errors(namespace, context, new_nodes)
     except config_lib.KubernetesError:
         raise
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: blind-except
         raise config_lib.KubernetesError(
             'An error occurred while trying to fetch the reason '
             'for pod scheduling failure. '
@@ -889,7 +889,7 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
         '$(prefix_cmd) service ssh restart; '
         # Eliminate the error
         # `mesg: ttyname failed: inappropriate ioctl for device`.
-        # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # noqa: E501
+        # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # noqa: line-too-long
         '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
 
     pre_init_cmd = ('set -ex; ' + check_k8s_user_sudo_cmd +
@@ -1160,7 +1160,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                        'Continuing without using nvidia RuntimeClass.\n'
                        'If you are on a K3s cluster, manually '
                        'override runtimeClassName in ~/.sky/config.yaml. '
-                       'For more details, refer to https://docs.skypilot.co/en/latest/reference/config.html')  # noqa: E501
+                       'For more details, refer to https://docs.skypilot.co/en/latest/reference/config.html')  # noqa: line-too-long
 
     needs_gpus = False
     needs_gpus_nvidia = False
@@ -1173,7 +1173,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             kubernetes_utils.SUPPORTED_GPU_RESOURCE_KEYS['nvidia'], 0) > 0
 
     # TPU pods provisioned on GKE use the default containerd runtime.
-    # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # noqa: E501
+    # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # noqa: line-too-long
     if nvidia_runtime_exists and needs_gpus_nvidia:
         pod_spec['spec']['runtimeClassName'] = 'nvidia'
 
@@ -1219,8 +1219,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         #  spec.affinity
         #  resourceClaims
         # Refer to the following links for more details:
-        # https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest#define_a_provisioningrequest_object # noqa: E501
-        # https://kueue.sigs.k8s.io/docs/admission-check-controllers/provisioning/#podset-merge-policy # noqa: E501
+        # https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest#define_a_provisioningrequest_object # noqa: line-too-long
+        # https://kueue.sigs.k8s.io/docs/admission-check-controllers/provisioning/#podset-merge-policy # noqa: line-too-long
         if config.count > 1:
             # For multi-node support, we put a soft-constraint to schedule
             # worker pods on different nodes than the head pod.
@@ -1258,7 +1258,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         # This is to prevent from non-TPU workloads from being scheduled on TPU
         # slice nodes. We need this toleration to allow the pod to be scheduled
         # on TPU nodes.
-        # Reference: https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work # noqa: E501
+        # Reference: https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work # noqa: line-too-long
         tpu_label = kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY
         if tpu_label in config.node_config.get('spec',
                                                {}).get('nodeSelector', {}):
@@ -1752,7 +1752,7 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
     """
     try:
         pod_events = _get_pod_events(context, namespace, pod_name)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: blind-except
         logger.debug(f'Failed to get events for pod {pod_name}: {e}')
         return None
 
@@ -1990,7 +1990,7 @@ def list_namespaced_pod(context: Optional[str], namespace: str,
             raise exceptions.ClusterStatusFetchingError(
                 f'Failed to query cluster {cluster_name_on_cloud!r} status. ' +
                 msg) from None
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: blind-except
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterStatusFetchingError(
                 f'Failed to query {identity} {cluster_name_on_cloud!r} '

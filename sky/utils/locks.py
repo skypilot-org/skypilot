@@ -168,7 +168,7 @@ class PostgresLock(DistributedLock):
     Supports both exclusive and shared lock modes.
 
     References:
-    # noqa: E501
+    # noqa: line-too-long
     - https://www.postgresql.org/docs/current/explicit-locking.html#ADVISORY-LOCKS
     - https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS
     # TODO(cooperc): re-enable pylint line-too-long
@@ -340,7 +340,7 @@ class PostgresLock(DistributedLock):
                     self._connection.invalidate()
                 else:
                     self._connection.close()
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:  # noqa: blind-except
                 if invalidate:
                     logger.debug(
                         f'Failed to invalidate postgres connection: {e}')
@@ -409,7 +409,7 @@ def _detect_lock_type() -> str:
         engine = global_user_state.initialize_and_get_db()
         if engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
             return 'postgres'
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: blind-except
         # Fall back to filelock if database detection fails
         pass
 

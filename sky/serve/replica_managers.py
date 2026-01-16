@@ -151,7 +151,7 @@ def launch_cluster(replica_id: int,
                                    f'cluster {cluster_name}.') from e
             logger.info('Failed to launch the sky serve replica cluster with '
                         f'error: {common_utils.format_exception(e)})')
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             logger.info('Failed to launch the sky serve replica cluster with '
                         f'error: {common_utils.format_exception(e)})')
             with ux_utils.enable_traceback():
@@ -590,7 +590,7 @@ class ReplicaInfo:
             if statuses[1] == job_lib.JobStatus.SUCCEEDED:
                 return self, True, probe_time
             return self, False, probe_time
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             logger.error(f'Error when probing pool of {self.cluster_name}: '
                          f'{common_utils.format_exception(e)}.')
             return self, False, probe_time
@@ -1237,7 +1237,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             logger.debug('Refreshing thread pool.')
             try:
                 self._refresh_thread_pool()
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:  # noqa: blind-except
                 # No matter what error happens, we should keep the
                 # thread pool refresher running.
                 logger.error('Error in thread pool refresher: '
@@ -1300,7 +1300,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             logger.debug('Refreshing job status.')
             try:
                 self._fetch_job_status()
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:  # noqa: blind-except
                 # No matter what error happens, we should keep the
                 # job status fetcher running.
                 logger.error('Error in job status fetcher: '
@@ -1434,7 +1434,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 serve_utils.set_service_status_and_active_versions_from_replica(
                     self._service_name, replica_infos, self._update_mode)
 
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:  # noqa: blind-except
                 # No matter what error happens, we should keep the
                 # replica prober running.
                 logger.error('Error in replica prober: '

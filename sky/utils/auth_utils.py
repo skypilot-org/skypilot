@@ -36,9 +36,9 @@ def get_ssh_key_and_lock_path(user_hash: str) -> Tuple[str, str, str]:
 def _generate_rsa_key_pair() -> Tuple[str, str]:
     # Keep the import of the cryptography local to avoid expensive
     # third-party imports when not needed.
-    from cryptography.hazmat.backends import default_backend  # noqa: PLC0415
-    from cryptography.hazmat.primitives import serialization  # noqa: PLC0415
-    from cryptography.hazmat.primitives.asymmetric import rsa  # noqa: PLC0415
+    from cryptography.hazmat.backends import default_backend  # noqa: import-outside-toplevel
+    from cryptography.hazmat.primitives import serialization  # noqa: import-outside-toplevel
+    from cryptography.hazmat.primitives.asymmetric import rsa  # noqa: import-outside-toplevel
 
     key = rsa.generate_private_key(backend=default_backend(),
                                    public_exponent=65537,

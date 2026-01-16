@@ -215,7 +215,7 @@ def _retry_on_server_unavailable(max_wait_seconds: int = 600,
                         with rich_utils.client_status(
                                 _readable_error_msg(e.message)):
                             if time.time() - start_time > max_wait_seconds:
-                                # noqa: E501
+                                # noqa: line-too-long
                                 raise exceptions.ServerTemporarilyUnavailableError(
                                     'Timeout waiting for the API server to be '
                                     f'available after {max_wait_seconds}s.') \
@@ -255,7 +255,7 @@ def handle_server_unavailable(response: 'requests.Response') -> None:
         response_data = response.json()
         if 'detail' in response_data:
             error_msg = response_data['detail']
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: blind-except
         error_msg = handle_response_text(response)
 
     with ux_utils.print_exception_no_traceback():
@@ -316,12 +316,12 @@ async def handle_server_unavailable_async(
         response_data = await response.json()
         if 'detail' in response_data:
             error_msg = response_data['detail']
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: blind-except
         try:
             text = await response.text()
             if text:
                 error_msg = text
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: blind-except
             pass
 
     with ux_utils.print_exception_no_traceback():

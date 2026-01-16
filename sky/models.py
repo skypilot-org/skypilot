@@ -24,7 +24,7 @@ class User:
 
     def __init__(
             self,
-            id: str,  # noqa: A002
+            id: str,  # noqa: builtin-argument-shadowing
             name: Optional[str] = None,
             password: Optional[str] = None,
             created_at: Optional[int] = None):

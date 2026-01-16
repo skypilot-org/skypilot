@@ -309,7 +309,7 @@ class DockerInitializer:
                 # AWS ECR: Use aws ecr get-login-password for authentication
                 # ECR format: <account-id>.dkr.ecr.<region>.amazonaws.com
                 # This command uses the IAM credentials from the EC2 instance
-                # Ref: https://docs.aws.amazon.com/AmazonECR/latest/userguide/registry_auth.html # noqa: E501
+                # Ref: https://docs.aws.amazon.com/AmazonECR/latest/userguide/registry_auth.html # noqa: line-too-long
                 region = _extract_region_from_ecr_server(
                     docker_login_config.server)
 
@@ -398,7 +398,7 @@ class DockerInitializer:
         # alias for sudo to empty string, therefore any sudo in the following
         # commands won't fail.
         # Disable apt-get from asking user input during installation.
-        # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai  # noqa: E501
+        # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai  # noqa: line-too-long
         self._run(
             f'echo \'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}\' '
             '>> ~/.bashrc;'
@@ -440,11 +440,11 @@ class DockerInitializer:
         # container.
         # Last command here is to eliminate the error
         # `mesg: ttyname failed: inappropriate ioctl for device`.
-        # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # noqa: E501
+        # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # noqa: line-too-long
         port = constants.DEFAULT_DOCKER_PORT
         # In case the port is already configured in the sshd_config file
         # in some images, we delete it first and then append the new one.
-        # noqa: W605
+        # noqa: invalid-escape-sequence
         self._run(
             'sudo sed -i "/^Port .*/d" /etc/ssh/sshd_config;'
             f'echo "Port {port}" | sudo tee -a /etc/ssh/sshd_config > /dev/null;'
@@ -523,7 +523,7 @@ class DockerInitializer:
             try:
                 self._run('nvidia-smi', log_err_when_fail=False)
                 return run_options + ['--runtime=nvidia', '--gpus all']
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:  # noqa: blind-except
                 logger.debug(
                     'Nvidia Container Runtime is present in the docker image'
                     'specified, but no GPUs found on the cluster. It should '
@@ -554,7 +554,7 @@ class DockerInitializer:
                 DEFAULT_OBJECT_STORE_MAX_MEMORY_BYTES,
             )
             return run_options + [f'--shm-size="{shm_size}b"']
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: blind-except
             logger.warning(
                 f'Received error while trying to auto-compute SHM size {e}')
             return run_options

@@ -19,7 +19,7 @@ class Dag:
 
     def __init__(self) -> None:
         self.tasks: List['task.Task'] = []
-        import networkx as nx  # noqa: PLC0415
+        import networkx as nx  # noqa: import-outside-toplevel
 
         self.graph = nx.DiGraph()
         self.name: Optional[str] = None

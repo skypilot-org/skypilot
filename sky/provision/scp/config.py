@@ -82,7 +82,7 @@ def _get_default_config_cmd():
 def _get_ssh_key_gen_cmd(ssh_public_key: str):
     cmd_st = 'mkdir -p ~/.ssh/; touch ~/.ssh/authorized_keys;'
     cmd_ed = 'chmod 644 ~/.ssh/authorized_keys; chmod 700 ~/.ssh/'
-    cmd = "echo '{}' &>>~/.ssh/authorized_keys;".format(ssh_public_key)  # noqa: Q000
+    cmd = "echo '{}' &>>~/.ssh/authorized_keys;".format(ssh_public_key)  # noqa: bad-quotes-inline-string
     return cmd_st + cmd + cmd_ed
 
 
