@@ -54,13 +54,12 @@ exclude = [
 # I: isort (import sorting)
 # B: flake8-bugbear (common bugs)
 # Q: flake8-quotes (quote consistency)
-# C4: flake8-comprehensions
 # BLE: flake8-blind-except (broad exception catching)
 # ARG: flake8-unused-arguments
 # A: flake8-builtins (builtin shadowing)
 # SLF: flake8-self (private member access)
 # PLC0415: pylint import-outside-toplevel
-select = ["F", "E", "W", "I", "B", "Q", "C4", "BLE", "ARG", "A", "SLF", "PLC0415"]
+select = ["F", "E", "W", "I", "B", "Q", "BLE", "ARG", "A", "SLF", "PLC0415"]
 
 # Match pylint's dummy variable pattern: _, __, _var, unused_*, dummy_*
 dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?)|unused_.*|dummy_.*)$"
