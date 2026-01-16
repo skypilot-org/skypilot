@@ -471,9 +471,6 @@
                             "type": "boolean"
                         }
                     }
-                },
-                "unified": {
-                    "type": "boolean"
                 }
             }
         },
