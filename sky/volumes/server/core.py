@@ -124,7 +124,7 @@ def volume_list(
                 cloud_to_used_by_pods[cloud] = used_by_pods
                 cloud_to_used_by_clusters[cloud] = used_by_clusters
                 cloud_to_failed_volume_names[cloud] = failed_volume_names
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 logger.warning(
                     f'Failed to get usedby info for volumes on {cloud}: {e}')
                 cloud_to_used_by_pods[cloud] = {}
@@ -229,7 +229,7 @@ def volume_delete(names: List[str],
             with _volume_lock(name):
                 try:
                     provision.delete_volume(cloud, config)
-                except Exception as e:  # pylint: disable=broad-except
+                except Exception as e:
                     if purge:
                         logger.warning(f'Failed to delete volume {name} '
                                        f'on {cloud}: {e}. Purging from '

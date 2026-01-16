@@ -111,7 +111,7 @@ def _auto_retry(should_retry: Callable[[Exception], bool] = lambda _: True):
             for retry_cnt in range(_MAX_RETRY):
                 try:
                     return func(*args, **kwargs)
-                except Exception as e:  # pylint: disable=broad-except
+                except Exception as e:
                     if not should_retry(e) or retry_cnt >= _MAX_RETRY - 1:
                         raise
                     sleep = backoff.current_backoff()
@@ -493,7 +493,6 @@ def start_skylet_on_head_node(
         launched_resources: resources_lib.Resources) -> None:
     """Start skylet on the head node."""
     # Avoid circular import.
-    # pylint: disable=import-outside-toplevel
     from sky.utils import controller_utils
 
     def _set_skypilot_env_var_cmd() -> str:

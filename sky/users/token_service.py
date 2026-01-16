@@ -66,7 +66,7 @@ class TokenService:
                 if db_secret:
                     logger.debug('Retrieved existing JWT secret from database')
                     return db_secret
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 logger.debug(f'Failed to get JWT secret from database: {e}')
             return None
 
@@ -87,7 +87,7 @@ class TokenService:
                 logger.info(
                     'Generated new JWT secret and stored in database. '
                     'This secret will persist across API server restarts.')
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 logger.warning(
                     f'Failed to store new JWT secret in database: {e}. '
                     f'Using in-memory secret (tokens will not persist '

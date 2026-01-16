@@ -147,7 +147,6 @@ def compute_server_config(
         burstable_parallel_for_short = _BURSTABLE_WORKERS_FOR_LOCAL
         # Runs in low resource mode if the available memory is less than
         # server_constants.MIN_AVAIL_MEM_GB.
-        # pylint: disable=import-outside-toplevel
         import sky.jobs.utils as job_utils
         max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
                       if job_utils.is_consolidation_mode() else
@@ -206,7 +205,6 @@ def _max_long_worker_parallism(cpu_count: int,
                                local=False) -> int:
     """Max parallelism for long workers."""
     # Reserve min available memory to avoid OOM.
-    # pylint: disable=import-outside-toplevel
     import sky.jobs.utils as job_utils
     max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
                   if job_utils.is_consolidation_mode() else
@@ -235,7 +233,6 @@ def _max_short_worker_parallism(mem_size_gb: float,
                                 long_worker_parallism: int) -> int:
     """Max parallelism for short workers."""
     # Reserve memory for long workers and min available memory.
-    # pylint: disable=import-outside-toplevel
     import sky.jobs.utils as job_utils
     max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
                   if job_utils.is_consolidation_mode() else

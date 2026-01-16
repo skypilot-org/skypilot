@@ -43,7 +43,6 @@ class InternalRequestDaemon:
     should_skip: Callable[[], bool] = _default_should_skip
 
     def refresh_log_level(self) -> int:
-        # pylint: disable=import-outside-toplevel
         import logging
 
         try:
@@ -64,7 +63,7 @@ class InternalRequestDaemon:
             # schema validation, just in case.
             logger.warning(f'Invalid log level: {level_str}, using DEBUG')
             return logging.DEBUG
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.exception(f'Error refreshing log level for {self.id}: {e}')
             return logging.DEBUG
 
@@ -83,7 +82,7 @@ class InternalRequestDaemon:
                     sky_logging.reload_logger()
                     level = self.refresh_log_level()
                     self.event_fn()
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 # It is OK to fail to run the event, as the event is not
                 # critical, but we should log the error.
                 logger.exception(
@@ -106,7 +105,6 @@ class InternalRequestDaemon:
 
 def refresh_cluster_status_event():
     """Periodically refresh the cluster status."""
-    # pylint: disable=import-outside-toplevel
     from sky.backends import backend_utils
 
     logger.info('=== Refreshing cluster status ===')
@@ -122,7 +120,6 @@ def refresh_cluster_status_event():
 
 def refresh_volume_status_event():
     """Periodically refresh the volume status."""
-    # pylint: disable=import-outside-toplevel
     from sky.volumes.server import core
 
     # Disable logging for periodic refresh to avoid the usage message being
@@ -154,7 +151,6 @@ atexit.register(_release_managed_job_consolidation_mode_lock)
 
 def managed_job_status_refresh_event():
     """Refresh the managed job status for controller consolidation mode."""
-    # pylint: disable=import-outside-toplevel
     from sky.jobs import constants as managed_job_constants
     from sky.jobs import utils as managed_job_utils
 
@@ -211,14 +207,12 @@ def managed_job_status_refresh_event():
 
 def should_skip_managed_job_status_refresh():
     """Check if the managed job status refresh event should be skipped."""
-    # pylint: disable=import-outside-toplevel
     from sky.jobs import utils as managed_job_utils
     return not managed_job_utils.is_consolidation_mode()
 
 
 def _serve_status_refresh_event(pool: bool):
     """Refresh the sky serve status for controller consolidation mode."""
-    # pylint: disable=import-outside-toplevel
     from sky.serve import serve_utils
 
     # We run the recovery logic before starting the event loop as those two are
@@ -236,7 +230,6 @@ def _serve_status_refresh_event(pool: bool):
 
 def _should_skip_serve_status_refresh_event(pool: bool):
     """Check if the serve status refresh event should be skipped."""
-    # pylint: disable=import-outside-toplevel
     from sky.serve import serve_utils
     return not serve_utils.is_consolidation_mode(pool=pool)
 

@@ -124,7 +124,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     login=login_args,
                     create_instance_kwargs=create_instance_kwargs,
                 )
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 logger.warning(f'run_instances error: {e}')
                 raise
             logger.info(f'Launched instance {instance_id}.')
@@ -195,7 +195,7 @@ def action_instances(
             continue
         try:
             getattr(utils, fn)(inst_id)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'Failed to {fn} instance {inst_id}: '

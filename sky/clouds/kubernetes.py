@@ -68,7 +68,7 @@ class Kubernetes(clouds.Cloud):
     _CLOUD_UNSUPPORTED_FEATURES = {
         # TODO(romilb): Stopping might be possible to implement with
         #  container checkpointing introduced in Kubernetes v1.25. See:
-        #  https://kubernetes.io/blog/2022/12/05/forensic-container-checkpointing-alpha/ # pylint: disable=line-too-long
+        #  https://kubernetes.io/blog/2022/12/05/forensic-container-checkpointing-alpha/ # noqa: E501
         clouds.CloudImplementationFeatures.STOP: 'Kubernetes does not '
                                                  'support stopping VMs.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
@@ -938,7 +938,7 @@ class Kubernetes(clouds.Cloud):
                 assert check_result[1] is not None
                 return False, (_red_color('disabled.') +
                                _dim_color(f' Reason: {check_result[1]}'))
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             return False, _red_color(str(e))
 
     @classmethod
@@ -1027,7 +1027,7 @@ class Kubernetes(clouds.Cloud):
                     check=True)
             if os.path.exists(kubeconfig_file):
                 # convert auth plugin paths (e.g.: gke-gcloud-auth-plugin)
-                kubeconfig_file = kubernetes_utils.format_kubeconfig_exec_auth_with_cache(kubeconfig_file)  # pylint: disable=line-too-long
+                kubeconfig_file = kubernetes_utils.format_kubeconfig_exec_auth_with_cache(kubeconfig_file)  # noqa: E501
 
             # Upload kubeconfig to the default path to avoid having to set
             # KUBECONFIG in the environment.
@@ -1092,7 +1092,7 @@ class Kubernetes(clouds.Cloud):
 
         Follows Kubernetes DNS-1123 subdomain rules:
         - must be <= 253 characters
-        - must match: '[a-z0-9]([-a-z0-9]*[a-z0-9])?(.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*' # pylint: disable=line-too-long
+        - must match: '[a-z0-9]([-a-z0-9]*[a-z0-9])?(.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*' # noqa: E501
         """
         # Max length per DNS-1123 subdomain
         if len(volume_name) > cls._MAX_VOLUME_NAME_LEN_LIMIT:

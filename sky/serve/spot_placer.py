@@ -175,9 +175,7 @@ class SpotPlacer:
         logger.info(f'{len(possible_locations)} possible location candidates '
                     'are enabled for spot placement.')
         logger.debug(f'All possible locations: {possible_locations}')
-        self.location2status: Dict[Location, LocationStatus] = {
-            location: LocationStatus.ACTIVE for location in possible_locations
-        }
+        self.location2status: Dict[Location, LocationStatus] = dict.fromkeys(possible_locations, LocationStatus.ACTIVE)
         self.location2cost: Dict[Location, float] = {}
         # Already checked there is only one resource in the task.
         self.resources = list(task.resources)[0]

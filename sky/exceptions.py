@@ -122,7 +122,7 @@ def deserialize_exception(serialized: Dict[str, Any]) -> Exception:
         return Exception(f'{exception_type}: {serialized["message"]}')
     e = exception_class(*serialized['args'], **serialized['attributes'])
     if serialized['stacktrace'] is not None:
-        setattr(e, 'stacktrace', serialized['stacktrace'])
+        e.stacktrace = serialized['stacktrace']
     return e
 
 
@@ -459,7 +459,7 @@ class AWSAzFetchingError(SkyPilotExcludeArgsBaseException):
                     'Failed to retrieve availability zones. '
                     'Please ensure that the `ec2:DescribeAvailabilityZones` '
                     'action is enabled for your AWS account in IAM. '
-                    'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html.'  # pylint: disable=line-too-long
+                    'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html.'  # noqa: E501
                 )
             else:
                 raise ValueError(f'Unknown reason {self}')
@@ -553,7 +553,6 @@ class JobExitCode(enum.IntEnum):
                         status: Optional['job_lib.JobStatus']) -> 'JobExitCode':
         """Convert a job status to an exit code."""
         # Import here to avoid circular imports
-        # pylint: disable=import-outside-toplevel
         from sky.skylet import job_lib
 
         if status is None:
@@ -581,7 +580,6 @@ class JobExitCode(enum.IntEnum):
             status: Optional['managed_jobs.ManagedJobStatus']) -> 'JobExitCode':
         """Convert a managed job status to an exit code."""
         # Import here to avoid circular imports
-        # pylint: disable=import-outside-toplevel
         from sky import jobs as managed_jobs
 
         if status is None:

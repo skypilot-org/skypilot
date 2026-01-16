@@ -24,7 +24,6 @@ def up(
     task: Union['sky.Task', 'sky.Dag'],
     service_name: str,
     # Internal only:
-    # pylint: disable=invalid-name
     _need_confirmation: bool = False
 ) -> server_common.RequestId[Tuple[str, str]]:
     """Spins up a service.
@@ -59,7 +58,6 @@ def update(
     service_name: str,
     mode: 'serve_utils.UpdateMode',
     # Internal only:
-    # pylint: disable=invalid-name
     _need_confirmation: bool = False
 ) -> server_common.RequestId[None]:
     """Updates an existing service.
@@ -92,7 +90,7 @@ def update(
 @server_common.check_server_healthy_or_start
 def down(
     service_names: Optional[Union[str, List[str]]],
-    all: bool = False,  # pylint: disable=redefined-builtin
+    all: bool = False,
     purge: bool = False
 ) -> server_common.RequestId[None]:
     """Tears down a service.

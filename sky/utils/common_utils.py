@@ -395,7 +395,6 @@ def get_using_remote_api_server() -> bool:
         return value
     # This gets the right status for the local client.
     # TODO(zhwu): This is to prevent circular import. We should refactor this.
-    # pylint: disable=import-outside-toplevel
     from sky.server import common as server_common
     return not server_common.is_api_server_local()
 
@@ -555,7 +554,7 @@ def _redact_secrets_values(argv: List[str]) -> List[str]:
                 i += 1
 
         return result
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         # If anything goes wrong with redaction, return original argv
         # This ensures the command can still execute
         return argv or []
@@ -648,7 +647,7 @@ def retry(method, max_retries=3, initial_backoff=1):
         while try_count < max_retries:
             try:
                 return method(*args, **kwargs)
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 try_count += 1
                 if try_count < max_retries:
                     logger.warning(f'Caught {e}. Retrying.')
@@ -833,7 +832,7 @@ def get_cleaned_username(username: str = '') -> str:
      4. Removing any hyphens at the end of the username
      5. Truncate the username to 63 characters, as requested by GCP labels
 
-    Dots are removed due to: https://cloud.google.com/compute/docs/labeling-resources#requirements # pylint: disable=line-too-long
+    Dots are removed due to: https://cloud.google.com/compute/docs/labeling-resources#requirements # noqa: E501
 
     e.g. 1SkY-PiLot2- becomes sky-pilot2
 
@@ -1135,7 +1134,7 @@ def release_memory():
             libc = ctypes.CDLL('libc.so.6')
             return libc.malloc_trim(0)
         return 0
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         logger.error(f'Failed to release memory: '
                      f'{format_exception(e)}')
         return 0

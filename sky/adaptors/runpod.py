@@ -48,7 +48,7 @@ def rest_request(method: str,
                                     headers=headers,
                                     json=json,
                                     timeout=_TIMEOUT)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             # Retry on transient network errors
             if attempt >= _MAX_RETRIES:
                 raise RuntimeError(f'RunPod REST network error: {e}') from e
@@ -71,6 +71,6 @@ def rest_request(method: str,
         if resp.text:
             try:
                 return resp.json()
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 return resp.text
         return None

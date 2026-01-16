@@ -120,7 +120,6 @@ def _execute(
     skip_unnecessary_provisioning: bool = False,
     *,  #keyword only separator
     # Internal only:
-    # pylint: disable=invalid-name
     _request_name: request_names.AdminPolicyRequestName,
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
@@ -250,7 +249,6 @@ def _execute_dag(
     no_setup: bool,
     clone_disk_from: Optional[str],
     skip_unnecessary_provisioning: bool,
-    # pylint: disable=invalid-name
     _quiet_optimizer: bool,
     _is_launched_by_jobs_controller: bool,
     _is_launched_by_sky_serve_controller: bool,
@@ -551,7 +549,6 @@ def launch(
     fast: bool = False,
     *,  #keyword only separator
     # Internal only:
-    # pylint: disable=invalid-name
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
@@ -733,7 +730,7 @@ cluster_launch = launch
 
 
 @usage_lib.entrypoint
-def exec(  # pylint: disable=redefined-builtin
+def exec(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: str,
     dryrun: bool = False,

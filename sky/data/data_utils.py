@@ -125,7 +125,7 @@ def split_cos_path(s3_path: str) -> Tuple[str, str, str]:
         match = re.match(pattern_region_bucket_data, s3_path)
     except TypeError:
         # URI provided isn't a string
-        raise ValueError(f'URI received: {s3_path} is not valid.')  # pylint: disable=raise-missing-from
+        raise ValueError(f'URI received: {s3_path} is not valid.')
     if match:
         region, bucket_name, data_path = match.group(1), match.group(
             2), match.group(3)
@@ -306,7 +306,7 @@ def is_az_container_endpoint(endpoint_url: str) -> bool:
       bool: True if the endpoint is valid, False otherwise.
     """
     # Storage account must be length of 3-24
-    # Reference: https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules#microsoftstorage # pylint: disable=line-too-long
+    # Reference: https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules#microsoftstorage # noqa: E501
     pattern = re.compile(
         r'^https://([a-z0-9]{3,24})\.blob\.core\.windows\.net(/[^/]+)*$')
     match = pattern.match(endpoint_url)
@@ -378,7 +378,7 @@ def verify_oci_bucket(name: str) -> bool:
         # Try to get the bucket
         client.get_bucket(namespace_name=namespace, bucket_name=name)
         return True
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         # If any exception occurs (bucket not found, permission issues, etc.),
         # return False
         return False
@@ -404,7 +404,7 @@ def _get_ibm_cos_bucket_region(region, bucket_name):
         tmp_client = ibm.get_cos_client(region)
         tmp_client.head_bucket(Bucket=bucket_name)
         return region
-    except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # pylint: disable=line-too-long
+    except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # noqa: E501
         if e.response['Error']['Code'] == '404':
             logger.debug(f'bucket {bucket_name} was not found '
                          f'in {region}')
@@ -982,7 +982,7 @@ def verify_coreweave_bucket(name: str, retry: int = 0) -> bool:
                     f'{retry_count} retries ({retry_count * 5} seconds)')
             return True
 
-        except coreweave.botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # pylint: disable=line-too-long:
+        except coreweave.botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # noqa: E501
             error_code = e.response['Error']['Code']
             if error_code == '403':
                 logger.error(f'Access denied to bucket {name}')
@@ -992,7 +992,7 @@ def verify_coreweave_bucket(name: str, retry: int = 0) -> bool:
             else:
                 logger.debug(
                     f'Unexpected error checking CoreWeave bucket {name}: {e}')
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.debug(
                 f'Unexpected error checking CoreWeave bucket {name}: {e}')
 

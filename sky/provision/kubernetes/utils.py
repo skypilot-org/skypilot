@@ -14,8 +14,17 @@ import shutil
 import subprocess
 import time
 import typing
-from typing import (Any, Callable, Dict, List, Literal, Optional, Set, Tuple,
-                    Union)
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import ijson
 
@@ -56,7 +65,7 @@ else:
 # Please be careful when changing this.
 # When mounting, Kubernetes changes the ownership of the parent directory
 # to root:root.
-# See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.  # pylint: disable=line-too-long
+# See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.  # noqa: E501
 HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME = 'sky-data'
 # Path where the persistent volume for HA controller is mounted.
 # TODO(andy): Consider using dedicated path like `/var/skypilot`
@@ -787,7 +796,6 @@ class Autoscaler:
     can_query_backend: bool = False
 
     @classmethod
-    # pylint: disable=unused-argument
     def can_create_new_instance_of_type(cls, context: str,
                                         instance_type: str) -> bool:
         """Returns if the Kubernetes context has an autoscaler
@@ -1856,7 +1864,7 @@ def check_credentials(context: Optional[str],
                        'is stable.')
     except ValueError as e:
         return False, common_utils.format_exception(e)
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         return False, ('An error occurred: '
                        f'{common_utils.format_exception(e, use_bracket=True)}')
 
@@ -2109,7 +2117,7 @@ def check_pod_config(pod_config: dict) \
         PodValidator.validate(pod_config)
     except exceptions.KubernetesValidationError as e:
         return False, f'Validation error in {".".join(e.path)}: {str(e)}'
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         return False, f'Unexpected error: {str(e)}'
     return True, None
 
@@ -2438,7 +2446,7 @@ class KubernetesInstanceType:
             accelerator_type | str: Type of accelerator
         """
         pattern = re.compile(
-            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_type>[\w\d-]+):(?P<accelerator_count>\d+))?$'  # pylint: disable=line-too-long
+            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_type>[\w\d-]+):(?P<accelerator_count>\d+))?$'  # noqa: E501
         )
         match = pattern.match(name)
         if match:
@@ -2621,15 +2629,15 @@ def check_port_forward_mode_dependencies(
     # errors
     socat_message = (
         '`socat` is required to setup Kubernetes cloud with '
-        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
+        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # noqa: E501
         'default networking mode and it is not installed. ')
     netcat_default_message = (
         '`nc` is required to setup Kubernetes cloud with '
-        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
+        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # noqa: E501
         'default networking mode and it is not installed. ')
     netcat_macos_message = (
         'The default MacOS `nc` is installed. However, for '
-        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
+        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # noqa: E501
         'default networking mode, GNU netcat is required. ')
 
     # save
@@ -3024,7 +3032,7 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
     """Converts a dictionary to a Kubernetes object.
 
     Useful for comparing two Kubernetes objects. Adapted from
-    https://github.com/kubernetes-client/python/issues/977#issuecomment-592030030  # pylint: disable=line-too-long
+    https://github.com/kubernetes-client/python/issues/977#issuecomment-592030030  # noqa: E501
 
     Args:
         object_dict: Dictionary representing the Kubernetes object
@@ -3592,7 +3600,6 @@ def process_skypilot_pods(
         - List of KubernetesSkyPilotClusterInfo with job controller info.
         - List of KubernetesSkyPilotClusterInfo with serve controller info.
     """
-    # pylint: disable=import-outside-toplevel
     from sky import resources as resources_lib
     clusters: Dict[str, KubernetesSkyPilotClusterInfo] = {}
     jobs_controllers: List[KubernetesSkyPilotClusterInfo] = []
@@ -3692,7 +3699,7 @@ def _gpu_resource_key_helper(context: Optional[str]) -> str:
         for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
             if any(gpu_key in node.status.capacity for node in nodes):
                 return gpu_key
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         logger.warning(f'Failed to load kube config or query nodes: {e}. '
                        'Falling back to default GPU resource key.')
     return gpu_resource_key
@@ -3823,7 +3830,7 @@ def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
     try:
         format_kubeconfig_exec_auth(config, path)
         return path
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         # There may be problems with kubeconfig, but the user is not actually
         # using Kubernetes (or SSH Node Pools)
         logger.warning(

@@ -16,8 +16,19 @@ import tempfile
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterator, List, Optional, Sequence,
-                    Set, Tuple, TypeVar, Union)
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 import uuid
 
 import aiohttp
@@ -128,7 +139,7 @@ WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 # check multiple IPs because some IPs may be blocked on certain networks.
 # Fixed IP addresses are used to avoid DNS lookup blocking the check, for
 # machine with no internet connection.
-# Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
+# Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # noqa: E501
 _TEST_IP_LIST = ['https://8.8.8.8', 'https://1.1.1.1']
 
 # Allow each CPU thread take 2 tasks.
@@ -874,10 +885,10 @@ def write_cluster_config(
                                  'Name=ip-address,Values=%h')
             get_instance_id_command = 'aws ec2 describe-instances ' + \
                 f'--region {region_name} --filters {ip_address_filter} ' + \
-                '--query \"Reservations[].Instances[].InstanceId\" ' + \
+                '--query "Reservations[].Instances[].InstanceId" ' + \
                 f'{profile_str} --output text'
             ssm_proxy_command = 'aws ssm start-session --target ' + \
-                f'\"$({get_instance_id_command})\" ' + \
+                f'"$({get_instance_id_command})" ' + \
                 f'--region {region_name} {profile_str} ' + \
                 '--document-name AWS-StartSSHSession ' + \
                 '--parameters portNumber=%p'
@@ -1090,7 +1101,7 @@ def write_cluster_config(
         try:
             config_dict['config_hash'] = _deterministic_cluster_yaml_hash(
                 tmp_yaml_path)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.warning(f'Failed to calculate config_hash: {e}')
             logger.debug('Full exception:', exc_info=e)
         return config_dict
@@ -1120,7 +1131,7 @@ def write_cluster_config(
     try:
         config_dict['config_hash'] = _deterministic_cluster_yaml_hash(
             tmp_yaml_path)
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         logger.warning('Failed to calculate config_hash: '
                        f'{common_utils.format_exception(e)}')
         logger.debug('Full exception:', exc_info=e)
@@ -1797,7 +1808,7 @@ def get_node_ips(cluster_yaml: str,
             metadata = provision_lib.get_cluster_info(
                 provider_name, ray_config['provider'].get('region'),
                 ray_config['cluster_name'], ray_config['provider'])
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             # This could happen when the VM is not fully launched, and a user
             # is trying to terminate it with `sky down`.
             logger.debug(
@@ -2071,7 +2082,7 @@ def _query_cluster_status_via_cloud_api(
                          f'{cluster_name_in_hint} '
                          f'status:\n{pprint.pformat(node_status_dict)}')
             node_statuses = list(node_status_dict.values())
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ClusterStatusFetchingError(
                     f'Failed to query {cloud_name} cluster '
@@ -2121,7 +2132,7 @@ def _query_cluster_info_via_cloud_api(
                 f'head instance:\n{cluster_info.get_head_instance()}\n'
                 f'worker instances:\n{cluster_info.get_worker_instances()}')
             return cluster_info
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.FetchClusterInfoError(
                     reason=exceptions.FetchClusterInfoError.Reason.UNKNOWN
@@ -2423,7 +2434,7 @@ def _update_cluster_status(
             if ray_status_details is None:
                 ray_status_details = str(e)
             logger.debug(common_utils.format_exception(e))
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             # This can be raised by `external_ssh_ports()`, due to the
             # underlying call to kubernetes API.
             ray_status_details = str(e)
@@ -2579,7 +2590,7 @@ def _update_cluster_status(
                     cluster_info = _query_cluster_info_via_cloud_api(handle)
                     is_head_node_alive = cluster_info.get_head_instance(
                     ) is not None
-                except Exception as e:  # pylint: disable=broad-except
+                except Exception as e:
                     logger.debug(
                         f'Failed to get cluster info for {cluster_name!r}: '
                         f'{common_utils.format_exception(e)}')
@@ -2618,7 +2629,7 @@ def _update_cluster_status(
                             word = 'autostopped' if noun == 'autostop' else 'autodowned'
                             logger.debug(f'The cluster is likely {word}.')
                             reset_local_autostop = False
-                    except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+                    except (Exception, SystemExit) as e:
                         success = False
                         logger.debug(f'Failed to reset autostop. Due to '
                                      f'{common_utils.format_exception(e)}')
@@ -3312,7 +3323,6 @@ def get_clusters(
     summary_response: bool = False,
     include_handle: bool = True,
     # Internal only:
-    # pylint: disable=invalid-name
     _include_is_managed: bool = False,
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached or optionally refreshed cluster records.

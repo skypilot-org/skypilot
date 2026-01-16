@@ -17,7 +17,7 @@ class _AuthCallbackHandler(BaseHTTPRequestHandler):
         self.remote_endpoint = remote_endpoint
         super().__init__(*args, **kwargs)
 
-    def do_POST(self):  # pylint: disable=invalid-name
+    def do_POST(self):
         """Handle POST request for OAuth callback."""
         data = self.rfile.read(int(self.headers['Content-Length']))
 
@@ -39,7 +39,7 @@ class _AuthCallbackHandler(BaseHTTPRequestHandler):
                              self.remote_endpoint)
             self.end_headers()
 
-    def log_message(self, *args):  # pylint: disable=unused-argument
+    def log_message(self, *args):
         """Suppress default HTTP server logging."""
         pass
 

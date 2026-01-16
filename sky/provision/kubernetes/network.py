@@ -82,7 +82,7 @@ def _open_ports_using_ingress(
         raise Exception(
             'Ingress controller not found. '
             'Install Nginx ingress controller first: '
-            'https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md.'  # pylint: disable=line-too-long
+            'https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md.'  # noqa: E501
         )
 
     # Prepare service names, ports, for template rendering

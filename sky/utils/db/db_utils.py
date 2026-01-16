@@ -232,7 +232,7 @@ def add_column_to_table_alembic(
         index: If True, create an index on this column. If None, no index
             is created.
     """
-    from alembic import op  # pylint: disable=import-outside-toplevel
+    from alembic import op
 
     try:
         # Create the column with server_default if provided
@@ -277,7 +277,7 @@ def drop_column_from_table_alembic(
         table_name: Name of the table to drop column from.
         column_name: Name of the column to drop.
     """
-    from alembic import op  # pylint: disable=import-outside-toplevel
+    from alembic import op
 
     # Check if column exists before trying to drop it
     bind = op.get_bind()
@@ -361,11 +361,9 @@ class SQLiteConn(threading.local):
             parameters = []
 
         def exec_and_commit(sql: str, parameters: Optional[Iterable[Any]]):
-            # pylint: disable=protected-access
             with safe_cursor_on_connection(conn._conn) as cursor:
                 cursor.execute(sql, parameters)
 
-        # pylint: disable=protected-access
         await conn._execute(exec_and_commit, sql, parameters)
 
     @aiosqlite.context.contextmanager
@@ -378,7 +376,6 @@ class SQLiteConn(threading.local):
             parameters = []
 
         def exec_fetch_all(sql: str, parameters: Optional[Iterable[Any]]):
-            # pylint: disable=protected-access
             with safe_cursor_on_connection(conn._conn) as cursor:
                 cursor.execute(sql, parameters)
                 # Note(dev): sqlite3.Connection cannot be patched, keep
@@ -386,7 +383,6 @@ class SQLiteConn(threading.local):
                 fault_point()
                 return cursor.fetchall()
 
-        # pylint: disable=protected-access
         return await conn._execute(exec_fetch_all, sql, parameters)
 
     async def execute_get_returning_value_async(
@@ -401,12 +397,10 @@ class SQLiteConn(threading.local):
 
         def exec_and_get_returning_value(sql: str,
                                          parameters: Optional[Iterable[Any]]):
-            # pylint: disable=protected-access
             with safe_cursor_on_connection(conn._conn) as cursor:
                 cursor.execute(sql, parameters)
                 return cursor.fetchone()
 
-        # pylint: disable=protected-access
         return await conn._execute(exec_and_get_returning_value, sql,
                                    parameters)
 

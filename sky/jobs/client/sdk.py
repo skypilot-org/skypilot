@@ -47,7 +47,6 @@ def launch(
     pool: Optional[str] = None,
     num_jobs: Optional[int] = None,
     # Internal only:
-    # pylint: disable=invalid-name
     _need_confirmation: bool = False,
 ) -> server_common.RequestId[Tuple[Optional[int],
                                    Optional['backends.ResourceHandle']]]:
@@ -178,8 +177,8 @@ def queue_v2(
                 'status': (sky.jobs.ManagedJobStatus) of the job,
                 'cluster_resources': (str) resources of the cluster,
                 'region': (str) region of the cluster,
-                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
-                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # noqa: E501
+                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # noqa: E501
               }
             ]
         total (int): Total number of jobs after filter,
@@ -255,8 +254,8 @@ def queue(
                 'status': (sky.jobs.ManagedJobStatus) of the job,
                 'cluster_resources': (str) resources of the cluster,
                 'region': (str) region of the cluster,
-                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
-                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # noqa: E501
+                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # noqa: E501
               }
             ]
 
@@ -284,7 +283,7 @@ def queue(
 def cancel(
     name: Optional[str] = None,
     job_ids: Optional[Sequence[int]] = None,
-    all: bool = False,  # pylint: disable=redefined-builtin
+    all: bool = False,
     all_users: bool = False,
     pool: Optional[str] = None,
 ) -> server_common.RequestId[None]:
@@ -481,7 +480,6 @@ def pool_apply(
     mode: 'serve_utils.UpdateMode',
     workers: Optional[int] = None,
     # Internal only:
-    # pylint: disable=invalid-name
     _need_confirmation: bool = False
 ) -> server_common.RequestId[None]:
     """Apply a config to a pool."""
@@ -505,7 +503,7 @@ def pool_apply(
 @versions.minimal_api_version(12)
 def pool_down(
     pool_names: Optional[Union[str, List[str]]],
-    all: bool = False,  # pylint: disable=redefined-builtin
+    all: bool = False,
     purge: bool = False,
 ) -> server_common.RequestId[None]:
     """Delete a pool."""

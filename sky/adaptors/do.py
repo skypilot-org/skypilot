@@ -14,7 +14,6 @@ _LAZY_MODULES = (pydo, azure)
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def exceptions():
     """Azure exceptions."""
-    # pylint: disable=import-outside-toplevel
     from azure.core import exceptions as azure_exceptions
     return azure_exceptions
 

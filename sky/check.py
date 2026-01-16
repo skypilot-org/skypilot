@@ -85,7 +85,6 @@ def check_capabilities(
     capabilities: Optional[List[sky_cloud.CloudCapability]] = None,
     workspace: Optional[str] = None,
 ) -> Dict[str, Dict[str, List[sky_cloud.CloudCapability]]]:
-    # pylint: disable=import-outside-toplevel
     from sky.workspaces import core
 
     echo = (lambda *_args, **_kwargs: None
@@ -139,7 +138,7 @@ def check_capabilities(
                     ok, reason = cloud.check_credentials(capability)
                 except exceptions.NotSupportedError:
                     return None
-                except Exception:  # pylint: disable=broad-except
+                except Exception:
                     ok, reason = False, traceback.format_exc()
                 if not isinstance(reason, dict):
                     reason = reason.strip() if reason else None
@@ -352,7 +351,7 @@ def check_capabilities(
                 dim=True) + click.style('sky check', bold=True) + '\n' +
             click.style(
                 'If any problems remain, refer to detailed docs at: '
-                'https://docs.skypilot.co/en/latest/getting-started/installation.html',  # pylint: disable=line-too-long
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html',  # noqa: E501
                 dim=True))
 
     return all_workspaces_results

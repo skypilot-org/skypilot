@@ -116,7 +116,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 network_volume_id=network_volume_id,
                 volume_mount_path=volume_mount_path,
             )
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.warning(f'run_instances error: {e}\n'
                            f'Full traceback:\n{traceback.format_exc()}')
             raise
@@ -178,7 +178,7 @@ def terminate_instances(
             continue
         try:
             utils.remove(inst_id)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'Failed to terminate instance {inst_id}: '

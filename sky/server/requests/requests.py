@@ -13,8 +13,16 @@ import sqlite3
 import threading
 import time
 import traceback
-from typing import (Any, Callable, Dict, Generator, List, NamedTuple, Optional,
-                    Tuple)
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    List,
+    NamedTuple,
+    Optional,
+    Tuple,
+)
 import uuid
 
 import anyio
@@ -1061,7 +1069,7 @@ async def _add_or_update_request_no_lock_async(request: Request):
 def set_exception_stacktrace(e: BaseException) -> None:
     with ux_utils.enable_traceback():
         stacktrace = traceback.format_exc()
-    setattr(e, 'stacktrace', stacktrace)
+    e.stacktrace = stacktrace
 
 
 def set_request_failed(request_id: str, e: BaseException) -> None:
@@ -1210,7 +1218,7 @@ async def requests_gc_daemon():
         except asyncio.CancelledError:
             logger.info('Requests GC daemon cancelled')
             break
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.error(f'Error running requests GC daemon: {e}'
                          f'traceback: {traceback.format_exc()}')
         # Run the daemon at most once every hour to avoid too frequent

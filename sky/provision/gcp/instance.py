@@ -209,7 +209,7 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     # then use all the instances with the same matching launch_config plus some
     # instances with wrong launch_config.
     def get_order_key(node):
-        import datetime  # pylint: disable=import-outside-toplevel
+        import datetime
 
         timestamp = node.get('lastStartTimestamp')
         if timestamp is not None:
@@ -368,7 +368,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     try:
         return _run_instances(region, cluster_name_on_cloud, config)
     except gcp.http_error_exception() as e:
-        error_details = getattr(e, 'error_details')
+        error_details = e.error_details
         errors = []
         if isinstance(error_details, list):
             for detail in error_details:

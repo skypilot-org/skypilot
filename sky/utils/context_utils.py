@@ -34,16 +34,16 @@ def hijack_sys_attrs():
     """
     # Modify stdout and stderr of unvicorn process to be contextually aware,
     # use setattr to bypass the TextIO type check.
-    setattr(sys, 'stdout', context.Stdout())
-    setattr(sys, 'stderr', context.Stderr())
+    sys.stdout = context.Stdout()
+    sys.stderr = context.Stderr()
     # Reload logger to apply latest stdout and stderr.
     sky_logging.reload_logger()
     # Hijack os.environ with ContextualEnviron to make env variables
     # contextually aware.
-    setattr(os, 'environ', context.ContextualEnviron(os.environ))
+    os.environ = context.ContextualEnviron(os.environ)
     # Hijack subprocess.Popen to pass the contextual environ to subprocess
     # by default.
-    setattr(subprocess, 'Popen', context.Popen)
+    subprocess.Popen = context.Popen
 
 
 def passthrough_stream_handler(in_stream: IO[Any], out_stream: IO[Any]) -> str:

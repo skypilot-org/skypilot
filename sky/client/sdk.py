@@ -16,8 +16,17 @@ import logging
 import os
 import subprocess
 import typing
-from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
-                    TypeVar, Union)
+from typing import (
+    Any,
+    Dict,
+    Iterator,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
 from urllib import parse as urlparse
 
 import click
@@ -177,7 +186,7 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
             return get(request_id)
         else:
             return None
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         logger.debug(f'To stream request logs: sky api logs {request_id}')
         raise
 
@@ -429,7 +438,6 @@ def validate(
                                 remote_api_version < 15)
     for task in dag.tasks:
         if omit_user_specified_yaml:
-            # pylint: disable=protected-access
             task._user_specified_yaml = None
         task.expand_and_validate_workdir()
         if not workdir_only:
@@ -467,14 +475,13 @@ def launch(
     idle_minutes_to_autostop: Optional[int] = None,
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
     dryrun: bool = False,
-    down: bool = False,  # pylint: disable=redefined-outer-name
+    down: bool = False,
     backend: Optional['backends.Backend'] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
     # Internal only:
-    # pylint: disable=invalid-name
     _need_confirmation: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
@@ -653,14 +660,13 @@ def _launch(
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
-    down: bool = False,  # pylint: disable=redefined-outer-name
+    down: bool = False,
     backend: Optional['backends.Backend'] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
     # Internal only:
-    # pylint: disable=invalid-name
     _need_confirmation: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
@@ -759,11 +765,11 @@ def _launch(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def exec(  # pylint: disable=redefined-builtin
+def exec(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
     dryrun: bool = False,
-    down: bool = False,  # pylint: disable=redefined-outer-name
+    down: bool = False,
     backend: Optional['backends.Backend'] = None,
 ) -> server_common.RequestId[Tuple[Optional[int],
                                    Optional['backends.ResourceHandle']]]:
@@ -1069,7 +1075,7 @@ def start(
     idle_minutes_to_autostop: Optional[int] = None,
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
     retry_until_up: bool = False,
-    down: bool = False,  # pylint: disable=redefined-outer-name
+    down: bool = False,
     force: bool = False,
 ) -> server_common.RequestId['backends.CloudVmRayResourceHandle']:
     """Restart a cluster.
@@ -1246,7 +1252,7 @@ def autostop(
         cluster_name: str,
         idle_minutes: int,
         wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
-        down: bool = False,  # pylint: disable=redefined-outer-name
+        down: bool = False,
 ) -> server_common.RequestId[None]:
     """Schedules an autostop/autodown for a cluster.
 
@@ -1431,10 +1437,9 @@ def job_status(
 @annotations.client_api
 def cancel(
     cluster_name: str,
-    all: bool = False,  # pylint: disable=redefined-builtin
+    all: bool = False,
     all_users: bool = False,
     job_ids: Optional[List[int]] = None,
-    # pylint: disable=invalid-name
     _try_cancel_if_cluster_is_init: bool = False
 ) -> server_common.RequestId[None]:
     """Cancels jobs on a cluster.
@@ -1630,7 +1635,7 @@ def endpoints(
 @annotations.client_api
 def cost_report(
     days: Optional[int] = None
-) -> server_common.RequestId[List[Dict[str, Any]]]:  # pylint: disable=redefined-builtin
+) -> server_common.RequestId[List[Dict[str, Any]]]:
     """Gets all cluster cost reports, including those that have been downed.
 
     The estimated cost column indicates price for the cluster based on the type
@@ -2012,7 +2017,7 @@ def get(request_id: server_common.RequestId[T]) -> T:
             request_task = requests_lib.Request.decode(
                 payloads.RequestPayload(**response.json().get('detail')))
             logger.debug(f'Got request with error: {request_task.name}')
-        except Exception:  # pylint: disable=broad-except
+        except Exception:
             request_task = None
     if request_task is None:
         with ux_utils.print_exception_no_traceback():
@@ -2196,7 +2201,6 @@ def _local_api_server_running(kill: bool = False) -> bool:
 @annotations.client_api
 def api_status(
     request_ids: Optional[List[Union[server_common.RequestId[T], str]]] = None,
-    # pylint: disable=redefined-builtin
     all_status: bool = False,
     limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
@@ -2363,7 +2367,7 @@ def api_stop() -> None:
         except FileNotFoundError:
             # its fine we will create it
             pass
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             # in case we get perm issues or something is messed up, just ignore
             # it and assume the process is dead
             logger.error(f'Error looking at job controller pid file: {e}')
@@ -2565,7 +2569,7 @@ def api_login(endpoint: Optional[str] = None,
                 raise RuntimeError(
                     f'Failed to connect to API server at {endpoint}: {e}'
                 ) from e
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'{colorama.Fore.RED}Service account token authentication '
@@ -2613,7 +2617,7 @@ def api_login(endpoint: Optional[str] = None,
             else:
                 token = token_container['token']
 
-        except (Exception, KeyboardInterrupt) as e:  # pylint: disable=broad-except
+        except (Exception, KeyboardInterrupt) as e:
             logger.debug(f'Automatic authentication failed: {e}, '
                          'falling back to manual token entry.')
             if isinstance(e, KeyboardInterrupt):
@@ -2629,7 +2633,7 @@ def api_login(endpoint: Optional[str] = None,
             if server is not None:
                 try:
                     server.server_close()
-                except Exception:  # pylint: disable=broad-except
+                except Exception:
                     pass
             if not token:
                 with ux_utils.print_exception_no_traceback():

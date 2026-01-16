@@ -5,7 +5,6 @@ Revises: 006
 Create Date: 2025-08-28
 
 """
-# pylint: disable=invalid-name
 from typing import Sequence, Union
 
 from alembic import op

@@ -30,7 +30,7 @@ def _is_url(policy_string: str) -> bool:
     try:
         parsed = urlparse.urlparse(policy_string)
         return parsed.scheme in ('http', 'https')
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         return False
 
 
@@ -157,7 +157,7 @@ def apply(
         except exceptions.UserRequestRejectedByPolicy as e:
             with ux_utils.print_exception_no_traceback():
                 raise e
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.UserRequestRejectedByPolicy(
                     f'{colorama.Fore.RED}User request rejected by policy '

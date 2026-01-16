@@ -386,7 +386,7 @@ def query_instances(
 
 def run_instances(
         region: str,
-        cluster_name: str,  # pylint: disable=unused-argument
+        cluster_name: str,
         cluster_name_on_cloud: str,
         config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Run instances for the given cluster (Slurm in this case)."""

@@ -159,7 +159,6 @@ class Resources:
         priority: Optional[int] = None,
         volumes: Optional[List[Dict[str, Any]]] = None,
         # Internal use only.
-        # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
         _docker_username_for_runpod: Optional[str] = None,
         _is_image_managed: Optional[bool] = None,
@@ -212,7 +211,7 @@ class Resources:
             False.
           job_recovery: the job recovery strategy to use for the managed
             job to recover the cluster from preemption. Refer to
-            `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/jobs/recovery_strategy.py>`__ # pylint: disable=line-too-long
+            `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/jobs/recovery_strategy.py>`__ # noqa: E501
             for more details.
             When a dict is provided, it can have the following fields:
 
@@ -1440,7 +1439,7 @@ class Resources:
                     continue
                 # TODO(hailong): check instance local SSD
                 # support for instance_type.
-                # Refer to https://cloud.google.com/compute/docs/disks/local-ssd#machine-series-lssd # pylint: disable=line-too-long
+                # Refer to https://cloud.google.com/compute/docs/disks/local-ssd#machine-series-lssd # noqa: E501
                 self.cloud.check_disk_tier_enabled(self.instance_type,
                                                    volume['disk_tier'])
             if (need_region_or_zone and self._region is None and
@@ -1734,7 +1733,7 @@ class Resources:
             # if it is BEST.
             if self.disk_tier != resources_utils.DiskTier.BEST:
                 # Add parenthesis for better readability.
-                if not (self.disk_tier <= other.disk_tier):  # pylint: disable=superfluous-parens
+                if not (self.disk_tier <= other.disk_tier):
                     return False
 
         if self.network_tier is not None:
@@ -2532,7 +2531,7 @@ class LaunchableResources(Resources):
     None). It should not be instantiated directly.
     """
 
-    def __init__(self, *args, **kwargs) -> None:  # pylint: disable=super-init-not-called,unused-argument
+    def __init__(self, *args, **kwargs) -> None:
         assert False, (
             'LaunchableResources should not be instantiated directly. '
             'It is only used for type checking by MyPy.')

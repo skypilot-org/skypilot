@@ -6,7 +6,6 @@ Create Date: 2025-10-07
 
 """
 import glob
-# pylint: disable=invalid-name
 import os
 from typing import Sequence, Union
 

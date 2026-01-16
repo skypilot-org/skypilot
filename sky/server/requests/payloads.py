@@ -205,7 +205,6 @@ class DagRequestBody(RequestBody):
     def to_kwargs(self) -> Dict[str, Any]:
         # Import here to avoid requirement of the whole SkyPilot dependency on
         # local clients.
-        # pylint: disable=import-outside-toplevel
         from sky.utils import dag_utils
 
         kwargs = super().to_kwargs()
@@ -263,7 +262,6 @@ class LaunchBody(RequestBody):
     clone_disk_from: Optional[str] = None
     fast: bool = False
     # Internal only:
-    # pylint: disable=invalid-name
     quiet_optimizer: bool = False
     is_launched_by_jobs_controller: bool = False
     is_launched_by_sky_serve_controller: bool = False

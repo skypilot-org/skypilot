@@ -14,7 +14,6 @@ if typing.TYPE_CHECKING:
     from sky.data import storage as storage_lib
 
 Path = str
-# pylint: disable=invalid-name
 _ResourceHandleType = typing.TypeVar('_ResourceHandleType',
                                      bound='ResourceHandle')
 
@@ -34,7 +33,7 @@ class Backend(Generic[_ResourceHandleType]):
     NAME = 'backend'
 
     # Backward compatibility, with the old name of the handle.
-    ResourceHandle = ResourceHandle  # pylint: disable=invalid-name
+    ResourceHandle = ResourceHandle
 
     # --- APIs ---
     def check_resources_fit_cluster(

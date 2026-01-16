@@ -214,7 +214,7 @@ def has_active_ssh_sessions() -> bool:
                            f'{proc.returncode}.')
             return False
         return int(proc.stdout.strip()) > 0
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         logger.warning(f'Error checking active SSH sessions: {e}.')
         return False
 

@@ -115,7 +115,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 if stopped_instances[stopped_instance_id]['name'].endswith(
                         '-head'):
                     head_instance_id = stopped_instance_id
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 logger.warning(f'Start instance error: {e}')
                 raise
             time.sleep(utils.POLL_INTERVAL)  # to avoid fake STOPPED status
@@ -142,7 +142,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     'use_static_ip_address', False),
                 filesystems=config.node_config.get('filesystems', []),
                 network_tier=config.node_config.get('network_tier'))
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.warning(f'run_instances error: {e}')
             raise
         logger.info(f'Launched instance {instance_id}.')
@@ -211,7 +211,7 @@ def terminate_instances(
             continue
         try:
             utils.remove(inst_id)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'Failed to terminate instance {inst_id}: '

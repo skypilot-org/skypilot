@@ -47,7 +47,6 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
       s3_bucket_name: str; Name of the Amazon S3 Bucket
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
     """
-    # pylint: disable=import-outside-toplevel
     import google.auth
 
     credentials, _ = google.auth.default()

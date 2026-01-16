@@ -87,7 +87,7 @@ def cleanup_storage(yaml_content: str) -> bool:
         for storage in task.storage_mounts.values():
             storage.construct()
         backend.teardown_ephemeral_storage(task)
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         logger.error('Failed to clean up storage: '
                      f'{common_utils.format_exception(e)}')
         with ux_utils.enable_traceback():
@@ -104,7 +104,7 @@ def cleanup_storage(yaml_content: str) -> bool:
                     shutil.rmtree(path)
                 else:
                     os.remove(path)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.error(f'Failed to clean up file mount {file_mount}: {e}')
             with ux_utils.enable_traceback():
                 logger.error(f'  Traceback: {traceback.format_exc()}')
@@ -137,7 +137,7 @@ def _cleanup(service_name: str, pool: bool) -> bool:
                         'cluster. Removing replica from database.')
             try:
                 serve_state.remove_replica(service_name, info.replica_id)
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 logger.warning(f'Failed to remove replica {info.replica_id} '
                                f'from database: {e}')
                 failed = True
@@ -177,7 +177,7 @@ def _cleanup(service_name: str, pool: bool) -> bool:
                 if controller_utils.can_terminate(pool):
                     try:
                         t.start()
-                    except Exception as e:  # pylint: disable=broad-except
+                    except Exception as e:
                         _set_to_failed_cleanup(info)
                         logger.error(f'Failed to start thread for replica '
                                      f'{info.replica_id}: {e}')
@@ -403,7 +403,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         # and set it to FAILED_CLEANUP instead.
         try:
             failed = _cleanup(service_name, service_spec.pool)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.error(f'Failed to clean up service {service_name}: {e}')
             with ux_utils.enable_traceback():
                 logger.error(f'  Traceback: {traceback.format_exc()}')

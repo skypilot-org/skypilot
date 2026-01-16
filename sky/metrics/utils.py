@@ -287,7 +287,7 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
 
             # sleep for 100ms to avoid busy-waiting
             time.sleep(0.1)
-    except BaseException:  # pylint: disable=broad-exception-caught
+    except BaseException:
         if port_forward_process:
             stop_svc_port_forward(port_forward_process,
                                   timeout=terminate_port_forward_timeout)
@@ -374,7 +374,7 @@ async def send_metrics_request_with_port_forward(
             response.raise_for_status()
             return response.text
 
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except Exception as e:
         logger.error(f'Failed to send metrics request with port forward: '
                      f'{common_utils.format_exception(e)}')
         raise
@@ -433,7 +433,7 @@ async def get_metrics_for_context(context: str) -> str:
     # Query both DCGM metrics and kube_pod_labels metrics
     # This ensures the dashboard can perform joins to filter by skypilot cluster
     match_patterns = [
-        '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # pylint: disable=line-too-long
+        '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # noqa: E501
         'kube_pod_labels',
         'node_cpu_seconds_total{mode="idle"}'
     ]

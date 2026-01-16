@@ -9,7 +9,6 @@ from sky import exceptions
 from sky import sky_logging
 from sky.utils import atomic
 
-# pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
     from typing import ParamSpec
 else:
@@ -55,7 +54,7 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
         try:
             result = fn(*args, **kwargs)
             fut.set_result(result)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.debug(f'Executor [{self.name}] error executing {fn}: {e}')
             fut.set_exception(e)
         finally:

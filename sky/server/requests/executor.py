@@ -68,7 +68,6 @@ from sky.workspaces import core as workspaces_core
 if typing.TYPE_CHECKING:
     import types
 
-# pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
     from typing import ParamSpec
 else:
@@ -245,7 +244,7 @@ class RequestWorker:
                              daemon=True).start()
 
             logger.info(f'[{self}] Submitted request: {request_id}')
-        except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+        except (Exception, SystemExit) as e:
             # Catch any other exceptions to avoid crashing the worker process.
             logger.error(
                 f'[{self}] Error processing request: '
@@ -530,7 +529,7 @@ def _request_execution_wrapper(request_id: str,
         # Yield control to the scheduler for uniform handling of retries.
         _restore_output()
         raise
-    except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+    except (Exception, SystemExit) as e:
         api_requests.set_request_failed(request_id, e)
         # Manually reset the original stdout and stderr file descriptors early
         # so that the "Request xxxx failed due to ..." log message will be
@@ -559,7 +558,7 @@ def _request_execution_wrapper(request_id: str,
                 common_utils.release_memory()
             if request_name is not None:
                 _record_memory_metrics(request_name, proc, rss_begin, peak_rss)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.error(f'Failed to record memory metrics: '
                          f'{common_utils.format_exception(e)}')
 
@@ -665,7 +664,7 @@ async def _execute_request_coroutine(request: api_requests.Request):
             get_request_thread_executor(), _execute_with_config_override, func,
             request_body, request.request_id, request.name,
             **request_body.to_kwargs())
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         ctx.redirect_log(original_output)
         await api_requests.set_request_failed_async(request.request_id, e)
         logger.error(f'Failed to run request {request.request_id} due to '
@@ -690,7 +689,7 @@ async def _execute_request_coroutine(request: api_requests.Request):
                 # The task is cancelled by ctx.cancel(), where the status
                 # should already be set to CANCELLED.
                 pass
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 ctx.redirect_log(original_output)
                 await api_requests.set_request_failed_async(request_id, e)
                 logger.error(f'Request {request_id} failed due to '
@@ -709,7 +708,6 @@ async def _execute_request_coroutine(request: api_requests.Request):
         # request status for consistency.
         await api_requests.set_request_cancelled_async(request.request_id)
         pass
-    # pylint: disable=broad-except
     except (Exception, KeyboardInterrupt, SystemExit) as e:
         # Handle any other error
         ctx.redirect_log(original_output)

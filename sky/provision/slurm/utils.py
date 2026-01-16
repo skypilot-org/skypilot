@@ -80,7 +80,7 @@ def _get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
         kv_cache.add_or_update_cache_entry(
             cache_key, json.dumps([n._asdict() for n in nodes_info]),
             time.time() + _SLURM_NODES_INFO_CACHE_TTL)
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         # Catch the error and continue.
         # Failure to cache the result is not critical to the
         # success of this function.
@@ -159,7 +159,7 @@ class SlurmInstanceType:
             accelerator_type | str: Type of accelerator
         """
         pattern = re.compile(
-            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_type>[\w\d-]+):(?P<accelerator_count>\d+))?$'  # pylint: disable=line-too-long
+            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_type>[\w\d-]+):(?P<accelerator_count>\d+))?$'  # noqa: E501
         )
         match = pattern.match(name)
         if match is not None:
@@ -355,7 +355,7 @@ def check_instance_fits(
         return (False, f'Could not query Slurm cluster {cluster} '
                 f'because the Slurm configuration file '
                 f'{DEFAULT_SLURM_PATH} does not exist.')
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         return (False, f'Could not query Slurm cluster {cluster} '
                 f'because Slurm SSH configuration at {DEFAULT_SLURM_PATH} '
                 f'could not be loaded: {common_utils.format_exception(e)}.')
@@ -466,7 +466,7 @@ def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
                 continue
             if node_gpu_type.lower() == requested_gpu_type.lower():
                 return node_gpu_type
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         logger.warning(
             'Failed to determine the exact GPU GRES type from the Slurm '
             f'cluster {cluster!r}. Falling back to '
@@ -658,7 +658,7 @@ def get_partition_infos(cluster_name: str) -> Dict[str, slurm.SlurmPartition]:
         )
 
         partitions_info = client.get_partitions_info()
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         raise ValueError(
             f'Failed to get partitions for cluster '
             f'{cluster_name}: {common_utils.format_exception(e)}') from e

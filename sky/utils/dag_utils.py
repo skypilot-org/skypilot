@@ -89,7 +89,7 @@ def _load_chain_dag(
             task = task_lib.Task.from_yaml_config(task_config, env_overrides,
                                                   secrets_overrides)
             if current_task is not None:
-                current_task >> task  # pylint: disable=pointless-statement
+                current_task >> task
             current_task = task
     dag.name = dag_name
     return dag

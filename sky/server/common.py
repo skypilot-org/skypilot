@@ -15,8 +15,18 @@ import tempfile
 import threading
 import time
 import typing
-from typing import (Any, Callable, cast, Dict, Generic, Literal, Optional,
-                    Tuple, TypeVar, Union)
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Generic,
+    Literal,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
 from urllib.request import Request
 import uuid
 
@@ -646,7 +656,6 @@ def _start_api_server(deploy: bool = False,
         #      whole YAML config is really just `db: <URI>`.
         if skypilot_config.get_nested(('db',), None) is None:
             avail_mem_size_gb: float = common_utils.get_mem_size_gb()
-            # pylint: disable=import-outside-toplevel
             import sky.jobs.utils as job_utils
             max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
                           if job_utils.is_consolidation_mode(
@@ -718,7 +727,7 @@ def _start_api_server(deploy: bool = False,
                 check_server_healthy()
             except exceptions.APIVersionMismatchError:
                 raise
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 if time.time() - start_time >= WAIT_APISERVER_START_TIMEOUT_SEC:
                     with ux_utils.print_exception_no_traceback():
                         raise RuntimeError(
@@ -912,7 +921,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     Returns:
         The translated task as a single-task dag.
     """
-    from sky.utils import dag_utils  # pylint: disable=import-outside-toplevel
+    from sky.utils import dag_utils
 
     user_hash = env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
 

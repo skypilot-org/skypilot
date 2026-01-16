@@ -23,8 +23,18 @@ import sys
 import threading
 import traceback
 import typing
-from typing import (Any, Awaitable, Callable, Dict, List, Literal, Optional,
-                    Set, Tuple, Type)
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+)
 import uuid
 import zipfile
 
@@ -102,7 +112,6 @@ from sky.workspaces import server as workspaces_rest
 if typing.TYPE_CHECKING:
     from sky import backends
 
-# pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
     from typing import ParamSpec
 else:
@@ -123,7 +132,7 @@ def _basic_auth_401_response(content: str):
     """Return a 401 response with basic auth realm."""
     return fastapi.responses.JSONResponse(
         status_code=401,
-        headers={'WWW-Authenticate': 'Basic realm=\"SkyPilot\"'},
+        headers={'WWW-Authenticate': 'Basic realm="SkyPilot"'},
         content=content)
 
 
@@ -137,7 +146,7 @@ def _try_set_basic_auth_user(request: fastapi.Request):
     try:
         decoded = base64.b64decode(encoded).decode()
         username, password = decoded.split(':', 1)
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         return
 
     users = global_user_state.get_user_by_name(username)
@@ -244,7 +253,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         try:
             decoded = base64.b64decode(encoded).decode()
             username, password = decoded.split(':', 1)
-        except Exception:  # pylint: disable=broad-except
+        except Exception:
             return _basic_auth_401_response('Invalid basic auth')
 
         users = global_user_state.get_user_by_name(username)
@@ -337,7 +346,6 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
         try:
             # Import here to avoid circular imports
-            # pylint: disable=import-outside-toplevel
             from sky.users.token_service import token_service
 
             # Verify and decode JWT token
@@ -376,7 +384,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             try:
                 global_user_state.update_service_account_token_last_used(
                     token_id)
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 logger.debug(f'Failed to update token last used time: {e}')
 
             # Set the authenticated user
@@ -389,7 +397,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
             logger.debug(f'Authenticated service account: {user_id}')
 
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.error(f'Service account authentication failed: {e}',
                          exc_info=True)
             return fastapi.responses.JSONResponse(
@@ -504,7 +512,7 @@ async def schedule_on_boot_check_async():
 
 
 @contextlib.asynccontextmanager
-async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
+async def lifespan(app: fastapi.FastAPI):
     """FastAPI lifespan context manager."""
     del app  # unused
     # Startup: Run background tasks
@@ -936,7 +944,7 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         # Apply admin policy and validate DAG is blocking, run it in a separate
         # thread executor to avoid blocking the uvicorn event loop.
         await context_utils.to_thread(validate_dag, dag)
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         # Print the exception to the API server log.
         if env_options.Options.SHOW_DEBUG_INFO.get():
             logger.info('/validate exception:', exc_info=True)
@@ -983,7 +991,6 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     # Field _body would be set if the request body has been received, fail fast
     # to surface potential memory issues, i.e. catch the issue in our smoke
     # test.
-    # pylint: disable=protected-access
     if hasattr(request, '_body'):
         raise fastapi.HTTPException(
             status_code=500,
@@ -1172,7 +1179,6 @@ async def launch(launch_body: payloads.LaunchBody,
 
 
 @app.post('/exec')
-# pylint: disable=redefined-builtin
 async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
     """Executes a task on an existing cluster."""
     cluster_name = exec_body.cluster_name
@@ -1653,7 +1659,6 @@ async def stream(
     # 'plain': plain text for HTML clients
     # 'html': HTML for browsers
     # 'console': console for CLI/API clients
-    # pylint: disable=redefined-builtin
     format: Literal['auto', 'plain', 'html', 'console'] = 'auto',
 ) -> fastapi.responses.Response:
     """Streams the logs of a request.
@@ -2018,7 +2023,7 @@ async def _run_websocket_proxy(
                             '!Q',
                             message[type_size:type_size + latency_size])[0]
                         latency_seconds = avg_latency_ms / 1000
-                        metrics_utils.SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS.labels(  # pylint: disable=line-too-long
+                        metrics_utils.SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS.labels(  # noqa: E501
                             pid=os.getpid()).observe(latency_seconds)
                         continue
                     else:
@@ -2027,7 +2032,7 @@ async def _run_websocket_proxy(
 
                 try:
                     await write_to_backend(message)
-                except Exception as e:  # pylint: disable=broad-except
+                except Exception as e:
                     # Typically we will not reach here, if the conn to backend
                     # is disconnected, backend_to_websocket will exit first.
                     # But just in case.
@@ -2060,11 +2065,11 @@ async def _run_websocket_proxy(
                         '!B', SSHMessageType.REGULAR_DATA.value)
                     data = message_type_bytes + data
                 await websocket.send_bytes(data)
-        except Exception:  # pylint: disable=broad-except
+        except Exception:
             pass
         try:
             await websocket.close()
-        except Exception:  # pylint: disable=broad-except
+        except Exception:
             # The websocket might have been closed by the client
             pass
 
@@ -2339,7 +2344,7 @@ async def ssh_interactive_auth(websocket: fastapi.WebSocket,
                 logger.debug(f'WebSocket disconnected for session {session_id}')
             except asyncio.CancelledError:
                 pass
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 logger.error(f'Error in websocket_to_pty: {e}')
 
         async def pty_to_websocket():
@@ -2365,17 +2370,17 @@ async def ssh_interactive_auth(websocket: fastapi.WebSocket,
                     await websocket.send_bytes(data)
             except asyncio.CancelledError:
                 pass
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 logger.error(f'Error in pty_to_websocket: {e}')
             finally:
                 try:
                     await websocket.close()
-                except Exception:  # pylint: disable=broad-except
+                except Exception:
                     pass
 
         await asyncio.gather(websocket_to_pty(), pty_to_websocket())
 
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         logger.error(f'Error in SSH interactive auth websocket: {e}')
         raise
     finally:
@@ -2615,7 +2620,7 @@ if __name__ == '__main__':
                                         ws_per_message_deflate=False)
         skyuvicorn.run(uvicorn_config,
                        max_db_connections=config.num_db_connections_per_worker)
-    except Exception as exc:  # pylint: disable=broad-except
+    except Exception as exc:
         logger.error(f'Failed to start SkyPilot API server: '
                      f'{common_utils.format_exception(exc, use_bracket=True)}')
         raise

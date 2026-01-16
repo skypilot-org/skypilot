@@ -32,7 +32,7 @@ def _get_git_commit():
         if changes:
             commit_hash += '-dirty'
         return commit_hash
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         return _SKYPILOT_COMMIT_SHA
 
 
@@ -81,7 +81,6 @@ _set_http_proxy_env_vars()
 # ----------------------------------------------------------------- #
 
 # Keep this order to avoid cyclic imports
-# pylint: disable=wrong-import-position
 from sky import backends
 from sky import clouds
 from sky.admin_policy import AdminPolicy
@@ -101,7 +100,7 @@ from sky.client.sdk import cost_report
 from sky.client.sdk import down
 from sky.client.sdk import download_logs
 from sky.client.sdk import endpoints
-from sky.client.sdk import exec  # pylint: disable=redefined-builtin
+from sky.client.sdk import exec
 from sky.client.sdk import get
 from sky.client.sdk import job_status
 from sky.client.sdk import launch

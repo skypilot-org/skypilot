@@ -124,7 +124,7 @@ class RedirectOutputForProcess:
             # of the subprocess.
             try:
                 self.func(*args, **kwargs)
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 logger.error(f'Failed to run {self.func.__name__}. '
                              f'Details: {common_utils.format_exception(e)}')
                 with enable_traceback():

@@ -5,7 +5,6 @@ Revises: 008
 Create Date: 2025-09-24
 
 """
-# pylint: disable=invalid-name
 import pickle
 from typing import Sequence, Union
 

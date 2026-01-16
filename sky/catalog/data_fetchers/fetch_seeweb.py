@@ -234,14 +234,14 @@ def fetch_seeweb_data(api_key: str) -> List[Dict]:
 
                 parsed.update({'regions_available': regions_available})
                 plans.append(parsed)
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 print(f'Error parsing plan {plan.name}: {e}')
                 continue
 
         print(f'Successfully parsed {len(plans)} plans')
         return plans
 
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         raise Exception(f'Error fetching data from Seeweb API: {e}') from e
 
 
@@ -298,7 +298,7 @@ def create_catalog(api_key: str, output_path: str) -> None:
                         gpu_info_str,  # GpuInfo
                         ''  # SpotPrice (Seeweb doesn't support spot)
                     ])
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 print(f'Error processing plan {plan["plan_name"]}: {e}')
                 continue
 

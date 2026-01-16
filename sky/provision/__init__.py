@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
 from sky import models
 from sky import sky_logging
+
 # These provision.<cloud> modules should never fail even if underlying cloud SDK
 # dependencies are not installed. This is ensured by using sky.adaptors inside
 # these modules, for lazy loading of cloud SDKs.
@@ -70,7 +71,6 @@ def _route_to_cloud_impl(func):
     return _wrapper
 
 
-# pylint: disable=unused-argument
 
 
 @timeline.event

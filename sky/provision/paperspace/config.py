@@ -12,7 +12,7 @@ def bootstrap_instances(
         region: str, cluster_name: str,
         config: common.ProvisionConfig) -> common.ProvisionConfig:
     """Bootstraps instances for the given cluster."""
-    if not config.node_config['DiskSize'] in constants.DISK_SIZES:
+    if config.node_config['DiskSize'] not in constants.DISK_SIZES:
         if config.node_config['DiskSize'] > constants.DISK_SIZES[-1]:
             raise ValueError(
                 f'Paperspace largest disk size is {constants.DISK_SIZES[-1]},'

@@ -25,7 +25,7 @@ class Volume:
     def __init__(
             self,
             name: Optional[str] = None,
-            type: Optional[str] = None,  # pylint: disable=redefined-builtin
+            type: Optional[str] = None,
             infra: Optional[str] = None,
             size: Optional[str] = None,
             labels: Optional[Dict[str, str]] = None,
@@ -63,7 +63,7 @@ class Volume:
         try:
             vt = (volume_lib.VolumeType(vol_type_val)
                   if vol_type_val is not None else None)
-        except Exception:  # pylint: disable=broad-except
+        except Exception:
             vt = None
 
         if vt is None:
@@ -205,7 +205,7 @@ class RunpodNetworkVolume(Volume):
                     raise ValueError(
                         f'RunPod network volume size must be at least '
                         f'{volume_lib.MIN_RUNPOD_NETWORK_VOLUME_SIZE_GB}GB.')
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 raise ValueError(f'Invalid volume size {self.size!r}: '
                                  f'{e}') from e
         if not self.zone:

@@ -142,7 +142,7 @@ class LazyDataFrame:
         if self._update_if_stale_func() or self._df is None:
             try:
                 self._df = pd.read_csv(self._filename)
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 # As users can manually modify the catalog, read_csv can fail.
                 logger.error(f'Failed to read {self._filename}. '
                              'To fix: delete the csv file and try again.')
@@ -208,8 +208,8 @@ def read_catalog(filename: str,
             if not _need_update():
                 return False
 
-            url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
-            url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+            url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # noqa: E501
+            url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # noqa: E501
             headers = {'User-Agent': 'SkyPilot/0.7'}
             update_frequency_str = ''
             if pull_frequency_hours is not None:

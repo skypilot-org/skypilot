@@ -5,7 +5,6 @@ Revises:
 Create Date: 2024-01-01 12:00:00.000000
 
 """
-# pylint: disable=invalid-name
 from alembic import op
 import sqlalchemy as sa
 

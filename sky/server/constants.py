@@ -4,7 +4,7 @@ import os
 
 from sky.skylet import constants
 
-# pylint: disable=line-too-long
+# noqa: E501
 # The SkyPilot API version that the code currently use.
 # Bump this version when the API is changed and special compatibility handling
 # based on version info is needed.

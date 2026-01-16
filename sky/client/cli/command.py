@@ -35,8 +35,18 @@ import sys
 import time
 import traceback
 import typing
-from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
-                    TypeVar, Union)
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import click
 import colorama
@@ -213,11 +223,11 @@ def _get_cluster_records_and_set_ssh_config(
                 # TODO(zhwu): write the template to a temp file, don't use
                 # the one in skypilot repo, to avoid changing the file when
                 # updating skypilot.
-                f'\"{escaped_executable_path} '
+                f'"{escaped_executable_path} '
                 f'{escaped_websocket_proxy_path} '
                 f'{server_common.get_server_url()} '
                 f'{handle.cluster_name} '
-                f'kubernetes-pod-ssh-proxy\"')
+                f'kubernetes-pod-ssh-proxy"')
             credentials['ssh_proxy_command'] = proxy_command
         elif isinstance(handle.launched_resources.cloud, clouds.Slurm):
             # Replace the proxy command to proxy through the SkyPilot API
@@ -848,7 +858,7 @@ class _NaturalOrderGroup(click.Group):
     Reference: https://github.com/pallets/click/issues/513
     """
 
-    def list_commands(self, ctx):  # pylint: disable=unused-argument
+    def list_commands(self, ctx):
         # Preserve definition order but hide aliases (same command object) and
         # commands explicitly marked as hidden.
         seen_commands = set()
@@ -1009,7 +1019,6 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
     required=False,
     # Disabling quote check here, as there seems to be a bug in pylint,
     # which incorrectly recognizes the help string as a docstring.
-    # pylint: disable=bad-docstring-quotes
     help='Skip confirmation prompt.')
 @click.option('--no-setup',
               is_flag=True,
@@ -1065,7 +1074,7 @@ def launch(
     ports: Tuple[str, ...],
     idle_minutes_to_autostop: Optional[int],
     wait_for: Optional[str],
-    down: bool,  # pylint: disable=redefined-outer-name
+    down: bool,
     retry_until_up: bool,
     yes: bool,
     no_setup: bool,
@@ -1227,7 +1236,6 @@ def launch(
               type=str,
               help='Git reference (branch, tag, or commit hash) to use.')
 @usage_lib.entrypoint
-# pylint: disable=redefined-builtin
 def exec(
     cluster: Optional[str],
     cluster_option: Optional[str],
@@ -1426,7 +1434,7 @@ def _handle_jobs_queue_request(
             if pool_status_request_id is not None:
                 try:
                     return sdk.stream_and_get(pool_status_request_id)
-                except Exception:  # pylint: disable=broad-except
+                except Exception:
                     # If getting pool status fails, just continue without it
                     return None
             return None
@@ -1478,7 +1486,7 @@ def _handle_jobs_queue_request(
                     records[0]['status'] == status_lib.ClusterStatus.STOPPED):
                 controller = controller_utils.Controllers.JOBS_CONTROLLER.value
                 msg = controller.default_hint_if_non_existent
-        except Exception:  # pylint: disable=broad-except
+        except Exception:
             # This is to an best effort to find the latest controller status to
             # print more helpful message, so we can ignore any exception to
             # print the original error.
@@ -1489,7 +1497,7 @@ def _handle_jobs_queue_request(
                 'issues. Try again later. '
                 f'Details: {common_utils.format_exception(e, use_bracket=True)}'
             )
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         msg = ''
         if env_options.Options.SHOW_DEBUG_INFO.get():
             msg += traceback.format_exc()
@@ -1513,7 +1521,7 @@ def _handle_services_request(
     service_names: Optional[List[str]],
     show_all: bool,
     show_endpoint: bool,
-    pool: bool = False,  # pylint: disable=redefined-outer-name
+    pool: bool = False,
     is_called_by_user: bool = False
 ) -> Tuple[Optional[int], str]:
     """Get service statuses.
@@ -1562,7 +1570,7 @@ def _handle_services_request(
                 controller = (
                     controller_utils.Controllers.SKY_SERVE_CONTROLLER.value)
                 msg = controller.default_hint_if_non_existent
-        except Exception:  # pylint: disable=broad-except
+        except Exception:
             # This is to an best effort to find the latest controller status to
             # print more helpful message, so we can ignore any exception to
             # print the original error.
@@ -1571,7 +1579,7 @@ def _handle_services_request(
             msg = (f'Failed to fetch {noun} statuses due to connection issues. '
                    'Please try again later. Details: '
                    f'{common_utils.format_exception(e, use_bracket=True)}')
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         msg = (f'Failed to fetch {noun} statuses: '
                f'{common_utils.format_exception(e, use_bracket=True)}')
     else:
@@ -1737,7 +1745,6 @@ def _show_enabled_infra(
 @flags.all_users_option('Show all clusters, including those not owned by the '
                         'current user.')
 @usage_lib.entrypoint
-# pylint: disable=redefined-builtin
 def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
            endpoint: Optional[int], show_managed_jobs: bool,
            show_services: bool, show_pools: bool, clusters: List[str],
@@ -2108,7 +2115,7 @@ def status_kubernetes(verbose: bool):
               help='Show clusters from the last N days. Default is 30 days. '
               'If set to 0, show all clusters.')
 @usage_lib.entrypoint
-def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
+def cost_report(all: bool, days: int):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show estimated costs for launched clusters.
 
@@ -2292,7 +2299,7 @@ def logs(
     provision: bool,
     worker: Optional[int],
     sync_down: bool,
-    status: bool,  # pylint: disable=redefined-outer-name
+    status: bool,
     follow: bool,
     tail: int,
 ):
@@ -2427,12 +2434,12 @@ def logs(
 @usage_lib.entrypoint
 def cancel(
     cluster: str,
-    all: bool,  # pylint: disable=redefined-builtin
+    all: bool,
     all_users: bool,
-    jobs: List[int],  # pylint: disable=redefined-outer-name
+    jobs: List[int],
     yes: bool,
     async_call: bool,
-):  # pylint: disable=redefined-builtin
+):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s).
 
@@ -2554,7 +2561,7 @@ def cancel(
 @usage_lib.entrypoint
 def stop(
     clusters: List[str],
-    all: bool,  # pylint: disable=redefined-builtin
+    all: bool,
     all_users: bool,
     yes: bool,
     async_call: bool,
@@ -2631,12 +2638,12 @@ def stop(
 @usage_lib.entrypoint
 def autostop(
     clusters: List[str],
-    all: bool,  # pylint: disable=redefined-builtin
+    all: bool,
     all_users: bool,
     idle_minutes: Optional[int],
     wait_for: Optional[str],
-    cancel: bool,  # pylint: disable=redefined-outer-name
-    down: bool,  # pylint: disable=redefined-outer-name
+    cancel: bool,
+    down: bool,
     yes: bool,
     async_call: bool,
 ):
@@ -2747,7 +2754,6 @@ def autostop(
     required=False,
     # Disabling quote check here, as there seems to be a bug in pylint,
     # which incorrectly recognizes the help string as a docstring.
-    # pylint: disable=bad-docstring-quotes
     help=('Retry provisioning infinitely until the cluster is up, '
           'if we fail to start the cluster due to unavailability errors.'),
 )
@@ -2761,14 +2767,13 @@ def autostop(
           'upgrading the SkyPilot runtime on the cluster.'))
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
-# pylint: disable=redefined-builtin
 def start(
     clusters: List[str],
     all: bool,
     yes: bool,
     idle_minutes_to_autostop: Optional[int],
     wait_for: Optional[str],
-    down: bool,  # pylint: disable=redefined-outer-name
+    down: bool,
     retry_until_up: bool,
     force: bool,
     async_call: bool,
@@ -2974,7 +2979,7 @@ def start(
 @usage_lib.entrypoint
 def down(
     clusters: List[str],
-    all: bool,  # pylint: disable=redefined-builtin
+    all: bool,
     all_users: bool,
     yes: bool,
     purge: bool,
@@ -3172,7 +3177,7 @@ def _down_or_stop_clusters(
         names: List[str],
         apply_to_all: bool = False,
         all_users: bool = False,
-        down: bool = False,  # pylint: disable=redefined-outer-name
+        down: bool = False,
         no_confirm: bool = True,
         purge: bool = False,
         idle_minutes_to_autostop: Optional[int] = None,
@@ -3471,7 +3476,6 @@ def _down_or_stop_clusters(
     type=str,
     help='The workspace to check. If None, all workspaces will be checked.')
 @usage_lib.entrypoint
-# pylint: disable=redefined-outer-name
 def check(infra_list: Tuple[str],
           verbose: bool,
           workspace: Optional[str] = None):
@@ -3539,7 +3543,7 @@ def check(infra_list: Tuple[str],
 @usage_lib.entrypoint
 def show_gpus(
         accelerator_str: Optional[str],
-        all: bool,  # pylint: disable=redefined-builtin
+        all: bool,
         infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
@@ -4366,7 +4370,7 @@ def show_gpus(
                                   case_sensitive=False,
                                   all_regions=all_regions))
         # Import here to save module load speed.
-        # pylint: disable=import-outside-toplevel,line-too-long
+        # noqa: E501
         from sky.catalog import common as catalog_common
 
         # For each gpu name (count not included):
@@ -4482,7 +4486,6 @@ def storage():
 @flags.config_option(expose_value=False)
 @flags.verbose_option()
 @usage_lib.entrypoint
-# pylint: disable=redefined-builtin
 def storage_ls(verbose: bool):
     """List storage objects managed by SkyPilot."""
     request_id = sdk.storage_ls()
@@ -4507,7 +4510,7 @@ def storage_ls(verbose: bool):
               help='Skip confirmation prompt.')
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
-def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  # pylint: disable=redefined-builtin
+def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):
     """Delete storage objects.
 
     Examples:
@@ -4555,7 +4558,7 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
     for name, request_id in request_ids.items():
         try:
             _async_call_or_wait(request_id, async_call, 'sky.storage')
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.error(f'{colorama.Fore.RED}Error deleting storage {name}: '
                          f'{common_utils.format_exception(e, use_bracket=True)}'
                          f'{colorama.Style.RESET_ALL}')
@@ -4617,7 +4620,7 @@ def volumes_apply(
         entrypoint: Optional[Tuple[str, ...]],
         name: Optional[str],
         infra: Optional[str],
-        type: Optional[str],  # pylint: disable=redefined-builtin
+        type: Optional[str],
         size: Optional[str],
         use_existing: Optional[bool],
         yes: bool,
@@ -4638,7 +4641,6 @@ def volumes_apply(
         sky volumes apply --name pvc2 --infra k8s --type k8s-pvc --size 100Gi
         --use-existing
     """
-    # pylint: disable=import-outside-toplevel
     from sky.volumes import volume as volume_lib
 
     volume_config_dict: Dict[str, Any] = {}
@@ -4757,7 +4759,7 @@ def volumes_ls(verbose: bool):
 @usage_lib.entrypoint
 def volumes_delete(
         names: List[str],
-        all: bool,  # pylint: disable=redefined-builtin
+        all: bool,
         purge: bool,
         yes: bool,
         async_call: bool):
@@ -4806,7 +4808,7 @@ def volumes_delete(
         try:
             _async_call_or_wait(volumes_sdk.delete(names, purge=purge),
                                 async_call, 'sky.volumes.delete')
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.error(f'{colorama.Fore.RED}Error deleting volumes {names}: '
                          f'{str(e)}{colorama.Style.RESET_ALL}')
 
@@ -4888,7 +4890,7 @@ def jobs_launch(
     ports: Tuple[str],
     detach_run: bool,
     yes: bool,
-    pool: Optional[str],  # pylint: disable=redefined-outer-name
+    pool: Optional[str],
     num_jobs: Optional[int],
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
@@ -5058,7 +5060,6 @@ def jobs_launch(
 @flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
 @usage_lib.entrypoint
-# pylint: disable=redefined-builtin
 def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
                all_users: bool, all: bool, limit: int):
     """Show statuses of managed jobs.
@@ -5140,7 +5141,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
         def get_pool_status():
             try:
                 return managed_jobs.pool_status(pool_names=None)
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 # If pool_status fails, we'll just skip the worker information
                 return None
 
@@ -5194,10 +5195,9 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
 @flags.yes_option()
 @flags.all_users_option('Cancel all managed jobs from all users.')
 @usage_lib.entrypoint
-# pylint: disable=redefined-builtin
 def jobs_cancel(
     name: Optional[str],
-    pool: Optional[str],  # pylint: disable=redefined-outer-name
+    pool: Optional[str],
     job_ids: Tuple[int],
     all: bool,
     yes: bool,
@@ -5373,7 +5373,7 @@ def pool():
 @usage_lib.entrypoint
 def jobs_pool_apply(
     pool_yaml: Optional[Tuple[str, ...]],
-    pool: Optional[str],  # pylint: disable=redefined-outer-name
+    pool: Optional[str],
     workdir: Optional[str],
     infra: Optional[str],
     cloud: Optional[str],
@@ -5519,7 +5519,6 @@ def jobs_pool_status(verbose: bool, pool_names: List[str], show_all: bool):
 @flags.yes_option()
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
-# pylint: disable=redefined-builtin
 def jobs_pool_down(
     pool_names: List[str],
     all: bool,
@@ -5636,7 +5635,7 @@ def jobs_pool_down(
                         f'anyway.{colorama.Style.RESET_ALL}')
                 else:
                     click.echo('All jobs cancelled.')
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         # If API call fails, log warning but continue with pool down
         logger.warning(
             f'Failed to check for running jobs in pool(s): {pool_names!r}: {e}.'
@@ -5660,7 +5659,7 @@ def _handle_serve_logs(
         replica_ids: Tuple[int, ...],
         sync_down: bool,
         tail: Optional[int],
-        pool: bool,  # pylint: disable=redefined-outer-name
+        pool: bool,
 ):
     noun = 'pool' if pool else 'service'
     capnoun = noun.capitalize()
@@ -5895,7 +5894,7 @@ def _generate_task_with_service(
     disk_tier: Optional[str],
     network_tier: Optional[str],
     not_supported_cmd: str,
-    pool: bool,  # pylint: disable=redefined-outer-name
+    pool: bool,
     git_url: Optional[str] = None,
     git_ref: Optional[str] = None,
 ) -> task_lib.Task:
@@ -6249,7 +6248,6 @@ def serve_update(
               help='Show service endpoint.')
 @click.argument('service_names', required=False, type=str, nargs=-1)
 @usage_lib.entrypoint
-# pylint: disable=redefined-builtin
 def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
     """Show statuses of SkyServe services.
 
@@ -6376,7 +6374,6 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
               help='Tear down a given replica')
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
-# pylint: disable=redefined-builtin
 def serve_down(
     service_names: List[str],
     all: bool,
@@ -6710,7 +6707,6 @@ def api_logs(request_id: Optional[str], server_logs: bool,
 @flags.all_users_option('Cancel all requests from all users.')
 @flags.yes_option()
 @usage_lib.entrypoint
-# pylint: disable=redefined-builtin
 def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool,
                yes: bool):
     """Cancel a request running on SkyPilot API server."""
@@ -6781,7 +6777,6 @@ INT_OR_NONE = IntOrNone()
           f' set to "none" or "all" to show all requests.'))
 @flags.verbose_option('Show more details.')
 @usage_lib.entrypoint
-# pylint: disable=redefined-builtin
 def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
                verbose: bool, limit: Optional[int]):
     """List requests on SkyPilot API server."""

@@ -189,7 +189,7 @@ def terminate_instances(
         logger.debug(
             f'Terminating instances {", ".join(instance_ids_to_terminate)}')
         lambda_client.remove_instances(instance_ids_to_terminate)
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
                 f'Failed to terminate instances {instance_ids_to_terminate}: '

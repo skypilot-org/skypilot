@@ -53,7 +53,6 @@ async def volume_validate(
         _: fastapi.Request,
         volume_validate_body: payloads.VolumeValidateBody) -> None:
     """Validates a volume."""
-    # pylint: disable=import-outside-toplevel
     from sky.volumes import volume as volume_lib
 
     try:

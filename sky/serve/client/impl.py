@@ -24,12 +24,11 @@ def up(
     service_name: str,
     pool: bool = False,
     # Internal only:
-    # pylint: disable=invalid-name
     _need_confirmation: bool = False
 ) -> server_common.RequestId[Tuple[str, str]]:
     assert not pool, 'Command `up` is not supported for pool.'
     # Avoid circular import.
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
+    from sky.client import sdk
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     with admin_policy_utils.apply_and_use_config_in_current_request(
@@ -70,12 +69,11 @@ def update(
     mode: 'serve_utils.UpdateMode',
     pool: bool = False,
     # Internal only:
-    # pylint: disable=invalid-name
     _need_confirmation: bool = False
 ) -> server_common.RequestId[None]:
     assert not pool, 'Command `update` is not supported for pool.'
     # Avoid circular import.
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
+    from sky.client import sdk
     noun = 'pool' if pool else 'service'
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
@@ -116,12 +114,11 @@ def apply(
     mode: 'serve_utils.UpdateMode',
     pool: bool = False,
     # Internal only:
-    # pylint: disable=invalid-name
     _need_confirmation: bool = False
 ) -> server_common.RequestId[None]:
     assert pool, 'Command `apply` is only supported for pool.'
     # Avoid circular import.
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
+    from sky.client import sdk
 
     noun = 'pool' if pool else 'service'
     # There are two cases here. If task is None, we should be trying to
@@ -184,7 +181,7 @@ def apply(
 
 def down(
     service_names: Optional[Union[str, List[str]]],
-    all: bool = False,  # pylint: disable=redefined-builtin
+    all: bool = False,
     purge: bool = False,
     pool: bool = False,
 ) -> server_common.RequestId[None]:
@@ -232,7 +229,7 @@ def tail_logs(service_name: str,
               tail: Optional[int] = None,
               pool: bool = False) -> None:
     # Avoid circular import.
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
+    from sky.client import sdk
 
     if pool:
         body = payloads.JobsPoolLogsBody(
@@ -276,7 +273,7 @@ def sync_down_logs(service_name: str,
                    tail: Optional[int] = None,
                    pool: bool = False) -> None:
     # Avoid circular import.
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
+    from sky.client import sdk
 
     if pool:
         body = payloads.JobsPoolDownloadLogsBody(

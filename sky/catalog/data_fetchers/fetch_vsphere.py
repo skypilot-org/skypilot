@@ -449,7 +449,7 @@ def initialize_vms_csv(csv_saving_path: str,
                                     f'{accelerator_count},'
                                     f'{vcpus},'
                                     f'{memory_gb},'
-                                    f'\"{gpu_info_str}\",0.0,0.0,'
+                                    f'"{gpu_info_str}",0.0,0.0,'
                                     f'{vcenter_name},{cluster_name}\n')
             cpu_host_dict = summary_result.get('weakest_host_of_each_cluster')
             if cpu_host_dict:
@@ -535,7 +535,7 @@ def initialize_images_csv(csv_saving_path: str, vc_object,
                         if gpu_name not in gpu_tags:
                             gpu_tags.append(gpu_name)
                 if gpu_tags:
-                    gpu_tags_str = str(gpu_tags).replace('\'', '\"')
+                    gpu_tags_str = str(gpu_tags).replace('\'', '"')
                     f.write(f'{item.id},{vcenter_name},{item_cpu},{item_memory}'
                             f',,,\'{gpu_tags_str}\'\n')
 
@@ -567,7 +567,7 @@ def initialize_instance_image_mapping_csv(vms_csv_path: str,
                 vm_gpu_fullname = row['AcceleratorName'].lower()
                 vm_gpu_manufacturer_fullname = json.loads(
                     row['GpuInfo'].replace(
-                        '\'', '\"'))['Gpus'][0]['Manufacturer'].lower()
+                        '\'', '"'))['Gpus'][0]['Manufacturer'].lower()
                 mapping_found_by_gpu_name = False
                 default_manufacturer_name = None
                 for image_gpu_tag in row['GpuTags']:

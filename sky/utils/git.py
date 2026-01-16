@@ -258,7 +258,7 @@ class GitRepo:
                     f'Successfully validated repository {https_url} access '
                     'using public access')
                 return GitCloneInfo(url=https_url)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.debug(f'Public access failed: {str(e)}')
 
         # Step 2: Try with token if provided
@@ -310,7 +310,7 @@ class GitRepo:
                 else:
                     raise exceptions.GitError(
                         f'No SSH keys found for {self.repo_url}.')
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 raise exceptions.GitError(
                     f'Failed to access repository {self.repo_url} using '
                     'SSH key authentication. Please verify your SSH key and '
@@ -338,7 +338,7 @@ class GitRepo:
         try:
             # Try to use paramiko's SSH config parser if available
             try:
-                import paramiko  # pylint: disable=import-outside-toplevel
+                import paramiko
                 ssh_config = paramiko.SSHConfig()
                 with open(ssh_config_path, 'r', encoding='utf-8') as f:
                     ssh_config.parse(f)
@@ -367,7 +367,7 @@ class GitRepo:
                 logger.debug('paramiko not available')
                 return None
 
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.debug(f'Error parsing SSH config: {str(e)}')
             return None
 
@@ -409,7 +409,7 @@ class GitRepo:
 
                 logger.debug(f'Using provided SSH key: {key_path}')
                 return (key_path, key_content)
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 raise exceptions.GitError(
                     f'Validate provided SSH key error: {str(e)}') from e
 
@@ -421,7 +421,7 @@ class GitRepo:
                     key_content = f.read()
                 logger.debug(f'Using SSH key from config: {config_key_path}')
                 return (config_key_path, key_content)
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 logger.debug(f'Could not read SSH key: {str(e)}')
 
         # Step 3: Search for default SSH keys
@@ -462,7 +462,7 @@ class GitRepo:
                 logger.debug(f'Discovered default SSH key: {private_key_path}')
                 return (private_key_path, key_content)
 
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 logger.debug(
                     f'Error checking SSH key {private_key_path}: {str(e)}')
                 continue

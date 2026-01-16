@@ -407,7 +407,7 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
             config.node_config) == instance_utils.GCPNodeType.TPU):
         # SKY: The API for TPU VM is slightly different from normal compute
         # instances.
-        # See https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#Node # pylint: disable=line-too-long
+        # See https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#Node # noqa: E501
         account_dict['scope'] = account_dict['scopes']
         account_dict.pop('scopes')
         iam_role = {'serviceAccount': account_dict}
@@ -476,7 +476,7 @@ def _check_firewall_rules(cluster_name: str, vpc_name: str, project_id: str,
             # Rules applied to specific VM (targetTags) may not work for the
             # current VM, so should be skipped.
             # Filter by targetTags == ['cluster_name']
-            # See https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.networks.html#getEffectiveFirewalls # pylint: disable=line-too-long
+            # See https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.networks.html#getEffectiveFirewalls # noqa: E501
             tags = rule.get('targetTags', None)
             if tags is not None:
                 if len(tags) != 1:
@@ -946,7 +946,6 @@ def _delete_firewall_rule(project_id: str, compute, name):
     return response
 
 
-# pylint: disable=redefined-builtin
 def _list_firewall_rules(project_id, compute, filter=None):
     response = (compute.firewalls().list(
         project=project_id,
@@ -962,13 +961,13 @@ def _create_vpcnet(project_id: str, compute, body):
     return response
 
 
-def _list_vpcnets(project_id: str, compute, filter=None):  # pylint: disable=redefined-builtin
+def _list_vpcnets(project_id: str, compute, filter=None):
     response = (compute.networks().list(
         project=project_id,
         filter=filter,
     ).execute())
 
-    return (list(sorted(response['items'], key=lambda x: x['name']))
+    return (sorted(response['items'], key=lambda x: x['name'])
             if 'items' in response else [])
 
 
@@ -1000,7 +999,7 @@ def _list_subnets(
     # Note we do not directly use the filter (network=<...>) arg of the list()
     # call above, because it'd involve constructing a long URL of the following
     # format and passing it as the filter value:
-    # 'https://www.googleapis.com/compute/v1/projects/<project_id>/global/networks/<network_name>' # pylint: disable=line-too-long
+    # 'https://www.googleapis.com/compute/v1/projects/<project_id>/global/networks/<network_name>' # noqa: E501
     matched_items = []
     for item in items:
         if network == _network_interface_to_vpc_name(item):

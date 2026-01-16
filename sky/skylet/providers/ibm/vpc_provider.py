@@ -17,7 +17,7 @@ import requests
 from sky.adaptors import ibm
 from sky.skylet.providers.ibm.utils import RAY_RECYCLABLE, get_logger
 
-# pylint: disable=line-too-long
+# noqa: E501
 logger = get_logger("vpc_provider_")
 REQUIRED_RULES = {
     "outbound_tcp_all": "selected security group is missing rule permitting outbound TCP access\n",
@@ -59,7 +59,7 @@ class IBMVPCProvider:
         self.region = region
         self.zone = zone
         reused_vpc_data = None
-        # pylint: disable=line-too-long
+        # noqa: E501
         vpcs_filtered_by_tags_and_region = self.search_client.search(
             query=f"type:vpc AND tags:{self.cluster_name} AND region:{self.region}",
             fields=["tags", "region", "type"],
@@ -261,7 +261,7 @@ class IBMVPCProvider:
         """
         if not vpc_data:
             return None
-        # pylint: disable=line-too-long
+        # noqa: E501
         tmp_vpc_client = ibm.client(region=region)
         subnets_attached_to_routing_table = tmp_vpc_client.list_subnets(
             routing_table_id=vpc_data["default_routing_table"]["id"]
@@ -321,7 +321,7 @@ class IBMVPCProvider:
             logger.debug(f"Deleting VM: {vm_data['id']}")
             vpc_client.delete_instance(id=vm_data["id"])
 
-        # pylint: disable=line-too-long E1136
+        # noqa: E501 E1136
         res = vpc_client.list_instances(vpc_id=vpc_id).get_result()
         num_instances = res["total_count"]
 
@@ -357,7 +357,7 @@ class IBMVPCProvider:
 
     def delete_gateways(self, vpc_client, vpc_id):
         """deletes all gateways attached to the specified vpc"""
-        # pylint: disable=line-too-long
+        # noqa: E501
         gateways = vpc_client.list_public_gateways(
             resource_group_id=self.resource_group_id
         ).get_result()["public_gateways"]
@@ -392,7 +392,7 @@ class IBMVPCProvider:
         sg = self.vpc_client.get_security_group(sg_id).get_result()
 
         for rule in sg["rules"]:
-            # pylint: disable=line-too-long
+            # noqa: E501
             # check outbound rules that are not associated with a specific IP address range
             if rule["direction"] == "outbound" and rule["remote"] == {
                 "cidr_block": "0.0.0.0/0"
@@ -460,7 +460,6 @@ def _build_security_group_rule_prototype_model(missing_rule, sg_id=None):
         port = int(port)
         port_min = port
         port_max = port
-    # pylint: disable=W0703
     except Exception:
         port_min = 1
         port_max = 65535

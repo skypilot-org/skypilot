@@ -66,7 +66,6 @@ def update(task: Optional['sky.Task'],
 
 
 @usage_lib.entrypoint
-# pylint: disable=redefined-builtin
 def down(
     service_names: Optional[Union[str, List[str]]] = None,
     all: bool = False,

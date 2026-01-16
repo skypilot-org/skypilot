@@ -11,8 +11,17 @@ import collections
 import enum
 import math
 import typing
-from typing import (Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple,
-                    Union)
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 from typing_extensions import assert_never
 
@@ -498,7 +507,7 @@ class Cloud:
         Default implementation returns 0 for non-implemented clouds.
         """
         del instance_type, region, zone
-        return {reservation: 0 for reservation in specific_reservations}
+        return dict.fromkeys(specific_reservations, 0)
 
     @classmethod
     def check_credentials(

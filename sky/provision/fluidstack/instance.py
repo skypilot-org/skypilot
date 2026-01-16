@@ -130,7 +130,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                         f'{instance_name}.')
             try:
                 utils.FluidstackClient().rename(instance_id, instance_name)
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 logger.warning(f'run_instances error: {e}')
                 raise
 
@@ -163,7 +163,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 instance_type=config.node_config['InstanceType'],
                 ssh_pub_key=config.node_config['AuthorizedKey'],
                 region=region)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.warning(f'run_instances error: {e}')
             raise
         logger.info(f'Launched instance {instance_ids[0]}.')
@@ -246,7 +246,7 @@ def terminate_instances(
             continue
         try:
             utils.FluidstackClient().delete(inst_id)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'Failed to terminate instance {inst_id}: '

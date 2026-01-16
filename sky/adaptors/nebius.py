@@ -136,37 +136,31 @@ SKY_CHECK_NAME = 'Nebius (for Nebius Object Storae)'
 
 
 def request_error():
-    # pylint: disable=import-outside-toplevel
     from nebius.aio import service_error
     return service_error.RequestError
 
 
 def compute():
-    # pylint: disable=import-outside-toplevel
     from nebius.api.nebius.compute import v1 as compute_v1
     return compute_v1
 
 
 def iam():
-    # pylint: disable=import-outside-toplevel
     from nebius.api.nebius.iam import v1 as iam_v1
     return iam_v1
 
 
 def billing():
-    # pylint: disable=import-outside-toplevel
     from nebius.api.nebius.billing import v1alpha1 as billing_v1alpha1
     return billing_v1alpha1
 
 
 def nebius_common():
-    # pylint: disable=import-outside-toplevel
     from nebius.api.nebius.common import v1 as common_v1
     return common_v1
 
 
 def vpc():
-    # pylint: disable=import-outside-toplevel
     from nebius.api.nebius.vpc import v1 as vpc_v1
     return vpc_v1
 
@@ -265,7 +259,7 @@ def get_nebius_credentials(boto3_session):
 
 # lru_cache() is thread-safe and it will return the same session object
 # for different threads.
-# Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache # pylint: disable=line-too-long
+# Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache # noqa: E501
 @annotations.lru_cache(scope='global')
 def session():
     """Create an AWS session."""
@@ -318,7 +312,6 @@ def client(service_name: str):
 @common.load_lazy_modules(_LAZY_MODULES)
 def botocore_exceptions():
     """AWS botocore exception."""
-    # pylint: disable=import-outside-toplevel
     from botocore import exceptions
     return exceptions
 

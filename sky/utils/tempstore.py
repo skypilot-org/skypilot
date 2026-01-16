@@ -32,7 +32,6 @@ def tempdir() -> Iterator[str]:
 
 
 # Keep the function signature same as tempfile.mkdtemp.
-# pylint: disable=redefined-builtin
 def mkdtemp(suffix: Optional[str] = None,
             prefix: Optional[str] = None,
             dir: Optional[str] = None) -> str:

@@ -241,7 +241,7 @@ def _create_instances(
             if gpus != '[]':
                 # TODO: improve the csv initialization logic, for now,
                 #  we need to replace the single quote with double quote
-                gpus = json.loads(gpus.replace('\'', '\"'))
+                gpus = json.loads(gpus.replace('\'', '"'))
                 for gpu in gpus:
                     if gpu.get('Status') == 'Available':
                         if (vms_item['AcceleratorName'].lower()
@@ -500,7 +500,7 @@ def terminate_instances(
     for inst in instances:
         if inst.runtime.powerState == 'poweredOn':
             poweroff_vm(vc_object.servicemanager.content, inst)
-        vm_service.delete(inst._moId)  # pylint: disable=protected-access
+        vm_service.delete(inst._moId)
     # Clear the cache when down the cluster
     cluster_info = metadata_utils.Metadata()
     cluster_info.pop(cluster_name_on_cloud)

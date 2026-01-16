@@ -14,14 +14,16 @@ from sky.catalog.data_fetchers.fetch_vsphere import initialize_accelerators_csv
 from sky.catalog.data_fetchers.fetch_vsphere import initialize_hosts_csv
 from sky.catalog.data_fetchers.fetch_vsphere import initialize_images_csv
 from sky.catalog.data_fetchers.fetch_vsphere import (
-    initialize_instance_image_mapping_csv)
+    initialize_instance_image_mapping_csv,
+)
 from sky.catalog.data_fetchers.fetch_vsphere import initialize_vms_csv
 from sky.provision.vsphere.common import vim_utils
 from sky.provision.vsphere.common.cls_api_client import ClsApiClient
 from sky.provision.vsphere.common.cls_api_helper import ClsApiHelper
 from sky.provision.vsphere.common.id_generator import generate_random_uuid
 from sky.provision.vsphere.common.service_manager_factory import (
-    ServiceManagerFactory)
+    ServiceManagerFactory,
+)
 from sky.provision.vsphere.common.vim_utils import create_spec_with_script
 from sky.provision.vsphere.common.vim_utils import poweron_vm
 from sky.provision.vsphere.common.vim_utils import wait_for_tasks
@@ -69,7 +71,7 @@ class VsphereClient:
         if self.servicemanager:
             self.servicemanager.disconnect()
 
-    def remove_instances(self, *instance_ids: str) -> Dict[str, Any]:  # pylint: disable=unused-argument
+    def remove_instances(self, *instance_ids: str) -> Dict[str, Any]:
         """Terminate instances."""
         ### TODO: Add implementation
         # pass
@@ -163,7 +165,7 @@ class VsphereClient:
             # Find the deployment target
             deployment_target = vsphere_adaptor.get_ovf_client(
             ).LibraryItem.DeploymentTarget(
-                resource_pool_id=cluster_obj.resourcePool._GetMoId(),  # pylint: disable=protected-access
+                resource_pool_id=cluster_obj.resourcePool._GetMoId(),
                 host_id=host_mobid)
 
             ovf_summary = self.client.ovf_lib_item_service.filter(
@@ -266,14 +268,14 @@ class VsphereClient:
             raise VsphereError('Failed to connect to vSphere.')
         if self.servicemanager.si is None:
             raise VsphereError('Failed to connect to vSphere.')
-        pbm_si, pm_content = self._create_pbm_connection(  # pylint: disable=unused-variable
-            self.servicemanager.si._stub)  # pylint: disable=protected-access
+        pbm_si, pm_content = self._create_pbm_connection(
+            self.servicemanager.si._stub)
         pm = pm_content.profileManager
         return pm
 
     # we should not call this method directly
     def _create_pbm_connection(self, vpxd_stub):
-        session_cookie = vpxd_stub.cookie.split('\"')[1]
+        session_cookie = vpxd_stub.cookie.split('"')[1]
         http_context = vsphere_adaptor.get_vmomi_support().GetHttpContext()
         cookie = http_cookies.SimpleCookie()
         cookie['vmware_soap_session'] = session_cookie
@@ -284,7 +286,7 @@ class VsphereClient:
 
         context = None
         if hasattr(ssl, '_create_unverified_context'):
-            context = ssl._create_unverified_context()  # pylint: disable=protected-access
+            context = ssl._create_unverified_context()
         pbm_stub = vsphere_adaptor.get_pyvmomi().SoapStubAdapter(
             host=hostname,
             version='pbm.version.version1',

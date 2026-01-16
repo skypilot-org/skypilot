@@ -12,7 +12,6 @@ router = fastapi.APIRouter()
 
 
 @router.get('')
-# pylint: disable=redefined-builtin
 async def get(request: fastapi.Request) -> None:
     """Gets workspace config on the server."""
     # Have to manually inject user info into the request body because the

@@ -175,7 +175,7 @@ def bulk_provision(
             # This error is a user error instead of a provisioning failure.
             # And there is no possibility to fix it by teardown.
             raise
-        except Exception as exc:  # pylint: disable=broad-except
+        except Exception as exc:
             zone_str = 'all zones'
             if zones:
                 zone_str = ','.join(zone.name for zone in zones)
@@ -211,7 +211,7 @@ def bulk_provision(
                         'preserve the cluster state. Please try launching the '
                         'cluster again, or terminate it with: '
                         f'sky down {cluster_name.display_name}') from e
-                except Exception as e:  # pylint: disable=broad-except
+                except Exception as e:
                     logger.debug(f'{terminate_str} {cluster_name!r} failed.')
                     logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
                     retry_cnt += 1
@@ -336,7 +336,7 @@ def _wait_ssh_connection_direct(ip: str,
                                                  ssh_proxy_command)
     except socket.timeout:  # this is the most expected exception
         stderr = f'Timeout: SSH connection to {ip} is not ready.'
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         stderr = f'Error: {common_utils.format_exception(e)}'
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_probe_timeout, ssh_proxy_command)
@@ -475,7 +475,7 @@ def _post_provision_setup(
         e = RuntimeError(f'Provision failed for cluster {cluster_name!r}. '
                          'Could not find any head instance. To fix: refresh '
                          f'status with: sky status -r; and retry provisioning.')
-        setattr(e, 'detailed_reason', str(cluster_info))
+        e.detailed_reason = str(cluster_info)
         raise e
 
     # TODO(suquark): Move wheel build here in future PRs.
@@ -762,7 +762,7 @@ def post_provision_runtime_setup(
                 handle_cluster_yaml=handle_cluster_yaml,
                 provision_record=provision_record,
                 custom_resource=custom_resource)
-        except Exception:  # pylint: disable=broad-except
+        except Exception:
             logger.error(
                 ux_utils.error_message(
                     'Failed to set up SkyPilot runtime on cluster.',

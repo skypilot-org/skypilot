@@ -300,7 +300,7 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
 
             success_count += 1
 
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             error_count += 1
             creation_errors.append(f'{user_data["username"]}: {str(e)}')
 
@@ -473,7 +473,6 @@ def create_service_account_token(
 
         # Add service account to permission system with default role
         # Import here to avoid circular imports
-        # pylint: disable=import-outside-toplevel
         from sky.users.permission import permission_service
         permission_service.add_user_if_not_exists(service_account_user_id)
 
@@ -509,7 +508,7 @@ def create_service_account_token(
             'message': 'Please save this token - it will not be shown again!'
         }
 
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         logger.error(f'Failed to create service account token: {e}')
         raise fastapi.HTTPException(
             status_code=500,
@@ -630,7 +629,7 @@ def update_service_account_role(
             'service_account_user_id': service_account_user_id,
             'new_role': role_body.role
         }
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         logger.error(f'Failed to update service account role: {e}')
         raise fastapi.HTTPException(
             status_code=500, detail='Failed to update service account role')
@@ -714,7 +713,7 @@ def rotate_service_account_token(
                         'token - it will not be shown again!')
         }
 
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         logger.error(f'Failed to rotate service account token: {e}')
         raise fastapi.HTTPException(
             status_code=500, detail='Failed to rotate service account token')

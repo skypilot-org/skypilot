@@ -144,7 +144,7 @@ def provision_ephemeral_volumes(
                 continue
             volume_infos.append(volume_info)
         provider_config['ephemeral_volume_infos'] = volume_infos
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except Exception as e:
         logger.error(f'Failed to provision ephemeral volumes: {e}')
         raise e
 

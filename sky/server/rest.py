@@ -143,7 +143,7 @@ def retry_transient_errors(max_retries: int = 3,
                         _handle_exception()
                         logger.debug('Request interrupted. Retry immediately.')
                         continue
-                    except Exception as e:  # pylint: disable=broad-except
+                    except Exception as e:
                         _handle_exception()
                         if consecutive_failed_count >= max_retries:
                             # Retries exhausted.
@@ -215,7 +215,7 @@ def _retry_on_server_unavailable(max_wait_seconds: int = 600,
                         with rich_utils.client_status(
                                 _readable_error_msg(e.message)):
                             if time.time() - start_time > max_wait_seconds:
-                                # pylint: disable=line-too-long
+                                # noqa: E501
                                 raise exceptions.ServerTemporarilyUnavailableError(
                                     'Timeout waiting for the API server to be '
                                     f'available after {max_wait_seconds}s.') \
@@ -255,7 +255,7 @@ def handle_server_unavailable(response: 'requests.Response') -> None:
         response_data = response.json()
         if 'detail' in response_data:
             error_msg = response_data['detail']
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         error_msg = handle_response_text(response)
 
     with ux_utils.print_exception_no_traceback():
@@ -316,12 +316,12 @@ async def handle_server_unavailable_async(
         response_data = await response.json()
         if 'detail' in response_data:
             error_msg = response_data['detail']
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         try:
             text = await response.text()
             if text:
                 error_msg = text
-        except Exception:  # pylint: disable=broad-except
+        except Exception:
             pass
 
     with ux_utils.print_exception_no_traceback():
@@ -369,7 +369,7 @@ async def request_async(session: 'aiohttp.ClientSession', method: str, url: str,
         except exceptions.RequestInterruptedError:
             logger.debug('Request interrupted. Retry immediately.')
             continue
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             last_exception = e
             if retry_count >= max_retries - 1:
                 # Retries exhausted

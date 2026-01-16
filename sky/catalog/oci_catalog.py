@@ -25,7 +25,7 @@ from sky.utils import resources_utils
 if typing.TYPE_CHECKING:
     import pandas as pd
 
-    from sky.clouds import cloud  # pylint: disable=ungrouped-imports
+    from sky.clouds import cloud
 
 logger = logging.getLogger(__name__)
 

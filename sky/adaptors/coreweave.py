@@ -144,7 +144,6 @@ def client(service_name: str):
 @common.load_lazy_modules(_LAZY_MODULES)
 def botocore_exceptions():
     """AWS botocore exception."""
-    # pylint: disable=import-outside-toplevel
     from botocore import exceptions as boto_exceptions
     return boto_exceptions
 
@@ -233,7 +232,7 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
                       f's3.addressing_style virtual --profile '
                       f'{COREWEAVE_PROFILE_NAME}')
         hints += f'\n{_INDENT_PREFIX}For more info: '
-        hints += 'https://docs.coreweave.com/docs/products/storage/object-storage/get-started-caios'  # pylint: disable=line-too-long
+        hints += 'https://docs.coreweave.com/docs/products/storage/object-storage/get-started-caios'  # noqa: E501
 
     return (False, hints) if hints else (True, hints)
 

@@ -52,7 +52,6 @@ async def main(url: str, timestamps_supported: bool, login_url: str) -> None:
 async def run_websocket_proxy(websocket: ClientConnection,
                               timestamps_supported: bool) -> None:
     if os.isatty(sys.stdin.fileno()):
-        # pylint: disable=import-outside-toplevel
         import termios
         import tty
         old_settings = termios.tcgetattr(sys.stdin.fileno())
@@ -153,7 +152,7 @@ async def stdin_to_websocket(reader: asyncio.StreamReader,
             async with websocket_lock:
                 await websocket.send(data)
 
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         print(f'Error in stdin_to_websocket: {e}', file=sys.stderr)
     finally:
         async with websocket_lock:
@@ -206,7 +205,7 @@ async def websocket_to_stdout(websocket: ClientConnection,
             await writer.drain()
     except websockets.exceptions.ConnectionClosed:
         print('WebSocket connection closed', file=sys.stderr)
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         print(f'Error in websocket_to_stdout: {e}', file=sys.stderr)
         raise e
     finally:

@@ -164,7 +164,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                 username = profile['posixAccounts'][0]['username']
                 if username:
                     os_login_username = username
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 logger.debug('Failed to parse gcloud os-login profile.\n'
                              f'{common_utils.format_exception(e)}')
                 pass
@@ -255,7 +255,6 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
               'r',
               encoding='utf-8') as file:
         ssh_key_data = file.read().strip()
-    # pylint: disable=E1136
     try:
         res = client.create_key(public_key=ssh_key_data,
                                 name=_get_unique_key_name(),
@@ -339,7 +338,7 @@ def setup_vast_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = auth_utils.get_or_generate_keys()
     with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
         public_key = pub_key_file.read().strip()
-        current_key_list = vast.vast().show_ssh_keys()  # pylint: disable=assignment-from-no-return
+        current_key_list = vast.vast().show_ssh_keys()
         # Only add an ssh key if it hasn't already been added
         if not any(x['public_key'] == public_key for x in current_key_list):
             vast.vast().create_ssh_key(ssh_key=public_key)

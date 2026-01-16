@@ -68,7 +68,7 @@ def make_image_public(image_id, region):
     subprocess.run(unblock_command, shell=True, check=True)
     public_command = (
         f'aws ec2 modify-image-attribute --image-id {image_id} '
-        '--launch-permission "{\\\"Add\\\": [{\\\"Group\\\":\\\"all\\\"}]}" '
+        '--launch-permission "{\\"Add\\": [{\\"Group\\":\\"all\\"}]}" '
         f'--region {region}')
     subprocess.run(public_command, shell=True, check=True)
     print(f'Made {image_id} public')
@@ -142,7 +142,7 @@ def main():
         print(f'Start copying image to {copy_to_region}...')
         try:
             new_image_id = copy_image_and_make_public(copy_to_region)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             print(f'Error generating image to {copy_to_region}: {str(e)}')
             new_image_id = 'NEED_FALLBACK'
         image_cache.append((new_image_id, copy_to_region))

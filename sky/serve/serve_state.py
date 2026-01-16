@@ -527,7 +527,7 @@ def get_services() -> List[Dict[str, Any]]:
         rows = session.execute(query).fetchall()
     records = []
     for row in rows:
-        records.append(_get_service_from_row(row._mapping))  # pylint: disable=protected-access
+        records.append(_get_service_from_row(row._mapping))
     return records
 
 
@@ -537,7 +537,7 @@ def get_num_services() -> int:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         return session.execute(
-            sqlalchemy.select(sqlalchemy.func.count()  # pylint: disable=not-callable
+            sqlalchemy.select(sqlalchemy.func.count()
                              ).select_from(services_table)).fetchone()[0]
 
 
@@ -549,7 +549,7 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
         query = _build_services_with_latest_version_query(service_name)
         rows = session.execute(query).fetchall()
     for row in rows:
-        return _get_service_from_row(row._mapping)  # pylint: disable=protected-access
+        return _get_service_from_row(row._mapping)
     return None
 
 

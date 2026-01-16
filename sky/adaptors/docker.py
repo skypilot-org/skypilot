@@ -1,6 +1,5 @@
 """Docker adaptors"""
 
-# pylint: disable=import-outside-toplevel
 
 from sky.adaptors import common
 

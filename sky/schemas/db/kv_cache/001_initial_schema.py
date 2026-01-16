@@ -5,7 +5,6 @@ Revises:
 Create Date: 2025-11-13 12:00:00.000000
 
 """
-# pylint: disable=invalid-name
 from alembic import op
 
 from sky.utils.db import db_utils

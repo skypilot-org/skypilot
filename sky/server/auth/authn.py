@@ -47,4 +47,4 @@ async def override_user_info_in_request_body(request: fastapi.Request,
                     constants.USER_ID_ENV_VAR] = auth_user.id
                 original_json['env_vars'][
                     constants.USER_ENV_VAR] = auth_user.name
-            request._body = json.dumps(original_json).encode('utf-8')  # pylint: disable=protected-access
+            request._body = json.dumps(original_json).encode('utf-8')

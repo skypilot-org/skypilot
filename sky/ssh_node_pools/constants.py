@@ -1,5 +1,5 @@
 """Constants for SSH Node Pools"""
-# pylint: disable=line-too-long
+# noqa: E501
 import os
 
 DEFAULT_KUBECONFIG_PATH = os.path.expanduser('~/.kube/config')

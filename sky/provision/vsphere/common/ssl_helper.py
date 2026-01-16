@@ -18,7 +18,7 @@ def get_unverified_context():
     """
     context = None
     if hasattr(ssl, '_create_unverified_context'):
-        context = ssl._create_unverified_context()  # pylint: disable=protected-access
+        context = ssl._create_unverified_context()
     return context
 
 

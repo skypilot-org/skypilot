@@ -4,7 +4,6 @@
 # Due to the design of the sdk, pylint has a false
 # positive for the functions.
 #
-# pylint: disable=assignment-from-no-return
 import collections
 import csv
 import json

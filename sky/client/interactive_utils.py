@@ -102,7 +102,7 @@ async def _handle_interactive_auth_websocket(session_id: str) -> None:
                 except asyncio.CancelledError:
                     # Task was cancelled - auth complete
                     pass
-                except Exception as e:  # pylint: disable=broad-except
+                except Exception as e:
                     logger.debug(f'Error in stdin_to_websocket: {e}')
 
             async def websocket_to_stdout():
@@ -111,7 +111,7 @@ async def _handle_interactive_auth_websocket(session_id: str) -> None:
                     async for message in ws:
                         stdout_writer.write(message)
                         await stdout_writer.drain()
-                except Exception as e:  # pylint: disable=broad-except
+                except Exception as e:
                     logger.debug(f'Error in websocket_to_stdout: {e}')
 
             # Run both directions concurrently
@@ -127,7 +127,7 @@ async def _handle_interactive_auth_websocket(session_id: str) -> None:
                 await stdin_task
             except asyncio.CancelledError:
                 pass
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         logger.error(f'Failed to handle interactive authentication: {e}')
         raise
     finally:

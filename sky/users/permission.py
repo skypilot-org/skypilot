@@ -87,7 +87,6 @@ class PermissionService:
             is not available or no rules are defined.
         """
         try:
-            # pylint: disable=import-outside-toplevel
             from sky.server import plugins as server_plugins
             return server_plugins.get_plugin_rbac_rules()
         except ImportError:
@@ -95,7 +94,7 @@ class PermissionService:
             logger.debug(
                 'Plugin module not available, skipping plugin RBAC rules')
             return {}
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.warning(f'Failed to get plugin RBAC rules: {e}')
             return {}
 

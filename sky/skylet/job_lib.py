@@ -393,12 +393,12 @@ def add_job(job_name: str,
     # job_id will autoincrement with the null value
     if int(constants.SKYLET_VERSION) >= 28:
         _DB.cursor.execute(
-            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?, null)',  # pylint: disable=line-too-long
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?, null)',  # noqa: E501
             (job_name, username, job_submitted_at, JobStatus.INIT.value,
              run_timestamp, None, resources_str, metadata))
     else:
         _DB.cursor.execute(
-            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)',  # pylint: disable=line-too-long
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)',  # noqa: E501
             (job_name, username, job_submitted_at, JobStatus.INIT.value,
              run_timestamp, None, resources_str, metadata))
     _DB.conn.commit()
@@ -472,7 +472,6 @@ def _set_status_no_lock(job_id: int, status: JobStatus) -> None:
 
 def set_status(job_id: int, status: JobStatus) -> None:
     # TODO(mraheja): remove pylint disabling when filelock version updated
-    # pylint: disable=abstract-class-instantiated
     with filelock.FileLock(_get_lock_path(job_id)):
         _set_status_no_lock(job_id, status)
 
@@ -515,7 +514,6 @@ def get_exit_codes(job_id: int) -> Optional[List[int]]:
 @init_db
 def set_job_started(job_id: int) -> None:
     # TODO(mraheja): remove pylint disabling when filelock version updated.
-    # pylint: disable=abstract-class-instantiated
     assert _DB is not None
     with filelock.FileLock(_get_lock_path(job_id)):
         _DB.cursor.execute(
@@ -545,7 +543,6 @@ def get_status_no_lock(job_id: int) -> Optional[JobStatus]:
 
 def get_status(job_id: int) -> Optional[JobStatus]:
     # TODO(mraheja): remove pylint disabling when filelock version updated.
-    # pylint: disable=abstract-class-instantiated
     with filelock.FileLock(_get_lock_path(job_id)):
         return get_status_no_lock(job_id)
 
@@ -578,7 +575,7 @@ def get_statuses(job_ids: List[int]) -> Dict[int, Optional[str]]:
     rows = _DB.cursor.execute(
         f'SELECT job_id, status FROM jobs WHERE job_id IN ({query_str})',
         job_ids)
-    statuses: Dict[int, Optional[str]] = {job_id: None for job_id in job_ids}
+    statuses: Dict[int, Optional[str]] = dict.fromkeys(job_ids)
     for (job_id, status) in rows:
         statuses[job_id] = status
     return statuses
@@ -1277,7 +1274,7 @@ class JobLibCodeGen:
                   managed_job_id: Optional[int],
                   follow: bool = True,
                   tail: int = 0) -> str:
-        # pylint: disable=line-too-long
+        # noqa: E501
 
         code = [
             # We use != instead of is not because 1 is not None will print a warning:
@@ -1348,8 +1345,8 @@ class JobLibCodeGen:
     def get_job_exit_codes(cls, job_id: Optional[int] = None) -> str:
         """Generate shell command to retrieve exit codes."""
         code = [
-            f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',  # pylint: disable=line-too-long
-            'exit_codes = job_lib.get_exit_codes(job_id) if job_id is not None and int(constants.SKYLET_VERSION) >= 28 else {}',  # pylint: disable=line-too-long
+            f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',  # noqa: E501
+            'exit_codes = job_lib.get_exit_codes(job_id) if job_id is not None and int(constants.SKYLET_VERSION) >= 28 else {}',  # noqa: E501
             'print(exit_codes, flush=True)',
         ]
         return cls._build(code)

@@ -16,7 +16,7 @@ class SafeThread(threading.Thread):
     def run(self):
         try:
             super().run()
-        except BaseException as e:  # pylint: disable=broad-except
+        except BaseException as e:
             self._exc = e
 
     @property
@@ -26,7 +26,6 @@ class SafeThread(threading.Thread):
         return common_utils.format_exception(self._exc)
 
 
-# pylint: disable=invalid-name
 KeyType = TypeVar('KeyType')
 ValueType = TypeVar('ValueType')
 

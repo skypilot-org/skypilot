@@ -1,4 +1,4 @@
-# pylint: skip-file
+# ruff: noqa
 """SkyPilot.
 
 SkyPilot is a framework for easily running machine learning* workloads on any
@@ -86,7 +86,7 @@ def get_commit_hash():
         if changes:
             commit_hash += '-dirty'
         return commit_hash
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         print(_COMMIT_FAILURE_MESSAGE.format(verb='get', error=str(e)),
               file=sys.stderr)
         return commit_hash
@@ -105,7 +105,7 @@ def replace_commit_hash():
                              flags=re.M)
         with open(INIT_FILE_PATH, 'w', encoding='utf-8') as fp:
             fp.write(content)
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         # Avoid breaking the installation when there is no permission to write
         # the file.
         print(_COMMIT_FAILURE_MESSAGE.format(verb='replace', error=str(e)),
@@ -118,7 +118,7 @@ def revert_commit_hash():
         if original_init_content is not None:
             with open(INIT_FILE_PATH, 'w', encoding='utf-8') as fp:
                 fp.write(original_init_content)
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         # Avoid breaking the installation when there is no permission to write
         # the file.
         print(_COMMIT_FAILURE_MESSAGE.format(verb='replace', error=str(e)),

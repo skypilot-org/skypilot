@@ -54,7 +54,7 @@ def gc_controller_logs_for_job():
                 while not finished:
                     finished = _clean_controller_logs_with_retention(
                         controller_logs_retention)
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 logger.error(f'Error GC controller logs for job: {e}',
                              exc_info=True)
         else:
@@ -82,7 +82,7 @@ def gc_task_logs_for_job():
                 while not finished:
                     finished = _clean_task_logs_with_retention(
                         task_logs_retention)
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 logger.error(f'Error GC task logs for job: {e}', exc_info=True)
         else:
             logger.info('Controller logs GC is disabled')

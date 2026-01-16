@@ -189,7 +189,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             logger.warning(f'API error during instance launch: {e}')
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(error_msg) from e
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             # Generic error handling for unexpected errors
             instance_type = config.node_config['InstanceType']
             region_str = (f' in region {region}'
@@ -307,7 +307,7 @@ def terminate_instances(
             logger.info(
                 f'Successfully initiated termination of instance {inst_id} '
                 f'({name})')
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'Failed to terminate instance {inst_id}: '

@@ -486,7 +486,7 @@ def _validate_config(config: Dict[str, Any], config_source: str) -> None:
         config,
         schemas.get_config_schema(),
         f'Invalid config YAML from ({config_source}). See: '
-        'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
+        'https://docs.skypilot.co/en/latest/reference/config.html. '  # noqa: E501
         'Error: ',
         skip_none=False)
 
@@ -790,7 +790,7 @@ def override_skypilot_config(
             config,
             schemas.get_config_schema(),
             'Invalid config. See: '
-            'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
+            'https://docs.skypilot.co/en/latest/reference/config.html. '  # noqa: E501
             'Error: ',
             skip_none=False)
         _set_config_overridden(True)

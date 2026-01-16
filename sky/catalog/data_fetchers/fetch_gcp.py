@@ -277,7 +277,7 @@ def filter_zones(func: Callable[[], List[str]]) -> Callable[[], List[str]]:
     removes any zones present in the global EXCLUDED_REGIONS (if defined).
     """
 
-    def wrapper(*args, **kwargs) -> List[str]:  # pylint: disable=redefined-outer-name
+    def wrapper(*args, **kwargs) -> List[str]:
         original_zones = set(func(*args, **kwargs))
         if ZONES:
             original_zones &= ZONES

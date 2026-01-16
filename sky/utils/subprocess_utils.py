@@ -11,8 +11,17 @@ import termios
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, List, Optional, Protocol, Set, Tuple,
-                    Union)
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    Set,
+    Tuple,
+    Union,
+)
 
 import colorama
 

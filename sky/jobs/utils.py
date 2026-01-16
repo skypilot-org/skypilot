@@ -16,8 +16,19 @@ import textwrap
 import time
 import traceback
 import typing
-from typing import (Any, Deque, Dict, Iterable, List, Literal, Optional, Set,
-                    TextIO, Tuple, Union)
+from typing import (
+    Any,
+    Deque,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Set,
+    TextIO,
+    Tuple,
+    Union,
+)
 
 import colorama
 import filelock
@@ -141,7 +152,7 @@ def terminate_cluster(
     max_retry: int = 6,
 ) -> None:
     """Terminate the cluster."""
-    from sky import core  # pylint: disable=import-outside-toplevel
+    from sky import core
     retry_cnt = 0
     # In some cases, e.g. botocore.exceptions.NoCredentialsError due to AWS
     # metadata service throttling, the failed sky.down attempt can take 10-11
@@ -164,7 +175,7 @@ def terminate_cluster(
             # The cluster is already down.
             logger.debug(f'The cluster {cluster_name} is already down.')
             return
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             retry_cnt += 1
             if retry_cnt >= max_retry:
                 raise RuntimeError(
@@ -303,7 +314,7 @@ def ha_recovery_for_consolidation_mode() -> None:
                         logger.debug(message)
                         f.write(message)
                         continue
-                except Exception:  # pylint: disable=broad-except
+                except Exception:
                     # _controller_process_alive may raise if psutil fails; we
                     # should not crash the recovery logic because of this.
                     message = ('Error checking controller pid '
@@ -436,10 +447,9 @@ def controller_process_alive(record: managed_job_state.ControllerPidRecord,
         else:
             # If we can't check the create_time try to check the cmdline instead
             cmd_str = ' '.join(process.cmdline())
-            # pylint: disable=line-too-long
+            # noqa: E501
             # Pre-#7051 cmdline: /path/to/python -u -m sky.jobs.controller <dag.yaml_path> --job-id <job_id>
             # Post-#7051 cmdline: /path/to/python -u -msky.jobs.controller
-            # pylint: enable=line-too-long
             if ('-m sky.jobs.controller' not in cmd_str and
                     '-msky.jobs.controller' not in cmd_str):
                 if not quiet:
@@ -525,7 +535,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                 try:
                     if pool is None:
                         terminate_cluster(cluster_name)
-                except Exception as e:  # pylint: disable=broad-except
+                except Exception as e:
                     error_msg = (
                         f'Failed to terminate cluster {cluster_name}: '
                         f'{common_utils.format_exception(e, use_bracket=True)}')

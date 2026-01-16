@@ -70,7 +70,6 @@ def check_compute_credentials() -> bool:
             seeweb_client.fetch_servers()
         except pydantic.ValidationError:
             # Fallback: fetch raw JSON to validate authentication
-            # pylint: disable=protected-access
             base_url = seeweb_client._Api__generate_base_url()  # type: ignore
             headers = seeweb_client._Api__generate_authentication_headers(
             )  # type: ignore
@@ -78,7 +77,7 @@ def check_compute_credentials() -> bool:
             resp = requests.get(url, headers=headers, timeout=15)
             resp.raise_for_status()
             # If we get here, authentication worked even if schema mismatches
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         raise SeewebAuthenticationError(
             f'Unable to authenticate with Seeweb API: {e}') from e
 
@@ -127,7 +126,6 @@ def client():
             return orig_fetch_servers(timeout=timeout)
         except pydantic.ValidationError:
             # Fallback path: fetch raw JSON, drop snapshot fields, then validate
-            # pylint: disable=protected-access
             base_url = api._Api__generate_base_url()  # type: ignore
             headers = api._Api__generate_authentication_headers(
             )  # type: ignore
@@ -158,7 +156,6 @@ def client():
             return orig_delete_server(server_name, timeout=timeout)
         except pydantic.ValidationError:
             # Fallback: perform raw DELETE and interpret not_found as success
-            # pylint: disable=protected-access
             base_url = api._Api__generate_base_url()  # type: ignore
             headers = api._Api__generate_authentication_headers(
             )  # type: ignore

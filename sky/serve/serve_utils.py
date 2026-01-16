@@ -13,8 +13,19 @@ import shutil
 import time
 import traceback
 import typing
-from typing import (Any, Callable, DefaultDict, Deque, Dict, Iterator, List,
-                    Optional, TextIO, Type, Union)
+from typing import (
+    Any,
+    Callable,
+    DefaultDict,
+    Deque,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    TextIO,
+    Type,
+    Union,
+)
 import uuid
 
 import colorama
@@ -285,7 +296,7 @@ def ha_recovery_for_consolidation_mode(pool: bool):
                                 f'{noun} {service_name} is still running. '
                                 'Skipping recovery.\n')
                         continue
-                except Exception:  # pylint: disable=broad-except
+                except Exception:
                     # _controller_process_alive may raise if psutil fails; we
                     # should not crash the recovery logic because of this.
                     f.write('Error checking controller pid '
@@ -678,7 +689,7 @@ def _get_service_status(
         try:
             yaml_content = get_yaml_content(service_name, version)
             raw_yaml_config = yaml_utils.read_yaml_str(yaml_content)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             # If this is a consolidation mode running without an PVC, the file
             # might lost after an API server update (restart). In such case, we
             # don't want it to crash the command. Fall back to an empty string.
@@ -708,7 +719,7 @@ def _get_service_status(
         record['target_num_replicas'] = resp.json()['target_num_replicas']
     except requests.exceptions.RequestException:
         record['target_num_replicas'] = None
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         logger.error(f'Failed to get autoscaler info for {service_name}: '
                      f'{common_utils.format_exception(e)}\n'
                      f'Traceback: {traceback.format_exc()}')

@@ -177,10 +177,10 @@ class Optimizer:
         with dag:
             source = make_dummy(_DUMMY_SOURCE_NAME)
             for real_source_node in zero_indegree_nodes:
-                source >> real_source_node  # pylint: disable=pointless-statement
+                source >> real_source_node
             sink = make_dummy(_DUMMY_SINK_NAME)
             for real_sink_node in zero_outdegree_nodes:
-                real_sink_node >> sink  # pylint: disable=pointless-statement
+                real_sink_node >> sink
 
     @staticmethod
     def _remove_dummy_source_sink_nodes(dag: 'dag_lib.Dag'):
@@ -541,7 +541,7 @@ class Optimizer:
             starts executing no sooner than its parent tasks are finished and
             the output data from the parents has arrived to the task v.
         """
-        import pulp  # pylint: disable=import-outside-toplevel
+        import pulp
 
         if minimize_cost:
             prob = pulp.LpProblem('Cost-Optimization', pulp.LpMinimize)
@@ -549,13 +549,13 @@ class Optimizer:
             prob = pulp.LpProblem('Runtime-Optimization', pulp.LpMinimize)
 
         # Prepare the constants.
-        V = topo_order  # pylint: disable=invalid-name
-        E = graph.edges()  # pylint: disable=invalid-name
+        V = topo_order
+        E = graph.edges()
         k = {
             node: list(resource_cost_map.values())
             for node, resource_cost_map in node_to_cost_map.items()
         }
-        F: Dict[Any, Dict[Any, List[float]]] = collections.defaultdict(dict)  # pylint: disable=invalid-name
+        F: Dict[Any, Dict[Any, List[float]]] = collections.defaultdict(dict)
         for u, v in E:
             F[u][v] = []
             for r_u in node_to_cost_map[u].keys():
@@ -591,8 +591,8 @@ class Optimizer:
         # 3. e[u][v] linearizes c[u] x c[v].
         for u, v in E:
             e_uv = e[u][v]  # 1-d one-hot vector
-            N_u = len(c[u])  # pylint: disable=invalid-name
-            N_v = len(c[v])  # pylint: disable=invalid-name
+            N_u = len(c[u])
+            N_v = len(c[v])
 
             for row in range(N_u):
                 prob += pulp.lpSum(
@@ -1424,5 +1424,4 @@ def _fill_in_launchable_resources(
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)
-    return launchable, cloud_candidates, list(
-        sorted(all_fuzzy_candidates)), resource_hints
+    return launchable, cloud_candidates, sorted(all_fuzzy_candidates), resource_hints

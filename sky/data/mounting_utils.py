@@ -53,7 +53,7 @@ def get_rclone_install_cmd() -> str:
     """ RClone installation for both apt-get and rpm.
     This would be common command.
     """
-    # pylint: disable=line-too-long
+    # noqa: E501
     install_cmd = (
         'ARCH=$(uname -m) && '
         'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
@@ -91,7 +91,6 @@ def get_s3_mount_install_cmd() -> str:
     return install_cmd
 
 
-# pylint: disable=invalid-name
 def get_s3_mount_cmd(bucket_name: str,
                      mount_path: str,
                      _bucket_sub_path: Optional[str] = None) -> str:
@@ -217,7 +216,6 @@ def get_gcs_mount_install_cmd() -> str:
     return install_cmd
 
 
-# pylint: disable=invalid-name
 def get_gcs_mount_cmd(bucket_name: str,
                       mount_path: str,
                       _bucket_sub_path: Optional[str] = None) -> str:
@@ -312,7 +310,6 @@ def get_az_mount_install_cmd() -> str:
     return install_cmd
 
 
-# pylint: disable=invalid-name
 def get_az_mount_cmd(container_name: str,
                      storage_account_name: str,
                      mount_path: str,
@@ -391,7 +388,6 @@ def get_az_mount_cmd(container_name: str,
     return mount_cmd
 
 
-# pylint: disable=invalid-name
 def get_r2_mount_cmd(r2_credentials_path: str,
                      r2_profile_name: str,
                      endpoint_url: str,
@@ -525,7 +521,7 @@ def get_oci_mount_cmd(mount_path: str, store_name: str, region: str,
                       namespace: str, compartment: str, config_file: str,
                       config_profile: str) -> str:
     """ OCI specific RClone mount command for oci object storage. """
-    # pylint: disable=line-too-long
+    # noqa: E501
     mount_cmd = (
         f'sudo chown -R `whoami` {mount_path}'
         f' && rclone config create oos_{store_name} oracleobjectstorage'

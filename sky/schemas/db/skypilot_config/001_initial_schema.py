@@ -5,7 +5,6 @@ Revises:
 Create Date: 2025-10-21
 
 """
-# pylint: disable=invalid-name
 from alembic import op
 
 from sky.skypilot_config import Base

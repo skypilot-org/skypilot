@@ -449,7 +449,6 @@ def get_resources_schema():
 
 
 def get_volume_schema():
-    # pylint: disable=import-outside-toplevel
     from sky.utils import volume
 
     return {
@@ -510,7 +509,6 @@ def get_volume_schema():
 
 
 def get_storage_schema():
-    # pylint: disable=import-outside-toplevel
     from sky.data import storage
 
     return {
@@ -632,7 +630,6 @@ def get_volume_mount_schema():
 def get_service_schema():
     """Schema for top-level `service:` field (for SkyServe)."""
     # To avoid circular imports, only import when needed.
-    # pylint: disable=import-outside-toplevel
     from sky.serve import load_balancing_policies
     from sky.serve import spot_placer
     return {
@@ -1187,7 +1184,6 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
 
 
 def get_config_schema():
-    # pylint: disable=import-outside-toplevel
     from sky.server import daemons
 
     resources_schema = {

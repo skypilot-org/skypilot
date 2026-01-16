@@ -55,7 +55,7 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
                 raise RuntimeError(
                     f'RunPod network volume size must be at least '
                     f'{volume_lib.MIN_RUNPOD_NETWORK_VOLUME_SIZE_GB}GB.')
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             raise RuntimeError(f'Invalid volume size {size!r}: {e}') from e
 
         payload = {
@@ -213,7 +213,7 @@ def get_all_volumes_usedby(
             usedby_pods, usedby_clusters = get_volume_usedby(config)
             used_by_pods[config.name_on_cloud] = usedby_pods
             used_by_clusters[config.name_on_cloud] = usedby_clusters
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.debug(f'Failed to get usedby info for RunPod volume '
                          f'{config.name}: {e}')
             failed_volume_names.add(config.name)

@@ -102,7 +102,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 gpu_count=gpu_count,
                 tags={},
                 disk_size=config.node_config['DiskSize'])
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.warning(f'run_instances error: {e}')
             raise
         logger.info(f'Launched instance {instance_id}.')

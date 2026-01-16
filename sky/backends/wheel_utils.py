@@ -123,7 +123,7 @@ def _build_sky_wheel() -> pathlib.Path:
                 if f.name == 'MANIFEST.in':
                     # Remove the line `sky/dashboard/out`, so we do not
                     # include the dashboard files in the internal wheel
-                    import fileinput  # pylint: disable=import-outside-toplevel
+                    import fileinput
                     with fileinput.input(tmp_dir / f.name,
                                          inplace=True) as file:
                         for line in file:
@@ -246,7 +246,7 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
     # This lock prevents that the wheel is updated while being copied.
     # Although the current caller already uses a lock, we still lock it here
     # to guarantee inherent consistency.
-    with filelock.FileLock(_WHEEL_LOCK_PATH):  # pylint: disable=E0110
+    with filelock.FileLock(_WHEEL_LOCK_PATH):
         # This implements a classic "compare, update and clone" consistency
         # protocol. "compare, update and clone" has to be atomic to avoid
         # race conditions.

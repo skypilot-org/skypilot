@@ -274,7 +274,6 @@ def _get_active_resources(
         return global_user_state.get_clusters()
 
     def get_all_managed_jobs() -> List[Dict[str, Any]]:
-        # pylint: disable=import-outside-toplevel
         from sky.jobs.server import core as managed_jobs_core
         try:
             filtered_jobs, _, _, _ = managed_jobs_core.queue_v2(

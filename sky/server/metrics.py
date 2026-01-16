@@ -8,9 +8,9 @@ import time
 from typing import List
 
 import fastapi
+import prometheus_client as prom
 from prometheus_client import generate_latest
 from prometheus_client import multiprocess
-import prometheus_client as prom
 import psutil
 import starlette.middleware.base
 import uvicorn
@@ -119,7 +119,7 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         try:
             response = await call_next(request)
             status_code_group = _get_status_code_group(response.status_code)
-        except Exception:  # pylint: disable=broad-except
+        except Exception:
             status_code_group = '5xx'
             raise
         finally:

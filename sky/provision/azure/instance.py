@@ -868,7 +868,7 @@ def delete_vm_and_attached_resources(subscription_id: str, resource_group: str,
             # Network Interface is disassociated. This takes abour ~30s.
             delete_virtual_machine(resource_group_name=resource_group,
                                    vm_name=vm_name).result()
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.warning('Failed to delete VM: {}'.format(e))
 
     for nic_name in filtered_resources[_RESOURCE_NETWORK_INTERFACE_TYPE]:
@@ -878,21 +878,21 @@ def delete_vm_and_attached_resources(subscription_id: str, resource_group: str,
             # dependency of Network Interface on Public IP Address is
             # disassociated. This takes about ~1s.
             _delete_nic_with_retries(network_client, resource_group, nic_name)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.warning('Failed to delete nic: {}'.format(e))
 
     for public_ip_name in filtered_resources[_RESOURCE_PUBLIC_IP_ADDRESS_TYPE]:
         try:
             delete_public_ip_addresses(resource_group_name=resource_group,
                                        public_ip_address_name=public_ip_name)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.warning('Failed to delete public ip: {}'.format(e))
 
     for vnet_name in filtered_resources[_RESOURCE_VIRTUAL_NETWORK_TYPE]:
         try:
             delete_virtual_networks(resource_group_name=resource_group,
                                     virtual_network_name=vnet_name)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.warning('Failed to delete vnet: {}'.format(e))
 
     for msi_name in filtered_resources[_RESOURCE_MANAGED_IDENTITY_TYPE]:
@@ -918,21 +918,21 @@ def delete_vm_and_attached_resources(subscription_id: str, resource_group: str,
                             delete_role_assignment(
                                 scope=scope,
                                 role_assignment_name=guid_role_assignment_name)
-                        except Exception as e:  # pylint: disable=broad-except
+                        except Exception as e:
                             logger.warning('Failed to delete role '
                                            'assignment: {}'.format(e))
                         break
         try:
             delete_managed_identity(resource_group_name=resource_group,
                                     resource_name=msi_name)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.warning('Failed to delete msi: {}'.format(e))
 
     for nsg_name in filtered_resources[_RESOURCE_NETWORK_SECURITY_GROUP_TYPE]:
         try:
             delete_network_security_group(resource_group_name=resource_group,
                                           network_security_group_name=nsg_name)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.warning('Failed to delete nsg: {}'.format(e))
 
     delete_deployment = _get_azure_sdk_function(
@@ -947,7 +947,7 @@ def delete_vm_and_attached_resources(subscription_id: str, resource_group: str,
         try:
             delete_deployment(resource_group_name=resource_group,
                               deployment_name=deployment_name)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.warning('Failed to delete deployment: {}'.format(e))
 
 

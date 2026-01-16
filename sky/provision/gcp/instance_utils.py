@@ -54,7 +54,7 @@ def _retry_on_gcp_http_exception(
                 try:
                     value = func(*args, **kwargs)
                     return value
-                except Exception as e:  # pylint: disable=broad-except
+                except Exception as e:
                     if (isinstance(e, gcp.http_error_exception()) and
                         (regex is None or re.search(regex, str(e)))):
                         logger.error(
@@ -448,7 +448,7 @@ class GCPComputeInstance(GCPInstance):
             # Retry the wait() call until it succeeds or times out.
             # This is because the wait() call is only best effort, and does not
             # guarantee that the operation is done when it returns.
-            # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait # pylint: disable=line-too-long
+            # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait # noqa: E501
             remaining_timeout = max(timeout - (time.time() - wait_start), 1)
             result = call_operation(operation_caller.wait, remaining_timeout)
             if result['status'] == 'DONE':
@@ -465,7 +465,7 @@ class GCPComputeInstance(GCPInstance):
                     msg = _format_and_log_message_from_errors(
                         errors, result, zone)
                     error = common.ProvisionerError('Operation failed')
-                    setattr(error, 'detailed_reason', msg)
+                    error.detailed_reason = msg
                     error.errors = errors
                     raise error
                 return
@@ -489,7 +489,7 @@ class GCPComputeInstance(GCPInstance):
             msg = _format_and_log_message_from_errors(errors, None, zone)
             error = common.ProvisionerError('Operation timed out')
             # Used for usage collection only, to include in the usage message.
-            setattr(error, 'detailed_reason', msg)
+            error.detailed_reason = msg
             error.errors = errors
             raise error
 
@@ -557,7 +557,7 @@ class GCPComputeInstance(GCPInstance):
         rule = cls.load_resource().firewalls().list(
             project=project_id, filter=f'name={firewall_rule_name}').execute()
         # For the return value format, please refer to
-        # https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.firewalls.html#list # pylint: disable=line-too-long
+        # https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.firewalls.html#list # noqa: E501
         if 'items' not in rule:
             logger.warning(f'Firewall rule {firewall_rule_name} not found. '
                            'Skip cleanup.')
@@ -823,7 +823,7 @@ class GCPComputeInstance(GCPInstance):
         #   \'{  "type": "PERSISTENT",  "boot": true,  "initializeParams": {
         #    "diskSizeGb": "256",    "diskType"...\'. Boot disk must have a
         #    source specified'
-        # https://cloud.google.com/compute/docs/reference/rest/v1/instances/bulkInsert # pylint: disable=line-too-long
+        # https://cloud.google.com/compute/docs/reference/rest/v1/instances/bulkInsert # noqa: E501
         if config.get('sourceMachineImage') is not None:
             return False
         # bulkInsert does not support attaching existing
@@ -851,7 +851,7 @@ class GCPComputeInstance(GCPInstance):
         def _handle_http_error(e):
             # NOTE: Error example:
             # {
-            #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.", # pylint: disable=line-too-long
+            #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.", # noqa: E501
             #   'domain': 'usageLimits',
             #   'reason': 'quotaExceeded'
             # }
@@ -1076,7 +1076,7 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
                                  f'instanceTemplates/{instance_template_name}')
         if not mig_exists:
             # Create a new MIG with size 0 and resize it later for triggering
-            # DWS, according to the doc: https://cloud.google.com/compute/docs/instance-groups/create-mig-with-gpu-vms # pylint: disable=line-too-long
+            # DWS, according to the doc: https://cloud.google.com/compute/docs/instance-groups/create-mig-with-gpu-vms # noqa: E501
             operation = mig_utils.create_managed_instance_group(
                 project_id,
                 zone,
@@ -1357,8 +1357,8 @@ class GCPTPUVMInstance(GCPInstance):
         instance: str,
         tag: str,
     ) -> None:
-        # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes  # pylint: disable=line-too-long
-        # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes/patch  # pylint: disable=line-too-long
+        # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes  # noqa: E501
+        # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes/patch  # noqa: E501
         del project_id, zone  # unused
         try:
             response = cls.load_resource().projects().locations().nodes().get(
@@ -1510,7 +1510,7 @@ class GCPTPUVMInstance(GCPInstance):
             except gcp.http_error_exception() as e:
                 # NOTE: Error example:
                 # {
-                #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.", # pylint: disable=line-too-long
+                #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.", # noqa: E501
                 #   'domain': 'usageLimits',
                 #   'reason': 'quotaExceeded'
                 # }
@@ -1572,7 +1572,7 @@ class GCPTPUVMInstance(GCPInstance):
             # Retry the wait() call until it succeeds or times out.
             # This is because the wait() call is only best effort, and does not
             # guarantee that the operation is done when it returns.
-            # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait # pylint: disable=line-too-long
+            # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait # noqa: E501
             for i, operation in enumerate(operations):
                 if success[i]:
                     continue

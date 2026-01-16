@@ -16,8 +16,17 @@ import tempfile
 import textwrap
 import threading
 import time
-from typing import (Deque, Dict, Iterable, Iterator, List, Optional, TextIO,
-                    Tuple, Union)
+from typing import (
+    Deque,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    TextIO,
+    Tuple,
+    Union,
+)
 
 import colorama
 
@@ -247,7 +256,7 @@ def run_with_log(
                     skip_lines = []
                 # Skip these lines caused by `-i` option of bash. Failed to
                 # find other way to turn off these two warning.
-                # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
+                # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # noqa: E501
                 # `ssh -T -i -tt` still cause the problem.
                 skip_lines += [
                     'bash: cannot set terminal process group',
@@ -311,7 +320,7 @@ def make_task_bash_script(codegen: str,
                           env_vars: Optional[Dict[str, str]] = None) -> str:
     # set -a is used for exporting all variables functions to the environment
     # so that bash `user_script` can access `conda activate`. Detail: #436.
-    # Reference: https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html # pylint: disable=line-too-long
+    # Reference: https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html # noqa: E501
     # DEACTIVATE_SKY_REMOTE_PYTHON_ENV: Deactivate the SkyPilot runtime env, as
     # the ray cluster is started within the runtime env, which may cause the
     # user program to run in that env as well.

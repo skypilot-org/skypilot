@@ -112,7 +112,7 @@ async def get(request_id: str) -> Any:
                     request_task = requests_lib.Request.decode(
                         payloads.RequestPayload(**await response.json()))
                     logger.debug(f'Got request with error: {request_task.name}')
-                except Exception:  # pylint: disable=broad-except
+                except Exception:
                     request_task = None
             if request_task is None:
                 with ux_utils.print_exception_no_traceback():
@@ -186,7 +186,7 @@ async def stream_response_async(request_id: Optional[str],
                     retry_context.line_processed = line_count
         if request_id is not None and get_result:
             return await get(request_id)
-    except Exception:  # pylint: disable=broad-except
+    except Exception:
         logger.debug(f'To stream request logs: sky api logs {request_id}')
         raise
 
@@ -393,14 +393,13 @@ async def launch(
     idle_minutes_to_autostop: Optional[int] = None,
     wait_for: Optional['autostop_lib.AutostopWaitFor'] = None,
     dryrun: bool = False,
-    down: bool = False,  # pylint: disable=redefined-outer-name
+    down: bool = False,
     backend: Optional['backends.Backend'] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
     # Internal only:
-    # pylint: disable=invalid-name
     _need_confirmation: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
@@ -422,11 +421,11 @@ async def launch(
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def exec(  # pylint: disable=redefined-builtin
+async def exec(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
     dryrun: bool = False,
-    down: bool = False,  # pylint: disable=redefined-outer-name
+    down: bool = False,
     backend: Optional['backends.Backend'] = None,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
 ) -> Tuple[Optional[int], Optional['backends.ResourceHandle']]:
@@ -467,7 +466,7 @@ async def start(
     idle_minutes_to_autostop: Optional[int] = None,
     wait_for: Optional['autostop_lib.AutostopWaitFor'] = None,
     retry_until_up: bool = False,
-    down: bool = False,  # pylint: disable=redefined-outer-name
+    down: bool = False,
     force: bool = False,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG,
 ) -> 'backends.CloudVmRayResourceHandle':
@@ -516,7 +515,7 @@ async def autostop(
     cluster_name: str,
     idle_minutes: int,
     wait_for: Optional['autostop_lib.AutostopWaitFor'] = None,
-    down: bool = False,  # pylint: disable=redefined-outer-name
+    down: bool = False,
     stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG
 ) -> None:
     """Async version of autostop() that schedules an autostop/autodown for a
@@ -567,10 +566,9 @@ async def job_status(
 @annotations.client_api
 async def cancel(
         cluster_name: str,
-        all: bool = False,  # pylint: disable=redefined-builtin
+        all: bool = False,
         all_users: bool = False,
         job_ids: Optional[List[int]] = None,
-        # pylint: disable=invalid-name
         _try_cancel_if_cluster_is_init: bool = False,
         stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> None:
     """Async version of cancel() that cancels jobs on a cluster."""

@@ -1,6 +1,5 @@
 """IBM cloud adaptors"""
 
-# pylint: disable=import-outside-toplevel
 
 import json
 import multiprocessing
@@ -59,7 +58,7 @@ def get_oauth_token():
         various IBM cloud APIs
     using an http request to avoid having to install module
         ibm_watson to get IAMTokenManager"""
-    # pylint: disable=line-too-long
+    # noqa: E501
     res = requests.post(
         'https://iam.cloud.ibm.com/identity/token',
         headers={'Content-Type': 'application/x-www-form-urlencoded'},

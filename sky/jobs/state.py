@@ -12,8 +12,17 @@ import sqlite3
 import threading
 import time
 import typing
-from typing import (Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple,
-                    Union)
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 import urllib.parse
 
 import colorama
@@ -342,7 +351,7 @@ async def _describe_task_transition_failure(session: sql_async.AsyncSession,
             status = row['status']
             end_at = row['end_at']
             details += f' Status: {status}, End time: {end_at}.'
-    except Exception as exc:  # pylint: disable=broad-except
+    except Exception as exc:
         details += f' Error fetching task details: {exc}'
     return details
 
@@ -1296,7 +1305,7 @@ def get_managed_job_tasks(job_id: int) -> List[Dict[str, Any]]:
         rows = session.execute(query).fetchall()
     jobs = []
     for row in rows:
-        job_dict = _get_jobs_dict(row._mapping)  # pylint: disable=protected-access
+        job_dict = _get_jobs_dict(row._mapping)
         job_dict['status'] = ManagedJobStatus(job_dict['status'])
         job_dict['schedule_state'] = ManagedJobScheduleState(
             job_dict['schedule_state'])
@@ -1355,7 +1364,7 @@ def get_managed_jobs_total() -> int:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         result = session.execute(
-            sqlalchemy.select(sqlalchemy.func.count()  # pylint: disable=not-callable
+            sqlalchemy.select(sqlalchemy.func.count()
                              ).select_from(spot_table)).fetchone()
         return result[0] if result else 0
 
@@ -1403,10 +1412,10 @@ def build_managed_jobs_with_filters_no_status_query(
     # global_user_state.get_user() on it. This runs on the controller, which may
     # not have the user info. Prefer to do it on the API server side.
     if count_only:
-        query = sqlalchemy.select(sqlalchemy.func.count().label('count'))  # pylint: disable=not-callable
+        query = sqlalchemy.select(sqlalchemy.func.count().label('count'))
     elif status_count:
         query = sqlalchemy.select(spot_table.c.status,
-                                  sqlalchemy.func.count().label('count'))  # pylint: disable=not-callable
+                                  sqlalchemy.func.count().label('count'))
     else:
         query = sqlalchemy.select(spot_table, job_info_table)
     query = query.select_from(
@@ -1573,7 +1582,7 @@ def get_managed_jobs_with_filters(
         rows = session.execute(query).fetchall()
     jobs = []
     for row in rows:
-        job_dict = _get_jobs_dict(row._mapping)  # pylint: disable=protected-access
+        job_dict = _get_jobs_dict(row._mapping)
         if job_dict.get('status') is not None:
             job_dict['status'] = ManagedJobStatus(job_dict['status'])
         if job_dict.get('schedule_state') is not None:
@@ -1859,7 +1868,7 @@ def get_num_launching_jobs() -> int:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         return session.execute(
             sqlalchemy.select(
-                sqlalchemy.func.count()  # pylint: disable=not-callable
+                sqlalchemy.func.count()
             ).select_from(job_info_table).where(
                 sqlalchemy.and_(
                     job_info_table.c.schedule_state ==
@@ -1887,7 +1896,7 @@ def get_num_alive_jobs(pool: Optional[str] = None) -> int:
 
         return session.execute(
             sqlalchemy.select(
-                sqlalchemy.func.count()  # pylint: disable=not-callable
+                sqlalchemy.func.count()
             ).select_from(job_info_table).where(
                 sqlalchemy.and_(*where_conditions))).fetchone()[0]
 
@@ -2913,7 +2922,7 @@ async def job_event_retention_daemon():
         except asyncio.CancelledError:
             logger.info('Job event retention daemon cancelled')
             break
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             logger.error(f'Error running job event retention daemon: {e}')
 
         await asyncio.sleep(JOB_EVENT_DAEMON_INTERVAL_SECONDS)

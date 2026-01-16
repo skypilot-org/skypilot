@@ -122,10 +122,10 @@ class ClsApiHelper(object):
 
     def get_libraryitem_spec(
             self,
-            client_token,  # pylint: disable=unused-argument
+            client_token,
             name,
             description,
-            library_id,  # pylint: disable=unused-argument
+            library_id,
             library_item_type):
         """        Create library item spec
 
@@ -188,7 +188,7 @@ class ClsApiHelper(object):
                     # Python 2.7.9 has stronger SSL certificate validation,
                     # so we need to pass in a context when dealing with
                     # self-signed certificates.
-                    context = ssl._create_unverified_context()  # pylint: disable=protected-access
+                    context = ssl._create_unverified_context()
                     urllib2.urlopen(request, context=context)
                 else:
                     # Don't pass context parameter since versions of Python
@@ -220,14 +220,14 @@ class ClsApiHelper(object):
                 # Python 2.7.9 has stronger SSL certificate validation,
                 # so we need to pass in a context when dealing with self-signed
                 # certificates.
-                context = ssl._create_unverified_context()  # pylint: disable=protected-access
-                response = urllib2.urlopen(  # pylint: disable=consider-using-with
+                context = ssl._create_unverified_context()
+                response = urllib2.urlopen(
                     url=download_info.download_endpoint.uri,
                     context=context)
             else:
                 # Don't pass context parameter since versions of Python
                 # before 2.7.9 don't support it.
-                response = urllib2.urlopen(download_info.download_endpoint.uri)  # pylint: disable=consider-using-with
+                response = urllib2.urlopen(download_info.download_endpoint.uri)
             file_path = os.path.join(directory, file_info.name)
             with open(file_path, 'wb') as local_file:
                 local_file.write(response.read())

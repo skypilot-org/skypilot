@@ -260,12 +260,10 @@ def high_availability_specified(cluster_name: Optional[str]) -> bool:
         return False
 
     if controller.value.controller_type == 'jobs':
-        # pylint: disable-next=import-outside-toplevel
         from sky.jobs import utils as managed_job_utils
         if managed_job_utils.is_consolidation_mode():
             return True
     elif controller.value.controller_type == 'serve':
-        # pylint: disable-next=import-outside-toplevel
         from sky.serve import serve_utils
         if serve_utils.is_consolidation_mode():
             return True
@@ -347,12 +345,12 @@ def _get_cloud_dependencies_installation_commands(
                 # TODO (kyuds): how to implement conservative installation?
                 commands.append(
                     '(command -v gke-gcloud-auth-plugin &>/dev/null || '
-                    '(gcloud components install gke-gcloud-auth-plugin --quiet &>/dev/null))')  # pylint: disable=line-too-long
+                    '(gcloud components install gke-gcloud-auth-plugin --quiet &>/dev/null))')  # noqa: E501
         elif isinstance(cloud, clouds.Nebius):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
                 f'echo -en "\\r{step_prefix}Nebius{empty_str}" && '
-                'curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh '  # pylint: disable=line-too-long
+                'curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh '  # noqa: E501
                 '| sudo NEBIUS_INSTALL_FOLDER=/usr/local/bin bash &> /dev/null && '
                 'nebius profile create --profile sky '
                 '--endpoint api.nebius.cloud '
@@ -383,14 +381,14 @@ def _get_cloud_dependencies_installation_commands(
                 '/bin/linux/$ARCH/kubectl" && '
                 'sudo install -o root -g root -m 0755 '
                 'kubectl /usr/local/bin/kubectl)) && '
-                f'echo -e \'#!/bin/bash\\nexport PATH="{kubernetes_constants.SKY_K8S_EXEC_AUTH_PATH}"\\nexec "$@"\' | sudo tee /usr/local/bin/{kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER} > /dev/null && '  # pylint: disable=line-too-long
-                f'sudo chmod +x /usr/local/bin/{kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER}')  # pylint: disable=line-too-long
+                f'echo -e \'#!/bin/bash\\nexport PATH="{kubernetes_constants.SKY_K8S_EXEC_AUTH_PATH}"\\nexec "$@"\' | sudo tee /usr/local/bin/{kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER} > /dev/null && '  # noqa: E501
+                f'sudo chmod +x /usr/local/bin/{kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER}')  # noqa: E501
             k8s_dependencies_installed = True
         elif isinstance(cloud, clouds.Cudo):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
                 f'echo -en "\\r{step_prefix}cudoctl{empty_str}" && '
-                'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb > /dev/null 2>&1 && '  # pylint: disable=line-too-long
+                'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb > /dev/null 2>&1 && '  # noqa: E501
                 'sudo dpkg -i ~/cudoctl.deb > /dev/null 2>&1')
         elif isinstance(cloud, clouds.IBM):
             if controller != Controllers.JOBS_CONTROLLER:
@@ -472,7 +470,7 @@ def download_and_stream_job_log(
             # job_ids all represent the same logical managed job.
             job_ids=job_ids,
             local_dir=local_dir)
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         # We want to avoid crashing the controller. sync_down_logs() is pretty
         # complicated and could crash in various places (creating remote
         # runners, executing remote code, decoding the payload, etc.). So, we
@@ -506,7 +504,7 @@ def download_and_stream_job_log(
     except FileNotFoundError:
         logger.error('Failed to find the logs for the user '
                      f'program at {log_file}.')
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         logger.error(
             f'Failed to stream the logs for the user program at '
             f'{log_file}: {common_utils.format_exception(e)}',
@@ -825,7 +823,7 @@ def _setup_proxy_command_on_controller(
         # Instead of removing the key, we set the value to empty string
         # so that the controller will only try the regions specified by
         # the keys.
-        ssh_proxy_command = {k: None for k in ssh_proxy_command}
+        ssh_proxy_command = dict.fromkeys(ssh_proxy_command)
         config.set_nested(proxy_command_key, ssh_proxy_command)
 
     return config

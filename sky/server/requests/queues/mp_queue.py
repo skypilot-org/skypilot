@@ -70,7 +70,7 @@ def wait_for_queues_to_be_ready(queue_names: List[str],
             get_queue(queue_names[0], port)
             queue_names.pop(0)
             break
-        except ConnectionRefusedError as e:  # pylint: disable=broad-except
+        except ConnectionRefusedError as e:
             logger.info(f'Waiting for request queue, named {queue_names[0]!r}, '
                         f'to be ready...')
             time.sleep(0.2)

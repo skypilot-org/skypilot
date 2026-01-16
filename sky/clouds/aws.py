@@ -9,8 +9,19 @@ import re
 import subprocess
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterator, List, Literal, Optional, Set,
-                    Tuple, TypeVar, Union)
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import colorama
 from typing_extensions import ParamSpec
@@ -97,7 +108,7 @@ _EFA_DOCKER_RUN_OPTIONS = [
 ]
 
 # AWS EFA image name.
-# Refer to https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-base-gpu-ami-ubuntu-22-04.html for latest version. # pylint: disable=line-too-long
+# Refer to https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-base-gpu-ami-ubuntu-22-04.html for latest version. # noqa: E501
 # TODO(hailong): may need to update the version later.
 _EFA_IMAGE_NAME = 'Deep Learning Base OSS Nvidia Driver GPU AMI' \
 ' (Ubuntu 22.04) 20250808'
@@ -277,7 +288,7 @@ class AWS(clouds.Cloud):
     # By testing, the actual limit is 256 - 8 = 248 characters
     # (our provisioner adds additional `-worker`), due to the
     # maximum length of DescribeInstances API filter value.
-    # Reference: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html # pylint: disable=line-too-long
+    # Reference: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html # noqa: E501
     _MAX_CLUSTER_NAME_LEN_LIMIT = 248
 
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
@@ -290,7 +301,7 @@ class AWS(clouds.Cloud):
         f'\n{_INDENT_PREFIX}  $ aws configure'
         f'\n{_INDENT_PREFIX}  $ aws configure list  # Ensure that this shows identity is set.'
         f'\n{_INDENT_PREFIX}For more info: '
-        'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
+        'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # noqa: E501
     )
 
     _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
@@ -334,7 +345,7 @@ class AWS(clouds.Cloud):
         help_str += (
             f'\n{cls._INDENT_PREFIX}  $ aws sso login --profile <profile_name>'
             f'\n{cls._INDENT_PREFIX}For more info: '
-            'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html'  # pylint: disable=line-too-long
+            'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html'  # noqa: E501
         )
         return help_str
 
@@ -485,7 +496,7 @@ class AWS(clouds.Cloud):
         image_not_found_message = (
             f'Image {image_id!r} not found in AWS region {region} - '
             f'can\'t get {log_context}.\n\n'
-            f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
+            f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # noqa: E501
             'Example: ami-0729d913a335efca7')
         max_retries = 3
         debug_message = 'no describe_images response'
@@ -575,7 +586,7 @@ class AWS(clouds.Cloud):
         try:
             kv_cache.add_or_update_cache_entry(kv_cache_key, str(image_size),
                                                time.time() + day_in_seconds)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             # Catch the error and continue.
             # Failure to cache the result is not critical to the
             # success of this function.
@@ -617,7 +628,7 @@ class AWS(clouds.Cloud):
         try:
             kv_cache.add_or_update_cache_entry(kv_cache_key, root_device_name,
                                                time.time() + day_in_seconds)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             # Catch the error and continue.
             # Failure to cache the result is not critical to the
             # success of this function.
@@ -629,7 +640,7 @@ class AWS(clouds.Cloud):
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         # The command for getting the current zone is from:
-        # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html  # pylint: disable=line-too-long
+        # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html  # noqa: E501
         command_str = (
             'TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" '
             '-H "X-aws-ec2-metadata-token-ttl-seconds: 21600"` && '
@@ -939,7 +950,6 @@ class AWS(clouds.Cloud):
             return False, hints
 
         # Fetch the AWS catalogs
-        # pylint: disable=import-outside-toplevel
         from sky.catalog import aws_catalog
 
         # Trigger the fetch of the availability zones mapping.
@@ -950,7 +960,7 @@ class AWS(clouds.Cloud):
                 'Failed to fetch the availability zones for the account '
                 f'{identity_str}. It is likely due to permission issues, please'
                 ' check the minimal permission required for AWS: '
-                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # noqa: E501
                 f'\n{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
@@ -975,7 +985,7 @@ class AWS(clouds.Cloud):
                 'Failed to list buckets for the account '
                 f'{identity_str}. It is likely due to permission issues, please'
                 ' check the storage permission required for AWS: '
-                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # noqa: E501
                 f'\n{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
@@ -1172,8 +1182,8 @@ class AWS(clouds.Cloud):
             # organization
             # 3. 'Arn' is the full path to the user, which can be reused when
             # the user is deleted and recreated.
-            # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # pylint: disable=line-too-long
-            # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable # pylint: disable=line-too-long
+            # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # noqa: E501
+            # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable # noqa: E501
             user_info = sts.get_caller_identity()
             # Allow fallback to AccountId if UserId does not match, because:
             # 1. In the case where multiple IAM users belong a single root account,
@@ -1205,7 +1215,6 @@ class AWS(clouds.Cloud):
                     f' {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
         except aws.botocore_exceptions().InvalidConfigError as e:
-            # pylint: disable=import-outside-toplevel
             import awscli
             from packaging import version
             awscli_version = version.parse(awscli.__version__)
@@ -1232,7 +1241,7 @@ class AWS(clouds.Cloud):
                 raise exceptions.CloudUserIdentityError(
                     'AWS access token is expired.'
                     f' {cls._sso_credentials_help_str(expired=True)}') from None
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     f'Failed to get AWS user.\n'
@@ -1433,7 +1442,6 @@ class AWS(clouds.Cloud):
         region = resources.region
         use_spot = resources.use_spot
 
-        # pylint: disable=import-outside-toplevel,unused-import
         from sky.catalog import aws_catalog
 
         quota_code = aws_catalog.get_quota_code(instance_type, use_spot)
@@ -1476,7 +1484,7 @@ class AWS(clouds.Cloud):
             # For backward compatibility, the cluster in INIT state launched
             # before #2352 may not have zone information. In this case, we
             # return 0 for all reservations.
-            return {reservation: 0 for reservation in specific_reservations}
+            return dict.fromkeys(specific_reservations, 0)
         reservations = aws_utils.list_reservations_for_instance_type(
             instance_type, region)
 
