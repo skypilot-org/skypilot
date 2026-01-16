@@ -34,35 +34,37 @@ combine_as_imports = true
 use_parentheses = true
 
 [tool.ruff]
-# Match existing pylint/yapf config
 line-length = 80
 target-version = "py38"
 
-# Match pylint ignore paths + format.sh excludes
+# Exclude paths matching pylint config and format.sh:
+# - .pylintrc: ignore=third_party,ray_patches,providers (base names)
+# - format.sh: --ignore-paths 'sky/schemas/generated|sky/skylet/providers/ibm'
 extend-exclude = [
     "build/**",
-    "sky/skylet/providers/ibm/**",
-    "sky/schemas/generated/**",
     "third_party/**",
     "ray_patches/**",
-    "**/providers/**",
-    "tests/unit_tests/test_sky/backends/testdata/**",
+    "providers/**",
+    "sky/schemas/generated/**",
+    "sky/skylet/providers/ibm/**",
 ]
 
 [tool.ruff.lint]
 select = [
+    # --- Core rules matching pylint ---
     "E",      # pycodestyle errors
     "W",      # pycodestyle warnings
     "F",      # Pyflakes
-    "C4",     # flake8-comprehensions
-    "B",      # flake8-bugbear
-    "Q",      # flake8-quotes
+    "Q",      # flake8-quotes (matches pylint-quotes plugin)
     "PLE",    # Pylint errors
     "PLW",    # Pylint warnings
     "PLC",    # Pylint conventions
-    "UP",     # pyupgrade
-    "G",      # flake8-logging-format
-    "RUF",    # Ruff-specific
+    "TID",    # flake8-tidy-imports (for banned-api / deprecated-modules)
+    # --- Enhancements beyond pylint ---
+    "UP",     # pyupgrade - Python version upgrades
+    "C4",     # flake8-comprehensions
+    "B",      # flake8-bugbear - common bugs
+    "RUF",    # Ruff-specific rules
 ]
 
 ignore = [
@@ -81,14 +83,6 @@ ignore = [
     # global-statement (W0603)
     # ==========================================================================
     "PLW0603",
-
-    # ==========================================================================
-    # logging-format-interpolation (W1202) - marked FIXME in pylint config
-    # logging-fstring-interpolation (W1203) - marked FIXME in pylint config
-    # Pylint wants lazy % formatting, but these are disabled so all styles allowed
-    # ==========================================================================
-    "G001",  # Logging statement uses str.format
-    "G004",  # Logging statement uses f-string
 
     # ==========================================================================
     # unnecessary-lambda-assignment (C3001) - marked FIXME in pylint config
@@ -127,10 +121,6 @@ dummy-variable-rgx = "^\\*{0,2}(_$|unused_|dummy_)"
 inline-quotes = "single"
 multiline-quotes = "double"
 docstring-quotes = "double"
-
-[tool.ruff.lint.pydocstyle]
-# Match Google style guide used by the project
-convention = "google"
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 # Match pylint deprecated-modules setting
