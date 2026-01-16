@@ -346,7 +346,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
         try:
             # Import here to avoid circular imports
-            from sky.users.token_service import token_service
+            from sky.users.token_service import token_service  # noqa: PLC0415
 
             # Verify and decode JWT token
             payload = token_service.verify_token(sa_token)
@@ -1179,7 +1179,7 @@ async def launch(launch_body: payloads.LaunchBody,
 
 
 @app.post('/exec')
-async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
+async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:  # noqa: A001
     """Executes a task on an existing cluster."""
     cluster_name = exec_body.cluster_name
     await executor.schedule_request_async(
@@ -1659,7 +1659,7 @@ async def stream(
     # 'plain': plain text for HTML clients
     # 'html': HTML for browsers
     # 'console': console for CLI/API clients
-    format: Literal['auto', 'plain', 'html', 'console'] = 'auto',
+    format: Literal['auto', 'plain', 'html', 'console'] = 'auto',  # noqa: A002
 ) -> fastapi.responses.Response:
     """Streams the logs of a request.
 

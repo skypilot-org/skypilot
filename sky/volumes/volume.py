@@ -25,7 +25,7 @@ class Volume:
     def __init__(
             self,
             name: Optional[str] = None,
-            type: Optional[str] = None,
+            type: Optional[str] = None,  # noqa: A002
             infra: Optional[str] = None,
             size: Optional[str] = None,
             labels: Optional[Dict[str, str]] = None,

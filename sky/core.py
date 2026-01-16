@@ -994,7 +994,7 @@ def queue(cluster_name: str,
 @usage_lib.entrypoint
 def cancel(
     cluster_name: str,
-    all: bool = False,
+    all: bool = False,  # noqa: A002
     all_users: bool = False,
     job_ids: Optional[List[int]] = None,
     # Internal only:

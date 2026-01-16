@@ -308,8 +308,8 @@ class Cudo(clouds.Cloud):
                 f'{cls._CREDENTIAL_HINT}\n'
                 f'{cls._INDENT_PREFIX}'
                 f'{common_utils.format_exception(e, use_bracket=True)}')
-        from cudo_compute import cudo_api
-        from cudo_compute.rest import ApiException
+        from cudo_compute import cudo_api  # noqa: PLC0415
+        from cudo_compute.rest import ApiException  # noqa: PLC0415
         try:
             _, error = cudo_api.make_client()
         except FileNotFoundError as e:

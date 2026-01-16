@@ -473,7 +473,7 @@ def create_service_account_token(
 
         # Add service account to permission system with default role
         # Import here to avoid circular imports
-        from sky.users.permission import permission_service
+        from sky.users.permission import permission_service  # noqa: PLC0415
         permission_service.add_user_if_not_exists(service_account_user_id)
 
         # Handle expiration: 0 means "never expire"

@@ -136,32 +136,32 @@ SKY_CHECK_NAME = 'Nebius (for Nebius Object Storae)'
 
 
 def request_error():
-    from nebius.aio import service_error
+    from nebius.aio import service_error  # noqa: PLC0415
     return service_error.RequestError
 
 
 def compute():
-    from nebius.api.nebius.compute import v1 as compute_v1
+    from nebius.api.nebius.compute import v1 as compute_v1  # noqa: PLC0415
     return compute_v1
 
 
 def iam():
-    from nebius.api.nebius.iam import v1 as iam_v1
+    from nebius.api.nebius.iam import v1 as iam_v1  # noqa: PLC0415
     return iam_v1
 
 
 def billing():
-    from nebius.api.nebius.billing import v1alpha1 as billing_v1alpha1
+    from nebius.api.nebius.billing import v1alpha1 as billing_v1alpha1  # noqa: PLC0415
     return billing_v1alpha1
 
 
 def nebius_common():
-    from nebius.api.nebius.common import v1 as common_v1
+    from nebius.api.nebius.common import v1 as common_v1  # noqa: PLC0415
     return common_v1
 
 
 def vpc():
-    from nebius.api.nebius.vpc import v1 as vpc_v1
+    from nebius.api.nebius.vpc import v1 as vpc_v1  # noqa: PLC0415
     return vpc_v1
 
 
@@ -312,7 +312,7 @@ def client(service_name: str):
 @common.load_lazy_modules(_LAZY_MODULES)
 def botocore_exceptions():
     """AWS botocore exception."""
-    from botocore import exceptions
+    from botocore import exceptions  # noqa: PLC0415
     return exceptions
 
 

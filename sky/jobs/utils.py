@@ -152,7 +152,7 @@ def terminate_cluster(
     max_retry: int = 6,
 ) -> None:
     """Terminate the cluster."""
-    from sky import core
+    from sky import core  # noqa: PLC0415
     retry_cnt = 0
     # In some cases, e.g. botocore.exceptions.NoCredentialsError due to AWS
     # metadata service throttling, the failed sky.down attempt can take 10-11

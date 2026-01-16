@@ -711,7 +711,7 @@ def apply(
 
 def down(
     service_names: Optional[Union[str, List[str]]] = None,
-    all: bool = False,
+    all: bool = False,  # noqa: A002
     purge: bool = False,
     pool: bool = False,
 ) -> None:

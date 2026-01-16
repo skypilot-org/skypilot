@@ -100,7 +100,7 @@ from sky.client.sdk import cost_report
 from sky.client.sdk import down
 from sky.client.sdk import download_logs
 from sky.client.sdk import endpoints
-from sky.client.sdk import exec
+from sky.client.sdk import exec  # noqa: A004
 from sky.client.sdk import get
 from sky.client.sdk import job_status
 from sky.client.sdk import launch

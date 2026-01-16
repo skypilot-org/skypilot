@@ -47,7 +47,7 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
       s3_bucket_name: str; Name of the Amazon S3 Bucket
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
     """
-    import google.auth
+    import google.auth  # noqa: PLC0415
 
     credentials, _ = google.auth.default()
     storagetransfer = gcp.build('storagetransfer',

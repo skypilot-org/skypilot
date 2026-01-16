@@ -553,7 +553,7 @@ class JobExitCode(enum.IntEnum):
                         status: Optional['job_lib.JobStatus']) -> 'JobExitCode':
         """Convert a job status to an exit code."""
         # Import here to avoid circular imports
-        from sky.skylet import job_lib
+        from sky.skylet import job_lib  # noqa: PLC0415
 
         if status is None:
             return cls.NOT_FOUND
@@ -580,7 +580,7 @@ class JobExitCode(enum.IntEnum):
             status: Optional['managed_jobs.ManagedJobStatus']) -> 'JobExitCode':
         """Convert a managed job status to an exit code."""
         # Import here to avoid circular imports
-        from sky import jobs as managed_jobs
+        from sky import jobs as managed_jobs  # noqa: PLC0415
 
         if status is None:
             return cls.NOT_FOUND

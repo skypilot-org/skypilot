@@ -421,7 +421,7 @@ async def launch(
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def exec(
+async def exec(  # noqa: A001
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
     dryrun: bool = False,
@@ -566,7 +566,7 @@ async def job_status(
 @annotations.client_api
 async def cancel(
         cluster_name: str,
-        all: bool = False,
+        all: bool = False,  # noqa: A002
         all_users: bool = False,
         job_ids: Optional[List[int]] = None,
         _try_cancel_if_cluster_is_init: bool = False,

@@ -449,7 +449,7 @@ def get_resources_schema():
 
 
 def get_volume_schema():
-    from sky.utils import volume
+    from sky.utils import volume  # noqa: PLC0415
 
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -463,7 +463,7 @@ def get_volume_schema():
             'type': {
                 'type': 'string',
                 'case_sensitive_enum': [
-                    type.value for type in volume.VolumeType
+                    type.value for type in volume.VolumeType  # noqa: A001
                 ],
             },
             'infra': {
@@ -495,7 +495,7 @@ def get_volume_schema():
                     'access_mode': {
                         'type': 'string',
                         'case_sensitive_enum': [
-                            type.value for type in volume.VolumeAccessMode
+                            type.value for type in volume.VolumeAccessMode  # noqa: A001
                         ],
                     },
                     'namespace': {
@@ -509,7 +509,7 @@ def get_volume_schema():
 
 
 def get_storage_schema():
-    from sky.data import storage
+    from sky.data import storage  # noqa: PLC0415
 
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -534,7 +534,7 @@ def get_storage_schema():
             'store': {
                 'type': 'string',
                 'case_insensitive_enum': [
-                    type.value for type in storage.StoreType
+                    type.value for type in storage.StoreType  # noqa: A001
                 ]
             },
             'persistent': {
@@ -630,8 +630,8 @@ def get_volume_mount_schema():
 def get_service_schema():
     """Schema for top-level `service:` field (for SkyServe)."""
     # To avoid circular imports, only import when needed.
-    from sky.serve import load_balancing_policies
-    from sky.serve import spot_placer
+    from sky.serve import load_balancing_policies  # noqa: PLC0415
+    from sky.serve import spot_placer  # noqa: PLC0415
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -1116,20 +1116,20 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
     'networking': {
         'type': 'string',
         'case_insensitive_enum': [
-            type.value for type in kubernetes_enums.KubernetesNetworkingMode
+            type.value for type in kubernetes_enums.KubernetesNetworkingMode  # noqa: A001
         ],
     },
     'ports': {
         'type': 'string',
         'case_insensitive_enum': [
-            type.value for type in kubernetes_enums.KubernetesPortMode
+            type.value for type in kubernetes_enums.KubernetesPortMode  # noqa: A001
         ],
     },
     **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
     'autoscaler': {
         'type': 'string',
         'case_insensitive_enum': [
-            type.value for type in kubernetes_enums.KubernetesAutoscalerType
+            type.value for type in kubernetes_enums.KubernetesAutoscalerType  # noqa: A001
         ],
     },
     'high_availability': {
@@ -1184,7 +1184,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
 
 
 def get_config_schema():
-    from sky.server import daemons
+    from sky.server import daemons  # noqa: PLC0415
 
     resources_schema = {
         k: v

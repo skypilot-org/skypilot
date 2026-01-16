@@ -40,7 +40,7 @@ async def launch(
     request_id = await context_utils.to_thread(sdk.launch, task, name, pool,
                                                num_jobs, _need_confirmation)
     if stream_logs is not None:
-        return await sdk_async._stream_and_get(request_id, stream_logs)
+        return await sdk_async._stream_and_get(request_id, stream_logs)  # noqa: SLF001
     else:
         return await sdk_async.get(request_id)
 
@@ -61,7 +61,7 @@ async def queue_v2(
                                                skip_finished, all_users,
                                                job_ids, limit, fields)
     if stream_logs is not None:
-        return await sdk_async._stream_and_get(request_id, stream_logs)
+        return await sdk_async._stream_and_get(request_id, stream_logs)  # noqa: SLF001
     else:
         return await sdk_async.get(request_id)
 
@@ -80,7 +80,7 @@ async def queue(
                                                skip_finished, all_users,
                                                job_ids)
     if stream_logs is not None:
-        return await sdk_async._stream_and_get(request_id, stream_logs)
+        return await sdk_async._stream_and_get(request_id, stream_logs)  # noqa: SLF001
     else:
         return await sdk_async.get(request_id)
 
@@ -89,7 +89,7 @@ async def queue(
 async def cancel(
     name: Optional[str] = None,
     job_ids: Optional[List[int]] = None,
-    all: bool = False,
+    all: bool = False,  # noqa: A002
     all_users: bool = False,
     stream_logs: Optional[
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
@@ -98,7 +98,7 @@ async def cancel(
     request_id = await context_utils.to_thread(sdk.cancel, name, job_ids, all,
                                                all_users)
     if stream_logs is not None:
-        return await sdk_async._stream_and_get(request_id, stream_logs)
+        return await sdk_async._stream_and_get(request_id, stream_logs)  # noqa: SLF001
     else:
         return await sdk_async.get(request_id)
 

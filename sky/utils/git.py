@@ -338,7 +338,7 @@ class GitRepo:
         try:
             # Try to use paramiko's SSH config parser if available
             try:
-                import paramiko
+                import paramiko  # noqa: PLC0415
                 ssh_config = paramiko.SSHConfig()
                 with open(ssh_config_path, 'r', encoding='utf-8') as f:
                     ssh_config.parse(f)

@@ -130,7 +130,7 @@ def client(service_name: str, region):
 @common.load_lazy_modules(_LAZY_MODULES)
 def botocore_exceptions():
     """AWS botocore exception."""
-    from botocore import exceptions as boto_exceptions
+    from botocore import exceptions as boto_exceptions  # noqa: PLC0415
     return boto_exceptions
 
 

@@ -1237,7 +1237,7 @@ def launch(
               type=str,
               help='Git reference (branch, tag, or commit hash) to use.')
 @usage_lib.entrypoint
-def exec(
+def exec(  # noqa: A001
     cluster: Optional[str],
     cluster_option: Optional[str],
     entrypoint: Tuple[str, ...],
@@ -2116,7 +2116,7 @@ def status_kubernetes(verbose: bool):
               help='Show clusters from the last N days. Default is 30 days. '
               'If set to 0, show all clusters.')
 @usage_lib.entrypoint
-def cost_report(all: bool, days: int):
+def cost_report(all: bool, days: int):  # noqa: A002
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show estimated costs for launched clusters.
 
@@ -2435,7 +2435,7 @@ def logs(
 @usage_lib.entrypoint
 def cancel(
     cluster: str,
-    all: bool,
+    all: bool,  # noqa: A002
     all_users: bool,
     jobs: List[int],
     yes: bool,
@@ -2562,7 +2562,7 @@ def cancel(
 @usage_lib.entrypoint
 def stop(
     clusters: List[str],
-    all: bool,
+    all: bool,  # noqa: A002
     all_users: bool,
     yes: bool,
     async_call: bool,
@@ -2639,7 +2639,7 @@ def stop(
 @usage_lib.entrypoint
 def autostop(
     clusters: List[str],
-    all: bool,
+    all: bool,  # noqa: A002
     all_users: bool,
     idle_minutes: Optional[int],
     wait_for: Optional[str],
@@ -2770,7 +2770,7 @@ def autostop(
 @usage_lib.entrypoint
 def start(
     clusters: List[str],
-    all: bool,
+    all: bool,  # noqa: A002
     yes: bool,
     idle_minutes_to_autostop: Optional[int],
     wait_for: Optional[str],
@@ -2980,7 +2980,7 @@ def start(
 @usage_lib.entrypoint
 def down(
     clusters: List[str],
-    all: bool,
+    all: bool,  # noqa: A002
     all_users: bool,
     yes: bool,
     purge: bool,
@@ -3544,7 +3544,7 @@ def check(infra_list: Tuple[str],
 @usage_lib.entrypoint
 def show_gpus(
         accelerator_str: Optional[str],
-        all: bool,
+        all: bool,  # noqa: A002
         infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
@@ -4372,7 +4372,7 @@ def show_gpus(
                                   all_regions=all_regions))
         # Import here to save module load speed.
         # noqa: E501
-        from sky.catalog import common as catalog_common
+        from sky.catalog import common as catalog_common  # noqa: PLC0415
 
         # For each gpu name (count not included):
         #   - Group by cloud
@@ -4511,7 +4511,7 @@ def storage_ls(verbose: bool):
               help='Skip confirmation prompt.')
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
-def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):
+def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  # noqa: A002
     """Delete storage objects.
 
     Examples:
@@ -4621,7 +4621,7 @@ def volumes_apply(
         entrypoint: Optional[Tuple[str, ...]],
         name: Optional[str],
         infra: Optional[str],
-        type: Optional[str],
+        type: Optional[str],  # noqa: A002
         size: Optional[str],
         use_existing: Optional[bool],
         yes: bool,
@@ -4642,7 +4642,7 @@ def volumes_apply(
         sky volumes apply --name pvc2 --infra k8s --type k8s-pvc --size 100Gi
         --use-existing
     """
-    from sky.volumes import volume as volume_lib
+    from sky.volumes import volume as volume_lib  # noqa: PLC0415
 
     volume_config_dict: Dict[str, Any] = {}
     if entrypoint is not None and len(entrypoint) > 0:
@@ -4760,7 +4760,7 @@ def volumes_ls(verbose: bool):
 @usage_lib.entrypoint
 def volumes_delete(
         names: List[str],
-        all: bool,
+        all: bool,  # noqa: A002
         purge: bool,
         yes: bool,
         async_call: bool):
@@ -5062,7 +5062,7 @@ def jobs_launch(
 @flags.all_option('Show all jobs.')
 @usage_lib.entrypoint
 def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
-               all_users: bool, all: bool, limit: int):
+               all_users: bool, all: bool, limit: int):  # noqa: A002
     """Show statuses of managed jobs.
 
     Each managed jobs can have one of the following statuses:
@@ -5200,7 +5200,7 @@ def jobs_cancel(
     name: Optional[str],
     pool: Optional[str],
     job_ids: Tuple[int],
-    all: bool,
+    all: bool,  # noqa: A002
     yes: bool,
     all_users: bool,
 ):
@@ -5522,7 +5522,7 @@ def jobs_pool_status(verbose: bool, pool_names: List[str], show_all: bool):
 @usage_lib.entrypoint
 def jobs_pool_down(
     pool_names: List[str],
-    all: bool,
+    all: bool,  # noqa: A002
     purge: bool,
     yes: bool,
     async_call: bool,
@@ -5542,7 +5542,7 @@ def jobs_pool_down(
                                f'Provided {argument_str!r}.')
 
     def _get_nonterminal_jobs(pool_names: List[str],
-                              all: bool) -> List[responses.ManagedJobRecord]:
+                              all: bool) -> List[responses.ManagedJobRecord]:  # noqa: A002
         # Get nonterminal jobs for this pool using managed_jobs.queue
         request_id, queue_result_version = cli_utils.get_managed_job_queue(
             refresh=False,
@@ -6377,7 +6377,7 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
 @usage_lib.entrypoint
 def serve_down(
     service_names: List[str],
-    all: bool,
+    all: bool,  # noqa: A002
     purge: bool,
     yes: bool,
     replica_id: Optional[int],
@@ -6708,7 +6708,7 @@ def api_logs(request_id: Optional[str], server_logs: bool,
 @flags.all_users_option('Cancel all requests from all users.')
 @flags.yes_option()
 @usage_lib.entrypoint
-def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool,
+def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool,  # noqa: A002
                yes: bool):
     """Cancel a request running on SkyPilot API server."""
     if all or all_users:

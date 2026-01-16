@@ -316,7 +316,7 @@ class AutostopEvent(SkyletEvent):
     def _stop_cluster_with_new_provisioner(self, autostop_config,
                                            cluster_config, provider_name,
                                            cloud):
-        from sky import provision as provision_lib
+        from sky import provision as provision_lib  # noqa: PLC0415
         autostop_lib.set_autostopping_started()
 
         cluster_name_on_cloud = cluster_config['cluster_name']

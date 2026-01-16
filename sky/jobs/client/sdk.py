@@ -283,7 +283,7 @@ def queue(
 def cancel(
     name: Optional[str] = None,
     job_ids: Optional[Sequence[int]] = None,
-    all: bool = False,
+    all: bool = False,  # noqa: A002
     all_users: bool = False,
     pool: Optional[str] = None,
 ) -> server_common.RequestId[None]:
@@ -503,7 +503,7 @@ def pool_apply(
 @versions.minimal_api_version(12)
 def pool_down(
     pool_names: Optional[Union[str, List[str]]],
-    all: bool = False,
+    all: bool = False,  # noqa: A002
     purge: bool = False,
 ) -> server_common.RequestId[None]:
     """Delete a pool."""

@@ -53,7 +53,7 @@ async def volume_validate(
         _: fastapi.Request,
         volume_validate_body: payloads.VolumeValidateBody) -> None:
     """Validates a volume."""
-    from sky.volumes import volume as volume_lib
+    from sky.volumes import volume as volume_lib  # noqa: PLC0415
 
     try:
         volume_config = {

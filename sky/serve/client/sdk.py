@@ -90,7 +90,7 @@ def update(
 @server_common.check_server_healthy_or_start
 def down(
     service_names: Optional[Union[str, List[str]]],
-    all: bool = False,
+    all: bool = False,  # noqa: A002
     purge: bool = False
 ) -> server_common.RequestId[None]:
     """Tears down a service.

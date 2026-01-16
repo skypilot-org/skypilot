@@ -3604,7 +3604,7 @@ def process_skypilot_pods(
         - List of KubernetesSkyPilotClusterInfo with job controller info.
         - List of KubernetesSkyPilotClusterInfo with serve controller info.
     """
-    from sky import resources as resources_lib
+    from sky import resources as resources_lib  # noqa: PLC0415
     clusters: Dict[str, KubernetesSkyPilotClusterInfo] = {}
     jobs_controllers: List[KubernetesSkyPilotClusterInfo] = []
     serve_controllers: List[KubernetesSkyPilotClusterInfo] = []

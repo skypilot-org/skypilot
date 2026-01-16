@@ -24,7 +24,7 @@ class User:
 
     def __init__(
             self,
-            id: str,
+            id: str,  # noqa: A002
             name: Optional[str] = None,
             password: Optional[str] = None,
             created_at: Optional[int] = None):

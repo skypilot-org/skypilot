@@ -357,7 +357,7 @@ class Azure(clouds.Cloud):
 
         if (resources.image_id is None or
                 resources.extract_docker_image() is not None):
-            from sky.catalog import azure_catalog
+            from sky.catalog import azure_catalog  # noqa: PLC0415
             gen_version = azure_catalog.get_gen_version_from_instance_type(
                 resources.instance_type)
             image_id = self._get_default_image_tag(gen_version,
@@ -624,7 +624,7 @@ class Azure(clouds.Cloud):
         while True:
             retry_cnt += 1
             try:
-                import knack
+                import knack  # noqa: PLC0415
             except ModuleNotFoundError as e:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.CloudUserIdentityError(

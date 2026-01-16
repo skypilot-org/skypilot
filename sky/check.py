@@ -85,7 +85,7 @@ def check_capabilities(
     capabilities: Optional[List[sky_cloud.CloudCapability]] = None,
     workspace: Optional[str] = None,
 ) -> Dict[str, Dict[str, List[sky_cloud.CloudCapability]]]:
-    from sky.workspaces import core
+    from sky.workspaces import core  # noqa: PLC0415
 
     echo = (lambda *_args, **_kwargs: None
            ) if quiet else lambda *args, **kwargs: click.echo(

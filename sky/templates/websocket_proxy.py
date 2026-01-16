@@ -52,8 +52,8 @@ async def main(url: str, timestamps_supported: bool, login_url: str) -> None:
 async def run_websocket_proxy(websocket: ClientConnection,
                               timestamps_supported: bool) -> None:
     if os.isatty(sys.stdin.fileno()):
-        import termios
-        import tty
+        import termios  # noqa: PLC0415
+        import tty  # noqa: PLC0415
         old_settings = termios.tcgetattr(sys.stdin.fileno())
         tty.setraw(sys.stdin.fileno())
     else:

@@ -946,7 +946,7 @@ def _delete_firewall_rule(project_id: str, compute, name):
     return response
 
 
-def _list_firewall_rules(project_id, compute, filter=None):
+def _list_firewall_rules(project_id, compute, filter=None):  # noqa: A002
     response = (compute.firewalls().list(
         project=project_id,
         filter=filter,
@@ -961,7 +961,7 @@ def _create_vpcnet(project_id: str, compute, body):
     return response
 
 
-def _list_vpcnets(project_id: str, compute, filter=None):
+def _list_vpcnets(project_id: str, compute, filter=None):  # noqa: A002
     response = (compute.networks().list(
         project=project_id,
         filter=filter,

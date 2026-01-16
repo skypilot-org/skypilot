@@ -238,12 +238,12 @@ def client(service_name: str, **kwargs):
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def botocore_exceptions():
     """AWS botocore exception."""
-    from botocore import exceptions
+    from botocore import exceptions  # noqa: PLC0415
     return exceptions
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def botocore_config():
     """AWS botocore exception."""
-    from botocore import config
+    from botocore import config  # noqa: PLC0415
     return config

@@ -100,7 +100,7 @@ def _default_ec2_resource(
         # For version < 1 (variable does not exist), we do not have
         # `max_attempts` in the `aws.resource` call, so we need to reload the
         # module to get the latest `aws.resource` function.
-        import importlib
+        import importlib  # noqa: PLC0415
         importlib.reload(aws)
     return aws.resource('ec2',
                         region_name=region,

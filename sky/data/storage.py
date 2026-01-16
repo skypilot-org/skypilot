@@ -429,7 +429,7 @@ class AbstractStore:
             # TODO: remove the hasattr check after v0.11.0
             _bucket_sub_path=override_args.get(
                 '_bucket_sub_path',
-                metadata._bucket_sub_path
+                metadata._bucket_sub_path  # noqa: SLF001
             ) if hasattr(metadata, '_bucket_sub_path') else None)
 
     def get_metadata(self) -> StoreMetadata:
@@ -2770,7 +2770,7 @@ class AzureBlobStore(AbstractStore):
             # TODO: remove the hasattr check after v0.11.0
             _bucket_sub_path=override_args.get(
                 '_bucket_sub_path',
-                metadata._bucket_sub_path
+                metadata._bucket_sub_path  # noqa: SLF001
             ) if hasattr(metadata, '_bucket_sub_path') else None)
 
     def get_metadata(self) -> AzureBlobStoreMetadata:
@@ -4166,8 +4166,8 @@ class OciStore(AbstractStore):
           StorageBucketGetError: If fetching existing bucket fails
           StorageInitError: If general initialization fails.
         """
-        from sky.clouds.utils import oci_utils
-        from sky.provision.oci.query_utils import query_helper
+        from sky.clouds.utils import oci_utils  # noqa: PLC0415
+        from sky.provision.oci.query_utils import query_helper  # noqa: PLC0415
 
         self.oci_config_file = oci.get_config_file()
         self.config_profile = oci_utils.oci_config.get_profile()

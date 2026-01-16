@@ -951,7 +951,7 @@ class AWS(clouds.Cloud):
             return False, hints
 
         # Fetch the AWS catalogs
-        from sky.catalog import aws_catalog
+        from sky.catalog import aws_catalog  # noqa: PLC0415
 
         # Trigger the fetch of the availability zones mapping.
         try:
@@ -1216,8 +1216,8 @@ class AWS(clouds.Cloud):
                     f' {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
         except aws.botocore_exceptions().InvalidConfigError as e:
-            import awscli
-            from packaging import version
+            import awscli  # noqa: PLC0415
+            from packaging import version  # noqa: PLC0415
             awscli_version = version.parse(awscli.__version__)
             if (awscli_version < version.parse('1.27.10') and
                     'configured to use SSO' in str(e)):
@@ -1443,7 +1443,7 @@ class AWS(clouds.Cloud):
         region = resources.region
         use_spot = resources.use_spot
 
-        from sky.catalog import aws_catalog
+        from sky.catalog import aws_catalog  # noqa: PLC0415
 
         quota_code = aws_catalog.get_quota_code(instance_type, use_spot)
 

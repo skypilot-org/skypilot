@@ -336,7 +336,7 @@ class OCI(clouds.Cloud):
                 instance_type=original_instance_type,
                 region=region.name)
 
-            from sky.catalog import oci_catalog
+            from sky.catalog import oci_catalog  # noqa: PLC0415
             os_type = oci_catalog.get_image_os_from_tag(tag=image_str,
                                                         region=region.name)
         logger.debug(f'OS type for the image {image_id} is {os_type}')

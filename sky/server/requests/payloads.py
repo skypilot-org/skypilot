@@ -205,7 +205,7 @@ class DagRequestBody(RequestBody):
     def to_kwargs(self) -> Dict[str, Any]:
         # Import here to avoid requirement of the whole SkyPilot dependency on
         # local clients.
-        from sky.utils import dag_utils
+        from sky.utils import dag_utils  # noqa: PLC0415
 
         kwargs = super().to_kwargs()
 

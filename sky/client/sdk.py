@@ -438,7 +438,7 @@ def validate(
                                 remote_api_version < 15)
     for task in dag.tasks:
         if omit_user_specified_yaml:
-            task._user_specified_yaml = None
+            task._user_specified_yaml = None  # noqa: SLF001
         task.expand_and_validate_workdir()
         if not workdir_only:
             task.expand_and_validate_file_mounts()
@@ -765,7 +765,7 @@ def _launch(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def exec(
+def exec(  # noqa: A001
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
     dryrun: bool = False,
@@ -1437,7 +1437,7 @@ def job_status(
 @annotations.client_api
 def cancel(
     cluster_name: str,
-    all: bool = False,
+    all: bool = False,  # noqa: A002
     all_users: bool = False,
     job_ids: Optional[List[int]] = None,
     _try_cancel_if_cluster_is_init: bool = False

@@ -267,7 +267,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
         # the error message from the pod that is already scheduled.
         if pod_status != 'Pending':
             continue
-        pod_name = pod._metadata._name
+        pod_name = pod._metadata._name  # noqa: SLF001
         events = kubernetes.core_api(context).list_namespaced_event(
             namespace,
             field_selector=(f'involvedObject.name={pod_name},'

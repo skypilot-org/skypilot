@@ -349,7 +349,7 @@ async def scheduled_launch(
         yield
         return
 
-    assert starting_lock == starting_signal._lock, (  # type: ignore
+    assert starting_lock == starting_signal._lock, (  # noqa: SLF001  # type: ignore
         'starting_lock and starting_signal must use the same lock')
 
     while True:

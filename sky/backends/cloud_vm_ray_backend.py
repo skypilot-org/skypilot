@@ -1823,7 +1823,7 @@ class RetryingVmProvisioner(object):
                     ])
                 # Set the max width of REASON column to 80 to avoid the table
                 # being wrapped in a unreadable way.
-                table._max_width = {'REASON': 80}
+                table._max_width = {'REASON': 80}  # noqa: SLF001
                 raise exceptions.ResourcesUnavailableError(
                     _RESOURCES_UNAVAILABLE_LOG + '\n' + table.get_string(),
                     failover_history=failover_history)
@@ -4332,7 +4332,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # TODO(aylei): backward compatibility for legacy runtime that
             # returns run_timestamp only, remove after 0.12.0
             (dir if constants.SKY_LOGS_DIRECTORY in dir else os.path.join(
-                constants.SKY_LOGS_DIRECTORY, dir)) for dir in dirs
+                constants.SKY_LOGS_DIRECTORY, dir)) for dir in dirs  # noqa: A001
         ]
         # Include cluster name in local log directory path to avoid conflicts
         # when the same job_id exists on different clusters
@@ -4857,8 +4857,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if (isinstance(cloud, clouds.IBM) and terminate and
                 prev_cluster_status == status_lib.ClusterStatus.STOPPED):
-            from sky.adaptors import ibm
-            from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
+            from sky.adaptors import ibm  # noqa: PLC0415
+            from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider  # noqa: PLC0415
 
             config_provider = global_user_state.get_cluster_yaml_dict(
                 handle.cluster_yaml)['provider']

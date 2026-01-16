@@ -1305,7 +1305,7 @@ def get_managed_job_tasks(job_id: int) -> List[Dict[str, Any]]:
         rows = session.execute(query).fetchall()
     jobs = []
     for row in rows:
-        job_dict = _get_jobs_dict(row._mapping)
+        job_dict = _get_jobs_dict(row._mapping)  # noqa: SLF001
         job_dict['status'] = ManagedJobStatus(job_dict['status'])
         job_dict['schedule_state'] = ManagedJobScheduleState(
             job_dict['schedule_state'])
@@ -1582,7 +1582,7 @@ def get_managed_jobs_with_filters(
         rows = session.execute(query).fetchall()
     jobs = []
     for row in rows:
-        job_dict = _get_jobs_dict(row._mapping)
+        job_dict = _get_jobs_dict(row._mapping)  # noqa: SLF001
         if job_dict.get('status') is not None:
             job_dict['status'] = ManagedJobStatus(job_dict['status'])
         if job_dict.get('schedule_state') is not None:

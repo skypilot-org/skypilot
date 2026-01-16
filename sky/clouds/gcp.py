@@ -854,8 +854,8 @@ class GCP(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         try:
             # Check google-api-python-client installation.
-            from google import auth  # type: ignore
-            import googleapiclient
+            from google import auth  # noqa: PLC0415  # type: ignore
+            import googleapiclient  # noqa: PLC0415
 
             # Check the installation of google-cloud-sdk.
             _run_output('gcloud --version')
@@ -914,7 +914,7 @@ class GCP(clouds.Cloud):
                 f'{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
-        import google.auth
+        import google.auth  # noqa: PLC0415
 
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # noqa: E501
         credentials, project = google.auth.default()
@@ -1105,7 +1105,7 @@ class GCP(clouds.Cloud):
     def get_project_id(cls, dryrun: bool = False) -> str:
         if dryrun:
             return 'dryrun-project-id'
-        from google import auth  # type: ignore
+        from google import auth  # noqa: PLC0415  # type: ignore
         config_project_id = skypilot_config.get_workspace_cloud('gcp').get(
             'project_id', None)
         if config_project_id:
@@ -1153,7 +1153,7 @@ class GCP(clouds.Cloud):
         def _propagate_disk_type(
             lowest: Optional[str] = None,
             highest: Optional[str] = None,
-            all: Optional[str] = None) -> None:
+            all: Optional[str] = None) -> None:  # noqa: A002
             if lowest is not None:
                 tier2name[resources_utils.DiskTier.LOW] = lowest
             if highest is not None:
@@ -1350,7 +1350,7 @@ class GCP(clouds.Cloud):
         use_spot = resources.use_spot
         region = resources.region
 
-        from sky.catalog import gcp_catalog
+        from sky.catalog import gcp_catalog  # noqa: PLC0415
 
         quota_code = gcp_catalog.get_quota_code(accelerator, use_spot)
 

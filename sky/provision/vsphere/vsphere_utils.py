@@ -166,7 +166,7 @@ class VsphereClient:
             # Find the deployment target
             deployment_target = vsphere_adaptor.get_ovf_client(
             ).LibraryItem.DeploymentTarget(
-                resource_pool_id=cluster_obj.resourcePool._GetMoId(),
+                resource_pool_id=cluster_obj.resourcePool._GetMoId(),  # noqa: SLF001
                 host_id=host_mobid)
 
             ovf_summary = self.client.ovf_lib_item_service.filter(
@@ -270,7 +270,7 @@ class VsphereClient:
         if self.servicemanager.si is None:
             raise VsphereError('Failed to connect to vSphere.')
         pbm_si, pm_content = self._create_pbm_connection(
-            self.servicemanager.si._stub)
+            self.servicemanager.si._stub)  # noqa: SLF001
         pm = pm_content.profileManager
         return pm
 
@@ -287,7 +287,7 @@ class VsphereClient:
 
         context = None
         if hasattr(ssl, '_create_unverified_context'):
-            context = ssl._create_unverified_context()
+            context = ssl._create_unverified_context()  # noqa: SLF001
         pbm_stub = vsphere_adaptor.get_pyvmomi().SoapStubAdapter(
             host=hostname,
             version='pbm.version.version1',

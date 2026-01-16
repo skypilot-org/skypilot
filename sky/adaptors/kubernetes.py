@@ -52,7 +52,7 @@ def _decorate_methods(obj: Any, decorator: Callable, decoration_type: str):
                                                 set())
             if decoration_type not in decorated_types:
                 decorated_attr = decorator(attr)
-                decorated_attr._sky_decorator_types = (
+                decorated_attr._sky_decorator_types = (  # noqa: SLF001
                     decorated_types | {decoration_type})
                 setattr(obj, attr_name, decorated_attr)
     return obj

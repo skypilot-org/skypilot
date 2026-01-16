@@ -59,7 +59,7 @@ exclude = [
 # N: pep8-naming (naming conventions)
 # C4: flake8-comprehensions
 # T20: flake8-print (print statements)
-select = ["F", "E", "W", "I", "B", "Q", "C4", "BLE", "ARG"]
+select = ["F", "E", "W", "I", "B", "Q", "C4", "BLE", "ARG", "A", "SLF", "PLC0415"]
 
 # Match pylint's dummy variable pattern: _, __, _var, unused_*, dummy_*
 dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?)|unused_.*|dummy_.*)$"

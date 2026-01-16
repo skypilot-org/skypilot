@@ -189,7 +189,7 @@ class ClsApiHelper(object):
                     # Python 2.7.9 has stronger SSL certificate validation,
                     # so we need to pass in a context when dealing with
                     # self-signed certificates.
-                    context = ssl._create_unverified_context()
+                    context = ssl._create_unverified_context()  # noqa: SLF001
                     urllib2.urlopen(request, context=context)
                 else:
                     # Don't pass context parameter since versions of Python
@@ -221,7 +221,7 @@ class ClsApiHelper(object):
                 # Python 2.7.9 has stronger SSL certificate validation,
                 # so we need to pass in a context when dealing with self-signed
                 # certificates.
-                context = ssl._create_unverified_context()
+                context = ssl._create_unverified_context()  # noqa: SLF001
                 response = urllib2.urlopen(
                     url=download_info.download_endpoint.uri,
                     context=context)

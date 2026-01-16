@@ -209,7 +209,7 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     # then use all the instances with the same matching launch_config plus some
     # instances with wrong launch_config.
     def get_order_key(node):
-        import datetime
+        import datetime  # noqa: PLC0415
 
         timestamp = node.get('lastStartTimestamp')
         if timestamp is not None:

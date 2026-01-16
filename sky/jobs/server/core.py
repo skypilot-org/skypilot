@@ -498,7 +498,7 @@ def launch(
             controller_task.set_resources(controller_resources)
 
             controller_task.managed_job_dag = dag_copy
-            controller_task._metadata = metadata
+            controller_task._metadata = metadata  # noqa: SLF001
 
             job_identity = ''
             if job_rank is not None:
@@ -1009,7 +1009,7 @@ def queue_v2(
 @usage_lib.entrypoint
 def cancel(name: Optional[str] = None,
            job_ids: Optional[List[int]] = None,
-           all: bool = False,
+           all: bool = False,  # noqa: A002
            all_users: bool = False,
            pool: Optional[str] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -1221,7 +1221,7 @@ def pool_apply(
 @usage_lib.entrypoint
 def pool_down(
     pool_names: Optional[Union[str, List[str]]] = None,
-    all: bool = False,
+    all: bool = False,  # noqa: A002
     purge: bool = False,
 ) -> None:
     """Delete a pool."""

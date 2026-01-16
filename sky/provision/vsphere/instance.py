@@ -500,7 +500,7 @@ def terminate_instances(
     for inst in instances:
         if inst.runtime.powerState == 'poweredOn':
             poweroff_vm(vc_object.servicemanager.content, inst)
-        vm_service.delete(inst._moId)
+        vm_service.delete(inst._moId)  # noqa: SLF001
     # Clear the cache when down the cluster
     cluster_info = metadata_utils.Metadata()
     cluster_info.pop(cluster_name_on_cloud)

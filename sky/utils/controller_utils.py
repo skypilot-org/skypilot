@@ -260,11 +260,11 @@ def high_availability_specified(cluster_name: Optional[str]) -> bool:
         return False
 
     if controller.value.controller_type == 'jobs':
-        from sky.jobs import utils as managed_job_utils
+        from sky.jobs import utils as managed_job_utils  # noqa: PLC0415
         if managed_job_utils.is_consolidation_mode():
             return True
     elif controller.value.controller_type == 'serve':
-        from sky.serve import serve_utils
+        from sky.serve import serve_utils  # noqa: PLC0415
         if serve_utils.is_consolidation_mode():
             return True
 

@@ -395,7 +395,7 @@ def get_using_remote_api_server() -> bool:
         return value
     # This gets the right status for the local client.
     # TODO(zhwu): This is to prevent circular import. We should refactor this.
-    from sky.server import common as server_common
+    from sky.server import common as server_common  # noqa: PLC0415
     return not server_common.is_api_server_local()
 
 

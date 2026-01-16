@@ -35,7 +35,7 @@ _MAX_RETRY_FOR_GET_SUBSCRIPTION_ID = 5
 @annotations.lru_cache(scope='global', maxsize=1)
 def get_subscription_id() -> str:
     """Get the default subscription id."""
-    from azure.common import credentials
+    from azure.common import credentials  # noqa: PLC0415
     retry = 0
     backoff = common_utils.Backoff(initial_backoff=0.5, max_backoff_factor=4)
     while True:
@@ -57,14 +57,14 @@ def get_subscription_id() -> str:
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_current_account_user() -> str:
     """Get the default account user."""
-    from azure.common import credentials
+    from azure.common import credentials  # noqa: PLC0415
     return credentials.get_cli_profile().get_current_account_user()
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def exceptions():
     """Azure exceptions."""
-    from azure.core import exceptions as azure_exceptions
+    from azure.core import exceptions as azure_exceptions  # noqa: PLC0415
     return azure_exceptions
 
 
@@ -72,10 +72,10 @@ def exceptions():
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def azure_mgmt_models(name: str):
     if name == 'compute':
-        from azure.mgmt.compute import models
+        from azure.mgmt.compute import models  # noqa: PLC0415
         return models
     elif name == 'network':
-        from azure.mgmt.network import models
+        from azure.mgmt.network import models  # noqa: PLC0415
         return models
 
 
@@ -110,31 +110,31 @@ def get_client(name: str,
     # Increase the timeout to fix the Azure get-access-token timeout issue.
     # Tracked in
     # https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
-    from azure import identity
+    from azure import identity  # noqa: PLC0415
     with _session_creation_lock:
         credential = identity.AzureCliCredential(process_timeout=30)
         if name == 'compute':
-            from azure.mgmt import compute
+            from azure.mgmt import compute  # noqa: PLC0415
             return compute.ComputeManagementClient(credential, subscription_id)
         elif name == 'network':
-            from azure.mgmt import network
+            from azure.mgmt import network  # noqa: PLC0415
             return network.NetworkManagementClient(credential, subscription_id)
         elif name == 'resource':
-            from azure.mgmt import resource
+            from azure.mgmt import resource  # noqa: PLC0415
             return resource.ResourceManagementClient(credential,
                                                      subscription_id)
         elif name == 'storage':
-            from azure.mgmt import storage
+            from azure.mgmt import storage  # noqa: PLC0415
             return storage.StorageManagementClient(credential, subscription_id)
         elif name == 'authorization':
-            from azure.mgmt import authorization
+            from azure.mgmt import authorization  # noqa: PLC0415
             return authorization.AuthorizationManagementClient(
                 credential, subscription_id)
         elif name == 'msi':
-            from azure.mgmt import msi
+            from azure.mgmt import msi  # noqa: PLC0415
             return msi.ManagedServiceIdentityClient(credential, subscription_id)
         elif name == 'graph':
-            import msgraph
+            import msgraph  # noqa: PLC0415
             return msgraph.GraphServiceClient(credential)
         elif name == 'container':
             # There is no direct way to check if a container URL is public or
@@ -147,8 +147,8 @@ def get_client(name: str,
             # Note: Checking a private container without credentials is
             # faster (~0.2s) than checking a public container with
             # credentials (~90s).
-            from azure.mgmt import storage
-            from azure.storage import blob
+            from azure.mgmt import storage  # noqa: PLC0415
+            from azure.storage import blob  # noqa: PLC0415
             container_url = kwargs.pop('container_url', None)
             assert container_url is not None, ('Must provide container_url'
                                                ' keyword arguments for '
@@ -279,7 +279,7 @@ def get_az_container_sas_token(
     Returns:
         An SAS token with a 1-hour lifespan to access the specified container.
     """
-    from azure.storage import blob
+    from azure.storage import blob  # noqa: PLC0415
     sas_token = blob.generate_container_sas(
         account_name=storage_account_name,
         container_name=container_name,
@@ -308,7 +308,7 @@ def get_az_blob_sas_token(storage_account_name: str, storage_account_key: str,
     Returns:
         A SAS token with a 1-hour lifespan to access the specified blob.
     """
-    from azure.storage import blob
+    from azure.storage import blob  # noqa: PLC0415
     sas_token = blob.generate_blob_sas(
         account_name=storage_account_name,
         container_name=container_name,
@@ -470,12 +470,12 @@ def get_az_resource_group(
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def create_security_rule(**kwargs):
-    from azure.mgmt.network import models
+    from azure.mgmt.network import models  # noqa: PLC0415
     return models.SecurityRule(**kwargs)
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def deployment_mode():
     """Azure deployment mode."""
-    from azure.mgmt.resource.resources.models import DeploymentMode
+    from azure.mgmt.resource.resources.models import DeploymentMode  # noqa: PLC0415
     return DeploymentMode
