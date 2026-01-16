@@ -14,6 +14,9 @@ from sky.utils import volume as volume_lib
 
 logger = sky_logging.init_logger(__name__)
 
+PVC_FAILING_EVENT_REASONS = ('ProvisioningFailed',)
+WARNING_EVENT_TYPE = 'Warning'
+
 
 def _get_context_namespace(config: models.VolumeConfig) -> Tuple[str, str]:
     """Gets the context and namespace of a volume."""
@@ -342,7 +345,22 @@ def get_all_volumes_errors(
                                 context, pvc))
                         if (volume_binding_mode is None or
                                 volume_binding_mode == 'WaitForFirstConsumer'):
-                            volume_errors[volume_name] = None
+                            error_msg = None
+                            pvc_events = kubernetes_utils.get_pvc_events(
+                                context, namespace, pvc_name)
+                            for event in pvc_events:
+                                if (event.type == WARNING_EVENT_TYPE or
+                                        event.reason
+                                        in PVC_FAILING_EVENT_REASONS):
+                                    reason_str = event.reason
+                                    if event.message:
+                                        reason_str += f': {event.message}'
+                                    error_msg = (f'PVC is pending. '
+                                                 f'{reason_str}. To debug, run'
+                                                 f': kubectl describe pvc '
+                                                 f'{pvc_name} -n {namespace}')
+                                    break
+                            volume_errors[volume_name] = error_msg
                         else:
                             # Generic pending message if no specific error
                             # detected
@@ -445,7 +463,7 @@ def _check_pvc_access_mode_error(context: Optional[str],
     return (f'PVC access mode mismatch: PVC requests {pvc_access_mode}, but '
             f'available PersistentVolumes support: {pv_access_modes_str}. '
             f'Update the volume with the correct access_mode '
-            f'(e.g., ReadWriteMany) and recreate it. To debug, run: '
+            f'(e.g., {pv_access_modes_str}) and recreate it. To debug, run: '
             f'kubectl describe pvc {pvc_name} -n {namespace}')
 
 
