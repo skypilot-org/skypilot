@@ -170,10 +170,23 @@ class TestGFDLabelFormatter:
     def test_fallback_for_unknown_gpus(self):
         """Test fallback behavior for GPUs not in canonical list."""
         # Fallback removes 'NVIDIA-', 'GEFORCE-', and replaces 'RTX-' with 'RTX'
+        # but preserves other dashes
         test_cases = [
-            ('NVIDIA-RTX-A6000', 'RTXA6000'),
             ('NVIDIA-GEFORCE-RTX-3090', 'RTX3090'),
             ('NVIDIA-RTX-6000', 'RTX6000'),
+            ('NVIDIA-QUADRO-P5000', 'QUADRO-P5000'),
+        ]
+        for input_value, expected in test_cases:
+            result = GFDLabelFormatter.get_accelerator_from_label_value(
+                input_value)
+            assert result == expected, f'Failed for {input_value}'
+
+    def test_professional_rtx_gpus(self):
+        """Test detection of professional RTX GPUs now in canonical list."""
+        test_cases = [
+            ('NVIDIA-RTX-A6000', 'A6000'),
+            ('NVIDIA-RTX-A5000-24GB', 'A5000'),
+            ('NVIDIA-RTX-A4000-16GB', 'A4000'),
         ]
         for input_value, expected in test_cases:
             result = GFDLabelFormatter.get_accelerator_from_label_value(
