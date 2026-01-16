@@ -1384,6 +1384,7 @@ class SSHCommandRunner(CommandRunner):
         Raises:
             exceptions.CommandError: rsync command failed.
         """
+        del stage  # unused
         if self._docker_ssh_proxy_command is not None:
             docker_ssh_proxy_command = self._docker_ssh_proxy_command(['ssh'])
         else:
@@ -1648,6 +1649,7 @@ class KubernetesCommandRunner(CommandRunner):
         Raises:
             exceptions.CommandError: rsync command failed.
         """
+        del stage  # unused
 
         # Build command.
         helper_path = shlex.quote(
