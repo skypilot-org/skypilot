@@ -532,7 +532,7 @@ def test_autostopping_behaviors(generic_cloud: str):
                 # Launch cluster with a URL endpoint to test sky url
                 f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} '
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} {f.name} '
-                f'--port 8080 --no-setup-cloud-identity) && '
+                f'--ports 8080 --no-setup-cloud-identity) && '
                 f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
                 f'sky status -r {name} | grep UP',
 
