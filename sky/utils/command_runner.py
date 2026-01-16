@@ -1661,11 +1661,7 @@ class SlurmCommandRunner(SSHCommandRunner):
     # package installation while avoiding permission conflicts when
     # multiple users share the same node. Otherwise it defaults to
     # ~/.cache/uv.
-    # Similarly for enroot, to not rely on cluster-specific configs and paths.
-    _ENV_SETUP = ('export UV_CACHE_DIR=/tmp/uv_cache_$(id -u) && '
-                  'export ENROOT_RUNTIME_PATH=/tmp/enroot/user-$(id -u) && '
-                  'export ENROOT_CACHE_PATH=/tmp/enroot-cache/user-$(id -u) && '
-                  'export ENROOT_DATA_PATH=/tmp/enroot-data/user-$(id -u)')
+    _ENV_SETUP = 'export UV_CACHE_DIR=/tmp/uv_cache_$(id -u)'
 
     def __init__(
         self,
