@@ -89,7 +89,7 @@ class SSHNodePoolManager:
             return []
         try:
             return [f.name for f in self.keys_dir.iterdir() if f.is_file()]
-        except Exception:  # noqa: blind-except
+        except Exception:  # noqa: BLE001
             return []
 
     def _validate_pool_config(self, config: Dict[str, Any]) -> None:
@@ -167,6 +167,6 @@ def ssh_status(context_name: str) -> Tuple[bool, str]:
     try:
         is_ready, reason = clouds.SSH.check_single_context(context_name)
         return is_ready, reason
-    except Exception as e:  # noqa: blind-except
+    except Exception as e:  # noqa: BLE001
         return False, ('Failed to check SSH context: '
                        f'{common_utils.format_exception(e)}')

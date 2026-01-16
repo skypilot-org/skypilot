@@ -158,7 +158,7 @@ class Vast(clouds.Cloud):
             zone: Optional[str] = None,
             datacenter_only: bool = False) -> Optional[str]:
         """Returns the default instance type for Vast."""
-        from sky.catalog import vast_catalog  # noqa: import-outside-toplevel
+        from sky.catalog import vast_catalog  # noqa: PLC0415
         return vast_catalog.get_default_instance_type(
             cpus=cpus,
             memory=memory,
@@ -230,7 +230,7 @@ class Vast(clouds.Cloud):
         self, resources: 'resources_lib.Resources'
     ) -> 'resources_utils.FeasibleResources':
         """Returns a list of feasible resources for the given resources."""
-        from sky.catalog import vast_catalog  # noqa: import-outside-toplevel
+        from sky.catalog import vast_catalog  # noqa: PLC0415
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
@@ -309,7 +309,7 @@ class Vast(clouds.Cloud):
                 '        $ pip install vastai\n'
                 '        $ mkdir -p ~/.config/vastai\n'
                 f'        $ echo [key] > {_CREDENTIAL_PATH}\n'
-                '    For more information, see https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#vast'  # noqa: line-too-long
+                '    For more information, see https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#vast'  # noqa: E501
             )
 
         return True, None

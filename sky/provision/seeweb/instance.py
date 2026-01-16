@@ -175,7 +175,7 @@ class SeewebNodeProvider:
                     # and general status is not STOPPED
                     if specific_status != 'SHUTOFF' and srv.status != 'STOPPED':
                         self._power_off(srv.name)
-                except Exception:  # noqa: blind-except
+                except Exception:  # noqa: BLE001
                     # Fallback: if we can't get specific
                     # status, use general status check
                     if srv.status != 'STOPPED':
@@ -207,7 +207,7 @@ class SeewebNodeProvider:
             try:
                 specific_status = self.ecs.fetch_server_status(server.name)
                 instances[server.name] = specific_status
-            except Exception:  # noqa: blind-except
+            except Exception:  # noqa: BLE001
                 # Fallback to general status if fetch_server_status fails
                 general_status = server.status
                 instances[server.name] = general_status
@@ -233,7 +233,7 @@ class SeewebNodeProvider:
                             server.name)
                         if specific_status != 'SHUTOFF':
                             all_shutoff = False
-                    except Exception:  # noqa: blind-except
+                    except Exception:  # noqa: BLE001
                         all_shutoff = False
 
                 if all_shutoff:
@@ -301,7 +301,7 @@ class SeewebNodeProvider:
                                     timeout=10,
                                     check=False)
             return result.returncode == 0
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             logger.debug(f'Error pinging {server_ip}: {e}')
             return False
 
@@ -322,7 +322,7 @@ class SeewebNodeProvider:
                                     timeout=15,
                                     check=False)
             return result.returncode == 0
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             logger.debug(f'Error checking SSH on {server_ip}: {e}')
             return False
 
@@ -381,7 +381,7 @@ class SeewebNodeProvider:
                     return node.name
                 if getattr(node, 'name', None) and node.name.endswith('-head'):
                     return node.name
-            except Exception:  # noqa: blind-except
+            except Exception:  # noqa: BLE001
                 continue
         return nodes[0].name if nodes else None
 
@@ -491,7 +491,7 @@ class SeewebNodeProvider:
                     if specific_status != 'SHUTOFF':
                         all_stopped = False
 
-                except Exception:  # noqa: blind-except
+                except Exception:  # noqa: BLE001
                     all_stopped = False
 
             if all_stopped:
@@ -658,7 +658,7 @@ def _ping_server_standalone(server_ip: str) -> bool:
                                 timeout=10,
                                 check=False)
         return result.returncode == 0
-    except Exception as e:  # noqa: blind-except
+    except Exception as e:  # noqa: BLE001
         logger.error(f'Error pinging {server_ip}: {e}')
         return False
 
@@ -680,7 +680,7 @@ def _check_ssh_ready_standalone(server_ip: str) -> bool:
                                 timeout=15,
                                 check=False)
         return result.returncode == 0
-    except Exception:  # noqa: blind-except
+    except Exception:  # noqa: BLE001
         return False
 
 

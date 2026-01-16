@@ -290,7 +290,7 @@ class Vsphere(clouds.Cloud):
             'Run the following commands:'
             f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[vSphere]'
             f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
-            'For more details. See https://docs.skypilot.co/en/latest/getting-started/installation.html#vmware-vsphere'  # noqa: line-too-long
+            'For more details. See https://docs.skypilot.co/en/latest/getting-started/installation.html#vmware-vsphere'  # noqa: E501
         )
         # Check pyVmomi installation.
         if not adaptors_common.can_import_modules(['pyVmomi']):
@@ -321,7 +321,7 @@ class Vsphere(clouds.Cloud):
             return False, ('Failed to verify Vsphere credentials. '
                            'Check your network connection '
                            'and try again.')
-        except Exception as err:  # noqa: blind-except
+        except Exception as err:  # noqa: BLE001
             error_message = str(err)
             return False, (error_message)  # TODO: Add url of guide.
         return True, None

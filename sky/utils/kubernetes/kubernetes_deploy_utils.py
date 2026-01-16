@@ -187,7 +187,7 @@ def deploy_local_cluster(name: Optional[str], port_start: Optional[int],
                 log_path=log_path,
                 is_local=True,
                 follow_up_message=
-                'If you want to delete it instead, run: `sky local down --name {name}`'))  # noqa: line-too-long
+                'If you want to delete it instead, run: `sky local down --name {name}`'))  # noqa: E501
     else:
         with ux_utils.print_exception_no_traceback():
             log_hint = ux_utils.log_path_hint(log_path, is_local=True)
@@ -213,7 +213,7 @@ def deploy_local_cluster(name: Optional[str], port_start: Optional[int],
         if gpus:
             # Get GPU model by querying the node labels
             label_name_escaped = 'skypilot.co/accelerator'.replace('.', '\\.')
-            gpu_type_cmd = f'kubectl get node {name}-control-plane -o jsonpath="{{.metadata.labels[\'{label_name_escaped}\']}}"'  # noqa: line-too-long
+            gpu_type_cmd = f'kubectl get node {name}-control-plane -o jsonpath="{{.metadata.labels[\'{label_name_escaped}\']}}"'  # noqa: E501
             try:
                 # Run the command and capture the output
                 gpu_count_output = subprocess.check_output(gpu_type_cmd,
@@ -226,7 +226,7 @@ def deploy_local_cluster(name: Optional[str], port_start: Optional[int],
                 gpu_type_str = ''
 
             # Get number of GPUs (sum of nvidia.com/gpu resources)
-            gpu_count_command = 'kubectl get nodes -o=jsonpath=\'{range .items[*]}{.status.allocatable.nvidia\\.com/gpu}{"\\n"}{end}\' | awk \'{sum += $1} END {print sum}\''  # noqa: line-too-long
+            gpu_count_command = 'kubectl get nodes -o=jsonpath=\'{range .items[*]}{.status.allocatable.nvidia\\.com/gpu}{"\\n"}{end}\' | awk \'{sum += $1} END {print sum}\''  # noqa: E501
             try:
                 # Run the command and capture the output
                 gpu_count_output = subprocess.check_output(gpu_count_command,
@@ -258,7 +258,7 @@ def deploy_local_cluster(name: Optional[str], port_start: Optional[int],
                 follow_up_message=(
                     '\n`sky launch` can now run tasks locally.\n'
                     'Hint: To change the number of CPUs, change your docker '
-                    'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.'  # noqa: line-too-long
+                    'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.'  # noqa: E501
                     f'{gpu_hint}')))
 
 

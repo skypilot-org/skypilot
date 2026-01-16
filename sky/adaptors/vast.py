@@ -13,7 +13,7 @@ def import_package(func):
 
         if _vast_sdk is None:
             try:
-                import vastai_sdk as _vast  # noqa: import-outside-toplevel
+                import vastai_sdk as _vast  # noqa: PLC0415
                 _vast_sdk = _vast.VastAI()
             except ImportError as e:
                 raise ImportError(f'Fail to import dependencies for vast: {e}\n'

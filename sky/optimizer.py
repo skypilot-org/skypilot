@@ -541,7 +541,7 @@ class Optimizer:
             starts executing no sooner than its parent tasks are finished and
             the output data from the parents has arrived to the task v.
         """
-        import pulp  # noqa: import-outside-toplevel
+        import pulp  # noqa: PLC0415
 
         if minimize_cost:
             prob = pulp.LpProblem('Cost-Optimization', pulp.LpMinimize)

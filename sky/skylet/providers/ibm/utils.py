@@ -19,7 +19,7 @@ def get_logger(caller_name):
 
     Path(LOGS_FOLDER).mkdir(parents=True, exist_ok=True)
     logs_path = LOGS_FOLDER + caller_name + time.strftime("%Y-%m-%d--%H-%M-%S")
-    # noqa: line-too-long
+    # noqa: E501
     file_formatter = logging.Formatter(
         "%(asctime)s %(levelname)-8s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
     )

@@ -214,7 +214,7 @@ def has_active_ssh_sessions() -> bool:
                            f'{proc.returncode}.')
             return False
         return int(proc.stdout.strip()) > 0
-    except Exception as e:  # noqa: blind-except
+    except Exception as e:  # noqa: BLE001
         logger.warning(f'Error checking active SSH sessions: {e}.')
         return False
 

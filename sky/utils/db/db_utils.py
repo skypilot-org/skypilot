@@ -232,7 +232,7 @@ def add_column_to_table_alembic(
         index: If True, create an index on this column. If None, no index
             is created.
     """
-    from alembic import op  # noqa: import-outside-toplevel
+    from alembic import op  # noqa: PLC0415
 
     try:
         # Create the column with server_default if provided
@@ -277,7 +277,7 @@ def drop_column_from_table_alembic(
         table_name: Name of the table to drop column from.
         column_name: Name of the column to drop.
     """
-    from alembic import op  # noqa: import-outside-toplevel
+    from alembic import op  # noqa: PLC0415
 
     # Check if column exists before trying to drop it
     bind = op.get_bind()
@@ -361,10 +361,10 @@ class SQLiteConn(threading.local):
             parameters = []
 
         def exec_and_commit(sql: str, parameters: Optional[Iterable[Any]]):
-            with safe_cursor_on_connection(conn._conn) as cursor:  # noqa: private-member-access
+            with safe_cursor_on_connection(conn._conn) as cursor:  # noqa: SLF001
                 cursor.execute(sql, parameters)
 
-        await conn._execute(exec_and_commit, sql, parameters)  # noqa: private-member-access
+        await conn._execute(exec_and_commit, sql, parameters)  # noqa: SLF001
 
     @aiosqlite.context.contextmanager
     async def execute_fetchall_async(self,
@@ -376,14 +376,14 @@ class SQLiteConn(threading.local):
             parameters = []
 
         def exec_fetch_all(sql: str, parameters: Optional[Iterable[Any]]):
-            with safe_cursor_on_connection(conn._conn) as cursor:  # noqa: private-member-access
+            with safe_cursor_on_connection(conn._conn) as cursor:  # noqa: SLF001
                 cursor.execute(sql, parameters)
                 # Note(dev): sqlite3.Connection cannot be patched, keep
                 # fault_point here to test the integrity of exec_fetch_all()
                 fault_point()
                 return cursor.fetchall()
 
-        return await conn._execute(exec_fetch_all, sql, parameters)  # noqa: private-member-access
+        return await conn._execute(exec_fetch_all, sql, parameters)  # noqa: SLF001
 
     async def execute_get_returning_value_async(
             self,
@@ -397,11 +397,11 @@ class SQLiteConn(threading.local):
 
         def exec_and_get_returning_value(sql: str,
                                          parameters: Optional[Iterable[Any]]):
-            with safe_cursor_on_connection(conn._conn) as cursor:  # noqa: private-member-access
+            with safe_cursor_on_connection(conn._conn) as cursor:  # noqa: SLF001
                 cursor.execute(sql, parameters)
                 return cursor.fetchone()
 
-        return await conn._execute(exec_and_get_returning_value, sql,  # noqa: private-member-access
+        return await conn._execute(exec_and_get_returning_value, sql,  # noqa: SLF001
                                    parameters)
 
     async def close(self):

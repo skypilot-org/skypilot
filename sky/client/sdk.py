@@ -438,7 +438,7 @@ def validate(
                                 remote_api_version < 15)
     for task in dag.tasks:
         if omit_user_specified_yaml:
-            task._user_specified_yaml = None  # noqa: private-member-access
+            task._user_specified_yaml = None  # noqa: SLF001
         task.expand_and_validate_workdir()
         if not workdir_only:
             task.expand_and_validate_file_mounts()
@@ -765,7 +765,7 @@ def _launch(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def exec(  # noqa: builtin-variable-shadowing
+def exec(  # noqa: A001
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
     dryrun: bool = False,
@@ -1437,7 +1437,7 @@ def job_status(
 @annotations.client_api
 def cancel(
     cluster_name: str,
-    all: bool = False,  # noqa: builtin-argument-shadowing
+    all: bool = False,  # noqa: A002
     all_users: bool = False,
     job_ids: Optional[List[int]] = None,
     _try_cancel_if_cluster_is_init: bool = False
@@ -2017,7 +2017,7 @@ def get(request_id: server_common.RequestId[T]) -> T:
             request_task = requests_lib.Request.decode(
                 payloads.RequestPayload(**response.json().get('detail')))
             logger.debug(f'Got request with error: {request_task.name}')
-        except Exception:  # noqa: blind-except
+        except Exception:  # noqa: BLE001
             request_task = None
     if request_task is None:
         with ux_utils.print_exception_no_traceback():
@@ -2367,7 +2367,7 @@ def api_stop() -> None:
         except FileNotFoundError:
             # its fine we will create it
             pass
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             # in case we get perm issues or something is messed up, just ignore
             # it and assume the process is dead
             logger.error(f'Error looking at job controller pid file: {e}')
@@ -2569,7 +2569,7 @@ def api_login(endpoint: Optional[str] = None,
                 raise RuntimeError(
                     f'Failed to connect to API server at {endpoint}: {e}'
                 ) from e
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'{colorama.Fore.RED}Service account token authentication '
@@ -2617,7 +2617,7 @@ def api_login(endpoint: Optional[str] = None,
             else:
                 token = token_container['token']
 
-        except (Exception, KeyboardInterrupt) as e:  # noqa: blind-except
+        except (Exception, KeyboardInterrupt) as e:  # noqa: BLE001
             logger.debug(f'Automatic authentication failed: {e}, '
                          'falling back to manual token entry.')
             if isinstance(e, KeyboardInterrupt):
@@ -2633,7 +2633,7 @@ def api_login(endpoint: Optional[str] = None,
             if server is not None:
                 try:
                     server.server_close()
-                except Exception:  # noqa: blind-except
+                except Exception:  # noqa: BLE001
                     pass
             if not token:
                 with ux_utils.print_exception_no_traceback():

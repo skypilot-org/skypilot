@@ -72,7 +72,7 @@ class Azure(clouds.Cloud):
     # suffix `-<region name>`. Azure also has a 64 char limit for VM names, and
     # ray adds addtional `ray-`, `-worker`, and `-<9 chars hash>` for the VM
     # names, so the limit is 64 - 4 - 7 - 10 = 43.
-    # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # noqa: line-too-long
+    # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # noqa: E501
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
     _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
@@ -357,7 +357,7 @@ class Azure(clouds.Cloud):
 
         if (resources.image_id is None or
                 resources.extract_docker_image() is not None):
-            from sky.catalog import azure_catalog  # noqa: import-outside-toplevel
+            from sky.catalog import azure_catalog  # noqa: PLC0415
             gen_version = azure_catalog.get_gen_version_from_instance_type(
                 resources.instance_type)
             image_id = self._get_default_image_tag(gen_version,
@@ -411,7 +411,7 @@ class Azure(clouds.Cloud):
         # into .bashrc. The bash script will restart sshd if it has not been
         # restarted, identified by a file /tmp/__restarted is existing.
         # Also, add default user to docker group.
-        # noqa: line-too-long
+        # noqa: E501
         cloud_init_setup_commands = textwrap.dedent("""\
             #cloud-config
             runcmd:
@@ -563,7 +563,7 @@ class Azure(clouds.Cloud):
             f'\n{cls._INDENT_PREFIX}  $ az login'
             f'\n{cls._INDENT_PREFIX}  $ az account set -s <subscription_id>'
             f'\n{cls._INDENT_PREFIX}For more info: '
-            'https://docs.microsoft.com/en-us/cli/azure/get-started-with-azure-cli'  # noqa: line-too-long
+            'https://docs.microsoft.com/en-us/cli/azure/get-started-with-azure-cli'  # noqa: E501
         )
         # This file is required because it will be synced to remote VMs for
         # `az` to access private storage buckets.
@@ -624,7 +624,7 @@ class Azure(clouds.Cloud):
         while True:
             retry_cnt += 1
             try:
-                import knack  # noqa: import-outside-toplevel
+                import knack  # noqa: PLC0415
             except ModuleNotFoundError as e:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.CloudUserIdentityError(
@@ -695,7 +695,7 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def _is_s_series(cls, instance_type: Optional[str]) -> bool:
-        # For azure naming convention, see https://learn.microsoft.com/en-us/azure/virtual-machines/vm-naming-conventions  # noqa: line-too-long
+        # For azure naming convention, see https://learn.microsoft.com/en-us/azure/virtual-machines/vm-naming-conventions  # noqa: E501
         if instance_type is None:
             return True
         x = re.match(
@@ -715,7 +715,7 @@ class Azure(clouds.Cloud):
                 'Azure disk_tier=ultra is not supported now. '
                 'Please use disk_tier={low, medium, high, best} instead.')
         # Only S-series supported premium ssd
-        # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # noqa: line-too-long
+        # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # noqa: E501
         if cls._get_disk_type(
                 disk_tier
         ) == 'Premium_LRS' and not Azure._is_s_series(instance_type):

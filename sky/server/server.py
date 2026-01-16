@@ -146,7 +146,7 @@ def _try_set_basic_auth_user(request: fastapi.Request):
     try:
         decoded = base64.b64decode(encoded).decode()
         username, password = decoded.split(':', 1)
-    except Exception:  # noqa: blind-except
+    except Exception:  # noqa: BLE001
         return
 
     users = global_user_state.get_user_by_name(username)
@@ -253,7 +253,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         try:
             decoded = base64.b64decode(encoded).decode()
             username, password = decoded.split(':', 1)
-        except Exception:  # noqa: blind-except
+        except Exception:  # noqa: BLE001
             return _basic_auth_401_response('Invalid basic auth')
 
         users = global_user_state.get_user_by_name(username)
@@ -346,7 +346,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
         try:
             # Import here to avoid circular imports
-            from sky.users.token_service import token_service  # noqa: import-outside-toplevel
+            from sky.users.token_service import token_service  # noqa: PLC0415
 
             # Verify and decode JWT token
             payload = token_service.verify_token(sa_token)
@@ -384,7 +384,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             try:
                 global_user_state.update_service_account_token_last_used(
                     token_id)
-            except Exception as e:  # noqa: blind-except
+            except Exception as e:  # noqa: BLE001
                 logger.debug(f'Failed to update token last used time: {e}')
 
             # Set the authenticated user
@@ -1046,7 +1046,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         raise fastapi.HTTPException(
             status_code=400,
             detail='Client disconnected, please try again.') from e
-    except Exception as e:  # noqa: blind-except
+    except Exception as e:  # noqa: BLE001
         logger.error(f'Error uploading zip file: {zip_file_path}')
         # Client disconnected, remove the zip file.
         zip_file_path.unlink(missing_ok=True)
@@ -1147,7 +1147,7 @@ async def unzip_file(zip_file_path: pathlib.Path,
             raise fastapi.HTTPException(
                 status_code=400,
                 detail=f'Invalid zip file: {common_utils.format_exception(e)}')
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             logger.error(f'Error unzipping file: {zip_file_path}')
             raise fastapi.HTTPException(
                 status_code=500,
@@ -1179,7 +1179,7 @@ async def launch(launch_body: payloads.LaunchBody,
 
 
 @app.post('/exec')
-async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:  # noqa: builtin-variable-shadowing
+async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:  # noqa: A001
     """Executes a task on an existing cluster."""
     cluster_name = exec_body.cluster_name
     await executor.schedule_request_async(
@@ -1442,7 +1442,7 @@ async def download(download_body: payloads.DownloadBody,
             headers=headers,
             background=fastapi.BackgroundTasks().add_task(
                 lambda: zip_path.unlink(missing_ok=True)))
-    except Exception as e:  # noqa: blind-except
+    except Exception as e:  # noqa: BLE001
         raise fastapi.HTTPException(status_code=500,
                                     detail=f'Error creating zip file: {str(e)}')
 
@@ -1659,7 +1659,7 @@ async def stream(
     # 'plain': plain text for HTML clients
     # 'html': HTML for browsers
     # 'console': console for CLI/API clients
-    format: Literal['auto', 'plain', 'html', 'console'] = 'auto',  # noqa: builtin-argument-shadowing
+    format: Literal['auto', 'plain', 'html', 'console'] = 'auto',  # noqa: A002
 ) -> fastapi.responses.Response:
     """Streams the logs of a request.
 
@@ -2023,7 +2023,7 @@ async def _run_websocket_proxy(
                             '!Q',
                             message[type_size:type_size + latency_size])[0]
                         latency_seconds = avg_latency_ms / 1000
-                        metrics_utils.SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS.labels(  # noqa: line-too-long
+                        metrics_utils.SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS.labels(  # noqa: E501
                             pid=os.getpid()).observe(latency_seconds)
                         continue
                     else:
@@ -2032,7 +2032,7 @@ async def _run_websocket_proxy(
 
                 try:
                     await write_to_backend(message)
-                except Exception as e:  # noqa: blind-except
+                except Exception as e:  # noqa: BLE001
                     # Typically we will not reach here, if the conn to backend
                     # is disconnected, backend_to_websocket will exit first.
                     # But just in case.
@@ -2065,11 +2065,11 @@ async def _run_websocket_proxy(
                         '!B', SSHMessageType.REGULAR_DATA.value)
                     data = message_type_bytes + data
                 await websocket.send_bytes(data)
-        except Exception:  # noqa: blind-except
+        except Exception:  # noqa: BLE001
             pass
         try:
             await websocket.close()
-        except Exception:  # noqa: blind-except
+        except Exception:  # noqa: BLE001
             # The websocket might have been closed by the client
             pass
 
@@ -2344,7 +2344,7 @@ async def ssh_interactive_auth(websocket: fastapi.WebSocket,
                 logger.debug(f'WebSocket disconnected for session {session_id}')
             except asyncio.CancelledError:
                 pass
-            except Exception as e:  # noqa: blind-except
+            except Exception as e:  # noqa: BLE001
                 logger.error(f'Error in websocket_to_pty: {e}')
 
         async def pty_to_websocket():
@@ -2370,12 +2370,12 @@ async def ssh_interactive_auth(websocket: fastapi.WebSocket,
                     await websocket.send_bytes(data)
             except asyncio.CancelledError:
                 pass
-            except Exception as e:  # noqa: blind-except
+            except Exception as e:  # noqa: BLE001
                 logger.error(f'Error in pty_to_websocket: {e}')
             finally:
                 try:
                     await websocket.close()
-                except Exception:  # noqa: blind-except
+                except Exception:  # noqa: BLE001
                     pass
 
         await asyncio.gather(websocket_to_pty(), pty_to_websocket())
@@ -2468,7 +2468,7 @@ async def serve_dashboard(full_path: str):
             content = f.read()
 
         return fastapi.responses.HTMLResponse(content=content)
-    except Exception as e:  # noqa: blind-except
+    except Exception as e:  # noqa: BLE001
         logger.error(f'Error serving dashboard: {e}')
         raise fastapi.HTTPException(status_code=500, detail=str(e))
 

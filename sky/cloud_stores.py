@@ -204,8 +204,8 @@ class AzureBlobCloudStorage(CloudStorage):
         'elif [ "$ARCH" = "x86_64" ]; then '
         '  ARCH="amd64"; '
         'fi && '
-        'curl -fL https://github.com/Azure/azure-storage-azcopy/releases/download/v10.30.1/azcopy_linux_${ARCH}_10.30.1.tar.gz -o azcopy.tar.gz && '  # noqa: line-too-long
-        'sudo tar -xvzf azcopy.tar.gz --strip-components=1 -C /usr/local/bin --exclude=*.txt && '  # noqa: line-too-long
+        'curl -fL https://github.com/Azure/azure-storage-azcopy/releases/download/v10.30.1/azcopy_linux_${ARCH}_10.30.1.tar.gz -o azcopy.tar.gz && '  # noqa: E501
+        'sudo tar -xvzf azcopy.tar.gz --strip-components=1 -C /usr/local/bin --exclude=*.txt && '  # noqa: E501
         'sudo chmod +x /usr/local/bin/azcopy && '
         'rm azcopy.tar.gz)'
     ]
@@ -331,7 +331,7 @@ class AzureBlobCloudStorage(CloudStorage):
                                                         blob_path)
         # "?" is a delimiter character used when SAS token is attached to the
         # container endpoint.
-        # Reference: https://learn.microsoft.com/en-us/azure/ai-services/translator/document-translation/how-to-guides/create-sas-tokens?tabs=Containers # noqa: line-too-long
+        # Reference: https://learn.microsoft.com/en-us/azure/ai-services/translator/document-translation/how-to-guides/create-sas-tokens?tabs=Containers # noqa: E501
         converted_source = f'{source}?{sas_token}' if sas_token else source
 
         return shlex.quote(converted_source)

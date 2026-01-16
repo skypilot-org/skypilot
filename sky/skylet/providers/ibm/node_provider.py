@@ -131,7 +131,7 @@ class IBMVPCNodeProvider(NodeProvider):
             # check if current VM is the remote head node
             if self._get_node_type(name) == NODE_KIND_HEAD:
                 logger.debug(f"{name} is HEAD")
-                # noqa: line-too-long
+                # noqa: E501
                 node = self.ibm_vpc_client.list_instances(name=name).get_result()[
                     "instances"
                 ]
@@ -372,7 +372,7 @@ class IBMVPCNodeProvider(NodeProvider):
 
             # verify a floating ip is attached to the node
             nic_id = node["network_interfaces"][0]["id"]
-            # noqa: line-too-long
+            # noqa: E501
             res = self.ibm_vpc_client.list_instance_network_interface_floating_ips(
                 node["id"], nic_id
             ).get_result()
@@ -543,7 +543,7 @@ class IBMVPCNodeProvider(NodeProvider):
 
         instance_prototype["zone"] = {"name": self.zone}
         instance_prototype["boot_volume_attachment"] = boot_volume_attachment
-        # noqa: line-too-long
+        # noqa: E501
         instance_prototype["primary_network_interface"] = primary_network_interface
 
         try:
@@ -576,7 +576,7 @@ class IBMVPCNodeProvider(NodeProvider):
         """
 
         if base_config.get("head_ip"):
-            # noqa: line-too-long
+            # noqa: E501
             for ip in self.ibm_vpc_client.list_floating_ips().get_result()[
                 "floating_ips"
             ]:
@@ -824,7 +824,7 @@ W0622
         node = node_data if node_data else self._get_cached_node(node_id)
 
         # get vpc_id to delete if deleting head node which isn't a failed node
-        # noqa: line-too-long
+        # noqa: E501
         vpc_id_to_delete = None
         if (
             self._get_node_type(node["name"]) == NODE_KIND_HEAD

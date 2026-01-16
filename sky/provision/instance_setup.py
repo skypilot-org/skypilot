@@ -493,7 +493,7 @@ def start_skylet_on_head_node(
         launched_resources: resources_lib.Resources) -> None:
     """Start skylet on the head node."""
     # Avoid circular import.
-    from sky.utils import controller_utils  # noqa: import-outside-toplevel
+    from sky.utils import controller_utils  # noqa: PLC0415
 
     def _set_skypilot_env_var_cmd() -> str:
         """Sets the skypilot environment variables on the remote machine."""

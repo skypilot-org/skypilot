@@ -54,7 +54,7 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
         try:
             result = fn(*args, **kwargs)
             fut.set_result(result)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             logger.debug(f'Executor [{self.name}] error executing {fn}: {e}')
             fut.set_exception(e)
         finally:

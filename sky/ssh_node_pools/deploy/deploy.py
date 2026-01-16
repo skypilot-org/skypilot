@@ -1,5 +1,5 @@
 """SSH-based Kubernetes Cluster Deployment Script"""
-# noqa: line-too-long
+# noqa: E501
 import base64
 import concurrent.futures as cf
 import os
@@ -220,7 +220,7 @@ def deploy_multiple_clusters(
                 f'{colorama.Fore.CYAN}Completed {action} for cluster: {cluster_name}{colorama.Style.RESET_ALL}'
             )
             successful_clusters.append(cluster_name)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             reason = str(e)
             failed_clusters.append((cluster_name, reason))
             action = 'cleaning' if cleanup else 'deploying'
@@ -412,7 +412,7 @@ def deploy_single_cluster(cluster_name,
         'if [ "$(sudo sshd -T | grep allowtcpforwarding)" = "allowtcpforwarding yes" ]; then '
         f'echo "TCP Forwarding already enabled on head node ({head_node})."; '
         'else '
-        'sudo sed -i \'s/^#\?\s*AllowTcpForwarding.*/AllowTcpForwarding yes/\' '  # noqa: invalid-escape-sequence
+        'sudo sed -i \'s/^#\?\s*AllowTcpForwarding.*/AllowTcpForwarding yes/\' '  # noqa: W605
         '/etc/ssh/sshd_config && sudo systemctl restart sshd && '
         f'echo "Successfully enabled TCP Forwarding on head node ({head_node})."; '
         'fi')
@@ -675,7 +675,7 @@ def deploy_single_cluster(cluster_name,
                             logger.error(
                                 f'{colorama.Fore.RED}Error: '
                                 f'Certificate file is empty{RESET_ALL}')
-                    except Exception as e:  # noqa: blind-except
+                    except Exception as e:  # noqa: BLE001
                         logger.error(f'{colorama.Fore.RED}'
                                      f'Error processing certificate data: {e}'
                                      f'{RESET_ALL}')
@@ -761,7 +761,7 @@ def deploy_single_cluster(cluster_name,
                         else:
                             logger.error(f'{colorama.Fore.RED}Error: '
                                          f'Key file is empty{RESET_ALL}')
-                    except Exception as e:  # noqa: blind-except
+                    except Exception as e:  # noqa: BLE001
                         logger.error(f'{colorama.Fore.RED}'
                                      f'Error processing key data: {e}'
                                      f'{RESET_ALL}')

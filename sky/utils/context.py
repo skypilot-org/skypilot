@@ -25,7 +25,7 @@ from typing import (
 from typing_extensions import ParamSpec
 
 if TYPE_CHECKING:
-    from sky.skypilot_config import ConfigContext
+    pass
 
 _PROCESS_GLOBAL_VARS = {}
 

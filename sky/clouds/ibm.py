@@ -173,7 +173,7 @@ class IBM(clouds.Cloud):
             'price_per_gb': 0.09
         }]
         for price_threshold in price_thresholds:
-            # noqa: line-too-long
+            # noqa: E501
             cost += (num_gigabytes - price_threshold['threshold']
                     ) * price_threshold['price_per_gb']
             num_gigabytes -= (num_gigabytes - price_threshold['threshold'])
@@ -384,7 +384,7 @@ class IBM(clouds.Cloud):
         client = ibm.client(region=region)
         try:
             image_data = client.get_image(image_id).get_result()
-        # noqa: line-too-long
+        # noqa: E501
         except ibm.ibm_cloud_sdk_core.ApiException as e:  # type: ignore[union-attr]
             logger.error(e.message)
             with ux_utils.print_exception_no_traceback():
@@ -393,9 +393,9 @@ class IBM(clouds.Cloud):
                     '\nTo use image id in IBM, create a private VPC image and '
                     'paste its ID in the image_id section.\n'
                     '\nTo create an image manually:\n'
-                    'https://cloud.ibm.com/docs/vpc?topic=vpc-creating-and-using-an-image-from-volume\n'  # noqa: line-too-long
+                    'https://cloud.ibm.com/docs/vpc?topic=vpc-creating-and-using-an-image-from-volume\n'  # noqa: E501
                     '\nTo use an official VPC image creation tool:\n'
-                    'https://www.ibm.com/cloud/blog/use-ibm-packer-plugin-to-create-custom-images-on-ibm-cloud-vpc-infrastructure\n'  # noqa: line-too-long
+                    'https://www.ibm.com/cloud/blog/use-ibm-packer-plugin-to-create-custom-images-on-ibm-cloud-vpc-infrastructure\n'  # noqa: E501
                     '\nTo use a more limited but easier to manage tool:\n'
                     'https://github.com/IBM/vpc-img-inst') from None
         try:
@@ -465,7 +465,7 @@ class IBM(clouds.Cloud):
         try:
             ibm.client()
             return True, None
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             return (False, f'{str(e)}' + help_str)
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

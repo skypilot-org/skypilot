@@ -90,7 +90,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'This is likely a resource leak. '
                 'Use "sky down" to terminate the cluster.')
 
-        # noqa: line-too-long
+        # noqa: E501
         logger.debug(
             f'run_instances: Found {[inst["name"] for inst in existing_instances]} '
             'existing instances in cluster.')
@@ -154,11 +154,11 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
         if ocpu_count > 0:
             mem = node_config['MemoryInGbs']
             if mem is not None and mem != 'None':
-                # noqa: line-too-long
+                # noqa: E501
                 machine_shape_config = oci_adaptor.oci.core.models.LaunchInstanceShapeConfigDetails(
                     ocpus=ocpu_count, memory_in_gbs=mem)
             else:
-                # noqa: line-too-long
+                # noqa: E501
                 machine_shape_config = oci_adaptor.oci.core.models.LaunchInstanceShapeConfigDetails(
                     ocpus=ocpu_count)
 
@@ -270,7 +270,7 @@ def stop_instances(
     worker_only: bool = False,
 ) -> None:
     """Stop running instances."""
-    # noqa: line-too-long
+    # noqa: E501
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
 
     region = provider_config['region']

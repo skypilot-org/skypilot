@@ -87,14 +87,14 @@ class PermissionService:
             is not available or no rules are defined.
         """
         try:
-            from sky.server import plugins as server_plugins  # noqa: import-outside-toplevel
+            from sky.server import plugins as server_plugins  # noqa: PLC0415
             return server_plugins.get_plugin_rbac_rules()
         except ImportError:
             # Plugin module not available (e.g., not running as server)
             logger.debug(
                 'Plugin module not available, skipping plugin RBAC rules')
             return {}
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             logger.warning(f'Failed to get plugin RBAC rules: {e}')
             return {}
 

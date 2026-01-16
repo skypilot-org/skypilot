@@ -11,7 +11,7 @@ _REGION_CONFIG_CLOUDS = ['nebius', 'oci']
 # Kubernetes API use list to represent dictionary fields with patch strategy
 # merge and each item is indexed by the patch merge key. The following map
 # maps the field name to the patch merge key.
-# noqa: line-too-long
+# noqa: E501
 # Ref: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#podspec-v1-core
 # NOTE: field containers and imagePullSecrets are not included deliberately for
 # backward compatibility (we only support one container per pod now).

@@ -234,7 +234,7 @@ def fetch_seeweb_data(api_key: str) -> List[Dict]:
 
                 parsed.update({'regions_available': regions_available})
                 plans.append(parsed)
-            except Exception as e:  # noqa: blind-except
+            except Exception as e:  # noqa: BLE001
                 print(f'Error parsing plan {plan.name}: {e}')
                 continue
 
@@ -298,7 +298,7 @@ def create_catalog(api_key: str, output_path: str) -> None:
                         gpu_info_str,  # GpuInfo
                         ''  # SpotPrice (Seeweb doesn't support spot)
                     ])
-            except Exception as e:  # noqa: blind-except
+            except Exception as e:  # noqa: BLE001
                 print(f'Error processing plan {plan["plan_name"]}: {e}')
                 continue
 

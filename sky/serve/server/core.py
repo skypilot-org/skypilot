@@ -68,7 +68,7 @@ def update(task: Optional['sky.Task'],
 @usage_lib.entrypoint
 def down(
     service_names: Optional[Union[str, List[str]]] = None,
-    all: bool = False,  # noqa: builtin-argument-shadowing
+    all: bool = False,  # noqa: A002
     purge: bool = False,
 ) -> None:
     """Tears down a service.

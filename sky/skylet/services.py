@@ -50,7 +50,7 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
                 autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
                 down=request.down)
             return autostopv1_pb2.SetAutostopResponse()
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def IsAutostopping(  # type: ignore[return]
@@ -63,7 +63,7 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
             is_autostopping = autostop_lib.get_is_autostopping()
             return autostopv1_pb2.IsAutostoppingResponse(
                 is_autostopping=is_autostopping)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
 
@@ -82,12 +82,12 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
         """Gets serve status."""
         try:
             service_names, pool = (
-                serve_rpc_utils.GetServiceStatusRequestConverter.from_proto(request))  # noqa: line-too-long
+                serve_rpc_utils.GetServiceStatusRequestConverter.from_proto(request))  # noqa: E501
             statuses = serve_utils.get_service_status_pickled(
                 service_names, pool)
             return serve_rpc_utils.GetServiceStatusResponseConverter.to_proto(
                 statuses)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def AddVersion(  # type: ignore[return]
@@ -98,7 +98,7 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
             service_name = request.service_name
             version = serve_state.add_version(service_name)
             return servev1_pb2.AddVersionResponse(version=version)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def TerminateServices(  # type: ignore[return]
@@ -108,10 +108,10 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
         """Terminates serve"""
         try:
             service_names, purge, pool = (
-                serve_rpc_utils.TerminateServicesRequestConverter.from_proto(request))  # noqa: line-too-long
+                serve_rpc_utils.TerminateServicesRequestConverter.from_proto(request))  # noqa: E501
             message = serve_utils.terminate_services(service_names, purge, pool)
             return servev1_pb2.TerminateServicesResponse(message=message)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def TerminateReplica(  # type: ignore[return]
@@ -126,7 +126,7 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
             message = serve_utils.terminate_replica(service_name, replica_id,
                                                     purge)
             return servev1_pb2.TerminateReplicaResponse(message=message)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def WaitServiceRegistration(  # type: ignore[return]
@@ -142,7 +142,7 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
                 service_name, job_id, pool)
             lb_port = serve_utils.load_service_initialization_result(encoded)
             return servev1_pb2.WaitServiceRegistrationResponse(lb_port=lb_port)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def UpdateService(  # type: ignore[return]
@@ -157,7 +157,7 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
             serve_utils.update_service_encoded(service_name, version, mode,
                                                pool)
             return servev1_pb2.UpdateServiceResponse()
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
 
@@ -174,7 +174,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                                               request.resources_str,
                                               request.metadata)
             return jobsv1_pb2.AddJobResponse(job_id=job_id, log_dir=log_dir)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def QueueJob(  # type: ignore[return]
@@ -234,7 +234,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                                                   task.name, task.resources_str,
                                                   task.metadata_json)
             return jobsv1_pb2.QueueJobResponse()
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def UpdateStatus(  # type: ignore[return]
@@ -244,7 +244,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         try:
             job_lib.update_status()
             return jobsv1_pb2.UpdateStatusResponse()
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def GetJobQueue(  # type: ignore[return]
@@ -257,7 +257,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             jobs_info = job_lib.get_jobs_info(user_hash=user_hash,
                                               all_jobs=all_jobs)
             return jobsv1_pb2.GetJobQueueResponse(jobs=jobs_info)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def CancelJobs(  # type: ignore[return]
@@ -271,7 +271,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                                                     user_hash)
             return jobsv1_pb2.CancelJobsResponse(
                 cancelled_job_ids=cancelled_job_ids)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def FailAllInProgressJobs(  # type: ignore[return]
@@ -281,7 +281,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         try:
             job_lib.fail_all_jobs_in_progress()
             return jobsv1_pb2.FailAllInProgressJobsResponse()
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def TailLogs(
@@ -317,7 +317,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             exit_code_int = 0 if not request.follow and int(
                 exit_code) == 101 else int(exit_code)
             yield jobsv1_pb2.TailLogsResponse(exit_code=exit_code_int)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
         finally:
             buffer.close()
@@ -336,7 +336,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 job_statuses[job_id] = job_lib.JobStatus(status).to_protobuf(
                 ) if status is not None else jobsv1_pb2.JOB_STATUS_UNSPECIFIED
             return jobsv1_pb2.GetJobStatusResponse(job_statuses=job_statuses)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def GetJobSubmittedTimestamp(  # type: ignore[return]
@@ -353,7 +353,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                               f'Job {job_id} not found')
             return jobsv1_pb2.GetJobSubmittedTimestampResponse(
                 timestamp=timestamp)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def GetJobEndedTimestamp(  # type: ignore[return]
@@ -369,7 +369,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 context.abort(grpc.StatusCode.NOT_FOUND,
                               f'Job {job_id} not found or not ended')
             return jobsv1_pb2.GetJobEndedTimestampResponse(timestamp=timestamp)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def GetLogDirsForJobs(  # type: ignore[return]
@@ -385,7 +385,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             job_log_dirs = job_lib.get_job_log_dirs(job_ids)
             return jobsv1_pb2.GetLogDirsForJobsResponse(
                 job_log_dirs=job_log_dirs)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def GetJobExitCodes(  # type: ignore[return]
@@ -400,7 +400,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 exit_codes_list = job_lib.get_exit_codes(job_id)
                 exit_codes = exit_codes_list if exit_codes_list else []
             return jobsv1_pb2.GetJobExitCodesResponse(exit_codes=exit_codes)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
 
@@ -416,7 +416,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
         try:
             return managed_jobsv1_pb2.GetVersionResponse(
                 controller_version=constants.SKYLET_VERSION)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def GetJobTable(  # type: ignore[return]
@@ -528,7 +528,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
             job_ids = managed_job_state.get_all_job_ids_by_name(job_name)
             return managed_jobsv1_pb2.GetAllJobIdsByNameResponse(
                 job_ids=job_ids)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def CancelJobs(  # type: ignore[return]
@@ -573,7 +573,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     grpc.StatusCode.INVALID_ARGUMENT,
                     f'invalid cancellation criteria: {cancellation_criteria}')
             return managed_jobsv1_pb2.CancelJobsResponse(message=message)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def StreamLogs(

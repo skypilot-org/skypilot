@@ -255,7 +255,7 @@ def create_catalog(output_dir: str) -> None:
                     }],
                     'TotalGpuMemoryInMiB': int(gpu_memory * gpu_cnt),
                 }
-                gpuinfo = json.dumps(gpuinfo).replace('"', "'")  # noqa: bad-quotes-inline-string
+                gpuinfo = json.dumps(gpuinfo).replace('"', "'")  # noqa: Q000
                 instance_type = f'{plan["gpu_type"]}::{gpu_cnt}'
                 for region in plan.get('regions', []):
                     writer.writerow([

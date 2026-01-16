@@ -6,9 +6,7 @@ from typing import Callable, Dict, List, Optional, Set, Type, Union
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky.backends import backend
-    from sky.clouds import cloud
-    from sky.jobs import recovery_strategy
+    pass
 
 T = typing.TypeVar('T')
 

@@ -44,7 +44,7 @@ class Cudo(clouds.Cloud):
         'Install cudoctl and run the following commands:\n'
         f'{_INDENT_PREFIX}  $ cudoctl init\n'
         f'{_INDENT_PREFIX}For more info: '
-        # noqa: line-too-long
+        # noqa: E501
         'https://docs.skypilot.co/en/latest/getting-started/installation.html')
 
     _PROJECT_HINT = (
@@ -52,7 +52,7 @@ class Cudo(clouds.Cloud):
         f'{_INDENT_PREFIX} $ cudoctl projects create my-project-name\n'
         f'{_INDENT_PREFIX} $ cudoctl init\n'
         f'{_INDENT_PREFIX}For more info: '
-        # noqa: line-too-long
+        # noqa: E501
         'https://docs.skypilot.co/en/latest/getting-started/installation.html')
 
     _CLOUD_UNSUPPORTED_FEATURES = {
@@ -308,8 +308,8 @@ class Cudo(clouds.Cloud):
                 f'{cls._CREDENTIAL_HINT}\n'
                 f'{cls._INDENT_PREFIX}'
                 f'{common_utils.format_exception(e, use_bracket=True)}')
-        from cudo_compute import cudo_api  # noqa: import-outside-toplevel
-        from cudo_compute.rest import ApiException  # noqa: import-outside-toplevel
+        from cudo_compute import cudo_api  # noqa: PLC0415
+        from cudo_compute.rest import ApiException  # noqa: PLC0415
         try:
             _, error = cudo_api.make_client()
         except FileNotFoundError as e:

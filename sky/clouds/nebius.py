@@ -368,13 +368,13 @@ class Nebius(clouds.Cloud):
         Nebius's compute service."""
         token_cred_msg = (
             f'{_INDENT_PREFIX}Credentials can be set up by running: \n'
-            f'{_INDENT_PREFIX}  $ nebius iam get-access-token > {nebius.iam_token_path()} \n'  # noqa: line-too-long
+            f'{_INDENT_PREFIX}  $ nebius iam get-access-token > {nebius.iam_token_path()} \n'  # noqa: E501
             f'{_INDENT_PREFIX} or generate  {nebius.credentials_path()} \n')
 
-        tenant_msg = (f'{_INDENT_PREFIX} Copy your tenant ID from the web console and save it to file \n'  # noqa: line-too-long
-                      f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID_PATH > {nebius.tenant_id_path()} \n'  # noqa: line-too-long
-                      f'{_INDENT_PREFIX} Or if you have 1 tenant you can run:\n'  # noqa: line-too-long
-                      f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.tenant_id_path()} \n')  # noqa: line-too-long
+        tenant_msg = (f'{_INDENT_PREFIX} Copy your tenant ID from the web console and save it to file \n'  # noqa: E501
+                      f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID_PATH > {nebius.tenant_id_path()} \n'  # noqa: E501
+                      f'{_INDENT_PREFIX} Or if you have 1 tenant you can run:\n'  # noqa: E501
+                      f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.tenant_id_path()} \n')  # noqa: E501
         if not nebius.is_token_or_cred_file_exist():
             return False, f'{token_cred_msg}'
         tenant_id = nebius.get_tenant_id()
@@ -416,7 +416,7 @@ class Nebius(clouds.Cloud):
                     f'\n{_INDENT_PREFIX}  $ aws configure --profile nebius')
             hints += (
                 f'\n{_INDENT_PREFIX}For more info: '
-                'https://docs.skypilot.co/en/latest/getting-started/installation.html#nebius'  # noqa: line-too-long
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html#nebius'  # noqa: E501
             )
         return (False, hints) if hints else (True, hints)
 
@@ -462,7 +462,7 @@ class Nebius(clouds.Cloud):
             profile = nebius.sync_call(
                 profile_client.get(nebius.iam().GetProfileRequest(),
                                    timeout=nebius.READ_TIMEOUT))
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             raise exceptions.CloudUserIdentityError(
                 f'Error getting Nebius profile: {e}')
         if profile.user_profile is not None:

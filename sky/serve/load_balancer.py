@@ -79,7 +79,7 @@ class SkyServeLoadBalancer:
         # If more than 100 requests are sent to the same replica, the
         # httpx.Client will queue the requests and send them when a
         # connection is available.
-        # Reference: https://github.com/encode/httpcore/blob/a8f80980daaca98d556baea1783c5568775daadc/httpcore/_async/connection_pool.py#L69-L71 # noqa: line-too-long
+        # Reference: https://github.com/encode/httpcore/blob/a8f80980daaca98d556baea1783c5568775daadc/httpcore/_async/connection_pool.py#L69-L71 # noqa: E501
         self._client_pool: Dict[str, httpx.AsyncClient] = dict()
         # We need this lock to avoid getting from the client pool while
         # updating it from _sync_with_controller.
@@ -154,7 +154,7 @@ class SkyServeLoadBalancer:
                     constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS)
                 # Await those tasks after the interval to avoid blocking.
                 await asyncio.gather(*close_client_tasks)
-            except Exception as e:  # noqa: blind-except
+            except Exception as e:  # noqa: BLE001
                 logger.error(f'An error occurred when syncing with '
                              f'the controller: {e}'
                              f'\nTraceback: {traceback.format_exc()}')

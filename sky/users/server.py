@@ -300,7 +300,7 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
 
             success_count += 1
 
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             error_count += 1
             creation_errors.append(f'{user_data["username"]}: {str(e)}')
 
@@ -349,7 +349,7 @@ def user_export() -> Dict[str, Any]:
 
         return {'csv_content': csv_content, 'user_count': len(exported_users)}
 
-    except Exception as e:  # noqa: blind-except
+    except Exception as e:  # noqa: BLE001
         raise fastapi.HTTPException(status_code=500,
                                     detail=f'Failed to export users: {str(e)}')
 
@@ -473,7 +473,7 @@ def create_service_account_token(
 
         # Add service account to permission system with default role
         # Import here to avoid circular imports
-        from sky.users.permission import permission_service  # noqa: import-outside-toplevel
+        from sky.users.permission import permission_service  # noqa: PLC0415
         permission_service.add_user_if_not_exists(service_account_user_id)
 
         # Handle expiration: 0 means "never expire"
@@ -508,7 +508,7 @@ def create_service_account_token(
             'message': 'Please save this token - it will not be shown again!'
         }
 
-    except Exception as e:  # noqa: blind-except
+    except Exception as e:  # noqa: BLE001
         logger.error(f'Failed to create service account token: {e}')
         raise fastapi.HTTPException(
             status_code=500,
@@ -629,7 +629,7 @@ def update_service_account_role(
             'service_account_user_id': service_account_user_id,
             'new_role': role_body.role
         }
-    except Exception as e:  # noqa: blind-except
+    except Exception as e:  # noqa: BLE001
         logger.error(f'Failed to update service account role: {e}')
         raise fastapi.HTTPException(
             status_code=500, detail='Failed to update service account role')
@@ -713,7 +713,7 @@ def rotate_service_account_token(
                         'token - it will not be shown again!')
         }
 
-    except Exception as e:  # noqa: blind-except
+    except Exception as e:  # noqa: BLE001
         logger.error(f'Failed to rotate service account token: {e}')
         raise fastapi.HTTPException(
             status_code=500, detail='Failed to rotate service account token')

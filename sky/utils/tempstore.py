@@ -34,7 +34,7 @@ def tempdir() -> Iterator[str]:
 # Keep the function signature same as tempfile.mkdtemp.
 def mkdtemp(suffix: Optional[str] = None,
             prefix: Optional[str] = None,
-            dir: Optional[str] = None) -> str:  # noqa: builtin-argument-shadowing
+            dir: Optional[str] = None) -> str:  # noqa: A002
     """Create a temporary directory in the temp dir of current context.
 
     The directory will be cleaned when the current context exits.
@@ -44,9 +44,9 @@ def mkdtemp(suffix: Optional[str] = None,
     context_temp_dir = _TEMP_DIR.get()
 
     if context_temp_dir is not None and dir is None:
-        dir = context_temp_dir  # noqa: builtin-variable-shadowing
+        dir = context_temp_dir  # noqa: A001
     elif context_temp_dir is not None and dir is not None:
-        dir = os.path.join(context_temp_dir, dir)  # noqa: builtin-variable-shadowing
+        dir = os.path.join(context_temp_dir, dir)  # noqa: A001
         os.makedirs(dir, exist_ok=True)
 
     return tempfile.mkdtemp(suffix=suffix, prefix=prefix, dir=dir)

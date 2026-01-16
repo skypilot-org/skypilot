@@ -264,7 +264,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
         # alias for sudo to empty string, therefore any sudo in the following
         # commands won't fail.
         # Disable apt-get from asking user input during installation.
-        # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai  # noqa: line-too-long
+        # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai  # noqa: E501
         self.run(
             'echo \'[ "$(whoami)" == "root" ] && alias sudo=""\' >> ~/.bashrc;'
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;')
@@ -299,9 +299,9 @@ class SkyDockerCommandRunner(DockerCommandRunner):
         # container.
         # Last command here is to eliminate the error
         # `mesg: ttyname failed: inappropriate ioctl for device`.
-        # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # noqa: line-too-long
+        # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # noqa: E501
         port = constants.DEFAULT_DOCKER_PORT
-        # noqa: invalid-escape-sequence
+        # noqa: W605
         self.run(f'sudo sed -i "s/#Port 22/Port {port}/" /etc/ssh/sshd_config;'
                  'mkdir -p ~/.ssh;'
                  'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
@@ -335,7 +335,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                     # If they do not, try to change ownership!
                     self.run(f'cat {mount} >/dev/null 2>&1 || '
                              f'sudo chown $(id -u):$(id -g) {mount}')
-                except Exception:  # noqa: blind-except
+                except Exception:  # noqa: BLE001
                     lsl_string = (self.run(
                         f'ls -l {mount}',
                         with_output=True).decode('utf-8').strip())

@@ -16,7 +16,7 @@ class SafeThread(threading.Thread):
     def run(self):
         try:
             super().run()
-        except BaseException as e:  # noqa: blind-except
+        except BaseException as e:  # noqa: BLE001
             self._exc = e
 
     @property

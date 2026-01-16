@@ -22,7 +22,7 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 if typing.TYPE_CHECKING:
-    from sky import models
+    pass
 
 
 def _is_url(policy_string: str) -> bool:
@@ -30,7 +30,7 @@ def _is_url(policy_string: str) -> bool:
     try:
         parsed = urlparse.urlparse(policy_string)
         return parsed.scheme in ('http', 'https')
-    except Exception:  # noqa: blind-except
+    except Exception:  # noqa: BLE001
         return False
 
 
@@ -157,7 +157,7 @@ def apply(
         except exceptions.UserRequestRejectedByPolicy as e:
             with ux_utils.print_exception_no_traceback():
                 raise e
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.UserRequestRejectedByPolicy(
                     f'{colorama.Fore.RED}User request rejected by policy '

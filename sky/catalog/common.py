@@ -208,8 +208,8 @@ def read_catalog(filename: str,
             if not _need_update():
                 return False
 
-            url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # noqa: line-too-long
-            url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # noqa: line-too-long
+            url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # noqa: E501
+            url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # noqa: E501
             headers = {'User-Agent': 'SkyPilot/0.7'}
             update_frequency_str = ''
             if pull_frequency_hours is not None:

@@ -34,16 +34,16 @@ class FluentbitAgent(LoggingAgent):
     def get_setup_command(self,
                           cluster_name: resources_utils.ClusterName) -> str:
         install_cmd = (
-            # noqa: line-too-long
+            # noqa: E501
             'if ! command -v fluent-bit >/dev/null 2>&1 && [ ! -f /opt/fluent-bit/bin/fluent-bit ]; then '
             'sudo apt-get update; sudo apt-get install -y gnupg; '
-            # noqa: line-too-long
+            # noqa: E501
             'sudo sh -c \'curl -L https://packages.fluentbit.io/fluentbit.key | gpg --dearmor > /usr/share/keyrings/fluentbit-keyring.gpg\'; '
-            # noqa: line-too-long
+            # noqa: E501
             'os_id=$(grep -oP \'(?<=^ID=).*\' /etc/os-release 2>/dev/null || lsb_release -is 2>/dev/null | tr \'[:upper:]\' \'[:lower:]\'); '
-            # noqa: line-too-long
+            # noqa: E501
             'codename=$(grep -oP \'(?<=VERSION_CODENAME=).*\' /etc/os-release 2>/dev/null || lsb_release -cs 2>/dev/null); '
-            # noqa: line-too-long
+            # noqa: E501
             'echo "deb [signed-by=/usr/share/keyrings/fluentbit-keyring.gpg] https://packages.fluentbit.io/$os_id/$codename $codename main" | sudo tee /etc/apt/sources.list.d/fluent-bit.list; '
             'sudo apt-get update; '
             'sudo apt-get install -y fluent-bit; '
@@ -54,7 +54,7 @@ class FluentbitAgent(LoggingAgent):
                       f'echo {shlex.quote(cfg)} > {cfg_path}')
         kill_prior_cmd = (
             'if [ -f "/tmp/fluentbit.pid" ]; then '
-            # noqa: line-too-long
+            # noqa: E501
             'echo "Killing prior fluent-bit process $(cat /tmp/fluentbit.pid)"; '
             'kill "$(cat /tmp/fluentbit.pid)" || true; '
             'fi')
@@ -74,7 +74,7 @@ class FluentbitAgent(LoggingAgent):
             'parsers': [{
                 'name': 'sky-ray-parser',
                 'format': 'regex',
-                # noqa: line-too-long
+                # noqa: E501
                 'regex': r'(?:\x1b\[[\d;]+m)?\((?<worker_name>[^,]+)(?:,\s*rank=(?<rank>\d+))?(?:,\s*pid=(?<pid>\d+))(?:,\s*ip=(?<ip>[\d.]+))?\)(?:\x1b\[[\d;]+m)?\s*(?<log_line>.*)',
                 'types': 'rank:integer pid:integer',
             }],

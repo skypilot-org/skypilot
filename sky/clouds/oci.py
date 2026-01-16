@@ -336,7 +336,7 @@ class OCI(clouds.Cloud):
                 instance_type=original_instance_type,
                 region=region.name)
 
-            from sky.catalog import oci_catalog  # noqa: import-outside-toplevel
+            from sky.catalog import oci_catalog  # noqa: PLC0415
             os_type = oci_catalog.get_image_os_from_tag(tag=image_str,
                                                         region=region.name)
         logger.debug(f'OS type for the image {image_id} is {os_type}')
@@ -441,7 +441,7 @@ class OCI(clouds.Cloud):
 
         short_credential_help_str = (
             'For more details, refer to: '
-            # noqa: line-too-long
+            # noqa: E501
             'https://docs.skypilot.co/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci'
         )
         credential_help_str = (
@@ -657,7 +657,7 @@ class OCI(clouds.Cloud):
         try:
             vms = query_helper.query_instances_by_tags(tag_filters=tag_filters,
                                                        region=region)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ClusterStatusFetchingError(
                     f'Failed to query OCI cluster {name!r} status. '

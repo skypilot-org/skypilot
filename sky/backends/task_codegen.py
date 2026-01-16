@@ -73,9 +73,9 @@ class TaskCodeGen:
             # FIXME: This is a hack to make sure that the functions can be found
             # by ray.remote. This should be removed once we have a better way to
             # specify dependencies for ray.
-            inspect.getsource(log_lib._ProcessingArgs),  # noqa: private-member-access
-            inspect.getsource(log_lib._get_context),  # noqa: private-member-access
-            inspect.getsource(log_lib._handle_io_stream),  # noqa: private-member-access
+            inspect.getsource(log_lib._ProcessingArgs),  # noqa: SLF001
+            inspect.getsource(log_lib._get_context),  # noqa: SLF001
+            inspect.getsource(log_lib._handle_io_stream),  # noqa: SLF001
             inspect.getsource(log_lib.process_subprocess_stream),
             inspect.getsource(log_lib.run_with_log),
             inspect.getsource(log_lib.make_task_bash_script),
@@ -592,7 +592,7 @@ class RayCodeGen(TaskCodeGen):
                 num_gpus = acc_count
                 options.append(f'num_gpus={num_gpus}')
         options.append(
-            'scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy('  # noqa: line-too-long
+            'scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy('  # noqa: E501
             'placement_group=pg, '
             f'placement_group_bundle_index={gang_scheduling_id})')
 

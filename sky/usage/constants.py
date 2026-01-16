@@ -1,6 +1,6 @@
 """Constants for usage collection."""
 
-LOG_URL = 'http://usage.skypilot.co:9090/loki/api/v1/push'  # noqa: line-too-long
+LOG_URL = 'http://usage.skypilot.co:9090/loki/api/v1/push'  # noqa: E501
 
 USAGE_MESSAGE_SCHEMA_VERSION = 1
 PRIVACY_POLICY_PATH = '~/.sky/privacy_policy'

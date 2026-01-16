@@ -191,7 +191,7 @@ def status(
         try:
             status_responses.append(
                 responses.StatusResponse.model_validate(cluster))
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             logger.warning('Failed to validate status responses for cluster '
                            f'{cluster.get("name")}: {e}')
     return status_responses
@@ -446,7 +446,7 @@ def cost_report(
 
         try:
             report['total_cost'] = get_total_cost(report)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             # Ok to skip the total cost as this is just for display purposes.
             logger.warning(f'Failed to get total cost for cluster '
                            f'{report["name"]}: {str(e)}')
@@ -488,7 +488,7 @@ def _update_record_with_resources(
     for field in fields:
         try:
             record[field] = str(getattr(resources, field))
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             # Ok to skip the fields as this is just for display
             # purposes.
             logger.debug(f'Failed to get resources.{field} for cluster '
@@ -503,7 +503,7 @@ def _update_record_with_resources(
             resources_utils.format_resource(resources, simplified_only=False))
         record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
         record['resources_str_full'] = f'{num_nodes}x{resource_str_full}'
-    except Exception as e:  # noqa: blind-except
+    except Exception as e:  # noqa: BLE001
         logger.debug(f'Failed to get resources_str for cluster '
                      f'{record["name"]}: {str(e)}')
         for field in fields:
@@ -994,7 +994,7 @@ def queue(cluster_name: str,
 @usage_lib.entrypoint
 def cancel(
     cluster_name: str,
-    all: bool = False,  # noqa: builtin-argument-shadowing
+    all: bool = False,  # noqa: A002
     all_users: bool = False,
     job_ids: Optional[List[int]] = None,
     # Internal only:

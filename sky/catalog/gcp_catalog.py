@@ -609,7 +609,7 @@ def check_accelerator_attachable_to_host(instance_type: str,
                 raise exceptions.ResourcesMismatchError(
                     'TPU Nodes can be only used with N1 machines. '
                     'Please refer to: '
-                    'https://cloud.google.com/compute/docs/general-purpose-machines#n1_machines')  # noqa: line-too-long
+                    'https://cloud.google.com/compute/docs/general-purpose-machines#n1_machines')  # noqa: E501
         return
 
     if acc_name in _ACC_INSTANCE_TYPE_DICTS:

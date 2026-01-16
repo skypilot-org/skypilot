@@ -39,64 +39,64 @@ def build(service_name: str, version: str, *args, **kwargs):
 @common.load_lazy_modules(_LAZY_MODULES)
 def storage_client():
     """Helper that connects to GCS Storage Client for GCS Bucket"""
-    from google.cloud import storage  # noqa: import-outside-toplevel
+    from google.cloud import storage  # noqa: PLC0415
     return storage.Client()
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
 def anonymous_storage_client():
     """Helper that connects to GCS Storage Client for Public GCS Buckets"""
-    from google.cloud import storage  # noqa: import-outside-toplevel
+    from google.cloud import storage  # noqa: PLC0415
     return storage.Client.create_anonymous_client()
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
 def not_found_exception():
     """NotFound exception."""
-    from google.api_core import exceptions as gcs_exceptions  # noqa: import-outside-toplevel
+    from google.api_core import exceptions as gcs_exceptions  # noqa: PLC0415
     return gcs_exceptions.NotFound
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
 def forbidden_exception():
     """Forbidden exception."""
-    from google.api_core import exceptions as gcs_exceptions  # noqa: import-outside-toplevel
+    from google.api_core import exceptions as gcs_exceptions  # noqa: PLC0415
     return gcs_exceptions.Forbidden
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
 def http_error_exception():
     """HttpError exception."""
-    from googleapiclient import errors  # noqa: import-outside-toplevel
+    from googleapiclient import errors  # noqa: PLC0415
     return errors.HttpError
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
 def credential_error_exception():
     """CredentialError exception."""
-    from google.auth import exceptions  # noqa: import-outside-toplevel
+    from google.auth import exceptions  # noqa: PLC0415
     return exceptions.DefaultCredentialsError
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
 def auth_error_exception():
     """GoogleAuthError exception."""
-    from google.auth import exceptions  # noqa: import-outside-toplevel
+    from google.auth import exceptions  # noqa: PLC0415
     return exceptions.GoogleAuthError
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
 def gcp_auth_refresh_error_exception():
     """GCP auth refresh error exception."""
-    from google.auth import exceptions  # noqa: import-outside-toplevel
+    from google.auth import exceptions  # noqa: PLC0415
     return exceptions.RefreshError
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
 def get_credentials(cred_type: str, credentials_field: str):
     """Get GCP credentials."""
-    from google.oauth2 import service_account  # noqa: import-outside-toplevel
-    from google.oauth2.credentials import Credentials as OAuthCredentials  # noqa: import-outside-toplevel
+    from google.oauth2 import service_account  # noqa: PLC0415
+    from google.oauth2.credentials import Credentials as OAuthCredentials  # noqa: PLC0415
 
     if cred_type == 'service_account':
         # If parsing the gcp_credentials failed, then the user likely made a

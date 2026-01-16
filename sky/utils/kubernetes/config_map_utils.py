@@ -94,7 +94,7 @@ def initialize_configmap_sync_on_startup(config_file_path: str) -> None:
 
         logger.info(f'Synced PVC config to new ConfigMap {configmap_name}')
 
-    except Exception as e:  # noqa: blind-except
+    except Exception as e:  # noqa: BLE001
         logger.warning(f'Failed to initialize ConfigMap sync: {e}')
 
 
@@ -129,5 +129,5 @@ def patch_configmap_with_config(config, config_file_path: str) -> None:
             else:
                 raise
 
-    except Exception as e:  # noqa: blind-except
+    except Exception as e:  # noqa: BLE001
         logger.warning(f'Failed to sync config to ConfigMap: {e}')

@@ -112,7 +112,7 @@ async def get(request_id: str) -> Any:
                     request_task = requests_lib.Request.decode(
                         payloads.RequestPayload(**await response.json()))
                     logger.debug(f'Got request with error: {request_task.name}')
-                except Exception:  # noqa: blind-except
+                except Exception:  # noqa: BLE001
                     request_task = None
             if request_task is None:
                 with ux_utils.print_exception_no_traceback():
@@ -421,7 +421,7 @@ async def launch(
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def exec(  # noqa: builtin-variable-shadowing
+async def exec(  # noqa: A001
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
     dryrun: bool = False,
@@ -566,7 +566,7 @@ async def job_status(
 @annotations.client_api
 async def cancel(
         cluster_name: str,
-        all: bool = False,  # noqa: builtin-argument-shadowing
+        all: bool = False,  # noqa: A002
         all_users: bool = False,
         job_ids: Optional[List[int]] = None,
         _try_cancel_if_cluster_is_init: bool = False,

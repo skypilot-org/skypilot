@@ -27,7 +27,7 @@ async def up(
     request_id = await context_utils.to_thread(sdk.up, task, service_name,
                                                _need_confirmation)
     if stream_logs is not None:
-        return await sdk_async._stream_and_get(request_id, stream_logs)  # noqa: private-member-access
+        return await sdk_async._stream_and_get(request_id, stream_logs)  # noqa: SLF001
     else:
         return await sdk_async.get(request_id)
 
@@ -46,7 +46,7 @@ async def update(
     request_id = await context_utils.to_thread(sdk.update, task, service_name,
                                                mode, _need_confirmation)
     if stream_logs is not None:
-        return await sdk_async._stream_and_get(request_id, stream_logs)  # noqa: private-member-access
+        return await sdk_async._stream_and_get(request_id, stream_logs)  # noqa: SLF001
     else:
         return await sdk_async.get(request_id)
 
@@ -54,7 +54,7 @@ async def update(
 @usage_lib.entrypoint
 async def down(
     service_names: Optional[Union[str, List[str]]],
-    all: bool = False,  # noqa: builtin-argument-shadowing
+    all: bool = False,  # noqa: A002
     purge: bool = False,
     stream_logs: Optional[
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG
@@ -63,7 +63,7 @@ async def down(
     request_id = await context_utils.to_thread(sdk.down, service_names, all,
                                                purge)
     if stream_logs is not None:
-        return await sdk_async._stream_and_get(request_id, stream_logs)  # noqa: private-member-access
+        return await sdk_async._stream_and_get(request_id, stream_logs)  # noqa: SLF001
     else:
         return await sdk_async.get(request_id)
 
@@ -81,7 +81,7 @@ async def terminate_replica(
     request_id = await context_utils.to_thread(sdk.terminate_replica,
                                                service_name, replica_id, purge)
     if stream_logs is not None:
-        return await sdk_async._stream_and_get(request_id, stream_logs)  # noqa: private-member-access
+        return await sdk_async._stream_and_get(request_id, stream_logs)  # noqa: SLF001
     else:
         return await sdk_async.get(request_id)
 
@@ -95,7 +95,7 @@ async def status(
     """Async version of status() that sdk_async.gets service statuses."""
     request_id = await context_utils.to_thread(sdk.status, service_names)
     if stream_logs is not None:
-        return await sdk_async._stream_and_get(request_id, stream_logs)  # noqa: private-member-access
+        return await sdk_async._stream_and_get(request_id, stream_logs)  # noqa: SLF001
     else:
         return await sdk_async.get(request_id)
 

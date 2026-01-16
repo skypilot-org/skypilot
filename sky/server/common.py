@@ -656,7 +656,7 @@ def _start_api_server(deploy: bool = False,
         #      whole YAML config is really just `db: <URI>`.
         if skypilot_config.get_nested(('db',), None) is None:
             avail_mem_size_gb: float = common_utils.get_mem_size_gb()
-            import sky.jobs.utils as job_utils  # noqa: import-outside-toplevel
+            import sky.jobs.utils as job_utils  # noqa: PLC0415
             max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
                           if job_utils.is_consolidation_mode(
                               on_api_restart=True) else
@@ -921,7 +921,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     Returns:
         The translated task as a single-task dag.
     """
-    from sky.utils import dag_utils  # noqa: import-outside-toplevel
+    from sky.utils import dag_utils  # noqa: PLC0415
 
     user_hash = env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
 

@@ -142,7 +142,7 @@ def main():
         print(f'Start copying image to {copy_to_region}...')
         try:
             new_image_id = copy_image_and_make_public(copy_to_region)
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             print(f'Error generating image to {copy_to_region}: {str(e)}')
             new_image_id = 'NEED_FALLBACK'
         image_cache.append((new_image_id, copy_to_region))

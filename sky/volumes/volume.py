@@ -25,7 +25,7 @@ class Volume:
     def __init__(
             self,
             name: Optional[str] = None,
-            type: Optional[str] = None,  # noqa: builtin-argument-shadowing
+            type: Optional[str] = None,  # noqa: A002
             infra: Optional[str] = None,
             size: Optional[str] = None,
             labels: Optional[Dict[str, str]] = None,
@@ -63,7 +63,7 @@ class Volume:
         try:
             vt = (volume_lib.VolumeType(vol_type_val)
                   if vol_type_val is not None else None)
-        except Exception:  # noqa: blind-except
+        except Exception:  # noqa: BLE001
             vt = None
 
         if vt is None:

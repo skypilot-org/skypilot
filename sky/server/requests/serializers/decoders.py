@@ -17,7 +17,6 @@ from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
     from sky import backends
-    from sky import clouds
 
 handlers: Dict[str, Any] = {}
 

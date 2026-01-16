@@ -98,7 +98,7 @@ DEFAULT_GCP_IMAGE_GB = 50
 USER_PORTS_FIREWALL_RULE_NAME = 'sky-ports-{}'
 
 # UX message when image not found in GCP.
-# noqa: line-too-long
+# noqa: E501
 _IMAGE_NOT_FOUND_UX_MESSAGE = (
     'Image {image_id!r} not found in GCP.\n'
     '\nTo find GCP images: https://cloud.google.com/compute/docs/images\n'
@@ -194,7 +194,7 @@ class GCP(clouds.Cloud):
         # ~/.config/gcloud/application_default_credentials.json.
         f'{_INDENT_PREFIX}  $ gcloud auth application-default login\n'
         f'{_INDENT_PREFIX}For more info: '
-        'https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # noqa: line-too-long
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # noqa: E501
     )
     _APPLICATION_CREDENTIAL_HINT = (
         'Run the following commands:\n'
@@ -202,7 +202,7 @@ class GCP(clouds.Cloud):
         f'{_INDENT_PREFIX}Or set the environment variable GOOGLE_APPLICATION_CREDENTIALS '
         'to the path of your service account key file.\n'
         f'{_INDENT_PREFIX}For more info: '
-        'https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # noqa: line-too-long
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # noqa: E501
     )
 
     _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
@@ -342,7 +342,7 @@ class GCP(clouds.Cloud):
         # The command for getting the current zone is from:
         # https://cloud.google.com/compute/docs/metadata/querying-metadata
         command_str = (
-            'curl -s http://metadata.google.internal/computeMetadata/v1/instance/zone'  # noqa: line-too-long
+            'curl -s http://metadata.google.internal/computeMetadata/v1/instance/zone'  # noqa: E501
             ' -H "Metadata-Flavor: Google" | awk -F/ \'{print $4}\'')
         return command_str
 
@@ -854,8 +854,8 @@ class GCP(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         try:
             # Check google-api-python-client installation.
-            from google import auth  # noqa: import-outside-toplevel# type: ignore
-            import googleapiclient  # noqa: import-outside-toplevel
+            from google import auth  # noqa: PLC0415  # type: ignore
+            import googleapiclient  # noqa: PLC0415, F401
 
             # Check the installation of google-cloud-sdk.
             _run_output('gcloud --version')
@@ -914,9 +914,9 @@ class GCP(clouds.Cloud):
                 f'{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
-        import google.auth  # noqa: import-outside-toplevel
+        import google.auth  # noqa: PLC0415
 
-        # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # noqa: line-too-long
+        # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # noqa: E501
         credentials, project = google.auth.default()
         crm = gcp.build('cloudresourcemanager',
                         'v1',
@@ -937,7 +937,7 @@ class GCP(clouds.Cloud):
                 'The following permissions are not enabled for the current '
                 f'GCP identity ({identity_str}):\n    '
                 f'{diffs}\n    '
-                'For more details, visit: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html')  # noqa: line-too-long
+                'For more details, visit: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html')  # noqa: E501
 
         # This code must be executed after the iam check above,
         # as the check below for api enablement itself needs:
@@ -1105,7 +1105,7 @@ class GCP(clouds.Cloud):
     def get_project_id(cls, dryrun: bool = False) -> str:
         if dryrun:
             return 'dryrun-project-id'
-        from google import auth  # noqa: import-outside-toplevel# type: ignore
+        from google import auth  # noqa: PLC0415  # type: ignore
         config_project_id = skypilot_config.get_workspace_cloud('gcp').get(
             'project_id', None)
         if config_project_id:
@@ -1153,7 +1153,7 @@ class GCP(clouds.Cloud):
         def _propagate_disk_type(
             lowest: Optional[str] = None,
             highest: Optional[str] = None,
-            all: Optional[str] = None) -> None:  # noqa: builtin-argument-shadowing
+            all: Optional[str] = None) -> None:  # noqa: A002
             if lowest is not None:
                 tier2name[resources_utils.DiskTier.LOW] = lowest
             if highest is not None:
@@ -1350,7 +1350,7 @@ class GCP(clouds.Cloud):
         use_spot = resources.use_spot
         region = resources.region
 
-        from sky.catalog import gcp_catalog  # noqa: import-outside-toplevel
+        from sky.catalog import gcp_catalog  # noqa: PLC0415
 
         quota_code = gcp_catalog.get_quota_code(accelerator, use_spot)
 

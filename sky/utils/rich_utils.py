@@ -226,7 +226,7 @@ def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
 
     See also: :func:`client_status`, :class:`EncodedStatus`.
     """
-    from sky import sky_logging  # noqa: import-outside-toplevel
+    from sky import sky_logging  # noqa: PLC0415
     if (annotations.is_on_api_server and _is_thread_safe() and
             not sky_logging.is_silent()):
         if _get_server_status() is None:
@@ -265,7 +265,7 @@ def safe_logger():
 
         client_status_live = (client_status_obj is not None and
                               hasattr(client_status_obj, '_live') and
-                              client_status_obj._live.is_started)  # noqa: private-member-access
+                              client_status_obj._live.is_started)  # noqa: SLF001
         if client_status_live and client_status_obj is not None:
             client_status_obj.stop()
         yield
@@ -282,7 +282,7 @@ class RichSafeStreamHandler(logging.StreamHandler):
 
 def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     """A wrapper for multi-threaded client-side console.status."""
-    from sky import sky_logging  # noqa: import-outside-toplevel
+    from sky import sky_logging  # noqa: PLC0415
     if (threading.current_thread() is threading.main_thread() and
             not sky_logging.is_silent()):
         if _get_client_status() is None:

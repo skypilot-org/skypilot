@@ -117,7 +117,7 @@ class Precondition(abc.ABC):
                     await api_requests.update_status_msg_async(
                         self.request_id, status_msg)
                     last_status_msg = status_msg
-            except (Exception, SystemExit, KeyboardInterrupt) as e:  # noqa: blind-except
+            except (Exception, SystemExit, KeyboardInterrupt) as e:  # noqa: BLE001
                 await api_requests.set_request_failed_async(self.request_id, e)
                 logger.info(f'Request {self.request_id} failed due to '
                             f'{common_utils.format_exception(e)}')

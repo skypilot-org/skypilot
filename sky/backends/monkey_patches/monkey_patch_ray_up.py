@@ -73,5 +73,5 @@ def monkey_patch_should_create_new_head(
 # Since hash_launch_conf is imported this way, we must patch this imported
 # version.
 sdk.sdk.commands.hash_launch_conf = monkey_patch_hash_launch_conf
-sdk.sdk.commands._should_create_new_head = monkey_patch_should_create_new_head  # noqa: private-member-access
+sdk.sdk.commands._should_create_new_head = monkey_patch_should_create_new_head  # noqa: SLF001
 sdk.create_or_update_cluster({ray_yaml_path}, **{ray_up_kwargs})

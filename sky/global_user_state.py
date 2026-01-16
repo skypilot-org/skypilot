@@ -388,7 +388,7 @@ def _sqlite_supports_returning() -> bool:
     """Check if SQLite (3.35.0+) and SQLAlchemy (2.0+) support RETURNING.
 
     See https://sqlite.org/lang_returning.html and
-    https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#insert-update-delete-returning  # noqa: line-too-long
+    https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#insert-update-delete-returning  # noqa: E501
     """
     sqlalchemy_version_parts = sqlalchemy.__version__.split('.')
     assert len(sqlalchemy_version_parts) >= 1, \
@@ -1056,7 +1056,7 @@ async def cluster_event_retention_daemon():
         except asyncio.CancelledError:
             logger.info('Cluster event retention daemon cancelled')
             break
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             logger.error(f'Error running cluster event retention daemon: {e}')
 
         # Run daemon at most once every hour to avoid too frequent cleanup.
@@ -1451,7 +1451,7 @@ def get_cluster_history_provision_log_path(cluster_name: str) -> Optional[str]:
                     return -1
                 _, end = intervals[-1]
                 return end if end is not None else int(time.time())
-            except Exception:  # noqa: blind-except
+            except Exception:  # noqa: BLE001
                 return -1
 
         latest_row = max(rows,

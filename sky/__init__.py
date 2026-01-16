@@ -32,7 +32,7 @@ def _get_git_commit():
         if changes:
             commit_hash += '-dirty'
         return commit_hash
-    except Exception:  # noqa: blind-except
+    except Exception:  # noqa: BLE001
         return _SKYPILOT_COMMIT_SHA
 
 
@@ -100,7 +100,7 @@ from sky.client.sdk import cost_report
 from sky.client.sdk import down
 from sky.client.sdk import download_logs
 from sky.client.sdk import endpoints
-from sky.client.sdk import exec  # noqa: builtin-import-shadowing
+from sky.client.sdk import exec  # noqa: A004
 from sky.client.sdk import get
 from sky.client.sdk import job_status
 from sky.client.sdk import launch

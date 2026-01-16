@@ -16,7 +16,7 @@ VMS_CSV = 'cudo/vms.csv'
 
 def get_gpu_info(count, model):
     mem = utils.cudo_gpu_mem[model]
-    # noqa: line-too-long
+    # noqa: E501
     # {'Name': 'A4000', 'Manufacturer': 'NVIDIA', 'Count': 1.0, 'MemoryInfo': {'SizeInMiB': 16384}}], 'TotalGpuMemoryInMiB': 16384}"
     info = {
         'Gpus': [{
@@ -29,7 +29,7 @@ def get_gpu_info(count, model):
         }],
         'TotalGpuMemoryInMiB': 1024 * mem * count
     }
-    # noqa: bad-quotes-inline-string
+    # noqa: Q000
     return '"' + json.dumps(info).replace('"', "'") + '"'
 
 
@@ -81,7 +81,7 @@ def update_prices():
     path = VMS_CSV
     with open(path, 'w', encoding='utf-8') as file:
         file.write(
-            # noqa: line-too-long
+            # noqa: E501
             'InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,Price,Region,GpuInfo,SpotPrice\n'
         )
         for row in rows:

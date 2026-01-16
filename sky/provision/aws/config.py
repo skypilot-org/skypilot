@@ -644,7 +644,7 @@ def _configure_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
     if enable_efa:
         # EFA requires that outbound rules permit the same security group to
         # communicate with each other
-        # Refer to https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-start-nccl.html#nccl-start-base-setup # noqa: line-too-long
+        # Refer to https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-start-nccl.html#nccl-start-base-setup # noqa: E501
         outbound_rules.append({
             'FromPort': -1,
             'ToPort': -1,

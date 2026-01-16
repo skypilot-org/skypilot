@@ -318,7 +318,7 @@ class RunPod(clouds.Cloud):
             'Credentials can be set up by running: \n'
             '        $ pip install runpod \n'
             '        $ runpod config\n'
-            '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'  # noqa: line-too-long
+            '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'  # noqa: E501
         )
 
         valid, error = cls._check_runpod_credentials()
@@ -336,13 +336,13 @@ class RunPod(clouds.Cloud):
     def _validate_api_key(cls) -> Tuple[bool, Optional[str]]:
         """Validate RunPod API key by making an actual API call."""
         # Import here to avoid circular imports and ensure runpod is configured
-        from sky.provision.runpod import utils as runpod_utils  # noqa: import-outside-toplevel
+        from sky.provision.runpod import utils as runpod_utils  # noqa: PLC0415
         try:
             # Try to list instances to validate the API key works
             runpod_utils.list_instances()
             return True, None
-        except Exception as e:  # noqa: blind-except
-            from sky.adaptors import runpod  # noqa: import-outside-toplevel
+        except Exception as e:  # noqa: BLE001
+            from sky.adaptors import runpod  # noqa: PLC0415
             error_msg = common_utils.format_exception(e, use_bracket=True)
             if isinstance(e, runpod.runpod.error.QueryError):
                 error_msg_lower = str(e).lower()
@@ -367,9 +367,9 @@ class RunPod(clouds.Cloud):
         # TODO(andy): remove this fallback after dropping Python 3.10 support.
         try:
             try:
-                import tomllib as toml  # noqa: import-outside-toplevel
+                import tomllib as toml  # noqa: PLC0415
             except ModuleNotFoundError:  # py<3.11
-                import tomli as toml  # noqa: import-outside-toplevel
+                import tomli as toml  # noqa: PLC0415
         except ModuleNotFoundError:
             # Should never happen. We already installed proper dependencies for
             # different Python versions in setup_files/dependencies.py.

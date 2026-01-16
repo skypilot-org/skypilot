@@ -351,7 +351,7 @@ async def _describe_task_transition_failure(session: sql_async.AsyncSession,
             status = row['status']
             end_at = row['end_at']
             details += f' Status: {status}, End time: {end_at}.'
-    except Exception as exc:  # noqa: blind-except
+    except Exception as exc:  # noqa: BLE001
         details += f' Error fetching task details: {exc}'
     return details
 
@@ -1305,7 +1305,7 @@ def get_managed_job_tasks(job_id: int) -> List[Dict[str, Any]]:
         rows = session.execute(query).fetchall()
     jobs = []
     for row in rows:
-        job_dict = _get_jobs_dict(row._mapping)  # noqa: private-member-access
+        job_dict = _get_jobs_dict(row._mapping)  # noqa: SLF001
         job_dict['status'] = ManagedJobStatus(job_dict['status'])
         job_dict['schedule_state'] = ManagedJobScheduleState(
             job_dict['schedule_state'])
@@ -1582,7 +1582,7 @@ def get_managed_jobs_with_filters(
         rows = session.execute(query).fetchall()
     jobs = []
     for row in rows:
-        job_dict = _get_jobs_dict(row._mapping)  # noqa: private-member-access
+        job_dict = _get_jobs_dict(row._mapping)  # noqa: SLF001
         if job_dict.get('status') is not None:
             job_dict['status'] = ManagedJobStatus(job_dict['status'])
         if job_dict.get('schedule_state') is not None:
@@ -2922,7 +2922,7 @@ async def job_event_retention_daemon():
         except asyncio.CancelledError:
             logger.info('Job event retention daemon cancelled')
             break
-        except Exception as e:  # noqa: blind-except
+        except Exception as e:  # noqa: BLE001
             logger.error(f'Error running job event retention daemon: {e}')
 
         await asyncio.sleep(JOB_EVENT_DAEMON_INTERVAL_SECONDS)

@@ -395,7 +395,7 @@ def get_using_remote_api_server() -> bool:
         return value
     # This gets the right status for the local client.
     # TODO(zhwu): This is to prevent circular import. We should refactor this.
-    from sky.server import common as server_common  # noqa: import-outside-toplevel
+    from sky.server import common as server_common  # noqa: PLC0415
     return not server_common.is_api_server_local()
 
 
@@ -554,7 +554,7 @@ def _redact_secrets_values(argv: List[str]) -> List[str]:
                 i += 1
 
         return result
-    except Exception:  # noqa: blind-except
+    except Exception:  # noqa: BLE001
         # If anything goes wrong with redaction, return original argv
         # This ensures the command can still execute
         return argv or []
@@ -832,7 +832,7 @@ def get_cleaned_username(username: str = '') -> str:
      4. Removing any hyphens at the end of the username
      5. Truncate the username to 63 characters, as requested by GCP labels
 
-    Dots are removed due to: https://cloud.google.com/compute/docs/labeling-resources#requirements # noqa: line-too-long
+    Dots are removed due to: https://cloud.google.com/compute/docs/labeling-resources#requirements # noqa: E501
 
     e.g. 1SkY-PiLot2- becomes sky-pilot2
 
@@ -1134,7 +1134,7 @@ def release_memory():
             libc = ctypes.CDLL('libc.so.6')
             return libc.malloc_trim(0)
         return 0
-    except Exception as e:  # noqa: blind-except
+    except Exception as e:  # noqa: BLE001
         logger.error(f'Failed to release memory: '
                      f'{format_exception(e)}')
         return 0

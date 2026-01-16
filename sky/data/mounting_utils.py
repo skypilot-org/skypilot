@@ -53,7 +53,7 @@ def get_rclone_install_cmd() -> str:
     """ RClone installation for both apt-get and rpm.
     This would be common command.
     """
-    # noqa: line-too-long
+    # noqa: E501
     install_cmd = (
         'ARCH=$(uname -m) && '
         'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
@@ -521,7 +521,7 @@ def get_oci_mount_cmd(mount_path: str, store_name: str, region: str,
                       namespace: str, compartment: str, config_file: str,
                       config_profile: str) -> str:
     """ OCI specific RClone mount command for oci object storage. """
-    # noqa: line-too-long
+    # noqa: E501
     mount_cmd = (
         f'sudo chown -R `whoami` {mount_path}'
         f' && rclone config create oos_{store_name} oracleobjectstorage'

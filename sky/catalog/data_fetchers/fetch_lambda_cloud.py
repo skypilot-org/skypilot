@@ -109,7 +109,7 @@ def create_catalog(api_key: str, output_path: str) -> None:
                     }],
                     'TotalGpuMemoryInMiB': GPU_TO_MEMORY[gpu]
                 }
-                gpuinfo = json.dumps(gpuinfo_dict).replace('"', "'")  # noqa: bad-quotes-inline-string
+                gpuinfo = json.dumps(gpuinfo_dict).replace('"', "'")  # noqa: Q000
             for r in REGIONS:
                 writer.writerow(
                     [vm, gpu, gpu_cnt, vcpus, mem, price, r, gpuinfo, ''])
