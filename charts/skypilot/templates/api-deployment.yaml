@@ -258,9 +258,21 @@ spec:
           periodSeconds: 5
           initialDelaySeconds: 5
         volumeMounts:
+        {{- if and .Values.storage.enabled (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
+        # For RollingUpdate with storage enabled, use emptyDir for ~/.sky to avoid
+        # running SQLite on NFS. Only persist the clients directory for file mounts.
+        # An ephemeral volums is still required since we have to share ~/.sky between
+        # containers.
+        - name: sky-ephemeral
+          mountPath: /root/.sky
+        - name: state-volume
+          mountPath: /root/.sky/api_server/clients
+          subPath: api_server/clients
+        {{- else }}
         - name: state-volume
           mountPath: /root/.sky
           subPath: .sky
+        {{- end }}
         {{- if .Values.storage.enabled }}
         - name: state-volume
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
@@ -384,9 +396,14 @@ spec:
             sleep 60;
           done
         volumeMounts:
+        {{- if and .Values.storage.enabled (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
+        - name: sky-ephemeral
+          mountPath: /root/.sky
+        {{- else }}
         - name: state-volume
           mountPath: /root/.sky
           subPath: .sky
+        {{- end }}
       {{- end }}
       {{- with .Values.apiService.sidecarContainers }}
       {{- toYaml . | nindent 6 }}
@@ -670,6 +687,13 @@ spec:
       - name: state-volume
         persistentVolumeClaim:
           claimName: {{ $fullName }}-state
+      {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
+      # When using RollingUpdate with storage enabled, use a separate emptyDir
+      # for ~/.sky to avoid running SQLite on NFS. Only specific subdirectories
+      # like api_server/clients are persisted to the PVC.
+      - name: sky-ephemeral
+        emptyDir: {}
+      {{- end }}
       {{- else }}
       - name: state-volume
         emptyDir: {}
