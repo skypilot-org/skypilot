@@ -355,6 +355,7 @@ async def scheduled_launch(
     # a different cluster in parallel. We handle scheduler state at the group
     # level in _run_job_group(), so bypass per-task scheduling here.
     # Check if job is a JobGroup by examining the DAG YAML content.
+    # TODO(zhwu): make JobGroup scheduler aware.
     dag_content = file_content_utils.get_job_dag_content(job_id)
     if dag_content is not None and dag_utils.is_job_group_yaml_str(dag_content):
         yield
