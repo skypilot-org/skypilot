@@ -11,6 +11,9 @@ import { TourProvider } from '@/hooks/useTour';
 import { PluginProvider } from '@/plugins/PluginProvider';
 import { VersionProvider } from '@/components/elements/version-display';
 
+// Import plugin registry early so it's available for plugins
+import '@/data/plugin-registry';
+
 const Layout = dynamic(
   () => import('@/components/elements/layout').then((mod) => mod.Layout),
   { ssr: false }
