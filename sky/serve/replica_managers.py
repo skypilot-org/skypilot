@@ -1228,7 +1228,12 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # Delete old version metadata.
                 serve_state.delete_version(self._service_name, version)
                 # Delete storage buckets of older versions.
-                service.cleanup_storage(yaml_content)
+                if not self._is_pool:
+                    # For pools, we don't clean up the storage, because the
+                    # storage is shared between all replicas. We clean up the
+                    # storage in sky/serve/service.py when the pool is
+                    # terminated so storage will not be leaked.
+                    service.cleanup_storage(yaml_content)
             # newest version will be cleaned in serve down
             self.least_recent_version = current_least_recent_version
 
