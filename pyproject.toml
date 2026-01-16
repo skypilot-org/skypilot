@@ -98,6 +98,8 @@ ignore = [
 # Examples can have print statements
 "examples/**" = ["T20"]
 "llm/**" = ["T20"]
+# Template file with placeholders that get string-formatted
+"sky/backends/monkey_patches/*.py" = ["F821"]
 
 [tool.ruff.lint.isort]
 # Match isort's Google profile behavior
