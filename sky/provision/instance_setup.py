@@ -21,13 +21,13 @@ from sky.usage import constants as usage_constants
 from sky.usage import usage_lib
 from sky.utils import accelerator_registry
 from sky.utils import command_runner
-from sky.utils.command_runner import CommandStage
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils.command_runner import CommandStage
 
 logger = sky_logging.init_logger(__name__)
 
