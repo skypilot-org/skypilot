@@ -102,6 +102,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         last_event: cluster.last_event,
         to_down: cluster.to_down,
         cluster_name_on_cloud: cluster.cluster_name_on_cloud,
+        labels: cluster.labels || {},
         jobs: [],
         command: cluster.last_creation_command || cluster.last_use,
         task_yaml: cluster.last_creation_yaml || '{}',

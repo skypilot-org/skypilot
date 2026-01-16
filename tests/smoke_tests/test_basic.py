@@ -536,7 +536,7 @@ def test_aws_manual_restart_recovery():
             # instance would get a new IP address.
             # We should see a warning message on how to recover
             # from this state.
-            f'sky status -r {name} | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."',
+            f's=$(sky status -r {name}) && echo "$s" && echo "$s" | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."',
             # Recover the cluster.
             f'sky start -y {name}',
             # Wait for the cluster to be up.
@@ -701,6 +701,84 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
             assert cluster_exist, status_response
         finally:
             sky.get(sky.down(name))
+
+
+def test_cluster_labels_in_status(generic_cloud: str):
+    """Test that labels in cluster YAML are stored and returned in status."""
+    from sky.client import sdk
+    from sky.utils.common import StatusRefreshMode
+
+    name = smoke_tests_utils.get_cluster_name()
+    expected_labels = {'test-label': 'test-value', 'project': 'smoke-test'}
+
+    def check_labels_in_status():
+        """Check that labels are present in the cluster status."""
+        # Get the cluster status using SDK
+        status_request_id = sdk.status([name],
+                                       refresh=StatusRefreshMode.NONE,
+                                       all_users=True)
+        cluster_records = sdk.stream_and_get(status_request_id)
+
+        # Find our cluster in the status
+        cluster_record = None
+        for cluster in cluster_records:
+            if cluster.get('name') == name:
+                cluster_record = cluster
+                break
+
+        if cluster_record is None:
+            yield f'Cluster {name} not found in status'
+            return
+
+        if 'labels' not in cluster_record:
+            yield 'labels field missing from cluster record'
+            return
+
+        if cluster_record['labels'] is None:
+            yield 'labels field is None'
+            return
+
+        if cluster_record['labels'] != expected_labels:
+            yield (f"Expected labels {expected_labels}, "
+                   f"got {cluster_record['labels']}")
+            return
+
+        # Success - labels are correct
+        return
+
+    # Create YAML with labels
+    yaml_content = textwrap.dedent("""\
+        resources:
+          cpus: 2+
+          labels:
+            test-label: test-value
+            project: smoke-test
+
+        run: |
+          echo "Hello from labeled cluster"
+          sleep 5
+        """)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'cluster_labels_in_status',
+            [
+                f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path}',
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=name,
+                    cluster_status=[sky.ClusterStatus.UP],
+                    timeout=600),
+                lambda: check_labels_in_status(),
+            ],
+            teardown=f'sky down -y {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 # The sky launch CLI has some additional checks to make sure the cluster is up/
@@ -1657,9 +1735,9 @@ def test_loopback_access_with_basic_auth(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'loopback_access',
         [
-            # Without consolidation mode, loopback access should not be allowed.
+            # Without consolidation mode, loopback access should be allowed.
             f'export {constants.ENV_VAR_ENABLE_BASIC_AUTH}=true && {smoke_tests_utils.SKY_API_RESTART}',
-            f's=$(SKYPILOT_DEBUG=0 sky status 2>&1 || true) && echo "$s" | grep "401 Client Error: Unauthorized for url: http://127.0.0.1:46580"',
+            f's=$(SKYPILOT_DEBUG=0 sky status) && echo "$s" | grep "Clusters"',
             # With consolidation mode, loopback access should be allowed.
             f'export {constants.ENV_VAR_ENABLE_BASIC_AUTH}=true && export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={server_config_path} && {smoke_tests_utils.SKY_API_RESTART}',
             f's=$(SKYPILOT_DEBUG=0 sky status) && echo "$s" | grep "Clusters"',

@@ -32,7 +32,6 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import context_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
 from sky.utils.plugin_extensions import ExternalClusterFailure
@@ -103,6 +102,7 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('specs', sqlalchemy.Text),
     sqlalchemy.Column('local_log_file', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('metadata', sqlalchemy.Text, server_default='{}'),
+    sqlalchemy.Column('links', sqlalchemy.JSON, server_default=None),
     sqlalchemy.Column('logs_cleaned_at', sqlalchemy.Float, server_default=None),
     sqlalchemy.Column('full_resources', sqlalchemy.JSON, server_default=None),
 )
@@ -276,7 +276,7 @@ def _init_db_async(func):
             # this may happen multiple times since there is no locking
             # here but thats fine, this is just a short circuit for the
             # common case.
-            await context_utils.to_thread(initialize_and_get_db_async)
+            await asyncio.to_thread(initialize_and_get_db_async)
 
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=5)
         last_exc = None
@@ -381,6 +381,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'specs': r.get('specs'),
         'local_log_file': r.get('local_log_file'),
         'metadata': r.get('metadata'),
+        'links': r.get('links'),  # SQLAlchemy JSON type, already parsed
         # columns from job_info table (some may be None for legacy jobs)
         '_job_info_job_id': r.get(job_info_table.c.spot_job_id
                                  ),  # ambiguous, use table.column
@@ -1720,6 +1721,29 @@ def set_current_cluster_name(job_id: int, current_cluster_name: str) -> None:
         session.commit()
 
 
+@_init_db
+def update_job_full_resources(job_id: int,
+                              full_resources_json: Dict[str, Any]) -> None:
+    """Update the full_resources column for a job.
+
+    This is called after scheduling to set the specific resource that was
+    selected from an any_of or ordered list. The update happens within the
+    filelock in get_next_cluster_name to ensure atomicity.
+
+    Args:
+        job_id: The spot_job_id to update
+        full_resources_json: The resolved resource configuration (single
+            resource, not any_of/ordered)
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.execute(
+            sqlalchemy.update(spot_table).where(
+                spot_table.c.spot_job_id == job_id).values(
+                    {spot_table.c.full_resources: full_resources_json}))
+        session.commit()
+
+
 @_init_db_async
 async def set_job_id_on_pool_cluster_async(job_id: int,
                                            job_id_on_pool_cluster: int) -> None:
@@ -1896,6 +1920,20 @@ def get_nonterminal_job_ids_by_pool(pool: str,
         return job_ids
 
 
+def _is_any_of_or_ordered(resource_config: Dict[str, Any]) -> bool:
+    """Check if resource config is heterogeneous (any_of or ordered).
+
+    Args:
+        resource_config: Resource configuration dictionary
+
+    Returns:
+        True if the config contains 'any_of' or 'ordered' keys, indicating
+        heterogeneous resources that haven't been resolved to a specific
+        resource yet.
+    """
+    return 'any_of' in resource_config or 'ordered' in resource_config
+
+
 @_init_db
 def get_pool_worker_used_resources(
         job_ids: Set[int]) -> Optional['resources_lib.Resources']:
@@ -1937,6 +1975,12 @@ def get_pool_worker_used_resources(
     total_resources = None
     # full_resources is now stored as JSON dict from to_yaml_config()
     for resource_config in resource_configs:
+        # Check if this is an unresolved heterogeneous config (any_of/ordered)
+        if _is_any_of_or_ordered(resource_config):
+            # Can't determine usage for heterogeneous unresolved configs.
+            # Return None to fall back to non-resource-aware scheduling.
+            return None
+
         resources_set = resources_lib.Resources.from_yaml_config(
             resource_config)
         if len(resources_set) == 0:
@@ -2342,6 +2386,53 @@ async def set_failed_async(
     if callback_func and updated:
         await callback_func('FAILED')
     logger.info(failure_reason)
+
+
+@_init_db_async
+async def update_links_async(job_id: int, task_id: int,
+                             links: Dict[str, str]) -> None:
+    """Update the links for a managed job task.
+
+    Links are stored as JSON in the database. SQLAlchemy handles
+    serialization/deserialization automatically.
+
+    Uses a transaction to ensure atomicity. For PostgreSQL, we use row-level
+    locking (SELECT FOR UPDATE). For SQLite, row-level locking is not
+    supported, so we rely on SQLite's database-level write locking which
+    provides serializable isolation for write transactions.
+    """
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    logger.info(f'Updating external links with: {links}')
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        async with session.begin():
+            # Build the select query
+            select_query = sqlalchemy.select(spot_table.c.links).where(
+                sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                spot_table.c.task_id == task_id))
+
+            # Use row-level locking for PostgreSQL; SQLite doesn't support
+            # SELECT FOR UPDATE but provides database-level write locking
+            if (_SQLALCHEMY_ENGINE_ASYNC.dialect.name ==
+                    db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+                select_query = select_query.with_for_update()
+
+            result = await session.execute(select_query)
+            existing_links_row = result.fetchone()
+            existing_links = {}
+            if existing_links_row and existing_links_row[0]:
+                existing_links = existing_links_row[0]
+
+            # Merge new links into existing
+            existing_links.update(links)
+
+            # Update the database (SQLAlchemy JSON type handles serialization)
+            await session.execute(
+                sqlalchemy.update(spot_table).where(
+                    sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                    spot_table.c.task_id == task_id)).values({
+                                        spot_table.c.links: existing_links,
+                                    }))
+            # Transaction commits automatically when exiting the context
 
 
 @_init_db_async

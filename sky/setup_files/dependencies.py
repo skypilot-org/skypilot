@@ -36,8 +36,10 @@ install_requires = [
     'python-dotenv',
     'rich',
     'tabulate',
-    # Light weight requirement, can be replaced with "typing" once
-    # we deprecate Python 3.7 (this will take a while).
+    # Light weight requirement, can be removed after we deprecate Python 3.9.
+    # ParamSpec is available in typing module starting from Python 3.10, so
+    # we can replace "from typing_extensions import ParamSpec" with
+    # "from typing import ParamSpec" once we require Python >= 3.10.
     'typing_extensions',
     # filelock 3.15.0 or higher is required for async file locking.
     'filelock >= 3.15.0',
@@ -55,7 +57,7 @@ install_requires = [
     # uvicorn, so we need to pin uvicorn version to avoid potential break
     # changes.
     # Notes for current version check:
-    # - uvicorn 0.33.0 is the latest version that supports Python 3.8
+    # - uvicorn 0.33.0 is the latest version that supports Python 3.9
     # - uvicorn 0.36.0 removes setup_event_loop thus breaks SkyPilot's custom
     #   behavior.
     'uvicorn[standard] >=0.33.0, <0.36.0',
@@ -70,7 +72,7 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
-    'sqlalchemy',
+    'sqlalchemy>=2.0.0',
     'psycopg2-binary',
     'aiosqlite',
     'asyncpg',
@@ -86,7 +88,7 @@ install_requires = [
     'gitpython',
     'paramiko',
     'types-paramiko',
-    'alembic',
+    'alembic>=1.8.0',
     'aiohttp',
     'anyio',
 ]
@@ -146,7 +148,8 @@ aws_dependencies = [
     'boto3>=1.26.1',
     # NOTE: colorama is a dependency of awscli. We pin it to match the
     # version constraint in awscli (<0.4.7) to prevent potential conflicts
-    # with other packages like ray, which might otherwise install a newer version.
+    # with other packages like ray, which might otherwise install a newer
+    # version.
     'colorama<0.4.7',
 ]
 
@@ -245,7 +248,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi==0.4.0'],
     'shadeform': [],  # No dependencies needed for shadeform
-    'slurm': [],  # No dependencies needed for slurm
+    'slurm': ['python-hostlist'],
 }
 
 # Calculate which clouds should be included in the [all] installation.

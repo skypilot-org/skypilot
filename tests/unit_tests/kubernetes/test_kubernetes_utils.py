@@ -1135,6 +1135,37 @@ def test_parse_cpu_or_gpu_resource_to_float():
     assert utils.parse_cpu_or_gpu_resource_to_float('') == 0.0  # Empty string
 
 
+def test_parse_memory_resource_with_millibytes():
+    """Test parse_memory_resource function with lowercase 'm' suffix.
+    
+    This test verifies that parse_memory_resource correctly handles memory
+    values with lowercase 'm' suffix like '100m' = 0.1 bytes.
+    Note: For memory, 'm' means milli (0.001 bytes), so 100m = 100 * 0.001 = 0.1 bytes.
+    """
+    # Test with lowercase 'm' suffix (millibytes)
+    # 100m = 100 * 0.001 bytes = 0.1 bytes
+    assert utils.parse_memory_resource('100m', unit='B') == 0.1
+
+    # 1000m = 1000 * 0.001 bytes = 1.0 bytes
+    assert utils.parse_memory_resource('1000m', unit='B') == 1.0
+
+    # 500m = 500 * 0.001 bytes = 0.5 bytes
+    assert utils.parse_memory_resource('500m', unit='B') == 0.5
+
+    # Test conversion to GB: 100m = 0.1 bytes = 0.1 / (2^30) GB
+    result = utils.parse_memory_resource('100m', unit='G')
+    expected = 0.1 / (2**30)
+    assert abs(result - expected) < 1e-15
+
+    # Test with standard memory units (should work)
+    assert utils.parse_memory_resource('1Gi', unit='G') == 1.0
+    assert utils.parse_memory_resource('512Mi', unit='G') == 0.5
+    assert utils.parse_memory_resource('1024Mi', unit='G') == 1.0
+
+    # Test with bytes (no unit)
+    assert utils.parse_memory_resource('1024', unit='K') == 1.0
+
+
 def test_coreweave_autoscaler():
     """Test that CoreweaveAutoscaler is properly configured."""
     from sky.provision.kubernetes.utils import AUTOSCALER_TYPE_TO_AUTOSCALER

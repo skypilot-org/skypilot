@@ -97,7 +97,7 @@ jobs:
       repository_type: 'pypi'
     secrets: inherit
 
-  trigger-helm-release:
+  trigger-docker-and-helm-release:
     needs: [publish-and-validate-pypi]
     uses: ./.github/workflows/helm-docker-release.yaml
     with:
