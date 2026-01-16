@@ -7,18 +7,19 @@ import pytest
 
 # Import all fixtures from aws_fixtures module to make them available
 # to tests in this directory and subdirectories.
-from tests.unit_tests.aws.aws_fixtures import aws_test_environment
-from tests.unit_tests.aws.aws_fixtures import create_ray_cluster
-from tests.unit_tests.aws.aws_fixtures import create_test_instance
-from tests.unit_tests.aws.aws_fixtures import get_instances_by_cluster
-from tests.unit_tests.aws.aws_fixtures import mock_aws_credentials
-from tests.unit_tests.aws.aws_fixtures import mock_ec2
-from tests.unit_tests.aws.aws_fixtures import mock_ec2_multi_region
-from tests.unit_tests.aws.aws_fixtures import mock_ec2_with_instances
-from tests.unit_tests.aws.aws_fixtures import mock_iam
-from tests.unit_tests.aws.aws_fixtures import mock_s3
-from tests.unit_tests.aws.aws_fixtures import mock_s3_with_data
-from tests.unit_tests.aws.aws_fixtures import wait_for_instance_state
+from tests.integration_tests.aws.aws_fixtures import aws_test_environment
+from tests.integration_tests.aws.aws_fixtures import create_ray_cluster
+from tests.integration_tests.aws.aws_fixtures import create_test_instance
+from tests.integration_tests.aws.aws_fixtures import get_instances_by_cluster
+from tests.integration_tests.aws.aws_fixtures import GPU_INSTANCE_TYPES
+from tests.integration_tests.aws.aws_fixtures import mock_aws_credentials
+from tests.integration_tests.aws.aws_fixtures import mock_ec2
+from tests.integration_tests.aws.aws_fixtures import mock_ec2_multi_region
+from tests.integration_tests.aws.aws_fixtures import mock_ec2_with_instances
+from tests.integration_tests.aws.aws_fixtures import mock_iam
+from tests.integration_tests.aws.aws_fixtures import mock_s3
+from tests.integration_tests.aws.aws_fixtures import mock_s3_with_data
+from tests.integration_tests.aws.aws_fixtures import wait_for_instance_state
 
 # Re-export fixtures so pytest can discover them
 __all__ = [
