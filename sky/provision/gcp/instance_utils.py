@@ -1,5 +1,4 @@
 """Utilities for GCP instances."""
-# ruff: noqa: E501
 import copy
 import enum
 import functools
@@ -456,7 +455,7 @@ class GCPComputeInstance(GCPInstance):
                 # NOTE: Error example:
                 # {
                 #   'code': 'VM_MIN_COUNT_NOT_REACHED',
-                #   'message': 'Requested minimum count of 4 VMs could not be created.'
+                #   'message': 'Requested minimum count of 4 VMs could not be created.'  # noqa: E501
                 # }
                 errors = result.get('error', {}).get('errors')
                 if errors is not None:
@@ -853,14 +852,14 @@ class GCPComputeInstance(GCPInstance):
         def _handle_http_error(e):
             # NOTE: Error example:
             # {
-            #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.",
+            #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.",  # noqa: E501
             #   'domain': 'usageLimits',
             #   'reason': 'quotaExceeded'
             # }
             error_details = getattr(e, 'error_details', [])
             errors = []
             for detail in error_details:
-                # To be consistent with error messages returned by operation wait.
+                # To be consistent with error messages returned by operation wait.  # noqa: E501
                 errors.append({
                     'code': detail.get('reason'),
                     'domain': detail.get('domain'),
@@ -1514,7 +1513,7 @@ class GCPTPUVMInstance(GCPInstance):
             except gcp.http_error_exception() as e:
                 # NOTE: Error example:
                 # {
-                #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.",
+                #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.",  # noqa: E501
                 #   'domain': 'usageLimits',
                 #   'reason': 'quotaExceeded'
                 # }

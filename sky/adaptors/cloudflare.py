@@ -1,5 +1,4 @@
 """Cloudflare cloud adaptors"""
-# ruff: noqa: E501
 
 import contextlib
 import os
@@ -176,7 +175,7 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     hints = None
     accountid_path = os.path.expanduser(ACCOUNT_ID_PATH)
     if not r2_profile_in_aws_cred():
-        hints = f'[{R2_PROFILE_NAME}] profile is not set in {R2_CREDENTIALS_PATH}.'
+        hints = f'[{R2_PROFILE_NAME}] profile is not set in {R2_CREDENTIALS_PATH}.'  # noqa: E501
     if not os.path.exists(accountid_path):
         if hints:
             hints += ' Additionally, '
@@ -187,10 +186,10 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
         hints += ' Run the following commands:'
         if not r2_profile_in_aws_cred():
             hints += f'\n{_INDENT_PREFIX}  $ pip install boto3'
-            hints += f'\n{_INDENT_PREFIX}  $ AWS_SHARED_CREDENTIALS_FILE={R2_CREDENTIALS_PATH} aws configure --profile r2'
+            hints += f'\n{_INDENT_PREFIX}  $ AWS_SHARED_CREDENTIALS_FILE={R2_CREDENTIALS_PATH} aws configure --profile r2'  # noqa: E501
         if not os.path.exists(accountid_path):
             hints += f'\n{_INDENT_PREFIX}  $ mkdir -p ~/.cloudflare'
-            hints += f'\n{_INDENT_PREFIX}  $ echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid'
+            hints += f'\n{_INDENT_PREFIX}  $ echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid'  # noqa: E501
         hints += f'\n{_INDENT_PREFIX}For more info: '
         hints += 'https://docs.skypilot.co/en/latest/getting-started/installation.html#cloudflare-r2'
 

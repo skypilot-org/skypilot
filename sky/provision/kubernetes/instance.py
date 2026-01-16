@@ -1,5 +1,4 @@
 """Kubernetes instance provisioning."""
-# ruff: noqa: E501
 import copy
 import datetime
 import json
@@ -1294,7 +1293,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         if to_create_deployment:
             volume.create_persistent_volume_claim(namespace, context, pvc_spec)
 
-            # It's safe to directly modify the template spec in the deployment spec
+            # It's safe to directly modify the template spec in the deployment spec  # noqa: E501
             # because controller pod is singleton, i in [0].
             template_pod_spec = deployment_spec['spec']['template']
             # Add the deployment name as a label to the pod spec
@@ -1325,14 +1324,14 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         is_provisioned_cluster_ha = is_high_availability_cluster_by_kubectl(
             cluster_name_on_cloud, context, namespace)
         if is_provisioned_cluster_ha != to_create_deployment:
-            ha_str = lambda x: 'high availability' if x else 'non-high availability'
+            ha_str = lambda x: 'high availability' if x else 'non-high availability'  # noqa: E501
 
             message = (
                 f'The cluster "{cluster_name_on_cloud}" is configured to be '
-                f'{ha_str(to_create_deployment)} but the cluster has already been '
+                f'{ha_str(to_create_deployment)} but the cluster has already been '  # noqa: E501
                 f'provisioned as {ha_str(is_provisioned_cluster_ha)}. '
                 'If you want to make the provisioned cluster '
-                f'{ha_str(to_create_deployment)}, please first down the cluster '
+                f'{ha_str(to_create_deployment)}, please first down the cluster '  # noqa: E501
                 'and then up the cluster again.')
             raise exceptions.InconsistentHighAvailabilityError(message)
 
@@ -1354,7 +1353,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             for pod in _wait_for_deployment_pod(context, namespace, deployment)
         ]
     else:
-        # If not creating deployments, 'created_resources' already holds Pod objects
+        # If not creating deployments, 'created_resources' already holds Pod objects  # noqa: E501
         pods = created_resources
 
     created_pods = {}

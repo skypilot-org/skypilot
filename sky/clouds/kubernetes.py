@@ -1031,7 +1031,7 @@ class Kubernetes(clouds.Cloud):
                     check=True)
             if os.path.exists(kubeconfig_file):
                 # convert auth plugin paths (e.g.: gke-gcloud-auth-plugin)
-                kubeconfig_file = kubernetes_utils.format_kubeconfig_exec_auth_with_cache(kubeconfig_file)
+                kubeconfig_file = kubernetes_utils.format_kubeconfig_exec_auth_with_cache(kubeconfig_file)  # noqa: E501
 
             # Upload kubeconfig to the default path to avoid having to set
             # KUBECONFIG in the environment.
@@ -1096,7 +1096,7 @@ class Kubernetes(clouds.Cloud):
 
         Follows Kubernetes DNS-1123 subdomain rules:
         - must be <= 253 characters
-        - must match: '[a-z0-9]([-a-z0-9]*[a-z0-9])?(.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*'
+        - must match: '[a-z0-9]([-a-z0-9]*[a-z0-9])?(.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*'  # noqa: E501
         """
         # Max length per DNS-1123 subdomain
         if len(volume_name) > cls._MAX_VOLUME_NAME_LEN_LIMIT:

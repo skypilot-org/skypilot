@@ -1,5 +1,4 @@
 """Paperspace API client wrapper for SkyPilot."""
-# ruff: noqa: E501
 
 import json
 import os
@@ -130,13 +129,13 @@ class PaperspaceCloudClient:
             'apt-get update \n'
             'apt-get install -y ca-certificates curl \n'
             'install -m 0755 -d /etc/apt/keyrings \n'
-            'curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \n'
+            'curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \n'  # noqa: E501
             'chmod a+r /etc/apt/keyrings/docker.asc \n'
-            'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \\\n'
+            'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \\\n'  # noqa: E501
             '$(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \\\n'
             'tee /etc/apt/sources.list.d/docker.list > /dev/null \n'
             'apt-get update \n'
-            'apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \n'
+            'apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \n'  # noqa: E501
             'fi \n'
             # TODO(tian): Maybe remove this as well since we are now adding
             # users to docker group in the DockerInitializer. Need to test.

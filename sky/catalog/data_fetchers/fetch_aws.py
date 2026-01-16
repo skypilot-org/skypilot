@@ -369,7 +369,7 @@ def get_all_regions_instance_types_df(regions: Set[str]) -> 'pd.DataFrame':
 
 # Fetch Images
 # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch
-# Current AMIs (we have to use different PyTorch versions for different OS as Ubuntu 18.04
+# Current AMIs (we have to use different PyTorch versions for different OS as Ubuntu 18.04  # noqa: E501
 # does not have the latest PyTorch version):
 # GPU:
 # Deep Learning AMI GPU PyTorch 2.1.0 (Ubuntu 20.04) 20231103
@@ -424,13 +424,13 @@ def _fetch_image_id_from_ssm_param(
         ubuntu_version: str = '22.04') -> Optional[str]:
     try:
         image = subprocess.check_output(f"""\
-            aws ssm get-parameter --region {region} --name "{ssm_prefix}/ubuntu-{ubuntu_version}/latest/image_id" \\
+            aws ssm get-parameter --region {region} --name "{ssm_prefix}/ubuntu-{ubuntu_version}/latest/image_id" \\  # noqa: E501
                 --query 'Parameter.Value' --output text
             """,
                                         shell=True)
     except subprocess.CalledProcessError as e:
         print(
-            f'Failed to fetch image ID from SSM parameter for {region}, {ssm_prefix}, {ubuntu_version}'
+            f'Failed to fetch image ID from SSM parameter for {region}, {ssm_prefix}, {ubuntu_version}'  # noqa: E501
         )
         print(f'{type(e)}: {e}')
         return None

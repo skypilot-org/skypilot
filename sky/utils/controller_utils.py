@@ -1,5 +1,4 @@
 """Util constants/functions for SkyPilot Controllers."""
-# ruff: noqa: E501
 import copy
 import dataclasses
 import enum
@@ -346,13 +345,13 @@ def _get_cloud_dependencies_installation_commands(
                 # TODO (kyuds): how to implement conservative installation?
                 commands.append(
                     '(command -v gke-gcloud-auth-plugin &>/dev/null || '
-                    '(gcloud components install gke-gcloud-auth-plugin --quiet &>/dev/null))')
+                    '(gcloud components install gke-gcloud-auth-plugin --quiet &>/dev/null))')  # noqa: E501
         elif isinstance(cloud, clouds.Nebius):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
                 f'echo -en "\\r{step_prefix}Nebius{empty_str}" && '
-                'curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh '
-                '| sudo NEBIUS_INSTALL_FOLDER=/usr/local/bin bash &> /dev/null && '
+                'curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh '  # noqa: E501
+                '| sudo NEBIUS_INSTALL_FOLDER=/usr/local/bin bash &> /dev/null && '  # noqa: E501
                 'nebius profile create --profile sky '
                 '--endpoint api.nebius.cloud '
                 '--service-account-file $HOME/.nebius/credentials.json '
@@ -382,14 +381,14 @@ def _get_cloud_dependencies_installation_commands(
                 '/bin/linux/$ARCH/kubectl" && '
                 'sudo install -o root -g root -m 0755 '
                 'kubectl /usr/local/bin/kubectl)) && '
-                f'echo -e \'#!/bin/bash\\nexport PATH="{kubernetes_constants.SKY_K8S_EXEC_AUTH_PATH}"\\nexec "$@"\' | sudo tee /usr/local/bin/{kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER} > /dev/null && '
-                f'sudo chmod +x /usr/local/bin/{kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER}')
+                f'echo -e \'#!/bin/bash\\nexport PATH="{kubernetes_constants.SKY_K8S_EXEC_AUTH_PATH}"\\nexec "$@"\' | sudo tee /usr/local/bin/{kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER} > /dev/null && '  # noqa: E501
+                f'sudo chmod +x /usr/local/bin/{kubernetes_constants.SKY_K8S_EXEC_AUTH_WRAPPER}')  # noqa: E501
             k8s_dependencies_installed = True
         elif isinstance(cloud, clouds.Cudo):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
                 f'echo -en "\\r{step_prefix}cudoctl{empty_str}" && '
-                'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb > /dev/null 2>&1 && '
+                'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb > /dev/null 2>&1 && '  # noqa: E501
                 'sudo dpkg -i ~/cudoctl.deb > /dev/null 2>&1')
         elif isinstance(cloud, clouds.IBM):
             if controller != Controllers.JOBS_CONTROLLER:

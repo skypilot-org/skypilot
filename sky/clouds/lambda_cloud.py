@@ -1,5 +1,4 @@
 """Lambda Cloud."""
-# ruff: noqa: E501
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
@@ -40,16 +39,16 @@ class Lambda(clouds.Cloud):
     # for Lambda Cloud.
     # STOP/AUTOSTOP: The Lambda cloud provider does not support stopping VMs.
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is currently not supported on {_REPR}.',
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',
-        clouds.CloudImplementationFeatures.IMAGE_ID: f'Specifying image ID is not supported in {_REPR}.',
-        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',  # noqa: E501
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is currently not supported on {_REPR}.',  # noqa: E501
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',  # noqa: E501
+        clouds.CloudImplementationFeatures.IMAGE_ID: f'Specifying image ID is not supported in {_REPR}.',  # noqa: E501
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',  # noqa: E501
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
             ('Custom network tier is currently not supported in '
              f'{_REPR}.'),
-        clouds.CloudImplementationFeatures.HOST_CONTROLLERS: f'Host controllers are not supported in {_REPR}.',
-        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS: f'High availability controllers are not supported on {_REPR}.',
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS: f'Host controllers are not supported in {_REPR}.',  # noqa: E501
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS: f'High availability controllers are not supported on {_REPR}.',  # noqa: E501
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             ('Customized multiple network interfaces are not supported in '
              f'{_REPR}.'),

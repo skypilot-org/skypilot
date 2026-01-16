@@ -1,5 +1,4 @@
 """Azure cli adaptor"""
-# ruff: noqa: E501
 
 import asyncio
 import datetime
@@ -162,7 +161,7 @@ def get_client(name: str,
 
             # Check if the given storage account exists. This separate check
             # is necessary as running container_client.exists() with container
-            # url on non-existent storage account errors out after long lag(~90s)
+            # url on non-existent storage account errors out after long lag(~90s)  # noqa: E501
             storage_client = storage.StorageManagementClient(
                 credential, subscription_id)
             storage_account_availability = (
@@ -216,7 +215,7 @@ def get_client(name: str,
                             'Failed to retreive the container client for the '
                             f'container {container_client.container_name!r}. '
                             f'Details: '
-                            f'{common_utils.format_exception(e, use_bracket=True)}'
+                            f'{common_utils.format_exception(e, use_bracket=True)}'  # noqa: E501
                         )
                 except exceptions().HttpResponseError as e:
                     # Handle case where user lacks sufficient IAM role for
@@ -253,7 +252,7 @@ def get_client(name: str,
                             'Failed to retreive the container client for the '
                             f'container {container_client.container_name!r}. '
                             f'Details: '
-                            f'{common_utils.format_exception(e, use_bracket=True)}'
+                            f'{common_utils.format_exception(e, use_bracket=True)}'  # noqa: E501
                         )
             else:
                 raise TimeoutError(
@@ -418,7 +417,7 @@ def assign_storage_account_iam_role(
             with ux_utils.print_exception_no_traceback():
                 raise sky_exceptions.StorageBucketCreateError(
                     f'{role_assignment_failure_error_msg}'
-                    f'Details: {common_utils.format_exception(e, use_bracket=True)}'
+                    f'Details: {common_utils.format_exception(e, use_bracket=True)}'  # noqa: E501
                 )
     except exceptions().HttpResponseError as e:
         if 'AuthorizationFailed' in str(e):
@@ -433,7 +432,7 @@ def assign_storage_account_iam_role(
             with ux_utils.print_exception_no_traceback():
                 raise sky_exceptions.StorageBucketCreateError(
                     f'{role_assignment_failure_error_msg}'
-                    f'Details: {common_utils.format_exception(e, use_bracket=True)}'
+                    f'Details: {common_utils.format_exception(e, use_bracket=True)}'  # noqa: E501
                 )
 
 
@@ -457,7 +456,7 @@ def get_az_resource_group(
         if account.name == storage_account_name:
             # Extract the resource group name from the account ID
             # An example of account.id would be the following:
-            # /subscriptions/{subscription_id}/resourceGroups/{resource_group_name}/providers/Microsoft.Storage/storageAccounts/{container_name}
+            # /subscriptions/{subscription_id}/resourceGroups/{resource_group_name}/providers/Microsoft.Storage/storageAccounts/{container_name}  # noqa: E501
             split_account_id = account.id.split('/')
             assert len(split_account_id) == 9
             resource_group_name = split_account_id[4]

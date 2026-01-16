@@ -331,7 +331,7 @@ def make_task_bash_script(codegen: str,
             #!/bin/bash
             source ~/.bashrc
             set -a
-            . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true
+            . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true  # noqa: E501
             set +a
             {constants.DEACTIVATE_SKY_REMOTE_PYTHON_ENV}
             export PYTHONUNBUFFERED=1

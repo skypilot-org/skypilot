@@ -1,5 +1,4 @@
 """Amazon Web Services."""
-# ruff: noqa: E501
 import enum
 import fnmatch
 import functools
@@ -109,7 +108,7 @@ _EFA_DOCKER_RUN_OPTIONS = [
 ]
 
 # AWS EFA image name.
-# Refer to https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-base-gpu-ami-ubuntu-22-04.html for latest version.
+# Refer to https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-base-gpu-ami-ubuntu-22-04.html for latest version.  # noqa: E501
 # TODO(hailong): may need to update the version later.
 _EFA_IMAGE_NAME = 'Deep Learning Base OSS Nvidia Driver GPU AMI' \
 ' (Ubuntu 22.04) 20250808'
@@ -206,7 +205,7 @@ def _get_max_efa_interfaces(instance_type: str, region_name: str) -> int:
         client = aws.client('ec2', region_name=region_name)
         response = client.describe_instance_types(
             # TODO(cooperc): fix the types for mypy 1.16
-            # Boto3 type stubs expect Literal instance types; using str list here.
+            # Boto3 type stubs expect Literal instance types; using str list here.  # noqa: E501
             InstanceTypes=[instance_type],  # type: ignore
             Filters=[{
                 'Name': 'network-info.efa-supported',
@@ -300,7 +299,7 @@ class AWS(clouds.Cloud):
     _STATIC_CREDENTIAL_HELP_STR = (
         'Run the following commands:'
         f'\n{_INDENT_PREFIX}  $ aws configure'
-        f'\n{_INDENT_PREFIX}  $ aws configure list  # Ensure that this shows identity is set.'
+        f'\n{_INDENT_PREFIX}  $ aws configure list  # Ensure that this shows identity is set.'  # noqa: E501
         f'\n{_INDENT_PREFIX}For more info: '
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'
     )
@@ -319,18 +318,18 @@ class AWS(clouds.Cloud):
         unsupported_features = {}
         if resources.use_spot:
             unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
-                f'Stopping spot instances is currently not supported on {cls._REPR}.'
+                f'Stopping spot instances is currently not supported on {cls._REPR}.'  # noqa: E501
             )
 
         unsupported_features[
             clouds.CloudImplementationFeatures.
             HIGH_AVAILABILITY_CONTROLLERS] = (
-                f'High availability controllers are not supported on {cls._REPR}.'
+                f'High availability controllers are not supported on {cls._REPR}.'  # noqa: E501
             )
 
         unsupported_features[
             clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK] = (
-                f'Customized multiple network interfaces are not supported on {cls._REPR}.'
+                f'Customized multiple network interfaces are not supported on {cls._REPR}.'  # noqa: E501
             )
 
         return unsupported_features
@@ -408,8 +407,8 @@ class AWS(clouds.Cloud):
             assert r.zones is not None, r
             if num_nodes > 1 or aws_utils.use_reservations():
                 # When num_nodes > 1, we shouldn't pass a list of zones to the
-                # AWS NodeProvider to try, because it may then place the nodes of
-                # the same cluster in different zones. This is an artifact of the
+                # AWS NodeProvider to try, because it may then place the nodes of  # noqa: E501
+                # the same cluster in different zones. This is an artifact of the  # noqa: E501
                 # current AWS NodeProvider implementation.
                 # Also, when using reservations, they are zone-specific, so we
                 # should return one zone at a time.
@@ -582,7 +581,7 @@ class AWS(clouds.Cloud):
         image_size = image['BlockDeviceMappings'][0]['Ebs']['VolumeSize']
         # cache the result for a day.
         # AMIs are immutable, so we can cache the result for a long time.
-        # While AMIs can be deleted, if the AMI is deleted before cache expiration,
+        # While AMIs can be deleted, if the AMI is deleted before cache expiration,  # noqa: E501
         # the actual VM launch still fails.
         day_in_seconds = 60 * 60 * 24  # 1 day, 60s * 60m * 24h
         try:
@@ -593,7 +592,7 @@ class AWS(clouds.Cloud):
             # Failure to cache the result is not critical to the
             # success of this function.
             logger.debug(
-                f'Failed to cache image size for {image_id} in region {region}: {e}'
+                f'Failed to cache image size for {image_id} in region {region}: {e}'  # noqa: E501
             )
         return image_size
 
@@ -606,7 +605,7 @@ class AWS(clouds.Cloud):
             return DEFAULT_ROOT_DEVICE_NAME
         assert region is not None, (image_id, region)
         workspace_profile = aws.get_workspace_profile()
-        kv_cache_key = f'aws:ami:root_device_name:{workspace_profile}:{region}:{image_id}'
+        kv_cache_key = f'aws:ami:root_device_name:{workspace_profile}:{region}:{image_id}'  # noqa: E501
         root_device_name = kv_cache.get_cache_entry(kv_cache_key)
         if root_device_name is not None:
             logger.debug(f'Image root device name {root_device_name} found in '
@@ -635,7 +634,7 @@ class AWS(clouds.Cloud):
             # Failure to cache the result is not critical to the
             # success of this function.
             logger.debug(
-                f'Failed to cache image root device name for {image_id} in region {region}: {e}'
+                f'Failed to cache image root device name for {image_id} in region {region}: {e}'  # noqa: E501
             )
         return root_device_name
 
@@ -826,7 +825,7 @@ class AWS(clouds.Cloud):
             region=region_name,
             keys=('disk_encrypted',),
             default_value=False)
-        user_security_group_config = skypilot_config.get_effective_region_config(
+        user_security_group_config = skypilot_config.get_effective_region_config(  # noqa: E501
             cloud='aws',
             region=region_name,
             keys=('security_group_name',),
@@ -850,10 +849,10 @@ class AWS(clouds.Cloud):
         elif resources.ports is not None:
             with ux_utils.print_exception_no_traceback():
                 logger.warning(
-                    f'Skip opening ports {resources.ports} for cluster {cluster_name!r}, '
-                    'as `aws.security_group_name` in `~/.sky/config.yaml` is specified as '
-                    f' {security_group!r}. Please make sure the specified security group '
-                    'has requested ports setup; or, leave out `aws.security_group_name` '
+                    f'Skip opening ports {resources.ports} for cluster {cluster_name!r}, '  # noqa: E501
+                    'as `aws.security_group_name` in `~/.sky/config.yaml` is specified as '  # noqa: E501
+                    f' {security_group!r}. Please make sure the specified security group '  # noqa: E501
+                    'has requested ports setup; or, leave out `aws.security_group_name` '  # noqa: E501
                     'in `~/.sky/config.yaml`.')
 
         return {
@@ -946,7 +945,7 @@ class AWS(clouds.Cloud):
     @classmethod
     def _check_compute_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
-        """Checks if the user has access credentials to this AWS's compute service."""
+        """Checks if the user has access credentials to this AWS's compute service."""  # noqa: E501
         credentials_exist, identity_str, hints = cls._check_credentials_exist()
         if not credentials_exist:
             return False, hints
@@ -971,7 +970,7 @@ class AWS(clouds.Cloud):
     @classmethod
     def _check_storage_credentials(
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
-        """Checks if the user has access credentials to this AWS's storage service."""
+        """Checks if the user has access credentials to this AWS's storage service."""  # noqa: E501
         credentials_exist, identity_str, hints = cls._check_credentials_exist()
         if not credentials_exist:
             return False, hints
@@ -1057,36 +1056,36 @@ class AWS(clouds.Cloud):
                 hints += single_cloud_hint
         elif identity_type == AWSIdentityType.IAM_ROLE:
             # When using an IAM role, the credentials may not exist in the
-            # ~/.aws/credentials file. So we don't check for the existence of the
+            # ~/.aws/credentials file. So we don't check for the existence of the  # noqa: E501
             # file. This will happen when the user is on a VM (or
             # jobs-controller) created by an SSO account, i.e. the VM will be
             # assigned the IAM role: skypilot-v1.
             hints = f'AWS IAM role is set.{single_cloud_hint}'
         elif identity_type == AWSIdentityType.CONTAINER_ROLE:
-            # Similar to the IAM ROLE, an ECS container may not store credentials
-            # in the ~/.aws/credentials file. So we don't check for the existence of
+            # Similar to the IAM ROLE, an ECS container may not store credentials  # noqa: E501
+            # in the ~/.aws/credentials file. So we don't check for the existence of  # noqa: E501
             # the file. i.e. the container will be assigned the IAM role of the
             # task: skypilot-v1.
             hints = f'AWS container-role is set.{single_cloud_hint}'
         elif identity_type == AWSIdentityType.CUSTOM_PROCESS:
-            # Similar to the IAM ROLE, a custom process may not store credentials
-            # in the ~/.aws/credentials file. So we don't check for the existence of
-            # the file. i.e. the custom process will be assigned the IAM role of the
+            # Similar to the IAM ROLE, a custom process may not store credentials  # noqa: E501
+            # in the ~/.aws/credentials file. So we don't check for the existence of  # noqa: E501
+            # the file. i.e. the custom process will be assigned the IAM role of the  # noqa: E501
             # task: skypilot-v1.
             hints = f'AWS custom-process is set.{single_cloud_hint}'
         elif identity_type == AWSIdentityType.ASSUME_ROLE:
-            # When using ASSUME ROLE, the credentials are coming from a different
-            # source profile. So we don't check for the existence of ~/.aws/credentials.
+            # When using ASSUME ROLE, the credentials are coming from a different  # noqa: E501
+            # source profile. So we don't check for the existence of ~/.aws/credentials.  # noqa: E501
             # i.e. the assumed role will be assigned the IAM role of the
             # task: skypilot-v1.
             hints = f'AWS assume-role is set.{single_cloud_hint}'
         elif identity_type == AWSIdentityType.ENV:
-            # When using ENV vars, the credentials are coming from the environment
-            # variables. So we don't check for the existence of ~/.aws/credentials.
+            # When using ENV vars, the credentials are coming from the environment  # noqa: E501
+            # variables. So we don't check for the existence of ~/.aws/credentials.  # noqa: E501
             # i.e. the identity is not determined by the file.
             hints = f'AWS env is set.{single_cloud_hint}'
         else:
-            # This file is required because it is required by the VMs launched on
+            # This file is required because it is required by the VMs launched on  # noqa: E501
             # other clouds to access private s3 buckets and resources like EC2.
             # `get_active_user_identity` does not guarantee this file exists.
             if not static_credential_exists:
@@ -1188,10 +1187,10 @@ class AWS(clouds.Cloud):
             # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable
             user_info = sts.get_caller_identity()
             # Allow fallback to AccountId if UserId does not match, because:
-            # 1. In the case where multiple IAM users belong a single root account,
+            # 1. In the case where multiple IAM users belong a single root account,  # noqa: E501
             # those users normally share the visibility of the VMs, so we do not
             # need to identity them with each other. (There can be some cases,
-            # when an IAM user is given a limited permission by the admin, we may
+            # when an IAM user is given a limited permission by the admin, we may  # noqa: E501
             # ignore that case for now, or print out a warning if the underlying
             # userid changed for a cluster).
             # 2. In the case where the multiple users belong to an organization,
@@ -1224,15 +1223,15 @@ class AWS(clouds.Cloud):
                     'configured to use SSO' in str(e)):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.CloudUserIdentityError(
-                        'awscli is too old to use SSO. Run the following command to upgrade:'
+                        'awscli is too old to use SSO. Run the following command to upgrade:'  # noqa: E501
                         f'\n{cls._INDENT_PREFIX}  $ pip install awscli>=1.27.10'
-                        f'\n{cls._INDENT_PREFIX}You may need to log into SSO again after '
+                        f'\n{cls._INDENT_PREFIX}You may need to log into SSO again after '  # noqa: E501
                         f'upgrading. {cls._sso_credentials_help_str()}'
                     ) from None
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     f'Invalid AWS configuration.\n'
-                    f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
+                    f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'  # noqa: E501
                 ) from None
         except aws.botocore_exceptions().TokenRetrievalError as e:
             logger.debug(f'Failed to get AWS caller identity: {e}.')
@@ -1247,7 +1246,7 @@ class AWS(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     f'Failed to get AWS user.\n'
-                    f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
+                    f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'  # noqa: E501
                 ) from None
         # TODO: Return a list of identities in the profile when we support
         #   automatic switching for AWS. Currently we only support one identity.
@@ -1301,9 +1300,9 @@ class AWS(clouds.Cloud):
             #   message for users
             return cls._sts_get_caller_identity()
         config_hash = hashlib.md5(stdout).hexdigest()[:8]
-        # Getting aws identity cost ~1s, so we cache the result with the output of
-        # `aws configure list` as cache key. Different `aws configure list` output
-        # can have same aws identity, our assumption is the output would be stable
+        # Getting aws identity cost ~1s, so we cache the result with the output of  # noqa: E501
+        # `aws configure list` as cache key. Different `aws configure list` output  # noqa: E501
+        # can have same aws identity, our assumption is the output would be stable  # noqa: E501
         # in real world, so the number of cache files would be limited.
         # TODO(aylei): consider using a more stable cache key and evaluate eviction.
         cache_path = catalog_common.get_catalog_path(
@@ -1363,15 +1362,15 @@ class AWS(clouds.Cloud):
         #   - this file exists
         # It has the following purposes:
         #   - make all nodes (any cloud) able to access private S3 buckets
-        #   - make some remote nodes able to launch new nodes on AWS (i.e., makes
-        #     AWS head node able to launch AWS workers, or any-cloud jobs controller
+        #   - make some remote nodes able to launch new nodes on AWS (i.e., makes  # noqa: E501
+        #     AWS head node able to launch AWS workers, or any-cloud jobs controller  # noqa: E501
         #     able to launch spot clusters on AWS).
         #
-        # If we detect the current user identity is AWS SSO, we will not upload this
+        # If we detect the current user identity is AWS SSO, we will not upload this  # noqa: E501
         # file to any remote nodes (any cloud). Instead, a SkyPilot IAM role is
         # assigned to both AWS head and workers.
         # TODO(skypilot): This also means we leave open a bug for AWS SSO users that
-        # use multiple clouds. The non-AWS nodes will have neither the credential
+        # use multiple clouds. The non-AWS nodes will have neither the credential  # noqa: E501
         # file nor the ability to understand AWS IAM.
         credentials_path = os.path.expanduser(_get_credentials_path())
         if os.path.exists(credentials_path):
@@ -1408,7 +1407,7 @@ class AWS(clouds.Cloud):
             resources_utils.DiskTier.ULTRA: 20000,
             resources_utils.DiskTier.HIGH: 7000,
             resources_utils.DiskTier.MEDIUM: 3500,
-            resources_utils.DiskTier.LOW: 0,  # iops is not required on standard disk
+            resources_utils.DiskTier.LOW: 0,  # iops is not required on standard disk  # noqa: E501
         }
         return {
             'disk_tier': cls._get_disk_type(tier),
@@ -1532,7 +1531,7 @@ class AWS(clouds.Cloud):
         if not instance_ids:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
-                    f'Failed to find the source cluster {cluster_name.display_name!r} on '
+                    f'Failed to find the source cluster {cluster_name.display_name!r} on '  # noqa: E501
                     'AWS.')
 
         if len(instance_ids) != 1:
@@ -1543,7 +1542,7 @@ class AWS(clouds.Cloud):
 
         instance_id = instance_ids[0]
         create_image_cmd = (
-            f'aws ec2 create-image --region {region} --instance-id {instance_id} '
+            f'aws ec2 create-image --region {region} --instance-id {instance_id} '  # noqa: E501
             f'--name {image_name} --output text')
         returncode, image_id, stderr = subprocess_utils.run_with_retries(
             create_image_cmd,
@@ -1559,11 +1558,11 @@ class AWS(clouds.Cloud):
             stream_logs=True)
 
         rich_utils.force_update_status(
-            f'Waiting for the source image {cluster_name.display_name!r} from {region} to be available on AWS.'
+            f'Waiting for the source image {cluster_name.display_name!r} from {region} to be available on AWS.'  # noqa: E501
         )
         # Wait for the image to be available
         wait_image_cmd = (
-            f'aws ec2 wait image-available --region {region} --image-ids {image_id}'
+            f'aws ec2 wait image-available --region {region} --image-ids {image_id}'  # noqa: E501
         )
         returncode, _, stderr = subprocess_utils.run_with_retries(
             wait_image_cmd,
@@ -1601,12 +1600,12 @@ class AWS(clouds.Cloud):
             returncode,
             copy_image_cmd,
             error_msg=
-            f'Failed to copy image {image_id!r} from {source_region} to {target_region}.',
+            f'Failed to copy image {image_id!r} from {source_region} to {target_region}.',  # noqa: E501
             stderr=stderr,
             stream_logs=True)
 
         rich_utils.force_update_status(
-            f'Waiting for the target image {target_image_id!r} on {target_region} to be '
+            f'Waiting for the target image {target_image_id!r} on {target_region} to be '  # noqa: E501
             'available on AWS.')
         wait_image_cmd = (
             f'aws ec2 wait image-available --region {target_region} '
