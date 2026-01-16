@@ -81,6 +81,8 @@ ignore = [
     "B904",
     # B007: unused loop control variable
     "B007",
+    # Q003: avoid escaped quotes - keep existing style
+    "Q003",
 ]
 
 # Per-file ignores for specific patterns
@@ -96,12 +98,13 @@ ignore = [
 "llm/**" = ["T20"]
 
 [tool.ruff.lint.isort]
-# Match the Google profile from isort config
+# Match the existing codebase import style as closely as possible
 force-single-line = false
 force-sort-within-sections = true
 combine-as-imports = true
-split-on-trailing-comma = false
 known-first-party = ["sky"]
+# Keep standard library imports on single line like "from typing import X, Y, Z"
+lines-after-imports = 2
 
 [tool.ruff.lint.flake8-quotes]
 # Match pylint-quotes configuration
