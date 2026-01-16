@@ -63,8 +63,6 @@ select = ["F", "E", "W", "I", "B", "Q", "C4"]
 
 # Ignore rules that were disabled in pylint or cause too many changes
 ignore = [
-    # Line length handled by formatter
-    "E501",
     # Allow lambda assignment (was disabled in pylint: unnecessary-lambda-assignment)
     "E731",
     # Ignore missing docstrings (was disabled: missing-function-docstring)
