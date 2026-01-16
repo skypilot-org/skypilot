@@ -306,7 +306,7 @@ def is_az_container_endpoint(endpoint_url: str) -> bool:
       bool: True if the endpoint is valid, False otherwise.
     """
     # Storage account must be length of 3-24
-    # Reference: https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules#microsoftstorage # noqa: E501
+    # Reference: https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules#microsoftstorage
     pattern = re.compile(
         r'^https://([a-z0-9]{3,24})\.blob\.core\.windows\.net(/[^/]+)*$')
     match = pattern.match(endpoint_url)
@@ -404,7 +404,7 @@ def _get_ibm_cos_bucket_region(region, bucket_name):
         tmp_client = ibm.get_cos_client(region)
         tmp_client.head_bucket(Bucket=bucket_name)
         return region
-    except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # noqa: E501
+    except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr]
         if e.response['Error']['Code'] == '404':
             logger.debug(f'bucket {bucket_name} was not found '
                          f'in {region}')
@@ -982,7 +982,7 @@ def verify_coreweave_bucket(name: str, retry: int = 0) -> bool:
                     f'{retry_count} retries ({retry_count * 5} seconds)')
             return True
 
-        except coreweave.botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # noqa: E501
+        except coreweave.botocore.exceptions.ClientError as e:  # type: ignore[union-attr]
             error_code = e.response['Error']['Code']
             if error_code == '403':
                 logger.error(f'Access denied to bucket {name}')

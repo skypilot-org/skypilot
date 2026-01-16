@@ -9,7 +9,7 @@ Reasons:
    a cluster is first created. This then makes it possible for us to support
    changing the proxy command without changing the launch hash in the future.
 
-2. The _should_create_new_head() function inside Ray autoscaler to avoid the ray up 
+2. The _should_create_new_head() function inside Ray autoscaler to avoid the ray up
 checking the launch hash when creating the head node.
 
 Reasons:

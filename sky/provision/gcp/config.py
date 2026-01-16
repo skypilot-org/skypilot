@@ -407,7 +407,7 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
             config.node_config) == instance_utils.GCPNodeType.TPU):
         # SKY: The API for TPU VM is slightly different from normal compute
         # instances.
-        # See https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#Node # noqa: E501
+        # See https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#Node
         account_dict['scope'] = account_dict['scopes']
         account_dict.pop('scopes')
         iam_role = {'serviceAccount': account_dict}
@@ -476,7 +476,7 @@ def _check_firewall_rules(cluster_name: str, vpc_name: str, project_id: str,
             # Rules applied to specific VM (targetTags) may not work for the
             # current VM, so should be skipped.
             # Filter by targetTags == ['cluster_name']
-            # See https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.networks.html#getEffectiveFirewalls # noqa: E501
+            # See https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.networks.html#getEffectiveFirewalls
             tags = rule.get('targetTags', None)
             if tags is not None:
                 if len(tags) != 1:
@@ -999,7 +999,7 @@ def _list_subnets(
     # Note we do not directly use the filter (network=<...>) arg of the list()
     # call above, because it'd involve constructing a long URL of the following
     # format and passing it as the filter value:
-    # 'https://www.googleapis.com/compute/v1/projects/<project_id>/global/networks/<network_name>' # noqa: E501
+    # 'https://www.googleapis.com/compute/v1/projects/<project_id>/global/networks/<network_name>'
     matched_items = []
     for item in items:
         if network == _network_interface_to_vpc_name(item):

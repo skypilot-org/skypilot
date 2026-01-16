@@ -161,7 +161,7 @@ def _list_reservations_for_instance_type(
         list_reservations_cmd,
         # 1: means connection aborted (although it shows 22 in the error,
         # but the actual error code is 1)
-        # Example: ERROR: gcloud crashed (ConnectionError): ('Connection aborted.', OSError(22, 'Invalid argument')) # noqa: E501
+        # Example: ERROR: gcloud crashed (ConnectionError): ('Connection aborted.', OSError(22, 'Invalid argument'))
         retry_returncode=[255, 1],
     )
     subprocess_utils.handle_returncode(

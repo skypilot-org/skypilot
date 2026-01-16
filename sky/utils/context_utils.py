@@ -40,7 +40,7 @@ def hijack_sys_attrs():
     sky_logging.reload_logger()
     # Hijack os.environ with ContextualEnviron to make env variables
     # contextually aware.
-    os.environ = context.ContextualEnviron(os.environ)
+    os.environ = context.ContextualEnviron(os.environ)  # noqa: B003
     # Hijack subprocess.Popen to pass the contextual environ to subprocess
     # by default.
     subprocess.Popen = context.Popen

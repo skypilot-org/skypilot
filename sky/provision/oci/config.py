@@ -31,7 +31,7 @@ def bootstrap_instances(
     # Find the configured VCN, or create a new one.
     vcn = query_helper.find_create_vcn_subnet(region)
     if vcn is None:
-        # noqa: E501
+
         raise exceptions.ResourcesUnavailableError(
             'Failed to create a new VCN, possibly you hit the resource limitation.'
         )

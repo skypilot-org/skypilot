@@ -205,7 +205,7 @@ CONDA_INSTALLATION_COMMANDS = (
     '{ '
     # Use uname -m to get the architecture of the machine and download the
     # corresponding Miniconda3-Linux.sh script.
-    'curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-$(uname -m).sh -o Miniconda3-Linux.sh && '  # noqa: E501
+    'curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-$(uname -m).sh -o Miniconda3-Linux.sh && '
     # We do not use && for installation of conda and the following init commands
     # because for some images, conda is already installed, but not initialized.
     # In this case, we need to initialize conda and set auto_activate_base to
@@ -280,7 +280,7 @@ RAY_INSTALLATION_COMMANDS = (
     f'|| {RAY_STATUS} || '
     # The pydantic-core==2.41.3 for arm seems corrupted
     # so we need to avoid that specific version.
-    f'{SKY_UV_PIP_CMD} install -U "ray[default]=={SKY_REMOTE_RAY_VERSION}" "pydantic-core==2.41.1"; '  # noqa: E501
+    f'{SKY_UV_PIP_CMD} install -U "ray[default]=={SKY_REMOTE_RAY_VERSION}" "pydantic-core==2.41.1"; '
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
     # not include ~/.local/bin (the pip install will have the output: `WARNING:
@@ -318,7 +318,7 @@ COPY_SKYPILOT_TEMPLATES_COMMANDS = (
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f'{SKY_UV_INSTALL_CMD};'
     f'{{ {SKY_UV_PIP_CMD} list | grep "skypilot " && '
-    '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # noqa: E501
+    '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '
     f'{{ {SKY_UV_PIP_CMD} uninstall skypilot; '
     # uv cannot install azure-cli normally, since it depends on pre-release
     # packages. Manually install azure-cli with the --prerelease=allow flag
@@ -569,8 +569,8 @@ ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING = (
 SKYPILOT_DEFAULT_WORKSPACE = 'default'
 
 # BEGIN constants used for service catalog.
-HOSTED_CATALOG_DIR_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/master/catalogs'  # noqa: E501
-HOSTED_CATALOG_DIR_URL_S3_MIRROR = 'https://skypilot-catalog.s3.us-east-1.amazonaws.com/catalogs'  # noqa: E501
+HOSTED_CATALOG_DIR_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/master/catalogs'
+HOSTED_CATALOG_DIR_URL_S3_MIRROR = 'https://skypilot-catalog.s3.us-east-1.amazonaws.com/catalogs'
 CATALOG_SCHEMA_VERSION = 'v8'
 CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
@@ -615,7 +615,7 @@ MEMORY_SIZE_PATTERN = (
     '^[0-9]+('
     f'{"|".join([unit.lower() for unit in MEMORY_SIZE_UNITS])}|'
     f'{"|".join([unit.upper() for unit in MEMORY_SIZE_UNITS])}|'
-    f'{"|".join([unit[0].upper() + unit[1:] for unit in MEMORY_SIZE_UNITS if len(unit) > 1])}'  # noqa: E501
+    f'{"|".join([unit[0].upper() + unit[1:] for unit in MEMORY_SIZE_UNITS if len(unit) > 1])}'
     ')?$')
 
 LAST_USE_TRUNC_LENGTH = 25

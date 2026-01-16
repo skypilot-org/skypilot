@@ -459,7 +459,7 @@ class AWSAzFetchingError(SkyPilotExcludeArgsBaseException):
                     'Failed to retrieve availability zones. '
                     'Please ensure that the `ec2:DescribeAvailabilityZones` '
                     'action is enabled for your AWS account in IAM. '
-                    'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html.'  # noqa: E501
+                    'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html.'
                 )
             else:
                 raise ValueError(f'Unknown reason {self}')

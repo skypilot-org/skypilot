@@ -4370,7 +4370,7 @@ def show_gpus(
                                   case_sensitive=False,
                                   all_regions=all_regions))
         # Import here to save module load speed.
-        # noqa: E501
+
         from sky.catalog import common as catalog_common  # noqa: PLC0415
 
         # For each gpu name (count not included):

@@ -15,7 +15,7 @@ def encode_payload(payload: Any, payload_type: Optional[str] = None) -> str:
     the message during transfer.
 
     An example message that is polluted by the system warning:
-    "LC_ALL: cannot change locale (en_US.UTF-8)\n<sky-payload>hello, world</sky-payload>" # noqa: E501
+    "LC_ALL: cannot change locale (en_US.UTF-8)\n<sky-payload>hello, world</sky-payload>"
 
     Args:
         payload: A str, dict or list to be encoded.

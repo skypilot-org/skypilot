@@ -66,6 +66,10 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?)|unused_.*|dummy_.*)$"
 
 # Globally ignored rules
 ignore = [
+    # E501: line-too-long - pylint wasn't effectively enforcing this due to
+    # cascading `# pylint: disable=line-too-long` comments that suppressed
+    # violations for the rest of each file. Disabling to match de facto behavior.
+    "E501",
     # E731: Allow lambda assignment (common pattern)
     "E731",
     # B008: function call in default argument (common pattern in click)

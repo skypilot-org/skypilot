@@ -18,7 +18,7 @@ import requests
 import yaml
 
 TOKEN_ENDPOINT = 'https://iam.cloud.ibm.com/identity/token'
-REGIONS_ENDPOINT = f'https://us-south.iaas.cloud.ibm.com/v1/regions?version={datetime.today().strftime("%Y-%m-%d")}&generation=2'  # noqa: E501
+REGIONS_ENDPOINT = f'https://us-south.iaas.cloud.ibm.com/v1/regions?version={datetime.today().strftime("%Y-%m-%d")}&generation=2'
 DEFAULT_IBM_CREDENTIALS_PATH = os.path.expanduser('~/.ibm/credentials.yaml')
 
 
@@ -78,13 +78,13 @@ def _fetch_instance_profiles(regions: List[str],
         'Accept': 'application/json',
     }
     for r in regions:
-        az_endpoint = f'https://{r}.iaas.cloud.ibm.com/v1/regions/{r}/zones?version={d}&generation=2'  # noqa: E501
+        az_endpoint = f'https://{r}.iaas.cloud.ibm.com/v1/regions/{r}/zones?version={d}&generation=2'
         az_response = requests.get(url=az_endpoint, headers=headers)
         az_response_json = az_response.json()
         zones = [a['name'] for a in az_response_json['zones']]
         print(f'Fetching instance profiles for region {r}, zones {zones}')
 
-        instances_endpoint = f'https://{r}.iaas.cloud.ibm.com/v1/instance/profiles?version={d}&generation=2'  # noqa: E501
+        instances_endpoint = f'https://{r}.iaas.cloud.ibm.com/v1/instance/profiles?version={d}&generation=2'
         instance_response = requests.get(url=instances_endpoint,
                                          headers=headers)
         instance_response_json = instance_response.json()
@@ -126,10 +126,10 @@ def create_catalog(region_profile: Dict[str, Tuple[List, List]],
                 if 'gpu_manufacturer' in profile:
                     gpu_manufacturer = profile['gpu_manufacturer']['values'][0]
                 # TODO: How to fetch prices?
-                #       The pricing API doesn't return prices for instance.profile. # noqa: E501
-                #       https://cloud.ibm.com/docs/account?topic=account-getting-pricing-api # noqa: E501
-                #       https://globalcatalog.cloud.ibm.com/api/v1?q=kind:instance.profile # noqa: E501
-                #       https://globalcatalog.cloud.ibm.com/api/v1/gx2-16x128x1v100/plan # noqa: E501
+                #       The pricing API doesn't return prices for instance.profile.
+                #       https://cloud.ibm.com/docs/account?topic=account-getting-pricing-api
+                #       https://globalcatalog.cloud.ibm.com/api/v1?q=kind:instance.profile
+                #       https://globalcatalog.cloud.ibm.com/api/v1/gx2-16x128x1v100/plan
                 price = 0.0
                 gpuinfo: Optional[str] = None
                 gpu_memory_mb: Optional[int] = None

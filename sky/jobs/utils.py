@@ -447,7 +447,7 @@ def controller_process_alive(record: managed_job_state.ControllerPidRecord,
         else:
             # If we can't check the create_time try to check the cmdline instead
             cmd_str = ' '.join(process.cmdline())
-            # noqa: E501
+
             # Pre-#7051 cmdline: /path/to/python -u -m sky.jobs.controller <dag.yaml_path> --job-id <job_id>
             # Post-#7051 cmdline: /path/to/python -u -msky.jobs.controller
             if ('-m sky.jobs.controller' not in cmd_str and

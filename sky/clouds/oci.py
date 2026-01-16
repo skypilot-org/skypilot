@@ -441,7 +441,7 @@ class OCI(clouds.Cloud):
 
         short_credential_help_str = (
             'For more details, refer to: '
-            # noqa: E501
+
             'https://docs.skypilot.co/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci'
         )
         credential_help_str = (

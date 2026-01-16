@@ -452,7 +452,7 @@ class FailoverCloudErrorHandlerV1:
         # Determining whether head node launch *may* have been requested based
         # on outputs is tricky. We are conservative here by choosing an "early
         # enough" output line in the following:
-        # https://github.com/ray-project/ray/blob/03b6bc7b5a305877501110ec04710a9c57011479/python/ray/autoscaler/_private/commands.py#L704-L737  # noqa: E501
+        # https://github.com/ray-project/ray/blob/03b6bc7b5a305877501110ec04710a9c57011479/python/ray/autoscaler/_private/commands.py#L704-L737
         # This is okay, because we mainly want to use the return value of this
         # func to skip cleaning up never-launched clusters that encountered VPC
         # errors; their launch should not have printed any such outputs.
@@ -542,7 +542,7 @@ class FailoverCloudErrorHandlerV2:
                     'UNSUPPORTED_OPERATION',
                     'insufficientCapacity',
             ]:  # Per zone.
-                # Return codes can be found at https://cloud.google.com/compute/docs/troubleshooting/troubleshooting-vm-creation # noqa: E501
+                # Return codes can be found at https://cloud.google.com/compute/docs/troubleshooting/troubleshooting-vm-creation
                 # However, UNSUPPORTED_OPERATION is observed empirically
                 # when VM is preempted during creation.  This seems to be
                 # not documented by GCP.
@@ -566,13 +566,13 @@ class FailoverCloudErrorHandlerV2:
             elif code in [3, 8, 9]:
                 # Error code 3 means TPU is preempted during creation.
                 # Example:
-                # {'code': 3, 'message': 'Cloud TPU received a bad request. update is not supported while in state PREEMPTED [EID: 0x73013519f5b7feb2]'} # noqa: E501
+                # {'code': 3, 'message': 'Cloud TPU received a bad request. update is not supported while in state PREEMPTED [EID: 0x73013519f5b7feb2]'}
                 # Error code 8 means TPU resources is out of
                 # capacity. Example:
-                # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # noqa: E501
+                # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'}
                 # Error code 9 means TPU resources is insufficient reserved
                 # capacity. Example:
-                # {'code': 9, 'message': 'Insufficient reserved capacity. Contact customer support to increase your reservation. [EID: 0x2f8bc266e74261a]'} # noqa: E501
+                # {'code': 9, 'message': 'Insufficient reserved capacity. Contact customer support to increase your reservation. [EID: 0x2f8bc266e74261a]'}
                 _add_to_blocked_resources(
                     blocked_resources,
                     launchable_resources.copy(zone=zone.name))
@@ -634,14 +634,14 @@ class FailoverCloudErrorHandlerV2:
                     'having the required permissions and the user '
                     'account does not have enough permission to '
                     'update it. Please contact your administrator and '
-                    'check out: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html\n'  # noqa: E501
+                    'check out: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html\n'
                     f'Details: {message}')
                 _add_to_blocked_resources(
                     blocked_resources,
                     launchable_resources.copy(region=None, zone=None))
             elif 'is not found or access is unauthorized' in message:
                 # Parse HttpError for unauthorized regions. Example:
-                # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # noqa: E501
+                # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.".
                 # Details: "Location us-east1-d is not found or access is
                 # unauthorized.">
                 _add_to_blocked_resources(
@@ -1214,7 +1214,7 @@ class RetryingVmProvisioner(object):
                         prev_cluster_ever_up=prev_cluster_ever_up,
                         log_dir=self.log_dir,
                         ports_to_open_on_launch=ports_to_open_on_launch)
-                    # NOTE: We will handle the logic of '_ensure_cluster_ray_started' # noqa: E501
+                    # NOTE: We will handle the logic of '_ensure_cluster_ray_started'
                     # in 'provision_utils.post_provision_runtime_setup()' in the
                     # caller.
                     resources_vars = (
@@ -1421,7 +1421,7 @@ class RetryingVmProvisioner(object):
             # Downside is existing tasks on the cluster will keep running
             # (which may be ok with the semantics of 'sky launch' twice).
             # Tracked in https://github.com/ray-project/ray/issues/20402.
-            # Ref: https://github.com/ray-project/ray/blob/releases/2.4.0/python/ray/autoscaler/sdk/sdk.py#L16-L49  # noqa: E501
+            # Ref: https://github.com/ray-project/ray/blob/releases/2.4.0/python/ray/autoscaler/sdk/sdk.py#L16-L49
             script_path = write_ray_up_script_with_patched_launch_hash_fn(
                 cluster_config_file, ray_up_kwargs={'no_restart': True})
 
@@ -1450,7 +1450,7 @@ class RetryingVmProvisioner(object):
                 require_outputs=True,
                 # Disable stdin to avoid ray outputs mess up the terminal with
                 # misaligned output when multithreading/multiprocessing are used
-                # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264  # noqa: E501
+                # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264
                 stdin=subprocess.DEVNULL)
             return returncode, stdout, stderr
 
@@ -1644,7 +1644,7 @@ class RetryingVmProvisioner(object):
             env=dict(os.environ, RAY_USAGE_STATS_ENABLED='0'),
             # Disable stdin to avoid ray outputs mess up the terminal with
             # misaligned output when multithreading/multiprocessing is used.
-            # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # noqa: E501
+            # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264
             stdin=subprocess.DEVNULL)
 
     @timeline.event
@@ -2942,7 +2942,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         example_resource.region != launched_resources.region):
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesMismatchError(
-                            f'Task requested resources {example_resource} in region '  # noqa: E501
+                            f'Task requested resources {example_resource} in region '
                             f'{example_resource.region!r}'
                             ', but the existing cluster '
                             f'is in region {launched_resources.region!r}.')
@@ -2953,7 +2953,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 'does not have zone specified.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesMismatchError(
-                            f'Task requested resources {example_resource} in zone '  # noqa: E501
+                            f'Task requested resources {example_resource} in zone '
                             f'{example_resource.zone!r},'
                             'but the existing cluster '
                             f'{zone_str}')
@@ -3693,7 +3693,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # in the script already.
                     # Skip an empty line and two lines due to the /bin/bash -i
                     # and source ~/.bashrc in the setup_cmd.
-                    #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # noqa: E501
+                    #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device
                     #   bash: no job control in this shell
                     skip_num_lines=3)
                 return returncode
@@ -4858,8 +4858,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if (isinstance(cloud, clouds.IBM) and terminate and
                 prev_cluster_status == status_lib.ClusterStatus.STOPPED):
             from sky.adaptors import ibm  # noqa: PLC0415
-            from sky.skylet.providers.ibm.vpc_provider import (
-                IBMVPCProvider,  # noqa: PLC0415
+            from sky.skylet.providers.ibm.vpc_provider import (  # noqa: PLC0415
+                IBMVPCProvider,
             )
 
             config_provider = global_user_state.get_cluster_yaml_dict(
@@ -4914,7 +4914,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         # Disable stdin to avoid ray outputs mess up the
                         # terminal with misaligned output when multithreading/
                         # multiprocessing are used.
-                        # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # noqa: E501
+                        # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264
                         stdin=subprocess.DEVNULL)
         if returncode != 0:
             if purge:
@@ -5477,7 +5477,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                 if _get_pod_config(desired_cluster_yaml_obj) != _get_pod_config(
                         cluster_yaml_obj):
-                    # noqa: E501
+
                     logger.warning(
                         f'{colorama.Fore.YELLOW}WARNING: Kubernetes pod config mismatch detected. Task requires different '
                         f'pod config than the existing cluster. The existing '

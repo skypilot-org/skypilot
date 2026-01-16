@@ -177,8 +177,8 @@ def queue_v2(
                 'status': (sky.jobs.ManagedJobStatus) of the job,
                 'cluster_resources': (str) resources of the cluster,
                 'region': (str) region of the cluster,
-                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # noqa: E501
-                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # noqa: E501
+                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks),
+                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks),
               }
             ]
         total (int): Total number of jobs after filter,
@@ -254,8 +254,8 @@ def queue(
                 'status': (sky.jobs.ManagedJobStatus) of the job,
                 'cluster_resources': (str) resources of the cluster,
                 'region': (str) region of the cluster,
-                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # noqa: E501
-                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # noqa: E501
+                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks),
+                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks),
               }
             ]
 

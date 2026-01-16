@@ -168,10 +168,9 @@ class PostgresLock(DistributedLock):
     Supports both exclusive and shared lock modes.
 
     References:
-    # noqa: E501
+
     - https://www.postgresql.org/docs/current/explicit-locking.html#ADVISORY-LOCKS
     - https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS
-    # TODO(cooperc): re-enable pylint line-too-long
     """
 
     def __init__(self,

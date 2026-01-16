@@ -98,7 +98,6 @@ DEFAULT_GCP_IMAGE_GB = 50
 USER_PORTS_FIREWALL_RULE_NAME = 'sky-ports-{}'
 
 # UX message when image not found in GCP.
-# noqa: E501
 _IMAGE_NOT_FOUND_UX_MESSAGE = (
     'Image {image_id!r} not found in GCP.\n'
     '\nTo find GCP images: https://cloud.google.com/compute/docs/images\n'
@@ -194,7 +193,7 @@ class GCP(clouds.Cloud):
         # ~/.config/gcloud/application_default_credentials.json.
         f'{_INDENT_PREFIX}  $ gcloud auth application-default login\n'
         f'{_INDENT_PREFIX}For more info: '
-        'https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # noqa: E501
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp'
     )
     _APPLICATION_CREDENTIAL_HINT = (
         'Run the following commands:\n'
@@ -202,7 +201,7 @@ class GCP(clouds.Cloud):
         f'{_INDENT_PREFIX}Or set the environment variable GOOGLE_APPLICATION_CREDENTIALS '
         'to the path of your service account key file.\n'
         f'{_INDENT_PREFIX}For more info: '
-        'https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # noqa: E501
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp'
     )
 
     _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
@@ -342,7 +341,7 @@ class GCP(clouds.Cloud):
         # The command for getting the current zone is from:
         # https://cloud.google.com/compute/docs/metadata/querying-metadata
         command_str = (
-            'curl -s http://metadata.google.internal/computeMetadata/v1/instance/zone'  # noqa: E501
+            'curl -s http://metadata.google.internal/computeMetadata/v1/instance/zone'
             ' -H "Metadata-Flavor: Google" | awk -F/ \'{print $4}\'')
         return command_str
 
@@ -916,7 +915,7 @@ class GCP(clouds.Cloud):
 
         import google.auth  # noqa: PLC0415
 
-        # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # noqa: E501
+        # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".
         credentials, project = google.auth.default()
         crm = gcp.build('cloudresourcemanager',
                         'v1',
@@ -937,7 +936,7 @@ class GCP(clouds.Cloud):
                 'The following permissions are not enabled for the current '
                 f'GCP identity ({identity_str}):\n    '
                 f'{diffs}\n    '
-                'For more details, visit: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html')  # noqa: E501
+                'For more details, visit: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html')
 
         # This code must be executed after the iam check above,
         # as the check below for api enablement itself needs:

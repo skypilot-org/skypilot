@@ -592,7 +592,7 @@ class RayCodeGen(TaskCodeGen):
                 num_gpus = acc_count
                 options.append(f'num_gpus={num_gpus}')
         options.append(
-            'scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy('  # noqa: E501
+            'scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy('
             'placement_group=pg, '
             f'placement_group_bundle_index={gang_scheduling_id})')
 

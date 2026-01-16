@@ -315,7 +315,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                     # TODO(Doyoung): Update the error message raised
                     # with the multi-host TPU support.
                     gpu_resource_key = kubernetes_utils.get_gpu_resource_key(
-                        context)  # noqa: E501
+                        context)
                     if ((f'Insufficient {gpu_resource_key}' in event_message) or
                         ('didn\'t match Pod\'s node affinity/selector'
                          in event_message) and pod.spec.node_selector):
@@ -889,7 +889,7 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
         '$(prefix_cmd) service ssh restart; '
         # Eliminate the error
         # `mesg: ttyname failed: inappropriate ioctl for device`.
-        # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # noqa: E501
+        # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device
         '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
 
     pre_init_cmd = ('set -ex; ' + check_k8s_user_sudo_cmd +
@@ -1160,7 +1160,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                        'Continuing without using nvidia RuntimeClass.\n'
                        'If you are on a K3s cluster, manually '
                        'override runtimeClassName in ~/.sky/config.yaml. '
-                       'For more details, refer to https://docs.skypilot.co/en/latest/reference/config.html')  # noqa: E501
+                       'For more details, refer to https://docs.skypilot.co/en/latest/reference/config.html')
 
     needs_gpus = False
     needs_gpus_nvidia = False
@@ -1173,7 +1173,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             kubernetes_utils.SUPPORTED_GPU_RESOURCE_KEYS['nvidia'], 0) > 0
 
     # TPU pods provisioned on GKE use the default containerd runtime.
-    # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # noqa: E501
+    # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview
     if nvidia_runtime_exists and needs_gpus_nvidia:
         pod_spec['spec']['runtimeClassName'] = 'nvidia'
 
@@ -1219,8 +1219,8 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         #  spec.affinity
         #  resourceClaims
         # Refer to the following links for more details:
-        # https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest#define_a_provisioningrequest_object # noqa: E501
-        # https://kueue.sigs.k8s.io/docs/admission-check-controllers/provisioning/#podset-merge-policy # noqa: E501
+        # https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest#define_a_provisioningrequest_object
+        # https://kueue.sigs.k8s.io/docs/admission-check-controllers/provisioning/#podset-merge-policy
         if config.count > 1:
             # For multi-node support, we put a soft-constraint to schedule
             # worker pods on different nodes than the head pod.
@@ -1258,7 +1258,7 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         # This is to prevent from non-TPU workloads from being scheduled on TPU
         # slice nodes. We need this toleration to allow the pod to be scheduled
         # on TPU nodes.
-        # Reference: https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work # noqa: E501
+        # Reference: https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work
         tpu_label = kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY
         if tpu_label in config.node_config.get('spec',
                                                {}).get('nodeSelector', {}):
@@ -1453,11 +1453,9 @@ def _delete_services(name_prefix: str,
                 if not skip_ssh_service else [name_prefix])
     for service_name in services:
         # Since we are not saving this lambda, it's a false positive.
-        # TODO(andyl): Wait for
-        # https://github.com/pylint-dev/pylint/issues/5263.
         kubernetes_utils.delete_k8s_resource_with_retry(
             delete_func=lambda: kubernetes.core_api(
-                context).delete_namespaced_service(name=service_name,
+                context).delete_namespaced_service(name=service_name,  # noqa: B023
                                                    namespace=namespace,
                                                    _request_timeout=config_lib.
                                                    DELETION_TIMEOUT),

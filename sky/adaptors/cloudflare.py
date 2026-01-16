@@ -61,7 +61,7 @@ def get_r2_credentials(boto3_session):
 
 # lru_cache() is thread-safe and it will return the same session object
 # for different threads.
-# Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache # noqa: E501
+# Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache
 @annotations.lru_cache(scope='global')
 def session():
     """Create an AWS session."""
@@ -186,12 +186,12 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
         hints += ' Run the following commands:'
         if not r2_profile_in_aws_cred():
             hints += f'\n{_INDENT_PREFIX}  $ pip install boto3'
-            hints += f'\n{_INDENT_PREFIX}  $ AWS_SHARED_CREDENTIALS_FILE={R2_CREDENTIALS_PATH} aws configure --profile r2'  # noqa: E501
+            hints += f'\n{_INDENT_PREFIX}  $ AWS_SHARED_CREDENTIALS_FILE={R2_CREDENTIALS_PATH} aws configure --profile r2'
         if not os.path.exists(accountid_path):
             hints += f'\n{_INDENT_PREFIX}  $ mkdir -p ~/.cloudflare'
-            hints += f'\n{_INDENT_PREFIX}  $ echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid'  # noqa: E501
+            hints += f'\n{_INDENT_PREFIX}  $ echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid'
         hints += f'\n{_INDENT_PREFIX}For more info: '
-        hints += 'https://docs.skypilot.co/en/latest/getting-started/installation.html#cloudflare-r2'  # noqa: E501
+        hints += 'https://docs.skypilot.co/en/latest/getting-started/installation.html#cloudflare-r2'
 
     return (False, hints) if hints else (True, hints)
 

@@ -86,7 +86,7 @@ _STORAGE_LOG_FILE_NAME = 'storage_sync.log'
 
 def get_cached_enabled_storage_cloud_names_or_refresh(
         raise_if_no_cloud_access: bool = False) -> List[str]:
-    # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # noqa: E501
+    # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943
     # is resolved by implementing separate 'enabled_storage_clouds'
     enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
         sky_cloud.CloudCapability.STORAGE)
@@ -1677,7 +1677,7 @@ class S3CompatibleStore(AbstractStore):
     def validate_name(cls, name: str) -> str:
         """Validates the name of the S3 store.
 
-        Source for rules: https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html # noqa: E501
+        Source for rules: https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html
         """
 
         def _raise_no_traceback_name_error(err_str):
@@ -2223,7 +2223,7 @@ class GcsStore(AbstractStore):
                     'Storage \'store: gcs\' specified, but '
                     'GCP access is disabled. To fix, enable '
                     'GCP by running `sky check`. '
-                    'More info: https://docs.skypilot.co/en/latest/getting-started/installation.html.')  # noqa: E501
+                    'More info: https://docs.skypilot.co/en/latest/getting-started/installation.html.')
 
     @classmethod
     def validate_name(cls, name: str) -> str:
@@ -2842,14 +2842,14 @@ class AzureBlobStore(AbstractStore):
                     'Storage "store: azure" specified, but '
                     'Azure access is disabled. To fix, enable '
                     'Azure by running `sky check`. More info: '
-                    'https://docs.skypilot.co/en/latest/getting-started/installation.html.'  # noqa: E501
+                    'https://docs.skypilot.co/en/latest/getting-started/installation.html.'
                 )
 
     @classmethod
     def validate_name(cls, name: str) -> str:
         """Validates the name of the AZ Container.
 
-        Source for rules: https://learn.microsoft.com/en-us/rest/api/storageservices/Naming-and-Referencing-Containers--Blobs--and-Metadata#container-names # noqa: E501
+        Source for rules: https://learn.microsoft.com/en-us/rest/api/storageservices/Naming-and-Referencing-Containers--Blobs--and-Metadata#container-names
 
         Args:
             name: Name of the container
@@ -2948,7 +2948,7 @@ class AzureBlobStore(AbstractStore):
         adheres to the 24-character limit, as some region names can be very
         long. Using a 4-character hash for the region helps keep the name
         concise and prevents potential conflicts.
-        Reference: https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules#microsoftstorage # noqa: E501
+        Reference: https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules#microsoftstorage
 
         Args:
             region: Name of the region to create the storage account/container.
@@ -3634,7 +3634,7 @@ class IBMCosStore(AbstractStore):
     def validate_name(cls, name: str) -> str:
         """Validates the name of a COS bucket.
 
-        Rules source: https://ibm.github.io/ibm-cos-sdk-java/com/ibm/cloud/objectstorage/services/s3/model/Bucket.html  # noqa: E501
+        Rules source: https://ibm.github.io/ibm-cos-sdk-java/com/ibm/cloud/objectstorage/services/s3/model/Bucket.html
         """
 
         def _raise_no_traceback_name_error(err_str):
@@ -3990,7 +3990,7 @@ class IBMCosStore(AbstractStore):
                         f'{colorama.Style.RESET_ALL}')
             self.bucket = self.s3_resource.Bucket(bucket_name)
 
-        except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr]  # noqa: E501
+        except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr]
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
                     f'Failed to create bucket: '
@@ -4121,14 +4121,14 @@ class OciStore(AbstractStore):
                     'Storage \'store: oci\' specified, but ' \
                     'OCI access is disabled. To fix, enable '\
                     'OCI by running `sky check`. '\
-                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # noqa: E501
+                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.'
                     )
 
     @classmethod
     def validate_name(cls, name) -> str:
         """Validates the name of the OCI store.
 
-        Source for rules: https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/managingbuckets.htm#Managing_Buckets # noqa: E501
+        Source for rules: https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/managingbuckets.htm#Managing_Buckets
         """
 
         def _raise_no_traceback_name_error(err_str):
@@ -4172,7 +4172,6 @@ class OciStore(AbstractStore):
         self.oci_config_file = oci.get_config_file()
         self.config_profile = oci_utils.oci_config.get_profile()
 
-        ## noqa: E501
         # What's compartment? See thttps://docs.oracle.com/en/cloud/foundation/cloud_architecture/governance/compartments.html
         self.compartment = query_helper.find_compartment(self.region)
         self.client = oci.get_object_storage_client(region=self.region,

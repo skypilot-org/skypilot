@@ -3,7 +3,7 @@ import textwrap
 
 VERSION = 'v1'
 # Using v2 according to
-# https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#create-curl # noqa: E501
+# https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#create-curl
 TPU_VM_VERSION = 'v2'
 
 RAY = 'ray-autoscaler'
@@ -365,7 +365,7 @@ GCP_MINIMAL_PERMISSIONS = [
 ]
 
 # A list of permissions required to run SkyPilot on GCP.
-# Keep this in sync with https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html # noqa: E501
+# Keep this in sync with https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html
 VM_MINIMAL_PERMISSIONS = [
     'compute.disks.create',
     'compute.disks.list',

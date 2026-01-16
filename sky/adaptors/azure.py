@@ -143,7 +143,7 @@ def get_client(name: str,
             # error. Therefore, we use a try-except block, first assuming the
             # URL is for a public container. If an error occurs, we retry with
             # credentials, assuming it's a private container.
-            # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35770  # noqa: E501
+            # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35770
             # Note: Checking a private container without credentials is
             # faster (~0.2s) than checking a public container with
             # credentials (~90s).
@@ -206,7 +206,7 @@ def get_client(name: str,
                     # Caught when user attempted to use private container
                     # without access rights. Raised error is handled at the
                     # upstream.
-                    # Reference: https://learn.microsoft.com/en-us/troubleshoot/azure/entra/entra-id/app-integration/error-code-aadsts50020-user-account-identity-provider-does-not-exist # noqa: E501
+                    # Reference: https://learn.microsoft.com/en-us/troubleshoot/azure/entra/entra-id/app-integration/error-code-aadsts50020-user-account-identity-provider-does-not-exist
                     if 'ERROR: AADSTS50020' in str(e):
                         with ux_utils.print_exception_no_traceback():
                             raise e
@@ -350,7 +350,7 @@ def assign_storage_account_iam_role(
     graph_client = get_client('graph')
 
     # Obtaining user's object ID to assign role.
-    # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35573 # noqa: E501
+    # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35573
     async def get_object_id() -> str:
         httpx_logger = logging.getLogger('httpx')
         original_level = httpx_logger.getEffectiveLevel()
@@ -372,7 +372,7 @@ def assign_storage_account_iam_role(
     object_id = loop.run_until_complete(get_object_id())
 
     # Defintion ID of Storage Blob Data Owner role.
-    # Reference: https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles/storage#storage-blob-data-owner # noqa: E501
+    # Reference: https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles/storage#storage-blob-data-owner
     storage_blob_data_owner_role_id = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
     role_definition_id = ('/subscriptions'
                           f'/{subscription_id}'
@@ -456,7 +456,7 @@ def get_az_resource_group(
         if account.name == storage_account_name:
             # Extract the resource group name from the account ID
             # An example of account.id would be the following:
-            # /subscriptions/{subscription_id}/resourceGroups/{resource_group_name}/providers/Microsoft.Storage/storageAccounts/{container_name} # noqa: E501
+            # /subscriptions/{subscription_id}/resourceGroups/{resource_group_name}/providers/Microsoft.Storage/storageAccounts/{container_name}
             split_account_id = account.id.split('/')
             assert len(split_account_id) == 9
             resource_group_name = split_account_id[4]
@@ -477,7 +477,7 @@ def create_security_rule(**kwargs):
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def deployment_mode():
     """Azure deployment mode."""
-    from azure.mgmt.resource.resources.models import (
-        DeploymentMode,  # noqa: PLC0415
+    from azure.mgmt.resource.resources.models import (  # noqa: PLC0415
+        DeploymentMode,
     )
     return DeploymentMode

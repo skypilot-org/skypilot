@@ -388,7 +388,7 @@ def _sqlite_supports_returning() -> bool:
     """Check if SQLite (3.35.0+) and SQLAlchemy (2.0+) support RETURNING.
 
     See https://sqlite.org/lang_returning.html and
-    https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#insert-update-delete-returning  # noqa: E501
+    https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#insert-update-delete-returning
     """
     sqlalchemy_version_parts = sqlalchemy.__version__.split('.')
     assert len(sqlalchemy_version_parts) >= 1, \

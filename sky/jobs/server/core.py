@@ -779,8 +779,8 @@ def queue(refresh: bool,
                 'region': (str) region of the cluster,
                 'user_name': (Optional[str]) job creator's user name,
                 'user_hash': (str) job creator's user hash,
-                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # noqa: E501
-                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # noqa: E501
+                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks),
+                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks),
             }
         ]
     Raises:
@@ -853,8 +853,8 @@ def queue_v2(
                     'region': (str) region of the cluster,
                     'user_name': (Optional[str]) job creator's user name,
                     'user_hash': (str) job creator's user hash,
-                    'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # noqa: E501
-                    'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # noqa: E501
+                    'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks),
+                    'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks),
                 }
             ]
         total: int, total number of jobs after filter

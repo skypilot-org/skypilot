@@ -82,7 +82,7 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
         """Gets serve status."""
         try:
             service_names, pool = (
-                serve_rpc_utils.GetServiceStatusRequestConverter.from_proto(request))  # noqa: E501
+                serve_rpc_utils.GetServiceStatusRequestConverter.from_proto(request))
             statuses = serve_utils.get_service_status_pickled(
                 service_names, pool)
             return serve_rpc_utils.GetServiceStatusResponseConverter.to_proto(
@@ -108,7 +108,7 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
         """Terminates serve"""
         try:
             service_names, purge, pool = (
-                serve_rpc_utils.TerminateServicesRequestConverter.from_proto(request))  # noqa: E501
+                serve_rpc_utils.TerminateServicesRequestConverter.from_proto(request))
             message = serve_utils.terminate_services(service_names, purge, pool)
             return servev1_pb2.TerminateServicesResponse(message=message)
         except Exception as e:  # noqa: BLE001

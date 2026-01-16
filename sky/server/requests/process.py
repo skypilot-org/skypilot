@@ -94,7 +94,7 @@ class DisposableExecutor:
     This is a workaround for Python 3.10 since `max_tasks_per_child` of
     ProcessPoolExecutor was introduced in 3.11. There is no way to control
     the worker lifetime in 3.10.
-    Ref: https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures.ProcessPoolExecutor # noqa: E501
+    Ref: https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures.ProcessPoolExecutor
     TODO(aylei): use the official `max_tasks_per_child` when upgrade to 3.11
     """
 

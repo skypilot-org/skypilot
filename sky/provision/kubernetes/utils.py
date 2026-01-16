@@ -65,7 +65,7 @@ else:
 # Please be careful when changing this.
 # When mounting, Kubernetes changes the ownership of the parent directory
 # to root:root.
-# See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.  # noqa: E501
+# See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.
 HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME = 'sky-data'
 # Path where the persistent volume for HA controller is mounted.
 # TODO(andy): Consider using dedicated path like `/var/skypilot`
@@ -1993,7 +1993,7 @@ class PodValidator:
 
         if klass in cls.PRIMITIVE_TYPES:
             return cls.__validate_primitive(data, klass)
-        elif klass == object:
+        elif klass is object:
             return cls.__validate_object(data)
         elif klass == datetime.date:
             return cls.__validate_date(data)
@@ -2450,7 +2450,7 @@ class KubernetesInstanceType:
             accelerator_type | str: Type of accelerator
         """
         pattern = re.compile(
-            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_type>[\w\d-]+):(?P<accelerator_count>\d+))?$'  # noqa: E501
+            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_type>[\w\d-]+):(?P<accelerator_count>\d+))?$'
         )
         match = pattern.match(name)
         if match:
@@ -2633,15 +2633,15 @@ def check_port_forward_mode_dependencies(
     # errors
     socat_message = (
         '`socat` is required to setup Kubernetes cloud with '
-        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # noqa: E501
+        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '
         'default networking mode and it is not installed. ')
     netcat_default_message = (
         '`nc` is required to setup Kubernetes cloud with '
-        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # noqa: E501
+        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '
         'default networking mode and it is not installed. ')
     netcat_macos_message = (
         'The default MacOS `nc` is installed. However, for '
-        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # noqa: E501
+        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '
         'default networking mode, GNU netcat is required. ')
 
     # save
@@ -3036,7 +3036,7 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
     """Converts a dictionary to a Kubernetes object.
 
     Useful for comparing two Kubernetes objects. Adapted from
-    https://github.com/kubernetes-client/python/issues/977#issuecomment-592030030  # noqa: E501
+    https://github.com/kubernetes-client/python/issues/977#issuecomment-592030030
 
     Args:
         object_dict: Dictionary representing the Kubernetes object

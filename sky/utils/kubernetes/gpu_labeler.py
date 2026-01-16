@@ -110,7 +110,7 @@ def label(context: Optional[str] = None, wait_for_completion: bool = True):
             print('Continuing without using nvidia RuntimeClass. '
                   'This may fail on K3s clusters. '
                   'For more details, refer to K3s deployment notes at: '
-                  'https://docs.skypilot.co/en/latest/reference/kubernetes/kubernetes-setup.html')  # noqa: E501
+                  'https://docs.skypilot.co/en/latest/reference/kubernetes/kubernetes-setup.html')
             nvidia_exists = False
 
         if nvidia_exists:

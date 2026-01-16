@@ -282,7 +282,7 @@ class Paperspace(clouds.Cloud):
             # attempt to make a CURL request for listing instances
             utils.PaperspaceCloudClient().list_instances()
         except (AssertionError, KeyError, utils.PaperspaceCloudError) as e:
-            # noqa: E501
+
             return False, (
                 'Failed to access Paperspace Cloud with credentials.\n    '
                 'To configure credentials, follow the instructions at: '

@@ -215,7 +215,7 @@ def _retry_on_server_unavailable(max_wait_seconds: int = 600,
                         with rich_utils.client_status(
                                 _readable_error_msg(e.message)):
                             if time.time() - start_time > max_wait_seconds:
-                                # noqa: E501
+
                                 raise exceptions.ServerTemporarilyUnavailableError(
                                     'Timeout waiting for the API server to be '
                                     f'available after {max_wait_seconds}s.') \

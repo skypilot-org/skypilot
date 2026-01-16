@@ -169,7 +169,6 @@ class PolicyInterface:
         return f'{self.__class__.__name__}'
 
 
-# noqa: E501
 class AdminPolicy(PolicyInterface):
     """Abstract interface of an admin-defined policy for all user requests.
 

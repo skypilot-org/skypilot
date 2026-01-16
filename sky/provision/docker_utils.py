@@ -309,7 +309,7 @@ class DockerInitializer:
                 # AWS ECR: Use aws ecr get-login-password for authentication
                 # ECR format: <account-id>.dkr.ecr.<region>.amazonaws.com
                 # This command uses the IAM credentials from the EC2 instance
-                # Ref: https://docs.aws.amazon.com/AmazonECR/latest/userguide/registry_auth.html # noqa: E501
+                # Ref: https://docs.aws.amazon.com/AmazonECR/latest/userguide/registry_auth.html
                 region = _extract_region_from_ecr_server(
                     docker_login_config.server)
 
@@ -398,7 +398,7 @@ class DockerInitializer:
         # alias for sudo to empty string, therefore any sudo in the following
         # commands won't fail.
         # Disable apt-get from asking user input during installation.
-        # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai  # noqa: E501
+        # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai
         self._run(
             f'echo \'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}\' '
             '>> ~/.bashrc;'
@@ -440,7 +440,7 @@ class DockerInitializer:
         # container.
         # Last command here is to eliminate the error
         # `mesg: ttyname failed: inappropriate ioctl for device`.
-        # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # noqa: E501
+        # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device
         port = constants.DEFAULT_DOCKER_PORT
         # In case the port is already configured in the sshd_config file
         # in some images, we delete it first and then append the new one.

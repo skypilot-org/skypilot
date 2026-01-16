@@ -351,7 +351,7 @@ def check_capabilities(
                 dim=True) + click.style('sky check', bold=True) + '\n' +
             click.style(
                 'If any problems remain, refer to detailed docs at: '
-                'https://docs.skypilot.co/en/latest/getting-started/installation.html',  # noqa: E501
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html',
                 dim=True))
 
     return all_workspaces_results

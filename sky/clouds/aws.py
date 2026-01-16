@@ -108,7 +108,7 @@ _EFA_DOCKER_RUN_OPTIONS = [
 ]
 
 # AWS EFA image name.
-# Refer to https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-base-gpu-ami-ubuntu-22-04.html for latest version. # noqa: E501
+# Refer to https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-base-gpu-ami-ubuntu-22-04.html for latest version.
 # TODO(hailong): may need to update the version later.
 _EFA_IMAGE_NAME = 'Deep Learning Base OSS Nvidia Driver GPU AMI' \
 ' (Ubuntu 22.04) 20250808'
@@ -288,7 +288,7 @@ class AWS(clouds.Cloud):
     # By testing, the actual limit is 256 - 8 = 248 characters
     # (our provisioner adds additional `-worker`), due to the
     # maximum length of DescribeInstances API filter value.
-    # Reference: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html # noqa: E501
+    # Reference: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html
     _MAX_CLUSTER_NAME_LEN_LIMIT = 248
 
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
@@ -301,7 +301,7 @@ class AWS(clouds.Cloud):
         f'\n{_INDENT_PREFIX}  $ aws configure'
         f'\n{_INDENT_PREFIX}  $ aws configure list  # Ensure that this shows identity is set.'
         f'\n{_INDENT_PREFIX}For more info: '
-        'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # noqa: E501
+        'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'
     )
 
     _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
@@ -346,7 +346,7 @@ class AWS(clouds.Cloud):
         help_str += (
             f'\n{cls._INDENT_PREFIX}  $ aws sso login --profile <profile_name>'
             f'\n{cls._INDENT_PREFIX}For more info: '
-            'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html'  # noqa: E501
+            'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html'
         )
         return help_str
 
@@ -497,7 +497,7 @@ class AWS(clouds.Cloud):
         image_not_found_message = (
             f'Image {image_id!r} not found in AWS region {region} - '
             f'can\'t get {log_context}.\n\n'
-            f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # noqa: E501
+            f'To find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'
             'Example: ami-0729d913a335efca7')
         max_retries = 3
         debug_message = 'no describe_images response'
@@ -641,7 +641,7 @@ class AWS(clouds.Cloud):
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         # The command for getting the current zone is from:
-        # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html  # noqa: E501
+        # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html
         command_str = (
             'TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" '
             '-H "X-aws-ec2-metadata-token-ttl-seconds: 21600"` && '
@@ -961,7 +961,7 @@ class AWS(clouds.Cloud):
                 'Failed to fetch the availability zones for the account '
                 f'{identity_str}. It is likely due to permission issues, please'
                 ' check the minimal permission required for AWS: '
-                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # noqa: E501
+                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'
                 f'\n{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
@@ -986,7 +986,7 @@ class AWS(clouds.Cloud):
                 'Failed to list buckets for the account '
                 f'{identity_str}. It is likely due to permission issues, please'
                 ' check the storage permission required for AWS: '
-                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # noqa: E501
+                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'
                 f'\n{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
@@ -1183,8 +1183,8 @@ class AWS(clouds.Cloud):
             # organization
             # 3. 'Arn' is the full path to the user, which can be reused when
             # the user is deleted and recreated.
-            # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # noqa: E501
-            # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable # noqa: E501
+            # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html
+            # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable
             user_info = sts.get_caller_identity()
             # Allow fallback to AccountId if UserId does not match, because:
             # 1. In the case where multiple IAM users belong a single root account,

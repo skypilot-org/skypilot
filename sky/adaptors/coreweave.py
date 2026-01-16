@@ -232,7 +232,7 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
                       f's3.addressing_style virtual --profile '
                       f'{COREWEAVE_PROFILE_NAME}')
         hints += f'\n{_INDENT_PREFIX}For more info: '
-        hints += 'https://docs.coreweave.com/docs/products/storage/object-storage/get-started-caios'  # noqa: E501
+        hints += 'https://docs.coreweave.com/docs/products/storage/object-storage/get-started-caios'
 
     return (False, hints) if hints else (True, hints)
 

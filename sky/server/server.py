@@ -2023,7 +2023,7 @@ async def _run_websocket_proxy(
                             '!Q',
                             message[type_size:type_size + latency_size])[0]
                         latency_seconds = avg_latency_ms / 1000
-                        metrics_utils.SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS.labels(  # noqa: E501
+                        metrics_utils.SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS.labels(
                             pid=os.getpid()).observe(latency_seconds)
                         continue
                     else:

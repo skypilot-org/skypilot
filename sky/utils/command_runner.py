@@ -305,7 +305,7 @@ def ssh_options_list(
         # behavior. This allows us to inject -E <log_file> because otherwise
         # OpenSSH does not pass the log file to the derived ProxyCommand and
         # we could only log it to stderr (with -v), which can be noisy.
-        # See: https://github.com/openssh/openssh-portable/blob/a6f8f793d427a831be1b350741faa4f34066d55f/ssh.c#L1355-L1382 # noqa: E501
+        # See: https://github.com/openssh/openssh-portable/blob/a6f8f793d427a831be1b350741faa4f34066d55f/ssh.c#L1355-L1382
         derived_proxy_command = _proxyjump_to_proxycommand(
             ssh_proxy_jump, ssh_log_file)
         logger.debug(f'--- ProxyJump: {ssh_proxy_jump} -> '

@@ -44,7 +44,7 @@ class Cudo(clouds.Cloud):
         'Install cudoctl and run the following commands:\n'
         f'{_INDENT_PREFIX}  $ cudoctl init\n'
         f'{_INDENT_PREFIX}For more info: '
-        # noqa: E501
+
         'https://docs.skypilot.co/en/latest/getting-started/installation.html')
 
     _PROJECT_HINT = (
@@ -52,7 +52,7 @@ class Cudo(clouds.Cloud):
         f'{_INDENT_PREFIX} $ cudoctl projects create my-project-name\n'
         f'{_INDENT_PREFIX} $ cudoctl init\n'
         f'{_INDENT_PREFIX}For more info: '
-        # noqa: E501
+
         'https://docs.skypilot.co/en/latest/getting-started/installation.html')
 
     _CLOUD_UNSUPPORTED_FEATURES = {

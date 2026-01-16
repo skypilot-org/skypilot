@@ -67,7 +67,7 @@ def bootstrap_instances(
         subscription_id = azure.get_subscription_id()
     # Increase the timeout to fix the Azure get-access-token (used by ray azure
     # node_provider) timeout issue.
-    # Tracked in https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110 # noqa: E501
+    # Tracked in https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
     resource_client = azure.get_client('resource', subscription_id)
     provider_config['subscription_id'] = subscription_id
     logger.info(f'Using subscription id: {subscription_id}')

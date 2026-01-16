@@ -151,8 +151,8 @@ def iam():
 
 
 def billing():
-    from nebius.api.nebius.billing import (
-        v1alpha1 as billing_v1alpha1,  # noqa: PLC0415
+    from nebius.api.nebius.billing import (  # noqa: PLC0415
+        v1alpha1 as billing_v1alpha1,
     )
     return billing_v1alpha1
 
@@ -261,7 +261,7 @@ def get_nebius_credentials(boto3_session):
 
 # lru_cache() is thread-safe and it will return the same session object
 # for different threads.
-# Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache # noqa: E501
+# Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache
 @annotations.lru_cache(scope='global')
 def session():
     """Create an AWS session."""

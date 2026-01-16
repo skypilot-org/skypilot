@@ -74,7 +74,7 @@ USEFUL_COLUMNS = [
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
 # only available in this region, but it serves pricing information for all
 # regions.
-PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv'  # noqa: E501
+PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv'
 # g6f instances have fractional GPUs, but the API returns Count: 1 under
 # GpuInfo. However, the GPU memory is properly scaled. Taking the instance GPU
 # divided by the total memory of an L4 will give us the fraction of the GPU.
@@ -97,7 +97,7 @@ def get_enabled_regions() -> Set[str]:
                         'Failed to retrieve AWS regions. '
                         'Please ensure that the `ec2:DescribeRegions` action '
                         'is enabled for your AWS account in IAM. '
-                        'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeRegions.html'  # noqa: E501
+                        'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeRegions.html'
                     ) from None
             else:
                 raise
@@ -272,7 +272,7 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
         def get_additional_columns(row) -> pd.Series:
             acc_name, acc_count = get_acc_info(row)
             # AWS p3dn.24xlarge offers a different V100 GPU.
-            # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/ # noqa: E501
+            # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/
             if row['InstanceType'] == 'p3dn.24xlarge':
                 acc_name = 'V100-32GB'
             if row['InstanceType'] == 'p4de.24xlarge':
@@ -367,7 +367,7 @@ def get_all_regions_instance_types_df(regions: Set[str]) -> 'pd.DataFrame':
 
 
 # Fetch Images
-# https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # noqa: E501
+# https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch
 # Current AMIs (we have to use different PyTorch versions for different OS as Ubuntu 18.04
 # does not have the latest PyTorch version):
 # GPU:
@@ -385,7 +385,7 @@ def get_all_regions_instance_types_df(regions: Set[str]) -> 'pd.DataFrame':
 #   Nvidia driver: 470.57.02, CUDA Version: 11.4
 #
 # Neuron (Inferentia / Trainium):
-# https://aws.amazon.com/releasenotes/aws-deep-learning-ami-base-neuron-ubuntu-20-04/  # noqa: E501
+# https://aws.amazon.com/releasenotes/aws-deep-learning-ami-base-neuron-ubuntu-20-04/
 # Deep Learning Base Neuron AMI (Ubuntu 20.04) 20240923
 # TODO(tian): find out the driver version.
 #   Neuron driver:

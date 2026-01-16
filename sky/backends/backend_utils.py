@@ -139,7 +139,7 @@ WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 # check multiple IPs because some IPs may be blocked on certain networks.
 # Fixed IP addresses are used to avoid DNS lookup blocking the check, for
 # machine with no internet connection.
-# Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # noqa: E501
+# Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python
 _TEST_IP_LIST = ['https://8.8.8.8', 'https://1.1.1.1']
 
 # Allow each CPU thread take 2 tasks.

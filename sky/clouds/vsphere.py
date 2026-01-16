@@ -290,7 +290,7 @@ class Vsphere(clouds.Cloud):
             'Run the following commands:'
             f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[vSphere]'
             f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
-            'For more details. See https://docs.skypilot.co/en/latest/getting-started/installation.html#vmware-vsphere'  # noqa: E501
+            'For more details. See https://docs.skypilot.co/en/latest/getting-started/installation.html#vmware-vsphere'
         )
         # Check pyVmomi installation.
         if not adaptors_common.can_import_modules(['pyVmomi']):

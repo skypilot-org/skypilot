@@ -318,7 +318,7 @@ class RunPod(clouds.Cloud):
             'Credentials can be set up by running: \n'
             '        $ pip install runpod \n'
             '        $ runpod config\n'
-            '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'  # noqa: E501
+            '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'
         )
 
         valid, error = cls._check_runpod_credentials()

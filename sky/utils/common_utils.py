@@ -832,7 +832,7 @@ def get_cleaned_username(username: str = '') -> str:
      4. Removing any hyphens at the end of the username
      5. Truncate the username to 63 characters, as requested by GCP labels
 
-    Dots are removed due to: https://cloud.google.com/compute/docs/labeling-resources#requirements # noqa: E501
+    Dots are removed due to: https://cloud.google.com/compute/docs/labeling-resources#requirements
 
     e.g. 1SkY-PiLot2- becomes sky-pilot2
 

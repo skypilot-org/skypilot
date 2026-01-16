@@ -159,7 +159,7 @@ class SlurmInstanceType:
             accelerator_type | str: Type of accelerator
         """
         pattern = re.compile(
-            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_type>[\w\d-]+):(?P<accelerator_count>\d+))?$'  # noqa: E501
+            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_type>[\w\d-]+):(?P<accelerator_count>\d+))?$'
         )
         match = pattern.match(name)
         if match is not None:

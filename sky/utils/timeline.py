@@ -2,7 +2,7 @@
 
 The timeline follows the trace event format defined here:
 https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
-"""  # noqa: E501
+"""
 import atexit
 import json
 import os
