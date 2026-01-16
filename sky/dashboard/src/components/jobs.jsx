@@ -1124,6 +1124,7 @@ export function ManagedJobsTable({
           {item.details ? (
             <TruncatedDetails
               text={item.details}
+              queueName={item.kueue_queue_name}
               rowId={item.id}
               expandedRowId={expandedRowId}
               setExpandedRowId={setExpandedRowId}
@@ -1401,6 +1402,7 @@ export function ManagedJobsTable({
                       {expandedRowId === item.id && (
                         <ExpandedDetailsRow
                           text={item.details}
+                          queueName={item.kueue_queue_name}
                           colSpan={totalColSpan}
                           innerRef={expandedRowRef}
                         />
@@ -1868,9 +1870,11 @@ export function ClusterJobs({
                       >
                         <TruncatedDetails
                           text={item.job || 'Unnamed job'}
+                          queueName={item.kueue_queue_name}
                           rowId={item.id}
                           expandedRowId={expandedRowId}
                           setExpandedRowId={setExpandedRowId}
+                          infra={item.full_infra || item.infra}
                         />
                       </Link>
                     </TableCell>
@@ -1900,8 +1904,10 @@ export function ClusterJobs({
                   {expandedRowId === item.id && (
                     <ExpandedDetailsRow
                       text={item.job || 'Unnamed job'}
+                      queueName={null}
                       colSpan={8}
                       innerRef={expandedRowRef}
+                      infra={item.full_infra || item.infra}
                     />
                   )}
                 </React.Fragment>
@@ -2010,7 +2016,7 @@ export function ClusterJobs({
   );
 }
 
-function ExpandedDetailsRow({ text, colSpan, innerRef }) {
+function ExpandedDetailsRow({ text, colSpan, innerRef, infra, queueName }) {
   return (
     <TableRow className="expanded-details">
       <TableCell colSpan={colSpan}>
@@ -2025,7 +2031,7 @@ function ExpandedDetailsRow({ text, colSpan, innerRef }) {
                 className="mt-1 text-sm text-gray-700"
                 style={{ whiteSpace: 'pre-wrap' }}
               >
-                {text}
+                {parseTextWithKueueLinks(text, queueName, infra)}
               </p>
             </div>
           </div>
@@ -2035,7 +2041,14 @@ function ExpandedDetailsRow({ text, colSpan, innerRef }) {
   );
 }
 
-function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
+function TruncatedDetails({
+  text,
+  rowId,
+  expandedRowId,
+  setExpandedRowId,
+  infra,
+  queueName,
+}) {
   const safeText = text || '';
   const lines = safeText.split('\n');
   const isMultiLine = lines.length > 1;
@@ -2054,7 +2067,9 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
 
   return (
     <div className="truncated-details relative max-w-full flex items-center">
-      <span className="truncate">{displayText}</span>
+      <span className="truncate">
+        {parseTextWithKueueLinks(displayText, queueName, infra)}
+      </span>
       {(isTruncated || isMultiLine) && (
         <button
           ref={buttonRef}
