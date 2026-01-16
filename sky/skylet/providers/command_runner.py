@@ -335,7 +335,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                     # If they do not, try to change ownership!
                     self.run(f'cat {mount} >/dev/null 2>&1 || '
                              f'sudo chown $(id -u):$(id -g) {mount}')
-                except Exception:
+                except Exception:  # noqa: BLE001
                     lsl_string = (self.run(
                         f'ls -l {mount}',
                         with_output=True).decode('utf-8').strip())

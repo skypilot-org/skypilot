@@ -138,7 +138,7 @@ def check_capabilities(
                     ok, reason = cloud.check_credentials(capability)
                 except exceptions.NotSupportedError:
                     return None
-                except Exception:
+                except Exception:  # noqa: BLE001
                     ok, reason = False, traceback.format_exc()
                 if not isinstance(reason, dict):
                     reason = reason.strip() if reason else None

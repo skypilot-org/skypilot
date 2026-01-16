@@ -49,7 +49,7 @@ def _filter_instances(cluster_name_on_cloud: str,
             logger.debug(f'Including instance {instance_id} '
                          f'with status {instance_status}')
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f'Error processing instance {instance_id}: {str(e)}')
             continue
 
@@ -227,7 +227,7 @@ def terminate_instances(
         try:
             utils.terminate_instance(instance_id)
             logger.info(f'Terminated instance {instance_id}')
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f'Failed to terminate instance {instance_id}: {e}')
             continue
 

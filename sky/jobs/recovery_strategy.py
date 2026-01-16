@@ -247,7 +247,7 @@ class StrategyExecutor:
                 sdk.get,
                 request_id,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.info('Failed to cancel the job on the cluster. The cluster '
                         'might be already down or the head node is preempted.'
                         '\n  Detailed exception: '
@@ -274,7 +274,7 @@ class StrategyExecutor:
                     backend_utils.refresh_cluster_status_handle,
                     self.cluster_name,
                     force_refresh_statuses=set(status_lib.ClusterStatus)))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 # If any unexpected error happens, retry the job checking
                 # loop.
                 # TODO(zhwu): log the unexpected error to usage collection
@@ -298,7 +298,7 @@ class StrategyExecutor:
                         self.backend,
                         self.cluster_name,
                         job_id=self.job_id_on_pool_cluster))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 transient_error_reason = common_utils.format_exception(e)
                 # If any unexpected error happens, retry the job checking
                 # loop.
@@ -324,7 +324,7 @@ class StrategyExecutor:
                         self.job_id_on_pool_cluster,
                         get_end_time=False)
                     return job_submitted_at
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     # If we failed to get the job timestamp, we will retry
                     # job checking loop.
                     logger.info(f'Unexpected Exception: {e}\nFailed to get '
@@ -461,7 +461,7 @@ class StrategyExecutor:
                                     try:
                                         await context_utils.to_thread(
                                             sdk.get, req)
-                                    except Exception as e:
+                                    except Exception as e:  # noqa: BLE001
                                         # we must still return a CancelledError
                                         logger.error(
                                             f'Failed to cancel the job: {e}')
@@ -502,7 +502,7 @@ class StrategyExecutor:
                                     try:
                                         await context_utils.to_thread(
                                             sdk.get, req)
-                                    except Exception as e:
+                                    except Exception as e:  # noqa: BLE001
                                         # we must still return a CancelledError
                                         logger.error(
                                             f'Failed to cancel the job: {e}')
@@ -556,7 +556,7 @@ class StrategyExecutor:
                             return None
                         logger.info('Failed to launch a cluster with error: '
                                     f'{common_utils.format_exception(e)})')
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         # If the launch fails, it will be recovered by the
                         # following code.
                         logger.info('Failed to launch a cluster with error: '
@@ -601,7 +601,7 @@ class StrategyExecutor:
                                         'Cluster handle not found or '
                                         'cached cluster info is None so'
                                         'not populating instance links')
-                            except Exception as e:
+                            except Exception as e:  # noqa: BLE001
                                 # Don't fail the launch if we can't generate
                                 # links
                                 logger.debug(

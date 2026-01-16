@@ -655,7 +655,7 @@ class OCI(clouds.Cloud):
         try:
             vms = query_helper.query_instances_by_tags(tag_filters=tag_filters,
                                                        region=region)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ClusterStatusFetchingError(
                     f'Failed to query OCI cluster {name!r} status. '

@@ -377,7 +377,7 @@ class Seeweb(clouds.Cloud):
         try:
             result = seeweb_adaptor.check_compute_credentials()
             return result, None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return False, str(e)
 
     @classmethod
@@ -386,7 +386,7 @@ class Seeweb(clouds.Cloud):
         try:
             result = seeweb_adaptor.check_storage_credentials()
             return result, None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return False, str(e)
 
     @classmethod

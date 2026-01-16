@@ -464,7 +464,7 @@ class IBM(clouds.Cloud):
         try:
             ibm.client()
             return True, None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return (False, f'{str(e)}' + help_str)
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

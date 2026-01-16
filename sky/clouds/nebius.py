@@ -459,7 +459,7 @@ class Nebius(clouds.Cloud):
             profile = nebius.sync_call(
                 profile_client.get(nebius.iam().GetProfileRequest(),
                                    timeout=nebius.READ_TIMEOUT))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             raise exceptions.CloudUserIdentityError(
                 f'Error getting Nebius profile: {e}')
         if profile.user_profile is not None:

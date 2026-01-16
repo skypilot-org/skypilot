@@ -152,7 +152,7 @@ async def stdin_to_websocket(reader: asyncio.StreamReader,
             async with websocket_lock:
                 await websocket.send(data)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f'Error in stdin_to_websocket: {e}', file=sys.stderr)
     finally:
         async with websocket_lock:

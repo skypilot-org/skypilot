@@ -586,7 +586,7 @@ class AWS(clouds.Cloud):
         try:
             kv_cache.add_or_update_cache_entry(kv_cache_key, str(image_size),
                                                time.time() + day_in_seconds)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             # Catch the error and continue.
             # Failure to cache the result is not critical to the
             # success of this function.
@@ -628,7 +628,7 @@ class AWS(clouds.Cloud):
         try:
             kv_cache.add_or_update_cache_entry(kv_cache_key, root_device_name,
                                                time.time() + day_in_seconds)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             # Catch the error and continue.
             # Failure to cache the result is not critical to the
             # success of this function.
@@ -1241,7 +1241,7 @@ class AWS(clouds.Cloud):
                 raise exceptions.CloudUserIdentityError(
                     'AWS access token is expired.'
                     f' {cls._sso_credentials_help_str(expired=True)}') from None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     f'Failed to get AWS user.\n'

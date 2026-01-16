@@ -19,7 +19,7 @@ def get_ssh_node_pools() -> Dict[str, Any]:
     """Get all SSH Node Pool configurations."""
     try:
         return core.get_all_pools()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise fastapi.HTTPException(
             status_code=500,
             detail=
@@ -32,7 +32,7 @@ def update_ssh_node_pools(pools_config: Dict[str, Any]) -> Dict[str, str]:
     try:
         core.update_pools(pools_config)
         return {'status': 'success'}
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Failed to update SSH Node Pools:'
                                     f' {common_utils.format_exception(e)}')
@@ -50,7 +50,7 @@ def delete_ssh_node_pool(pool_name: str) -> Dict[str, str]:
                 detail=f'SSH Node Pool `{pool_name}` not found')
     except fastapi.HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise fastapi.HTTPException(status_code=500,
                                     detail='Failed to delete SSH Node Pool: '
                                     f'{common_utils.format_exception(e)}')
@@ -74,7 +74,7 @@ async def upload_ssh_key(request: fastapi.Request) -> Dict[str, str]:
         return {'status': 'success', 'key_path': key_path}
     except fastapi.HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise fastapi.HTTPException(
             status_code=500,
             detail=
@@ -86,7 +86,7 @@ def list_ssh_keys() -> List[str]:
     """List available SSH keys."""
     try:
         return core.list_ssh_keys()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         exception_msg = common_utils.format_exception(e)
         raise fastapi.HTTPException(
             status_code=500, detail=f'Failed to list SSH keys: {exception_msg}')
@@ -111,7 +111,7 @@ async def deploy_ssh_node_pool(request: fastapi.Request,
             'request_id': request.state.request_id,
             'message': f'SSH Node Pool `{pool_name}` deployment started'
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise fastapi.HTTPException(status_code=500,
                                     detail=f'Failed to deploy SSH Node Pool: '
                                     f'{common_utils.format_exception(e)}')
@@ -137,7 +137,7 @@ async def deploy_ssh_node_pool_general(
             'request_id': request.state.request_id,
             'message': f'SSH Node Pool `{pool_name}` deployment started'
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise fastapi.HTTPException(status_code=500,
                                     detail=f'Failed to deploy SSH Node Pool: '
                                     f'{common_utils.format_exception(e)}')
@@ -162,7 +162,7 @@ async def down_ssh_node_pool(request: fastapi.Request,
             'request_id': request.state.request_id,
             'message': f'SSH Node Pool `{pool_name}` teardown started'
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise fastapi.HTTPException(
             status_code=500,
             detail=f'Failed to tear down SSH Node Pool: '
@@ -191,7 +191,7 @@ async def down_ssh_node_pool_general(
             'request_id': request.state.request_id,
             'message': f'SSH Node Pool `{pool_name}` teardown started'
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise fastapi.HTTPException(
             status_code=500,
             detail=f'Failed to tear down SSH Node Pool: '
@@ -224,7 +224,7 @@ def get_ssh_node_pool_status(pool_name: str) -> Dict[str, str]:
             'status': 'Ready' if is_ready else 'Not Ready',
             'reason': cleaned_reason
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise fastapi.HTTPException(
             status_code=500,
             detail=f'Failed to get SSH Node Pool status: '

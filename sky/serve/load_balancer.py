@@ -154,7 +154,7 @@ class SkyServeLoadBalancer:
                     constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS)
                 # Await those tasks after the interval to avoid blocking.
                 await asyncio.gather(*close_client_tasks)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error(f'An error occurred when syncing with '
                              f'the controller: {e}'
                              f'\nTraceback: {traceback.format_exc()}')

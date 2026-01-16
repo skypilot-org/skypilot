@@ -199,7 +199,7 @@ class ClientWrapper:
                 # logger may already be cleaned up during __del__ at shutdown
                 if logger is not None:
                     logger.debug(f'No client found for {self._client}')
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             if logger is not None:
                 logger.debug(f'Error closing Kubernetes client: {e}')
 

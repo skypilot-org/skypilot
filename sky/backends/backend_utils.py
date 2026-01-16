@@ -1101,7 +1101,7 @@ def write_cluster_config(
         try:
             config_dict['config_hash'] = _deterministic_cluster_yaml_hash(
                 tmp_yaml_path)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f'Failed to calculate config_hash: {e}')
             logger.debug('Full exception:', exc_info=e)
         return config_dict
@@ -1131,7 +1131,7 @@ def write_cluster_config(
     try:
         config_dict['config_hash'] = _deterministic_cluster_yaml_hash(
             tmp_yaml_path)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning('Failed to calculate config_hash: '
                        f'{common_utils.format_exception(e)}')
         logger.debug('Full exception:', exc_info=e)
@@ -2082,7 +2082,7 @@ def _query_cluster_status_via_cloud_api(
                          f'{cluster_name_in_hint} '
                          f'status:\n{pprint.pformat(node_status_dict)}')
             node_statuses = list(node_status_dict.values())
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ClusterStatusFetchingError(
                     f'Failed to query {cloud_name} cluster '
@@ -2434,7 +2434,7 @@ def _update_cluster_status(
             if ray_status_details is None:
                 ray_status_details = str(e)
             logger.debug(common_utils.format_exception(e))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             # This can be raised by `external_ssh_ports()`, due to the
             # underlying call to kubernetes API.
             ray_status_details = str(e)
@@ -2590,7 +2590,7 @@ def _update_cluster_status(
                     cluster_info = _query_cluster_info_via_cloud_api(handle)
                     is_head_node_alive = cluster_info.get_head_instance(
                     ) is not None
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.debug(
                         f'Failed to get cluster info for {cluster_name!r}: '
                         f'{common_utils.format_exception(e)}')
@@ -2629,7 +2629,7 @@ def _update_cluster_status(
                             word = 'autostopped' if noun == 'autostop' else 'autodowned'
                             logger.debug(f'The cluster is likely {word}.')
                             reset_local_autostop = False
-                    except (Exception, SystemExit) as e:
+                    except (Exception, SystemExit) as e:  # noqa: BLE001
                         success = False
                         logger.debug(f'Failed to reset autostop. Due to '
                                      f'{common_utils.format_exception(e)}')

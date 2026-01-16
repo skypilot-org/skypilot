@@ -554,7 +554,7 @@ def _redact_secrets_values(argv: List[str]) -> List[str]:
                 i += 1
 
         return result
-    except Exception:
+    except Exception:  # noqa: BLE001
         # If anything goes wrong with redaction, return original argv
         # This ensures the command can still execute
         return argv or []
@@ -1134,7 +1134,7 @@ def release_memory():
             libc = ctypes.CDLL('libc.so.6')
             return libc.malloc_trim(0)
         return 0
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f'Failed to release memory: '
                      f'{format_exception(e)}')
         return 0

@@ -344,7 +344,7 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
             df['NeuronInfo'] = df['NeuronInfo'].apply(map_neuroninfo)
             df['GpuInfo'] = df['GpuInfo'].fillna(df['NeuronInfo'])
         df = df[USEFUL_COLUMNS]
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(traceback.format_exc())
         print(f'{region} failed with {e}', file=sys.stderr)
         return region

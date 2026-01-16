@@ -523,7 +523,7 @@ class DockerInitializer:
             try:
                 self._run('nvidia-smi', log_err_when_fail=False)
                 return run_options + ['--runtime=nvidia', '--gpus all']
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug(
                     'Nvidia Container Runtime is present in the docker image'
                     'specified, but no GPUs found on the cluster. It should '
@@ -554,7 +554,7 @@ class DockerInitializer:
                 DEFAULT_OBJECT_STORE_MAX_MEMORY_BYTES,
             )
             return run_options + [f'--shm-size="{shm_size}b"']
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(
                 f'Received error while trying to auto-compute SHM size {e}')
             return run_options

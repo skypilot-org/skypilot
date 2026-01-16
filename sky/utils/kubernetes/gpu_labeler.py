@@ -104,7 +104,7 @@ def label(context: Optional[str] = None, wait_for_completion: bool = True):
         try:
             nvidia_exists = kubernetes_utils.check_nvidia_runtime_class(
                 context=context)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print('Error occurred while checking for nvidia RuntimeClass: '
                   f'{str(e)}')
             print('Continuing without using nvidia RuntimeClass. '

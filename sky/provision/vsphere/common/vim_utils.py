@@ -266,7 +266,7 @@ def delete_object(content, mo):
     try:
         wait_for_tasks(content, [mo.Destroy()])
         logger.info('Deleted {0}'.format(mo._GetMoId()))
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.info('Unexpected error while deleting managed object {0}'.format(
             mo._GetMoId()))
         return False
@@ -283,7 +283,7 @@ def poweron_vm(content, mo):
     try:
         wait_for_tasks(content, [mo.PowerOn()])
         logger.info('{0} powered on successfully'.format(mo._GetMoId()))
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.info('Unexpected error while powering on vm {0}'.format(
             mo._GetMoId()))
         return False
@@ -324,7 +324,7 @@ def poweroff_vm(content, mo):
     try:
         wait_for_tasks(content, [mo.PowerOff()])
         logger.info('{0} powered off successfully'.format(mo._GetMoId()))
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.info('Unexpected error while powering off vm {0}'.format(
             mo._GetMoId()))
         return False

@@ -56,7 +56,7 @@ class SkyletEvent:
             logger.debug(f'{self.__class__.__name__} triggered')
             try:
                 self._run()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 # Keep the skylet running even if an event fails.
                 logger.error(f'{self.__class__.__name__} error: {e}')
                 with ux_utils.enable_traceback():
@@ -119,7 +119,7 @@ class ManagedJobEvent(SkyletEvent):
                         os.remove(
                             os.path.expanduser(
                                 scheduler.JOB_CONTROLLER_PID_PATH))
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     # in case we get perm issues or something is messed up, just
                     # ignore it and assume the process is dead
                     logger.error(

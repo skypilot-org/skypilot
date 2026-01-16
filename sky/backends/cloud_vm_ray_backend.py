@@ -261,7 +261,7 @@ def _is_message_too_long(returncode: int,
                       encoding='utf-8') as f:
                 content = f.read()
                 return _check_output_for_match_str(content)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             # We don't crash the setup if we cannot read the log file.
             # Instead, we should retry the setup with dumping the script
             # to a file to be safe.
@@ -997,7 +997,7 @@ class RetryingVmProvisioner(object):
             need_provision = to_provision.cloud.check_quota_available(
                 to_provision)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             need_provision = True
             logger.info(f'Error occurred when trying to check quota. '
                         f'Proceeding assuming quotas are available. Error: '
@@ -1252,7 +1252,7 @@ class RetryingVmProvisioner(object):
                     FailoverCloudErrorHandlerV2.update_blocklist_on_error(
                         self._blocked_resources, to_provision, region, zones, e)
                     continue
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     # NOTE: We try to cleanup the cluster even if the previous
                     # cluster does not exist. Also we are fast at
                     # cleaning up clusters now if there is no existing node..
@@ -2328,7 +2328,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                         tunnel = self._open_and_update_skylet_tunnel()
                         return grpc.insecure_channel(f'localhost:{tunnel.port}',
                                                      options=grpc_options)
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         # Failed to open tunnel, release the lock and retry.
                         logger.warning(f'Failed to open tunnel for cluster '
                                        f'{self.cluster_name!r}: '
@@ -2397,7 +2397,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 subprocess_utils.kill_children_processes(proc.pid)
         except psutil.NoSuchProcess:
             pass
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(
                 f'Failed to cleanup SSH tunnel process {tunnel_info.pid}: {e}')
 
@@ -4165,7 +4165,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # controller is trying to terminate a cluster.
                 requests_lib.kill_cluster_requests(handle.cluster_name,
                                                    exclude_request_to_kill)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 # We allow the failure to kill other launch requests, because
                 # it is not critical to the cluster teardown.
                 logger.warning(
@@ -4724,7 +4724,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """
         try:
             handle.close_skylet_ssh_tunnel()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             # Not critical to the cluster teardown, just log a warning.
             logger.warning(
                 'Failed to close Skylet SSH tunnel for cluster '
@@ -4743,7 +4743,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # controller is trying to terminate a cluster.
             requests_lib.kill_cluster_requests(handle.cluster_name,
                                                exclude_request_to_kill)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             # We allow the failure to kill other launch requests, because
             # it is not critical to the cluster teardown.
             logger.warning(
@@ -4875,7 +4875,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(
                     ':', 1)[-1]
                 vpc_found = True
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.critical('failed to locate vpc for ibm cloud')
                 returncode = -1
 
@@ -5245,7 +5245,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     lambda: SkyletClient(handle.get_grpc_channel()
                                         ).is_autostopping(request))
                 return response.is_autostopping
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 # The cluster may have been terminated, causing the gRPC call
                 # to timeout and fail.
                 logger.debug(f'Failed to check if cluster is autostopping: {e}')
@@ -5537,7 +5537,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 vol_name = vol_mount.get('VolumeNameOnCloud')
                                 if vol_name:
                                     existing_volume_names.add(vol_name)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     # If we can't get the existing volume mounts, log debug
                     # and skip the warning check
                     logger.debug(f'Failed to check existing volume mounts: {e}',

@@ -328,7 +328,7 @@ class HyperbolicClient:
                     return False
 
                 time.sleep(5)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning(
                     f'Error while waiting for instance {instance_id}: {str(e)}')
                 time.sleep(5)

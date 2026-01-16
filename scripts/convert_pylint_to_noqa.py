@@ -21,15 +21,15 @@ PYLINT_TO_NOQA = {
     'anomalous-backslash-in-string': 'W605',
     'invalid-string-quote': 'Q000',
     'inconsistent-quotes': 'Q000',
+    # Blind except rules - BLE enabled in Ruff
+    'broad-except': 'BLE001',
+    'broad-exception-caught': 'BLE001',
+    'W0703': 'BLE001',  # Same as broad-except
 }
 
 # Pylint rules that should be removed entirely (not enforced by Ruff)
 # These comments served a purpose with pylint but are not needed with Ruff
 RULES_TO_REMOVE = {
-    # Broad exception rules - not checked by Ruff by default
-    'broad-except',
-    'broad-exception-caught',
-    'W0703',  # Same as broad-except
     # Import rules - not checked by Ruff
     'import-outside-toplevel',
     'wrong-import-position',  # E402 is per-file ignored where needed

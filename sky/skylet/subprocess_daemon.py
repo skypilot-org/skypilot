@@ -54,7 +54,7 @@ def get_pgid_if_leader(pid) -> Optional[int]:
             print(f'Process group {pgid} is the leader.')
             return pgid
         return None
-    except Exception:
+    except Exception:  # noqa: BLE001
         # Process group is only available in UNIX.
         return None
 
@@ -64,7 +64,7 @@ def kill_process_group(pgid: int) -> bool:
     try:
         print(f'Terminating process group {pgid}...')
         os.killpg(pgid, signal.SIGTERM)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
     # Wait 30s for the process group to exit gracefully.
@@ -73,7 +73,7 @@ def kill_process_group(pgid: int) -> bool:
     try:
         print(f'Force killing process group {pgid}...')
         os.killpg(pgid, signal.SIGKILL)
-    except Exception:
+    except Exception:  # noqa: BLE001
         pass
 
     return True

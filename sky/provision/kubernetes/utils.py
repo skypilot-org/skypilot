@@ -1864,7 +1864,7 @@ def check_credentials(context: Optional[str],
                        'is stable.')
     except ValueError as e:
         return False, common_utils.format_exception(e)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, ('An error occurred: '
                        f'{common_utils.format_exception(e, use_bracket=True)}')
 
@@ -2117,7 +2117,7 @@ def check_pod_config(pod_config: dict) \
         PodValidator.validate(pod_config)
     except exceptions.KubernetesValidationError as e:
         return False, f'Validation error in {".".join(e.path)}: {str(e)}'
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, f'Unexpected error: {str(e)}'
     return True, None
 
@@ -3699,7 +3699,7 @@ def _gpu_resource_key_helper(context: Optional[str]) -> str:
         for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
             if any(gpu_key in node.status.capacity for node in nodes):
                 return gpu_key
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning(f'Failed to load kube config or query nodes: {e}. '
                        'Falling back to default GPU resource key.')
     return gpu_resource_key
@@ -3830,7 +3830,7 @@ def format_kubeconfig_exec_auth_with_cache(kubeconfig_path: str) -> str:
     try:
         format_kubeconfig_exec_auth(config, path)
         return path
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # There may be problems with kubeconfig, but the user is not actually
         # using Kubernetes (or SSH Node Pools)
         logger.warning(

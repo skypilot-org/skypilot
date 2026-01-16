@@ -45,7 +45,7 @@ def _load_cache() -> Optional[dict]:
             cache = json.load(f)
             _version_cache = cache
             return cache
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.debug(f'Failed to load version cache: {e}')
         return None
 
@@ -61,7 +61,7 @@ def _save_cache(cache: dict) -> None:
     try:
         with open(VERSION_CACHE_FILE, 'w', encoding='utf-8') as f:
             json.dump(cache, f)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.debug(f'Failed to save version cache: {e}')
 
 
@@ -84,7 +84,7 @@ def _check_pypi_release() -> Optional[str]:
             latest_version = data.get('info', {}).get('version')
             if latest_version:
                 return latest_version
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.debug(f'Failed to check pypi.org for release: {e}')
     return None
 
@@ -155,7 +155,7 @@ async def check_versions_periodically():
             # otherwise fetch from PyPI)
             get_latest_versions()
             logger.debug('Version check completed')
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug(f'Error in periodic version check: {e}')
 
         # Sleep for 1 day (in seconds)

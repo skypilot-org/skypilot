@@ -94,7 +94,7 @@ class PermissionService:
             logger.debug(
                 'Plugin module not available, skipping plugin RBAC rules')
             return {}
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f'Failed to get plugin RBAC rules: {e}')
             return {}
 

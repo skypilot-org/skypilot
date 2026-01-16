@@ -235,7 +235,7 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
             else:
                 try:
                     response_details = response.json().get('detail')
-                except Exception:
+                except Exception:  # noqa: BLE001
                     response_details = response.content
                 error_msg = (
                     f'Failed to upload chunk: {params.chunk_index + 1} / '

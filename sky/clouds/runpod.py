@@ -340,7 +340,7 @@ class RunPod(clouds.Cloud):
             # Try to list instances to validate the API key works
             runpod_utils.list_instances()
             return True, None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             from sky.adaptors import runpod
             error_msg = common_utils.format_exception(e, use_bracket=True)
             if isinstance(e, runpod.runpod.error.QueryError):

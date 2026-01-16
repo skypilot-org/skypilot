@@ -1010,18 +1010,18 @@ class SSHCommandRunner(CommandRunner):
                 except socket.timeout:
                     logger.debug(
                         'Timeout waiting for interactive auth connection')
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.error(f'Error in Unix socket connection: '
                                  f'{common_utils.format_exception(e)}')
                 finally:
                     if conn is not None:
                         try:
                             conn.close()
-                        except Exception:
+                        except Exception:  # noqa: BLE001
                             pass
                     try:
                         os.close(pty_m_fd)
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         pass
 
             unix_sock_thread = threading.Thread(

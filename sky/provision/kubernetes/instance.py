@@ -236,7 +236,7 @@ def _get_pvc_binding_status(namespace: str, context: Optional[str],
                     # Take the most recent event message
                     pending_info += f' - {event_messages[-1]}'
                 pending_pvcs.append((pvc_name, pending_info))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug(f'Failed to get PVC {pvc_name} status: {e}')
             continue
 
@@ -451,7 +451,7 @@ def _cluster_had_autoscale_event(namespace, context, search_start) -> bool:
         return _detect_cluster_event_reason_occurred(namespace, context,
                                                      search_start,
                                                      'TriggeredScaleUp')
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.debug(f'Error occurred while detecting cluster autoscaler: {e}')
         return False
 
@@ -482,7 +482,7 @@ def _cluster_maybe_autoscaling(namespace, context, search_start) -> bool:
         return _detect_cluster_event_reason_occurred(namespace, context,
                                                      search_start,
                                                      'FailedScheduling')
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.debug(f'Error occurred while detecting cluster autoscaler: {e}')
         return False
 
@@ -605,7 +605,7 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
         _raise_pod_scheduling_errors(namespace, context, new_nodes)
     except config_lib.KubernetesError:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise config_lib.KubernetesError(
             'An error occurred while trying to fetch the reason '
             'for pod scheduling failure. '
@@ -1752,7 +1752,7 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
     """
     try:
         pod_events = _get_pod_events(context, namespace, pod_name)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.debug(f'Failed to get events for pod {pod_name}: {e}')
         return None
 
@@ -1990,7 +1990,7 @@ def list_namespaced_pod(context: Optional[str], namespace: str,
             raise exceptions.ClusterStatusFetchingError(
                 f'Failed to query cluster {cluster_name_on_cloud!r} status. ' +
                 msg) from None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterStatusFetchingError(
                 f'Failed to query {identity} {cluster_name_on_cloud!r} '

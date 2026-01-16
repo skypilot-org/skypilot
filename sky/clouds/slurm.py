@@ -218,7 +218,7 @@ class Slurm(clouds.Cloud):
                     # Filter by zone (partition) if specified
                     partitions = [p for p in partitions if p == zone]
                 zones = [clouds.Zone(p) for p in partitions]
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug(f'Failed to get partitions for {cluster}: {e}')
                 zones = []
 
@@ -488,7 +488,7 @@ class Slurm(clouds.Cloud):
                 f'{cls._INDENT_PREFIX}For more info: '
                 'https://docs.skypilot.co/en/latest/getting-started/'
                 'installation.html#slurm-installation')
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return (False, 'Failed to load SSH configuration from '
                     f'{slurm_utils.DEFAULT_SLURM_PATH}: '
                     f'{common_utils.format_exception(e)}.')
@@ -523,7 +523,7 @@ class Slurm(clouds.Cloud):
                     f'{cls._SSH_CONFIG_KEY_MAPPING.get(key, key.capitalize())} '
                     'is missing, please check your ~/.slurm/config '
                     'and try again.')
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 error_msg = (f'Credential check failed: '
                              f'{common_utils.format_exception(e)}')
                 ctx2text[cluster] = f'disabled. {error_msg}'

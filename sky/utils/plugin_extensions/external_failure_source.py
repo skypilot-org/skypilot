@@ -146,7 +146,7 @@ class ExternalFailureSource:
         try:
             return cls._get_func(cluster_name=cluster_name,
                                  cluster_hash=cluster_hash)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f'Failed to get cluster failures: {e}')
             return []
 
@@ -169,6 +169,6 @@ class ExternalFailureSource:
         try:
             return cls._clear_func(cluster_name=cluster_name,
                                    cluster_hash=cluster_hash)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f'Failed to clear cluster failures: {e}')
             return []

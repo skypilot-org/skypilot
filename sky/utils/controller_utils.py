@@ -470,7 +470,7 @@ def download_and_stream_job_log(
             # job_ids all represent the same logical managed job.
             job_ids=job_ids,
             local_dir=local_dir)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # We want to avoid crashing the controller. sync_down_logs() is pretty
         # complicated and could crash in various places (creating remote
         # runners, executing remote code, decoding the payload, etc.). So, we

@@ -340,7 +340,7 @@ class PostgresLock(DistributedLock):
                     self._connection.invalidate()
                 else:
                     self._connection.close()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 if invalidate:
                     logger.debug(
                         f'Failed to invalidate postgres connection: {e}')
@@ -409,7 +409,7 @@ def _detect_lock_type() -> str:
         engine = global_user_state.initialize_and_get_db()
         if engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
             return 'postgres'
-    except Exception:
+    except Exception:  # noqa: BLE001
         # Fall back to filelock if database detection fails
         pass
 

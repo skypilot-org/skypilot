@@ -314,7 +314,7 @@ def ha_recovery_for_consolidation_mode() -> None:
                         logger.debug(message)
                         f.write(message)
                         continue
-                except Exception:
+                except Exception:  # noqa: BLE001
                     # _controller_process_alive may raise if psutil fails; we
                     # should not crash the recovery logic because of this.
                     message = ('Error checking controller pid '

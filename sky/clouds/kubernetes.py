@@ -938,7 +938,7 @@ class Kubernetes(clouds.Cloud):
                 assert check_result[1] is not None
                 return False, (_red_color('disabled.') +
                                _dim_color(f' Reason: {check_result[1]}'))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return False, _red_color(str(e))
 
     @classmethod

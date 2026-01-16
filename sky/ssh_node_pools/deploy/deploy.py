@@ -220,7 +220,7 @@ def deploy_multiple_clusters(
                 f'{colorama.Fore.CYAN}Completed {action} for cluster: {cluster_name}{colorama.Style.RESET_ALL}'
             )
             successful_clusters.append(cluster_name)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             reason = str(e)
             failed_clusters.append((cluster_name, reason))
             action = 'cleaning' if cleanup else 'deploying'
@@ -675,7 +675,7 @@ def deploy_single_cluster(cluster_name,
                             logger.error(
                                 f'{colorama.Fore.RED}Error: '
                                 f'Certificate file is empty{RESET_ALL}')
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         logger.error(f'{colorama.Fore.RED}'
                                      f'Error processing certificate data: {e}'
                                      f'{RESET_ALL}')
@@ -761,7 +761,7 @@ def deploy_single_cluster(cluster_name,
                         else:
                             logger.error(f'{colorama.Fore.RED}Error: '
                                          f'Key file is empty{RESET_ALL}')
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         logger.error(f'{colorama.Fore.RED}'
                                      f'Error processing key data: {e}'
                                      f'{RESET_ALL}')

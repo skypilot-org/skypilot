@@ -292,7 +292,7 @@ class Paperspace(clouds.Cloud):
             return False, ('Failed to verify Paperspace Cloud credentials. '
                            'Check your network connection '
                            'and try again.')
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return False, str(e)
 
         return True, None

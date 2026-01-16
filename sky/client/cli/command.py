@@ -1434,7 +1434,7 @@ def _handle_jobs_queue_request(
             if pool_status_request_id is not None:
                 try:
                     return sdk.stream_and_get(pool_status_request_id)
-                except Exception:
+                except Exception:  # noqa: BLE001
                     # If getting pool status fails, just continue without it
                     return None
             return None
@@ -1486,7 +1486,7 @@ def _handle_jobs_queue_request(
                     records[0]['status'] == status_lib.ClusterStatus.STOPPED):
                 controller = controller_utils.Controllers.JOBS_CONTROLLER.value
                 msg = controller.default_hint_if_non_existent
-        except Exception:
+        except Exception:  # noqa: BLE001
             # This is to an best effort to find the latest controller status to
             # print more helpful message, so we can ignore any exception to
             # print the original error.
@@ -1497,7 +1497,7 @@ def _handle_jobs_queue_request(
                 'issues. Try again later. '
                 f'Details: {common_utils.format_exception(e, use_bracket=True)}'
             )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         msg = ''
         if env_options.Options.SHOW_DEBUG_INFO.get():
             msg += traceback.format_exc()
@@ -1570,7 +1570,7 @@ def _handle_services_request(
                 controller = (
                     controller_utils.Controllers.SKY_SERVE_CONTROLLER.value)
                 msg = controller.default_hint_if_non_existent
-        except Exception:
+        except Exception:  # noqa: BLE001
             # This is to an best effort to find the latest controller status to
             # print more helpful message, so we can ignore any exception to
             # print the original error.
@@ -1579,7 +1579,7 @@ def _handle_services_request(
             msg = (f'Failed to fetch {noun} statuses due to connection issues. '
                    'Please try again later. Details: '
                    f'{common_utils.format_exception(e, use_bracket=True)}')
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         msg = (f'Failed to fetch {noun} statuses: '
                f'{common_utils.format_exception(e, use_bracket=True)}')
     else:
@@ -2482,7 +2482,7 @@ def cancel(
             matching_clusters = [
                 c for c in all_clusters if fnmatch.fnmatch(c, cluster)
             ]
-        except Exception:
+        except Exception:  # noqa: BLE001
             raise click.UsageError(
                 f'No clusters match pattern: {cluster!r}') from None
     else:
@@ -4558,7 +4558,7 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):
     for name, request_id in request_ids.items():
         try:
             _async_call_or_wait(request_id, async_call, 'sky.storage')
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f'{colorama.Fore.RED}Error deleting storage {name}: '
                          f'{common_utils.format_exception(e, use_bracket=True)}'
                          f'{colorama.Style.RESET_ALL}')
@@ -4808,7 +4808,7 @@ def volumes_delete(
         try:
             _async_call_or_wait(volumes_sdk.delete(names, purge=purge),
                                 async_call, 'sky.volumes.delete')
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f'{colorama.Fore.RED}Error deleting volumes {names}: '
                          f'{str(e)}{colorama.Style.RESET_ALL}')
 
@@ -5141,7 +5141,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
         def get_pool_status():
             try:
                 return managed_jobs.pool_status(pool_names=None)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 # If pool_status fails, we'll just skip the worker information
                 return None
 
@@ -5635,7 +5635,7 @@ def jobs_pool_down(
                         f'anyway.{colorama.Style.RESET_ALL}')
                 else:
                     click.echo('All jobs cancelled.')
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # If API call fails, log warning but continue with pool down
         logger.warning(
             f'Failed to check for running jobs in pool(s): {pool_names!r}: {e}.'

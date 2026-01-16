@@ -272,7 +272,7 @@ class RestfulAdminPolicy(PolicyTemplate):
         try:
             mutated_user_request = MutatedUserRequest.decode(
                 response.json(), user_request)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.RestfulPolicyError(
                     f'Failed to decode response from admin policy URL '

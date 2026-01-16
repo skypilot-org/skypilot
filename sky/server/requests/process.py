@@ -84,7 +84,7 @@ def _disposable_worker(fn, initializer, initargs, result_queue, args, kwargs):
             initializer(*initargs)
         result = fn(*args, **kwargs)
         result_queue.put(result)
-    except BaseException as e:
+    except BaseException as e:  # noqa: BLE001
         result_queue.put(e)
 
 

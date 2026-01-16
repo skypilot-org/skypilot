@@ -315,7 +315,7 @@ class Vsphere(clouds.Cloud):
             return False, ('Failed to verify Vsphere credentials. '
                            'Check your network connection '
                            'and try again.')
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001
             error_message = str(err)
             return False, (error_message)  # TODO: Add url of guide.
         return True, None

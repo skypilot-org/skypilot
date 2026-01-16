@@ -74,7 +74,7 @@ def _parse_api_error(response: Any) -> Tuple[str, bool]:
             return error_message, False
 
         return str(error_data), False
-    except Exception:
+    except Exception:  # noqa: BLE001
         return f'HTTP {response.status_code} {response.reason}', False
 
 
@@ -360,14 +360,14 @@ def parse_ssh_connection(ssh_connection: Any) -> Tuple[Optional[str], int]:
     if isinstance(ssh_connection, str):
         try:
             tokens = shlex.split(ssh_connection)
-        except Exception:
+        except Exception:  # noqa: BLE001
             tokens = [ssh_connection]
     elif isinstance(ssh_connection, list):
         for elem in ssh_connection:
             if isinstance(elem, str):
                 try:
                     tokens.extend(shlex.split(elem))
-                except Exception:
+                except Exception:  # noqa: BLE001
                     tokens.append(elem)
     else:
         # Unknown type; return defaults.

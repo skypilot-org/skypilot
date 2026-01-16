@@ -32,7 +32,7 @@ def _get_git_commit():
         if changes:
             commit_hash += '-dirty'
         return commit_hash
-    except Exception:
+    except Exception:  # noqa: BLE001
         return _SKYPILOT_COMMIT_SHA
 
 

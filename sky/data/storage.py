@@ -3246,7 +3246,7 @@ class AzureBlobStore(AbstractStore):
             logger.info(
                 f'Deleted objects from sub path {self._bucket_sub_path} '
                 f'in container {self.name}.')
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(
                 f'Failed to delete objects from sub path '
                 f'{self._bucket_sub_path} in container {self.name}. '

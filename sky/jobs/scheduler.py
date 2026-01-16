@@ -236,7 +236,7 @@ def maybe_start_controllers(from_scheduler: bool = False) -> None:
                             # that update_managed_jobs_statuses won't think they
                             # have failed.
                             state.reset_jobs_for_recovery()
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001
                             logger.error(f'Failed to stop the api server: {e}')
                             pass
                         else:

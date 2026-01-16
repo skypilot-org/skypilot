@@ -351,7 +351,7 @@ async def _describe_task_transition_failure(session: sql_async.AsyncSession,
             status = row['status']
             end_at = row['end_at']
             details += f' Status: {status}, End time: {end_at}.'
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         details += f' Error fetching task details: {exc}'
     return details
 
@@ -2922,7 +2922,7 @@ async def job_event_retention_daemon():
         except asyncio.CancelledError:
             logger.info('Job event retention daemon cancelled')
             break
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f'Error running job event retention daemon: {e}')
 
         await asyncio.sleep(JOB_EVENT_DAEMON_INTERVAL_SECONDS)

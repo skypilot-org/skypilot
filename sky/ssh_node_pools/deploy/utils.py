@@ -80,7 +80,7 @@ def get_effective_host_ip(hostname: str) -> str:
             for line in result.stdout.splitlines():
                 if line.startswith('hostname '):
                     return line.split(' ', 1)[1].strip()
-    except Exception:
+    except Exception:  # noqa: BLE001
         pass
     return hostname  # Return the original hostname if lookup fails
 

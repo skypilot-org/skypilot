@@ -424,7 +424,7 @@ def _clean_yaml(yaml_info: Dict[str, Optional[str]]):
                     message = (f'Error: Unexpected type for {redact_type}: '
                                f'{type(contents)}')
                     logger.debug(message)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 message = (
                     f'Error: Failed to dump lines for {redact_type.upper()}')
                 logger.debug(message)
@@ -462,7 +462,7 @@ def _send_local_messages():
             # in normal case.
             try:
                 _send_to_loki(msg_type)
-            except (Exception, SystemExit) as e:
+            except (Exception, SystemExit) as e:  # noqa: BLE001
                 logger.debug(f'Usage logging for {msg_type.value} '
                              f'exception caught: {type(e)}({e})')
 

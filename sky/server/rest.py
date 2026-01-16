@@ -255,7 +255,7 @@ def handle_server_unavailable(response: 'requests.Response') -> None:
         response_data = response.json()
         if 'detail' in response_data:
             error_msg = response_data['detail']
-    except Exception:
+    except Exception:  # noqa: BLE001
         error_msg = handle_response_text(response)
 
     with ux_utils.print_exception_no_traceback():
@@ -316,12 +316,12 @@ async def handle_server_unavailable_async(
         response_data = await response.json()
         if 'detail' in response_data:
             error_msg = response_data['detail']
-    except Exception:
+    except Exception:  # noqa: BLE001
         try:
             text = await response.text()
             if text:
                 error_msg = text
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
 
     with ux_utils.print_exception_no_traceback():

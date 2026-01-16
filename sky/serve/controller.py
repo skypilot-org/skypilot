@@ -97,7 +97,7 @@ class SkyServeController:
                         assert isinstance(scaling_option.target,
                                           int), scaling_option
                         self._replica_manager.scale_down(scaling_option.target)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 # No matter what error happens, we should keep the
                 # monitor running.
                 logger.error('Error in autoscaler: '
@@ -198,7 +198,7 @@ class SkyServeController:
                                                 update_mode=update_mode)
                 return responses.JSONResponse(content={'message': 'Success'},
                                               status_code=200)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 exception_str = common_utils.format_exception(e)
                 logger.error(f'Error in update_service: {exception_str}')
                 return responses.JSONResponse(content={

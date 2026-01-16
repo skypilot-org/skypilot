@@ -76,7 +76,7 @@ class SSH(kubernetes.Kubernetes):
                             f'ssh-{cluster_name}'
                             for cluster_name in ssh_config.keys()
                         ]
-            except Exception:
+            except Exception:  # noqa: BLE001
                 # If there's an error reading the file, return empty list
                 pass
 
@@ -198,7 +198,7 @@ class SSH(kubernetes.Kubernetes):
         # Get SSH contexts
         try:
             existing_allowed_contexts = cls.existing_allowed_contexts()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return (False, f'Failed to get SSH contexts: {str(e)}')
 
         if not existing_allowed_contexts:
@@ -233,7 +233,7 @@ class SSH(kubernetes.Kubernetes):
         # Get SSH contexts
         try:
             existing_allowed_contexts = cls.existing_allowed_contexts()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return (False, f'Failed to get SSH contexts: {str(e)}')
 
         if not existing_allowed_contexts:

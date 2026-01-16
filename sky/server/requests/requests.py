@@ -1218,7 +1218,7 @@ async def requests_gc_daemon():
         except asyncio.CancelledError:
             logger.info('Requests GC daemon cancelled')
             break
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f'Error running requests GC daemon: {e}'
                          f'traceback: {traceback.format_exc()}')
         # Run the daemon at most once every hour to avoid too frequent

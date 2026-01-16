@@ -326,7 +326,7 @@ class JobController:
 
                 exit_codes = json.loads(stdout.strip())
                 return exit_codes
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug(f'Failed to retrieve job exit codes: {e}')
             return None
         return None
@@ -607,7 +607,7 @@ class JobController:
                     success_end_time = await context_utils.to_thread(
                         managed_job_utils.try_to_get_job_end_time,
                         self._backend, cluster_name, job_id_on_pool_cluster)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning(
                         f'Failed to get job end time: '
                         f'{common_utils.format_exception(e)}',
@@ -640,7 +640,7 @@ class JobController:
                         await context_utils.to_thread(
                             self._download_log_and_stream, task_id, handle,
                             job_id_on_pool_cluster)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     # We don't want to crash here, so just log and continue.
                     logger.warning(
                         f'Failed to download and stream logs: '
@@ -942,7 +942,7 @@ class JobController:
             # below.
             cancelled = True
             raise
-        except (Exception, SystemExit) as e:
+        except (Exception, SystemExit) as e:  # noqa: BLE001
             logger.error(
                 f'Unexpected error in JobsController run for task {task_id}')
             with ux_utils.enable_traceback():
@@ -1050,7 +1050,7 @@ class ControllerManager:
                             core.cancel(cluster_name=cluster_name,
                                         job_ids=[job_id_on_pool_cluster],
                                         _try_cancel_if_cluster_is_init=True)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 error = e
                 logger.warning(
                     f'Failed to terminate cluster {cluster_name}: {e}')
@@ -1074,7 +1074,7 @@ class ControllerManager:
                     'issues.')
             try:
                 backend.teardown_ephemeral_storage(task)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 error = e
                 logger.warning(f'Failed to teardown ephemeral storage: {e}')
                 # we continue to try cleaning up whatever else we can.
@@ -1093,7 +1093,7 @@ class ControllerManager:
                             shutil.rmtree(path)
                         else:
                             os.remove(path)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning(
                         f'Failed to clean up file mount {file_mount}: {e}')
 
@@ -1106,7 +1106,7 @@ class ControllerManager:
             # most things in this function are blocking
             try:
                 await context_utils.to_thread(task_cleanup, task, job_id)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 error = e
 
         if error is not None:
@@ -1152,7 +1152,7 @@ class ControllerManager:
                 else:  # pragma: no cover - defensive
                     logger.error('Context is None, cannot set environment '
                                  'variables')
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error(
                     'Failed to load environment variables for job %s: '
                     '%s', job_id, e)
@@ -1197,7 +1197,7 @@ class ControllerManager:
                 await self._cleanup(job_id, pool=pool)
                 logger.info(
                     f'Cluster of managed job {job_id} has been cleaned up.')
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 failure_reason = ('Failed to clean up: '
                                   f'{common_utils.format_exception(e)}')
                 await managed_job_state.set_failed_async(
@@ -1333,7 +1333,7 @@ class ControllerManager:
             try:
                 waiting_job = await managed_job_state.get_waiting_job_async(
                     pid=self._pid, pid_started_at=self._pid_started_at)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error(f'Failed to get waiting job: {e}')
                 await asyncio.sleep(5)
                 continue
@@ -1399,7 +1399,7 @@ async def main(controller_uuid: str):
     gc_thread.start()
     try:
         await asyncio.gather(cancel_job_task, monitor_loop_task)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f'Controller server crashed: {e}')
         sys.exit(1)
 

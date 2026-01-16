@@ -232,7 +232,7 @@ def get_all_volumes_usedby(
                     field_selector=field_selector,
                     label_selector=label_selector,
                     _request_timeout=kubernetes.API_TIMEOUT)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.debug(f'Failed to get pods in namespace {namespace} '
                              f'in context {context}: {e}')
                 # Mark all volumes in this namespace as failed

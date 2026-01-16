@@ -63,7 +63,7 @@ class Volume:
         try:
             vt = (volume_lib.VolumeType(vol_type_val)
                   if vol_type_val is not None else None)
-        except Exception:
+        except Exception:  # noqa: BLE001
             vt = None
 
         if vt is None:

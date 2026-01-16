@@ -378,7 +378,7 @@ def verify_oci_bucket(name: str) -> bool:
         # Try to get the bucket
         client.get_bucket(namespace_name=namespace, bucket_name=name)
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001
         # If any exception occurs (bucket not found, permission issues, etc.),
         # return False
         return False
@@ -992,7 +992,7 @@ def verify_coreweave_bucket(name: str, retry: int = 0) -> bool:
             else:
                 logger.debug(
                     f'Unexpected error checking CoreWeave bucket {name}: {e}')
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug(
                 f'Unexpected error checking CoreWeave bucket {name}: {e}')
 
