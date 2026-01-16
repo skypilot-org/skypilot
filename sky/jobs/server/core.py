@@ -328,8 +328,8 @@ def launch(
         # through serialization. Without this, each task would be re-optimized
         # independently on the controller, potentially ending up on different
         # infras even with SAME_INFRA placement.
-        # TODO(zhwu): make the optimizer aware of multiple jobs directly during the
-        # re-optimization, instead of independentally.
+        # TODO(zhwu): make the optimizer aware of multiple jobs directly during
+        # the re-optimization, instead of independently.
         for task_ in dag.tasks:
             if task_.best_resources is not None:
                 best_cloud = task_.best_resources.cloud

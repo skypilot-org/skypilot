@@ -103,8 +103,8 @@ run: echo world
 
                 assert dag.is_job_group() is True
                 assert dag.name == 'test-group'
-                assert dag.placement == dag_lib.JobGroupPlacement.SAME_INFRA
-                assert dag.execution == dag_lib.JobGroupExecution.PARALLEL
+                assert dag.placement == dag_lib.DagPlacement.SAME_INFRA
+                assert dag.execution == dag_lib.DagExecution.PARALLEL
                 assert len(dag.tasks) == 2
                 assert dag.tasks[0].name == 'job1'
                 assert dag.tasks[1].name == 'job2'
@@ -186,14 +186,14 @@ class TestDagJobGroup:
         dag = dag_lib.Dag()
         assert dag.is_job_group() is False
 
-    def test_dag_set_job_group(self):
-        """Test setting DAG as JobGroup."""
+    def test_set_dag_config(self):
+        """Test setting DAG placement and execution mode."""
         dag = dag_lib.Dag()
-        dag.set_job_group(dag_lib.JobGroupPlacement.SAME_INFRA,
-                          dag_lib.JobGroupExecution.PARALLEL)
+        dag.set_dag_config(dag_lib.DagPlacement.SAME_INFRA,
+                           dag_lib.DagExecution.PARALLEL)
         assert dag.is_job_group() is True
-        assert dag.placement == dag_lib.JobGroupPlacement.SAME_INFRA
-        assert dag.execution == dag_lib.JobGroupExecution.PARALLEL
+        assert dag.placement == dag_lib.DagPlacement.SAME_INFRA
+        assert dag.execution == dag_lib.DagExecution.PARALLEL
 
 
 class TestJobGroupNetworking:
@@ -502,7 +502,7 @@ class TestOptimizeSameInfraRegion:
     """
 
     def test_find_common_infras_with_regions(self):
-        """Test that _find_common_infras correctly identifies region-specific infras."""
+        """Test _find_common_infras correctly identifies region-specific infras."""
         from sky.optimizer import Optimizer
 
         # Create mock clouds

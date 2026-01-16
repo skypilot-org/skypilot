@@ -9,15 +9,22 @@ if typing.TYPE_CHECKING:
     from sky import task
 
 
-class JobGroupPlacement(enum.Enum):
-    """Placement mode for JobGroups."""
-    # All jobs run on same K8s/Slurm cluster or cloud AZ
+class DagPlacement(enum.Enum):
+    """Placement mode for DAGs with multiple tasks.
+
+    This controls where tasks in a multi-task DAG are placed relative to
+    each other.
+    """
+    # All tasks run on same K8s/Slurm cluster or cloud AZ
     SAME_INFRA = 'SAME_INFRA'
 
 
-class JobGroupExecution(enum.Enum):
-    """Execution mode for JobGroups."""
-    PARALLEL = 'parallel'  # All jobs start in parallel
+class DagExecution(enum.Enum):
+    """Execution mode for DAGs with multiple tasks.
+
+    This controls how tasks in a multi-task DAG are executed.
+    """
+    PARALLEL = 'parallel'  # All tasks start in parallel
 
 
 class Dag:
@@ -43,10 +50,9 @@ class Dag:
         self.policy_applied: bool = False
         self.pool: Optional[str] = None
 
-        # JobGroup fields
-        self._is_job_group: bool = False
-        self.placement: Optional[JobGroupPlacement] = None
-        self.execution: Optional[JobGroupExecution] = None
+        # Placement and execution mode for multi-task DAGs
+        self.placement: Optional[DagPlacement] = None
+        self.execution: Optional[DagExecution] = None
 
     def add(self, task: 'task.Task') -> None:
         self.graph.add_node(task)
@@ -79,13 +85,17 @@ class Dag:
         return self.graph
 
     def is_job_group(self) -> bool:
-        """Check if this DAG represents a JobGroup."""
-        return self._is_job_group
+        """Check if this DAG represents a JobGroup.
 
-    def set_job_group(self, placement: 'JobGroupPlacement',
-                      execution: 'JobGroupExecution') -> None:
-        """Mark this DAG as a JobGroup with the given configuration."""
-        self._is_job_group = True
+        A DAG is a JobGroup if it has parallel execution and SAME_INFRA
+        placement. This is derived from the placement and execution settings.
+        """
+        return (self.execution == DagExecution.PARALLEL and
+                self.placement == DagPlacement.SAME_INFRA)
+
+    def set_dag_config(self, placement: 'DagPlacement',
+                       execution: 'DagExecution') -> None:
+        """Configure this DAG with the given placement and execution mode."""
         self.placement = placement
         self.execution = execution
 

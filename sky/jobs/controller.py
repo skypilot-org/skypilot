@@ -997,7 +997,7 @@ class JobController:
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 logger.info(f'Job {task.name} succeeded')
-                end_time = await context_utils.to_thread(
+                end_time = await asyncio.to_thread(
                     managed_job_utils.try_to_get_job_end_time, self._backend,
                     cluster_name, job_id_on_cluster)
                 await managed_job_state.set_succeeded_async(
@@ -1007,9 +1007,8 @@ class JobController:
                     callback_func=callback_func)
 
                 try:
-                    await context_utils.to_thread(self._download_log_and_stream,
-                                                  task_id, handle,
-                                                  job_id_on_cluster)
+                    await asyncio.to_thread(self._download_log_and_stream,
+                                            task_id, handle, job_id_on_cluster)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.warning(f'Failed to download logs: {e}')
 
@@ -1022,7 +1021,7 @@ class JobController:
 
             if job_status in job_lib.JobStatus.user_code_failure_states():
                 logger.error(f'Job {task.name} failed: {job_status}')
-                end_time = await context_utils.to_thread(
+                end_time = await asyncio.to_thread(
                     managed_job_utils.try_to_get_job_end_time, self._backend,
                     cluster_name, job_id_on_cluster)
 
@@ -1040,9 +1039,8 @@ class JobController:
                     callback_func=callback_func)
 
                 try:
-                    await context_utils.to_thread(self._download_log_and_stream,
-                                                  task_id, handle,
-                                                  job_id_on_cluster)
+                    await asyncio.to_thread(self._download_log_and_stream,
+                                            task_id, handle, job_id_on_cluster)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.warning(f'Failed to download logs: {e}')
 
@@ -1060,7 +1058,7 @@ class JobController:
                 return False
 
             # Check cluster status to detect preemption
-            (cluster_status, handle) = await context_utils.to_thread(
+            (cluster_status, handle) = await asyncio.to_thread(
                 backend_utils.refresh_cluster_status_handle,
                 cluster_name,
                 force_refresh_statuses=set(status_lib.ClusterStatus))
@@ -1102,7 +1100,7 @@ class JobController:
                 callback_func=callback_func)
 
             # Update handle after recovery
-            handle = await context_utils.to_thread(
+            handle = await asyncio.to_thread(
                 global_user_state.get_handle_from_cluster_name, cluster_name)
 
             # Update networking for all nodes after recovery
@@ -1114,7 +1112,7 @@ class JobController:
                 t_cluster = managed_job_utils.generate_managed_job_cluster_name(
                     t_name,
                     self._job_id) if self._pool is None else cluster_name
-                t_handle = await context_utils.to_thread(
+                t_handle = await asyncio.to_thread(
                     global_user_state.get_handle_from_cluster_name, t_cluster)
                 updated_handles.append((t, t_handle))
 
@@ -1193,7 +1191,7 @@ class JobController:
                 cluster_name, _ = await (
                     managed_job_state.get_pool_submit_info_async(self._job_id))
 
-            handle = await context_utils.to_thread(
+            handle = await asyncio.to_thread(
                 global_user_state.get_handle_from_cluster_name, cluster_name)
 
             if cluster_name is not None:

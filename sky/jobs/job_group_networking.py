@@ -232,21 +232,26 @@ def _generate_hosts_entries(
 async def _inject_hosts_on_node(
     runner: 'command_runner.CommandRunner',
     hosts_content: str,
+    job_group_name: str,
 ) -> bool:
     """Inject /etc/hosts entries on a single node.
+
+    Also creates a marker file to signal that networking setup is complete.
 
     Args:
         runner: CommandRunner for the target node.
         hosts_content: Content to append to /etc/hosts.
+        job_group_name: Name of the JobGroup (for marker file).
 
     Returns:
         True if successful, False otherwise.
     """
     # pylint: disable=invalid-string-quote
     escaped_content = hosts_content.replace("'", "'\\''")  # noqa: Q000
+    marker_file = get_network_ready_marker_path(job_group_name)
     cmd = (
         f"echo '{escaped_content}' | "  # noqa: Q000
-        'sudo tee -a /etc/hosts > /dev/null')
+        f'sudo tee -a /etc/hosts > /dev/null && touch {marker_file}')
     # pylint: enable=invalid-string-quote
 
     try:
@@ -278,7 +283,8 @@ def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]],
     if not dns_mappings:
         return ''
 
-    mapping_pairs = ' '.join(f'{dns}:{hostname}' for dns, hostname in dns_mappings)
+    mapping_pairs = ' '.join(
+        f'{dns}:{hostname}' for dns, hostname in dns_mappings)
 
     # Note: job_group_name is validated at YAML load time to be shell-safe
     script = textwrap.dedent(f"""\
@@ -391,10 +397,13 @@ async def _start_k8s_dns_updater_on_node(
         # Uses nohup with a subshell to fully detach from kubectl exec.
         # After a brief sleep, pgrep confirms the process is running.
         # Use 0.5s sleep to ensure process is visible on loaded systems.
+        # Also create the marker file to signal networking setup is initiated.
+        marker_file = get_network_ready_marker_path(job_group_name)
         run_cmd = (f'chmod +x {script_path} && '
                    f'(nohup {script_path} < /dev/null > {log_path} 2>&1 &) && '
                    f'sleep 0.5 && '
-                   f'pgrep -f "{process_id}" > /dev/null')
+                   f'pgrep -f "{process_id}" > /dev/null && '
+                   f'touch {marker_file}')
         logger.info(f'Starting DNS updater in background (log: {log_path})...')
         returncode, _, stderr = await loop.run_in_executor(
             None,
@@ -494,7 +503,8 @@ class NetworkConfigurator:
                         runner, k8s_dns_mappings, job_group_name)
                     setup_tasks.append((coro, task.name, node_idx, True))
                 elif ssh_hosts_content:
-                    coro = _inject_hosts_on_node(runner, ssh_hosts_content)
+                    coro = _inject_hosts_on_node(runner, ssh_hosts_content,
+                                                 job_group_name)
                     setup_tasks.append((coro, task.name, node_idx, False))
                 logger.debug(
                     f'Queued networking setup for {task.name}-{node_idx}')
@@ -618,12 +628,32 @@ def _make_env_var_name(job_name: str) -> str:
     return f'SKYPILOT_JOBGROUP_HOST_{safe_name}'
 
 
+def get_network_ready_marker_path(job_group_name: str) -> str:
+    """Get the path to the networking ready marker file.
+
+    This marker file is created by Phase 3 (setup_job_group_networking)
+    after /etc/hosts entries are set up. The wait script checks for this
+    file before starting the hostname resolution timeout.
+
+    Args:
+        job_group_name: Name of the JobGroup.
+
+    Returns:
+        Path to the marker file.
+    """
+    return f'/tmp/skypilot-jobgroup-network-ready-{job_group_name}'
+
+
 def generate_wait_for_networking_script(job_group_name: str,
                                         other_job_names: List[str]) -> str:
     """Generate a bash script to wait for network setup.
 
     This script should be prepended to task.setup to ensure networking
     is ready before the task starts.
+
+    The script has two phases:
+    1. Wait for the networking ready marker file (created by Phase 3)
+    2. Wait for all hostnames to be resolvable
 
     Args:
         job_group_name: Name of the JobGroup.
@@ -642,43 +672,76 @@ def generate_wait_for_networking_script(job_group_name: str,
 
     hostname_list = ' '.join(hostnames)
     # Note: job_group_name is validated at YAML load time to be shell-safe
+    marker_file = get_network_ready_marker_path(job_group_name)
     updater_log = (f'/tmp/skypilot-jobgroup-dns-updater-'
                    f'{job_group_name}.log')
     updater_process = f'skypilot-jobgroup-dns-updater-{job_group_name}'
 
+    # TODO(zhwu): The current handling is not robust against the case where
+    # network setup fails. The job will continue but may get stuck if it
+    # depends on networking. We should make the job group automatically
+    # recover (e.g., re-trigger network setup or restart the job) if the
+    # network fails to initialize properly.
     wait_script = textwrap.dedent(f"""
-        # Wait for JobGroup networking to be ready
+        # Wait for JobGroup networking to be ready (best-effort, non-blocking)
+        # If networking fails, we continue anyway to allow job group recovery
         echo "[SkyPilot] Waiting for network setup..."
-        echo "[SkyPilot] Waiting for hostnames: {hostname_list}"
-        HOSTNAMES="{hostname_list}"
-        MAX_WAIT=300  # 5 minutes
-        ELAPSED=0
-        UPDATER_LOG="{updater_log}"
-        UPDATER_PROCESS="{updater_process}"
-        for hostname in $HOSTNAMES; do
-          while ! getent hosts "$hostname" >/dev/null 2>&1; do
-            if [ $ELAPSED -ge $MAX_WAIT ]; then
-              echo "[SkyPilot] Error: Network setup timed out for \\"$hostname\\" after ${{ELAPSED}}s"
-              echo "[SkyPilot] DNS updater running: $(pgrep -f "$UPDATER_PROCESS" > /dev/null && echo 'yes' || echo 'no')"
-              echo "[SkyPilot] DNS updater log exists: $([ -f "$UPDATER_LOG" ] && echo 'yes' || echo 'no')"
-              echo "[SkyPilot] Hosts file entries:"
-              cat /etc/hosts | grep -i jobgroup || echo "(none)"
-              if [ -f "$UPDATER_LOG" ]; then
-                echo "[SkyPilot] DNS updater log (last 20 lines):"
-                tail -20 "$UPDATER_LOG"
-              fi
-              exit 1
-            fi
-            if [ $(($ELAPSED % 30)) -eq 0 ]; then
-              echo "[SkyPilot] Still waiting for $hostname (${{ELAPSED}}s elapsed)..."
-              echo "[SkyPilot] DNS updater running: $(pgrep -f "$UPDATER_PROCESS" > /dev/null && echo 'yes' || echo 'no')"
-            fi
-            sleep 2
-            ELAPSED=$((ELAPSED + 2))
-          done
-          echo "[SkyPilot] Hostname $hostname is now resolvable"
+        NETWORK_READY=true
+
+        # Phase 1: Wait for networking setup to be initiated by controller
+        # This marker file is created after Phase 3 sets up /etc/hosts
+        MARKER_FILE="{marker_file}"
+        MARKER_WAIT=600  # 10 minutes to wait for Phase 3 to start
+        MARKER_ELAPSED=0
+        echo "[SkyPilot] Waiting for networking initialization marker..."
+        while [ ! -f "$MARKER_FILE" ]; do
+          if [ $MARKER_ELAPSED -ge $MARKER_WAIT ]; then
+            echo "[SkyPilot] Warning: Networking setup not initiated after ${{MARKER_ELAPSED}}s"
+            echo "[SkyPilot] Continuing without full network setup (job group may recover later)"
+            NETWORK_READY=false
+            break
+          fi
+          if [ $(($MARKER_ELAPSED % 60)) -eq 0 ] && [ $MARKER_ELAPSED -gt 0 ]; then
+            echo "[SkyPilot] Still waiting for networking initialization (${{MARKER_ELAPSED}}s elapsed)..."
+          fi
+          sleep 5
+          MARKER_ELAPSED=$((MARKER_ELAPSED + 5))
         done
-        echo "[SkyPilot] Network is ready!"
+
+        if [ "$NETWORK_READY" = "true" ]; then
+          echo "[SkyPilot] Networking setup initiated, waiting for hostnames..."
+
+          # Phase 2: Wait for all hostnames to be resolvable
+          echo "[SkyPilot] Waiting for hostnames: {hostname_list}"
+          HOSTNAMES="{hostname_list}"
+          MAX_WAIT=300  # 5 minutes
+          ELAPSED=0
+          UPDATER_LOG="{updater_log}"
+          UPDATER_PROCESS="{updater_process}"
+          for hostname in $HOSTNAMES; do
+            while ! getent hosts "$hostname" >/dev/null 2>&1; do
+              if [ $ELAPSED -ge $MAX_WAIT ]; then
+                echo "[SkyPilot] Warning: Network setup timed out for \\"$hostname\\" after ${{ELAPSED}}s"
+                echo "[SkyPilot] DNS updater running: $(pgrep -f "$UPDATER_PROCESS" > /dev/null && echo 'yes' || echo 'no')"
+                echo "[SkyPilot] Continuing without full network setup (job group may recover later)"
+                NETWORK_READY=false
+                break 2  # Break out of both loops
+              fi
+              if [ $(($ELAPSED % 30)) -eq 0 ]; then
+                echo "[SkyPilot] Still waiting for $hostname (${{ELAPSED}}s elapsed)..."
+              fi
+              sleep 2
+              ELAPSED=$((ELAPSED + 2))
+            done
+            if [ "$NETWORK_READY" = "true" ]; then
+              echo "[SkyPilot] Hostname $hostname is now resolvable"
+            fi
+          done
+        fi
+
+        if [ "$NETWORK_READY" = "true" ]; then
+          echo "[SkyPilot] Network is ready!"
+        fi
     """)
 
     return wait_script.strip()

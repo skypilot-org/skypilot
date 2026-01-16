@@ -1072,7 +1072,7 @@ class Optimizer:
                 f'Placement: {placement.value if placement else "default"}')
 
         # For SAME_INFRA, find common infrastructure
-        if placement == dag_lib.JobGroupPlacement.SAME_INFRA:
+        if placement == dag_lib.DagPlacement.SAME_INFRA:
             return Optimizer._optimize_same_infra(dag, minimize,
                                                   blocked_resources, quiet)
         else:

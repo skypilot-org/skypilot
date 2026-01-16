@@ -488,21 +488,21 @@ def _load_job_group(
 
     # Parse placement and execution modes
     try:
-        placement = dag_lib.JobGroupPlacement(placement_str)
+        placement = dag_lib.DagPlacement(placement_str)
     except ValueError as e:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'Invalid placement mode: {placement_str}. '
-                f'Valid options: {[p.value for p in dag_lib.JobGroupPlacement]}'
+                f'Valid options: {[p.value for p in dag_lib.DagPlacement]}'
             ) from e
 
     try:
-        execution = dag_lib.JobGroupExecution(execution_str)
+        execution = dag_lib.DagExecution(execution_str)
     except ValueError as e:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'Invalid execution mode: {execution_str}. '
-                f'Valid options: {[e.value for e in dag_lib.JobGroupExecution]}'
+                f'Valid options: {[e.value for e in dag_lib.DagExecution]}'
             ) from e
 
     # Parse job definitions
@@ -545,9 +545,9 @@ def _load_job_group(
                                                   secrets_overrides)
             task.name = job_name
 
-    # Set JobGroup properties after context manager
+    # Set DAG placement and execution properties after context manager
     dag.name = group_name
-    dag.set_job_group(placement, execution)
+    dag.set_dag_config(placement, execution)
 
     logger.info(f'Loaded JobGroup "{group_name}" with {len(dag.tasks)} jobs: '
                 f'{[t.name for t in dag.tasks]}')
