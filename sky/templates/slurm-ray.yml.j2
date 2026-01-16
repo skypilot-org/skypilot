@@ -118,7 +118,7 @@ setup_commands:
     # This runs on both host and container; only install when root (container).
     if [ "$(id -u)" = "0" ]; then
       DROPBEAR_VERSION=2025.89
-      PACKAGES="socat curl"
+      PACKAGES="socat"
       if ! /usr/local/bin/dropbear -V 2>&1 | grep -q "$DROPBEAR_VERSION"; then
         cd /tmp
         if command -v apt-get >/dev/null 2>&1; then
