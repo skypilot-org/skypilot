@@ -52,6 +52,7 @@ from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.slurm import utils as slurm_utils
 from sky.serve import constants as serve_constants
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
@@ -62,6 +63,7 @@ from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import cluster_utils
 from sky.utils import command_runner
+from sky.utils.command_runner import CommandStage
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import context_utils
@@ -3651,7 +3653,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     runner.rsync(source=setup_sh_path,
                                  target=target_dir,
                                  up=True,
-                                 stream_logs=False)
+                                 stream_logs=False,
+                                 stage=CommandStage.EXEC)
 
             # Always dump the full setup script to the persistent path first
             # In high availability mode, we need to dump the full setup script
@@ -3803,7 +3806,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 head_runner.rsync(source=fp.name,
                                   target=script_path,
                                   up=True,
-                                  stream_logs=False)
+                                  stream_logs=False,
+                                  stage=CommandStage.EXEC)
 
         mkdir_code = f'mkdir -p {remote_log_dir} && touch {remote_log_path}'
         encoded_script = shlex.quote(codegen)
@@ -4364,6 +4368,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     target=os.path.expanduser(local_log_dir),
                     up=False,
                     stream_logs=False,
+                    stage=CommandStage.EXEC,
                 )
             except exceptions.CommandError as e:
                 if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
@@ -4648,6 +4653,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         target=f'{local_log_dir}/controller.log',
                         up=False,
                         stream_logs=False,
+                        stage=CommandStage.EXEC,
                     )
                 except exceptions.CommandError as e:
                     if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
@@ -5330,6 +5336,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             require_outputs=require_outputs,
             separate_stderr=separate_stderr,
             source_bashrc=source_bashrc,
+            stage=CommandStage.EXEC,
             **kwargs,
         )
 
@@ -6003,7 +6010,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             slurm_job_id = head_instance.tags.get('job_id')
             assert (slurm_job_id
                     is not None), ('job_id tag not found in head instance')
-            return task_codegen.SlurmCodeGen(slurm_job_id=slurm_job_id)
+            container_image = handle.launched_resources.extract_docker_image()
+            container_name = None
+            if container_image is not None:
+                container_name = slurm_utils.pyxis_container_name(
+                    handle.cluster_name_on_cloud)
+
+            return task_codegen.SlurmCodeGen(
+                slurm_job_id,
+                container_name,
+            )
         else:
             return task_codegen.RayCodeGen()
 

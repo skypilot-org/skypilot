@@ -326,6 +326,17 @@ class SshMode(enum.Enum):
     LOGIN = 2
 
 
+class CommandStage(enum.Enum):
+    """Stage of cluster lifecycle for command execution.
+
+    Controls which targets are used for run/rsync operations.
+    Only affects SlurmCommandRunner with containers; ignored by other runners.
+    """
+    DEFAULT = 0
+    SETUP = 1
+    EXEC = 2
+
+
 class CommandRunner:
     """Runner for commands to be executed on the cluster."""
 
@@ -337,7 +348,7 @@ class CommandRunner:
     def node_id(self) -> str:
         return '-'.join(str(x) for x in self.node)
 
-    def _get_remote_home_dir(self) -> str:
+    def get_remote_home_dir(self) -> str:
         # Use pattern matching to extract home directory.
         # Some container images print MOTD when login shells start, which can
         # contaminate command output. We use a unique pattern to extract the
@@ -416,7 +427,7 @@ class CommandRunner:
         command_str = ' '.join(command)
         return command_str
 
-    def _get_remote_home_dir_with_retry(
+    def get_remote_home_dir_with_retry(
         self,
         max_retry: int,
         get_remote_home_dir: Callable[[], str],
@@ -491,7 +502,7 @@ class CommandRunner:
                     pathlib.Path(target).expanduser().resolve())
             else:
                 if target.startswith('~'):
-                    remote_home_dir = self._get_remote_home_dir_with_retry(
+                    remote_home_dir = self.get_remote_home_dir_with_retry(
                         max_retry=max_retry,
                         get_remote_home_dir=get_remote_home_dir)
                     resolved_target = target.replace('~', remote_home_dir)
@@ -512,7 +523,7 @@ class CommandRunner:
             else:
                 resolved_target = os.path.expanduser(target)
                 if source.startswith('~'):
-                    remote_home_dir = self._get_remote_home_dir_with_retry(
+                    remote_home_dir = self.get_remote_home_dir_with_retry(
                         max_retry=max_retry,
                         get_remote_home_dir=get_remote_home_dir)
                     resolved_source = source.replace('~', remote_home_dir)
@@ -564,6 +575,7 @@ class CommandRunner:
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
+            stage: CommandStage = CommandStage.DEFAULT,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Runs the command on the cluster.
 
@@ -710,9 +722,9 @@ class CommandRunner:
 
         # Step 2: Execute the script on remote machine
         if target_dir.startswith('~'):
-            remote_home_dir = self._get_remote_home_dir_with_retry(
+            remote_home_dir = self.get_remote_home_dir_with_retry(
                 max_retry=max_retry,
-                get_remote_home_dir=self._get_remote_home_dir)
+                get_remote_home_dir=self.get_remote_home_dir)
             target_dir = target_dir.replace('~', remote_home_dir)
         quoted_target_dir = shlex.quote(target_dir)
         quoted_script_path = shlex.quote(remote_script_path)
@@ -1092,6 +1104,7 @@ class SSHCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
+            stage: CommandStage = CommandStage.DEFAULT,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -1236,6 +1249,7 @@ class SSHCommandRunner(CommandRunner):
         stream_logs: bool = True,
         max_retry: int = 1,
         get_remote_home_dir: Callable[[], str] = lambda: '~',
+        stage: CommandStage = CommandStage.DEFAULT,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -1378,6 +1392,7 @@ class KubernetesCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
+            stage: CommandStage = CommandStage.DEFAULT,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'kubectl exec' to run 'cmd' on a pod or deployment by its
         name and namespace.
@@ -1489,7 +1504,8 @@ class KubernetesCommandRunner(CommandRunner):
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,
-        max_retry: int = _MAX_RETRIES_FOR_RSYNC,
+        max_retry: int = 1,
+        stage: CommandStage = CommandStage.DEFAULT,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -1532,7 +1548,7 @@ class KubernetesCommandRunner(CommandRunner):
             # rsync with `kubectl` as the rsh command will cause ~/xx parsed as
             # /~/xx, so we need to replace ~ with the remote home directory. We
             # only need to do this when ~ is at the beginning of the path.
-            get_remote_home_dir=self._get_remote_home_dir)
+            get_remote_home_dir=self.get_remote_home_dir)
 
 
 class LocalProcessCommandRunner(CommandRunner):
@@ -1560,9 +1576,10 @@ class LocalProcessCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
+            stage: CommandStage = CommandStage.DEFAULT,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Use subprocess to run the command."""
-        del port_forward, ssh_mode, connect_timeout  # Unused.
+        del port_forward, ssh_mode, connect_timeout, stage  # Unused.
 
         command_str = self._get_command_to_run(
             cmd,
@@ -1617,8 +1634,10 @@ class LocalProcessCommandRunner(CommandRunner):
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        stage: CommandStage = CommandStage.DEFAULT,
     ) -> None:
         """Use rsync to sync the source to the target."""
+        del stage  # Unused.
         self._rsync(source,
                     target,
                     node_destination=None,
@@ -1636,6 +1655,16 @@ class SlurmCommandRunner(SSHCommandRunner):
     controller, to the virtual instances.
     """
 
+    # Set the uv cache directory to /tmp/uv_cache_$(id -u) to speed up
+    # package installation while avoiding permission conflicts when
+    # multiple users share the same node. Otherwise it defaults to
+    # ~/.cache/uv.
+    # Similarly for enroot, to not rely on cluster-specific configs and paths.
+    _ENV_SETUP = ('export UV_CACHE_DIR=/tmp/uv_cache_$(id -u) && '
+                  'export ENROOT_RUNTIME_PATH=/tmp/enroot/user-$(id -u) && '
+                  'export ENROOT_CACHE_PATH=/tmp/enroot-cache/user-$(id -u) && '
+                  'export ENROOT_DATA_PATH=/tmp/enroot-data/user-$(id -u)')
+
     def __init__(
         self,
         node: Tuple[str, int],
@@ -1646,6 +1675,7 @@ class SlurmCommandRunner(SSHCommandRunner):
         skypilot_runtime_dir: str,
         job_id: str,
         slurm_node: str,
+        container_args: Optional[str],
         **kwargs,
     ):
         """Initialize SlurmCommandRunner.
@@ -1682,32 +1712,48 @@ class SlurmCommandRunner(SSHCommandRunner):
         self.skypilot_runtime_dir = skypilot_runtime_dir
         self.job_id = job_id
         self.slurm_node = slurm_node
+        self.container_args = container_args
 
-    def rsync(
+    def _rsync_via_srun(
         self,
         source: str,
         target: str,
         *,
         up: bool,
+        in_container: bool,
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
     ) -> None:
-        """Rsyncs files to/from the Slurm compute node using srun as transport.
+        """Rsyncs files via srun, either to host or into container.
+
+        Args:
+            source: Source path.
+            target: Target path.
+            up: If True, upload from local to remote. If False, download.
+            in_container: If True, rsync into container filesystem.
+                If False, rsync to the host.
+            log_path: Path for rsync logs.
+            stream_logs: Whether to stream logs.
+            max_retry: Maximum retry attempts.
         """
         ssh_command = ' '.join(
             self.ssh_base_command(ssh_mode=SshMode.NON_INTERACTIVE,
                                   port_forward=None,
                                   connect_timeout=None))
 
-        # The script parses job_id+node_list from $1 (node_destination)
-        # shifts past $1, and then SSHs to login node, and runs srun with
-        # the remaining arguments.
+        if in_container:
+            extra_srun_args = f'{self.container_args} ' if self.container_args else ''
+            remote_home_dir = '/root'  # TODO(kevin): Dont hardcode this.
+        else:
+            extra_srun_args = ''
+            remote_home_dir = self.sky_dir
+
         script_content = f"""#!/bin/bash
 job_id=$(echo "$1" | cut -d+ -f1)
 node_list=$(echo "$1" | cut -d+ -f2)
 shift
-exec {ssh_command} srun --unbuffered --quiet --overlap \
+exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
     --jobid="$job_id" --nodelist="$node_list" --nodes=1 --ntasks=1 "$@"
 """
         encoded_info = f'{self.job_id}+{self.slurm_node}'
@@ -1725,7 +1771,7 @@ exec {ssh_command} srun --unbuffered --quiet --overlap \
                         log_path=log_path,
                         stream_logs=stream_logs,
                         max_retry=max_retry,
-                        get_remote_home_dir=lambda: self.sky_dir)
+                        get_remote_home_dir=lambda: remote_home_dir)
         finally:
             try:
                 os.unlink(rsh_script_path)
@@ -1734,38 +1780,89 @@ exec {ssh_command} srun --unbuffered --quiet --overlap \
                                f'{rsh_script_path}: '
                                f'{common_utils.exception_to_string(e)}')
 
-    @timeline.event
-    @context_utils.cancellation_guard
-    def run(self, cmd: Union[str, List[str]],
-            **kwargs) -> Union[int, Tuple[int, str, str]]:
-        """Run Slurm-supported user commands over an SSH connection.
+    def _run_via_srun(
+        self,
+        cmd: Union[str, List[str]],
+        in_container: bool,
+        **kwargs,
+    ) -> Union[int, Tuple[int, str, str]]:
+        """Run command via srun, either on host or in container.
 
         Args:
-            cmd: The Slurm-supported user command to run.
-
-        Returns:
-            returncode
-            or
-            A tuple of (returncode, stdout, stderr).
+            cmd: Command to run.
+            in_container: If True, run inside container using container_args.
+                If False, run on the host with HOME and working directory setup.
+            **kwargs: Additional arguments passed to SSHCommandRunner.run.
         """
-        # Override $HOME so that each SkyPilot cluster's state is isolated
-        # from one another. We rely on the assumption that ~ is exclusively
-        # used by a cluster, and in Slurm that is not the case, as $HOME
-        # could be part of a shared filesystem.
-        # And similarly for SKY_RUNTIME_DIR. See constants.\
-        # SKY_RUNTIME_DIR_ENV_VAR_KEY for more details.
-        cmd = (
-            f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
-            f'"{self.skypilot_runtime_dir}" && '
-            # Set the uv cache directory to /tmp/uv_cache_$(id -u) to speed up
-            # package installation while avoiding permission conflicts when
-            # multiple users share the same host. Otherwise it defaults to
-            # ~/.cache/uv.
-            f'export UV_CACHE_DIR=/tmp/uv_cache_$(id -u) && '
-            f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
+        if isinstance(cmd, list):
+            cmd = ' '.join(cmd)
 
-        cmd = (f'srun --unbuffered --quiet --overlap --jobid={self.job_id} '
-               f'--nodelist={self.slurm_node} '
-               f'--nodes=1 --ntasks=1 bash -c {shlex.quote(cmd)}')
+        # Build inner command with environment setup
+        if in_container:
+            assert self.container_args is not None, (
+                '_run_via_srun with in_container=True called but '
+                'container_args not set')
+            inner_cmd = f'{self._ENV_SETUP} && bash -c {shlex.quote(cmd)}'
+            extra_srun_args = f'{self.container_args} '
+        else:
+            inner_cmd = (
+                f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
+                f'"{self.skypilot_runtime_dir}" && '
+                f'{self._ENV_SETUP} && '
+                f'cd {self.sky_dir} && export HOME="$PWD" && '
+                f'bash -c {shlex.quote(cmd)}')
+            extra_srun_args = ''
 
-        return super().run(cmd, **kwargs)
+        srun_cmd = (
+            f'srun --unbuffered --quiet --overlap --jobid={self.job_id} '
+            f'--nodelist={self.slurm_node} '
+            f'--nodes=1 --ntasks=1 {extra_srun_args}'
+            f'bash -c {shlex.quote(inner_cmd)}')
+
+        return SSHCommandRunner.run(self, srun_cmd, **kwargs)
+
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        log_path: str = os.devnull,
+        stream_logs: bool = True,
+        max_retry: int = 1,
+        stage: CommandStage = CommandStage.DEFAULT,
+    ) -> None:
+        rsync_kwargs = dict(source=source,
+                            target=target,
+                            up=up,
+                            log_path=log_path,
+                            stream_logs=stream_logs,
+                            max_retry=max_retry)
+
+        if stage == CommandStage.SETUP:
+            self._rsync_via_srun(**rsync_kwargs, in_container=False)
+            if self.container_args is not None:
+                self._rsync_via_srun(**rsync_kwargs, in_container=True)
+        elif stage == CommandStage.EXEC or not self.container_args:
+            self._rsync_via_srun(**rsync_kwargs, in_container=False)
+        else:
+            self._rsync_via_srun(**rsync_kwargs, in_container=True)
+
+    @timeline.event
+    @context_utils.cancellation_guard
+    def run(
+        self,
+        cmd: Union[str, List[str]],
+        *,
+        stage: CommandStage = CommandStage.DEFAULT,
+        **kwargs,
+    ) -> Union[int, Tuple[int, str, str]]:
+        result = self._run_via_srun(cmd, in_container=False, **kwargs)
+
+        if stage == CommandStage.SETUP and self.container_args:
+            returncode = result if isinstance(result, int) else result[0]
+            if returncode != 0:
+                return result
+            result = self._run_via_srun(cmd, in_container=True, **kwargs)
+
+        return result

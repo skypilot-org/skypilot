@@ -5,6 +5,7 @@ import inspect
 import json
 import math
 import os
+import shlex
 import textwrap
 from typing import Dict, List, Optional, Tuple
 
@@ -664,14 +665,20 @@ class RayCodeGen(TaskCodeGen):
 class SlurmCodeGen(TaskCodeGen):
     """Code generator for task execution on Slurm using native srun."""
 
-    def __init__(self, slurm_job_id: str):
-        """Initialize SlurmCodeGen
+    def __init__(
+        self,
+        slurm_job_id: str,
+        container_name: Optional[str],
+    ):
+        """Initialize SlurmCodeGen.
 
         Args:
             slurm_job_id: The Slurm job ID, i.e. SLURM_JOB_ID
+            container_name: pyxis container name, or None
         """
         super().__init__()
         self._slurm_job_id = slurm_job_id
+        self._container_name = container_name
 
     def add_prologue(self, job_id: int) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
@@ -809,6 +816,13 @@ class SlurmCodeGen(TaskCodeGen):
         streaming_msg = self._get_job_started_msg()
         has_setup_cmd = self._setup_cmd is not None
 
+        container_flags = ''
+        if self._container_name is not None:
+            # --container-remap-root must be passed on every srun to get correct $HOME
+            container_flags = (
+                ' --container-remap-root'
+                f' --container-name={shlex.quote(self._container_name)}:exec')
+
         self._code += [
             sky_env_vars_dict_str,
             textwrap.dedent(f"""\
@@ -886,11 +900,17 @@ class SlurmCodeGen(TaskCodeGen):
                     # allocation. See:
                     # https://support.schedmd.com/show_bug.cgi?id=14298
                     # https://github.com/huggingface/datatrove/issues/248
+                    bash_cmd = shlex.quote(' '.join([
+                        'unset SKY_RUNTIME_DIR;',
+                        constants.SKY_SLURM_PYTHON_CMD,
+                        '-m sky.skylet.executor.slurm',
+                        runner_args,
+                    ]))
                     srun_cmd = (
                         "unset $(env | awk -F= '/^SLURM_/ {{print $1}}') && "
                         f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid={self._slurm_job_id} '
-                        f'--job-name=sky-{self.job_id}{{job_suffix}} --ntasks-per-node=1 {{extra_flags}} '
-                        f'{{constants.SKY_SLURM_PYTHON_CMD}} -m sky.skylet.executor.slurm {{runner_args}}'
+                        f'--job-name=sky-{self.job_id}{{job_suffix}} --ntasks-per-node=1{container_flags} {{extra_flags}} '
+                        f'/bin/bash -c {{bash_cmd}}'
                     )
                     return srun_cmd, script_path
 

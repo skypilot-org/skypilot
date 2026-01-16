@@ -1,5 +1,7 @@
 """Slurm instance provisioning."""
 
+import re
+import shlex
 import tempfile
 import textwrap
 import time
@@ -19,10 +21,6 @@ from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
 
-# TODO(kevin): This assumes $HOME is in a shared filesystem.
-# We should probably make it configurable, and add a check
-# during sky check.
-SHARED_ROOT_SKY_DIRECTORY = '~/.sky_clusters'
 PROVISION_SCRIPTS_DIRECTORY_NAME = '.sky_provision'
 PROVISION_SCRIPTS_DIRECTORY = f'~/{PROVISION_SCRIPTS_DIRECTORY_NAME}'
 
@@ -32,15 +30,12 @@ _JOB_TERMINATION_TIMEOUT_SECONDS = 60
 _SKY_DIR_CREATION_TIMEOUT_SECONDS = 30
 
 
-def _sky_cluster_home_dir(cluster_name_on_cloud: str) -> str:
+def _sky_cluster_home_dir(cluster_name_on_cloud: str, home_dir: str) -> str:
     """Returns the SkyPilot cluster's home directory path on the Slurm cluster.
 
     This path is assumed to be on a shared NFS mount accessible by all nodes.
-    To support clusters with non-NFS home directories, we would need to let
-    users specify an NFS-backed "working directory" or use a different
-    coordination mechanism.
     """
-    return f'{SHARED_ROOT_SKY_DIRECTORY}/{cluster_name_on_cloud}'
+    return f'{home_dir}/.sky_clusters/{cluster_name_on_cloud}'
 
 
 def _sbatch_provision_script_path(filename: str) -> str:
@@ -167,66 +162,6 @@ def _create_virtual_instance(
     except (TypeError, ValueError):
         accelerator_count = 0
 
-    skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
-    sky_home_dir = _sky_cluster_home_dir(cluster_name_on_cloud)
-    ready_signal = f'{sky_home_dir}/.sky_sbatch_ready'
-    slurm_marker_file = f'{sky_home_dir}/{slurm_utils.SLURM_MARKER_FILE}'
-
-    # Build the sbatch script
-    gpu_directive = ''
-    if (accelerator_type is not None and accelerator_type.upper() != 'NONE' and
-            accelerator_count > 0):
-        gpu_directive = (f'#SBATCH --gres=gpu:{accelerator_type}:'
-                         f'{accelerator_count}')
-
-    # By default stdout and stderr will be written to $HOME/slurm-%j.out
-    # (because we invoke sbatch from $HOME). Redirect elsewhere to not pollute
-    # the home directory.
-    provision_script = textwrap.dedent(f"""\
-        #!/bin/bash
-        #SBATCH --job-name={cluster_name_on_cloud}
-        #SBATCH --output={PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-%j.out
-        #SBATCH --error={PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-%j.out
-        #SBATCH --nodes={num_nodes}
-        #SBATCH --wait-all-nodes=1
-        # Let the job be terminated rather than requeued implicitly.
-        #SBATCH --no-requeue
-        #SBATCH --cpus-per-task={int(resources["cpus"])}
-        #SBATCH --mem={int(resources["memory"])}G
-        {gpu_directive}
-
-        # Cleanup function to remove cluster dirs on job termination.
-        cleanup() {{
-            # The Skylet is daemonized, so it is not automatically terminated when
-            # the Slurm job is terminated, we need to kill it manually.
-            echo "Terminating Skylet..."
-            if [ -f "{skypilot_runtime_dir}/.sky/skylet_pid" ]; then
-                kill $(cat "{skypilot_runtime_dir}/.sky/skylet_pid") 2>/dev/null || true
-            fi
-            echo "Cleaning up sky directories..."
-            # Clean up sky runtime directory on each node.
-            # NOTE: We can do this because --nodes for both this srun and the
-            # sbatch is the same number. Otherwise, there are no guarantees
-            # that this srun will run on the same subset of nodes as the srun
-            # that created the sky directories.
-            srun --nodes={num_nodes} rm -rf {skypilot_runtime_dir}
-            rm -rf {sky_home_dir}
-        }}
-        trap cleanup TERM
-
-        # Create sky home directory for the cluster.
-        mkdir -p {sky_home_dir}
-        # Create sky runtime directory on each node.
-        srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}
-        # Marker file to indicate we're in a Slurm cluster.
-        touch {slurm_marker_file}
-        # Suppress login messages.
-        touch {sky_home_dir}/.hushlogin
-        # Signal that the sbatch script has completed setup.
-        touch {ready_signal}
-        sleep infinity
-        """)
-
     # To bootstrap things, we need to do it with SSHCommandRunner first.
     # SlurmCommandRunner is for after the virtual instances are created.
     login_node_runner = command_runner.SSHCommandRunner(
@@ -237,6 +172,120 @@ def _create_virtual_instance(
         ssh_proxy_jump=ssh_proxy_jump,
         enable_interactive_auth=True,
     )
+
+    remote_home_dir = login_node_runner.get_remote_home_dir()
+
+    skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
+    sky_home_dir = _sky_cluster_home_dir(cluster_name_on_cloud, remote_home_dir)
+    ready_signal = f'{sky_home_dir}/.sky_sbatch_ready'
+    slurm_marker_file = f'{sky_home_dir}/{slurm_utils.SLURM_MARKER_FILE}'
+
+    # Get container image from node config (e.g., 'docker:ubuntu:22.04')
+    container_image = resources.get('image_id')
+    if container_image is not None and container_image.startswith('docker:'):
+        container_image = container_image[len('docker:'):]
+    container_name = slurm_utils.pyxis_container_name(cluster_name_on_cloud)
+
+    # Build the sbatch script
+    gpu_directive = ''
+    if (accelerator_type is not None and accelerator_type.upper() != 'NONE' and
+            accelerator_count > 0):
+        gpu_directive = (f'#SBATCH --gres=gpu:{accelerator_type.lower()}:'
+                         f'{accelerator_count}')
+
+    # Build container initialization block if container image specified
+    container_block = ''
+    if container_image is not None:
+        container_mounts = ','.join([
+            f'{remote_home_dir}:{remote_home_dir}',
+            f'{sky_home_dir}/sky_logs:/root/sky_logs',
+            f'{sky_home_dir}/sky_workdir:/root/sky_workdir',
+        ])
+        container_init_script = textwrap.dedent("""\
+            set -e
+            if command -v apt-get >/dev/null 2>&1; then
+                apt-get update
+                apt-get install -y ca-certificates rsync curl 
+            elif command -v yum >/dev/null 2>&1; then
+                yum install -y ca-certificates rsync curl
+            fi
+            """)
+        container_marker_file = (f'{sky_home_dir}/'
+                                  f'{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
+        # Run container init, touch ready signal, then sleep infinity to keep
+        # container running. Use --overlap so subsequent sruns can share the
+        # allocation. Background with & so sbatch continues.
+        container_cmd = shlex.quote(
+            f'{container_init_script}touch {ready_signal} && sleep infinity')
+        container_block = (
+            f'echo "Initializing container {container_name} on all nodes..."\n'
+            f'srun --overlap --nodes={num_nodes} --ntasks-per-node=1 '
+            f'--container-image={container_image} '
+            f'--container-name={container_name}:create '
+            f'--container-mounts="{container_mounts}" '
+            f'--container-remap-root '
+            f'--no-container-mount-home '
+            f'--container-writable '
+            f'bash -c {container_cmd} &\n'
+            f'touch {container_marker_file}')
+
+    # By default stdout and stderr will be written to $HOME/slurm-%j.out
+    # (because we invoke sbatch from $HOME). Redirect elsewhere to not pollute
+    # the home directory.
+    # pylint: disable=line-too-long
+    # fmt: off
+    provision_script = f"""\
+#!/bin/bash
+#SBATCH --job-name={cluster_name_on_cloud}
+#SBATCH --output={PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-%j.out
+#SBATCH --error={PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-%j.out
+#SBATCH --nodes={num_nodes}
+#SBATCH --time=7-00:00:00
+#SBATCH --wait-all-nodes=1
+# Let the job be terminated rather than requeued implicitly.
+#SBATCH --no-requeue
+#SBATCH --cpus-per-task={int(resources["cpus"])}
+#SBATCH --mem={int(resources["memory"])}G
+{gpu_directive}
+
+# Cleanup function to remove cluster dirs on job termination.
+cleanup() {{
+    # The Skylet is daemonized, so it is not automatically terminated when
+    # the Slurm job is terminated, we need to kill it manually.
+    echo "Terminating Skylet..."
+    if [ -f "{skypilot_runtime_dir}/.sky/skylet_pid" ]; then
+        kill $(cat "{skypilot_runtime_dir}/.sky/skylet_pid") 2>/dev/null || true
+    fi
+    echo "Cleaning up sky directories..."
+    # Remove the per-node enroot container, if it exists.
+    # This is only needed when container_scope=global.
+    # When container_scope=job, named containers are removed automatically
+    # at the end of the Slurm job, see: https://github.com/NVIDIA/pyxis/wiki/Setup#slurm-epilog
+    srun --nodes={num_nodes} --ntasks-per-node=1 enroot remove -f {slurm_utils.enroot_container_name_global_scope(cluster_name_on_cloud)} 2>/dev/null || true
+    # Clean up sky runtime directory on each node.
+    # NOTE: We can do this because --nodes for both this srun and the
+    # sbatch is the same number. Otherwise, there are no guarantees
+    # that this srun will run on the same subset of nodes as the srun
+    # that created the sky directories.
+    srun --nodes={num_nodes} rm -rf {skypilot_runtime_dir}
+    rm -rf {sky_home_dir}
+}}
+trap cleanup TERM
+
+# Create sky home directory and subdirectories for the cluster.
+mkdir -p {sky_home_dir}/sky_logs {sky_home_dir}/sky_workdir {sky_home_dir}/.sky
+# Create sky runtime directory on each node.
+srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}
+# Marker file to indicate we're in a Slurm cluster.
+touch {slurm_marker_file}
+# Suppress login messages.
+touch {sky_home_dir}/.hushlogin
+{container_block}
+{f'touch {ready_signal}' if container_image is None else '# ready_signal touched inside container'}
+{'sleep infinity' if container_image is None else 'wait'}
+"""
+    # fmt: on
+    # pylint: enable=line-too-long
 
     cmd = f'mkdir -p {PROVISION_SCRIPTS_DIRECTORY}'
     rc, stdout, stderr = login_node_runner.run(cmd,
@@ -571,6 +620,17 @@ def cleanup_ports(
     del cluster_name_on_cloud, ports, provider_config
     pass
 
+def _build_pyxis_args(
+    cluster_name_on_cloud: str,
+) -> str:
+    """Build pyxis/enroot container args for srun.
+
+    Uses :exec flag to attach to the already-running container (started with
+    sleep infinity in sbatch). Container settings like --container-remap-root,
+    --container-writable are preserved from when the container was created.
+    """
+    container_name = slurm_utils.pyxis_container_name(cluster_name_on_cloud)
+    return f'--container-remap-root --container-name={shlex.quote(container_name)}:exec'
 
 def get_command_runners(
     cluster_info: common.ClusterInfo,
@@ -602,17 +662,47 @@ def get_command_runners(
     # of the cluster yaml.
     ssh_proxy_jump = cluster_info.provider_config.get('ssh', {}).get(
         'proxyjump', None)
+
+    provider_config = cluster_info.provider_config
+    assert provider_config is not None, cluster_info
+
+    skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
+
+    ssh_config_dict = provider_config['ssh']
+    login_node_runner = command_runner.SSHCommandRunner(
+        (ssh_config_dict['hostname'], int(ssh_config_dict.get('port', 22))),
+        ssh_user,
+        ssh_private_key,
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_proxy_jump,
+        enable_interactive_auth=True,
+    )
+    remote_home_dir = login_node_runner.get_remote_home_dir()
+
+    sky_dir = _sky_cluster_home_dir(cluster_name_on_cloud, remote_home_dir)
+
+    container_marker = f'{sky_dir}/{slurm_utils.SLURM_CONTAINER_MARKER_FILE}'
+    rc, _, _ = login_node_runner.run(f'test -f {container_marker}',
+                                     require_outputs=True,
+                                     stream_logs=False)
+    container_args = None
+    if rc == 0:
+        container_args = _build_pyxis_args(
+            cluster_name_on_cloud=cluster_name_on_cloud,
+        )
+
     runners = [
         command_runner.SlurmCommandRunner(
             (instance_info.external_ip or '', instance_info.ssh_port),
             ssh_user,
             ssh_private_key,
-            sky_dir=_sky_cluster_home_dir(cluster_name_on_cloud),
-            skypilot_runtime_dir=_skypilot_runtime_dir(cluster_name_on_cloud),
+            sky_dir=sky_dir,
+            skypilot_runtime_dir=skypilot_runtime_dir,
             job_id=instance_info.tags['job_id'],
             slurm_node=instance_info.tags['node'],
             ssh_proxy_jump=ssh_proxy_jump,
             enable_interactive_auth=True,
+            container_args=container_args,
             **credentials) for instance_info in instances
     ]
 

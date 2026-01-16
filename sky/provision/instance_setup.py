@@ -21,6 +21,7 @@ from sky.usage import constants as usage_constants
 from sky.usage import usage_lib
 from sky.utils import accelerator_registry
 from sky.utils import command_runner
+from sky.utils.command_runner import CommandStage
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import resources_utils
@@ -239,7 +240,8 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                 require_outputs=True,
                 # Installing dependencies requires source bashrc to access
                 # conda.
-                source_bashrc=True)
+                source_bashrc=True,
+                stage=CommandStage.SETUP)
             retry_cnt = 0
             while returncode == 255 and retry_cnt < _MAX_RETRY:
                 # Got network connection issue occur during setup. This could
@@ -254,7 +256,8 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                                                         stream_logs=False,
                                                         log_path=log_path,
                                                         require_outputs=True,
-                                                        source_bashrc=True)
+                                                        source_bashrc=True,
+                                                        stage=CommandStage.SETUP)
                 if not returncode:
                     break
 
@@ -561,11 +564,11 @@ def _internal_file_mounts(file_mounts: Dict,
             mkdir_command = f'mkdir -p {os.path.dirname(dst)}'
         else:
             mkdir_command = f'mkdir -p {dst}'
-
         rc, stdout, stderr = runner.run(mkdir_command,
                                         log_path=log_path,
                                         stream_logs=False,
-                                        require_outputs=True)
+                                        require_outputs=True,
+                                        stage=CommandStage.SETUP)
         subprocess_utils.handle_returncode(
             rc,
             mkdir_command, ('Failed to run command before rsync '
@@ -578,6 +581,7 @@ def _internal_file_mounts(file_mounts: Dict,
             up=True,
             log_path=log_path,
             stream_logs=False,
+            stage=CommandStage.SETUP,
         )
 
 

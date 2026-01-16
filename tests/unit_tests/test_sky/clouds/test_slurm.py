@@ -344,3 +344,250 @@ class TestGRESGPUParsing:
         gpu_type, gpu_count = slurm_utils.get_gpu_type_and_count(gres_str)
         assert gpu_type == expected_type
         assert gpu_count == expected_count
+
+
+class TestCreateVirtualInstance:
+    """Test slurm_instance._create_virtual_instance() script generation."""
+
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.SSHCommandRunner')
+    def test_container_script_format(self, mock_ssh_runner, mock_slurm_client):
+        """Test that sbatch provision script stays host-native."""
+        from sky.provision import common
+        
+        # Mock the SlurmClient
+        mock_client = mock.MagicMock()
+        mock_client.query_jobs.return_value = []  # No existing jobs
+        mock_client.submit_sbatch_script.return_value = '12345'  # job_id
+        mock_client.get_job_nodes.return_value = (['node1'], {'node1': '10.0.0.5'})
+        mock_slurm_client.return_value = mock_client
+        
+        # Mock the SSH runner's run and rsync methods
+        mock_runner_instance = mock.MagicMock()
+        
+        def mock_run_side_effect(cmd, **kwargs):
+            require_outputs = kwargs.get('require_outputs', False)
+            if 'SKYPILOT_HOME_DIR' in cmd and require_outputs:
+                return (0, 'SKYPILOT_HOME_DIR: /home/testuser', '')
+            elif require_outputs:
+                return (0, '', '')
+            else:
+                return 0
+        
+        mock_runner_instance.run.side_effect = mock_run_side_effect
+        mock_runner_instance.rsync.return_value = None
+        mock_runner_instance.get_remote_home_dir.return_value = '/home/testuser'
+        mock_ssh_runner.return_value = mock_runner_instance
+        
+        cluster_name = 'test-cluster'
+        config = common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'testuser',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'gpu',
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': 4,
+                'memory': 16,
+                'accelerator_type': 'A100',
+                'accelerator_count': 2,
+                'image_id': 'nvcr.io/nvidia/pytorch:24.01-py3',
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+        
+        # Capture the sbatch script written to the temp file
+        written_script = None
+        
+        def capture_write(content):
+            nonlocal written_script
+            written_script = content
+        
+        with patch('tempfile.NamedTemporaryFile') as mock_tempfile:
+            mock_file = mock.MagicMock()
+            mock_file.name = '/tmp/test_script.sh'
+            mock_file.__enter__.return_value = mock_file
+            
+            # Patch the write method to capture the script
+            mock_file.write.side_effect = capture_write
+            mock_tempfile.return_value = mock_file
+            
+            slurm_instance._create_virtual_instance(
+                region='us-west-2',
+                cluster_name_on_cloud=cluster_name,
+                config=config,
+            )
+        
+        # Verify the script was written
+        assert written_script is not None, "Script was not written"
+        
+        # Expected script - exact match (using absolute paths)
+        container_image = 'nvcr.io/nvidia/pytorch:24.01-py3'
+        container_name = cluster_name  # pyxis_container_name just returns cluster_name
+        enroot_container_name = f'pyxis_{container_name}'
+        remote_home_dir = '/home/testuser'
+        sky_home_dir = f'{remote_home_dir}/.sky_clusters/{cluster_name}'
+        skypilot_runtime_dir = f'/tmp/{cluster_name}'
+        container_mounts = ','.join([
+            f'{remote_home_dir}:{remote_home_dir}',
+            f'{sky_home_dir}/sky_logs:/root/sky_logs',
+            f'{sky_home_dir}/sky_workdir:/root/sky_workdir',
+        ])
+        ready_signal = f'{sky_home_dir}/.sky_sbatch_ready'
+        expected_script = f"""#!/bin/bash
+#SBATCH --job-name={cluster_name}
+#SBATCH --output=.sky_provision/slurm-%j.out
+#SBATCH --error=.sky_provision/slurm-%j.out
+#SBATCH --nodes=1
+#SBATCH --time=7-00:00:00
+#SBATCH --wait-all-nodes=1
+# Let the job be terminated rather than requeued implicitly.
+#SBATCH --no-requeue
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --gres=gpu:a100:2
+
+# Cleanup function to remove cluster dirs on job termination.
+cleanup() {{
+    # The Skylet is daemonized, so it is not automatically terminated when
+    # the Slurm job is terminated, we need to kill it manually.
+    echo "Terminating Skylet..."
+    if [ -f "{skypilot_runtime_dir}/.sky/skylet_pid" ]; then
+        kill $(cat "{skypilot_runtime_dir}/.sky/skylet_pid") 2>/dev/null || true
+    fi
+    echo "Cleaning up sky directories..."
+    # Remove the per-node enroot container, if it exists.
+    # This is only needed when container_scope=global.
+    # When container_scope=job, named containers are removed automatically
+    # at the end of the Slurm job, see: https://github.com/NVIDIA/pyxis/wiki/Setup#slurm-epilog
+    srun --nodes=1 --ntasks-per-node=1 enroot remove -f {enroot_container_name} 2>/dev/null || true
+    # Clean up sky runtime directory on each node.
+    # NOTE: We can do this because --nodes for both this srun and the
+    # sbatch is the same number. Otherwise, there are no guarantees
+    # that this srun will run on the same subset of nodes as the srun
+    # that created the sky directories.
+    srun --nodes=1 rm -rf {skypilot_runtime_dir}
+    rm -rf {sky_home_dir}
+}}
+trap cleanup TERM
+
+# Create sky home directory and subdirectories for the cluster.
+mkdir -p {sky_home_dir}/sky_logs {sky_home_dir}/sky_workdir {sky_home_dir}/.sky
+# Create sky runtime directory on each node.
+srun --nodes=1 mkdir -p {skypilot_runtime_dir}
+# Marker file to indicate we're in a Slurm cluster.
+touch {sky_home_dir}/.sky_slurm_cluster
+# Suppress login messages.
+touch {sky_home_dir}/.hushlogin
+echo "Initializing container {container_name} on all nodes..."
+srun --overlap --nodes=1 --ntasks-per-node=1 --container-image={container_image} --container-name={container_name}:create --container-mounts="{container_mounts}" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
+if command -v apt-get >/dev/null 2>&1; then
+    apt-get update
+    apt-get install -y ca-certificates rsync curl openssh-client openssh-server
+elif command -v yum >/dev/null 2>&1; then
+    yum install -y ca-certificates rsync curl openssh-clients openssh-server
+fi
+touch {ready_signal} && sleep infinity' &
+touch {sky_home_dir}/.sky_slurm_container
+# ready_signal touched inside container
+wait
+"""
+        
+        assert written_script == expected_script, (
+            f"Script mismatch.\n\n"
+            f"=== EXPECTED ===\n{expected_script}\n\n"
+            f"=== ACTUAL ===\n{written_script}\n\n"
+            f"=== DIFF ===\n"
+            f"Expected lines: {len(expected_script.splitlines())}\n"
+            f"Actual lines: {len(written_script.splitlines())}\n"
+        )
+    
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.SSHCommandRunner')
+    def test_non_container_script_format(self, mock_ssh_runner, mock_slurm_client):
+        """Test that non-container sbatch script is properly formatted."""
+        from sky.provision import common
+        
+        # Mock the SlurmClient
+        mock_client = mock.MagicMock()
+        mock_client.query_jobs.return_value = []
+        mock_client.submit_sbatch_script.return_value = '12346'
+        mock_client.get_job_nodes.return_value = (['node1'], {'node1': '10.0.0.5'})
+        mock_slurm_client.return_value = mock_client
+        
+        # Mock the SSH runner
+        mock_runner_instance = mock.MagicMock()
+        
+        def mock_run_side_effect(cmd, **kwargs):
+            require_outputs = kwargs.get('require_outputs', False)
+            if 'SKYPILOT_HOME_DIR' in cmd and require_outputs:
+                return (0, 'SKYPILOT_HOME_DIR: /home/testuser', '')
+            elif require_outputs:
+                return (0, '', '')
+            else:
+                return 0
+        
+        mock_runner_instance.run.side_effect = mock_run_side_effect
+        mock_runner_instance.rsync.return_value = None
+        mock_runner_instance.get_remote_home_dir.return_value = '/home/testuser'
+        mock_ssh_runner.return_value = mock_runner_instance
+        
+        cluster_name = 'test-cluster-no-container'
+        config = common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'testuser',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'cpus',
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': 2,
+                'memory': 8,
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+        
+        written_script = None
+        
+        def capture_write(content):
+            nonlocal written_script
+            written_script = content
+        
+        with patch('tempfile.NamedTemporaryFile') as mock_tempfile:
+            mock_file = mock.MagicMock()
+            mock_file.name = '/tmp/test_script.sh'
+            mock_file.__enter__.return_value = mock_file
+            mock_file.write.side_effect = capture_write
+            mock_tempfile.return_value = mock_file
+            
+            slurm_instance._create_virtual_instance(
+                region='us-west-2',
+                cluster_name_on_cloud=cluster_name,
+                config=config,
+            )
+        
+        assert written_script is not None
+        
+        # Verify NO container directives present
+        assert '--container-image' not in written_script
+        assert '--container-name' not in written_script
+        assert '--container-mounts' not in written_script

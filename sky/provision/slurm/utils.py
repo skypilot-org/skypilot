@@ -21,6 +21,8 @@ logger = sky_logging.init_logger(__name__)
 
 DEFAULT_SLURM_PATH = '~/.slurm/config'
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
+# Marker file to indicate container mode is enabled for this cluster.
+SLURM_CONTAINER_MARKER_FILE = '.sky_slurm_container'
 
 # Regex pattern for parsing GPU GRES strings.
 # Format: 'gpu[:acc_type]:acc_count(optional_extra_info)'
@@ -41,6 +43,20 @@ def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
     if not match:
         return None, 0
     return match.group('type'), int(match.group('count'))
+
+
+def pyxis_container_name(cluster_name_on_cloud: str) -> str:
+    """Get the name of the pyxis container that gets passed to --container-name."""
+    return cluster_name_on_cloud
+
+
+def enroot_container_name_global_scope(cluster_name_on_cloud: str) -> str:
+    """Get the name of the enroot container created by pyxis when container_scope=global."""
+    # Not publicly documented, but see:
+    # https://github.com/NVIDIA/pyxis/blob/fb9c2d5a08a778346dd398d670deeb5a569904e5/pyxis_slurmstepd.c#L1104
+    # Added in commit:
+    # https://github.com/NVIDIA/pyxis/commit/a35027cf2ffa45cf702b117d215b1240aa6de22e
+    return f'pyxis_{pyxis_container_name(cluster_name_on_cloud)}'
 
 
 # SSH host key filename for sshd.
@@ -640,6 +656,8 @@ def srun_sshd_command(
     job_id: str,
     target_node: str,
     unix_user: str,
+    cluster_name_on_cloud: str,
+    is_container_image: bool,
 ) -> str:
     """Build srun command for launching sshd -i inside a Slurm job.
 
@@ -650,6 +668,8 @@ def srun_sshd_command(
         job_id: The Slurm job ID
         target_node: The target compute node hostname
         unix_user: The Unix user for the job
+        cluster_name_on_cloud: SkyPilot cluster name on Slurm side.
+        is_container_image: Whether the cluster is on containers.
 
     Returns:
         List of command arguments to be extended to ssh base command
@@ -657,33 +677,63 @@ def srun_sshd_command(
     # We use ~username to ensure we use the real home of the user ssh'ing in,
     # because we override the home directory in SlurmCommandRunner.run.
     user_home_ssh_dir = f'~{unix_user}/.ssh'
-    return shlex.join([
-        'srun',
-        '--quiet',
-        '--unbuffered',
-        '--overlap',
-        '--jobid',
-        job_id,
-        '-w',
-        target_node,
-        '/usr/sbin/sshd',
-        '-i',  # Uses stdin/stdout
-        '-e',  # Writes errors to stderr
-        '-f',  # Use /dev/null to avoid reading system sshd_config
-        '/dev/null',
-        '-h',
-        f'{user_home_ssh_dir}/{SLURM_SSHD_HOST_KEY_FILENAME}',
-        '-o',
-        f'AuthorizedKeysFile={user_home_ssh_dir}/authorized_keys',
-        '-o',
-        'PasswordAuthentication=no',
-        '-o',
-        'PubkeyAuthentication=yes',
-        # If UsePAM is enabled, we will not be able to run sshd(8)
-        # as a non-root user.
-        # See https://man7.org/linux/man-pages/man5/sshd_config.5.html
-        '-o',
-        'UsePAM=no',
-        '-o',
-        f'AcceptEnv={constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}',
-    ])
+
+    if is_container_image:
+        # Dropbear + socat bridge for container mode.
+        # See slurm-ray.yml.j2 for why we use Dropbear instead of OpenSSH.
+        # Dropbear's -i (inetd) mode expects a socket fd on stdin, but srun
+        # provides pipes. socat bridges stdin/stdout to a TCP socket.
+        ssh_bootstrap_cmd = (
+            'PORT=$((30000 + RANDOM % 30000)); '
+            'DROPBEAR=$(command -v /usr/local/bin/dropbear); '
+            '$DROPBEAR -F -E -s -R -p 127.0.0.1:$PORT & '
+            'DROPBEAR_PID=$!; '
+            'trap "kill $DROPBEAR_PID 2>/dev/null" EXIT; '
+            'sleep 0.1; '
+            'socat STDIO TCP:127.0.0.1:$PORT')
+        return shlex.join([
+            'srun',
+            '--overlap',
+            '--quiet',
+            '--unbuffered',
+            '--jobid', job_id,
+            '--nodes=1',
+            '--ntasks=1',
+            '--ntasks-per-node=1',
+            '-w', target_node,
+            '--container-remap-root',
+            f'--container-name={pyxis_container_name(cluster_name_on_cloud)}:exec',
+            '/bin/bash', '-c', ssh_bootstrap_cmd,
+        ])
+    else:
+        # Non-container: OpenSSH sshd
+        return shlex.join([
+            'srun',
+            '--quiet',
+            '--unbuffered',
+            '--overlap',
+            '--jobid',
+            job_id,
+            '-w',
+            target_node,
+            '/usr/sbin/sshd',
+            '-i',  # Uses stdin/stdout
+            '-e',  # Writes errors to stderr
+            '-f',  # Use /dev/null to avoid reading system sshd_config
+            '/dev/null',
+            '-h',
+            f'{user_home_ssh_dir}/{SLURM_SSHD_HOST_KEY_FILENAME}',
+            '-o',
+            f'AuthorizedKeysFile={user_home_ssh_dir}/authorized_keys',
+            '-o',
+            'PasswordAuthentication=no',
+            '-o',
+            'PubkeyAuthentication=yes',
+            # If UsePAM is enabled, we will not be able to run sshd(8)
+            # as a non-root user.
+            # See https://man7.org/linux/man-pages/man5/sshd_config.5.html
+            '-o',
+            'UsePAM=no',
+            '-o',
+            f'AcceptEnv={constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}',
+        ])
