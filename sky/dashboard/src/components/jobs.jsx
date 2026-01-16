@@ -855,7 +855,7 @@ export function ManagedJobsTable({
   };
 
   // Define base columns with their order
-  const baseColumns = [
+  const baseColumns = React.useMemo(() => [
     {
       id: 'id',
       order: 0,
@@ -1147,7 +1147,15 @@ export function ManagedJobsTable({
         </TableCell>
       ),
     },
-  ];
+  ], [
+    requestSort,
+    getSortDirection,
+    shouldShowWorkspace,
+    shouldShowPool,
+    expandedRowId,
+    poolsLoading,
+    poolsData,
+  ]);
 
   // Transform function to convert plugin columns to the format expected by the table
   const transformPluginColumn = React.useCallback(
