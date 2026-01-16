@@ -27,10 +27,6 @@ Values
 
 Below is the available helm value keys and the default value of each key:
 
-..
-  Omitted values:
-  * storage.accessMode: accessMode other than ReadWriteOnce is not tested yet.
-
 .. parsed-literal::
 
   :ref:`global <helm-values-global>`:
@@ -1187,14 +1183,31 @@ Default: ``""``
 ``storage.accessMode``
 ^^^^^^^^^^^^^^^^^^^^^^
 
-Access mode for the persistent storage volume. Can be set to ``ReadWriteOnce`` or ``ReadWriteMany`` depending on what is supported by the storage class.
+Access mode for the persistent storage volume. Available options:
+
+- ``ReadWriteOnce`` (RWO): The volume can be mounted as read-write by a single node. This is the default and works with most storage classes. Compatible with ``Recreate`` upgrade strategy. **Not compatible with RollingUpdate upgrade strategy** since the PVC cannot be mounted by both old and new pods simultaneously during rolling updates.
+
+- ``ReadWriteMany`` (RWX): The volume can be mounted as read-write by multiple nodes. Compatible with both ``Recreate`` and ``RollingUpdate`` upgrade strategies. Requires an RWX-capable storage class such as:
+
+  - GKE: Filestore-backed storage class
+  - EKS: EFS CSI driver
+  - AKS: Azure Files
+  - On-prem: NFS provisioner
+
+For more details on upgrade strategies, see :ref:`apiService.upgradeStrategy <helm-values-apiService-upgradeStrategy>`.
 
 Default: ``ReadWriteOnce``
 
 .. code-block:: yaml
 
+  # For Recreate upgrade strategy (default), ReadWriteOnce is sufficient
   storage:
     accessMode: ReadWriteOnce
+
+  # For RollingUpdate upgrade strategy with persistent storage, use ReadWriteMany
+  storage:
+    accessMode: ReadWriteMany
+    storageClassName: <your-rwx-storage-class>
 
 .. _helm-values-storage-size:
 

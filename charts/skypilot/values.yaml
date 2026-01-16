@@ -270,7 +270,7 @@ storage:
   # Note: Transient cluster logs (sky-*) and api_server logs are NOT persisted to minimize storage usage.
   # Refer to https://docs.skypilot.co/en/latest/reference/architecture/state.html for more details.
   #
-  # IMPORTANT: When using RollingUpdate upgrade strategy with an external database:
+  # IMPORTANT: When using RollingUpdate upgrade strategy:
   # - ReadWriteOnce (RWO): NOT supported - the PVC cannot be mounted by both old and new pods during rolling update.
   # - ReadWriteMany (RWX): Supported - requires an RWX-capable storage class (e.g., NFS-backed storage like Google Filestore,
   #   AWS EFS, Azure Files, or an NFS provisioner). Both pods can mount the same PVC during the rolling update.

@@ -184,7 +184,6 @@ tests:
       apiService.upgradeStrategy: RollingUpdate
       apiService.dbConnectionSecretName: test-db-secret
       storage.enabled: true
-      storage.accessMode: ReadWriteOnce
     asserts:
       - failedTemplate:
           errorMessage: "Local storage with ReadWriteOnce access mode is not supported when using RollingUpdate strategy. Either use Recreate upgrade strategy, set storage.enabled to false, or use ReadWriteMany access mode with a compatible storage class (e.g., NFS-backed storage like Google Filestore)."
