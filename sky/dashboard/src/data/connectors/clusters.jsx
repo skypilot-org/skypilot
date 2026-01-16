@@ -181,8 +181,6 @@ export async function getClusterHistory(clusterHash = null, days = 30) {
 
     const history = await apiClient.fetch('/cost_report', requestBody);
 
-    console.log('Raw cluster history data:', history); // Debug log
-
     const historyData = history.map((cluster) => {
       // Get cloud name from resources if available
       let cloud = 'Unknown';
@@ -500,7 +498,7 @@ export function useClusterDetails({ cluster, job = null }) {
  * Hook for cluster data with pagination support.
  * If a plugin has registered a data provider, uses it for server-side pagination.
  * Otherwise, falls back to client-side pagination with getClusters.
- * 
+ *
  * @param {Object} options - Hook options
  * @param {boolean} options.showHistory - Whether to include historical clusters
  * @param {number} options.historyDays - Number of days of history to fetch
@@ -515,18 +513,21 @@ export function useClusterData(options = {}) {
     sortConfig = { key: null, direction: 'ascending' },
     filters = [],
   } = options;
-  
+
   // Convert sortConfig to API format
   // Default to launched_at desc (newest first) when no sort is specified
   const sortBy = sortConfig.key || 'launched_at';
-  const sortOrder = sortConfig.key 
-    ? (sortConfig.direction === 'ascending' ? 'asc' : 'desc')
+  const sortOrder = sortConfig.key
+    ? sortConfig.direction === 'ascending'
+      ? 'asc'
+      : 'desc'
     : 'desc'; // Default to desc when no sort key selected
-  
+
   // Serialize filters for stable dependency comparison
   const filtersKey = JSON.stringify(filters);
 
   const [data, setData] = useState([]);
+  const [fullData, setFullData] = useState([]); // Full dataset for client-side filtering
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
@@ -536,23 +537,21 @@ export function useClusterData(options = {}) {
   const [hasPrev, setHasPrev] = useState(false);
   const [error, setError] = useState(null);
   const [isServerPagination, setIsServerPagination] = useState(false);
-  
+
   // Track plugin registration to trigger re-fetch
   const [pluginVersion, setPluginVersion] = useState(0);
   const lastLoggedModeRef = useRef(null);
-  
+
   // Subscribe to plugin registration events
   // Also check if plugin is already registered (in case it registered before we subscribed)
   useEffect(() => {
     // If plugin is already registered, trigger a fetch
     if (hasPluginClusterProvider()) {
-      console.log('[useClusterData] Plugin already registered on mount');
-      setPluginVersion(v => v + 1);
+      setPluginVersion((v) => v + 1);
     }
-    
+
     const unsubscribe = onClusterProviderRegistration(() => {
-      console.log('[useClusterData] Plugin registered, triggering re-fetch');
-      setPluginVersion(v => v + 1);
+      setPluginVersion((v) => v + 1);
     });
     return unsubscribe;
   }, []);
@@ -565,112 +564,137 @@ export function useClusterData(options = {}) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
-    
+
     // Check if plugin provider is available
     const pluginFetcher = getPluginClusterFetcher();
     const usePlugin = !!pluginFetcher;
-    
+
     // Log mode change
     if (lastLoggedModeRef.current !== usePlugin) {
       lastLoggedModeRef.current = usePlugin;
       if (usePlugin) {
-        console.log('[useClusterData] Using plugin fetcher for server-side pagination');
+        console.log(
+          '[useClusterData] Using plugin fetcher for server-side pagination'
+        );
       } else {
         console.log('[useClusterData] Using default client-side pagination');
       }
     }
-    
+
     try {
       if (usePlugin) {
         // Use plugin's fetch function with pagination params
         // Wrap with dashboardCache - page/limit/sort/filters in args creates unique cache key
         const result = await dashboardCache.get(
           pluginFetcher,
-          [{ page, limit, showHistory, historyDays, sortBy, sortOrder, filters }],
+          [
+            {
+              page,
+              limit,
+              showHistory,
+              historyDays,
+              sortBy,
+              sortOrder,
+              filters,
+            },
+          ],
           { ttl: 30000 }
         );
-        
+
         const itemCount = (result.items || result.data || []).length;
         const resultTotal = result.total || 0;
         const resultTotalPages = result.totalPages || result.total_pages || 1;
         const resultHasNext = result.hasNext || result.has_next || false;
         const resultHasPrev = result.hasPrev || result.has_prev || false;
-        
-        console.log('[useClusterData] Plugin returned:', {
-          itemCount,
-          total: resultTotal,
-          totalPages: resultTotalPages,
-          hasNext: resultHasNext,
-          hasPrev: resultHasPrev,
-          rawResult: result,
-        });
-        
-        setData(result.items || result.data || []);
+
+        const resultData = result.items || result.data || [];
+        setData(resultData);
+        setFullData(resultData); // Server handles filtering, so full = current page
         setTotal(resultTotal);
         setTotalPages(resultTotalPages);
         setHasNext(resultHasNext);
         setHasPrev(resultHasPrev);
         setIsServerPagination(true);
-        
-        console.log('[useClusterData] State updated: isServerPagination=true, total=' + resultTotal);
-        
+
         // Prefetch next page in background if there is one
         if (resultHasNext) {
-          const nextPageOptions = { 
-            page: page + 1, 
-            limit, 
-            showHistory, 
-            historyDays, 
-            sortBy, 
-            sortOrder, 
-            filters 
+          const nextPageOptions = {
+            page: page + 1,
+            limit,
+            showHistory,
+            historyDays,
+            sortBy,
+            sortOrder,
+            filters,
           };
           // Fire and forget - don't await, just warm the cache
-          dashboardCache.get(pluginFetcher, [nextPageOptions], { ttl: 30000 })
-            .then(() => console.log('[useClusterData] Prefetched page', page + 1))
-            .catch(err => console.warn('[useClusterData] Prefetch failed:', err));
+          dashboardCache
+            .get(pluginFetcher, [nextPageOptions], { ttl: 30000 })
+            .then(() =>
+              console.log('[useClusterData] Prefetched page', page + 1)
+            )
+            .catch((err) =>
+              console.warn('[useClusterData] Prefetch failed:', err)
+            );
         }
       } else {
         // Default: fetch all clusters and paginate client-side
         const activeClusters = await dashboardCache.get(getClusters);
-        
+
         let allClusters;
         if (showHistory) {
           let historyClusters = [];
           try {
-            historyClusters = await dashboardCache.get(getClusterHistory, [null, historyDays]);
+            historyClusters = await dashboardCache.get(getClusterHistory, [
+              null,
+              historyDays,
+            ]);
           } catch (historyError) {
             console.error('Error fetching cluster history:', historyError);
           }
-          
-          const markedActive = activeClusters.map(c => ({ ...c, isHistorical: false }));
-          const markedHistory = historyClusters.map(c => ({ ...c, isHistorical: true }));
-          
+
+          const markedActive = activeClusters.map((c) => ({
+            ...c,
+            isHistorical: false,
+          }));
+          const markedHistory = historyClusters.map((c) => ({
+            ...c,
+            isHistorical: true,
+          }));
+
           // Combine, preferring active over historical
           allClusters = [...markedActive];
-          markedHistory.forEach(hist => {
-            if (!activeClusters.some(a => a.cluster_hash === hist.cluster_hash)) {
+          markedHistory.forEach((hist) => {
+            if (
+              !activeClusters.some((a) => a.cluster_hash === hist.cluster_hash)
+            ) {
               allClusters.push(hist);
             }
           });
         } else {
-          allClusters = activeClusters.map(c => ({ ...c, isHistorical: false }));
+          allClusters = activeClusters.map((c) => ({
+            ...c,
+            isHistorical: false,
+          }));
         }
-        
+
         // Check if plugin became available while we were fetching
         // If so, skip updating state - the plugin fetch will handle it
         if (getPluginClusterFetcher()) {
-          console.log('[useClusterData] Plugin became available during default fetch, skipping state update');
+          console.log(
+            '[useClusterData] Plugin became available during default fetch, skipping state update'
+          );
           return;
         }
-        
+
         // Client-side pagination
         const clientTotal = allClusters.length;
         const clientTotalPages = Math.ceil(clientTotal / limit) || 1;
         const startIndex = (page - 1) * limit;
         const paginatedData = allClusters.slice(startIndex, startIndex + limit);
-        
+
         setData(paginatedData);
+        setFullData(allClusters); // Keep full dataset for client-side filtering
         setTotal(clientTotal);
         setTotalPages(clientTotalPages);
         setHasNext(page < clientTotalPages);
@@ -681,11 +705,21 @@ export function useClusterData(options = {}) {
       console.error('[useClusterData] Error fetching clusters:', fetchError);
       setError(fetchError);
       setData([]);
+      setFullData([]);
     }
-    
+
     setLoading(false);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, limit, showHistory, historyDays, sortBy, sortOrder, filtersKey, pluginVersion]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    page,
+    limit,
+    showHistory,
+    historyDays,
+    sortBy,
+    sortOrder,
+    filtersKey,
+    pluginVersion,
+  ]);
 
   // Fetch data on mount and when dependencies change
   useEffect(() => {
@@ -710,23 +744,23 @@ export function useClusterData(options = {}) {
   }, []);
 
   return {
-    // Data - for server pagination, this is current page; for client, it's the slice
+    // Data - current page slice (paginated)
     data,
-    // allData - for compatibility, same as data since we handle pagination internally
-    allData: data,
+    // allData - full dataset for client-side filtering (in server mode, same as data)
+    allData: fullData,
     total,
-    
+
     // Pagination state
     page,
     limit,
     totalPages,
     hasNext,
     hasPrev,
-    
+
     // Pagination actions
     setPage,
     setLimit: handleSetLimit,
-    
+
     // Other
     loading,
     error,
