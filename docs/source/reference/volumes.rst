@@ -26,17 +26,12 @@ Quickstart
      # volume.yaml
      name: new-pvc
      type: k8s-pvc
-     infra: kubernetes  # or k8s or k8s/context
+     infra: k8s  # or `k8s/context` or `runpod`
      size: 10Gi
-     # Optional fields:
-     #
-     # use_existing: true # If the PVC already exists, to true and set the `name` to the existing PVC name
-     # labels:
-     #   key: value
-     # config:
-     #   namespace: default
-     #   storage_class_name: csi-mounted-fs-path-sc
-     #   access_mode: ReadWriteMany
+     
+     # Optional: To use an existing PVC on k8s instead of creating a new one, set to `true` and set `name` to the existing PVC name.
+     # use_existing: true
+
 
 2. Create the volume with ``sky volumes apply volume.yaml``:
 
@@ -57,11 +52,9 @@ Quickstart
      run: |
        echo "Hello, World!" > /mnt/data/hello.txt
 
-.. note::
+.. tip::
 
-  - For multi-node clusters, volumes are mounted to all nodes. You must configure ``config.access_mode`` to ``ReadWriteMany`` and use a ``storage_class_name`` that supports the ``ReadWriteMany`` access mode. Otherwise, SkyPilot will fail to launch the cluster.
-  - If you want to mount a volume to all the cluster or jobs by default, you can use the admin policy to inject the volume path into the task YAML. See :ref:`add-volumes-policy` for details.
-
+   For temporary or cache data that should only last for the lifetime of a SkyPilot cluster, use :ref:`ephemeral volumes <ephemeral-volumes>`.
 
 .. _volumes-on-kubernetes-manage:
 
@@ -72,20 +65,10 @@ List all volumes with ``sky volumes ls``:
 
 .. code-block:: console
 
-  $ sky volumes ls
-  NAME     TYPE     INFRA                         SIZE  USER   WORKSPACE  AGE   STATUS  LAST_USE     USED_BY
-  new-pvc  k8s-pvc  Kubernetes/nebius-mk8s-vol    1Gi   alice  default    8m    IN_USE  <timestamp>  <cluster_name>
+  $ sky volumes ls -v
+  NAME     TYPE     INFRA                         SIZE  USER   WORKSPACE  AGE   STATUS  LAST_USE             USED_BY   NAME_ON_CLOUD              STORAGE_CLASS           ACCESS_MODE
+  new-pvc  k8s-pvc  Kubernetes/nebius-mk8s-vol    1Gi   alice  default    8m    IN_USE  2025-06-24 10:18:32  training  new-pvc-73ec42f2-5c6c4e    csi-mounted-fs-path-sc  ReadWriteMany
 
-
-.. tip::
-
-  Use ``-v`` to view detailed information about a volume.
-
-  .. code-block:: console
-
-    $ sky volumes ls -v
-    NAME     TYPE     INFRA                         SIZE  USER   WORKSPACE  AGE   STATUS  LAST_USE             USED_BY   NAME_ON_CLOUD              STORAGE_CLASS           ACCESS_MODE
-    new-pvc  k8s-pvc  Kubernetes/nebius-mk8s-vol    1Gi   alice  default    8m    IN_USE  2025-06-24 10:18:32  training  new-pvc-73ec42f2-5c6c4e    csi-mounted-fs-path-sc  ReadWriteMany
 
 Delete a volume with ``sky volumes delete``:
 
@@ -158,6 +141,34 @@ Persistent volumes are created and managed independently using the ``sky volumes
 .. note::
 
   Persistent volumes are shared across users on a SkyPilot API server. A user can mount volumes created by other users. This is useful for sharing caches and data across users.
+
+**Volume YAML configuration options:**
+
+.. code-block:: yaml
+
+  # volume.yaml
+  name: my-volume
+  type: k8s-pvc
+  infra: kubernetes  # or k8s or k8s/<context>
+  size: 10Gi
+
+  # Optional: To use an existing PVC instead of creating a new one, set to `true` and set `name` to the existing PVC name.
+  use_existing: true
+
+  # Optional: add labels to the PVC
+  labels:
+    key: value
+
+  # Optional: additional configuration
+  config:
+    namespace: default
+    storage_class_name: csi-mounted-fs-path-sc
+    access_mode: ReadWriteMany  # Required for multi-node clusters
+
+.. note::
+
+  - For multi-node clusters, volumes are mounted to all nodes. You must set ``config.access_mode`` to ``ReadWriteMany`` and use a ``storage_class_name`` that supports this access mode. Otherwise, SkyPilot will fail to launch the cluster.
+  - To mount a volume to all clusters or jobs by default, use the admin policy to inject the volume path into the task YAML. See :ref:`add-volumes-policy` for details.
 
 .. _ephemeral-volumes:
 
