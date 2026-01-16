@@ -787,10 +787,44 @@ export function ContextDetails({
                         }
                       }
 
-                      const utilizationStr =
-                        node.is_ready === false
-                          ? `0 of ${node.gpu_total} free (Node NotReady)`
-                          : `${node.gpu_free} of ${node.gpu_total} free`;
+                      // Build utilization string with extra info for cordoned/tainted/not ready nodes
+                      let utilizationStr = `${node.gpu_free} of ${node.gpu_total} free`;
+                      const extraInfo = [];
+
+                      // Add taint info grouped by effect
+                      const taints = node.taints || [];
+                      if (taints.length > 0) {
+                        const taintsByEffect = {};
+                        for (const taint of taints) {
+                          const effect = taint.effect;
+                          const key = taint.key;
+                          if (!taintsByEffect[effect]) {
+                            taintsByEffect[effect] = [];
+                          }
+                          taintsByEffect[effect].push(key);
+                        }
+                        const taintStrs = Object.entries(taintsByEffect).map(
+                          ([effect, keys]) =>
+                            `${effect} Taint [${keys.join(', ')}]`
+                        );
+                        if (taintStrs.length > 0) {
+                          extraInfo.push(taintStrs.join(', '));
+                        }
+                      }
+
+                      // Add cordoned info
+                      if (node.is_cordoned === true) {
+                        extraInfo.push('Node Cordoned');
+                      }
+
+                      // Add not ready info
+                      if (node.is_ready === false) {
+                        extraInfo.push('Node NotReady');
+                      }
+
+                      if (extraInfo.length > 0) {
+                        utilizationStr += ` (${extraInfo.join(', ')})`;
+                      }
 
                       return (
                         <tr
