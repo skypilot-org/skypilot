@@ -17,7 +17,7 @@
 #   The trainer connects to the router endpoint on port 30000.
 #
 # Usage:
-#   sky jobs launch llm/rlhf-jobgroup/rlhf-math-jobgroup.yaml
+#   sky jobs launch llm/rl-post-training-jobgroup/rlhf-math-jobgroup.yaml
 #
 # The components communicate over the job group network using DNS names:
 #   - data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000
@@ -40,7 +40,7 @@ resources:
   infra: kubernetes
 
 file_mounts:
-  /code: llm/rlhf-jobgroup/code
+  /code: llm/rl-post-training-jobgroup/code
 
 setup: |
   uv pip install fastapi uvicorn datasets --system
@@ -124,7 +124,7 @@ resources:
   infra: kubernetes
 
 file_mounts:
-  /code: llm/rlhf-jobgroup/code
+  /code: llm/rl-post-training-jobgroup/code
 
 setup: |
   uv pip install fastapi uvicorn --system
@@ -146,7 +146,7 @@ resources:
   infra: kubernetes
 
 file_mounts:
-  /code: llm/rlhf-jobgroup/code
+  /code: llm/rl-post-training-jobgroup/code
 
 setup: |
   uv pip install fastapi uvicorn --system
@@ -174,7 +174,7 @@ envs:
   BATCH_SIZE: 4
 
 file_mounts:
-  /code: llm/rlhf-jobgroup/code
+  /code: llm/rl-post-training-jobgroup/code
 
 setup: |
   uv pip install torch transformers accelerate httpx --system

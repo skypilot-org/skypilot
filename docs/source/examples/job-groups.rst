@@ -3,6 +3,10 @@
 Job Groups
 ==========
 
+.. warning::
+
+  **This is an experimental feature.** The interface may change in future versions.
+
 .. tip::
 
   Job Groups are ideal for heterogeneous parallel workloads where multiple jobs
@@ -15,10 +19,8 @@ Job Groups launch all jobs simultaneously, enabling complex distributed architec
 
 Common use cases include:
 
-- **RLHF training**: Separate jobs for policy training, reward modeling, and data serving
-- **Train-eval pipelines**: Training and evaluation running in parallel with shared storage
-- **Distributed inference**: Multiple inference servers with a load balancer
-- **Microservices**: Multiple services that need to discover and communicate with each other
+- **RL post-training**: Separate jobs for trainer, reward modeling, rollout server, and data serving
+- **Parallel train-eval**: Training and evaluation running in parallel with shared storage
 
 .. contents:: Contents
    :local:
@@ -170,8 +172,8 @@ When viewing logs for a multi-task job, SkyPilot displays a hint:
 Examples
 --------
 
-Train-eval with shared storage
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Parallel train-eval with shared storage
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This example runs training and evaluation in parallel, sharing checkpoints via
 a Kubernetes PVC volume:
@@ -200,10 +202,10 @@ a Kubernetes PVC volume:
 
 See the full example at ``llm/train-eval-jobgroup/`` in the SkyPilot repository.
 
-RLHF training architecture
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+RL post-training architecture
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This example demonstrates a distributed RLHF architecture with 5 components:
+This example demonstrates a distributed RL post-training architecture with 5 components:
 
 .. code-block:: yaml
 
@@ -247,7 +249,7 @@ This example demonstrates a distributed RLHF architecture with 5 components:
         --rollout-server rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:8001 \
         --reward-server reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002
 
-See the full example at ``llm/rlhf-jobgroup/`` in the SkyPilot repository.
+See the full RL post-training example at ``llm/rl-post-training-jobgroup/`` in the SkyPilot repository.
 
 
 Current limitations

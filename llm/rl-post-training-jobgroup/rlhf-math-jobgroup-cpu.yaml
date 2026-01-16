@@ -4,7 +4,7 @@
 # It demonstrates the service connectivity without requiring GPUs.
 #
 # Usage:
-#   sky jobs launch llm/rlhf-jobgroup/rlhf-math-jobgroup-cpu.yaml
+#   sky jobs launch llm/rl-post-training-jobgroup/rlhf-math-jobgroup-cpu.yaml
 ---
 name: rlhf-math-cpu
 placement: SAME_INFRA
@@ -19,7 +19,7 @@ resources:
   infra: kubernetes
 
 file_mounts:
-  /code: llm/rlhf-jobgroup/code
+  /code: llm/rl-post-training-jobgroup/code
 
 setup: |
   pip install fastapi uvicorn datasets
@@ -41,7 +41,7 @@ resources:
   infra: kubernetes
 
 file_mounts:
-  /code: llm/rlhf-jobgroup/code
+  /code: llm/rl-post-training-jobgroup/code
 
 setup: |
   pip install fastapi uvicorn
@@ -63,7 +63,7 @@ resources:
   infra: kubernetes
 
 file_mounts:
-  /code: llm/rlhf-jobgroup/code
+  /code: llm/rl-post-training-jobgroup/code
 
 setup: |
   pip install fastapi uvicorn

@@ -259,7 +259,7 @@ function JobDetails() {
               {jobId} {detailJobData?.name ? `(${detailJobData.name})` : ''}
               {isMultiTask && (
                 <span className="ml-2 text-xs text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded">
-                  {allTasks.length} tasks
+                  {allTasks.length} jobs
                 </span>
               )}
             </Link>
@@ -318,19 +318,19 @@ function JobDetails() {
               </Card>
             </div>
 
-            {/* Tasks Section - only show for multi-task jobs */}
+            {/* Jobs Section - only show for multi-task jobs */}
             {isMultiTask && (
-              <div id="tasks-section" className="mt-6">
+              <div id="jobs-section" className="mt-6">
                 <Card>
                   <div className="flex items-center justify-between px-4 pt-4">
                     <h3 className="text-lg font-semibold flex items-center">
-                      Tasks
+                      Jobs
                       <span className="ml-2 text-sm font-normal text-gray-500">
-                        ({allTasks.length} tasks)
+                        ({allTasks.length} jobs)
                       </span>
                       {jobPlacement === 'SAME_INFRA' && (
                         <Tooltip
-                          content="All tasks in this job group are co-located on the same infrastructure"
+                          content="All jobs in this job group are co-located on the same infrastructure"
                           className="text-muted-foreground"
                         >
                           <span className="ml-3 px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 cursor-help">
@@ -346,10 +346,10 @@ function JobDetails() {
                         <TableHeader>
                           <TableRow>
                             <TableHead className="whitespace-nowrap">
-                              Task ID
+                              ID
                             </TableHead>
                             <TableHead className="whitespace-nowrap">
-                              Task Name
+                              Name
                             </TableHead>
                             <TableHead className="whitespace-nowrap">
                               Status
@@ -390,7 +390,7 @@ function JobDetails() {
                                   href={`/jobs/${jobId}/${index}`}
                                   className="text-blue-600 hover:underline"
                                 >
-                                  {task.task || `Task ${index}`}
+                                  {task.task || `Job ${index}`}
                                 </Link>
                               </TableCell>
                               <TableCell>
@@ -442,7 +442,7 @@ function JobDetails() {
                               <TableCell>{task.recoveries || 0}</TableCell>
                               <TableCell>
                                 <Tooltip
-                                  content="Download task logs"
+                                  content="Download job logs"
                                   className="text-muted-foreground"
                                 >
                                   <button
@@ -497,10 +497,10 @@ function JobDetails() {
                         value={String(selectedTaskIndex)}
                       >
                         <SelectTrigger
-                          aria-label="Task"
+                          aria-label="Job"
                           className="focus:ring-0 focus:ring-offset-0 h-8 w-auto min-w-[160px] text-sm"
                         >
-                          <SelectValue placeholder="Select Task" />
+                          <SelectValue placeholder="Select Job" />
                         </SelectTrigger>
                         <SelectContent>
                           {allTasks.map((task, index) => (
@@ -508,7 +508,7 @@ function JobDetails() {
                               key={task.task_job_id || index}
                               value={String(index)}
                             >
-                              Task {index}
+                              Job {index}
                               {task.task ? `: ${task.task}` : ''}
                             </SelectItem>
                           ))}
@@ -541,7 +541,7 @@ function JobDetails() {
                   </div>
                   <div className="flex items-center space-x-3">
                     <Tooltip
-                      content="Download all task logs (zip)"
+                      content="Download all job logs (zip)"
                       className="text-muted-foreground"
                     >
                       <button
@@ -1118,10 +1118,10 @@ function JobDetailsContent({
         <div className="text-base mt-1">
           {allTasks.length > 1 ? (
             <NonCapitalizedTooltip
-              content={`Aggregated from ${allTasks.length} tasks:\n${allTasks
+              content={`Aggregated from ${allTasks.length} jobs:\n${allTasks
                 .map(
                   (task, index) =>
-                    `Task ${index}${task.task ? ` (${task.task})` : ''}: ${task.requested_resources || task.resources_str || 'N/A'}`
+                    `Job ${index}${task.task ? ` (${task.task})` : ''}: ${task.requested_resources || task.resources_str || 'N/A'}`
                 )
                 .join('\n')}`}
               className="text-sm text-muted-foreground"
@@ -1133,7 +1133,7 @@ function JobDetailsContent({
                     .filter(Boolean);
                   const uniqueResources = [...new Set(resourcesList)];
                   return uniqueResources.length === 1
-                    ? `${uniqueResources[0]} (x${allTasks.length} tasks)`
+                    ? `${uniqueResources[0]} (x${allTasks.length} jobs)`
                     : `${resourcesList[0]} (+${allTasks.length - 1} more)`;
                 })()}
               </span>
@@ -1284,7 +1284,7 @@ function JobDetailsContent({
               </div>
             )}
 
-            {/* Task YAML - Collapsible */}
+            {/* Job YAML - Collapsible */}
             {jobData.dag_yaml && jobData.dag_yaml !== '{}' && (
               <div>
                 <div className="flex items-center mb-2">
@@ -1353,13 +1353,13 @@ function JobDetailsContent({
                         // Multiple documents - show toggle and content
                         return (
                           <div className="space-y-4">
-                            {/* Toggle for Full YAML vs Per-Task */}
+                            {/* Toggle for Full YAML vs Per-Job */}
                             <div className="flex items-center space-x-4 pb-2 border-b border-gray-200">
                               <button
                                 onClick={() => setShowFullYaml(false)}
                                 className={`text-sm px-2 py-1 rounded ${!showFullYaml ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:text-gray-800'}`}
                               >
-                                By Task
+                                By Job
                               </button>
                               <button
                                 onClick={() => setShowFullYaml(true)}
@@ -1378,7 +1378,7 @@ function JobDetailsContent({
                                     .join('\n---\n')}
                               </YamlHighlighter>
                             ) : (
-                              // Show per-task YAMLs
+                              // Show per-job YAMLs
                               yamlDocs.map((doc, index) => (
                                 <div
                                   key={index}
@@ -1395,7 +1395,7 @@ function JobDetailsContent({
                                         <ChevronRightIcon className="w-4 h-4 mr-2" />
                                       )}
                                       <span className="text-sm font-medium text-gray-700">
-                                        Task {index + 1}: {doc.preview}
+                                        Job {index + 1}: {doc.preview}
                                       </span>
                                     </div>
                                   </button>

@@ -1,6 +1,6 @@
-# RLHF Math Training with Job Groups
+# RL Post-Training with Job Groups
 
-This example demonstrates a distributed RLHF (Reinforcement Learning from Human Feedback) architecture using SkyPilot job groups. It trains an LLM on mathematical reasoning tasks using GRPO (Group Relative Policy Optimization) with verifiable rewards.
+This example demonstrates a distributed RL post-training architecture using SkyPilot job groups. It trains an LLM on mathematical reasoning tasks using GRPO (Group Relative Policy Optimization) with verifiable rewards.
 
 ## Architecture
 
@@ -69,7 +69,7 @@ The example consists of 5 task types that communicate over HTTP, with built-in l
 ### Launch Training
 
 ```bash
-sky jobs launch llm/rlhf-jobgroup/rlhf-math-jobgroup.yaml
+sky jobs launch llm/rl-post-training-jobgroup/rlhf-math-jobgroup.yaml
 ```
 
 ### Monitor Training
@@ -79,11 +79,11 @@ sky jobs launch llm/rlhf-jobgroup/rlhf-math-jobgroup.yaml
 sky jobs queue
 
 # View logs for specific components
-sky jobs logs <job-id> --task data-server
-sky jobs logs <job-id> --task rollout-server
-sky jobs logs <job-id> --task reward-server
-sky jobs logs <job-id> --task replay-buffer
-sky jobs logs <job-id> --task ppo-trainer
+sky jobs logs <job-id> data-server
+sky jobs logs <job-id> rollout-server
+sky jobs logs <job-id> reward-server
+sky jobs logs <job-id> replay-buffer
+sky jobs logs <job-id> ppo-trainer
 ```
 
 Or use the SkyPilot dashboard to monitor jobs.
