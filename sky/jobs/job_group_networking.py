@@ -278,22 +278,7 @@ def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]],
     if not dns_mappings:
         return ''
 
-    # Validate and build mapping pairs, filtering out unsafe characters
-    # Allow: alphanumeric, dots (DNS), hyphens, underscores (job group names)
-    escaped_mappings = []
-    for dns, hostname in dns_mappings:
-        if not all(c.isalnum() or c in '.-_' for c in dns + hostname):
-            logger.warning(f'Skipping invalid DNS mapping: {dns} -> {hostname}')
-            continue
-        escaped_mappings.append(f'{dns}:{hostname}')
-
-    # If all mappings were filtered out, return empty (nothing to update)
-    if not escaped_mappings:
-        logger.warning('No valid DNS mappings after filtering, '
-                       'skipping DNS updater script generation')
-        return ''
-
-    mapping_pairs = ' '.join(escaped_mappings)
+    mapping_pairs = ' '.join(f'{dns}:{hostname}' for dns, hostname in dns_mappings)
 
     # Note: job_group_name is validated at YAML load time to be shell-safe
     script = textwrap.dedent(f"""\
@@ -521,9 +506,9 @@ class NetworkConfigurator:
         coroutines = [entry[0] for entry in setup_tasks]
         logger.info(f'Setting up networking on {len(coroutines)} nodes...')
         try:
-            results = await asyncio.wait_for(
-                asyncio.gather(*coroutines, return_exceptions=True),
-                timeout=60.0)
+            results = await asyncio.wait_for(asyncio.gather(
+                *coroutines, return_exceptions=True),
+                                             timeout=60.0)
         except asyncio.TimeoutError:
             logger.error('Networking setup timed out after 60 seconds')
             return False
