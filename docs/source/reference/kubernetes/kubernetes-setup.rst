@@ -257,8 +257,8 @@ The following setup steps are optional and can be performed based on your specif
 
 .. _kubernetes-setup-volumes:
 
-Set up volumes
-^^^^^^^^^^^^^^^
+Set up NFS and other volumes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 SkyPilot supports mounting various types of volumes to your pods on Kubernetes:
 
