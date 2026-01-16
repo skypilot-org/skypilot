@@ -713,7 +713,7 @@ def srun_sshd_command(
     job_id: str,
     target_node: str,
     unix_user: str,
-    cluster_name_on_cloud: str,
+    cluster_name_on_cloud: str,  # pylint: disable=unused-argument
     is_container_image: bool,
 ) -> str:
     """Build srun command for launching sshd -i inside a Slurm job.
@@ -736,65 +736,38 @@ def srun_sshd_command(
     user_home_ssh_dir = f'~{unix_user}/.ssh'
 
     if is_container_image:
-        # Dropbear + socat bridge for container mode.
-        # See slurm-ray.yml.j2 for why we use Dropbear instead of OpenSSH.
-        # Dropbear's -i (inetd) mode expects a socket fd on stdin, but srun
-        # provides pipes. socat bridges stdin/stdout to a TCP socket.
-        ssh_bootstrap_cmd = ('PORT=$((30000 + RANDOM % 30000)); '
-                             'DROPBEAR=$(command -v /usr/local/bin/dropbear); '
-                             '$DROPBEAR -F -E -s -R -p 127.0.0.1:$PORT & '
-                             'DROPBEAR_PID=$!; '
-                             'trap "kill $DROPBEAR_PID 2>/dev/null" EXIT; '
-                             'sleep 0.1; '
-                             'socat STDIO TCP:127.0.0.1:$PORT')
-        return shlex.join([
-            'srun',
-            '--overlap',
-            '--quiet',
-            '--unbuffered',
-            '--jobid',
-            job_id,
-            '--nodes=1',
-            '--ntasks=1',
-            '--ntasks-per-node=1',
-            '-w',
-            target_node,
-            '--container-remap-root',
-            f'--container-name='
-            f'{pyxis_container_name(cluster_name_on_cloud)}:exec',
-            '/bin/bash',
-            '-c',
-            ssh_bootstrap_cmd,
-        ])
-    else:
-        # Non-container: OpenSSH sshd
-        return shlex.join([
-            'srun',
-            '--quiet',
-            '--unbuffered',
-            '--overlap',
-            '--jobid',
-            job_id,
-            '-w',
-            target_node,
-            '/usr/sbin/sshd',
-            '-i',  # Uses stdin/stdout
-            '-e',  # Writes errors to stderr
-            '-f',  # Use /dev/null to avoid reading system sshd_config
-            '/dev/null',
-            '-h',
-            f'{user_home_ssh_dir}/{SLURM_SSHD_HOST_KEY_FILENAME}',
-            '-o',
-            f'AuthorizedKeysFile={user_home_ssh_dir}/authorized_keys',
-            '-o',
-            'PasswordAuthentication=no',
-            '-o',
-            'PubkeyAuthentication=yes',
-            # If UsePAM is enabled, we will not be able to run sshd(8)
-            # as a non-root user.
-            # See https://man7.org/linux/man-pages/man5/sshd_config.5.html
-            '-o',
-            'UsePAM=no',
-            '-o',
-            f'AcceptEnv={constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}',
-        ])
+        # Container SSH requires dropbear support. See the stacked PR.
+        raise NotImplementedError(
+            'Container SSH is not yet supported in this branch.')
+
+    # Non-container: OpenSSH sshd
+    return shlex.join([
+        'srun',
+        '--quiet',
+        '--unbuffered',
+        '--overlap',
+        '--jobid',
+        job_id,
+        '-w',
+        target_node,
+        '/usr/sbin/sshd',
+        '-i',  # Uses stdin/stdout
+        '-e',  # Writes errors to stderr
+        '-f',  # Use /dev/null to avoid reading system sshd_config
+        '/dev/null',
+        '-h',
+        f'{user_home_ssh_dir}/{SLURM_SSHD_HOST_KEY_FILENAME}',
+        '-o',
+        f'AuthorizedKeysFile={user_home_ssh_dir}/authorized_keys',
+        '-o',
+        'PasswordAuthentication=no',
+        '-o',
+        'PubkeyAuthentication=yes',
+        # If UsePAM is enabled, we will not be able to run sshd(8)
+        # as a non-root user.
+        # See https://man7.org/linux/man-pages/man5/sshd_config.5.html
+        '-o',
+        'UsePAM=no',
+        '-o',
+        f'AcceptEnv={constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}',
+    ])
