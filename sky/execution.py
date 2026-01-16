@@ -4,6 +4,7 @@ See `Stage` for a Task's life cycle.
 """
 import enum
 import logging
+import time
 import typing
 from typing import Callable, List, Optional, Tuple, Union
 
@@ -12,7 +13,6 @@ import colorama
 from sky import admin_policy
 from sky import backends
 from sky import clouds
-from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
@@ -663,10 +663,36 @@ def launch(
     handle = None
     stages = None
     skip_unnecessary_provisioning = False
-    # Check if cluster exists and we are doing fast provisioning
-    if fast and cluster_name is not None:
+
+    # Check for AUTOSTOPPING and wait with spinner (applies to all modes)
+    cluster_status = None
+    maybe_handle = None
+    if cluster_name is not None:
         cluster_status, maybe_handle = (
             backend_utils.refresh_cluster_status_handle(cluster_name))
+        if cluster_status == status_lib.ClusterStatus.AUTOSTOPPING:
+            # Use spinner to show progress while waiting
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message(
+                        f'Waiting for autostop to complete on {cluster_name!r}')
+            ):
+                while cluster_status == status_lib.ClusterStatus.AUTOSTOPPING:
+                    time.sleep(
+                        backend_utils.CLUSTER_STATUS_CACHE_DURATION_SECONDS)
+                    cluster_status, maybe_handle = (
+                        backend_utils.refresh_cluster_status_handle(
+                            cluster_name))
+            # Log final status after spinner completes
+            logger.info(
+                f'Autostop completed. Cluster status: '
+                f'{cluster_status.value if cluster_status else "TERMINATED"}')
+
+    # Check if cluster exists and we are doing fast provisioning
+    if fast and cluster_name is not None:
+        # Reuse cluster_status/maybe_handle if already fetched
+        if cluster_status is None:
+            cluster_status, maybe_handle = (
+                backend_utils.refresh_cluster_status_handle(cluster_name))
         if cluster_status == status_lib.ClusterStatus.INIT:
             # If the cluster is INIT, it may be provisioning. We want to prevent
             # concurrent calls from queueing up many sequential reprovision
@@ -693,12 +719,6 @@ def launch(
                     # once.
                     cluster_status_lock_timeout=-1,
                 ))
-        if cluster_status == status_lib.ClusterStatus.AUTOSTOPPING:
-            raise exceptions.ClusterNotUpError(
-                f'Cannot submit tasks to cluster {cluster_name!r} which is '
-                f'autostopping (executing autostop hooks). '
-                f'Current status: {cluster_status.value}.',
-                cluster_status=cluster_status)
         if cluster_status == status_lib.ClusterStatus.UP:
             handle = maybe_handle
             stages = [

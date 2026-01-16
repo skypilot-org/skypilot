@@ -379,16 +379,16 @@ def test_launch_fast_with_autostop_hook(generic_cloud: str):
 @pytest.mark.no_hyperbolic
 @pytest.mark.no_shadeform
 @pytest.mark.no_seeweb
-def test_launch_interruption_on_autostopping(generic_cloud: str):
-    """Test launching a new job while cluster is autostopping.
+def test_launch_waits_for_autostopping(generic_cloud: str):
+    """Test that launch waits for autostopping to complete.
 
-    This verifies that a new launch request can successfully interrupt the
-    autostop process and bring the cluster back to UP state.
+    This verifies that a new launch request waits for the autostop process
+    (including hook execution) to complete, and then restarts the cluster.
     """
     name = smoke_tests_utils.get_cluster_name()
     autostop_timeout = 600 if generic_cloud == 'azure' else 250
-    # Use a long-running hook to ensure we can catch the AUTOSTOPPING state
-    hook_duration = 300  # 5 minutes
+    # Use a shorter hook since we now wait for it to complete
+    hook_duration = 30
 
     # Load the existing minimal.yaml and add resources section with autostop hook
     minimal_yaml_path = 'tests/test_yamls/minimal.yaml'
@@ -405,7 +405,7 @@ def test_launch_interruption_on_autostopping(generic_cloud: str):
         f.flush()
 
         test = smoke_tests_utils.Test(
-            'test_launch_interruption_on_autostopping',
+            'test_launch_waits_for_autostopping',
             [
                 # Launch cluster
                 f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
@@ -417,9 +417,10 @@ def test_launch_interruption_on_autostopping(generic_cloud: str):
                     cluster_status=[sky.ClusterStatus.AUTOSTOPPING],
                     timeout=autostop_timeout),
 
-                # Interrupt with a new launch
-                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo interrupted") && '
-                'echo "$s" && echo "$s" | grep "Restarting."',
+                # Launch while autostopping - should wait for autostop to
+                # complete, then restart
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo after_autostop") && '
+                'echo "$s" && echo "$s" | grep "Waiting for autostop to complete"',
 
                 # Verify cluster is UP and job ran
                 f'sky logs {name} 2 --status',
@@ -427,7 +428,7 @@ def test_launch_interruption_on_autostopping(generic_cloud: str):
             ],
             f'sky down -y {name}',
             timeout=smoke_tests_utils.get_timeout(generic_cloud) +
-            autostop_timeout,
+            autostop_timeout + hook_duration,
         )
         smoke_tests_utils.run_one_test(test)
 

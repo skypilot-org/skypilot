@@ -139,7 +139,7 @@ CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 
 # Time that must elapse since the last status check before we should re-check if
 # the cluster has been terminated or autostopped.
-_CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
+CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
 
 CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 WORKSPACE_LOCK_TIMEOUT_SECONDS = 10
@@ -2786,7 +2786,7 @@ def _must_refresh_cluster_status(
     is_autostopping = record['status'] == status_lib.ClusterStatus.AUTOSTOPPING
     recently_refreshed = (record['status_updated_at'] is not None and
                           time.time() - record['status_updated_at'] <
-                          _CLUSTER_STATUS_CACHE_DURATION_SECONDS)
+                          CLUSTER_STATUS_CACHE_DURATION_SECONDS)
     is_stale = (use_spot or has_autostop or
                 is_autostopping) and not recently_refreshed
 
@@ -2815,7 +2815,7 @@ def refresh_cluster_record(
           following conditions will be refreshed no matter the argument is
           specified or not:
             - the most latest available status update is more than
-              _CLUSTER_STATUS_CACHE_DURATION_SECONDS old, and one of:
+              CLUSTER_STATUS_CACHE_DURATION_SECONDS old, and one of:
                 1. the cluster is a spot cluster, or
                 2. cluster autostop is set and the cluster is not STOPPED.
         cluster_lock_already_held: Whether the caller is already holding the
