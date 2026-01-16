@@ -76,7 +76,7 @@ class Slurm(clouds.Cloud):
         resources: 'resources_lib.Resources',
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        del region  # unused
+        del region, resources  # Unused
         # logger.critical('[BYPASS] Check Slurm's unsupported features...')
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
@@ -263,6 +263,7 @@ class Slurm(clouds.Cloud):
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
         """For now, we assume zero cost for Slurm clusters."""
+        del instance_type, region, use_spot, zone  # Unused
         return 0.0
 
     def accelerators_to_hourly_cost(self,
@@ -275,6 +276,7 @@ class Slurm(clouds.Cloud):
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
+        del num_gigabytes  # Unused
         return 0.0
 
     def __repr__(self):
@@ -323,7 +325,7 @@ class Slurm(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
-        del cluster_name, dryrun, volume_mounts  # Unused.
+        del cluster_name, dryrun, volume_mounts, num_nodes  # Unused
         if region is not None:
             cluster = region.name
         else:

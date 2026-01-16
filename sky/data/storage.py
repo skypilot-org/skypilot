@@ -516,6 +516,7 @@ class AbstractStore:
         Args:
           mount_path: str; Mount path on remote server
         """
+        del mount_path  # Unused
         raise exceptions.NotSupportedError(
             f'{StorageMode.MOUNT_CACHED.value} is '
             f'not supported for {self.name}.')

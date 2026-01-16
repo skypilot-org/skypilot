@@ -651,6 +651,7 @@ class GCPComputeInstance(GCPInstance):
         total_count: int,
         include_head_node: bool,
     ) -> Tuple[Optional[List], List[str]]:
+        del total_count  # Unused
         # NOTE: The syntax for bulkInsert() is different from insert().
         # bulkInsert expects resource names without prefix. Otherwise
         # it causes a 503 error.
@@ -1000,6 +1001,7 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
         total_count: int,
         include_head_node: bool,
     ) -> Tuple[Optional[List], List[str]]:
+        del include_head_node  # Unused
         logger.debug(f'Creating cluster with MIG: {cluster_name!r}')
         config = copy.deepcopy(node_config)
         labels = dict(config.get('labels', {}), **labels)
@@ -1446,6 +1448,7 @@ class GCPTPUVMInstance(GCPInstance):
         total_count: int,
         include_head_node: bool,
     ) -> Tuple[Optional[List], List[str]]:
+        del total_count  # Unused
         config = copy.deepcopy(node_config)
         # removing Compute-specific default key set in config.py
         config.pop('networkInterfaces', None)
@@ -1643,6 +1646,7 @@ class GCPTPUVMInstance(GCPInstance):
         The boot disk of TPU VMs is not resizable, and users need to add a
         persistent disk to expand disk capacity. Related issue: #2387
         """
+        del availability_zone, instance_name, node_config, project_id  # Unused
         return
 
     @classmethod

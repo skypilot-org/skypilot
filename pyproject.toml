@@ -86,9 +86,6 @@ ignore = [
     "Q003",
     # B011: assert False - can be intentional
     "B011",
-    # ARG002/ARG003: unused method arguments - many are intentional overrides
-    # Ruff only exempts @typing.override (Python 3.12+), but we support 3.8+
-    "ARG002", "ARG003",
 ]
 
 # Per-file ignores for specific patterns

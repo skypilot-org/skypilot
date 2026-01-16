@@ -86,7 +86,7 @@ class Fluidstack(clouds.Cloud):
             A dict of {feature: reason} for the features not supported by the
             cloud implementation.
         """
-        del resources  # unused
+        del resources, region  # Unused
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
@@ -103,6 +103,7 @@ class Fluidstack(clouds.Cloud):
         zone: Optional[str],
         resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
+        del resources  # Unused
         assert zone is None, 'FluidStack does not support zones.'
         del accelerators, zone  # unused
         if use_spot:
@@ -155,6 +156,7 @@ class Fluidstack(clouds.Cloud):
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
+        del num_gigabytes  # Unused
         return 0.0
 
     def __repr__(self):
@@ -205,6 +207,7 @@ class Fluidstack(clouds.Cloud):
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
 
+        del cluster_name, dryrun, num_nodes, volume_mounts  # Unused
         assert zones is None, 'FluidStack does not support zones.'
         resources = resources.assert_launchable()
         acc_dict = self.get_accelerators_from_instance_type(
@@ -337,4 +340,5 @@ class Fluidstack(clouds.Cloud):
         zone: Optional[str],
         **kwargs,
     ) -> List[status_lib.ClusterStatus]:
+        del kwargs, name, region, tag_filters, zone  # Unused
         return []

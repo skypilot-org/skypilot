@@ -58,6 +58,7 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
             context: grpc.ServicerContext
     ) -> autostopv1_pb2.IsAutostoppingResponse:
         """Checks if the cluster is currently autostopping."""
+        del request  # Unused
         try:
             is_autostopping = autostop_lib.get_is_autostopping()
             return autostopv1_pb2.IsAutostoppingResponse(
@@ -239,6 +240,7 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
     def UpdateStatus(  # type: ignore[return]
             self, request: jobsv1_pb2.UpdateStatusRequest,
             context: grpc.ServicerContext) -> jobsv1_pb2.UpdateStatusResponse:
+        del request  # Unused
         try:
             job_lib.update_status()
             return jobsv1_pb2.UpdateStatusResponse()
@@ -410,6 +412,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
             self, request: managed_jobsv1_pb2.GetVersionRequest,
             context: grpc.ServicerContext
     ) -> managed_jobsv1_pb2.GetVersionResponse:
+        del request  # Unused
         try:
             return managed_jobsv1_pb2.GetVersionResponse(
                 controller_version=constants.SKYLET_VERSION)
@@ -578,6 +581,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
             request: managed_jobsv1_pb2.
         StreamLogsRequest,  # type: ignore[return]
             context: grpc.ServicerContext):
+        del request  # Unused
         # TODO(kevin): implement this
         context.abort(grpc.StatusCode.UNIMPLEMENTED,
                       'StreamLogs is not implemented')

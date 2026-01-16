@@ -215,6 +215,7 @@ class GCP(clouds.Cloud):
         resources: 'resources.Resources',
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        del region  # Unused
         unsupported = {}
         if gcp_utils.is_tpu_vm_pod(resources):
             unsupported = {
@@ -266,6 +267,7 @@ class GCP(clouds.Cloud):
         zone: Optional[str],
         resources: Optional['resources.Resources'] = None,
     ) -> List[clouds.Region]:
+        del resources  # Unused
         if accelerators is None:
             regions = catalog.get_region_zones_for_instance_type(instance_type,
                                                                  use_spot,
@@ -486,6 +488,7 @@ class GCP(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
+        del num_nodes, volume_mounts  # Unused
         assert zones is not None, (region, zones)
 
         region_name = region.name
@@ -1129,6 +1132,7 @@ class GCP(clouds.Cloud):
         instance_type: Optional[str],
         disk_tier: Optional[resources_utils.DiskTier]
     ) -> Tuple[bool, str]:
+        del disk_tier, instance_type  # Unused
         return True, ''
 
     @classmethod
@@ -1407,6 +1411,7 @@ class GCP(clouds.Cloud):
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
         """Query the status of a cluster."""
+        del kwargs, name, region, tag_filters, zone  # Unused
         # TODO(suquark): deprecate this method
         assert False, 'This code path should not be used.'
 

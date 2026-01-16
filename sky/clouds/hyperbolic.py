@@ -69,7 +69,7 @@ class Hyperbolic(clouds.Cloud):
         resources: 'resources_lib.Resources',
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        del resources
+        del resources, region  # Unused
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
@@ -89,6 +89,7 @@ class Hyperbolic(clouds.Cloud):
         zone: Optional[str],
         resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
+        del resources  # Unused
         assert zone is None, 'Hyperbolic does not support zones.'
         del accelerators, zone  # unused
 
@@ -244,6 +245,7 @@ class Hyperbolic(clouds.Cloud):
                              instance_type: str,
                              accelerators: Optional[Dict[str, int]] = None,
                              use_spot: bool = False):
+        del accelerators, instance_type, num_nodes, region, use_spot  # Unused
         yield None
 
     @classmethod
@@ -251,11 +253,13 @@ class Hyperbolic(clouds.Cloud):
         return None
 
     def get_egress_cost(self, num_gigabytes: float):
+        del num_gigabytes  # Unused
         return 0.0
 
     def accelerators_to_hourly_cost(self, accelerators: Dict[str, int],
                                     use_spot: bool, region: Optional[str],
                                     zone: Optional[str]) -> float:
+        del accelerators, region, use_spot, zone  # Unused
         return 0.0
 
     def make_deploy_resources_variables(
@@ -269,7 +273,7 @@ class Hyperbolic(clouds.Cloud):
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
         """Returns a dict of variables for the deployment template."""
-        del dryrun, region, cluster_name  # unused
+        del dryrun, region, cluster_name, num_nodes, volume_mounts  # Unused
         assert zones is None, ('Hyperbolic does not support zones', zones)
 
         resources = resources.assert_launchable()

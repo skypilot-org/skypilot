@@ -130,6 +130,7 @@ class ClsApiHelper(object):
         """        Create library item spec
 
         """
+        del client_token  # Unused
         lib_item_spec = vsphere_adaptor.get_library_client().ItemModel()
         lib_item_spec.name = name
         lib_item_spec.description = description

@@ -73,6 +73,7 @@ class VsphereClient:
 
     def remove_instances(self, *instance_ids: str) -> Dict[str, Any]:
         """Terminate instances."""
+        del instance_ids  # Unused
         ### TODO: Add implementation
         # pass
         return {}

@@ -77,6 +77,7 @@ class Vsphere(clouds.Cloud):
         resources: 'resources_lib.Resources',
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        del region, resources  # Unused
         features = cls._CLOUD_UNSUPPORTED_FEATURES
         return features
 
@@ -94,7 +95,7 @@ class Vsphere(clouds.Cloud):
         zone: Optional[str],
         resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
-        del accelerators, zone  # unused
+        del accelerators, zone, resources  # Unused
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, _CLOUD_VSPHERE)
 
@@ -112,6 +113,7 @@ class Vsphere(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[List[clouds.Zone]]:
+        del num_nodes  # Unused
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
@@ -130,6 +132,7 @@ class Vsphere(clouds.Cloud):
         region: Optional[str] = None,
         zone: Optional[str] = None,
     ) -> float:
+        del instance_type, region, use_spot, zone  # Unused
         return 0.0
 
     def accelerators_to_hourly_cost(
@@ -139,10 +142,12 @@ class Vsphere(clouds.Cloud):
         region: Optional[str] = None,
         zone: Optional[str] = None,
     ) -> float:
+        del accelerators, region, use_spot, zone  # Unused
         # Always return 0 for vSphere cases.
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
+        del num_gigabytes  # Unused
         # vSphere doesn't support this part.
         return 0.0
 
@@ -194,6 +199,7 @@ class Vsphere(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
+        del num_nodes, volume_mounts  # Unused
         # TODO get image id here.
         del cluster_name, dryrun  # unused
         assert zones is not None, (region, zones)

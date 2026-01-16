@@ -41,6 +41,7 @@ class IBM(clouds.Cloud):
         resources: 'resources_lib.Resources',
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        del region  # Unused
         features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is currently not supported on {cls._REPR}.'),
@@ -79,7 +80,7 @@ class IBM(clouds.Cloud):
         zone: Optional[str],
         resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
-        del accelerators  # unused
+        del accelerators, resources  # Unused
         if use_spot:
             return []
         regions = catalog.get_region_zones_for_instance_type(
@@ -199,7 +200,7 @@ class IBM(clouds.Cloud):
         Returns:
           A dictionary of cloud-specific node type variables.
         """
-        del cluster_name, dryrun  # Unused.
+        del cluster_name, dryrun, num_nodes, volume_mounts  # Unused
 
         def _get_profile_resources(instance_profile):
             """returns a dict representing the

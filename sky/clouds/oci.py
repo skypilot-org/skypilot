@@ -73,6 +73,7 @@ class OCI(clouds.Cloud):
         resources: 'resources_lib.Resources',
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        del region  # Unused
         unsupported_features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is currently not supported on {cls._REPR}.'),
@@ -107,7 +108,7 @@ class OCI(clouds.Cloud):
         zone: Optional[str],
         resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
-        del accelerators  # unused
+        del accelerators, resources  # Unused
 
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'oci')
@@ -231,7 +232,7 @@ class OCI(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
-        del cluster_name, dryrun  # Unused.
+        del cluster_name, dryrun, num_nodes, volume_mounts  # Unused
         assert region is not None, resources
 
         resources = resources.assert_launchable()
@@ -556,6 +557,7 @@ class OCI(clouds.Cloud):
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        del image_id, region  # Unused
         # We ignore checking the image size because most of situations the
         # boot volume size is larger than the image size. For specific rare
         # situations, the configuration/setup commands should make sure the

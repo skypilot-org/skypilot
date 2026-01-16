@@ -91,6 +91,7 @@ class Azure(clouds.Cloud):
         resources: 'resources.Resources',
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        del region  # Unused
         features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is currently not supported on {cls._REPR}.'),
@@ -277,7 +278,7 @@ class Azure(clouds.Cloud):
         zone: Optional[str],
         resources: Optional['resources.Resources'] = None,
     ) -> List[clouds.Region]:
-        del accelerators  # unused
+        del accelerators, resources  # Unused
         assert zone is None, 'Azure does not support zones'
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'azure')
@@ -339,6 +340,7 @@ class Azure(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
+        del num_nodes, volume_mounts  # Unused
         assert zones is None, ('Azure does not support zones', zones)
 
         region_name = region.name

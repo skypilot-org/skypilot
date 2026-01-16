@@ -355,6 +355,7 @@ class Kubernetes(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
+        del instance_type, region, use_spot, zone  # Unused
         # TODO(romilb): Investigate how users can provide their own cost catalog
         #  for Kubernetes clusters.
         # For now, assume zero cost for Kubernetes clusters
@@ -369,6 +370,7 @@ class Kubernetes(clouds.Cloud):
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
+        del num_gigabytes  # Unused
         return 0.0
 
     def __repr__(self):
@@ -432,6 +434,7 @@ class Kubernetes(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[Optional[List[clouds.Zone]]]:
+        del accelerators, instance_type, num_nodes, region, use_spot  # Unused
         # Always yield None for zones, since Kubernetes does not have zones, and
         # we should allow any region get to this point.
         yield None

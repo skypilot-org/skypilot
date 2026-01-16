@@ -63,7 +63,7 @@ class Lambda(clouds.Cloud):
         resources: 'resources_lib.Resources',
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        del resources  # unused
+        del resources, region  # Unused
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
@@ -80,6 +80,7 @@ class Lambda(clouds.Cloud):
         zone: Optional[str],
         resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
+        del resources  # Unused
         assert zone is None, 'Lambda does not support zones.'
         del accelerators, zone  # unused
         if use_spot:
@@ -132,6 +133,7 @@ class Lambda(clouds.Cloud):
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
+        del num_gigabytes  # Unused
         return 0.0
 
     def __repr__(self):
@@ -182,7 +184,7 @@ class Lambda(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
-        del cluster_name, dryrun  # Unused.
+        del cluster_name, dryrun, num_nodes, volume_mounts  # Unused
         assert zones is None, 'Lambda does not support zones.'
         resources = resources.assert_launchable()
         acc_dict = self.get_accelerators_from_instance_type(
@@ -309,6 +311,7 @@ class Lambda(clouds.Cloud):
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List[status_lib.ClusterStatus]:
+        del kwargs, region, tag_filters, zone  # Unused
         status_map = {
             'booting': status_lib.ClusterStatus.INIT,
             'active': status_lib.ClusterStatus.UP,

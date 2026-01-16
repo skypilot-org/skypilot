@@ -859,6 +859,7 @@ class _NaturalOrderGroup(click.Group):
     """
 
     def list_commands(self, ctx):
+        del ctx  # Unused
         # Preserve definition order but hide aliases (same command object) and
         # commands explicitly marked as hidden.
         seen_commands = set()

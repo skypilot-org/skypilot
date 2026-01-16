@@ -68,7 +68,7 @@ class PrimeIntellect(clouds.Cloud):
         resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
         """Returns the regions that offer the specified resources."""
-        del accelerators
+        del accelerators, resources  # Unused
         regions = catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'primeintellect')
 
@@ -101,6 +101,7 @@ class PrimeIntellect(clouds.Cloud):
         use_spot: bool = False,
     ) -> Iterator[Optional[List['clouds.Zone']]]:
         """Returns an iterator over zones for provisioning."""
+        del num_nodes  # Unused
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
@@ -132,6 +133,7 @@ class PrimeIntellect(clouds.Cloud):
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
+        del num_gigabytes  # Unused
         return 0.0
 
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
@@ -313,5 +315,5 @@ class PrimeIntellect(clouds.Cloud):
             A dict of {feature: reason} for the features not supported by the
             cloud implementation.
         """
-        del resources  # unused
+        del resources, region  # Unused
         return cls._CLOUD_UNSUPPORTED_FEATURES

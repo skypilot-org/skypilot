@@ -88,6 +88,7 @@ class Seeweb(clouds.Cloud):
         resources: 'resources_lib.Resources',
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        del region, resources  # Unused
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
@@ -112,6 +113,7 @@ class Seeweb(clouds.Cloud):
         zone: Optional[str],
         resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
+        del accelerators, resources  # Unused
         assert zone is None, 'Seeweb does not support zones.'
         del zone
         if use_spot:
@@ -175,9 +177,11 @@ class Seeweb(clouds.Cloud):
         zone: Optional[str],
     ) -> float:
 
+        del accelerators, region, use_spot, zone  # Unused
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float):
+        del num_gigabytes  # Unused
         return 0.0
 
     def make_deploy_resources_variables(
@@ -192,6 +196,7 @@ class Seeweb(clouds.Cloud):
     ) -> Dict[str, Any]:
         """Create deployment variables for Seeweb."""
 
+        del dryrun, num_nodes, volume_mounts, zones  # Unused
         # Note: Spot instances and multi-node are automatically handled by
         # the framework via _CLOUD_UNSUPPORTED_FEATURES
 
@@ -276,6 +281,7 @@ class Seeweb(clouds.Cloud):
         region: Optional[str] = None,
         zone: Optional[str] = None,
     ) -> Optional[str]:
+        del region, zone  # Unused
         result = catalog.get_default_instance_type(cpus=cpus,
                                                    memory=memory,
                                                    disk_tier=disk_tier,
@@ -404,6 +410,7 @@ class Seeweb(clouds.Cloud):
         **kwargs,
     ) -> List['status_lib.ClusterStatus']:
         """Query the status of Seeweb cluster instances."""
+        del kwargs, region, tag_filters, zone  # Unused
         cluster_name_on_cloud = name
 
         result = seeweb_provision.instance.query_instances(

@@ -1177,6 +1177,7 @@ class DummyResources(resources_lib.Resources):
         return DummyResources._REPR
 
     def get_cost(self, seconds):
+        del seconds  # Unused
         return 0
 
 

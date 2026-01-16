@@ -468,6 +468,7 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
 
     @classmethod
     def get_label_key(cls, accelerator: Optional[str] = None) -> str:
+        del accelerator  # Unused
         return cls.LABEL_KEY
 
     @classmethod
@@ -511,6 +512,7 @@ class CoreWeaveLabelFormatter(GPULabelFormatter):
 
     @classmethod
     def get_label_key(cls, accelerator: Optional[str] = None) -> str:
+        del accelerator  # Unused
         return cls.LABEL_KEY
 
     @classmethod
@@ -664,6 +666,7 @@ class GFDLabelFormatter(GPULabelFormatter):
 
     @classmethod
     def get_label_key(cls, accelerator: Optional[str] = None) -> str:
+        del accelerator  # Unused
         return cls.LABEL_KEY
 
     @classmethod
@@ -810,6 +813,7 @@ class Autoscaler:
                 False if the Kubernetes context autoscaler cannot create a new
                 node satisfying the instance type.
         """
+        del context, instance_type  # Unused
         # For autoscalers that SkyPilot does not know how to interface with,
         # assume the autoscaler can create a new node that satisfies
         # the instance type.

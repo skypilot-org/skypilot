@@ -79,7 +79,7 @@ class Shadeform(clouds.Cloud):
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         """The features not supported based on the resources provided."""
-        del resources  # unused
+        del resources, region  # Unused
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
@@ -97,6 +97,7 @@ class Shadeform(clouds.Cloud):
         resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
         """Get regions that offer the requested instance type."""
+        del accelerators, resources  # Unused
         assert zone is None, 'Shadeform does not support zones.'
         del zone  # unused
         if use_spot:
@@ -203,10 +204,12 @@ class Shadeform(clouds.Cloud):
                                     region: Optional[str] = None,
                                     zone: Optional[str] = None) -> float:
         """Get hourly cost for accelerators."""
+        del accelerators, region, use_spot, zone  # Unused
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
         """Get egress cost."""
+        del num_gigabytes  # Unused
         # No explicit egress pricing from Shadeform API
         return 0.0
 
@@ -229,7 +232,7 @@ class Shadeform(clouds.Cloud):
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
         """Make variables for deployment template."""
-        del zones, num_nodes, dryrun, volume_mounts  # unused for Shadeform
+        del zones, num_nodes, dryrun, volume_mounts, cluster_name  # Unused
 
         # Get instance type
         r = resources.copy(accelerators=None)
@@ -395,6 +398,7 @@ class Shadeform(clouds.Cloud):
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List[status_lib.ClusterStatus]:
         """Query cluster status."""
+        del kwargs, name, region, tag_filters, zone  # Unused
         # For validation purposes, return empty list (no existing clusters)
         # Actual status querying is handled by the provisioner
         return []

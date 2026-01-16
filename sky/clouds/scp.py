@@ -75,6 +75,7 @@ class SCP(clouds.Cloud):
         resources: 'resources_lib.Resources',
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        del region  # Unused
         features = cls._CLOUD_UNSUPPORTED_FEATURES
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
@@ -101,7 +102,7 @@ class SCP(clouds.Cloud):
         resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
 
-        del accelerators, zone  # unused
+        del accelerators, zone, resources  # Unused
         if use_spot:
             return []
         if instance_type is None:
@@ -156,6 +157,7 @@ class SCP(clouds.Cloud):
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
+        del num_gigabytes  # Unused
         return 0.0
 
     @classmethod
@@ -203,7 +205,7 @@ class SCP(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Optional[str]]:
-        del cluster_name, dryrun  # Unused.
+        del cluster_name, dryrun, num_nodes, volume_mounts  # Unused
         assert zones is None, 'SCP does not support zones.'
 
         resources = resources.assert_launchable()
@@ -389,6 +391,6 @@ class SCP(clouds.Cloud):
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List[status_lib.ClusterStatus]:
-        del tag_filters, region, zone, kwargs  # Unused.
+        del tag_filters, region, zone, kwargs, name  # Unused
         # TODO: deprecate this method
         assert False, 'This code path should not be used.'

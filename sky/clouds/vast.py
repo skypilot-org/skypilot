@@ -69,7 +69,7 @@ class Vast(clouds.Cloud):
             A dict of {feature: reason} for the features not supported by the
             cloud implementation.
         """
-        del resources  # unused
+        del resources, region  # Unused
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
@@ -86,6 +86,7 @@ class Vast(clouds.Cloud):
         zone: Optional[str],
         resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
+        del resources  # Unused
         assert zone is None, 'Vast does not support zones.'
         del accelerators, zone  # unused
         regions = catalog.get_region_zones_for_instance_type(
@@ -144,6 +145,7 @@ class Vast(clouds.Cloud):
         return 0.0  # Vast includes accelerators in the hourly cost.
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
+        del num_gigabytes  # Unused
         return 0.0
 
     @classmethod
@@ -185,7 +187,7 @@ class Vast(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
-        del zones, dryrun, cluster_name, num_nodes  # unused
+        del zones, dryrun, cluster_name, num_nodes, volume_mounts  # Unused
 
         resources = resources.assert_launchable()
         acc_dict = self.get_accelerators_from_instance_type(
@@ -329,6 +331,7 @@ class Vast(clouds.Cloud):
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        del image_id, region  # Unused
         # TODO: use 0.0 for now to allow all images. We should change this to
         # return the docker image size.
         return 0.0

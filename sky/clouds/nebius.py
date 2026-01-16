@@ -82,6 +82,7 @@ class Nebius(clouds.Cloud):
         resources: 'resources_lib.Resources',
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        del region  # Unused
         unsupported = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
 
         # Check if the accelerators support InfiniBand (H100 or H200) and 8 GPUs
@@ -112,6 +113,7 @@ class Nebius(clouds.Cloud):
         zone: Optional[str],
         resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
+        del resources  # Unused
         assert zone is None, 'Nebius does not support zones.'
         del accelerators, zone  # unused
         regions = catalog.get_region_zones_for_instance_type(
@@ -170,6 +172,7 @@ class Nebius(clouds.Cloud):
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
+        del num_gigabytes  # Unused
         return 0.0
 
     def __repr__(self):
@@ -217,7 +220,7 @@ class Nebius(clouds.Cloud):
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
-        del dryrun, cluster_name
+        del dryrun, cluster_name, num_nodes, volume_mounts  # Unused
         assert zones is None, ('Nebius does not support zones', zones)
 
         resources = resources.assert_launchable()

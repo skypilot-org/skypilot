@@ -2532,6 +2532,7 @@ class LaunchableResources(Resources):
     """
 
     def __init__(self, *args, **kwargs) -> None:
+        del args, kwargs  # Unused
         assert False, (
             'LaunchableResources should not be instantiated directly. '
             'It is only used for type checking by MyPy.')

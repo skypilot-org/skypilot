@@ -751,6 +751,7 @@ class SlurmCodeGen(TaskCodeGen):
         log_dir: str,
         setup_cmd: Optional[str] = None,
     ) -> None:
+        del resources_dict  # Unused
         assert self._has_prologue, ('Call add_prologue() before add_setup().')
         self._has_setup = True
         self._cluster_num_nodes = len(stable_cluster_internal_ips)

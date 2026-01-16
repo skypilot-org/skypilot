@@ -184,7 +184,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
 
         This happens in the execute step.
         """
-        del handle, workdir  # Unused
+        del handle, workdir, envs_and_secrets  # Unused
         logger.info('Since the workdir is synced at build time, sync_workdir is'
                     ' a NoOp. If you are running sky exec, your workdir has not'
                     ' been updated.')
