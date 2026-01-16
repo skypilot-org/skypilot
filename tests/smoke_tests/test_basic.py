@@ -504,9 +504,9 @@ def test_autostopping_behaviors(generic_cloud: str):
     """Test various behaviors on AUTOSTOPPING cluster.
 
     This test verifies:
-    1. Task submission (sky exec) is rejected on AUTOSTOPPING cluster
-    2. Endpoint access (sky status --endpoint) still works
-    3. SSH access still works (for debugging/intervention)
+    1. Endpoint access (sky status --endpoint) works on AUTOSTOPPING cluster
+    2. SSH access still works (for debugging/intervention)
+    3. Task submission (sky exec) is rejected on AUTOSTOPPING cluster
     """
     name = smoke_tests_utils.get_cluster_name()
     autostop_timeout = 600 if generic_cloud == 'azure' else 250
@@ -529,7 +529,7 @@ def test_autostopping_behaviors(generic_cloud: str):
         test = smoke_tests_utils.Test(
             'test_autostopping_behaviors',
             [
-                # Launch cluster with a port to test endpoint access
+                # Launch cluster with a port for endpoint testing
                 f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} '
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} {f.name} --ports 8080) && '
                 f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
@@ -541,17 +541,16 @@ def test_autostopping_behaviors(generic_cloud: str):
                     cluster_status=[sky.ClusterStatus.AUTOSTOPPING],
                     timeout=autostop_timeout),
 
-                # Test 1: sky exec should be rejected with clear error message
-                # (New task submissions should fail during autostop)
-                f's=$(sky exec {name} "echo test" 2>&1); echo "$s"; '
-                f'echo "$s" | grep "autostopping"',
-
-                # Test 2: sky status --endpoint should work (cluster is still accessible)
+                # Test 1: sky status --endpoint should work on AUTOSTOPPING cluster
                 f'sky status {name} --endpoint 8080',
 
-                # Test 3: SSH access should still work (using direct SSH command)
-                # This is useful for debugging/intervention during autostop
+                # Test 2: SSH access should still work (for debugging/intervention)
                 f's=$(ssh {name} "echo ssh_works" 2>&1) && echo "$s" | grep "ssh_works"',
+
+                # Test 3: sky exec should be rejected on AUTOSTOPPING cluster
+                # Verify the error message contains the specific rejection text
+                f's=$(sky exec {name} "echo test" 2>&1); '
+                f'echo "$s" | grep "Please wait for autostop to complete" || exit 1',
 
                 # Verify cluster is still in AUTOSTOPPING state after tests
                 f'sky status -r {name} | grep AUTOSTOPPING',

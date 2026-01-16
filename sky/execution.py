@@ -13,6 +13,7 @@ import colorama
 from sky import admin_policy
 from sky import backends
 from sky import clouds
+from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
@@ -832,6 +833,17 @@ def exec(  # pylint: disable=redefined-builtin
     entrypoint.validate(skip_file_mounts=True)
     controller_utils.check_cluster_name_not_controller(cluster_name,
                                                        operation_str='sky.exec')
+
+    # Check if cluster is autostopping - reject exec on autostopping clusters
+    if not dryrun:
+        cluster_status, _ = backend_utils.refresh_cluster_status_handle(
+            cluster_name)
+        if cluster_status == status_lib.ClusterStatus.AUTOSTOPPING:
+            raise exceptions.ClusterNotUpError(
+                f'Cannot execute on cluster {cluster_name!r}: cluster is '
+                'autostopping. Please wait for autostop to complete, then use '
+                f'`sky start {cluster_name}` to restart.',
+                cluster_status=cluster_status)
 
     handle = backend_utils.check_cluster_available(
         cluster_name,
