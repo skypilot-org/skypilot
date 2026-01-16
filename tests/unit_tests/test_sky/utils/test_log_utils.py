@@ -37,7 +37,7 @@ def test_readable_time_duration_returns_dash(start, end, absolute):
 
 @pytest.mark.parametrize(
     "start_time,end_time,expected_relative,expected_absolute", [
-        (NOW, NOW + 10, 'a few secs before', '10s'),
+        (NOW, NOW + 10, '10 secs before', '10s'),
         (NOW, NOW + 60, '1 min before', '1m'),
         (NOW, NOW + 60 * 2 + 1, '2 mins before', '2m 1s'),
         (NOW, NOW + 3600, '1 hr before', '1h'),
