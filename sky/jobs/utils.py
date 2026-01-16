@@ -912,7 +912,7 @@ def cancel_jobs_by_pool(pool_name: str,
 
 def controller_log_file_for_job(identifier: Union[int, str],
                                 create_if_not_exists: bool = False) -> str:
-    # id is taken as a builtin in python, so we use identifier instead :()
+    # id is taken as a builtin in python, so we use identifier instead :(
     log_dir = os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
     if create_if_not_exists:
         os.makedirs(log_dir, exist_ok=True)
@@ -1272,10 +1272,10 @@ def get_alive_controller_uuids() -> List[str]:
     return uuids
 
 
-def stream_controller_logs(controller_uuid: Union[str, Literal[True]],
+def stream_controller_logs(controller_uuid: Optional[str],
                            follow: bool = True) -> Tuple[str, int]:
     """Stream controller logs by controller uuid."""
-    if controller_uuid is True:
+    if controller_uuid is None:
         controller_uuids = get_alive_controller_uuids()
         print('Available system uuids:')
         for uuid in controller_uuids:
@@ -1339,7 +1339,8 @@ def stream_logs(job_id: Optional[int],
 
     if system is not None:
         assert job_id is None and job_name is None, (job_id, job_name, system)
-        return stream_controller_logs(system, follow)
+        return stream_controller_logs(None if system is True else system,
+                                      follow)
 
     if controller:
         if job_id is None:

@@ -371,7 +371,7 @@ def tail_logs(
     """
     version = versions.get_remote_api_version()
     if version is not None and version < 27 and system is not None:
-        raise ValueError('system is not supported in your API server.'
+        raise ValueError('system is not supported in your API server. '
                          'Please upgrade to a newer API server to use this '
                          'feature.')
     body = payloads.JobsLogsBody(
@@ -470,7 +470,7 @@ def download_logs(
 
     version = versions.get_remote_api_version()
     if version is not None and version < 27 and system is not None:
-        raise ValueError('system is not supported in your API server.'
+        raise ValueError('system is not supported in your API server. '
                          'Please upgrade to a newer API server to use this '
                          'feature.')
 

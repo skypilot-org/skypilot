@@ -5305,7 +5305,7 @@ def jobs_cancel(
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
               controller: bool, refresh: bool, sync_down: bool,
-              system: Optional[Union[uuid.UUID, Literal[True]]]):
+              system: Optional[Union[str, Literal[True]]]):
     """Tail or sync down the log of a managed job.
 
     Args:
@@ -5329,7 +5329,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
         system = True
     elif isinstance(system, str):
         try:
-            system = uuid.UUID(system)
+            system = str(uuid.UUID(system))
         except (ValueError, TypeError) as e:
             raise click.UsageError(
                 f'Error: Invalid value for \'[SYSTEM]\': \'{system}\' is not '
