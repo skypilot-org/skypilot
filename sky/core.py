@@ -541,6 +541,7 @@ def _start(
             'is not supported.')
 
     hook: Optional[str] = None
+    hook_timeout: Optional[int] = None
     controller = controller_utils.Controllers.from_name(cluster_name)
     if controller is not None:
         if down or idle_minutes_to_autostop:
