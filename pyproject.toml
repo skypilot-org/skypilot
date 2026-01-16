@@ -40,10 +40,11 @@ target-version = "py38"
 # Pylint rules disabled in .pylintrc that have NO ruff equivalent:
 # (These require type checking, cross-file analysis, or are Python 2 era)
 # - abstract-method, arguments-differ, attribute-defined-outside-init
-# - c-extension-no-member, duplicate-code, import-error, invalid-str-codec
-# - locally-disabled, no-init, no-member, no-name-in-module, signature-differs
-# - suppressed-message, useless-suppression
+# - bad-option-value, c-extension-no-member, duplicate-code, import-error
+# - invalid-str-codec, locally-disabled, no-init, no-member, no-name-in-module
+# - signature-differs, suppressed-message, trailing-newlines, useless-suppression
 # - Plus ~40 Python 2 compatibility rules (obsolete)
+# Note: no-self-use and too-many-* rules are covered by PLR ignore
 #
 # Pylint rules disabled in .pylintrc with ruff equivalents NOT in select:
 # (No need to ignore since the rule sets aren't enabled)
