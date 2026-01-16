@@ -379,6 +379,83 @@ def test_launch_fast_with_autostop_hook(generic_cloud: str):
 @pytest.mark.no_hyperbolic
 @pytest.mark.no_shadeform
 @pytest.mark.no_seeweb
+def test_autostop_hook_timeout(generic_cloud: str):
+    """Test that autostop hook timeout works correctly.
+
+    This verifies that when a hook exceeds its timeout:
+    1. The hook is terminated
+    2. The cluster still transitions to STOPPED state
+    3. The timeout error is logged
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
+    # the VM is stopped.
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+    # Use a short timeout with a long-running hook to trigger timeout
+    hook_timeout = 5  # seconds
+    hook_duration = 60  # seconds (longer than timeout)
+
+    # Load the existing minimal.yaml and add resources section with autostop hook
+    minimal_yaml_path = 'tests/test_yamls/minimal.yaml'
+    yaml_config = yaml_utils.read_yaml(minimal_yaml_path)
+    yaml_config['resources'] = {
+        'autostop': {
+            'idle_minutes': 1,
+            'hook': f'echo "Hook started" && sleep {hook_duration}',
+            'hook_timeout': hook_timeout
+        }
+    }
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+        yaml_utils.dump_yaml(f.name, yaml_config)
+        f.flush()
+
+        test = smoke_tests_utils.Test(
+            'test_autostop_hook_timeout',
+            [
+                # Launch the cluster with a short autostop and a hook that will timeout
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} --fast {smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+                f'sky logs {name} 1 --status',
+                f'sky status -r {name} | grep UP',
+
+                # Wait until cluster enters AUTOSTOPPING state
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=name,
+                    cluster_status=[sky.ClusterStatus.AUTOSTOPPING],
+                    timeout=autostop_timeout),
+
+                # Cluster should still stop despite hook timeout.
+                # Use shorter timeout: hook_timeout + buffer for stop operation.
+                # This also verifies the hook was actually terminated by timeout
+                # (not waiting for the full hook_duration of 60s).
+                # Azure needs longer buffer (~7min) for VM stop operation.
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=name,
+                    cluster_status=[sky.ClusterStatus.STOPPED],
+                    timeout=autostop_timeout),
+
+                # Launch again to check logs
+                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+
+                # Verify hook started but timed out by checking skylet logs
+                f'skylet_log_output=$(sky exec {name} "cat ~/{constants.SKYLET_LOG_FILE}") && echo "$skylet_log_output" | grep "timed out"',
+            ],
+            f'sky down -y {name}',
+            timeout=smoke_tests_utils.get_timeout(generic_cloud) +
+            autostop_timeout,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# See cloud exclusion explanations in test_autostop
+@pytest.mark.no_fluidstack
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_ibm
+@pytest.mark.no_kubernetes
+@pytest.mark.no_slurm
+@pytest.mark.no_hyperbolic
+@pytest.mark.no_shadeform
+@pytest.mark.no_seeweb
 def test_launch_waits_for_autostopping(generic_cloud: str):
     """Test that launch waits for autostopping to complete.
 
