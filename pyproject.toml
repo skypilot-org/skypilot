@@ -59,7 +59,7 @@ exclude = [
 # N: pep8-naming (naming conventions)
 # C4: flake8-comprehensions
 # T20: flake8-print (print statements)
-select = ["F", "E", "W", "I", "B", "Q"]
+select = ["F", "E", "W", "I", "B", "Q", "C4"]
 
 # Ignore rules that were disabled in pylint or cause too many changes
 ignore = [
