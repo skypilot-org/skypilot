@@ -1,5 +1,5 @@
 """Async SDK functions for managed jobs."""
-import functools
+import asyncio
 import typing
 from typing import Dict, List, Literal, Optional, overload, Tuple, Union
 import uuid
@@ -13,7 +13,6 @@ from sky.schemas.api import responses
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
-from sky.utils import context_utils
 
 if typing.TYPE_CHECKING:
     import io
@@ -40,8 +39,8 @@ async def launch(
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Async version of launch() that launches a managed job."""
-    request_id = await context_utils.to_thread(sdk.launch, task, name, pool,
-                                               num_jobs, _need_confirmation)
+    request_id = await asyncio.to_thread(sdk.launch, task, name, pool, num_jobs,
+                                         _need_confirmation)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
@@ -60,9 +59,8 @@ async def queue_v2(
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
     """Async version of queue_v2() that gets statuses of managed jobs."""
-    request_id = await context_utils.to_thread(sdk.queue_v2, refresh,
-                                               skip_finished, all_users,
-                                               job_ids, limit, fields)
+    request_id = await asyncio.to_thread(sdk.queue_v2, refresh, skip_finished,
+                                         all_users, job_ids, limit, fields)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
@@ -79,9 +77,8 @@ async def queue(
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG
 ) -> List[responses.ManagedJobRecord]:
     """Async version of queue() that gets statuses of managed jobs."""
-    request_id = await context_utils.to_thread(sdk.queue, refresh,
-                                               skip_finished, all_users,
-                                               job_ids)
+    request_id = await asyncio.to_thread(sdk.queue, refresh, skip_finished,
+                                         all_users, job_ids)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
@@ -98,8 +95,8 @@ async def cancel(
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
 ) -> None:
     """Async version of cancel() that cancels managed jobs."""
-    request_id = await context_utils.to_thread(sdk.cancel, name, job_ids, all,
-                                               all_users)
+    request_id = await asyncio.to_thread(sdk.cancel, name, job_ids, all,
+                                         all_users)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:
@@ -115,7 +112,7 @@ async def tail_logs(
         output_stream: Optional['io.TextIOBase'] = None,
         system: Optional[Union[uuid.UUID, Literal[True]]] = None) -> int:
     """Async version of tail_logs() that tails the logs of a job."""
-    return await context_utils.to_thread(
+    return await asyncio.to_thread(
         sdk.tail_logs,
         cluster_name,
         job_id,
@@ -161,16 +158,14 @@ async def download_logs(
     system: Optional[Union[uuid.UUID, Literal[True]]] = None,
 ) -> Union[Dict[int, str], Dict[str, str]]:
     """Async version of download_logs() that syncs down logs of managed jobs."""
-    # this makes mypy happy
-    return await context_utils.to_thread(
-        functools.partial(sdk.download_logs, name, job_id, refresh, controller,
-                          local_dir, system))
+    return await asyncio.to_thread(sdk.download_logs, name, job_id, refresh,
+                                   controller, local_dir, system)
 
 
 @usage_lib.entrypoint
 async def dashboard() -> None:
     """Async version of dashboard() that starts a dashboard for managed jobs."""
-    return await context_utils.to_thread(sdk.dashboard)
+    return await asyncio.to_thread(sdk.dashboard)
 
 
 # Deprecated functions
