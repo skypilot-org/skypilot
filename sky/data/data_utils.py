@@ -24,6 +24,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import tigris
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
@@ -48,6 +49,18 @@ def split_s3_path(s3_path: str) -> Tuple[str, str]:
       s3_path: str; S3 Path, e.g. s3://imagenet/train/
     """
     path_parts = s3_path.replace('s3://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
+def split_tigris_path(tigris_path: str) -> Tuple[str, str]:
+    """Splits Tigris Path into Bucket name and Relative Path to Bucket
+
+    Args:
+      tigris_path: str; Tigris Path, e.g. tigris://imagenet/train/
+    """
+    path_parts = tigris_path.replace('tigris://', '').split('/')
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
@@ -1013,3 +1026,37 @@ def verify_coreweave_bucket(name: str, retry: int = 0) -> bool:
 
     # Should not reach here, but just in case
     return False
+
+
+def create_tigris_client() -> Client:
+    """Create Tigris S3 client."""
+    return tigris.client('s3')
+
+
+def verify_tigris_bucket(name: str) -> bool:
+    """Verify Tigris bucket exists and is accessible.
+
+    Args:
+      name: str; Name of Tigris Bucket (without tigris:// prefix)
+
+    Returns:
+      bool: True if bucket exists and is accessible, False otherwise.
+    """
+    tigris_client = create_tigris_client()
+    try:
+        tigris_client.head_bucket(Bucket=name)
+        return True
+    except tigris.botocore_exceptions().ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == '403':
+            logger.error(f'Access denied to bucket {name}')
+            return False
+        elif error_code == '404':
+            logger.debug(f'Bucket {name} does not exist')
+            return False
+        else:
+            logger.debug(f'Unexpected error checking Tigris bucket {name}: {e}')
+            return False
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Unexpected error checking Tigris bucket {name}: {e}')
+        return False
