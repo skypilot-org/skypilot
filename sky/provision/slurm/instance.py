@@ -244,21 +244,18 @@ def _create_virtual_instance(
     # https://github.com/NVIDIA/pyxis/wiki/Usage#registry-syntax
     container_image = resources.get('image_id')
     if container_image is not None:
-        if not container_image.startswith('docker:'):
-            raise ValueError(f'Invalid container image: {container_image}. '
-                             'Please use the format "docker:<image>:<tag>".')
-        container_image = container_image[len('docker:'):]
         if container_image.endswith('.sqsh'):
             # Local .sqsh file, use path directly.
             pass
         else:
             parts = container_image.split('/', 1)
-            maybe_domain, maybe_path = parts
-            is_custom_registry = (len(parts) > 1 and
-                                  ('.' in maybe_domain or ':' in maybe_domain or
-                                   maybe_domain == 'localhost'))
-            if is_custom_registry:
-                container_image = f'{maybe_domain}#{maybe_path}'
+            if len(parts) > 1:
+                maybe_domain, maybe_path = parts
+                is_custom_registry = ('.' in maybe_domain or
+                                      ':' in maybe_domain or
+                                      maybe_domain == 'localhost')
+                if is_custom_registry:
+                    container_image = f'{maybe_domain}#{maybe_path}'
     container_name = slurm_utils.pyxis_container_name(cluster_name_on_cloud)
 
     # Build the sbatch script

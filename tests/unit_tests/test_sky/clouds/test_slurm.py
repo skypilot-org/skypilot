@@ -444,7 +444,8 @@ class TestCreateVirtualInstance:
         assert written_script is not None, "Script was not written"
 
         # Expected script - exact match (using absolute paths)
-        container_image = 'nvcr.io/nvidia/pytorch:24.01-py3'
+        # enroot/pyxis requires '#' separator for non-Docker Hub registries
+        container_image = 'nvcr.io#nvidia/pytorch:24.01-py3'
         container_name = cluster_name  # pyxis_container_name just returns cluster_name
         enroot_container_name = f'pyxis_{container_name}'
         remote_home_dir = '/home/testuser'
