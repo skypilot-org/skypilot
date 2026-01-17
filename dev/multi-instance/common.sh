@@ -1,12 +1,12 @@
 # Common functions for multi-instance dev scripts.
 # Source this file, don't execute it.
 
-# Find .sky-dev/.instance by walking up from current directory
-find_instance() {
+# Find repo root by looking for .git directory
+find_repo_root() {
     local dir="$PWD"
     while [[ "$dir" != "/" ]]; do
-        if [[ -f "$dir/.sky-dev/.instance" ]]; then
-            echo "$dir/.sky-dev"
+        if [[ -d "$dir/.git" ]]; then
+            echo "$dir"
             return 0
         fi
         dir="$(dirname "$dir")"
@@ -14,14 +14,23 @@ find_instance() {
     return 1
 }
 
-# Load instance configuration
+# Load instance configuration. Assumes .sky-dev/.instance exists.
 load_instance() {
-    INSTANCE_DIR="$(find_instance)" || {
-        echo "ERROR: No .sky-dev/.instance found in current directory or parents." >&2
-        echo "Run setup.sh first: ./dev/multi-instance/setup.sh" >&2
-        exit 1
+    local repo_root
+    repo_root="$(find_repo_root)" || {
+        echo "ERROR: Not in a git repository." >&2
+        return 1
     }
+
+    INSTANCE_DIR="$repo_root/.sky-dev"
+
+    if [[ ! -f "$INSTANCE_DIR/.instance" ]]; then
+        echo "ERROR: No .sky-dev/.instance found. Run setup.sh first." >&2
+        return 1
+    fi
+
     source "$INSTANCE_DIR/.instance"
+    REPO_ROOT="$repo_root"
     CONTAINER_NAME="skypilot-dev-${INSTANCE_NAME}"
 }
 
@@ -29,11 +38,11 @@ load_instance() {
 check_docker() {
     if ! command -v docker &>/dev/null; then
         echo "ERROR: Docker is not installed or not in PATH." >&2
-        exit 1
+        return 1
     fi
     if ! docker info &>/dev/null; then
         echo "ERROR: Docker daemon is not running." >&2
-        exit 1
+        return 1
     fi
 }
 
