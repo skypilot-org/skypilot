@@ -1250,16 +1250,41 @@ def test_volume_env_mount_kubernetes():
 # ---------- Container logs from task on Kubernetes ----------
 
 
-def _check_container_logs(name, logs, total_lines, count):
+def _check_container_logs(name, logs, total_lines, count, timeout=60):
     """Check if the container logs contain the expected number of logging lines.
 
     Each line should be only one number in the given range and should show up
     count number of times. We skip the messages that we see in the job from
     running setup with set -x.
+
+    This function includes a retry mechanism because there can be a small delay
+    between job completion and when container logs become fully available via
+    kubectl logs.
     """
-    output_cmd = f's=$({logs});'
+    # Build the check conditions for all numbers
+    check_conditions = []
     for num in range(1, total_lines + 1):
-        output_cmd += f' echo "$s" | grep -x "{num}" | wc -l | grep {count};'
+        check_conditions.append(
+            f'[ "$(echo "$s" | grep -x "{num}" | wc -l)" -eq {count} ]')
+    all_checks = ' && '.join(check_conditions)
+
+    # Wrap in a retry loop with timeout
+    output_cmd = f'''
+start_time=$SECONDS
+while true; do
+    if (( $SECONDS - start_time > {timeout} )); then
+        echo "Timeout after {timeout} seconds waiting for container logs"
+        exit 1
+    fi
+    s=$({logs})
+    if {all_checks}; then
+        echo "Container logs verified successfully"
+        break
+    fi
+    echo "Waiting for container logs to be ready..."
+    sleep 5
+done
+'''
     return smoke_tests_utils.run_cloud_cmd_on_cluster(
         name,
         output_cmd,
