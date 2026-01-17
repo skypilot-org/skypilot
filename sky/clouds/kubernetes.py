@@ -805,6 +805,12 @@ class Kubernetes(clouds.Cloud):
         deploy_vars['k8s_ipc_lock_capability'] = (
             network_type.requires_ipc_lock_capability())
 
+        # CoreWeave NVL72 (GB200/GB300) requires NVLink domain pod affinity
+        # to ensure all pods from the same job are scheduled on the same rack
+        # for optimal NVLink fabric performance.
+        deploy_vars['k8s_coreweave_nvlink_affinity'] = (
+            network_type.requires_nvlink_domain_affinity())
+
         return deploy_vars
 
     @staticmethod
@@ -1177,6 +1183,13 @@ class Kubernetes(clouds.Cloud):
                         if label_key.startswith('nebius.com/'):
                             return (KubernetesHighPerformanceNetworkType.NEBIUS,
                                     '')
+                        # Check for CoreWeave NVL72 (GB200/GB300) by
+                        # detecting the NVLink domain label.
+                        nvlink_label = (
+                            kubernetes_utils.COREWEAVE_NVLINK_DOMAIN_LABEL)
+                        if label_key == nvlink_label:
+                            return (KubernetesHighPerformanceNetworkType.
+                                    COREWEAVE_NVL72, '')
                         if label_key.startswith('ib.coreweave.cloud/'):
                             return (
                                 KubernetesHighPerformanceNetworkType.COREWEAVE,
