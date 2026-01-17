@@ -323,17 +323,6 @@ class SshMode(enum.Enum):
     LOGIN = 2
 
 
-class CommandStage(enum.Enum):
-    """Stage of cluster lifecycle for command execution.
-
-    Controls which targets are used for run/rsync operations.
-    Only affects SlurmCommandRunner with containers; ignored by other runners.
-    """
-    DEFAULT = 0
-    SETUP = 1
-    EXEC = 2
-
-
 class CommandRunner:
     """Runner for commands to be executed on the cluster."""
 
@@ -577,7 +566,6 @@ class CommandRunner:
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
-            stage: CommandStage = CommandStage.DEFAULT,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Runs the command on the cluster.
 
@@ -1220,7 +1208,6 @@ class SSHCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
-            stage: CommandStage = CommandStage.DEFAULT,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -1365,7 +1352,6 @@ class SSHCommandRunner(CommandRunner):
         stream_logs: bool = True,
         max_retry: int = 1,
         get_remote_home_dir: Callable[[], str] = lambda: '~',
-        stage: CommandStage = CommandStage.DEFAULT,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -1384,7 +1370,6 @@ class SSHCommandRunner(CommandRunner):
         Raises:
             exceptions.CommandError: rsync command failed.
         """
-        del stage  # unused
         if self._docker_ssh_proxy_command is not None:
             docker_ssh_proxy_command = self._docker_ssh_proxy_command(['ssh'])
         else:
@@ -1518,7 +1503,6 @@ class KubernetesCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
-            stage: CommandStage = CommandStage.DEFAULT,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'kubectl exec' to run 'cmd' on a pod or deployment by its
         name and namespace.
@@ -1649,7 +1633,6 @@ class KubernetesCommandRunner(CommandRunner):
         Raises:
             exceptions.CommandError: rsync command failed.
         """
-        del stage  # unused
 
         # Build command.
         helper_path = shlex.quote(
@@ -1706,10 +1689,9 @@ class LocalProcessCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             run_in_background: bool = False,
-            stage: CommandStage = CommandStage.DEFAULT,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Use subprocess to run the command."""
-        del port_forward, ssh_mode, connect_timeout, stage  # Unused.
+        del port_forward, ssh_mode, connect_timeout  # Unused.
 
         command_str = self._get_command_to_run(
             cmd,
@@ -1764,10 +1746,8 @@ class LocalProcessCommandRunner(CommandRunner):
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
-        stage: CommandStage = CommandStage.DEFAULT,
     ) -> None:
         """Use rsync to sync the source to the target."""
-        del stage  # Unused.
         self._rsync(source,
                     target,
                     node_destination=None,

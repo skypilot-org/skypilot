@@ -83,7 +83,6 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
 from sky.utils import yaml_utils
-from sky.utils.command_runner import CommandStage
 from sky.utils.plugin_extensions import ExternalFailureSource
 
 if typing.TYPE_CHECKING:
@@ -4460,7 +4459,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     target=os.path.expanduser(local_log_dir),
                     up=False,
                     stream_logs=False,
-                    stage=CommandStage.EXEC,
                 )
             except exceptions.CommandError as e:
                 if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
@@ -4794,7 +4792,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         target=f'{local_log_dir}/controller.log',
                         up=False,
                         stream_logs=False,
-                        stage=CommandStage.EXEC,
                     )
                 except exceptions.CommandError as e:
                     if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
@@ -5491,7 +5488,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             require_outputs=require_outputs,
             separate_stderr=separate_stderr,
             source_bashrc=source_bashrc,
-            stage=CommandStage.EXEC,
             **kwargs,
         )
 

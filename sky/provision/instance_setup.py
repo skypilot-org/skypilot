@@ -27,7 +27,6 @@ from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
-from sky.utils.command_runner import CommandStage
 
 logger = sky_logging.init_logger(__name__)
 
@@ -240,8 +239,7 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                 require_outputs=True,
                 # Installing dependencies requires source bashrc to access
                 # conda.
-                source_bashrc=True,
-                stage=CommandStage.SETUP)
+                source_bashrc=True)
             retry_cnt = 0
             while returncode == 255 and retry_cnt < _MAX_RETRY:
                 # Got network connection issue occur during setup. This could
@@ -580,7 +578,6 @@ def _internal_file_mounts(file_mounts: Dict,
             up=True,
             log_path=log_path,
             stream_logs=False,
-            stage=CommandStage.SETUP,
         )
 
 
