@@ -1835,12 +1835,13 @@ class SlurmCommandRunner(SSHCommandRunner):
                                   port_forward=None,
                                   connect_timeout=None))
 
+        extra_srun_args = (f'{self.container_args} '
+                           if in_container and self.container_args else '')
         if in_container:
-            extra_srun_args = (f'{self.container_args} '
-                               if self.container_args else '')
-            remote_home_dir = '/root'  # TODO(kevin): Dont hardcode this.
+            # TODO(kevin): Cache container home dir using kv_cache.py keyed by
+            # container image+version (same image -> same $HOME).
+            remote_home_dir = self.get_remote_home_dir()
         else:
-            extra_srun_args = ''
             remote_home_dir = self.sky_dir
 
         script_content = f"""#!/bin/bash

@@ -35,7 +35,7 @@ _JOB_TERMINATION_TIMEOUT_SECONDS = 60
 _SKY_DIR_CREATION_TIMEOUT_SECONDS = 30
 
 
-def _sky_cluster_home_dir(cluster_name_on_cloud: str, home_dir: str) -> str:
+def _sky_cluster_home_dir(home_dir: str, cluster_name_on_cloud: str) -> str:
     """Returns the SkyPilot cluster's home directory path on the Slurm cluster.
 
     This path is assumed to be on a shared NFS mount accessible by all nodes.
@@ -188,7 +188,7 @@ def _create_virtual_instance(
     remote_home_dir = login_node_runner.get_remote_home_dir()
 
     skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
-    sky_home_dir = _sky_cluster_home_dir(cluster_name_on_cloud, remote_home_dir)
+    sky_home_dir = _sky_cluster_home_dir(remote_home_dir, cluster_name_on_cloud)
     ready_signal = f'{sky_home_dir}/.sky_sbatch_ready'
     slurm_marker_file = f'{sky_home_dir}/{slurm_utils.SLURM_MARKER_FILE}'
 
@@ -643,7 +643,7 @@ def cleanup_ports(
     pass
 
 
-def _build_pyxis_args(cluster_name_on_cloud: str,) -> str:
+def _build_pyxis_args(cluster_name_on_cloud: str) -> str:
     """Build pyxis/enroot container args for srun.
 
     Uses :exec flag to attach to the already-running container (started with
@@ -702,16 +702,19 @@ def get_command_runners(
     )
     remote_home_dir = login_node_runner.get_remote_home_dir()
 
-    sky_dir = _sky_cluster_home_dir(cluster_name_on_cloud, remote_home_dir)
-
+    sky_dir = _sky_cluster_home_dir(remote_home_dir, cluster_name_on_cloud)
     container_marker = f'{sky_dir}/{slurm_utils.SLURM_CONTAINER_MARKER_FILE}'
-    rc, _, _ = login_node_runner.run(f'test -f {container_marker}',
-                                     require_outputs=True,
-                                     stream_logs=False)
-    container_args = None
-    if rc == 0:
-        container_args = _build_pyxis_args(
-            cluster_name_on_cloud=cluster_name_on_cloud,)
+    rc, stdout, stderr = login_node_runner.run(f'test -f {container_marker}',
+                                               require_outputs=True,
+                                               stream_logs=False)
+    if rc not in (0, 1):
+        subprocess_utils.handle_returncode(
+            rc,
+            f'test -f {container_marker}',
+            f'Failed to check for container marker file: {container_marker}',
+            stderr=f'{stdout}\n{stderr}')
+    container_args = _build_pyxis_args(
+        cluster_name_on_cloud) if rc == 0 else None
 
     runners = [
         command_runner.SlurmCommandRunner(
