@@ -710,7 +710,7 @@ class Storage(object):
         # external buckets, this can be deprecated.
         self.force_delete = False
 
-    def construct(self):
+    def construct(self, region: Optional[str] = None):
         """Constructs the storage object.
 
         The Storage object is lazily initialized, so that when a user
@@ -725,6 +725,10 @@ class Storage(object):
         1. Set the stores field if not specified
         2. Create the bucket or check the existence of the bucket
         3. Sync the data from the source to the bucket if necessary
+
+        Args:
+            region: The region to create the storage in. If None, the default
+                region for the store type will be used.
         """
         if self._constructed:
             return
@@ -791,7 +795,7 @@ class Storage(object):
                                                mode=self.mode)
 
             for store_type in input_stores:
-                self.add_store(store_type)
+                self.add_store(store_type, region=region)
 
             if self.source is not None:
                 # If source is a pre-existing bucket, connect to the bucket
