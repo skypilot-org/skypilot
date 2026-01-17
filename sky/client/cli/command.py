@@ -5322,14 +5322,15 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
         raise click.UsageError(
             'Cannot specify both --controller and --system at the same time.')
 
+    system_processed: Optional[Union[uuid.UUID, Literal[True]]] = None
     if system == 'True':
         # AFAIK click can not handle Union[str, bool] so system will get auto
         # converted to a str. We just convert it back to a bool here. Not the
         # cleanest but it works.
-        system = True
+        system_processed = True
     elif isinstance(system, str):
         try:
-            system = str(uuid.UUID(system))
+            system_processed = uuid.UUID(system)
         except (ValueError, TypeError) as e:
             raise click.UsageError(
                 f'Error: Invalid value for \'[SYSTEM]\': \'{system}\' is not '
@@ -5343,7 +5344,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                     name=name,
                     job_id=job_id,
                     controller=controller,
-                    system=system,
+                    system=system_processed,
                     refresh=refresh)
             style = colorama.Style
             fore = colorama.Fore
@@ -5359,7 +5360,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                                                 job_id=job_id,
                                                 follow=follow,
                                                 controller=controller,
-                                                system=system,
+                                                system=system_processed,
                                                 refresh=refresh)
             sys.exit(returncode)
     except exceptions.ClusterNotUpError:

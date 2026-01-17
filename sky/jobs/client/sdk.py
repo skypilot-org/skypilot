@@ -408,19 +408,7 @@ def download_logs(
     controller: bool,
     local_dir: str = constants.SKY_LOGS_DIRECTORY,
     *,
-    system: Union[str, Literal[True]],
-) -> Dict[str, str]:
-    ...
-
-
-@overload
-def download_logs(
-    name: Optional[str],
-    job_id: Optional[int],
-    refresh: bool,
-    controller: bool,
-    local_dir: str,
-    system: Union[str, Literal[True]],
+    system: Union[uuid.UUID, Literal[True]],
 ) -> Dict[str, str]:
     ...
 
@@ -445,7 +433,7 @@ def download_logs(
     refresh: bool,
     controller: bool,
     local_dir: str = constants.SKY_LOGS_DIRECTORY,
-    system: Optional[Union[str, Literal[True]]] = None,
+    system: Optional[Union[uuid.UUID, Literal[True]]] = None,
 ) -> Union[Dict[int, str], Dict[str, str]]:
     """Sync down logs of managed jobs.
 

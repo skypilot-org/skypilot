@@ -1259,7 +1259,8 @@ def get_alive_controller_uuids() -> List[str]:
     # run_controller_cmd = (f'{sys.executable} -u -m'
     #                       f'sky.jobs.controller {controller_uuid}')
 
-    # we extract the controller_uuid from the cmdline (without the controller_ prefix)
+    # we extract the controller_uuid from the cmdline (without the controller_
+    # prefix)
     uuids = [cmdline[-1] for cmdline in cmdlines]
 
     for uuid, cmdline in zip(uuids, cmdlines):

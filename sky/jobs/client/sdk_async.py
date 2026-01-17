@@ -1,4 +1,5 @@
 """Async SDK functions for managed jobs."""
+import functools
 import typing
 from typing import Dict, List, Literal, Optional, overload, Tuple, Union
 import uuid
@@ -133,19 +134,7 @@ async def download_logs(
     controller: bool,
     local_dir: str = constants.SKY_LOGS_DIRECTORY,
     *,
-    system: Union[str, Literal[True]],
-) -> Dict[str, str]:
-    ...
-
-
-@overload
-async def download_logs(
-    name: Optional[str],
-    job_id: Optional[int],
-    refresh: bool,
-    controller: bool,
-    local_dir: str,
-    system: Union[str, Literal[True]],
+    system: Union[uuid.UUID, Literal[True]],
 ) -> Dict[str, str]:
     ...
 
@@ -169,11 +158,13 @@ async def download_logs(
     refresh: bool,
     controller: bool,
     local_dir: str = constants.SKY_LOGS_DIRECTORY,
-    system: Optional[Union[str, Literal[True]]] = None,
+    system: Optional[Union[uuid.UUID, Literal[True]]] = None,
 ) -> Union[Dict[int, str], Dict[str, str]]:
     """Async version of download_logs() that syncs down logs of managed jobs."""
-    return await context_utils.to_thread(sdk.download_logs, name, job_id,
-                                         refresh, controller, local_dir, system)
+    # this makes mypy happy
+    return await context_utils.to_thread(
+        functools.partial(sdk.download_logs, name, job_id, refresh, controller,
+                          local_dir, system))
 
 
 @usage_lib.entrypoint
