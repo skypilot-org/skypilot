@@ -3557,6 +3557,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 source=workdir,
                 target=SKY_REMOTE_WORKDIR,
                 up=True,
+                should_delete=True,
                 log_path=log_path,
                 stream_logs=False,
             )

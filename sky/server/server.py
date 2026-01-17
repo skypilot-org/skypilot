@@ -443,9 +443,9 @@ upload_ids_to_cleanup: Dict[Tuple[str, str], datetime.datetime] = {}
 
 
 async def cleanup_upload_ids():
-    """Cleans up the temporary chunks uploaded by the client after a delay."""
-    # Clean up the temporary chunks uploaded by the client after an hour. This
-    # is to prevent stale chunks taking up space on the API server.
+    """Cleans up uploaded files and unzipped directories after a delay."""
+    # Clean up the uploaded files and unzipped directories after an hour. This
+    # is to prevent stale files taking up space on the API server.
     while True:
         await asyncio.sleep(3600)
         current_time = datetime.datetime.now()
@@ -457,8 +457,10 @@ async def cleanup_upload_ids():
                 client_file_mounts_dir = (
                     common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
                     user_hash / 'file_mounts')
-                shutil.rmtree(client_file_mounts_dir / upload_id,
-                              ignore_errors=True)
+                await context_utils.to_thread(shutil.rmtree,
+                                              client_file_mounts_dir /
+                                              upload_id,
+                                              ignore_errors=True)
                 (client_file_mounts_dir /
                  upload_id).with_suffix('.zip').unlink(missing_ok=True)
                 upload_ids_to_cleanup.pop((upload_id, user_hash))
@@ -1025,7 +1027,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     if total_chunks == 1:
         zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
     else:
-        chunk_dir = client_file_mounts_dir / upload_id
+        chunk_dir = client_file_mounts_dir / upload_id / '.chunks'
         await anyio.Path(chunk_dir).mkdir(parents=True, exist_ok=True)
         zip_file_path = chunk_dir / f'part{chunk_index}.incomplete'
 
@@ -1072,7 +1074,15 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
                         await zip_file.write(data)
 
     logger.info(f'Uploaded zip file: {zip_file_path}')
-    await unzip_file(zip_file_path, client_file_mounts_dir)
+
+    # Check client API version to determine extraction behavior
+    # New clients (API v24+) use upload_id subdirectory for isolation
+    # Old clients (API v23-) extract directly to maintain backward compatibility
+    version_info = versions.check_compatibility_at_server(request.headers)
+    if version_info and version_info.api_version < 24:
+        upload_id = ''
+
+    await unzip_file(zip_file_path, client_file_mounts_dir, upload_id)
     if total_chunks > 1:
         await asyncio.to_thread(shutil.rmtree, chunk_dir)
     return payloads.UploadZipFileResponse(
@@ -1090,17 +1100,29 @@ def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
 
 
 async def unzip_file(zip_file_path: pathlib.Path,
-                     client_file_mounts_dir: pathlib.Path) -> None:
-    """Unzips a zip file without blocking the event loop."""
+                     client_file_mounts_dir: pathlib.Path,
+                     upload_id: str) -> None:
+    """Unzips a zip file without blocking the event loop.
+
+    Args:
+        zip_file_path: Path to the zip file to extract.
+        client_file_mounts_dir: Base directory for file mounts.
+        upload_id: Unique ID for this upload. If blank, extracts directly to
+            client_file_mounts_dir for backward compatibility with old clients.
+            If provided, extracts to {upload_id}/ subdirectory.
+    """
 
     def _do_unzip() -> None:
         try:
+            # Can always use upload_id because it will be '' for old clients
+            extract_dir = (client_file_mounts_dir / upload_id).resolve()
+            extract_dir.mkdir(parents=True, exist_ok=True)
+
             with zipfile.ZipFile(zip_file_path, 'r') as zipf:
                 for member in zipf.infolist():
                     # Determine the new path
                     original_path = os.path.normpath(member.filename)
-                    new_path = client_file_mounts_dir / original_path.lstrip(
-                        '/')
+                    new_path = extract_dir / original_path.lstrip('/')
 
                     if (member.external_attr >> 28) == 0xA:
                         # Symlink. Read the target path and create a symlink.
@@ -1108,10 +1130,9 @@ async def unzip_file(zip_file_path: pathlib.Path,
                         target = zipf.read(member).decode()
                         assert not os.path.isabs(target), target
                         # Since target is a relative path, we need to check that
-                        # it is under `client_file_mounts_dir` for security.
+                        # it is under `extract_dir` for security.
                         full_target_path = (new_path.parent / target).resolve()
-                        if not _is_relative_to(full_target_path,
-                                               client_file_mounts_dir):
+                        if not _is_relative_to(full_target_path, extract_dir):
                             raise ValueError(
                                 f'Symlink target {target} leads to a '
                                 'file not in userspace. Aborted.')

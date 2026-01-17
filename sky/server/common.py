@@ -929,15 +929,22 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     client_file_mounts_dir = client_dir / 'file_mounts'
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
-    def _get_client_file_mounts_path(
-            original_path: str, file_mounts_mapping: Dict[str, str]) -> str:
-        return str(client_file_mounts_dir /
-                   file_mounts_mapping[original_path].lstrip('/'))
+    def _get_client_file_mounts_path(original_path: str,
+                                     file_mounts_mapping: Dict[str, str],
+                                     upload_id: str) -> str:
+        mapped_path = file_mounts_mapping[original_path].lstrip('/')
+        # Files are extracted to client_file_mounts_dir/{upload_id}/
+        # This works for old clients because upload_id will be ''.
+        return str(client_file_mounts_dir / upload_id / mapped_path)
 
     task_configs = yaml_utils.read_yaml_all(str(client_task_path))
+    upload_id = ''
     for task_config in task_configs:
         if task_config is None:
             continue
+        # Extract upload_id from the first config (dag metadata)
+        if not upload_id:
+            upload_id = task_config.pop('upload_id', '')
         file_mounts_mapping = task_config.pop('file_mounts_mapping', {})
         if not file_mounts_mapping:
             # We did not mount any files to new paths on the remote server
@@ -946,9 +953,8 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
         if 'workdir' in task_config:
             workdir = task_config['workdir']
             if isinstance(workdir, str):
-                task_config['workdir'] = str(
-                    client_file_mounts_dir /
-                    file_mounts_mapping[workdir].lstrip('/'))
+                task_config['workdir'] = _get_client_file_mounts_path(
+                    workdir, file_mounts_mapping, upload_id)
         if workdir_only:
             continue
         if 'file_mounts' in task_config:
@@ -957,7 +963,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
                 if isinstance(src, str):
                     if not data_utils.is_cloud_store_url(src):
                         file_mounts[dst] = _get_client_file_mounts_path(
-                            src, file_mounts_mapping)
+                            src, file_mounts_mapping, upload_id)
                 elif isinstance(src, dict):
                     if 'source' in src:
                         source = src['source']
@@ -965,13 +971,14 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
                             if data_utils.is_cloud_store_url(source):
                                 continue
                             src['source'] = _get_client_file_mounts_path(
-                                source, file_mounts_mapping)
+                                source, file_mounts_mapping, upload_id)
                         else:
                             new_source = []
                             for src_item in source:
                                 new_source.append(
                                     _get_client_file_mounts_path(
-                                        src_item, file_mounts_mapping))
+                                        src_item, file_mounts_mapping,
+                                        upload_id))
                             src['source'] = new_source
                 else:
                     raise ValueError(f'Unexpected file_mounts value: {src}')
@@ -982,7 +989,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
                 for key in ['keyfile', 'certfile']:
                     if key in tls:
                         tls[key] = _get_client_file_mounts_path(
-                            tls[key], file_mounts_mapping)
+                            tls[key], file_mounts_mapping, upload_id)
 
     # We can switch to using string, but this is to make it easier to debug, by
     # persisting the translated task yaml file.
