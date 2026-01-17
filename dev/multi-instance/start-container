@@ -12,9 +12,11 @@ load_instance
 if ! container_exists; then
     echo "Creating container: $CONTAINER_NAME"
 
-    # Build credential mount options
+    # Build credential mount options (cloud providers + SSH + rclone)
     CRED_MOUNTS=""
-    for cred_dir in .aws .azure .config/gcloud .kube .ssh; do
+    for cred_dir in .aws .azure .config/gcloud .kube .ssh \
+                    .oci .vsphere .nebius .ibm .seeweb_cloud \
+                    .config/vastai .scp .config/rclone; do
         if [[ -e "$HOME/$cred_dir" ]]; then
             CRED_MOUNTS="$CRED_MOUNTS -v $HOME/$cred_dir:/root/$cred_dir:ro"
         fi
