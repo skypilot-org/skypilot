@@ -106,34 +106,32 @@ class S3CloudStorage(CloudStorage):
 class GcsCloudStorage(CloudStorage):
     """Google Cloud Storage."""
 
-    # We use gsutil as a basic implementation.  One pro is that its -m
-    # multi-threaded download is nice, which frees us from implementing
-    # parellel workers on our end.
-    # The gsutil command is part of the Google Cloud SDK, and we reuse
-    # the installation logic here.
-    _INSTALL_GSUTIL = gcp.GOOGLE_SDK_INSTALLATION_COMMAND
+    # We use gcloud storage for improved performance with automatic parallelism.
+    # See: https://cloud.google.com/storage/docs/gsutil-transition-to-gcloud
+    # The gcloud storage command is part of the Google Cloud SDK.
+    _INSTALL_GCLOUD_STORAGE = gcp.GOOGLE_SDK_INSTALLATION_COMMAND
 
     @property
-    def _gsutil_command(self):
-        gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+    def _gcloud_storage_command(self):
+        gcloud_storage_cmd = data_utils.get_gcloud_storage_command()
         return (
-            f'{alias_gen}; GOOGLE_APPLICATION_CREDENTIALS='
+            f'GOOGLE_APPLICATION_CREDENTIALS='
             f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH}; '
             # Explicitly activate service account. Unlike the gcp packages
-            # and other GCP commands, gsutil does not automatically pick up
-            # the default credential keys when it is a service account.
+            # and other GCP commands, gcloud storage does not automatically
+            # pick up the default credential keys when it is a service account.
             'gcloud auth activate-service-account '
             '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
             '2> /dev/null || true; '
-            f'{gsutil_alias}')
+            f'{gcloud_storage_cmd}')
 
     def is_directory(self, url: str) -> bool:
         """Returns whether 'url' is a directory.
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
         """
-        commands = [self._INSTALL_GSUTIL]
-        commands.append(f'{self._gsutil_command} ls -d {url}')
+        commands = [self._INSTALL_GCLOUD_STORAGE]
+        commands.append(f'{self._gcloud_storage_command} ls -d {url}')
         command = ' && '.join(commands)
         p = subprocess.run(command,
                            stdout=subprocess.PIPE,
@@ -143,12 +141,12 @@ class GcsCloudStorage(CloudStorage):
         out = p.stdout.decode().strip()
         # Edge Case: Gcloud command is run for first time #437
         out = out.split('\n')[-1]
-        # If <url> is a bucket root, then we only need `gsutil` to succeed
-        # to make sure the bucket exists. It is already a directory.
+        # If <url> is a bucket root, then we only need `gcloud storage` to
+        # succeed to make sure the bucket exists. It is already a directory.
         _, key = data_utils.split_gcs_path(url)
         if not key:
             return True
-        # Otherwise, gsutil ls -d url will return:
+        # Otherwise, gcloud storage ls -d url will return:
         #   --> url.rstrip('/')          if url is not a directory
         #   --> url with an ending '/'   if url is a directory
         if not out.endswith('/'):
@@ -159,19 +157,19 @@ class GcsCloudStorage(CloudStorage):
         return True
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
-        """Downloads a directory using gsutil."""
-        download_via_gsutil = (f'{self._gsutil_command} '
-                               f'rsync -e -r {source} {destination}')
-        all_commands = [self._INSTALL_GSUTIL]
-        all_commands.append(download_via_gsutil)
+        """Downloads a directory using gcloud storage."""
+        download_cmd = (f'{self._gcloud_storage_command} '
+                        f'rsync --recursive {source} {destination}')
+        all_commands = [self._INSTALL_GCLOUD_STORAGE]
+        all_commands.append(download_cmd)
         return ' && '.join(all_commands)
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
-        """Downloads a file using gsutil."""
-        download_via_gsutil = f'{self._gsutil_command} ' \
-                              f'cp {source} {destination}'
-        all_commands = [self._INSTALL_GSUTIL]
-        all_commands.append(download_via_gsutil)
+        """Downloads a file using gcloud storage."""
+        download_cmd = (f'{self._gcloud_storage_command} '
+                        f'cp {source} {destination}')
+        all_commands = [self._INSTALL_GCLOUD_STORAGE]
+        all_commands.append(download_cmd)
         return ' && '.join(all_commands)
 
 
