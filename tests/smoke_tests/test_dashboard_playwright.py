@@ -74,7 +74,8 @@ def test_dashboard_playwright_with_cluster(generic_cloud: str):
     This test:
     1. Launches a minimal cluster
     2. Runs Playwright tests that can verify cluster visibility
-    3. Cleans up the cluster
+    3. Verifies the cluster appears in the dashboard UI
+    4. Cleans up the cluster
     """
     if not _check_npm_available():
         pytest.skip('npm is not available, skipping dashboard Playwright tests')
@@ -91,16 +92,76 @@ def test_dashboard_playwright_with_cluster(generic_cloud: str):
             f'sky launch -y -c {name} --infra {generic_cloud} '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
             f'tests/test_yamls/minimal.yaml',
+            # Verify cluster is UP via CLI
+            f'sky status {name} | grep UP',
             # Install npm dependencies
             f'cd {dashboard_dir} && npm install',
             # Install Playwright browsers
             f'cd {dashboard_dir} && npx playwright install chromium',
-            # Run Playwright tests - the cluster should now be visible
-            f'cd {dashboard_dir} && npm run test:e2e',
+            # Run basic Playwright tests
+            f'cd {dashboard_dir} && npm run test:e2e -- tests/e2e/dashboard.spec.js',
+            # Run data visibility tests with the cluster name
+            f'cd {dashboard_dir} && EXPECTED_CLUSTER_NAME={name} EXPECTED_CLUSTER_STATUS=UP '
+            f'npm run test:e2e -- tests/e2e/data-visibility.spec.js',
         ],
         teardown=f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud,
                                                override_timeout=30 * 60),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.local
+@pytest.mark.no_remote_server
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_dashboard_playwright_with_managed_job(generic_cloud: str):
+    """Test dashboard with an actual managed job.
+
+    This test:
+    1. Launches a managed job
+    2. Runs Playwright tests to verify job visibility in dashboard
+    3. Verifies job status transitions are reflected in the UI
+    4. Cleans up the job
+    """
+    if not _check_npm_available():
+        pytest.skip('npm is not available, skipping dashboard Playwright tests')
+
+    import sky
+
+    name = smoke_tests_utils.get_cluster_name()
+    dashboard_dir = 'sky/dashboard'
+
+    test = smoke_tests_utils.Test(
+        'test_dashboard_playwright_with_managed_job',
+        [
+            # Ensure API server is running
+            smoke_tests_utils.SKY_API_RESTART,
+            # Launch a managed job that runs for a while
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y -d '
+            f'"echo Starting job && sleep 60 && echo Job completed"',
+            # Wait for the job to start running
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[
+                    sky.ManagedJobStatus.STARTING, sky.ManagedJobStatus.RUNNING
+                ],
+                timeout=300),
+            # Install npm dependencies
+            f'cd {dashboard_dir} && npm install',
+            # Install Playwright browsers
+            f'cd {dashboard_dir} && npx playwright install chromium',
+            # Run data visibility tests with the job name
+            f'cd {dashboard_dir} && EXPECTED_JOB_NAME={name} EXPECTED_JOB_STATUS=RUNNING '
+            f'npm run test:e2e -- tests/e2e/data-visibility.spec.js',
+        ],
+        teardown=f'sky jobs cancel -y -n {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud,
+                                               override_timeout=30 * 60),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
