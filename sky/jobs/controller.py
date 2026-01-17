@@ -437,7 +437,12 @@ class JobController:
             if job_status in job_lib.JobStatus.user_code_failure_states():
                 await asyncio.sleep(5)
 
-            # Check cluster status to detect preemption
+            # Pull the actual cluster status from the cloud provider to
+            # determine whether the cluster is preempted or failed.
+            # NOTE: Some failures may not be reflected in the cluster status
+            # depending on the cloud, which can also cause failure of the job.
+            # Plugins can report such failures via ExternalFailureSource.
+            # TODO(cooperc): do we need to add this to asyncio thread?
             (cluster_status, handle) = await asyncio.to_thread(
                 backend_utils.refresh_cluster_status_handle,
                 cluster_name,
