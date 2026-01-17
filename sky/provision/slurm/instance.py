@@ -254,10 +254,6 @@ def _create_virtual_instance(
     # https://github.com/NVIDIA/pyxis/wiki/Usage#registry-syntax
     container_image = resources.get('image_id')
     if container_image is not None:
-        if not container_image.startswith('docker:'):
-            raise ValueError(f'Invalid container image: {container_image}. '
-                             'Please use the format "docker:<image>:<tag>".')
-        container_image = container_image[len('docker:'):]
         if container_image.endswith('.sqsh'):
             # Local .sqsh file, use path directly.
             pass
