@@ -53,7 +53,8 @@ Each worktree gets a deterministic port (46501-46599) based on a hash of the rep
 
 ## Environment Variables
 
-The `sky` wrapper passes through: `SKYPILOT_DEV`, `SKYPILOT_DEBUG`, `AWS_*`, `GOOGLE_APPLICATION_CREDENTIALS`, `AZURE_SUBSCRIPTION_ID`, `KUBECONFIG`
+The `sky` wrapper passes through env vars matching these prefixes:
+`SKYPILOT_*`, `SKY_*`, `AWS_*`, `AZURE_*`, `GOOGLE_*`, `GCP_*`, `OCI_*`, `KUBE*`, `KUBERNETES_*`, `RUNPOD_*`, `HYPERBOLIC_*`, `SEEWEB_*`, `LAMBDA_*`, `DOCKER_*`, `GIT_*`, `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `RAY_*`, `HELM_*`
 
 ## Cleanup
 
