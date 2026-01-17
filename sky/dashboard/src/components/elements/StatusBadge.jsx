@@ -1,6 +1,6 @@
 import React from 'react';
 import { CircularProgress } from '@mui/material';
-import { CustomTooltip as Tooltip } from '@/components/utils';
+import { NonCapitalizedTooltip as Tooltip } from '@/components/utils';
 import {
   FilledCircleIcon,
   SquareIcon,
@@ -51,6 +51,9 @@ export const getStatusStyle = (status) => {
       return 'bg-red-50 text-red-700';
     case 'FAILED_CONTROLLER':
       return 'bg-red-50 text-red-700';
+
+    // Volume statuses - 'READY' and 'NOT_READY' are
+    // handled below with Serve statuses
 
     // Serve specific statuses - ReplicaStatus
     case 'READY':
@@ -155,7 +158,7 @@ export const StatusBadge = ({ status, statusTooltip }) => {
   const tooltipContent = statusTooltip || status;
 
   return (
-    <Tooltip content={tooltipContent} className="text-muted-foreground text-sm">
+    <Tooltip content={tooltipContent}>
       <span>{status2Badge(status)}</span>
     </Tooltip>
   );

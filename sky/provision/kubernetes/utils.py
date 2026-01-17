@@ -3897,3 +3897,25 @@ def get_cleaned_context_and_cloud_str(
         cloud_str = 'ssh'
         context = context[len('ssh-'):]
     return context, cloud_str
+
+
+def get_pvc_events(context: Optional[str],
+                   namespace: str,
+                   pvc_name: str,
+                   reverse: bool = True) -> List[Any]:
+    """Get the events for a PVC, sorted by creation_timestamp."""
+    try:
+        pvc_events = kubernetes.core_api(context).list_namespaced_event(
+            namespace,
+            field_selector=(f'involvedObject.name={pvc_name},'
+                            'involvedObject.kind=PersistentVolumeClaim'),
+            _request_timeout=kubernetes.API_TIMEOUT)
+    except (kubernetes.max_retry_error(), kubernetes.api_exception(),
+            kubernetes.config_exception()) as e:
+        logger.warning(f'Failed to get PVC events: {e}')
+        return []
+
+    return sorted(pvc_events.items,
+                  key=lambda e:
+                  (e.last_timestamp or e.metadata.creation_timestamp),
+                  reverse=reverse)
