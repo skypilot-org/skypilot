@@ -17,8 +17,8 @@ exclude = [
 ]
 
 [format]
-# Google Style Guide formatting options
-quote-style = "double"          # Google: Use """ for docstrings, be consistent for strings
+# Formatting options (single quotes to match existing codebase)
+quote-style = "single"          # Match existing codebase convention
 indent-style = "space"          # Google: 4 spaces, never tabs
 skip-magic-trailing-comma = false  # Google: trailing commas when closing bracket on separate line
 line-ending = "auto"
@@ -279,8 +279,9 @@ section-order = ["future", "standard-library", "third-party", "first-party", "lo
 convention = "google"
 
 [lint.flake8-quotes]
-# Google Style: be consistent, prefer double quotes for docstrings
-inline-quotes = "double"
+# Use single quotes for strings (matching existing codebase)
+# Keep double quotes for docstrings (Google style)
+inline-quotes = "single"
 docstring-quotes = "double"
 multiline-quotes = "double"
 

@@ -10,14 +10,14 @@ This section contains concrete findings from running ruff on the SkyPilot codeba
 
 The `ruff.toml` configuration has been aligned with the [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html):
 
-| Setting | Value | Google Style Reference |
-|---------|-------|------------------------|
-| Line length | 80 | Section 3.2 |
-| Indent | 4 spaces | Section 3.4 |
-| Quote style | Double quotes | Section 3.10 (consistency) |
-| Docstrings | `"""` (triple double) | Section 3.8 |
-| Trailing commas | When closing bracket on separate line | Section 3.4 |
-| Import order | stdlib → third-party → first-party | Section 3.13 |
+| Setting | Value | Notes |
+|---------|-------|-------|
+| Line length | 80 | Google Section 3.2 |
+| Indent | 4 spaces | Google Section 3.4 |
+| Quote style | Single quotes | Match existing codebase (pylint-quotes) |
+| Docstrings | `"""` (triple double) | Google Section 3.8 |
+| Trailing commas | When closing bracket on separate line | Google Section 3.4 |
+| Import order | stdlib → third-party → first-party | Google Section 3.13 |
 
 ### Formatting Differences (ruff format vs yapf)
 
@@ -25,16 +25,7 @@ The `ruff.toml` configuration has been aligned with the [Google Python Style Gui
 
 **Key style differences identified:**
 
-1. **Quote style (major change):**
-   ```python
-   # Current (single quotes)
-   message = 'Hello, world'
-
-   # Google style (double quotes)
-   message = "Hello, world"
-   ```
-
-2. **Trailing commas on multi-line structures:**
+1. **Trailing commas on multi-line structures:**
    ```python
    # yapf style
    return optimizer.Optimizer.optimize(dag=dag,
@@ -81,14 +72,13 @@ The `ruff.toml` configuration has been aligned with the [Google Python Style Gui
 
 ### Linting Differences (ruff check vs pylint)
 
-**With Google-aligned configuration:**
+**With single-quote configuration (matching existing codebase):**
 
 | Scope | Total Errors | Auto-fixable | Manual Fix Required |
 |-------|--------------|--------------|---------------------|
-| `sky/` only | 33,110 | 33,102 (99.9%) | 8 |
-| Main change | 33,088 Q000 | All auto-fixable | Quote style migration |
+| `sky/` only | 22 | 14 (64%) | 8 |
 
-**Non-quote errors requiring manual review (8 total):**
+**Errors requiring review (22 total):**
 
 | Code | Count | Description | Action |
 |------|-------|-------------|--------|
@@ -98,6 +88,8 @@ The `ruff.toml` configuration has been aligned with the [Google Python Style Gui
 | F841 | 2 | Unused variables | Review each |
 | F821 | 2 | Undefined names | Fix (real bugs) |
 | W291 | 1 | Trailing whitespace | Fix |
+
+**Note:** By using single quotes (matching the existing pylint-quotes configuration), we avoid 33,000+ quote-style violations that would otherwise require reformatting.
 
 ### Google Style Additions (Disabled for Gradual Adoption)
 
@@ -113,8 +105,9 @@ The following Google style checks are **configured but disabled** for gradual ad
 ### Configuration Created
 
 A complete `ruff.toml` has been created that:
-- Aligns with Google Python Style Guide
-- Uses double quotes (Google standard)
+- Aligns with Google Python Style Guide (except quote style)
+- Uses single quotes for strings (matching existing pylint-quotes config)
+- Uses double quotes for docstrings (Google standard)
 - Enables Google-style docstring convention (`convention = "google"`)
 - Disables docstring/annotation enforcement for gradual adoption
 - Handles per-file exceptions (tests, examples, __init__.py)
