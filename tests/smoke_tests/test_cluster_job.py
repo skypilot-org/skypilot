@@ -470,6 +470,55 @@ def test_docker_preinstalled_package(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.slurm
+def test_docker_preinstalled_package_slurm_sqsh(generic_cloud: str):
+    """Test local .sqsh container images on Slurm (both absolute and relative paths)."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_rel = f'{name}-rel'
+
+    # Parse "sky check slurm" output: "    ├── cluster: enabled" -> "cluster"
+    # sed strips ANSI escape codes from colored output
+    get_slurm_cluster = ("sky check slurm 2>&1 | "
+                         "sed 's/\\x1b\\[[0-9;]*m//g' | "
+                         "grep -E '(├──|└──)' | "
+                         "grep 'enabled' | "
+                         "head -1 | "
+                         "awk -F': ' '{print $1}' | "
+                         "awk '{print $NF}'")
+
+    test = smoke_tests_utils.Test(
+        'docker_preinstalled_sqsh',
+        [
+            # Get slurm cluster name and remote home directory
+            f'SLURM_CLUSTER=$({get_slurm_cluster}) && '
+            f'echo "Using Slurm cluster: $SLURM_CLUSTER" && '
+            f'SLURM_HOME=$(ssh -F ~/.slurm/config $SLURM_CLUSTER "echo \\$HOME") && '
+            f'echo "Remote home: $SLURM_HOME" && '
+            # Import nginx image to create .sqsh file in ~/nginx+latest.sqsh
+            f'ssh -F ~/.slurm/config $SLURM_CLUSTER "enroot import docker://nginx:latest" && '
+            # Test 1: Absolute path - launch with full path to .sqsh
+            f'sky launch -y -c {name} --infra slurm/$SLURM_CLUSTER '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--image-id docker:$SLURM_HOME/nginx+latest.sqsh -- nginx -V',
+            # Verify absolute path worked
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} whoami | grep root',
+            # Test 2: Relative path - must use ./ prefix for pyxis
+            f'SLURM_CLUSTER=$({get_slurm_cluster}) && '
+            f'sky launch -y -c {name_rel} --infra slurm/$SLURM_CLUSTER '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--image-id docker:./nginx+latest.sqsh -- nginx -V',
+            # Verify relative path worked
+            f'sky logs {name_rel} 1 --status',
+            f'sky exec {name} whoami | grep root',
+        ],
+        f'sky down -y {name} {name_rel}; '
+        f'SLURM_CLUSTER=$({get_slurm_cluster}) && '
+        f'ssh -F ~/.slurm/config $SLURM_CLUSTER "rm -f ~/nginx+latest.sqsh"',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Submitting multiple tasks to the same cluster. ----------
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_shadeform  # Shadeform does not have T4 GPUs

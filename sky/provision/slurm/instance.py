@@ -7,6 +7,7 @@ import threading
 import time
 from typing import Any, cast, Dict, List, Optional, Tuple
 
+from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
@@ -238,10 +239,22 @@ def _create_virtual_instance(
     ready_signal = f'{sky_home_dir}/.sky_sbatch_ready'
     slurm_marker_file = f'{sky_home_dir}/{slurm_utils.SLURM_MARKER_FILE}'
 
-    # Get container image from node config (e.g., 'docker:ubuntu:22.04')
+    # For non-Docker Hub registries, pyxis/enroot requires '#' separator
+    # between registry and path. See:
+    # https://github.com/NVIDIA/pyxis/wiki/Usage#registry-syntax
     container_image = resources.get('image_id')
-    if container_image is not None and container_image.startswith('docker:'):
-        container_image = container_image[len('docker:'):]
+    if container_image is not None:
+        if container_image.endswith('.sqsh'):
+            # Local .sqsh file, use path directly.
+            pass
+        else:
+            parts = container_image.split('/', 1)
+            maybe_domain, maybe_path = parts
+            is_custom_registry = (len(parts) > 1 and
+                                  ('.' in maybe_domain or ':' in maybe_domain or
+                                   maybe_domain == 'localhost'))
+            if is_custom_registry:
+                container_image = f'{maybe_domain}#{maybe_path}'
     container_name = slurm_utils.pyxis_container_name(cluster_name_on_cloud)
 
     # Build the sbatch script
@@ -405,14 +418,24 @@ touch {sky_home_dir}/.hushlogin
         log_thread = threading.Thread(target=_stream_logs, daemon=True)
         log_thread.start()
 
-    _wait_for_job_ready(
-        login_node_runner,
-        client,
-        job_id,
-        ready_signal,
-        slurm_log,
-        remaining_timeout,
-    )
+    try:
+        _wait_for_job_ready(
+            login_node_runner,
+            client,
+            job_id,
+            ready_signal,
+            slurm_log,
+            remaining_timeout,
+        )
+    except (TimeoutError, RuntimeError, exceptions.CommandError) as e:
+        _, stdout, _ = login_node_runner.run(f'cat {slurm_log} 2>/dev/null',
+                                             require_outputs=True,
+                                             stream_logs=False)
+        if stdout:
+            logger.error(f'=== Slurm job logs ({slurm_log}) ===\n'
+                         f'{stdout}'
+                         f'=== End of Slurm job logs ===')
+        raise e
 
     return common.ProvisionRecord(provider_name='slurm',
                                   region=region,
