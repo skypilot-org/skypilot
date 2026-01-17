@@ -3,7 +3,7 @@ import abc
 import dataclasses
 import importlib
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI
 
@@ -15,7 +15,11 @@ from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
+# Default paths for plugins configuration
 _DEFAULT_PLUGINS_CONFIG_PATH = '~/.sky/plugins.yaml'
+# Remote path for plugins config on the cluster
+REMOTE_PLUGINS_CONFIG_PATH = '~/.sky/plugins.yaml'
+
 _PLUGINS_CONFIG_ENV_VAR = (
     f'{skylet_constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}PLUGINS_CONFIG')
 
@@ -140,6 +144,12 @@ def _config_schema():
             'class': {
                 'type': 'string',
             },
+            'package': {
+                # Path to the plugin package directory (containing
+                # pyproject.toml or setup.py). If provided, the package
+                # will be built as a wheel and uploaded to remote clusters.
+                'type': 'string',
+            },
             'parameters': {
                 'type': 'object',
                 'required': [],
@@ -173,6 +183,20 @@ def _load_plugin_config() -> Optional[config_utils.Config]:
                                  _config_schema(),
                                  err_msg_prefix='Invalid plugins config: ')
     return config_utils.Config.from_dict(config)
+
+
+def get_plugin_packages() -> List[Dict[str, Any]]:
+    """Get the list of plugin packages with their configurations.
+
+    Returns:
+        A list of dictionaries containing plugin configurations, each with
+        at least 'class' and optionally 'package' (path to the package
+        directory) and 'parameters'.
+    """
+    config = _load_plugin_config()
+    if not config:
+        return []
+    return config.get('plugins', [])
 
 
 _PLUGINS: Dict[str, BasePlugin] = {}
