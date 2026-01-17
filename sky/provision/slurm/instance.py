@@ -268,8 +268,13 @@ def _create_virtual_instance(
     # Build container initialization block if container image specified
     container_block = ''
     if container_image is not None:
+        container_home_dir = '/root'  # TODO(kevin): Don't hardcode this.
+        ccache_subdir = '.cache/ccache'
         container_mounts = ','.join([
             f'{remote_home_dir}:{remote_home_dir}',
+            # ccache dir for faster builds
+            f'{remote_home_dir}/{ccache_subdir}:'
+            f'{container_home_dir}/{ccache_subdir}',
         ])
         container_init_script = textwrap.dedent("""\
             set -e
@@ -286,6 +291,8 @@ def _create_virtual_instance(
             f'touch {container_marker_file} {ready_signal}'
             f' && sleep infinity')
         container_block = (
+            f'srun --nodes={num_nodes} mkdir -p '
+            f'{remote_home_dir}/{ccache_subdir}\n'
             f'echo "Initializing container {container_name} on all nodes..."\n'
             f'srun --overlap --nodes={num_nodes} --ntasks-per-node=1 '
             f'--container-image={shlex.quote(container_image)} '
