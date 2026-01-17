@@ -1181,6 +1181,10 @@ class Kubernetes(clouds.Cloud):
                             return (
                                 KubernetesHighPerformanceNetworkType.COREWEAVE,
                                 '')
+                        if label_key.startswith('node-role.together.ai/'):
+                            return (
+                                KubernetesHighPerformanceNetworkType.TOGETHER,
+                                '')
 
                     # Check for GKE clusters with specific GPUDirect variants
                     machine_family = node.metadata.labels.get(
