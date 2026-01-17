@@ -22,6 +22,15 @@ Common use cases include:
 - **RL post-training**: Separate jobs for trainer, reward modeling, rollout server, and data serving
 - **Parallel train-eval**: Training and evaluation running in parallel with shared storage
 
+.. figure:: ../images/job-groups-rl-architecture.svg
+   :width: 90%
+   :align: center
+   :alt: RL Post-Training Architecture with Job Groups
+
+   Example: RL post-training architecture where each component (ppo-trainer, rollout-server,
+   reward-server, replay-buffer, data-server) runs as a separate job within a single Job Group.
+   Jobs can have different resource requirements and communicate via service discovery.
+
 .. contents:: Contents
    :local:
    :backlinks: none
