@@ -54,7 +54,11 @@ import { useMobile } from '@/hooks/useMobile';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { PluginSlot } from '@/plugins/PluginSlot';
-import { useTableColumns } from '@/plugins/PluginProvider';
+import {
+  useTableColumns,
+  usePluginComponents,
+  useMergedTableColumns,
+} from '@/plugins/PluginProvider';
 import {
   FilterDropdown,
   Filters,
@@ -716,20 +720,26 @@ export function ManagedJobsTable({
     });
   }, [data, poolsData, setValueList]);
 
-  const requestSort = (key) => {
-    let direction = 'ascending';
-    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
-      direction = 'descending';
-    }
-    setSortConfig({ key, direction });
-  };
+  const requestSort = React.useCallback(
+    (key) => {
+      let direction = 'ascending';
+      if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+        direction = 'descending';
+      }
+      setSortConfig({ key, direction });
+    },
+    [sortConfig]
+  );
 
-  const getSortDirection = (key) => {
-    if (sortConfig.key === key) {
-      return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
-    }
-    return '';
-  };
+  const getSortDirection = React.useCallback(
+    (key) => {
+      if (sortConfig.key === key) {
+        return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
+      }
+      return '';
+    },
+    [sortConfig]
+  );
 
   // Calculate active and finished counts
   const counts = React.useMemo(() => {
@@ -850,358 +860,385 @@ export function ManagedJobsTable({
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
-  // Get plugin columns
-  const pluginColumns = useTableColumns('jobs', {
-    shouldShowWorkspace,
-    shouldShowPool,
-  });
-
   // Define base columns with their order
-  const baseColumns = [
-    {
-      id: 'id',
-      order: 0,
-      renderHeader: () => (
-        <TableHead
-          className="sortable whitespace-nowrap"
-          onClick={() => requestSort('id')}
-        >
-          ID{getSortDirection('id')}
-        </TableHead>
-      ),
-      renderCell: (item) => (
-        <TableCell>
-          <Link href={`/jobs/${item.id}`} className="text-blue-600">
-            {item.id}
-          </Link>
-        </TableCell>
-      ),
-    },
-    {
-      id: 'name',
-      order: 1,
-      renderHeader: () => (
-        <TableHead
-          className="sortable whitespace-nowrap"
-          onClick={() => requestSort('name')}
-        >
-          Name{getSortDirection('name')}
-        </TableHead>
-      ),
-      renderCell: (item) => (
-        <TableCell>
-          <Link href={`/jobs/${item.id}`} className="text-blue-600">
-            {item.name}
-          </Link>
-        </TableCell>
-      ),
-    },
-    {
-      id: 'user',
-      order: 2,
-      renderHeader: () => (
-        <TableHead
-          className="sortable whitespace-nowrap"
-          onClick={() => requestSort('user')}
-        >
-          User{getSortDirection('user')}
-        </TableHead>
-      ),
-      renderCell: (item) => (
-        <TableCell>
-          <UserDisplay username={item.user} userHash={item.user_hash} />
-        </TableCell>
-      ),
-    },
-    {
-      id: 'workspace',
-      order: 2.5,
-      conditional: true, // Only show when shouldShowWorkspace is true
-      renderHeader: () =>
-        shouldShowWorkspace ? (
+  const baseColumns = React.useMemo(
+    () => [
+      {
+        id: 'id',
+        order: 0,
+        renderHeader: () => (
           <TableHead
             className="sortable whitespace-nowrap"
-            onClick={() => requestSort('workspace')}
+            onClick={() => requestSort('id')}
           >
-            Workspace{getSortDirection('workspace')}
+            ID{getSortDirection('id')}
           </TableHead>
-        ) : null,
-      renderCell: (item) =>
-        shouldShowWorkspace ? (
+        ),
+        renderCell: (item) => (
           <TableCell>
-            <Link
-              href="/workspaces"
-              className="text-gray-700 hover:text-blue-600 hover:underline"
-            >
-              {item.workspace || 'default'}
+            <Link href={`/jobs/${item.id}`} className="text-blue-600">
+              {item.id}
             </Link>
           </TableCell>
-        ) : null,
-    },
-    {
-      id: 'submitted',
-      order: 3,
-      renderHeader: () => (
-        <TableHead
-          className="sortable whitespace-nowrap"
-          onClick={() => requestSort('submitted_at')}
-        >
-          Submitted{getSortDirection('submitted_at')}
-        </TableHead>
-      ),
-      renderCell: (item) => (
-        <TableCell>{formatSubmittedTime(item.submitted_at)}</TableCell>
-      ),
-    },
-    {
-      id: 'duration',
-      order: 4,
-      renderHeader: () => (
-        <TableHead
-          className="sortable whitespace-nowrap"
-          onClick={() => requestSort('job_duration')}
-        >
-          Duration{getSortDirection('job_duration')}
-        </TableHead>
-      ),
-      renderCell: (item) => (
-        <TableCell>{formatDuration(item.job_duration)}</TableCell>
-      ),
-    },
-    {
-      id: 'status',
-      order: 5,
-      renderHeader: () => (
-        <TableHead
-          className="sortable whitespace-nowrap"
-          onClick={() => requestSort('status')}
-        >
-          Status{getSortDirection('status')}
-        </TableHead>
-      ),
-      renderCell: (item) => (
-        <TableCell>
-          <PluginSlot
-            name="jobs.table.status.badge"
-            context={item}
-            fallback={
-              <StatusBadge
-                status={item.status}
-                statusTooltip={item.statusTooltip}
-              />
-            }
-          />
-        </TableCell>
-      ),
-    },
-    {
-      id: 'infra',
-      order: 6,
-      renderHeader: () => (
-        <TableHead
-          className="sortable whitespace-nowrap"
-          onClick={() => requestSort('infra')}
-        >
-          Infra{getSortDirection('infra')}
-        </TableHead>
-      ),
-      renderCell: (item) => (
-        <TableCell>
-          {item.infra && item.infra !== '-' ? (
+        ),
+      },
+      {
+        id: 'name',
+        order: 1,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('name')}
+          >
+            Name{getSortDirection('name')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            <Link href={`/jobs/${item.id}`} className="text-blue-600">
+              {item.name}
+            </Link>
+          </TableCell>
+        ),
+      },
+      {
+        id: 'user',
+        order: 2,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('user')}
+          >
+            User{getSortDirection('user')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            <UserDisplay username={item.user} userHash={item.user_hash} />
+          </TableCell>
+        ),
+      },
+      {
+        id: 'workspace',
+        order: 2.5,
+        conditional: true, // Only show when shouldShowWorkspace is true
+        renderHeader: () =>
+          shouldShowWorkspace ? (
+            <TableHead
+              className="sortable whitespace-nowrap"
+              onClick={() => requestSort('workspace')}
+            >
+              Workspace{getSortDirection('workspace')}
+            </TableHead>
+          ) : null,
+        renderCell: (item) =>
+          shouldShowWorkspace ? (
+            <TableCell>
+              <Link
+                href="/workspaces"
+                className="text-gray-700 hover:text-blue-600 hover:underline"
+              >
+                {item.workspace || 'default'}
+              </Link>
+            </TableCell>
+          ) : null,
+      },
+      {
+        id: 'submitted',
+        order: 3,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('submitted_at')}
+          >
+            Submitted{getSortDirection('submitted_at')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>{formatSubmittedTime(item.submitted_at)}</TableCell>
+        ),
+      },
+      {
+        id: 'duration',
+        order: 4,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('job_duration')}
+          >
+            Duration{getSortDirection('job_duration')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>{formatDuration(item.job_duration)}</TableCell>
+        ),
+      },
+      {
+        id: 'status',
+        order: 5,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('status')}
+          >
+            Status{getSortDirection('status')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            <PluginSlot
+              name="jobs.table.status.badge"
+              context={item}
+              fallback={
+                <StatusBadge
+                  status={item.status}
+                  statusTooltip={item.statusTooltip}
+                />
+              }
+            />
+          </TableCell>
+        ),
+      },
+      {
+        id: 'infra',
+        order: 6,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('infra')}
+          >
+            Infra{getSortDirection('infra')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            {item.infra && item.infra !== '-' ? (
+              <NonCapitalizedTooltip
+                content={item.full_infra || item.infra}
+                className="text-sm text-muted-foreground"
+              >
+                <span>
+                  <Link href="/infra" className="text-blue-600 hover:underline">
+                    {item.cloud || item.infra.split('(')[0].trim()}
+                  </Link>
+                  {item.infra.includes('(') && (
+                    <span>
+                      {' ' +
+                        (() => {
+                          const NAME_TRUNCATE_LENGTH =
+                            UI_CONFIG.NAME_TRUNCATE_LENGTH;
+                          const fullRegionPart = item.infra.substring(
+                            item.infra.indexOf('(')
+                          );
+                          const regionContent = fullRegionPart.substring(
+                            1,
+                            fullRegionPart.length - 1
+                          );
+
+                          if (regionContent.length <= NAME_TRUNCATE_LENGTH) {
+                            return fullRegionPart;
+                          }
+
+                          const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+                          return `(${truncatedRegion})`;
+                        })()}
+                    </span>
+                  )}
+                </span>
+              </NonCapitalizedTooltip>
+            ) : (
+              <span>{item.infra || '-'}</span>
+            )}
+          </TableCell>
+        ),
+      },
+      {
+        id: 'requested_resources',
+        order: 7,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('cluster')}
+          >
+            Requested Resources{getSortDirection('cluster')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
             <NonCapitalizedTooltip
-              content={item.full_infra || item.infra}
+              content={
+                item.requested_resources ||
+                item.resources_str_full ||
+                item.resources_str ||
+                '-'
+              }
               className="text-sm text-muted-foreground"
             >
               <span>
-                <Link href="/infra" className="text-blue-600 hover:underline">
-                  {item.cloud || item.infra.split('(')[0].trim()}
-                </Link>
-                {item.infra.includes('(') && (
-                  <span>
-                    {' ' +
-                      (() => {
-                        const NAME_TRUNCATE_LENGTH =
-                          UI_CONFIG.NAME_TRUNCATE_LENGTH;
-                        const fullRegionPart = item.infra.substring(
-                          item.infra.indexOf('(')
-                        );
-                        const regionContent = fullRegionPart.substring(
-                          1,
-                          fullRegionPart.length - 1
-                        );
-
-                        if (regionContent.length <= NAME_TRUNCATE_LENGTH) {
-                          return fullRegionPart;
-                        }
-
-                        const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
-                        return `(${truncatedRegion})`;
-                      })()}
-                  </span>
-                )}
+                {item.requested_resources || item.resources_str || '-'}
               </span>
             </NonCapitalizedTooltip>
-          ) : (
-            <span>{item.infra || '-'}</span>
-          )}
-        </TableCell>
-      ),
-    },
-    {
-      id: 'requested_resources',
-      order: 7,
-      renderHeader: () => (
-        <TableHead
-          className="sortable whitespace-nowrap"
-          onClick={() => requestSort('cluster')}
-        >
-          Requested Resources{getSortDirection('cluster')}
-        </TableHead>
-      ),
-      renderCell: (item) => (
-        <TableCell>
-          <NonCapitalizedTooltip
-            content={
-              item.requested_resources ||
-              item.resources_str_full ||
-              item.resources_str ||
-              '-'
-            }
-            className="text-sm text-muted-foreground"
-          >
-            <span>{item.requested_resources || item.resources_str || '-'}</span>
-          </NonCapitalizedTooltip>
-        </TableCell>
-      ),
-    },
-    {
-      id: 'recoveries',
-      order: 8,
-      renderHeader: () => (
-        <TableHead
-          className="sortable whitespace-nowrap"
-          onClick={() => requestSort('recoveries')}
-        >
-          Recoveries{getSortDirection('recoveries')}
-        </TableHead>
-      ),
-      renderCell: (item) => <TableCell>{item.recoveries}</TableCell>,
-    },
-    {
-      id: 'pool',
-      order: 9.5,
-      conditional: true, // Only show when shouldShowPool is true
-      renderHeader: () =>
-        shouldShowPool ? (
+          </TableCell>
+        ),
+      },
+      {
+        id: 'recoveries',
+        order: 8,
+        renderHeader: () => (
           <TableHead
             className="sortable whitespace-nowrap"
-            onClick={() => requestSort('pool')}
+            onClick={() => requestSort('recoveries')}
           >
-            Pool{getSortDirection('pool')}
+            Recoveries{getSortDirection('recoveries')}
           </TableHead>
-        ) : null,
-      renderCell: (item) =>
-        shouldShowPool ? (
-          <TableCell>
-            <div
-              className={
-                poolsLoading ? 'blur-sm transition-all duration-300' : ''
-              }
+        ),
+        renderCell: (item) => <TableCell>{item.recoveries}</TableCell>,
+      },
+      {
+        id: 'pool',
+        order: 9.5,
+        conditional: true, // Only show when shouldShowPool is true
+        renderHeader: () =>
+          shouldShowPool ? (
+            <TableHead
+              className="sortable whitespace-nowrap"
+              onClick={() => requestSort('pool')}
             >
-              {poolsLoading
-                ? '-'
-                : renderPoolLink(item.pool, item.pool_hash, poolsData)}
-            </div>
+              Pool{getSortDirection('pool')}
+            </TableHead>
+          ) : null,
+        renderCell: (item) =>
+          shouldShowPool ? (
+            <TableCell>
+              <div
+                className={
+                  poolsLoading ? 'blur-sm transition-all duration-300' : ''
+                }
+              >
+                {poolsLoading
+                  ? '-'
+                  : renderPoolLink(item.pool, item.pool_hash, poolsData)}
+              </div>
+            </TableCell>
+          ) : null,
+      },
+      {
+        id: 'details',
+        order: 10,
+        renderHeader: () => <TableHead>Details</TableHead>,
+        renderCell: (item) => (
+          <TableCell>
+            {item.details ? (
+              <TruncatedDetails
+                text={item.details}
+                rowId={item.id}
+                expandedRowId={expandedRowId}
+                setExpandedRowId={setExpandedRowId}
+              />
+            ) : (
+              '-'
+            )}
           </TableCell>
-        ) : null,
-    },
-    {
-      id: 'details',
-      order: 10,
-      renderHeader: () => <TableHead>Details</TableHead>,
-      renderCell: (item) => (
-        <TableCell>
-          {item.details ? (
-            <TruncatedDetails
-              text={item.details}
-              rowId={item.id}
-              expandedRowId={expandedRowId}
-              setExpandedRowId={setExpandedRowId}
+        ),
+      },
+      {
+        id: 'logs',
+        order: 11,
+        renderHeader: () => <TableHead>Logs</TableHead>,
+        renderCell: (item) => (
+          <TableCell>
+            <Status2Actions
+              jobParent="/jobs"
+              jobId={item.id}
+              managed={true}
+              workspace={item.workspace}
             />
-          ) : (
-            '-'
-          )}
-        </TableCell>
-      ),
-    },
+          </TableCell>
+        ),
+      },
+    ],
+    [
+      requestSort,
+      getSortDirection,
+      shouldShowWorkspace,
+      shouldShowPool,
+      expandedRowId,
+      poolsLoading,
+      poolsData,
+    ]
+  );
+
+  // Transform function to convert plugin columns to the format expected by the table
+  const transformPluginColumn = React.useCallback(
+    (col) => ({
+      id: col.id,
+      order: col.header.order,
+      isPlugin: true,
+      pluginColumn: col,
+      renderHeader: () => {
+        const baseClasses = col.header.sortKey
+          ? 'sortable whitespace-nowrap'
+          : 'whitespace-nowrap';
+        const className = `${baseClasses}${col.header.className ? ' ' + col.header.className : ''}`;
+        return (
+          <TableHead
+            className={className}
+            onClick={
+              col.header.sortKey
+                ? () => requestSort(col.header.sortKey)
+                : undefined
+            }
+          >
+            {col.header.label}
+            {col.header.sortKey ? getSortDirection(col.header.sortKey) : ''}
+          </TableHead>
+        );
+      },
+      renderCell: (item) => {
+        const context = {
+          item,
+          shouldShowWorkspace,
+          shouldShowPool,
+          expandedRowId,
+          setExpandedRowId,
+          expandedRowRef,
+        };
+        const cellContent = col.cell.render(item, context);
+        return (
+          <TableCell className={col.cell.className || ''}>
+            {cellContent}
+          </TableCell>
+        );
+      },
+    }),
+    [
+      requestSort,
+      getSortDirection,
+      shouldShowWorkspace,
+      shouldShowPool,
+      expandedRowId,
+      setExpandedRowId,
+      expandedRowRef,
+    ]
+  );
+
+  // Merge base and plugin columns using the plugin system
+  // Plugin columns with the same ID as base columns will automatically replace them
+  const visibleColumns = useMergedTableColumns(
+    'jobs',
+    baseColumns,
     {
-      id: 'logs',
-      order: 11,
-      renderHeader: () => <TableHead>Logs</TableHead>,
-      renderCell: (item) => (
-        <TableCell>
-          <Status2Actions
-            jobParent="/jobs"
-            jobId={item.id}
-            managed={true}
-            workspace={item.workspace}
-          />
-        </TableCell>
-      ),
+      shouldShowColumn: (columnId) => {
+        // Handle conditional columns
+        if (columnId === 'workspace') return shouldShowWorkspace;
+        if (columnId === 'pool') return shouldShowPool;
+        return true;
+      },
     },
-  ];
-
-  // Add plugin columns to the array
-  const pluginColumnDefs = pluginColumns.map((col) => ({
-    id: col.id,
-    order: col.header.order,
-    isPlugin: true,
-    pluginColumn: col,
-    renderHeader: () => {
-      const baseClasses = col.header.sortKey
-        ? 'sortable whitespace-nowrap'
-        : 'whitespace-nowrap';
-      const className = `${baseClasses}${col.header.className ? ' ' + col.header.className : ''}`;
-      return (
-        <TableHead
-          className={className}
-          onClick={
-            col.header.sortKey
-              ? () => requestSort(col.header.sortKey)
-              : undefined
-          }
-        >
-          {col.header.label}
-          {col.header.sortKey ? getSortDirection(col.header.sortKey) : ''}
-        </TableHead>
-      );
-    },
-    renderCell: (item) => {
-      const context = { item, shouldShowWorkspace, shouldShowPool };
-      const cellContent = col.cell.render(item, context);
-      return (
-        <TableCell className={col.cell.className || ''}>
-          {cellContent}
-        </TableCell>
-      );
-    },
-  }));
-
-  // Merge base and plugin columns, sort by order
-  const allColumns = [...baseColumns, ...pluginColumnDefs].sort(
-    (a, b) => a.order - b.order
+    transformPluginColumn
   );
 
-  // Filter out conditional columns that shouldn't be shown
-  const visibleColumns = allColumns.filter(
-    (col) =>
-      !col.conditional ||
-      (col.conditional &&
-        ((col.id === 'workspace' && shouldShowWorkspace) ||
-          (col.id === 'pool' && shouldShowPool)))
-  );
-
-  // Calculate dynamic colSpan
+  // Calculate dynamic colSpan (used for expanded rows)
   const totalColSpan = visibleColumns.length;
 
   return (
