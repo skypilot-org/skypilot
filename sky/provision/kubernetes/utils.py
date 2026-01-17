@@ -677,14 +677,14 @@ class GFDLabelFormatter(GPULabelFormatter):
         """Searches against a canonical list of NVIDIA GPUs and pattern
         matches the canonical GPU name against the GFD label.
         """
-        canonical_gpu_names = [
-            'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4',
-            'V100', 'A10', 'P4000', 'P100', 'P40', 'P4', 'L40', 'L4'
-        ]
-        for canonical_name in canonical_gpu_names:
-            # A100-80G accelerator is A100-SXM-80GB or A100-PCIE-80GB
+        for canonical_name in kubernetes_constants.CANONICAL_GPU_NAMES:
+            # A100-80GB accelerator is A100-SXM-80GB or A100-PCIE-80GB
             if canonical_name == 'A100-80GB' and re.search(
                     r'A100.*-80GB', value):
+                return canonical_name
+            # H100-80GB accelerator is H100-SXM-80GB or H100-PCIE-80GB
+            if canonical_name == 'H100-80GB' and re.search(
+                    r'H100.*-80GB', value):
                 return canonical_name
             # Use word boundary matching to prevent substring matches
             elif re.search(rf'\b{re.escape(canonical_name)}\b', value):
