@@ -171,6 +171,13 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     request.state.anonymous_user = True
                     return await call_next(request)
 
+                # Allow unauthenticated access to the polling auth endpoint.
+                # This endpoint is used by the CLI to poll for auth tokens
+                # during the login flow before authentication is complete.
+                if request.url.path == '/api/v1/auth/token':
+                    request.state.anonymous_user = True
+                    return await call_next(request)
+
                 # TODO(aylei): in unified authentication, the redirection
                 # or rejection should be done after all the authentication
                 # methods are performed.

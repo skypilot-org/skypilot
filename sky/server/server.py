@@ -8,6 +8,7 @@ import contextlib
 import datetime
 from enum import IntEnum
 import hashlib
+import html
 import json
 import multiprocessing
 import os
@@ -71,6 +72,7 @@ from sky.server import versions
 from sky.server.auth import authn
 from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
+from sky.server.auth import sessions as auth_sessions
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
@@ -201,6 +203,23 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
     user_hash = hashlib.md5(
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
     return models.User(id=user_hash, name=user_name)
+
+
+def _generate_auth_token(request: fastapi.Request) -> str:
+    """Generate an auth token from the request.
+
+    The token contains the user info and cookies, base64 encoded.
+    Used by both /token and /api/v1/auth/authorize endpoints.
+    """
+    user = _get_auth_user_header(request)
+    token_data = {
+        # Token version number, bump for backwards incompatible changes.
+        'v': 1,
+        'user': user.id if user is not None else None,
+        'cookies': dict(request.cookies),
+    }
+    json_bytes = json.dumps(token_data).encode('utf-8')
+    return base64.b64encode(json_bytes).decode('utf-8')
 
 
 @middleware_utils.websocket_aware
@@ -726,16 +745,9 @@ def handle_concurrent_worker_exhausted_error(
 async def token(request: fastapi.Request,
                 local_port: Optional[int] = None) -> fastapi.responses.Response:
     del local_port  # local_port is used by the served js, but ignored by server
-    user = _get_auth_user_header(request)
-
-    token_data = {
-        'v': 1,  # Token version number, bump for backwards incompatible.
-        'user': user.id if user is not None else None,
-        'cookies': request.cookies,
-    }
     # Use base64 encoding to avoid having to escape anything in the HTML.
-    json_bytes = json.dumps(token_data).encode('utf-8')
-    base64_str = base64.b64encode(json_bytes).decode('utf-8')
+    base64_str = _generate_auth_token(request)
+    user = _get_auth_user_header(request)
 
     html_dir = pathlib.Path(__file__).parent / 'html'
     token_page_path = html_dir / 'token_page.html'
@@ -746,7 +758,8 @@ async def token(request: fastapi.Request,
         raise fastapi.HTTPException(
             status_code=500, detail='Token page template not found.') from e
 
-    user_info_string = f'Logged in as {user.name}' if user is not None else ''
+    user_info_string = html.escape(
+        f'Logged in as {user.name}') if user is not None else ''
     html_content = html_content.replace(
         'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER',
         base64_str).replace('USER_PLACEHOLDER', user_info_string)
@@ -759,6 +772,97 @@ async def token(request: fastapi.Request,
             # with some reverse proxies.
             'X-Accel-Buffering': 'no'
         })
+
+
+@app.get('/api/v1/auth/token')
+async def poll_auth_token(
+        code_verifier: Optional[str] = None) -> fastapi.responses.Response:
+    """Poll for auth token using code_verifier.
+
+    Computes code_challenge from code_verifier to look up the session.
+
+    Query params:
+        code_verifier: The original code verifier (required)
+
+    Returns:
+        - 200 with token if session is authorized
+        - 404 if session not found (user hasn't clicked Authorize yet)
+    """
+    if not code_verifier:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='code_verifier is required')
+
+    auth_token = auth_sessions.auth_session_store.poll_session(code_verifier)
+
+    if auth_token is None:
+        raise fastapi.HTTPException(status_code=404, detail='Session not found')
+
+    return fastapi.responses.JSONResponse(content={'token': auth_token},
+                                          headers={'Cache-Control': 'no-store'})
+
+
+@app.post('/api/v1/auth/authorize')
+async def authorize_auth_session(
+        request: fastapi.Request) -> fastapi.responses.JSONResponse:
+    """Authorize an auth session (called when user clicks Authorize button).
+
+    This endpoint requires authentication (via auth proxy cookies).
+    It generates the token and creates a session for the CLI to retrieve.
+
+    Request body:
+        code_challenge: The code challenge from the CLI
+
+    Returns:
+        - 200 if successfully authorized
+    """
+    try:
+        body = await request.json()
+    except json.JSONDecodeError as e:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='Invalid JSON body') from e
+
+    code_challenge = body.get('code_challenge')
+    if not code_challenge:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='code_challenge is required')
+    # Validate format: base64url-encoded SHA256, 43 chars of A-Za-z0-9_-
+    if not re.match(r'^[A-Za-z0-9_-]{43}$', code_challenge):
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='Invalid code_challenge format')
+
+    auth_token = _generate_auth_token(request)
+
+    # Create the session with the token
+    auth_sessions.auth_session_store.create_session(code_challenge, auth_token)
+
+    return fastapi.responses.JSONResponse(content={'status': 'authorized'},
+                                          headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/auth/authorize')
+async def authorize_page(
+        request: fastapi.Request) -> fastapi.responses.Response:
+    """Serve the authorization page where users click to authorize the CLI.
+
+    This page requires authentication (via auth proxy). The code_challenge
+    query param is read by JavaScript and sent to the POST endpoint.
+    """
+    user = request.state.auth_user
+    if user is None:
+        user = _get_auth_user_header(request)
+    user_info = html.escape(
+        f'Logged in as {user.name}') if user is not None else ''
+
+    html_dir = pathlib.Path(__file__).parent / 'html'
+    authorize_page_path = html_dir / 'authorize_page.html'
+    with open(authorize_page_path, 'r', encoding='utf-8') as f:
+        html_content = f.read()
+
+    html_content = html_content.replace('USER_PLACEHOLDER', user_info)
+
+    return fastapi.responses.HTMLResponse(
+        content=html_content,
+        headers={'Cache-Control': 'no-cache, no-transform'})
 
 
 @app.post('/check')
