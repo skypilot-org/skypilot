@@ -25,7 +25,5 @@ for var in $(compgen -v | grep -E '^(SKYPILOT_|SKY_|AWS_|AZURE_|GOOGLE_|GCP_|OCI
     ENV_ARGS="$ENV_ARGS -e $var=${!var}"
 done
 
-exec docker exec $DOCKER_FLAGS $ENV_ARGS \
-    -w /app \
-    "$CONTAINER_NAME" \
+exec docker exec $DOCKER_FLAGS $ENV_ARGS "$CONTAINER_NAME" \
     /opt/skypilot-venv/bin/sky "$@"
