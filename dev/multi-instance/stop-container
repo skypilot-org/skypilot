@@ -1,0 +1,16 @@
+#!/bin/bash
+# Stop the isolated SkyPilot development container.
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common.sh"
+
+check_docker
+load_instance
+
+if container_running; then
+    echo "Stopping container: $CONTAINER_NAME"
+    docker stop "$CONTAINER_NAME"
+else
+    echo "Container not running: $CONTAINER_NAME"
+fi

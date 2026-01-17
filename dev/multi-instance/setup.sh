@@ -1,13 +1,12 @@
 #!/bin/bash
 # Setup script for creating an isolated SkyPilot development instance.
 #
-# This creates the instance directory structure and configuration.
-# After setup, use start-container.sh to start the Docker container.
+# Creates .sky-dev/ directory with instance configuration.
+# After setup, use sky/start-container/stop-container from dev/multi-instance/
 #
 # Usage:
 #   cd /path/to/skypilot-worktree
 #   ./dev/multi-instance/setup.sh [instance-name]
-#   source .sky-dev/bin/activate
 
 set -e
 
@@ -24,17 +23,15 @@ echo "Setting up isolated SkyPilot instance: $INSTANCE_NAME"
 echo "Instance directory: $INSTANCE_DIR"
 
 # Create directory structure
-mkdir -p "$INSTANCE_DIR/state"       # Maps to /root/.sky in container
-mkdir -p "$INSTANCE_DIR/sky_logs"    # Maps to /root/sky_logs in container
-mkdir -p "$INSTANCE_DIR/bin"
+mkdir -p "$INSTANCE_DIR/state"       # Container's /root/.sky
+mkdir -p "$INSTANCE_DIR/sky_logs"    # Container's /root/sky_logs
 
 # Allocate a unique port
 allocate_port() {
     for port in $(seq $PORT_RANGE_START $PORT_RANGE_END); do
-        # Check if port is in use on host
         if ! ss -tln 2>/dev/null | grep -q ":$port " && \
            ! netstat -tln 2>/dev/null | grep -q ":$port "; then
-            # Also check if another instance already claimed this port
+            # Check sibling worktrees
             claimed=false
             shopt -s nullglob
             for other_port_file in "$REPO_ROOT"/../*/.sky-dev/.port; do
@@ -54,7 +51,6 @@ allocate_port() {
     return 1
 }
 
-# Allocate port if not already set
 if [[ -f "$INSTANCE_DIR/.port" ]]; then
     PORT=$(cat "$INSTANCE_DIR/.port")
     echo "Using existing port: $PORT"
@@ -64,62 +60,23 @@ else
     echo "Allocated port: $PORT"
 fi
 
-# Store instance metadata
-REAL_HOME="$HOME"
+# Write instance config
 cat > "$INSTANCE_DIR/.instance" << EOF
-INSTANCE_NAME=$INSTANCE_NAME
-INSTANCE_DIR=$INSTANCE_DIR
-REPO_ROOT=$REPO_ROOT
-PORT=$PORT
-REAL_HOME=$REAL_HOME
-CREATED=$(date -Iseconds)
-EOF
-
-# Copy scripts to bin/
-cp "$SCRIPT_DIR/sky" "$INSTANCE_DIR/bin/sky"
-cp "$SCRIPT_DIR/start-container.sh" "$INSTANCE_DIR/bin/start-container"
-chmod +x "$INSTANCE_DIR/bin/sky" "$INSTANCE_DIR/bin/start-container"
-
-# Create stop-container script
-cat > "$INSTANCE_DIR/bin/stop-container" << 'EOF'
-#!/bin/bash
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../.instance"
-CONTAINER_NAME="skypilot-dev-${INSTANCE_NAME}"
-echo "Stopping container: $CONTAINER_NAME"
-docker stop "$CONTAINER_NAME" 2>/dev/null || echo "Container not running"
-EOF
-chmod +x "$INSTANCE_DIR/bin/stop-container"
-
-# Create activate script
-cat > "$INSTANCE_DIR/bin/activate" << EOF
-# Source this file to activate the isolated SkyPilot instance
-# Usage: source $INSTANCE_DIR/bin/activate
-
-export PATH="$INSTANCE_DIR/bin:\$PATH"
-export SKYPILOT_DEV_INSTANCE="$INSTANCE_NAME"
-export SKYPILOT_DEV_PORT="$PORT"
-
-echo "Activated SkyPilot instance: $INSTANCE_NAME"
-echo "  Port: $PORT"
-echo "  Container: skypilot-dev-$INSTANCE_NAME"
-echo ""
-echo "Commands:"
-echo "  start-container  - Start the Docker container"
-echo "  stop-container   - Stop the Docker container"
-echo "  sky <cmd>        - Run sky commands in the container"
+INSTANCE_NAME="$INSTANCE_NAME"
+REPO_ROOT="$REPO_ROOT"
+PORT="$PORT"
 EOF
 
 echo ""
 echo "===== Setup Complete ====="
 echo ""
-echo "To activate this instance:"
+echo "Add dev/multi-instance to your PATH (once, in .bashrc or similar):"
 echo ""
-echo "  source $INSTANCE_DIR/bin/activate"
+echo "  export PATH=\"$SCRIPT_DIR:\$PATH\""
 echo ""
-echo "Then start the container and use sky:"
+echo "Then from this directory, use:"
 echo ""
-echo "  start-container"
-echo "  sky --help"
-echo "  sky api start"
+echo "  start-container   # Start the Docker container"
+echo "  sky --help        # Run sky commands"
+echo "  stop-container    # Stop the container"
 echo ""

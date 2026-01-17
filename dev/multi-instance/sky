@@ -1,47 +1,38 @@
 #!/bin/bash
-# Wrapper script that runs sky commands inside the isolated Docker container.
-#
-# This simply does: docker exec -it <container> sky "$@"
-# The container must be started first with start-container.sh
-
+# Wrapper that runs sky commands inside the isolated Docker container.
 set -e
 
-# Find instance directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common.sh"
 
-# Check if we're running from .sky-dev/bin/ or dev/multi-instance/
-if [[ -f "$SCRIPT_DIR/../.instance" ]]; then
-    # Running from .sky-dev/bin/
-    INSTANCE_DIR="$(dirname "$SCRIPT_DIR")"
-elif [[ -f "$SCRIPT_DIR/../../.sky-dev/.instance" ]]; then
-    # Running from dev/multi-instance/
-    INSTANCE_DIR="$SCRIPT_DIR/../../.sky-dev"
-else
-    echo "ERROR: Cannot find instance configuration." >&2
-    echo "Run setup.sh first, then use the wrapper from .sky-dev/bin/" >&2
-    exit 1
-fi
+check_docker
+load_instance
 
-# Load instance configuration
-source "$INSTANCE_DIR/.instance"
-
-CONTAINER_NAME="skypilot-dev-${INSTANCE_NAME}"
-
-# Check if container is running
-if ! docker container inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null | grep -q true; then
+# Start container if not running
+if ! container_running; then
     echo "Container not running. Starting it..."
-    "$INSTANCE_DIR/bin/start-container"
+    "$SCRIPT_DIR/start-container"
 fi
 
-# Determine if we need interactive mode
-# Use -it for most commands, but not when piping
+# Determine TTY flags
 DOCKER_FLAGS="-i"
 if [[ -t 0 ]] && [[ -t 1 ]]; then
     DOCKER_FLAGS="-it"
 fi
 
-# Run the command in the container
-exec docker exec $DOCKER_FLAGS \
+# Pass through relevant environment variables
+ENV_ARGS=""
+for var in SKYPILOT_DEV SKYPILOT_DEBUG \
+           AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE AWS_DEFAULT_REGION \
+           GOOGLE_APPLICATION_CREDENTIALS \
+           AZURE_SUBSCRIPTION_ID \
+           KUBECONFIG; do
+    if [[ -n "${!var:-}" ]]; then
+        ENV_ARGS="$ENV_ARGS -e $var=${!var}"
+    fi
+done
+
+exec docker exec $DOCKER_FLAGS $ENV_ARGS \
     -w /app \
     "$CONTAINER_NAME" \
-    /app/.sky-dev/venv/bin/sky "$@"
+    /opt/skypilot-venv/bin/sky "$@"
