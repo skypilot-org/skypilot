@@ -38,38 +38,22 @@ fi
 if ! container_running; then
     echo "Starting container: $CONTAINER_NAME"
     docker start "$CONTAINER_NAME"
-else
-    echo "Container already running: $CONTAINER_NAME"
 fi
 
-# Setup venv inside container (idempotent)
-echo "Ensuring venv is set up..."
-docker exec "$CONTAINER_NAME" bash -c '
-    set -e
-
-    # Install system deps if needed
-    if ! command -v python3 &>/dev/null; then
-        apt-get update -qq
-        apt-get install -y -qq python3 python3-pip python3-venv git curl >/dev/null
-    fi
-
-    # Create venv if needed (inside container, not in mounted repo)
-    if [[ ! -d /opt/skypilot-venv ]]; then
-        echo "Creating venv at /opt/skypilot-venv..."
+# Setup venv inside container (only if needed)
+if ! docker exec "$CONTAINER_NAME" test -x /opt/skypilot-venv/bin/sky 2>/dev/null; then
+    echo "Setting up venv..."
+    docker exec "$CONTAINER_NAME" bash -c '
+        set -e
+        if ! command -v python3 &>/dev/null; then
+            apt-get update -qq
+            apt-get install -y -qq python3 python3-pip python3-venv git curl >/dev/null
+        fi
         python3 -m venv /opt/skypilot-venv
-    fi
-
-    # Install skypilot in dev mode if needed
-    source /opt/skypilot-venv/bin/activate
-    if ! pip show skypilot &>/dev/null; then
-        echo "Installing skypilot in dev mode..."
+        source /opt/skypilot-venv/bin/activate
         pip install -q -e /app
-    fi
+    '
+    echo "Venv ready."
+fi
 
-    echo "Ready."
-'
-
-echo ""
-echo "Container ready: $CONTAINER_NAME"
-echo "  Port: localhost:$PORT -> container:46580"
-echo "  Repo: $REPO_ROOT -> /app"
+echo "Container ready: $CONTAINER_NAME (port $PORT)"
