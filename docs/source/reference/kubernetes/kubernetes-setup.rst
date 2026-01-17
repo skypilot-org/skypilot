@@ -262,7 +262,7 @@ Set up NFS and other volumes
 
 SkyPilot supports mounting various types of volumes to your pods on Kubernetes:
 
-* :ref:`Persistent volumes <volumes-quickstart>`: Independently managed volumes with lifecycle separate from clusters, ideal for long-term data storage and sharing datasets across clusters. These are backed by PVCs on block storage (e.g., AWS EBS, GCP Persistent Disk) or distributed file systems (e.g., JuiceFS, Nebius shared file system, AWS EFS, GCP Filestore).
+* :ref:`Persistent volumes <volumes-quickstart>`: Independently managed volumes with lifecycle separate from clusters, ideal for long-term data storage and sharing datasets across clusters. These are backed by Kubernetes PVCs on block storage (e.g., AWS EBS, GCP Persistent Disk) or distributed file systems (e.g., JuiceFS, Nebius shared file system, AWS EFS, GCP Filestore).
 
 * :ref:`Ephemeral volumes <ephemeral-volumes>`: Automatically created and deleted with your cluster, suitable for temporary storage and caches that are cluster-specific. Also backed by Kubernetes PVCs.
 
