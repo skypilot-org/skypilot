@@ -3,6 +3,7 @@
 import shlex
 import tempfile
 import textwrap
+import threading
 import time
 from typing import Any, cast, Dict, List, Optional, Tuple
 
@@ -32,7 +33,6 @@ def _sbatch_log_path(job_id: str) -> str:
 POLL_INTERVAL_SECONDS = 2
 # Default KillWait is 30 seconds, so we add some buffer time here.
 _JOB_TERMINATION_TIMEOUT_SECONDS = 60
-_SKY_DIR_CREATION_TIMEOUT_SECONDS = 30
 
 
 def _sky_cluster_home_dir(home_dir: str, cluster_name_on_cloud: str) -> str:
@@ -54,6 +54,49 @@ def _sbatch_provision_script_path(filename: str) -> str:
 def _skypilot_runtime_dir(cluster_name_on_cloud: str) -> str:
     """Returns the SkyPilot runtime directory path on the Slurm cluster."""
     return f'/tmp/{cluster_name_on_cloud}'
+
+
+def _wait_for_job_ready(
+    login_node_runner: 'command_runner.SSHCommandRunner',
+    client: 'slurm.SlurmClient',
+    job_id: str,
+    ready_signal: str,
+    slurm_log: str,
+    timeout: Optional[float] = None,
+) -> None:
+    """Wait for Slurm job initialization to complete.
+
+    Polls while the job is running. Fails if:
+    1. The job exits/fails (state not in PENDING/RUNNING/CONFIGURING)
+    2. The ready signal file never appears
+    3. The timeout is exceeded (if specified)
+    """
+    poll_interval_seconds = 1
+    start_time = time.time()
+
+    while True:
+        if timeout is not None:
+            elapsed = time.time() - start_time
+            if elapsed >= timeout:
+                raise TimeoutError(f'Slurm job {job_id} initialization timed '
+                                   'out. See sbatch logs for details: '
+                                   f'{slurm_log}')
+
+        rc, _, _ = login_node_runner.run(f'test -f {ready_signal}',
+                                         require_outputs=True,
+                                         stream_logs=False)
+        if rc == 0:
+            return
+
+        job_state = client.get_job_state(job_id)
+        # Job states that indicate the job is still initializing
+        # See: https://slurm.schedmd.com/squeue.html#SECTION_JOB-STATE-CODES
+        if job_state not in ('PENDING', 'RUNNING', 'CONFIGURING'):
+            raise RuntimeError(f'Slurm job {job_id} exited ({job_state}) '
+                               'before initialization completed. See sbatch '
+                               f'logs for details: {slurm_log}')
+
+        time.sleep(poll_interval_seconds)
 
 
 @timeline.event
@@ -172,6 +215,9 @@ def _create_virtual_instance(
         accelerator_count = int(
             accelerator_count_raw) if accelerator_count_raw is not None else 0
     except (TypeError, ValueError):
+        logger.warning(
+            f'Invalid accelerator_count value: {accelerator_count_raw!r}. '
+            'Defaulting to 0 (no accelerators).')
         accelerator_count = 0
 
     # To bootstrap things, we need to do it with SSHCommandRunner first.
@@ -229,22 +275,23 @@ def _create_virtual_instance(
             """)
         container_marker_file = (f'{sky_home_dir}/'
                                  f'{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
-        # Run container init, touch ready signal, then sleep infinity to keep
-        # container running. Use --overlap so subsequent sruns can share the
-        # allocation. Background with & so sbatch continues.
+        # Run container init, touch marker and ready signal, then sleep infinity
+        # to keep container running. Use --overlap so subsequent sruns can share
+        # the allocation. Background with & so sbatch continues.
         container_cmd = shlex.quote(
-            f'{container_init_script}touch {ready_signal} && sleep infinity')
+            f'{container_init_script}'
+            f'touch {container_marker_file} {ready_signal}'
+            f' && sleep infinity')
         container_block = (
             f'echo "Initializing container {container_name} on all nodes..."\n'
             f'srun --overlap --nodes={num_nodes} --ntasks-per-node=1 '
-            f'--container-image={container_image} '
-            f'--container-name={container_name}:create '
+            f'--container-image={shlex.quote(container_image)} '
+            f'--container-name={shlex.quote(container_name)}:create '
             f'--container-mounts="{container_mounts}" '
             f'--container-remap-root '
             f'--no-container-mount-home '
             f'--container-writable '
-            f'bash -c {container_cmd} &\n'
-            f'touch {container_marker_file}')
+            f'bash -c {container_cmd} &')
 
     # By default stdout and stderr will be written to $HOME/slurm-%j.out
     # (because we invoke sbatch from $HOME). Redirect elsewhere to not pollute
@@ -278,7 +325,7 @@ cleanup() {{
     # This is only needed when container_scope=global.
     # When container_scope=job, named containers are removed automatically
     # at the end of the Slurm job, see: https://github.com/NVIDIA/pyxis/wiki/Setup#slurm-epilog
-    srun --nodes={num_nodes} --ntasks-per-node=1 enroot remove -f {slurm_utils.enroot_container_name_global_scope(cluster_name_on_cloud)} 2>/dev/null || true
+    srun --nodes={num_nodes} --ntasks-per-node=1 enroot remove -f {shlex.quote(slurm_utils.enroot_container_name_global_scope(cluster_name_on_cloud))} 2>/dev/null || true
     # Clean up sky runtime directory on each node.
     # NOTE: We can do this because --nodes for both this srun and the
     # sbatch is the same number. Otherwise, there are no guarantees
@@ -326,6 +373,9 @@ touch {sky_home_dir}/.hushlogin
                  f'{partition} for cluster {cluster_name_on_cloud} '
                  f'with {num_nodes} nodes')
 
+    # Track start time to calculate remaining timeout after node allocation
+    provision_start_time = time.time()
+
     nodes, _ = client.get_job_nodes(job_id,
                                     wait=True,
                                     timeout=provision_timeout)
@@ -333,28 +383,36 @@ touch {sky_home_dir}/.hushlogin
         slurm_utils.instance_id(job_id, node) for node in nodes
     ]
 
+    # Calculate remaining timeout for job initialization
+    remaining_timeout = None
+    if provision_timeout is not None:
+        elapsed = time.time() - provision_start_time
+        remaining_timeout = max(0, provision_timeout - elapsed)
+
     # Wait for the sbatch script to create the cluster's sky directories,
     # to avoid a race condition where post-provision commands try to
     # access the directories before they are created.
-    # Tail the slurm log in the background for visibility into init process.
     slurm_log = f'~/{_sbatch_log_path(job_id)}'
-    stream_logs = env_options.Options.SHOW_DEBUG_INFO.get()
-    ready_check_cmd = (f'tail -f {slurm_log} 2>/dev/null & TAIL_PID=$!; '
-                       f'end=$((SECONDS+{_SKY_DIR_CREATION_TIMEOUT_SECONDS})); '
-                       f'while [ ! -f {ready_signal} ]; do '
-                       'if (( SECONDS >= end )); then '
-                       'kill $TAIL_PID 2>/dev/null; exit 1; fi; '
-                       'sleep 0.5; '
-                       'done; '
-                       'kill $TAIL_PID 2>/dev/null')
-    rc, stdout, stderr = login_node_runner.run(ready_check_cmd,
-                                               require_outputs=True,
-                                               stream_logs=stream_logs)
-    subprocess_utils.handle_returncode(
-        rc,
-        ready_check_cmd, f'Failed to verify SLURM job initialization. '
-        f'See sbatch logs for details: {slurm_log}',
-        stderr=f'{stdout}\n{stderr}')
+
+    # Stream logs in background thread for visibility if debug mode
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+
+        def _stream_logs():
+            login_node_runner.run(f'tail -f {slurm_log} 2>/dev/null',
+                                  require_outputs=False,
+                                  stream_logs=True)
+
+        log_thread = threading.Thread(target=_stream_logs, daemon=True)
+        log_thread.start()
+
+    _wait_for_job_ready(
+        login_node_runner,
+        client,
+        job_id,
+        ready_signal,
+        slurm_log,
+        remaining_timeout,
+    )
 
     return common.ProvisionRecord(provider_name='slurm',
                                   region=region,

@@ -21,7 +21,6 @@ logger = sky_logging.init_logger(__name__)
 
 DEFAULT_SLURM_PATH = '~/.slurm/config'
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
-# Marker file to indicate container mode is enabled for this cluster.
 SLURM_CONTAINER_MARKER_FILE = '.sky_slurm_container'
 
 # Regex pattern for parsing GPU GRES strings.

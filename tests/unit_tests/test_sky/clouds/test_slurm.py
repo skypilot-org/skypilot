@@ -467,7 +467,7 @@ class TestCreateVirtualInstance:
 #SBATCH --no-requeue
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --gres=gpu:a100:2
+#SBATCH --gres=gpu:A100:2
 
 # Cleanup function to remove cluster dirs on job termination.
 cleanup() {{
@@ -514,8 +514,7 @@ elif command -v dnf >/dev/null 2>&1; then
 elif command -v apk >/dev/null 2>&1; then
     apk add --no-cache $PACKAGES
 fi
-touch {ready_signal} && sleep infinity' &
-touch {sky_home_dir}/.sky_slurm_container
+touch {sky_home_dir}/.sky_slurm_container {ready_signal} && sleep infinity' &
 # ready_signal touched inside container
 wait
 """
