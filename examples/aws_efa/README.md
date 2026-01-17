@@ -76,6 +76,8 @@ Check the following table for the GPU and EFA count mapping for AWS instance typ
 
 | Instance Type | GPU Type | #EFA |
 |---------------|----------|------|
+| p6-b300.48xlarge | B300:8 | 16  |
+| p6-b200.48xlarge | B200:8 | 8   |
 | p4d.24xlarge  | A100:8   | 4    |
 | p4de.24xlarge | A100:8   | 4    |
 | p5.48xlarge   | H100:8   | 32   |
@@ -100,6 +102,7 @@ Check the following table for the GPU and EFA count mapping for AWS instance typ
 | g6e.16xlarge  | L40S:1   | 1    |
 | g6e.24xlarge  | L40S:4   | 2    |
 | g6e.48xlarge  | L40S:8   | 4    |
+| gr6.8xlarge   | L4:1     | 1    |
 
 
 Update the EFA number in the [`nccl_efa.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/nccl_efa.yaml) for the GPUs you use.

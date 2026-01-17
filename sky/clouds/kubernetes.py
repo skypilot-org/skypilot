@@ -1,10 +1,11 @@
 """Kubernetes."""
 import concurrent.futures
+import math
 import os
 import re
 import subprocess
 import tempfile
-from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
 
@@ -43,6 +44,8 @@ _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 # Shared directory to communicate with fusermount-server, refer to
 # addons/fuse-proxy/README.md for more details.
 _FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
+
+AWS_EFA_RESOURCE_KEY = 'vpc.amazonaws.com/efa'
 
 
 @registry.CLOUD_REGISTRY.register(aliases=['k8s'])
@@ -88,6 +91,7 @@ class Kubernetes(clouds.Cloud):
 
     IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'
     IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2004'
+    IMAGE_EFA = 'public.ecr.aws/hpc-cloud/nccl-tests:latest'
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
@@ -136,7 +140,7 @@ class Kubernetes(clouds.Cloud):
 
                     # Allow custom network tier if supported by the cluster
                     # (e.g., Nebius clusters with high performance networking)
-                    network_type, _ = network_future.result()
+                    network_type, _, _ = network_future.result()
                     if network_type.supports_high_performance_networking():
                         unsupported_features.pop(
                             clouds.CloudImplementationFeatures.
@@ -533,27 +537,6 @@ class Kubernetes(clouds.Cloud):
         else:
             acc_count = acc_count or 0
 
-        def _get_image_id(resources: 'resources_lib.Resources') -> str:
-            image_id_dict = resources.image_id
-            if image_id_dict is not None:
-                # Use custom image specified in resources
-                if None in image_id_dict:
-                    image_id = image_id_dict[None]
-                else:
-                    assert resources.region in image_id_dict, image_id_dict
-                    image_id = image_id_dict[resources.region]
-                if image_id.startswith('docker:'):
-                    image_id = image_id[len('docker:'):]
-            else:
-                # Select image based on whether we are using GPUs or not.
-                image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
-                # Get the container image ID from the service catalog.
-                image_id = catalog.get_image_id_from_tag(image_id,
-                                                         clouds='kubernetes')
-            return image_id
-
-        image_id = _get_image_id(resources)
-
         # Set environment variables for the pod. Note that SkyPilot env vars
         # are set separately when the task is run. These env vars are
         # independent of the SkyPilot task to be run.
@@ -637,8 +620,18 @@ class Kubernetes(clouds.Cloud):
         if resources.use_spot:
             spot_label_key, spot_label_value = kubernetes_utils.get_spot_label()
 
-        network_type, machine_type = self._detect_network_type(
-            context, resources.network_tier)
+        network_type, machine_type, metadata = self._detect_network_type(
+            context, resources.network_tier, k8s_acc_label_key,
+            k8s_resource_key, acc_count)
+
+        k8s_efa_count = None
+        if network_type == KubernetesHighPerformanceNetworkType.AWS_EFA:
+            if metadata and 'efa_count' in metadata:
+                k8s_efa_count = metadata['efa_count']
+            else:
+                logger.warning(
+                    f'No EFA interfaces detected on AWS nodes with '
+                    f'accelerator {k8s_acc_label_key}, skipping enabling EFA.')
 
         # Check if this cluster supports high performance networking and
         # configure appropriate settings for different cluster types
@@ -664,6 +657,31 @@ class Kubernetes(clouds.Cloud):
             # cpus is <1.
             'num-cpus': str(max(int(cpus), 1)),
         }
+
+        def _get_image_id(resources: 'resources_lib.Resources') -> str:
+            image_id_dict = resources.image_id
+            if image_id_dict is not None:
+                # Use custom image specified in resources
+                if None in image_id_dict:
+                    image_id = image_id_dict[None]
+                else:
+                    assert resources.region in image_id_dict, image_id_dict
+                    image_id = image_id_dict[resources.region]
+                if image_id.startswith('docker:'):
+                    image_id = image_id[len('docker:'):]
+            else:
+                if k8s_efa_count:
+                    image_id = self.IMAGE_EFA
+                else:
+                    # Select image based on whether we are using GPUs or not.
+                    image_id = (self.IMAGE_GPU
+                                if acc_count > 0 else self.IMAGE_CPU)
+                    # Get the container image ID from the service catalog.
+                    image_id = catalog.get_image_id_from_tag(
+                        image_id, clouds='kubernetes')
+            return image_id
+
+        image_id = _get_image_id(resources)
 
         # Get the storage class name for high availability controller's PVC
         k8s_ha_storage_class_name = (
@@ -732,6 +750,8 @@ class Kubernetes(clouds.Cloud):
             'memory': str(mem),
             'accelerator_count': str(acc_count),
             'timeout': str(timeout),
+            'k8s_efa_count': str(k8s_efa_count)
+                             if k8s_efa_count is not None else None,
             'k8s_port_mode': port_mode.value,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_values': k8s_acc_label_values,
@@ -1151,22 +1171,34 @@ class Kubernetes(clouds.Cloud):
     def _detect_network_type(
         cls,
         context: str,
-        network_tier: Optional['resources_utils.NetworkTier'] = None
-    ) -> Tuple[KubernetesHighPerformanceNetworkType, str]:
+        network_tier: Optional['resources_utils.NetworkTier'] = None,
+        k8s_acc_label_key: Optional[str] = None,
+        k8s_resource_key: Optional[str] = None,
+        acc_count: Optional[int] = None,
+    ) -> Tuple[KubernetesHighPerformanceNetworkType, str, Optional[Dict[str,
+                                                                        Any]]]:
         """Detect the type of Kubernetes network based on node labels.
 
         Args:
             context: The Kubernetes context to check.
             network_tier: The network tier requested. If None or not BEST,
                          returns NONE (no high-performance networking).
+            k8s_acc_label_key: The key of the Kubernetes accelerator label.
+            k8s_resource_key: The key of the Kubernetes resource.
+            acc_count: The number of accelerators requested.
 
         Returns:
-            A tuple of the detected network type and the instance type.
+            A tuple of (network_type, instance_type, metadata).
+            - network_type: The detected high-performance network type
+            - instance_type: The instance type string (may be empty
+              for some clouds)
+            - metadata: Optional dict with cloud-specific info
+              (e.g., {'efa_count': int})
         """
         # If network_tier is None or not BEST, return NONE
         if (network_tier is None or
                 network_tier != resources_utils.NetworkTier.BEST):
-            return KubernetesHighPerformanceNetworkType.NONE, ''
+            return KubernetesHighPerformanceNetworkType.NONE, '', None
 
         try:
             nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
@@ -1176,11 +1208,48 @@ class Kubernetes(clouds.Cloud):
                     for label_key, _ in node.metadata.labels.items():
                         if label_key.startswith('nebius.com/'):
                             return (KubernetesHighPerformanceNetworkType.NEBIUS,
-                                    '')
+                                    '', None)
                         if label_key.startswith('ib.coreweave.cloud/'):
                             return (
                                 KubernetesHighPerformanceNetworkType.COREWEAVE,
-                                '')
+                                '', None)
+                        if label_key.startswith('k8s.io/cloud-provider-aws'):
+                            # Only check for AWS EFA if GPU is specified
+                            if (not k8s_acc_label_key or not k8s_resource_key or
+                                    not acc_count):
+                                return (
+                                    KubernetesHighPerformanceNetworkType.NONE,
+                                    '', None)
+                            if (k8s_acc_label_key not in node.metadata.labels or
+                                    k8s_resource_key
+                                    not in node.status.allocatable or
+                                    int(node.status.
+                                        allocatable[k8s_resource_key]) <
+                                    acc_count):
+                                continue
+                            # Calculate EFA count proportionally
+                            if AWS_EFA_RESOURCE_KEY in node.status.allocatable:
+                                node_gpu_count = int(
+                                    node.status.allocatable[k8s_resource_key])
+                                node_efa_count = int(
+                                    node.status.
+                                    allocatable[AWS_EFA_RESOURCE_KEY])
+                                if node_efa_count > 0:
+                                    # Proportional allocation:
+                                    # user_gpu / node_gpu * node_efa
+                                    calculated_efa = math.floor(acc_count /
+                                                                node_gpu_count *
+                                                                node_efa_count)
+                                    efa_count = max(
+                                        1, min(calculated_efa, node_efa_count))
+                                    return (KubernetesHighPerformanceNetworkType
+                                            .AWS_EFA, '', {
+                                                'efa_count': efa_count
+                                            })
+                            # No EFA available, but it's an AWS node
+                            return (
+                                KubernetesHighPerformanceNetworkType.AWS_EFA,
+                                '', None)
 
                     # Check for GKE clusters with specific GPUDirect variants
                     machine_family = node.metadata.labels.get(
@@ -1197,25 +1266,25 @@ class Kubernetes(clouds.Cloud):
                         if 'a3-highgpu-8g' in instance_type:
                             return (
                                 KubernetesHighPerformanceNetworkType.GCP_TCPX,
-                                'a3-highgpu-8g')
+                                'a3-highgpu-8g', None)
                         elif 'a3-edgegpu-8g' in instance_type:
                             return (
                                 KubernetesHighPerformanceNetworkType.GCP_TCPX,
-                                'a3-edgegpu-8g')
+                                'a3-edgegpu-8g', None)
                         elif 'a3-megagpu-8g' in instance_type:
                             return (
                                 KubernetesHighPerformanceNetworkType.GCP_TCPXO,
-                                'a3-megagpu-8g')
+                                'a3-megagpu-8g', None)
                         elif 'a4-highgpu-8g' in instance_type:
                             return (KubernetesHighPerformanceNetworkType.
-                                    GCP_GPUDIRECT_RDMA, 'a4-highgpu-8g')
+                                    GCP_GPUDIRECT_RDMA, 'a4-highgpu-8g', None)
                         elif 'a3-ultragpu-8g' in instance_type:
                             return (KubernetesHighPerformanceNetworkType.
-                                    GCP_GPUDIRECT_RDMA, 'a3-ultragpu-8g')
+                                    GCP_GPUDIRECT_RDMA, 'a3-ultragpu-8g', None)
                         # Generic A3/A4 detection as fallback
                         elif machine_family == 'a4':
                             return (KubernetesHighPerformanceNetworkType.
-                                    GCP_GPUDIRECT_RDMA, 'a4')
+                                    GCP_GPUDIRECT_RDMA, 'a4', None)
 
                     # Fallback: Check for GPU Direct TCPX capable instance
                     # types with high-perf GPUs
@@ -1230,7 +1299,7 @@ class Kubernetes(clouds.Cloud):
                         # Default to TCPX if we can't determine the specific
                         # variant
                         return (KubernetesHighPerformanceNetworkType.GCP_TCPX,
-                                instance_type)
+                                instance_type, None)
 
         except exceptions.KubeAPIUnreachableError:
             # If we can't reach the cluster, assume no high perf networking
@@ -1246,7 +1315,7 @@ class Kubernetes(clouds.Cloud):
             default_value=None)
         if (autoscaler_type !=
                 kubernetes_enums.KubernetesAutoscalerType.GKE.value):
-            return KubernetesHighPerformanceNetworkType.NONE, ''
+            return KubernetesHighPerformanceNetworkType.NONE, '', None
         autoscaler = kubernetes_utils.get_autoscaler(
             kubernetes_enums.KubernetesAutoscalerType(autoscaler_type))
         logger.debug(f'{context} has autoscaler of type: {autoscaler_type}')
@@ -1254,18 +1323,18 @@ class Kubernetes(clouds.Cloud):
         # Check if any machine type supports high perf networking for GKE.
         if 'a3-highgpu-8g' in machine_types:
             return (KubernetesHighPerformanceNetworkType.GCP_TCPX,
-                    'a3-highgpu-8g')
+                    'a3-highgpu-8g', None)
         elif 'a3-edgegpu-8g' in machine_types:
             return (KubernetesHighPerformanceNetworkType.GCP_TCPX,
-                    'a3-edgegpu-8g')
+                    'a3-edgegpu-8g', None)
         elif 'a3-megagpu-8g' in machine_types:
             return (KubernetesHighPerformanceNetworkType.GCP_TCPXO,
-                    'a3-megagpu-8g')
+                    'a3-megagpu-8g', None)
         elif 'a4-highgpu-8g' in machine_types:
             return (KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA,
-                    'a4-highgpu-8g')
+                    'a4-highgpu-8g', None)
         elif 'a3-ultragpu-8g' in machine_types:
             return (KubernetesHighPerformanceNetworkType.GCP_GPUDIRECT_RDMA,
-                    'a3-ultragpu-8g')
+                    'a3-ultragpu-8g', None)
 
-        return KubernetesHighPerformanceNetworkType.NONE, ''
+        return KubernetesHighPerformanceNetworkType.NONE, '', None
