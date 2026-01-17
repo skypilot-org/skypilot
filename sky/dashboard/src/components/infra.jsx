@@ -806,8 +806,9 @@ export function ContextDetails({
                         statusInfo.push('Cordoned');
                       }
 
-                      // Add taint info grouped by effect
+                      // Build taint info separately
                       const taints = node.taints || [];
+                      let taintInfo = null;
                       if (taints.length > 0) {
                         const taintsByEffect = {};
                         for (const taint of taints) {
@@ -823,15 +824,16 @@ export function ContextDetails({
                             `${effect} Taint [${keys.join(', ')}]`
                         );
                         if (taintStrs.length > 0) {
-                          statusInfo.push(taintStrs.join(', '));
+                          taintInfo = taintStrs.join(', ');
                         }
                       }
 
                       const nodeStatusStr =
-                        statusInfo.length > 0
+                        statusInfo.length > 0 || taintInfo
                           ? statusInfo.join(', ')
                           : 'Healthy';
-                      const isNodeHealthy = statusInfo.length === 0;
+                      const isNodeHealthy =
+                        statusInfo.length === 0 && !taintInfo;
 
                       return (
                         <tr
@@ -856,14 +858,25 @@ export function ContextDetails({
                           <td className="p-3 whitespace-nowrap text-gray-700">
                             {utilizationStr}
                           </td>
-                          <td
-                            className={`p-3 whitespace-nowrap ${
-                              isNodeHealthy
-                                ? 'text-green-600'
-                                : 'text-orange-500'
-                            }`}
-                          >
-                            {nodeStatusStr}
+                          <td className="p-3 max-w-xs">
+                            <div className="flex flex-col gap-1.5">
+                              {nodeStatusStr && (
+                                <span
+                                  className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit ${
+                                    isNodeHealthy
+                                      ? 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20'
+                                      : 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20'
+                                  }`}
+                                >
+                                  {nodeStatusStr}
+                                </span>
+                              )}
+                              {taintInfo && (
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit bg-gray-50 text-gray-700 ring-1 ring-inset ring-gray-600/20">
+                                  {taintInfo}
+                                </span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
