@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: sky-gpu-labeler
+  namespace: kube-system
+  labels:
+    parent: skypilot
+    job: sky-gpu-labeler
+spec:
+  selector:
+    matchLabels:
+      app: sky-gpu-labeler
+  template:
+    metadata:
+      labels:
+        parent: skypilot
+        job: sky-gpu-labeler
+        app: sky-gpu-labeler
+    spec:
+      serviceAccountName: gpu-labeler-sa
+      # Tolerate all taints to ensure the DaemonSet runs on all GPU nodes,
+      # including those with custom taints (e.g., GPU-specific taints)
+      tolerations:
+      - operator: Exists
+      # Only schedule on nodes that don't have the GPU label yet.
+      # Once the node is labeled, the pod will keep running but won't be
+      # rescheduled if it's evicted (requiredDuringSchedulingIgnoredDuringExecution).
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: skypilot.co/accelerator
+                operator: DoesNotExist
+      containers:
+      - name: gpu-labeler
+        image: us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot-gpu:latest
+        command: ["/bin/bash", "-i", "-c"]
+        args:
+          - |
+            source ~/skypilot-runtime/bin/activate
+            python /label_gpus.py && sleep infinity
+        env:
+        - name: MY_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        # Allow nvidia-smi to query GPUs without allocating GPU resources.
+        # This prevents the DaemonSet from blocking GPU scheduling.
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: "all"
+        volumeMounts:
+        - name: label-script
+          mountPath: /label_gpus.py
+          subPath: label_gpus.py
+        resources:
+          requests:
+            cpu: "0.1"
+            memory: "100Mi"
+          limits:
+            cpu: "0.5"
+            memory: "200Mi"
+      volumes:
+      - name: label-script
+        configMap:
+          name: gpu-labeler-script
+          defaultMode: 0744
+      restartPolicy: Always

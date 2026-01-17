@@ -1,4 +1,11 @@
-"""Script to label GPU nodes in a Kubernetes cluster for use with SkyPilot"""
+"""Script to label GPU nodes in a Kubernetes cluster for use with SkyPilot
+
+This script supports two modes:
+1. Job mode (default): Creates one-off Jobs to label GPU nodes. Useful for
+   initial labeling or when autoscaling is not used.
+2. DaemonSet mode (--daemonset): Deploys a DaemonSet that automatically labels
+   new GPU nodes as they join the cluster. Recommended for autoscaling clusters.
+"""
 import argparse
 import hashlib
 import os
@@ -225,11 +232,107 @@ def wait_for_jobs_completion(jobs_to_node_names: Dict[str, str],
     return False  # Timed out
 
 
+def deploy_daemonset(context: Optional[str] = None) -> bool:
+    """Deploys a DaemonSet to automatically label GPU nodes.
+
+    The DaemonSet will run on all GPU nodes and label them with
+    skypilot.co/accelerator labels. This is useful for autoscaling clusters
+    where new nodes need to be automatically labeled as they join.
+
+    Args:
+        context: The Kubernetes context to use.
+
+    Returns:
+        True if deployment was successful, False otherwise.
+    """
+    # First, clean up any existing resources
+    deletion_success, reason = cleanup(context=context)
+    if not deletion_success:
+        print(reason)
+        return False
+
+    manifest_dir = os.path.join(directory_utils.get_sky_dir(),
+                                'utils/kubernetes')
+
+    # Apply the RBAC manifest using kubectl since it contains multiple resources
+    with rich_utils.client_status('Setting up GPU labeling RBAC'):
+        rbac_manifest_path = os.path.join(manifest_dir,
+                                          'k8s_gpu_labeler_setup.yaml')
+        try:
+            apply_command = ['kubectl', 'apply', '-f', rbac_manifest_path]
+            if context:
+                apply_command += ['--context', context]
+            subprocess.check_output(apply_command)
+        except subprocess.CalledProcessError as e:
+            output = e.output.decode('utf-8')
+            print('Error setting up GPU labeling RBAC: ' + output)
+            return False
+
+    # Load and apply the DaemonSet manifest
+    daemonset_manifest_path = os.path.join(manifest_dir,
+                                           'k8s_gpu_labeler_daemonset.yaml')
+    with rich_utils.client_status('Deploying GPU labeler DaemonSet'):
+        try:
+            with open(daemonset_manifest_path, 'r', encoding='utf-8') as file:
+                daemonset_manifest = yaml.safe_load(file)
+
+            # Check if the 'nvidia' RuntimeClass exists
+            try:
+                nvidia_exists = kubernetes_utils.check_nvidia_runtime_class(
+                    context=context)
+            except Exception as e:  # pylint: disable=broad-except
+                print('Error occurred while checking for nvidia RuntimeClass: '
+                      f'{str(e)}')
+                print('Continuing without using nvidia RuntimeClass. '
+                      'This may fail on K3s clusters. '
+                      'For more details, refer to K3s deployment notes at: '
+                      'https://docs.skypilot.co/en/latest/reference/kubernetes/'
+                      'kubernetes-setup.html')
+                nvidia_exists = False
+
+            if nvidia_exists:
+                print('Using nvidia RuntimeClass for GPU labeling.')
+                daemonset_manifest['spec']['template']['spec'][
+                    'runtimeClassName'] = 'nvidia'
+            else:
+                print('Using default RuntimeClass for GPU labeling.')
+
+            apps_v1 = kubernetes.apps_api(context=context)
+            namespace = daemonset_manifest['metadata']['namespace']
+            apps_v1.create_namespaced_daemon_set(namespace, daemonset_manifest)
+        except subprocess.CalledProcessError as e:
+            output = e.output.decode('utf-8')
+            print('Error deploying GPU labeler DaemonSet: ' + output)
+            return False
+        except Exception as e:  # pylint: disable=broad-except
+            print(f'Error deploying GPU labeler DaemonSet: {str(e)}')
+            return False
+
+    print(
+        _format_string(
+            'GPU labeler DaemonSet deployed successfully.',
+            colorama.Fore.GREEN))
+    context_str = f' --context {context}' if context else ''
+    print('The DaemonSet will automatically label new GPU nodes '
+          'as they join the cluster.')
+    print(f'\nTo check the status of the DaemonSet, run:\n'
+          f'  kubectl get daemonset -n kube-system '
+          f'sky-gpu-labeler{context_str}')
+    print(f'\nTo check the pods, run:\n'
+          f'  kubectl get pods -n kube-system '
+          f'-l job=sky-gpu-labeler{context_str}')
+    print(f'\nTo remove the DaemonSet, run:\n'
+          f'  python -m sky.utils.kubernetes.gpu_labeler '
+          f'--cleanup{context_str}')
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Labels GPU nodes in a Kubernetes cluster for use with '
-        'SkyPilot. Operates by running a job on each node that '
-        'parses nvidia-smi and patches the node with new labels. '
+        'SkyPilot. By default, runs Jobs to label existing GPU nodes. '
+        'Use --daemonset to deploy a DaemonSet for automatic labeling '
+        'of new nodes in autoscaling clusters. '
         'Labels created are of the format '
         'skypilot.co/accelerator: <gpu_name>. Automatically '
         'creates a service account and cluster role binding with '
@@ -244,7 +347,13 @@ def main():
     parser.add_argument('--async',
                         dest='async_completion',
                         action='store_true',
-                        help='do not wait for the GPU labeling to complete.')
+                        help='do not wait for the GPU labeling to complete. '
+                        '(Only applies to Job mode, not DaemonSet mode.)')
+    parser.add_argument('--daemonset',
+                        action='store_true',
+                        help='deploy a DaemonSet to automatically label GPU '
+                        'nodes as they join the cluster. Recommended for '
+                        'autoscaling clusters.')
     args = parser.parse_args()
     context = None
     if args.context:
@@ -258,6 +367,8 @@ def main():
 
     if args.cleanup:
         cleanup(context=context)
+    elif args.daemonset:
+        deploy_daemonset(context=context)
     else:
         label(context=context, wait_for_completion=not args.async_completion)
 
