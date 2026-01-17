@@ -1,0 +1,57 @@
+# Activate the multi-instance sky wrapper.
+# Source this file: source /path/to/skypilot/dev/multi-instance/activate
+#
+# This aliases 'sky' to the wrapper and modifies your prompt.
+# Run 'deactivate-sky' to undo.
+
+# Prevent double activation
+if [[ -n "${_SKY_WRAPPER_ACTIVE:-}" ]]; then
+    echo "Sky wrapper already active. Run 'deactivate-sky' first."
+    return 0
+fi
+
+# Find the directory containing this script
+_SKY_WRAPPER_DIR="${BASH_SOURCE[0]%/*}"
+if [[ "$_SKY_WRAPPER_DIR" == "${BASH_SOURCE[0]}" ]]; then
+    # Sourced via relative path without /
+    _SKY_WRAPPER_DIR="."
+fi
+_SKY_WRAPPER_DIR="$(cd "$_SKY_WRAPPER_DIR" && pwd)"
+
+# Save original PS1 and sky command (if any)
+_SKY_ORIG_PS1="${PS1:-}"
+_SKY_ORIG_SKY="$(command -v sky 2>/dev/null || true)"
+
+# Create aliases
+alias sky="$_SKY_WRAPPER_DIR/sky"
+alias start-container="$_SKY_WRAPPER_DIR/start-container"
+alias stop-container="$_SKY_WRAPPER_DIR/stop-container"
+
+# Modify prompt
+PS1="(sky-dev) ${PS1:-}"
+
+# Mark as active
+export _SKY_WRAPPER_ACTIVE=1
+export _SKY_WRAPPER_DIR
+
+# Deactivate function
+deactivate-sky() {
+    # Remove aliases
+    unalias sky 2>/dev/null
+    unalias start-container 2>/dev/null
+    unalias stop-container 2>/dev/null
+
+    # Restore prompt
+    PS1="${_SKY_ORIG_PS1:-}"
+
+    # Clear markers
+    unset _SKY_WRAPPER_ACTIVE
+    unset _SKY_WRAPPER_DIR
+    unset _SKY_ORIG_PS1
+    unset _SKY_ORIG_SKY
+    unset -f deactivate-sky
+
+    echo "Sky wrapper deactivated."
+}
+
+echo "Sky wrapper activated. Run 'deactivate-sky' to disable."

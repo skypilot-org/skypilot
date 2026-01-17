@@ -10,12 +10,12 @@ Each instance runs in its own Docker container with isolated state.
 ## Quick Start
 
 ```bash
-# One-time: add to PATH (in .bashrc or similar)
-export PATH="/path/to/skypilot/dev/multi-instance:$PATH"
-
 # Per-worktree: run setup
 cd /path/to/skypilot-worktree
-setup.sh
+./dev/multi-instance/setup.sh
+
+# Activate the wrapper (aliases sky, modifies prompt)
+source ./dev/multi-instance/activate
 
 # Use sky commands (auto-detects instance from current directory)
 start-container
@@ -23,6 +23,9 @@ sky api start
 sky status
 sky api stop
 stop-container
+
+# Deactivate when done
+deactivate-sky
 ```
 
 ## How It Works
@@ -37,11 +40,29 @@ stop-container
 | Script | Description |
 |--------|-------------|
 | `setup.sh` | Creates `.sky-dev/` directory with instance config |
+| `activate` | Source this to alias `sky` and modify prompt |
 | `start-container` | Creates/starts the Docker container |
 | `stop-container` | Stops the container |
 | `sky` | Runs sky commands in the container |
 
 All scripts (except `setup.sh`) auto-detect the instance by walking up from the current directory looking for `.sky-dev/.instance`.
+
+## Activation
+
+Source `activate` to enable the wrapper:
+```bash
+source /path/to/skypilot/dev/multi-instance/activate
+```
+
+This will:
+- Alias `sky`, `start-container`, `stop-container` to the wrappers
+- Prefix your prompt with `(sky-dev)` so you know it's active
+- Define `deactivate-sky` function to undo everything
+
+Alternatively, add to PATH permanently:
+```bash
+export PATH="/path/to/skypilot/dev/multi-instance:$PATH"
+```
 
 ## Directory Structure
 
