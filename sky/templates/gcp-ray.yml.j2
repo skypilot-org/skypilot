@@ -137,6 +137,9 @@ available_node_types:
       schedulingConfig:
         preemptible: true
   {%- endif %}
+  {%- if gcp_queued_resource %}
+      gcp_queued_resource: {{gcp_queued_resource}}
+  {%- endif %}
 {%- else %}
       machineType: {{instance_type}}
     {%- if machine_image is not none %}
