@@ -35,8 +35,9 @@ import sys
 import time
 import traceback
 import typing
-from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
-                    TypeVar, Union)
+from typing import (Any, Callable, Dict, Generator, List, Literal, Optional,
+                    Set, Tuple, TypeVar, Union)
+import uuid
 
 import click
 import colorama
@@ -5299,11 +5300,51 @@ def jobs_cancel(
               is_flag=True,
               required=False,
               help='Download logs for all jobs shown in the queue.')
+@click.option(
+    '--system',
+    is_flag=False,
+    flag_value=True,
+    default=None,
+    required=False,
+    hidden=True,
+    help=('Show the system logs of the job. Can be used as --system (flag)'
+          ' or --system <UUID>. Should rarely be used as the controller'
+          'processes manage multiple jobs.'))
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool, refresh: bool, sync_down: bool):
-    """Tail or sync down the log of a managed job."""
+              controller: bool, refresh: bool, sync_down: bool,
+              system: Optional[Union[str, Literal[True]]]):
+    """Tail or sync down the log of a managed job.
+
+    Args:
+        system: The system UUID to sync down logs for or True to sync all
+                active logs.
+    """
+
+    if system and job_id:
+        raise click.UsageError('Cannot specify both --system and job_id.')
+
+    if controller and system:
+        # this doesn't make sense because system requires a UUID, controller
+        # requires a job ID
+        raise click.UsageError(
+            'Cannot specify both --controller and --system at the same time.')
+
+    system_processed: Optional[Union[uuid.UUID, Literal[True]]] = None
+    if system == 'True':
+        # AFAIK click can not handle Union[str, bool] so system will get auto
+        # converted to a str. We just convert it back to a bool here. Not the
+        # cleanest but it works.
+        system_processed = True
+    elif isinstance(system, str):
+        try:
+            system_processed = uuid.UUID(system)
+        except (ValueError, TypeError) as e:
+            raise click.UsageError(
+                f'Error: Invalid value for \'[SYSTEM]\': \'{system}\' is not '
+                'a valid UUID.') from e
+
     try:
         if sync_down:
             with rich_utils.client_status(
@@ -5312,18 +5353,23 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                     name=name,
                     job_id=job_id,
                     controller=controller,
+                    system=system_processed,
                     refresh=refresh)
             style = colorama.Style
             fore = colorama.Fore
             controller_str = ' (controller)' if controller else ''
+            # TODO(luca): maybe come up with a better name for the process logs
+            system_str = 'Controller process ' if system else 'Job'
             for job, log_local_path in log_local_path_dict.items():
-                logger.info(f'{fore.CYAN}Job {job} logs{controller_str}: '
-                            f'{log_local_path}{style.RESET_ALL}')
+                logger.info(
+                    f'{fore.CYAN}{system_str} {job} logs{controller_str}: '
+                    f'{log_local_path}{style.RESET_ALL}')
         else:
             returncode = managed_jobs.tail_logs(name=name,
                                                 job_id=job_id,
                                                 follow=follow,
                                                 controller=controller,
+                                                system=system_processed,
                                                 refresh=refresh)
             sys.exit(returncode)
     except exceptions.ClusterNotUpError:
