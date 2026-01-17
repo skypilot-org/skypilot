@@ -59,10 +59,12 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import file_content_utils
 from sky.jobs import state
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.utils import controller_utils
+from sky.utils import dag_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
@@ -346,6 +348,16 @@ async def scheduled_launch(
     # the ALIVE_WAITING state. The state transition will be
     # WAITING -> ALIVE -> DONE without any intermediate transitions.
     if pool is not None:
+        yield
+        return
+
+    # For JobGroups, multiple tasks share the same job_id but each launches
+    # a different cluster in parallel. We handle scheduler state at the group
+    # level in _run_job_group(), so bypass per-task scheduling here.
+    # Check if job is a JobGroup by examining the DAG YAML content.
+    # TODO(zhwu): make JobGroup scheduler aware.
+    dag_content = file_content_utils.get_job_dag_content(job_id)
+    if dag_content is not None and dag_utils.is_job_group_yaml_str(dag_content):
         yield
         return
 

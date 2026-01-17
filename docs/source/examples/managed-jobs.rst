@@ -7,6 +7,13 @@ Managed Jobs
 
   This feature is great for scaling out: running a single job for long durations, or running many jobs in parallel.
 
+.. seealso::
+
+   :doc:`pools` for running batch inference workloads across multiple infrastructure.
+
+   :ref:`job-groups` for running multiple heterogeneous jobs in parallel that
+   can communicate with each other.
+
 SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically retry failures, recover from spot instance preemptions, and clean up when done.
 
 To start a managed job, use :code:`sky jobs launch`:

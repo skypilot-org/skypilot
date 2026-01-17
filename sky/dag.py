@@ -1,4 +1,5 @@
 """DAGs: user applications to be run."""
+import enum
 import pprint
 import threading
 import typing
@@ -8,6 +9,24 @@ if typing.TYPE_CHECKING:
     from sky import task
 
 
+class DagPlacement(enum.Enum):
+    """Placement mode for DAGs with multiple tasks.
+
+    This controls where tasks in a multi-task DAG are placed relative to
+    each other.
+    """
+    # All tasks run on same K8s/Slurm cluster or cloud AZ
+    SAME_INFRA = 'SAME_INFRA'
+
+
+class DagExecution(enum.Enum):
+    """Execution mode for DAGs with multiple tasks.
+
+    This controls how tasks in a multi-task DAG are executed.
+    """
+    PARALLEL = 'parallel'  # All tasks start in parallel
+
+
 class Dag:
     """Dag: a user application, represented as a DAG of Tasks.
 
@@ -15,6 +34,11 @@ class Dag:
         >>> import sky
         >>> with sky.Dag() as dag:
         >>>     task = sky.Task(...)
+
+    For JobGroups (heterogeneous parallel workloads):
+        >>> dag = dag_utils.load_job_group_from_yaml('job_group.yaml')
+        >>> # dag.is_job_group() returns True
+        >>> # dag.tasks contains jobs to run in parallel
     """
 
     def __init__(self) -> None:
@@ -25,6 +49,10 @@ class Dag:
         self.name: Optional[str] = None
         self.policy_applied: bool = False
         self.pool: Optional[str] = None
+
+        # Placement and execution mode for multi-task DAGs
+        self.placement: Optional[DagPlacement] = None
+        self.execution: Optional[DagExecution] = None
 
     def add(self, task: 'task.Task') -> None:
         self.graph.add_node(task)
@@ -55,6 +83,21 @@ class Dag:
 
     def get_graph(self):
         return self.graph
+
+    def is_job_group(self) -> bool:
+        """Check if this DAG represents a JobGroup.
+
+        A DAG is a JobGroup if it has parallel execution and SAME_INFRA
+        placement. This is derived from the placement and execution settings.
+        """
+        return (self.execution == DagExecution.PARALLEL and
+                self.placement == DagPlacement.SAME_INFRA)
+
+    def set_dag_config(self, placement: 'DagPlacement',
+                       execution: 'DagExecution') -> None:
+        """Configure this DAG with the given placement and execution mode."""
+        self.placement = placement
+        self.execution = execution
 
     def is_chain(self) -> bool:
         """Check if the DAG is a linear chain of tasks."""
