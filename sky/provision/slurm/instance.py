@@ -748,7 +748,7 @@ def cleanup_ports(
     pass
 
 
-def _build_pyxis_args(cluster_name_on_cloud: str,) -> str:
+def _build_pyxis_args(cluster_name_on_cloud: str) -> str:
     """Build pyxis/enroot container args for srun.
 
     Uses :exec flag to attach to the already-running container (started with
