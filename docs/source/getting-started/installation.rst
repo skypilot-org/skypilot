@@ -1671,6 +1671,30 @@ Seeweb |community-badge|
   [DEFAULT]
   api_key = <your-api-token>
 
+Verda |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+`Verda <https://www.verda.com/>`_ is the sovereign European GPU Cloud Provider. To use Verda with SkyPilot:
+
+1. Log into your `Verda Console : <https://console.verda.com/>`__.
+2. Navigate to *Keys → Cloud API Keys* in the console, and press **Create**.
+3. Create the file :code:`~/.verda/config.json` with the following contents:
+
+.. code-block:: shell
+
+      mkdir -p ~/.verda
+      echo { "client_id": "YOUR_CLIENT_ID", "client_secret": "YOUR_CLIENT_SECRET" } > ~/.verda/config.json
+
+4. Alternatively, you can set the environment variables :code:`VERDA_CLIENT_ID` and :code:`VERDA_CLIENT_SECRET`.
+5. To update your local catalog with Verda Cloud availability information, run the following command:
+
+.. code-block:: shell
+
+      uv run python -m sky.catalog.data_fetchers.fetch_verda
+
+6. You are all set! Verda Cloud does not require any additional setup or dependencies.
+
+
 .. _docker-image:
 
 Appendix: Using SkyPilot in Docker
