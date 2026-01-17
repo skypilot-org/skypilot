@@ -1,5 +1,6 @@
 """Async SDK functions for managed jobs."""
 import asyncio
+import functools
 import typing
 from typing import Dict, List, Literal, Optional, overload, Tuple, Union
 import uuid
@@ -158,8 +159,10 @@ async def download_logs(
     system: Optional[Union[uuid.UUID, Literal[True]]] = None,
 ) -> Union[Dict[int, str], Dict[str, str]]:
     """Async version of download_logs() that syncs down logs of managed jobs."""
-    return await asyncio.to_thread(sdk.download_logs, name, job_id, refresh,
-                                   controller, local_dir, system)
+    # this makes mypy happy bc typing with overloaded functions is annoying
+    return await asyncio.to_thread(
+        functools.partial(sdk.download_logs, name, job_id, refresh, controller,
+                          local_dir, system))
 
 
 @usage_lib.entrypoint
