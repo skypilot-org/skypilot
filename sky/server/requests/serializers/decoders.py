@@ -130,10 +130,10 @@ def decode_jobs_queue_v2(
     """
     # Case 1: dict shape {jobs, total, total_no_filter, status_counts}
     if isinstance(return_value, dict):
-        jobs = return_value.get('jobs', [])
-        total = return_value.get('total', len(jobs))
-        total_no_filter = return_value.get('total_no_filter', total)
-        status_counts = return_value.get('status_counts', {})
+        jobs: List[Dict[str, Any]] = return_value.get('jobs', [])
+        total: int = return_value.get('total', len(jobs))
+        total_no_filter: int = return_value.get('total_no_filter', total)
+        status_counts: Dict[str, int] = return_value.get('status_counts', {})
         for job in jobs:
             job['status'] = managed_jobs.ManagedJobStatus(job['status'])
         jobs = [responses.ManagedJobRecord(**job) for job in jobs]

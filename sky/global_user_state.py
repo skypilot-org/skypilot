@@ -1071,7 +1071,7 @@ def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
     event_type: ClusterEventType,
-    include_timestamps: Literal[False],
+    include_timestamps: Literal[False] = False,
     limit: Optional[int] = ...,
 ) -> List[str]:
     ...
