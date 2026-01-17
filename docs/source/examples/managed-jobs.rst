@@ -9,7 +9,7 @@ Managed Jobs
 
 .. seealso::
 
-   :ref:`pools` for running batch inference workloads using a pool of workers.
+   :ref:`pool` for running batch inference workloads using a pool of workers.
 
    :ref:`job-groups` for running multiple heterogeneous jobs in parallel that
    can communicate with each other.

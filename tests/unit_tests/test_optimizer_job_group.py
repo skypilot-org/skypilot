@@ -1,7 +1,8 @@
 """Unit tests for sky.optimizer - JobGroup optimization logic."""
 import collections
 from typing import Dict, List, Optional, Set, Tuple
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -108,8 +109,8 @@ class TestJobGroupOptimizer:
         assert region == 'us-east-1'
 
     def test_find_common_infras_no_common_region(self, mock_aws_cloud,
-                                                  mock_resources_aws_us_east_1,
-                                                  mock_resources_aws_us_west_2):
+                                                 mock_resources_aws_us_east_1,
+                                                 mock_resources_aws_us_west_2):
         """Test _find_common_infras with no common region."""
         task1 = MagicMock(spec=task_lib.Task)
         task2 = MagicMock(spec=task_lib.Task)
@@ -162,18 +163,21 @@ class TestJobGroupOptimizer:
         assert result == []
 
     def test_select_best_infra_single_option(self, mock_aws_cloud,
-                                              mock_resources_aws_us_east_1):
+                                             mock_resources_aws_us_east_1):
         """Test _select_best_infra with single option."""
         task = MagicMock(spec=task_lib.Task)
         task.estimate_runtime = MagicMock(return_value=3600)
         task.num_nodes = 1
 
         common_infras = [(mock_aws_cloud, 'us-east-1')]
-        task_candidates = {task: {mock_aws_cloud: [mock_resources_aws_us_east_1]}}
+        task_candidates = {
+            task: {
+                mock_aws_cloud: [mock_resources_aws_us_east_1]
+            }
+        }
 
         result = optimizer.Optimizer._select_best_infra(common_infras,
-                                                        task_candidates,
-                                                        [task],
+                                                        task_candidates, [task],
                                                         minimize_cost=True)
 
         cloud, region = result
@@ -181,8 +185,8 @@ class TestJobGroupOptimizer:
         assert region == 'us-east-1'
 
     def test_select_best_infra_minimize_cost(self, mock_aws_cloud,
-                                              mock_resources_aws_us_east_1,
-                                              mock_resources_aws_us_west_2):
+                                             mock_resources_aws_us_east_1,
+                                             mock_resources_aws_us_west_2):
         """Test _select_best_infra selects cheapest option."""
         task = MagicMock(spec=task_lib.Task)
         task.estimate_runtime = MagicMock(return_value=3600)
@@ -200,8 +204,7 @@ class TestJobGroupOptimizer:
         }
 
         result = optimizer.Optimizer._select_best_infra(common_infras,
-                                                        task_candidates,
-                                                        [task],
+                                                        task_candidates, [task],
                                                         minimize_cost=True)
 
         cloud, region = result
@@ -210,8 +213,8 @@ class TestJobGroupOptimizer:
         assert region == 'us-east-1'
 
     def test_select_best_infra_multiple_tasks(self, mock_aws_cloud,
-                                               mock_resources_aws_us_east_1,
-                                               mock_resources_aws_us_west_2):
+                                              mock_resources_aws_us_east_1,
+                                              mock_resources_aws_us_west_2):
         """Test _select_best_infra considers all tasks."""
         task1 = MagicMock(spec=task_lib.Task)
         task1.estimate_runtime = MagicMock(return_value=3600)
@@ -346,7 +349,8 @@ class TestOptimizeIndependent:
             optimize_call_count += 1
             return temp_dag
 
-        with patch.object(optimizer.Optimizer, 'optimize',
+        with patch.object(optimizer.Optimizer,
+                          'optimize',
                           side_effect=mock_optimize):
             result = optimizer.Optimizer._optimize_independent(
                 dag,
@@ -384,7 +388,8 @@ class TestOptimizeSameInfra:
         with patch('sky.optimizer._fill_in_launchable_resources') as mock_fill:
             mock_fill.return_value = ({}, None, None, None)
 
-            with pytest.raises(exceptions.ResourcesUnavailableError) as exc_info:
+            with pytest.raises(
+                    exceptions.ResourcesUnavailableError) as exc_info:
                 optimizer.Optimizer._optimize_same_infra(
                     dag,
                     minimize=common.OptimizeTarget.COST,
@@ -426,9 +431,8 @@ class TestOptimizeSameInfra:
 
         with patch('sky.optimizer._fill_in_launchable_resources',
                    side_effect=mock_fill):
-            with patch.object(
-                    optimizer.Optimizer,
-                    '_optimize_independent') as mock_independent:
+            with patch.object(optimizer.Optimizer,
+                              '_optimize_independent') as mock_independent:
                 mock_independent.return_value = dag
 
                 result = optimizer.Optimizer._optimize_same_infra(

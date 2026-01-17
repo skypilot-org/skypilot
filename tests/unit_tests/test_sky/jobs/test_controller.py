@@ -7,7 +7,9 @@ Tests cover controller recovery during rolling upgrades for:
 """
 import asyncio
 from typing import Dict, List, Optional, Tuple
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -40,6 +42,7 @@ class TestNormalJobRecovery:
     @pytest.mark.asyncio
     async def test_fresh_launch_when_pending(self, mock_task):
         """Test that PENDING status results in fresh launch."""
+
         async def mock_get_latest(job_id):
             return (0, managed_job_state.ManagedJobStatus.PENDING)
 
@@ -64,6 +67,7 @@ class TestNormalJobRecovery:
     @pytest.mark.asyncio
     async def test_fresh_launch_when_none_status(self, mock_task):
         """Test that None latest_task_id results in fresh launch."""
+
         async def mock_get_latest(job_id):
             return (None, None)
 
@@ -87,6 +91,7 @@ class TestNormalJobRecovery:
     @pytest.mark.asyncio
     async def test_resume_when_running(self, mock_task):
         """Test that RUNNING status triggers resume."""
+
         async def mock_get_latest(job_id):
             return (0, managed_job_state.ManagedJobStatus.RUNNING)
 
@@ -111,6 +116,7 @@ class TestNormalJobRecovery:
     @pytest.mark.asyncio
     async def test_resume_when_starting(self, mock_task):
         """Test that STARTING status triggers resume."""
+
         async def mock_get_latest(job_id):
             return (0, managed_job_state.ManagedJobStatus.STARTING)
 
@@ -135,6 +141,7 @@ class TestNormalJobRecovery:
     @pytest.mark.asyncio
     async def test_resume_when_recovering(self, mock_task):
         """Test that RECOVERING status triggers resume."""
+
         async def mock_get_latest(job_id):
             return (0, managed_job_state.ManagedJobStatus.RECOVERING)
 
@@ -214,6 +221,7 @@ class TestPipelineJobRecovery:
     @pytest.mark.asyncio
     async def test_resume_first_task_running(self, mock_pipeline_dag):
         """Test resuming when first task (task_id=0) was RUNNING."""
+
         async def mock_get_latest(job_id):
             return (0, managed_job_state.ManagedJobStatus.RUNNING)
 
@@ -244,6 +252,7 @@ class TestPipelineJobRecovery:
     @pytest.mark.asyncio
     async def test_resume_middle_task_running(self, mock_pipeline_dag):
         """Test resuming when middle task (task_id=1) was RUNNING."""
+
         async def mock_get_latest(job_id):
             return (1, managed_job_state.ManagedJobStatus.RUNNING)
 
@@ -272,6 +281,7 @@ class TestPipelineJobRecovery:
     @pytest.mark.asyncio
     async def test_resume_last_task_running(self, mock_pipeline_dag):
         """Test resuming when last task (task_id=2) was RUNNING."""
+
         async def mock_get_latest(job_id):
             return (2, managed_job_state.ManagedJobStatus.RUNNING)
 
@@ -318,6 +328,7 @@ class TestPipelineJobRecovery:
     @pytest.mark.asyncio
     async def test_fresh_launch_all_pending(self, mock_pipeline_dag):
         """Test fresh launch when all tasks are PENDING."""
+
         async def mock_get_latest(job_id):
             return (0, managed_job_state.ManagedJobStatus.PENDING)
 
@@ -346,6 +357,7 @@ class TestPipelineJobRecovery:
     @pytest.mark.asyncio
     async def test_resume_recovering_task(self, mock_pipeline_dag):
         """Test resuming when task was in RECOVERING state."""
+
         async def mock_get_latest(job_id):
             return (1, managed_job_state.ManagedJobStatus.RECOVERING)
 
@@ -374,6 +386,7 @@ class TestPipelineJobRecovery:
     @pytest.mark.asyncio
     async def test_resume_starting_task(self, mock_pipeline_dag):
         """Test resuming when task was in STARTING state."""
+
         async def mock_get_latest(job_id):
             return (0, managed_job_state.ManagedJobStatus.STARTING)
 
@@ -444,6 +457,7 @@ class TestJobGroupRecovery:
         - Task 1: RUNNING - should resume monitoring without forced recovery
         - Task 2: STARTING - should resume with forced recovery
         """
+
         # Mock the state queries to return different statuses for each task
         async def mock_get_status(job_id, task_id):
             statuses = {
@@ -491,6 +505,7 @@ class TestJobGroupRecovery:
     @pytest.mark.asyncio
     async def test_resume_all_pending_is_fresh_launch(self, mock_dag):
         """Test that all PENDING tasks result in fresh launch (no resume)."""
+
         async def mock_get_status(job_id, task_id):
             return managed_job_state.ManagedJobStatus.PENDING
 
@@ -519,6 +534,7 @@ class TestJobGroupRecovery:
     @pytest.mark.asyncio
     async def test_resume_all_terminal_returns_early(self, mock_dag):
         """Test that all terminal tasks result in early return."""
+
         async def mock_get_status(job_id, task_id):
             # All tasks succeeded
             return managed_job_state.ManagedJobStatus.SUCCEEDED
@@ -542,9 +558,8 @@ class TestJobGroupRecovery:
                     task_resume_info[task_id] = (task_status, True)
 
             # Check if all tasks are terminal
-            all_terminal = all(
-                status is not None and status.is_terminal()
-                for status, _ in task_resume_info.values())
+            all_terminal = all(status is not None and status.is_terminal()
+                               for status, _ in task_resume_info.values())
 
             assert all_terminal is True
 
@@ -557,6 +572,7 @@ class TestJobGroupRecovery:
     @pytest.mark.asyncio
     async def test_resume_cancelling_raises_cancelled_error(self, mock_dag):
         """Test that CANCELLING status raises CancelledError."""
+
         async def mock_get_status(job_id, task_id):
             if task_id == 1:
                 return managed_job_state.ManagedJobStatus.CANCELLING
@@ -580,6 +596,7 @@ class TestJobGroupRecovery:
     @pytest.mark.asyncio
     async def test_resume_recovering_state_forces_recovery(self, mock_dag):
         """Test that RECOVERING status triggers forced recovery."""
+
         async def mock_get_status(job_id, task_id):
             return managed_job_state.ManagedJobStatus.RECOVERING
 
@@ -613,7 +630,8 @@ class TestJobGroupRecovery:
         """Test that only PENDING/None tasks are included in launch list."""
         # Simulate the logic from _run_job_group
         task_resume_info = {
-            0: (managed_job_state.ManagedJobStatus.SUCCEEDED, False),  # Terminal
+            0: (managed_job_state.ManagedJobStatus.SUCCEEDED, False
+               ),  # Terminal
             1: (managed_job_state.ManagedJobStatus.RUNNING, False),  # Running
             2: (None, False),  # Fresh launch
         }
@@ -621,8 +639,8 @@ class TestJobGroupRecovery:
         tasks_to_launch: List[int] = []
         for task_id in range(len(mock_dag.tasks)):
             task_status, _ = task_resume_info[task_id]
-            needs_launch = (task_status is None or task_status ==
-                            managed_job_state.ManagedJobStatus.PENDING)
+            needs_launch = (task_status is None or task_status
+                            == managed_job_state.ManagedJobStatus.PENDING)
             if needs_launch:
                 tasks_to_launch.append(task_id)
 
