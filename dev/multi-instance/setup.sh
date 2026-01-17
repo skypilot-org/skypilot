@@ -1,18 +1,13 @@
 #!/bin/bash
 # Setup script for creating an isolated SkyPilot development instance.
 #
-# This allows running multiple copies of SkyPilot simultaneously in different
-# worktrees without conflicts. Each instance gets its own:
-# - State directory (~/.sky/)
-# - API server on a unique port
-# - Logs and temporary files
+# This creates the instance directory structure and configuration.
+# After setup, use start-container.sh to start the Docker container.
 #
 # Usage:
 #   cd /path/to/skypilot-worktree
 #   ./dev/multi-instance/setup.sh [instance-name]
-#
-# After setup, add to your shell:
-#   export PATH="$PWD/.sky-dev/bin:$PATH"
+#   source .sky-dev/bin/activate
 
 set -e
 
@@ -29,16 +24,14 @@ echo "Setting up isolated SkyPilot instance: $INSTANCE_NAME"
 echo "Instance directory: $INSTANCE_DIR"
 
 # Create directory structure
-mkdir -p "$INSTANCE_DIR/home/.sky"
-mkdir -p "$INSTANCE_DIR/home/sky_logs"
-mkdir -p "$INSTANCE_DIR/home/.config"
-mkdir -p "$INSTANCE_DIR/tmp"
+mkdir -p "$INSTANCE_DIR/state"       # Maps to /root/.sky in container
+mkdir -p "$INSTANCE_DIR/sky_logs"    # Maps to /root/sky_logs in container
 mkdir -p "$INSTANCE_DIR/bin"
 
 # Allocate a unique port
 allocate_port() {
     for port in $(seq $PORT_RANGE_START $PORT_RANGE_END); do
-        # Check if port is in use
+        # Check if port is in use on host
         if ! ss -tln 2>/dev/null | grep -q ":$port " && \
            ! netstat -tln 2>/dev/null | grep -q ":$port "; then
             # Also check if another instance already claimed this port
@@ -71,33 +64,8 @@ else
     echo "Allocated port: $PORT"
 fi
 
-# Create symlinks to real credentials (these need to be shared)
-REAL_HOME="$HOME"
-for cred_dir in .aws .azure .config/gcloud .kube .ssh; do
-    src="$REAL_HOME/$cred_dir"
-    dst="$INSTANCE_DIR/home/$cred_dir"
-    if [[ -e "$src" ]] && [[ ! -e "$dst" ]]; then
-        # Create parent directory if needed
-        mkdir -p "$(dirname "$dst")"
-        ln -sf "$src" "$dst"
-        echo "Linked: $cred_dir"
-    fi
-done
-
-# Create initial config.yaml with the correct API endpoint
-cat > "$INSTANCE_DIR/home/.sky/config.yaml" << EOF
-# Auto-generated config for isolated SkyPilot instance: $INSTANCE_NAME
-# Port: $PORT
-api_server:
-  endpoint: http://127.0.0.1:$PORT
-EOF
-echo "Created config.yaml with endpoint http://127.0.0.1:$PORT"
-
-# Copy the sky wrapper to bin/
-cp "$SCRIPT_DIR/sky" "$INSTANCE_DIR/bin/sky"
-chmod +x "$INSTANCE_DIR/bin/sky"
-
 # Store instance metadata
+REAL_HOME="$HOME"
 cat > "$INSTANCE_DIR/.instance" << EOF
 INSTANCE_NAME=$INSTANCE_NAME
 INSTANCE_DIR=$INSTANCE_DIR
@@ -107,30 +75,51 @@ REAL_HOME=$REAL_HOME
 CREATED=$(date -Iseconds)
 EOF
 
-echo ""
-echo "===== Setup Complete ====="
-echo ""
-echo "To use this isolated instance, add to your shell:"
-echo ""
-echo "  export PATH=\"$INSTANCE_DIR/bin:\$PATH\""
-echo ""
-echo "Or for a single session:"
-echo ""
-echo "  source $INSTANCE_DIR/bin/activate"
-echo ""
-echo "Then use 'sky' commands as normal. The API server will run on port $PORT."
-echo ""
+# Copy scripts to bin/
+cp "$SCRIPT_DIR/sky" "$INSTANCE_DIR/bin/sky"
+cp "$SCRIPT_DIR/start-container.sh" "$INSTANCE_DIR/bin/start-container"
+chmod +x "$INSTANCE_DIR/bin/sky" "$INSTANCE_DIR/bin/start-container"
 
-# Also create an activate script for convenience
+# Create stop-container script
+cat > "$INSTANCE_DIR/bin/stop-container" << 'EOF'
+#!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../.instance"
+CONTAINER_NAME="skypilot-dev-${INSTANCE_NAME}"
+echo "Stopping container: $CONTAINER_NAME"
+docker stop "$CONTAINER_NAME" 2>/dev/null || echo "Container not running"
+EOF
+chmod +x "$INSTANCE_DIR/bin/stop-container"
+
+# Create activate script
 cat > "$INSTANCE_DIR/bin/activate" << EOF
 # Source this file to activate the isolated SkyPilot instance
 # Usage: source $INSTANCE_DIR/bin/activate
 
 export PATH="$INSTANCE_DIR/bin:\$PATH"
 export SKYPILOT_DEV_INSTANCE="$INSTANCE_NAME"
+export SKYPILOT_DEV_PORT="$PORT"
 
-echo "Activated SkyPilot instance: $INSTANCE_NAME (port $PORT)"
-echo "Run 'sky api start' to start the API server"
+echo "Activated SkyPilot instance: $INSTANCE_NAME"
+echo "  Port: $PORT"
+echo "  Container: skypilot-dev-$INSTANCE_NAME"
+echo ""
+echo "Commands:"
+echo "  start-container  - Start the Docker container"
+echo "  stop-container   - Stop the Docker container"
+echo "  sky <cmd>        - Run sky commands in the container"
 EOF
 
-echo "Created activate script: $INSTANCE_DIR/bin/activate"
+echo ""
+echo "===== Setup Complete ====="
+echo ""
+echo "To activate this instance:"
+echo ""
+echo "  source $INSTANCE_DIR/bin/activate"
+echo ""
+echo "Then start the container and use sky:"
+echo ""
+echo "  start-container"
+echo "  sky --help"
+echo "  sky api start"
+echo ""

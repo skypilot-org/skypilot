@@ -1,227 +1,47 @@
 #!/bin/bash
-# Wrapper script for running SkyPilot in an isolated development environment.
+# Wrapper script that runs sky commands inside the isolated Docker container.
 #
-# This script:
-# 1. Sets up environment variables for isolation (HOME, TMPDIR, etc.)
-# 2. Intercepts 'sky api start' and 'sky api stop' to handle custom ports
-# 3. Passes all other commands through to the real sky CLI
-#
-# The wrapper is copied to .sky-dev/bin/ by setup.sh
+# This simply does: docker exec -it <container> sky "$@"
+# The container must be started first with start-container.sh
 
 set -e
 
-# Find instance directory (this script lives in .sky-dev/bin/)
+# Find instance directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTANCE_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Validate instance directory
-if [[ ! -f "$INSTANCE_DIR/.instance" ]]; then
-    echo "ERROR: Invalid instance directory: $INSTANCE_DIR" >&2
-    echo "Expected to find .instance file" >&2
+# Check if we're running from .sky-dev/bin/ or dev/multi-instance/
+if [[ -f "$SCRIPT_DIR/../.instance" ]]; then
+    # Running from .sky-dev/bin/
+    INSTANCE_DIR="$(dirname "$SCRIPT_DIR")"
+elif [[ -f "$SCRIPT_DIR/../../.sky-dev/.instance" ]]; then
+    # Running from dev/multi-instance/
+    INSTANCE_DIR="$SCRIPT_DIR/../../.sky-dev"
+else
+    echo "ERROR: Cannot find instance configuration." >&2
+    echo "Run setup.sh first, then use the wrapper from .sky-dev/bin/" >&2
     exit 1
 fi
 
 # Load instance configuration
 source "$INSTANCE_DIR/.instance"
 
-# Set up isolated environment
-export HOME="$INSTANCE_DIR/home"
-export TMPDIR="$INSTANCE_DIR/tmp"
-export SKY_RUNTIME_DIR="$INSTANCE_DIR/home"
-export SKYPILOT_API_SERVER_ENDPOINT="http://127.0.0.1:$PORT"
+CONTAINER_NAME="skypilot-dev-${INSTANCE_NAME}"
 
-# Use the sky module from this repo (not any globally installed version)
-export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
-
-# Ensure tmp directory exists
-mkdir -p "$TMPDIR"
-
-# Find the real Python and sky module from the repo
-PYTHON="${PYTHON:-python3}"
-SKY_MODULE="sky.cli"
-
-# Helper function to check if server is running
-is_server_running() {
-    if [[ -f "$INSTANCE_DIR/server.pid" ]]; then
-        local pid=$(cat "$INSTANCE_DIR/server.pid")
-        if kill -0 "$pid" 2>/dev/null; then
-            return 0
-        fi
-    fi
-    return 1
-}
-
-# Helper function to get server PID
-get_server_pid() {
-    if [[ -f "$INSTANCE_DIR/server.pid" ]]; then
-        cat "$INSTANCE_DIR/server.pid"
-    fi
-}
-
-# Handle 'sky api start'
-handle_api_start() {
-    shift 2  # Remove 'api' and 'start'
-
-    # Parse arguments (simplified - mainly for --foreground)
-    local foreground=false
-    local deploy=false
-    local host="127.0.0.1"
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --foreground)
-                foreground=true
-                shift
-                ;;
-            --deploy)
-                deploy=true
-                host="0.0.0.0"
-                shift
-                ;;
-            --host=*)
-                host="${1#*=}"
-                shift
-                ;;
-            --host)
-                host="$2"
-                shift 2
-                ;;
-            --enable-basic-auth)
-                export ENABLE_BASIC_AUTH=true
-                shift
-                ;;
-            *)
-                shift
-                ;;
-        esac
-    done
-
-    # Check if already running
-    if is_server_running; then
-        echo "SkyPilot API server is already running (PID: $(get_server_pid))"
-        echo "Endpoint: http://127.0.0.1:$PORT"
-        return 0
-    fi
-
-    echo "Starting SkyPilot API server on port $PORT..."
-
-    # Create log directory
-    mkdir -p "$HOME/.sky/api_server"
-    local log_file="$HOME/.sky/api_server/server.log"
-
-    # Build server arguments
-    local server_args="--port=$PORT --host=$host"
-    if [[ "$deploy" == "true" ]]; then
-        server_args="$server_args --deploy"
-    fi
-
-    # Set server environment
-    export IS_SKYPILOT_SERVER=true
-
-    if [[ "$foreground" == "true" ]]; then
-        echo "Running in foreground mode (logs to stdout)..."
-        exec "$PYTHON" -m sky.server.server $server_args
-    else
-        # Start in background
-        "$PYTHON" -m sky.server.server $server_args > "$log_file" 2>&1 &
-        local server_pid=$!
-        echo "$server_pid" > "$INSTANCE_DIR/server.pid"
-
-        # Wait for server to be ready
-        echo "Waiting for server to start..."
-        local max_attempts=30
-        local attempt=0
-        while [[ $attempt -lt $max_attempts ]]; do
-            if curl -s "http://127.0.0.1:$PORT/api/health" > /dev/null 2>&1; then
-                echo "SkyPilot API server started successfully!"
-                echo "  Endpoint: http://127.0.0.1:$PORT"
-                echo "  PID: $server_pid"
-                echo "  Logs: $log_file"
-                return 0
-            fi
-
-            # Check if process died
-            if ! kill -0 "$server_pid" 2>/dev/null; then
-                echo "ERROR: Server process died unexpectedly" >&2
-                echo "Check logs at: $log_file" >&2
-                rm -f "$INSTANCE_DIR/server.pid"
-                return 1
-            fi
-
-            sleep 1
-            ((attempt++))
-        done
-
-        echo "ERROR: Server did not become ready in time" >&2
-        echo "Check logs at: $log_file" >&2
-        return 1
-    fi
-}
-
-# Handle 'sky api stop'
-handle_api_stop() {
-    if ! is_server_running; then
-        echo "SkyPilot API server is not running"
-        rm -f "$INSTANCE_DIR/server.pid"
-        return 0
-    fi
-
-    local pid=$(get_server_pid)
-    echo "Stopping SkyPilot API server (PID: $pid)..."
-
-    # Try graceful shutdown first
-    kill "$pid" 2>/dev/null || true
-
-    # Wait for process to die
-    local max_attempts=10
-    local attempt=0
-    while [[ $attempt -lt $max_attempts ]]; do
-        if ! kill -0 "$pid" 2>/dev/null; then
-            echo "Server stopped"
-            rm -f "$INSTANCE_DIR/server.pid"
-            return 0
-        fi
-        sleep 0.5
-        ((attempt++))
-    done
-
-    # Force kill if still running
-    echo "Force killing server..."
-    kill -9 "$pid" 2>/dev/null || true
-    rm -f "$INSTANCE_DIR/server.pid"
-    echo "Server stopped"
-}
-
-# Handle 'sky api status' - add instance info
-handle_api_status() {
-    shift 2  # Remove 'api' and 'status'
-
-    echo "Instance: $INSTANCE_NAME"
-    echo "Port: $PORT"
-    echo "Server PID: $(get_server_pid 2>/dev/null || echo 'not running')"
-    echo ""
-
-    # Call the real sky api status
-    exec "$PYTHON" -m "$SKY_MODULE" api status "$@"
-}
-
-# Main command routing
-if [[ $# -ge 2 ]] && [[ "$1" == "api" ]]; then
-    case "$2" in
-        start)
-            handle_api_start "$@"
-            exit $?
-            ;;
-        stop)
-            handle_api_stop
-            exit $?
-            ;;
-        status)
-            handle_api_status "$@"
-            exit $?
-            ;;
-    esac
+# Check if container is running
+if ! docker container inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null | grep -q true; then
+    echo "Container not running. Starting it..."
+    "$INSTANCE_DIR/bin/start-container"
 fi
 
-# For all other commands, pass through to the real sky CLI
-exec "$PYTHON" -m "$SKY_MODULE" "$@"
+# Determine if we need interactive mode
+# Use -it for most commands, but not when piping
+DOCKER_FLAGS="-i"
+if [[ -t 0 ]] && [[ -t 1 ]]; then
+    DOCKER_FLAGS="-it"
+fi
+
+# Run the command in the container
+exec docker exec $DOCKER_FLAGS \
+    -w /app \
+    "$CONTAINER_NAME" \
+    /app/.sky-dev/venv/bin/sky "$@"

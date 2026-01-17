@@ -1,26 +1,12 @@
 # Multi-Instance Local Development
 
-This directory contains tooling for running multiple isolated copies of SkyPilot
-simultaneously for local development. This is useful when you have multiple git
-worktrees and want to run different versions/branches of SkyPilot without conflicts.
+Run multiple isolated copies of SkyPilot simultaneously for local development.
+Each instance runs in its own Docker container with isolated state, while sharing
+the same repo code and cloud credentials.
 
-## The Problem
+## Requirements
 
-SkyPilot stores state in several locations that cause conflicts when running multiple instances:
-
-- `~/.sky/` - State databases, config, locks
-- Port 46580 - Hardcoded API server port
-- `/tmp/skypilot_graceful_shutdown.lock` - Shared lock file
-- `~/sky_logs/` - Log files
-
-## The Solution
-
-Each worktree gets its own isolated environment by:
-
-1. **Overriding `$HOME`** - All `~/.sky/` paths become isolated
-2. **Overriding `$TMPDIR`** - The `/tmp/` lock file becomes isolated
-3. **Unique port per instance** - Each API server runs on a different port (46501-46599)
-4. **Symlinking credentials** - Cloud credentials (`.aws`, `.kube`, etc.) are shared via symlinks
+- Docker
 
 ## Quick Start
 
@@ -31,155 +17,176 @@ cd /path/to/skypilot-worktree
 # 2. Run setup (one-time per worktree)
 ./dev/multi-instance/setup.sh
 
-# 3. Activate the isolated environment
+# 3. Activate the instance
 source .sky-dev/bin/activate
 
-# 4. Use sky commands as normal!
+# 4. Start the container
+start-container
+
+# 5. Use sky commands as normal - they run in the container
+sky --help
 sky api start
 sky status
-sky launch ...
 sky api stop
-```
-
-## Directory Structure
-
-After setup, each worktree will have:
-
-```
-<worktree>/
-├── .sky-dev/                    # Instance-specific directory
-│   ├── .instance                # Instance metadata
-│   ├── .port                    # Allocated port number
-│   ├── server.pid               # Running server PID
-│   ├── home/                    # Isolated $HOME
-│   │   ├── .sky/                # SkyPilot state (isolated)
-│   │   ├── sky_logs/            # Logs (isolated)
-│   │   ├── .aws -> ~/.aws       # Symlink to real credentials
-│   │   ├── .kube -> ~/.kube     # Symlink to real credentials
-│   │   └── .config/
-│   │       └── gcloud -> ~/.config/gcloud
-│   ├── tmp/                     # Isolated $TMPDIR
-│   └── bin/
-│       ├── sky                  # Wrapper script
-│       └── activate             # Activation script
 ```
 
 ## How It Works
 
-### The `sky` Wrapper
+Each worktree gets its own Docker container with:
 
-The wrapper script (`.sky-dev/bin/sky`) does several things:
+- **Isolated state**: Container's `/root/.sky/` maps to `.sky-dev/state/`
+- **Isolated port**: Each container binds a unique port (46501-46599) to its internal 46580
+- **Shared code**: Your repo is mounted at `/app` (changes reflected immediately)
+- **Shared credentials**: `~/.aws`, `~/.kube`, etc. mounted read-only
 
-1. **Sets environment variables:**
-   - `HOME` → `.sky-dev/home/`
-   - `TMPDIR` → `.sky-dev/tmp/`
-   - `SKY_RUNTIME_DIR` → `.sky-dev/home/`
-   - `SKYPILOT_API_SERVER_ENDPOINT` → `http://127.0.0.1:<port>`
+The `sky` wrapper simply runs `docker exec` to execute commands in the container,
+so all real code paths are exercised.
 
-2. **Intercepts `sky api start`:**
-   - Starts the server directly with `python -m sky.server.server --port=<port>`
-   - Manages PID file for later stopping
-   - Waits for server to be ready
+## Directory Structure
 
-3. **Intercepts `sky api stop`:**
-   - Kills the server by PID
-   - Handles graceful shutdown with fallback to force kill
-
-4. **Passes through other commands:**
-   - All other `sky` commands work normally with the isolated environment
-
-### Port Allocation
-
-Ports are allocated from the range 46501-46599. The setup script:
-1. Scans for ports not in use (via `ss` or `netstat`)
-2. Checks sibling worktrees to avoid conflicts
-3. Stores the allocated port in `.sky-dev/.port`
-
-### Credential Sharing
-
-Cloud credentials are symlinked from your real home directory:
-- `~/.aws` - AWS credentials
-- `~/.kube` - Kubernetes config
-- `~/.config/gcloud` - GCP credentials
-- `~/.azure` - Azure credentials
-- `~/.ssh` - SSH keys
-
-This means credential changes in your real home are automatically reflected.
+```
+<worktree>/
+├── .sky-dev/
+│   ├── .instance            # Instance metadata
+│   ├── .port                # Allocated port number
+│   ├── state/               # Container's ~/.sky/ (isolated)
+│   ├── sky_logs/            # Container's ~/sky_logs/
+│   ├── venv/                # Python venv (created in container)
+│   └── bin/
+│       ├── activate         # Source this to set up PATH
+│       ├── sky              # Wrapper that docker execs
+│       ├── start-container  # Start/create the container
+│       └── stop-container   # Stop the container
+```
 
 ## Commands
 
-### Setup a new instance
+### Setup (one-time)
 
 ```bash
 ./dev/multi-instance/setup.sh [instance-name]
 ```
 
-The instance name defaults to the worktree directory name.
+Instance name defaults to the worktree directory name.
 
-### Activate the instance
+### Activate
 
 ```bash
 source .sky-dev/bin/activate
 ```
 
-Or add to your shell permanently:
+This adds `.sky-dev/bin/` to your PATH and sets env vars.
+
+### Start the container
+
 ```bash
-export PATH="/path/to/worktree/.sky-dev/bin:$PATH"
+start-container
 ```
 
-### Check instance status
+Creates the container if needed, starts it, and sets up the Python venv.
+The container runs in the background and persists across terminal sessions.
+
+### Run sky commands
 
 ```bash
-sky api status
-```
-
-This shows instance info plus the normal API server status.
-
-### Clean up
-
-To remove an instance:
-```bash
+sky --help
+sky api start
+sky status
+sky launch cluster.yaml
 sky api stop
+```
+
+All commands run inside the container via `docker exec`.
+
+### Stop the container
+
+```bash
+stop-container
+```
+
+### Access the container directly
+
+```bash
+# Get a shell
+docker exec -it skypilot-dev-<instance-name> bash
+
+# Run arbitrary commands
+docker exec -it skypilot-dev-<instance-name> /app/.sky-dev/venv/bin/python -c "import sky; print(sky.__version__)"
+```
+
+## Multiple Terminals
+
+The container persists, so you can access it from multiple terminals:
+
+```bash
+# Terminal 1
+source .sky-dev/bin/activate
+sky api start
+
+# Terminal 2
+source .sky-dev/bin/activate
+sky status
+```
+
+## Port Mapping
+
+Each instance gets a unique host port mapped to the container's 46580:
+
+- Instance 1: `localhost:46501` → container:46580
+- Instance 2: `localhost:46502` → container:46580
+- etc.
+
+The API server inside the container always listens on 46580 (the default),
+but from the host you'd access it via the mapped port.
+
+## Credentials
+
+Cloud credentials are mounted read-only from your home directory:
+
+- `~/.aws` → `/root/.aws`
+- `~/.kube` → `/root/.kube`
+- `~/.config/gcloud` → `/root/.config/gcloud`
+- `~/.azure` → `/root/.azure`
+- `~/.ssh` → `/root/.ssh`
+
+## Cleanup
+
+```bash
+# Stop and remove the container
+stop-container
+docker rm skypilot-dev-<instance-name>
+
+# Remove instance directory
 rm -rf .sky-dev
 ```
 
-## Limitations
-
-1. **Remote clusters**: Clusters launched from one instance aren't visible to others
-   (each has its own `~/.sky/state.db`)
-
-2. **No shared state**: Instances don't share cluster state, job history, etc.
-
-3. **Port conflicts**: If you have >99 instances, you'll run out of ports
-
-4. **Credential updates**: If you update credentials in `.sky-dev/home/.aws/`
-   (not the real `~/.aws/`), changes won't persist
-
 ## Troubleshooting
 
-### Server won't start
+### Container won't start
 
-Check logs at `.sky-dev/home/.sky/api_server/server.log`
+Check Docker is running:
+```bash
+docker info
+```
 
-### Port already in use
+### Python package issues
 
-Delete `.sky-dev/.port` and run setup again to reallocate:
+Rebuild the venv:
+```bash
+rm -rf .sky-dev/venv
+start-container
+```
+
+### Port conflict
+
+Delete `.sky-dev/.port` and re-run setup:
 ```bash
 rm .sky-dev/.port
 ./dev/multi-instance/setup.sh
 ```
 
-### Wrong sky binary being used
+### See container logs
 
-Check your PATH:
 ```bash
-which sky
-# Should show: /path/to/worktree/.sky-dev/bin/sky
-```
-
-### Server appears to hang
-
-The server may take a few seconds to initialize. Check if it's running:
-```bash
-curl http://127.0.0.1:$(cat .sky-dev/.port)/api/health
+docker logs skypilot-dev-<instance-name>
 ```
