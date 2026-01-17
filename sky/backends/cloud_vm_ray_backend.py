@@ -82,7 +82,6 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import volume as volume_lib
 from sky.utils import yaml_utils
-from sky.utils.command_runner import CommandStage
 from sky.utils.plugin_extensions import ExternalFailureSource
 
 if typing.TYPE_CHECKING:
@@ -3802,11 +3801,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # We choose to sync code + exec, because the alternative of
                 # 'ray submit' may not work as it may use system python
                 # (python2) to execute the script. Happens for AWS.
-                head_runner.rsync(source=fp.name,
-                                  target=script_path,
-                                  up=True,
-                                  stream_logs=False,
-                                  stage=CommandStage.EXEC)
+                head_runner.rsync_driver(source=fp.name,
+                                         target=script_path,
+                                         up=True,
+                                         stream_logs=False)
 
         mkdir_code = f'mkdir -p {remote_log_dir} && touch {remote_log_path}'
         encoded_script = shlex.quote(codegen)
@@ -4359,7 +4357,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             (runner, local_log_dir, remote_log_dir) = args
             try:
                 os.makedirs(os.path.expanduser(local_log_dir), exist_ok=True)
-                runner.rsync(
+                runner.rsync_driver(
                     # Require a `/` at the end to make sure the parent dir
                     # are not created locally. We do not add additional '*' as
                     # kubernetes's rsync does not work with an ending '*'.
@@ -4367,7 +4365,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     target=os.path.expanduser(local_log_dir),
                     up=False,
                     stream_logs=False,
-                    stage=CommandStage.EXEC,
                 )
             except exceptions.CommandError as e:
                 if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
@@ -4652,7 +4649,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         target=f'{local_log_dir}/controller.log',
                         up=False,
                         stream_logs=False,
-                        stage=CommandStage.EXEC,
                     )
                 except exceptions.CommandError as e:
                     if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
@@ -5325,7 +5321,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 
-        return head_runner.run(
+        return head_runner.run_driver(
             cmd,
             port_forward=port_forward,
             log_path=log_path,
@@ -5335,7 +5331,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             require_outputs=require_outputs,
             separate_stderr=separate_stderr,
             source_bashrc=source_bashrc,
-            stage=CommandStage.EXEC,
             **kwargs,
         )
 

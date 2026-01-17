@@ -43,12 +43,6 @@ class SshMode(enum.Enum):
     LOGIN = ...
 
 
-class CommandStage(enum.Enum):
-    DEFAULT = ...
-    SETUP = ...
-    EXEC = ...
-
-
 class CommandRunner:
     node_id: str
 
@@ -110,15 +104,80 @@ class CommandRunner:
     def get_remote_home_dir(self) -> str:
         ...
 
-    def rsync(self,
-              source: str,
-              target: str,
-              *,
-              up: bool,
-              log_path: str = ...,
-              stream_logs: bool = ...,
-              max_retry: int = ...,
-              stage: CommandStage = ...) -> None:
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        log_path: str = ...,
+        stream_logs: bool = ...,
+        max_retry: int = ...,
+    ) -> None:
+        ...
+
+    @typing.overload
+    def run_driver(self,
+                   cmd: Union[str, List[str]],
+                   *,
+                   require_outputs: Literal[False] = ...,
+                   **kwargs) -> int:
+        ...
+
+    @typing.overload
+    def run_driver(self, cmd: Union[str, List[str]], *,
+                   require_outputs: Literal[True],
+                   **kwargs) -> Tuple[int, str, str]:
+        ...
+
+    @typing.overload
+    def run_driver(self,
+                   cmd: Union[str, List[str]],
+                   *,
+                   require_outputs: bool = ...,
+                   **kwargs) -> Union[Tuple[int, str, str], int]:
+        ...
+
+    @typing.overload
+    def run_setup(self,
+                  cmd: Union[str, List[str]],
+                  *,
+                  require_outputs: Literal[False] = ...,
+                  **kwargs) -> int:
+        ...
+
+    @typing.overload
+    def run_setup(self, cmd: Union[str, List[str]], *,
+                  require_outputs: Literal[True],
+                  **kwargs) -> Tuple[int, str, str]:
+        ...
+
+    @typing.overload
+    def run_setup(self,
+                  cmd: Union[str, List[str]],
+                  *,
+                  require_outputs: bool = ...,
+                  **kwargs) -> Union[Tuple[int, str, str], int]:
+        ...
+
+    def rsync_driver(self,
+                     source: str,
+                     target: str,
+                     *,
+                     up: bool,
+                     log_path: str = ...,
+                     stream_logs: bool = ...,
+                     max_retry: int = ...) -> None:
+        ...
+
+    def rsync_setup(self,
+                    source: str,
+                    target: str,
+                    *,
+                    up: bool,
+                    log_path: str = ...,
+                    stream_logs: bool = ...,
+                    max_retry: int = ...) -> None:
         ...
 
     def port_forward_command(
@@ -230,16 +289,17 @@ class SSHCommandRunner(CommandRunner):
     ) -> List[str]:
         ...
 
-    def rsync(self,
-              source: str,
-              target: str,
-              *,
-              up: bool,
-              log_path: str = ...,
-              stream_logs: bool = ...,
-              max_retry: int = ...,
-              get_remote_home_dir: Callable[[], str] = ...,
-              stage: CommandStage = ...) -> None:
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        log_path: str = ...,
+        stream_logs: bool = ...,
+        max_retry: int = ...,
+        get_remote_home_dir: Callable[[], str] = ...,
+    ) -> None:
         ...
 
     def port_forward_command(
@@ -314,15 +374,16 @@ class KubernetesCommandRunner(CommandRunner):
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
-    def rsync(self,
-              source: str,
-              target: str,
-              *,
-              up: bool,
-              log_path: str = ...,
-              stream_logs: bool = ...,
-              max_retry: int = ...,
-              stage: CommandStage = ...) -> None:
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        log_path: str = ...,
+        stream_logs: bool = ...,
+        max_retry: int = ...,
+    ) -> None:
         ...
 
     def port_forward_command(

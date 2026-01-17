@@ -27,7 +27,6 @@ from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
-from sky.utils.command_runner import CommandStage
 
 logger = sky_logging.init_logger(__name__)
 
@@ -233,15 +232,14 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
     @_auto_retry()
     def _setup_node(runner: command_runner.CommandRunner, log_path: str):
         for cmd in setup_commands:
-            returncode, stdout, stderr = runner.run(
+            returncode, stdout, stderr = runner.run_setup(
                 cmd,
                 stream_logs=False,
                 log_path=log_path,
                 require_outputs=True,
                 # Installing dependencies requires source bashrc to access
                 # conda.
-                source_bashrc=True,
-                stage=CommandStage.SETUP)
+                source_bashrc=True)
             retry_cnt = 0
             while returncode == 255 and retry_cnt < _MAX_RETRY:
                 # Got network connection issue occur during setup. This could
@@ -252,13 +250,12 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                             'Retrying setup in 10 seconds.')
                 time.sleep(10)
                 retry_cnt += 1
-                returncode, stdout, stderr = runner.run(
+                returncode, stdout, stderr = runner.run_setup(
                     cmd,
                     stream_logs=False,
                     log_path=log_path,
                     require_outputs=True,
-                    source_bashrc=True,
-                    stage=CommandStage.SETUP)
+                    source_bashrc=True)
                 if not returncode:
                     break
 
@@ -565,24 +562,22 @@ def _internal_file_mounts(file_mounts: Dict,
             mkdir_command = f'mkdir -p {os.path.dirname(dst)}'
         else:
             mkdir_command = f'mkdir -p {dst}'
-        rc, stdout, stderr = runner.run(mkdir_command,
-                                        log_path=log_path,
-                                        stream_logs=False,
-                                        require_outputs=True,
-                                        stage=CommandStage.SETUP)
+        rc, stdout, stderr = runner.run_setup(mkdir_command,
+                                              log_path=log_path,
+                                              stream_logs=False,
+                                              require_outputs=True)
         subprocess_utils.handle_returncode(
             rc,
             mkdir_command, ('Failed to run command before rsync '
                             f'{src} -> {dst}.'),
             stderr=stdout + stderr)
 
-        runner.rsync(
+        runner.rsync_setup(
             source=src,
             target=dst,
             up=True,
             log_path=log_path,
             stream_logs=False,
-            stage=CommandStage.SETUP,
         )
 
 
