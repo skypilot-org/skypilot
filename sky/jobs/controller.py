@@ -763,7 +763,6 @@ class JobController:
         Other exceptions may be raised depending on the backend.
         """
         _add_k8s_annotations(task, self._job_id)
-        task_start_time = time.time()
         logger.info(
             f'Starting task {task_id} ({task.name}) for job {self._job_id}')
 
