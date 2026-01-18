@@ -224,7 +224,6 @@ def test_minimal_with_git_workdir(generic_cloud: str):
 
 
 @pytest.mark.no_runpod
-@pytest.mark.no_slurm  # Slurm does not support containers yet
 def test_minimal_with_git_workdir_docker(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(

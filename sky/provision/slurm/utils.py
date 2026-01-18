@@ -21,6 +21,7 @@ logger = sky_logging.init_logger(__name__)
 
 DEFAULT_SLURM_PATH = '~/.slurm/config'
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
+SLURM_CONTAINER_MARKER_FILE = '.sky_slurm_container'
 
 # Regex pattern for parsing GPU GRES strings.
 # Format: 'gpu[:acc_type]:acc_count(optional_extra_info)'
@@ -41,6 +42,20 @@ def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
     if not match:
         return None, 0
     return match.group('type'), int(match.group('count'))
+
+
+def pyxis_container_name(cluster_name_on_cloud: str) -> str:
+    """Get the pyxis container name that gets passed to --container-name."""
+    return cluster_name_on_cloud
+
+
+def enroot_container_name_global_scope(cluster_name_on_cloud: str) -> str:
+    """Get enroot container name when container_scope=global."""
+    # Not publicly documented, but see:
+    # https://github.com/NVIDIA/pyxis/blob/fb9c2d5a08a778346dd398d670deeb5a569904e5/pyxis_slurmstepd.c#L1104
+    # Added in commit:
+    # https://github.com/NVIDIA/pyxis/commit/a35027cf2ffa45cf702b117d215b1240aa6de22e
+    return f'pyxis_{pyxis_container_name(cluster_name_on_cloud)}'
 
 
 # SSH host key filename for sshd.
@@ -697,6 +712,8 @@ def srun_sshd_command(
     job_id: str,
     target_node: str,
     unix_user: str,
+    cluster_name_on_cloud: str,  # pylint: disable=unused-argument
+    is_container_image: bool,
 ) -> str:
     """Build srun command for launching sshd -i inside a Slurm job.
 
@@ -707,6 +724,8 @@ def srun_sshd_command(
         job_id: The Slurm job ID
         target_node: The target compute node hostname
         unix_user: The Unix user for the job
+        cluster_name_on_cloud: SkyPilot cluster name on Slurm side.
+        is_container_image: Whether the cluster is on containers.
 
     Returns:
         List of command arguments to be extended to ssh base command
@@ -714,6 +733,13 @@ def srun_sshd_command(
     # We use ~username to ensure we use the real home of the user ssh'ing in,
     # because we override the home directory in SlurmCommandRunner.run.
     user_home_ssh_dir = f'~{unix_user}/.ssh'
+
+    if is_container_image:
+        # Container SSH requires dropbear support. See the stacked PR.
+        raise NotImplementedError(
+            'Container SSH is not yet supported in this branch.')
+
+    # Non-container: OpenSSH sshd
     return shlex.join([
         'srun',
         '--quiet',

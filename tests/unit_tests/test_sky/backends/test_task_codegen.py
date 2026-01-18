@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from sky.backends import task_codegen
+from sky.provision.slurm import utils as slurm_utils
 
 TESTDATA_DIR = Path(__file__).parent / 'testdata' / 'ray_codegen'
 SLURM_TESTDATA_DIR = Path(__file__).parent / 'testdata' / 'slurm_codegen'
@@ -150,7 +151,10 @@ def test_slurm_single_node_with_gpu():
 
     Mirrors test_single_node_with_gpu() but for SlurmCodeGen.
     """
-    codegen = task_codegen.SlurmCodeGen(slurm_job_id='12345')
+    codegen = task_codegen.SlurmCodeGen(
+        slurm_job_id='12345',
+        container_name=None,
+    )
     codegen.add_prologue(job_id=2)
 
     resources_dict = {'CPU': 4.0, 'GPU': 1.0}
@@ -184,6 +188,42 @@ def test_slurm_single_node_with_gpu():
 
     result = codegen.build()
     assert_codegen_matches_snapshot('slurm_single_node_with_gpu',
+                                    result,
+                                    testdata_dir=SLURM_TESTDATA_DIR)
+
+
+def test_slurm_codegen_with_container():
+    codegen = task_codegen.SlurmCodeGen(
+        slurm_job_id='12345',
+        container_name=slurm_utils.pyxis_container_name('test-cluster'),
+    )
+    codegen.add_prologue(job_id=2)
+
+    resources_dict = {'CPU': 2.0}
+    task_env_vars = {}
+
+    codegen.add_setup(
+        1,
+        resources_dict=resources_dict,
+        stable_cluster_internal_ips=['10.0.0.1'],
+        env_vars=task_env_vars,
+        log_dir='/sky/logs',
+        setup_cmd=None,
+    )
+
+    codegen.add_task(
+        1,
+        bash_script='echo hello',
+        task_name='hello',
+        resources_dict={'CPU': 1.0},
+        log_dir='/sky/logs/tasks',
+        env_vars=task_env_vars,
+    )
+
+    codegen.add_epilogue()
+
+    result = codegen.build()
+    assert_codegen_matches_snapshot('slurm_codegen_with_container',
                                     result,
                                     testdata_dir=SLURM_TESTDATA_DIR)
 
@@ -267,7 +307,10 @@ class TestRcloneFlushScript:
     def test_slurm_flush_script_same_as_ray(self):
         """Test that SlurmCodeGen uses the same flush script as RayCodeGen."""
         ray_codegen = task_codegen.RayCodeGen()
-        slurm_codegen = task_codegen.SlurmCodeGen(slurm_job_id='12345')
+        slurm_codegen = task_codegen.SlurmCodeGen(
+            slurm_job_id='12345',
+            container_name=None,
+        )
 
         ray_script = ray_codegen._get_rclone_flush_script()
         slurm_script = slurm_codegen._get_rclone_flush_script()
