@@ -8,7 +8,14 @@ import {
   formatFullTimestamp,
   LogFilter,
 } from '@/components/utils';
-import { RotateCwIcon, Download } from 'lucide-react';
+import {
+  RotateCwIcon,
+  Download,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  PlayIcon,
+  PauseIcon,
+} from 'lucide-react';
 import { CircularProgress } from '@mui/material';
 import {
   streamClusterJobLogs,
@@ -78,6 +85,10 @@ function JobHeader({
   );
 }
 
+// LocalStorage keys for persisting user preferences
+const CLUSTER_LOGS_EXPANDED_KEY = 'skypilot-cluster-logs-expanded';
+const CLUSTER_LOGS_STREAMING_KEY = 'skypilot-cluster-logs-streaming';
+
 export function JobDetailPage() {
   const router = useRouter();
   const { cluster, job } = router.query;
@@ -87,6 +98,42 @@ export function JobDetailPage() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isCopied, setIsCopied] = useState(false);
   const [logsRefreshToken, setLogsRefreshToken] = useState(0);
+
+  // Logs section expanded state - collapsed by default
+  const [isLogsExpanded, setIsLogsExpanded] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(CLUSTER_LOGS_EXPANDED_KEY);
+      return saved === 'true';
+    }
+    return false;
+  });
+
+  // Streaming state - disabled by default
+  const [isStreamingEnabled, setIsStreamingEnabled] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(CLUSTER_LOGS_STREAMING_KEY);
+      return saved === 'true';
+    }
+    return false;
+  });
+
+  // Toggle logs expanded
+  const toggleLogsExpanded = () => {
+    const newValue = !isLogsExpanded;
+    setIsLogsExpanded(newValue);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(CLUSTER_LOGS_EXPANDED_KEY, String(newValue));
+    }
+  };
+
+  // Toggle streaming
+  const toggleStreaming = () => {
+    const newValue = !isStreamingEnabled;
+    setIsStreamingEnabled(newValue);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(CLUSTER_LOGS_STREAMING_KEY, String(newValue));
+    }
+  };
 
   const PENDING_STATUSES = useMemo(() => ['INIT', 'PENDING', 'SETTING_UP'], []);
 
@@ -119,8 +166,9 @@ export function JobDetailPage() {
   const { lines: displayLines, isLoading: isLoadingLogs } = useLogStreamer({
     streamFn: streamClusterJobLogs,
     streamArgs: logStreamArgs,
-    enabled: Boolean(cluster && job) && !isPending,
+    enabled: Boolean(cluster && job) && !isPending && isLogsExpanded,
     refreshTrigger: logsRefreshToken,
+    follow: isStreamingEnabled,
     onError: handleStreamError,
   });
 
@@ -308,66 +356,113 @@ export function JobDetailPage() {
             {/* Logs Section */}
             <div id="logs" className="mt-6">
               <Card>
-                <div className="flex items-center justify-between px-4 pt-4">
-                  <div className="flex items-center">
+                <div
+                  className={`flex items-center justify-between px-4 ${isLogsExpanded ? 'pt-4' : 'py-4'}`}
+                >
+                  <button
+                    onClick={toggleLogsExpanded}
+                    className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
+                  >
+                    {isLogsExpanded ? (
+                      <ChevronDownIcon className="w-5 h-5 mr-2" />
+                    ) : (
+                      <ChevronRightIcon className="w-5 h-5 mr-2" />
+                    )}
                     <h2 className="text-lg font-semibold">Logs</h2>
-                    <span className="ml-2 text-xs text-gray-500">
-                      (Logs are not streaming; click refresh to fetch the latest
-                      logs.)
-                    </span>
-                  </div>
-                  <div className="flex items-center space-x-3">
-                    <Tooltip
-                      content="Download full logs"
-                      className="text-muted-foreground"
-                    >
-                      <button
-                        onClick={() =>
-                          downloadJobLogs({
-                            clusterName: cluster,
-                            jobIds: job ? [job] : null,
-                            workspace: clusterData?.workspace,
-                          })
-                        }
-                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-                      >
-                        <Download className="w-4 h-4" />
-                      </button>
-                    </Tooltip>
-                    <Tooltip
-                      content="Refresh logs"
-                      className="text-muted-foreground"
-                    >
-                      <button
-                        onClick={handleRefreshLogs}
-                        disabled={isLoadingLogs}
-                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-                      >
-                        <RotateCwIcon
-                          className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
-                        />
-                      </button>
-                    </Tooltip>
-                  </div>
-                </div>
-                <div className="p-4">
-                  {isPending ? (
-                    <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
-                      <span>
-                        Waiting for the job to start; refresh in a few moments.
+                    {isStreamingEnabled && isLoadingLogs && (
+                      <span className="ml-2 flex items-center">
+                        <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                        <span className="ml-1 text-xs text-green-600">
+                          Streaming
+                        </span>
                       </span>
-                    </div>
-                  ) : isLoadingLogs ? (
-                    <div className="flex items-center justify-center py-4">
-                      <CircularProgress size={20} className="mr-2" />
-                      <span>Loading...</span>
-                    </div>
-                  ) : (
-                    <div className="max-h-96 overflow-y-auto">
-                      <LogFilter logs={displayLines} />
+                    )}
+                    {!isStreamingEnabled && (
+                      <span className="ml-2 text-xs text-gray-500">
+                        (Click to expand, enable streaming for live updates)
+                      </span>
+                    )}
+                  </button>
+                  {isLogsExpanded && (
+                    <div className="flex items-center space-x-3">
+                      <Tooltip
+                        content={
+                          isStreamingEnabled
+                            ? 'Stop live streaming'
+                            : 'Start live streaming'
+                        }
+                        className="text-muted-foreground"
+                      >
+                        <button
+                          onClick={toggleStreaming}
+                          className={`flex items-center ${
+                            isStreamingEnabled
+                              ? 'text-green-600 hover:text-green-700'
+                              : 'text-sky-blue hover:text-sky-blue-bright'
+                          }`}
+                        >
+                          {isStreamingEnabled ? (
+                            <PauseIcon className="w-4 h-4" />
+                          ) : (
+                            <PlayIcon className="w-4 h-4" />
+                          )}
+                        </button>
+                      </Tooltip>
+                      <Tooltip
+                        content="Download full logs"
+                        className="text-muted-foreground"
+                      >
+                        <button
+                          onClick={() =>
+                            downloadJobLogs({
+                              clusterName: cluster,
+                              jobIds: job ? [job] : null,
+                              workspace: clusterData?.workspace,
+                            })
+                          }
+                          className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                        >
+                          <Download className="w-4 h-4" />
+                        </button>
+                      </Tooltip>
+                      <Tooltip
+                        content="Refresh logs"
+                        className="text-muted-foreground"
+                      >
+                        <button
+                          onClick={handleRefreshLogs}
+                          disabled={isLoadingLogs}
+                          className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                        >
+                          <RotateCwIcon
+                            className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
+                          />
+                        </button>
+                      </Tooltip>
                     </div>
                   )}
                 </div>
+                {isLogsExpanded && (
+                  <div className="p-4">
+                    {isPending ? (
+                      <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
+                        <span>
+                          Waiting for the job to start; refresh in a few
+                          moments.
+                        </span>
+                      </div>
+                    ) : isLoadingLogs && displayLines.length === 0 ? (
+                      <div className="flex items-center justify-center py-4">
+                        <CircularProgress size={20} className="mr-2" />
+                        <span>Loading...</span>
+                      </div>
+                    ) : (
+                      <div className="max-h-96 overflow-y-auto">
+                        <LogFilter logs={displayLines} />
+                      </div>
+                    )}
+                  </div>
+                )}
               </Card>
             </div>
           </div>

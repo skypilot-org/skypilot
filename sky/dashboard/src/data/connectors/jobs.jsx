@@ -486,11 +486,13 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
 export async function streamManagedJobLogs({
   jobId,
   controller = false,
+  follow = false,
   signal,
   onNewLog,
 }) {
   // Measure timeout from last received data, not from start of request.
-  const inactivityTimeout = 30000; // 30 seconds of no data activity
+  // For follow mode, use a longer timeout since we expect continuous streaming
+  const inactivityTimeout = follow ? 120000 : 30000; // 2 minutes for follow, 30 seconds otherwise
   let lastActivity = Date.now();
   let timeoutId;
 
@@ -522,7 +524,7 @@ export async function streamManagedJobLogs({
     try {
       const requestBody = {
         controller: controller,
-        follow: false,
+        follow: follow,
         job_id: jobId,
         tail: DEFAULT_TAIL_LINES,
       };
@@ -590,7 +592,8 @@ export async function streamManagedJobLogs({
   }
 
   // If we timed out due to inactivity, show a more informative message
-  if (result.timeout) {
+  // For follow mode, don't show timeout as a warning since it's expected behavior
+  if (result.timeout && !follow) {
     showToast(
       `Log request for job ${jobId} timed out after ${inactivityTimeout / 1000}s of inactivity`,
       'warning'

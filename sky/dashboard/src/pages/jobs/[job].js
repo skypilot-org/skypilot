@@ -17,6 +17,8 @@ import {
   CopyIcon,
   CheckIcon,
   Download,
+  PlayIcon,
+  PauseIcon,
 } from 'lucide-react';
 import {
   CustomTooltip as Tooltip,
@@ -40,6 +42,10 @@ import { PluginSlot } from '@/plugins/PluginSlot';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import PropTypes from 'prop-types';
 
+// LocalStorage keys for persisting user preferences
+const LOGS_EXPANDED_KEY = 'skypilot-logs-expanded';
+const LOGS_STREAMING_KEY = 'skypilot-logs-streaming';
+
 function JobDetails() {
   const router = useRouter();
   const { job: jobId, tab } = router.query;
@@ -57,6 +63,42 @@ function JobDetails() {
   const [refreshControllerLogsFlag, setRefreshControllerLogsFlag] = useState(0);
   const [logExtractedLinks, setLogExtractedLinks] = useState({});
   const isMobile = useMobile();
+
+  // Logs section expanded state - collapsed by default
+  const [isLogsExpanded, setIsLogsExpanded] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(LOGS_EXPANDED_KEY);
+      return saved === 'true';
+    }
+    return false;
+  });
+
+  // Streaming state - disabled by default
+  const [isStreamingEnabled, setIsStreamingEnabled] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(LOGS_STREAMING_KEY);
+      return saved === 'true';
+    }
+    return false;
+  });
+
+  // Toggle logs expanded
+  const toggleLogsExpanded = () => {
+    const newValue = !isLogsExpanded;
+    setIsLogsExpanded(newValue);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(LOGS_EXPANDED_KEY, String(newValue));
+    }
+  };
+
+  // Toggle streaming
+  const toggleStreaming = () => {
+    const newValue = !isStreamingEnabled;
+    setIsStreamingEnabled(newValue);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(LOGS_STREAMING_KEY, String(newValue));
+    }
+  };
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
     if (!loading && isInitialLoad) {
@@ -272,62 +314,109 @@ function JobDetails() {
             {/* Logs Section */}
             <div id="logs-section" className="mt-6">
               <Card>
-                <div className="flex items-center justify-between px-4 pt-4">
-                  <div className="flex items-center">
+                <div
+                  className={`flex items-center justify-between px-4 ${isLogsExpanded ? 'pt-4' : 'py-4'}`}
+                >
+                  <button
+                    onClick={toggleLogsExpanded}
+                    className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
+                  >
+                    {isLogsExpanded ? (
+                      <ChevronDownIcon className="w-5 h-5 mr-2" />
+                    ) : (
+                      <ChevronRightIcon className="w-5 h-5 mr-2" />
+                    )}
                     <h3 className="text-lg font-semibold">Logs</h3>
-                    <span className="ml-2 text-xs text-gray-500">
-                      (Logs are not streaming; click refresh to fetch the latest
-                      logs.)
-                    </span>
-                  </div>
-                  <div className="flex items-center space-x-3">
-                    <Tooltip
-                      content="Download full logs"
-                      className="text-muted-foreground"
-                    >
-                      <button
-                        onClick={() =>
-                          downloadManagedJobLogs({
-                            jobId: parseInt(
-                              Array.isArray(jobId) ? jobId[0] : jobId
-                            ),
-                            controller: false,
-                          })
+                    {isStreamingEnabled && isLoadingLogs && (
+                      <span className="ml-2 flex items-center">
+                        <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                        <span className="ml-1 text-xs text-green-600">
+                          Streaming
+                        </span>
+                      </span>
+                    )}
+                    {!isStreamingEnabled && (
+                      <span className="ml-2 text-xs text-gray-500">
+                        (Click to expand, enable streaming for live updates)
+                      </span>
+                    )}
+                  </button>
+                  {isLogsExpanded && (
+                    <div className="flex items-center space-x-3">
+                      <Tooltip
+                        content={
+                          isStreamingEnabled
+                            ? 'Stop live streaming'
+                            : 'Start live streaming'
                         }
-                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                        className="text-muted-foreground"
                       >
-                        <Download className="w-4 h-4" />
-                      </button>
-                    </Tooltip>
-                    <Tooltip
-                      content="Refresh logs"
-                      className="text-muted-foreground"
-                    >
-                      <button
-                        onClick={handleLogsRefresh}
-                        disabled={isLoadingLogs}
-                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                        <button
+                          onClick={toggleStreaming}
+                          className={`flex items-center ${
+                            isStreamingEnabled
+                              ? 'text-green-600 hover:text-green-700'
+                              : 'text-sky-blue hover:text-sky-blue-bright'
+                          }`}
+                        >
+                          {isStreamingEnabled ? (
+                            <PauseIcon className="w-4 h-4" />
+                          ) : (
+                            <PlayIcon className="w-4 h-4" />
+                          )}
+                        </button>
+                      </Tooltip>
+                      <Tooltip
+                        content="Download full logs"
+                        className="text-muted-foreground"
                       >
-                        <RotateCwIcon
-                          className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
-                        />
-                      </button>
-                    </Tooltip>
+                        <button
+                          onClick={() =>
+                            downloadManagedJobLogs({
+                              jobId: parseInt(
+                                Array.isArray(jobId) ? jobId[0] : jobId
+                              ),
+                              controller: false,
+                            })
+                          }
+                          className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                        >
+                          <Download className="w-4 h-4" />
+                        </button>
+                      </Tooltip>
+                      <Tooltip
+                        content="Refresh logs"
+                        className="text-muted-foreground"
+                      >
+                        <button
+                          onClick={handleLogsRefresh}
+                          disabled={isLoadingLogs}
+                          className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                        >
+                          <RotateCwIcon
+                            className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
+                          />
+                        </button>
+                      </Tooltip>
+                    </div>
+                  )}
+                </div>
+                {isLogsExpanded && (
+                  <div className="p-4">
+                    <JobDetailsContent
+                      jobData={detailJobData}
+                      activeTab="logs"
+                      setIsLoadingLogs={setIsLoadingLogs}
+                      setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+                      isLoadingLogs={isLoadingLogs}
+                      isLoadingControllerLogs={isLoadingControllerLogs}
+                      refreshFlag={refreshLogsFlag}
+                      poolsData={poolsData}
+                      onLinksExtracted={setLogExtractedLinks}
+                      isStreamingEnabled={isStreamingEnabled}
+                    />
                   </div>
-                </div>
-                <div className="p-4">
-                  <JobDetailsContent
-                    jobData={detailJobData}
-                    activeTab="logs"
-                    setIsLoadingLogs={setIsLoadingLogs}
-                    setIsLoadingControllerLogs={setIsLoadingControllerLogs}
-                    isLoadingLogs={isLoadingLogs}
-                    isLoadingControllerLogs={isLoadingControllerLogs}
-                    refreshFlag={refreshLogsFlag}
-                    poolsData={poolsData}
-                    onLinksExtracted={setLogExtractedLinks}
-                  />
-                </div>
+                )}
               </Card>
             </div>
 
@@ -350,6 +439,8 @@ function JobDetails() {
               setIsLoadingLogs={setIsLoadingLogs}
               refreshControllerLogsFlag={refreshControllerLogsFlag}
               poolsData={poolsData}
+              isStreamingEnabled={isStreamingEnabled}
+              toggleStreaming={toggleStreaming}
             />
           </div>
         ) : (
@@ -371,6 +462,8 @@ function ControllerLogsSection({
   setIsLoadingLogs,
   refreshControllerLogsFlag,
   poolsData,
+  isStreamingEnabled,
+  toggleStreaming,
 }) {
   const CONTROLLER_LOGS_EXPANDED_KEY = 'skypilot-controller-logs-expanded';
 
@@ -408,12 +501,43 @@ function ControllerLogsSection({
               <ChevronRightIcon className="w-5 h-5 mr-2" />
             )}
             <h3 className="text-lg font-semibold">Controller Logs</h3>
-            <span className="ml-2 text-xs text-gray-500">
-              (Logs are not streaming; click refresh to fetch the latest logs.)
-            </span>
+            {isStreamingEnabled && isLoadingControllerLogs && (
+              <span className="ml-2 flex items-center">
+                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                <span className="ml-1 text-xs text-green-600">Streaming</span>
+              </span>
+            )}
+            {!isStreamingEnabled && (
+              <span className="ml-2 text-xs text-gray-500">
+                (Click to expand, enable streaming for live updates)
+              </span>
+            )}
           </button>
           {isExpanded && (
             <div className="flex items-center space-x-3">
+              <Tooltip
+                content={
+                  isStreamingEnabled
+                    ? 'Stop live streaming'
+                    : 'Start live streaming'
+                }
+                className="text-muted-foreground"
+              >
+                <button
+                  onClick={toggleStreaming}
+                  className={`flex items-center ${
+                    isStreamingEnabled
+                      ? 'text-green-600 hover:text-green-700'
+                      : 'text-sky-blue hover:text-sky-blue-bright'
+                  }`}
+                >
+                  {isStreamingEnabled ? (
+                    <PauseIcon className="w-4 h-4" />
+                  ) : (
+                    <PlayIcon className="w-4 h-4" />
+                  )}
+                </button>
+              </Tooltip>
               <Tooltip
                 content="Download full controller logs"
                 className="text-muted-foreground"
@@ -458,6 +582,7 @@ function ControllerLogsSection({
               isLoadingControllerLogs={isLoadingControllerLogs}
               refreshFlag={refreshControllerLogsFlag}
               poolsData={poolsData}
+              isStreamingEnabled={isStreamingEnabled}
             />
           </div>
         )}
@@ -484,6 +609,7 @@ function JobDetailsContent({
   links,
   logExtractedLinks: logExtractedLinksFromParent,
   onLinksExtracted,
+  isStreamingEnabled = false,
 }) {
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
   const [expandedYamlDocs, setExpandedYamlDocs] = useState({});
@@ -605,6 +731,7 @@ function JobDetailsContent({
     streamArgs: logStreamArgs,
     enabled: activeTab === 'logs' && !isPending && !isRecovering,
     refreshTrigger: activeTab === 'logs' ? refreshFlag : 0,
+    follow: isStreamingEnabled,
     onError: handleLogsError,
   });
 
@@ -617,6 +744,7 @@ function JobDetailsContent({
     streamArgs: controllerStreamArgs,
     enabled: activeTab === 'controllerlogs' && !isPreStart,
     refreshTrigger: activeTab === 'controllerlogs' ? refreshFlag : 0,
+    follow: isStreamingEnabled,
     onError: handleControllerLogsError,
   });
 
@@ -1105,6 +1233,7 @@ JobDetailsContent.propTypes = {
   links: PropTypes.object,
   logExtractedLinks: PropTypes.object,
   onLinksExtracted: PropTypes.func,
+  isStreamingEnabled: PropTypes.bool,
 };
 
 export default JobDetails;

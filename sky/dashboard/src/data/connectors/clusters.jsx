@@ -217,12 +217,13 @@ export async function streamClusterJobLogs({
   onNewLog,
   workspace,
   signal,
+  follow = false,
 }) {
   try {
     await apiClient.stream(
       '/logs',
       {
-        follow: false,
+        follow: follow,
         cluster_name: clusterName,
         job_id: jobId,
         tail: DEFAULT_TAIL_LINES,

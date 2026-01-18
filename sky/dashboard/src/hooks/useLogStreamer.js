@@ -3,12 +3,23 @@ import { stripAnsiCodes, shouldDropLogLine } from '@/components/utils';
 
 /**
  * Shared log streaming hook used by both managed job and cluster pages.
+ * @param {Object} options
+ * @param {Function} options.streamFn - The streaming function to call
+ * @param {Object} options.streamArgs - Arguments to pass to the stream function
+ * @param {boolean} options.enabled - Whether streaming is enabled
+ * @param {number} options.refreshTrigger - Incrementing this restarts the stream
+ * @param {boolean} options.follow - If true, stream continuously (live streaming)
+ * @param {number} options.maxLineChars - Max characters per line before truncation
+ * @param {number} options.maxRenderLines - Max lines to keep in memory
+ * @param {number} options.flushIntervalMs - How often to flush buffered lines to state
+ * @param {Function} options.onError - Error callback
  */
 export function useLogStreamer({
   streamFn,
   streamArgs,
   enabled = true,
   refreshTrigger = 0,
+  follow = false,
   maxLineChars = 2000,
   maxRenderLines = 5000,
   flushIntervalMs = 100,
@@ -136,6 +147,7 @@ export function useLogStreamer({
 
     streamFn({
       ...streamArgs,
+      follow,
       onNewLog: (chunk) => {
         if (active) {
           processChunk(chunk);
@@ -184,6 +196,7 @@ export function useLogStreamer({
     streamArgs,
     enabled,
     refreshTrigger,
+    follow,
     flushBufferedLines,
     flushIntervalMs,
     maxLineChars,
@@ -195,5 +208,6 @@ export function useLogStreamer({
     lines: displayLines,
     isLoading,
     hasReceivedFirstChunk,
+    isStreaming: follow && isLoading,
   };
 }
