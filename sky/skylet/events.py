@@ -220,6 +220,22 @@ class AutostopEvent(SkyletEvent):
                 f'Stopping.')
             self._stop_cluster(autostop_config)
 
+    def _execute_hook_if_present(self, autostop_config) -> None:
+        """Execute autostop hook if present in the config."""
+        hook = autostop_config.hook
+        hook_timeout = autostop_config.hook_timeout
+        if hook:
+            logger.info(f'Executing autostop hook before stopping cluster '
+                        f'(timeout: {hook_timeout}s)...')
+            hook_success = autostop_lib.execute_autostop_hook(
+                hook, hook_timeout)
+            if not hook_success:
+                logger.warning(
+                    'Autostop hook failed, but continuing with cluster stop. '
+                    'Check logs for details.')
+            else:
+                logger.info('Autostop hook completed successfully.')
+
     def _stop_cluster(self, autostop_config):
         if (autostop_config.backend ==
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
@@ -240,6 +256,9 @@ class AutostopEvent(SkyletEvent):
                 return
             logger.info('Not using new provisioner to stop the cluster. '
                         f'Cloud of this cluster: {provider_name}')
+
+            # Execute autostop hook if provided (for old provisioner path)
+            self._execute_hook_if_present(autostop_config)
 
             is_cluster_multinode = config['max_workers'] > 0
 
@@ -319,6 +338,9 @@ class AutostopEvent(SkyletEvent):
         # pylint: disable=import-outside-toplevel
         from sky import provision as provision_lib
         autostop_lib.set_autostopping_started()
+
+        # Execute autostop hook if provided
+        self._execute_hook_if_present(autostop_config)
 
         cluster_name_on_cloud = cluster_config['cluster_name']
         is_cluster_multinode = cluster_config['max_workers'] > 0

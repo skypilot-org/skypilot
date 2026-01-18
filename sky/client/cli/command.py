@@ -1630,7 +1630,8 @@ def _show_endpoint(query_clusters: Optional[List[str]],
                     ('endpoint port' if show_single_endpoint else 'endpoints')))
 
     cluster_record = cluster_records[0]
-    if cluster_record['status'] != status_lib.ClusterStatus.UP:
+    if cluster_record['status'] not in (status_lib.ClusterStatus.UP,
+                                        status_lib.ClusterStatus.AUTOSTOPPING):
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Cluster {cluster_record["name"]!r} '
                                'is not in UP status.')
@@ -2248,6 +2249,10 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
               is_flag=True,
               default=False,
               help='Stream the cluster provisioning logs (provision.log).')
+@click.option('--autostop',
+              is_flag=True,
+              default=False,
+              help='Stream the autostop hook logs from the cluster.')
 @click.option('--worker',
               '-w',
               default=None,
@@ -2291,6 +2296,7 @@ def logs(
     cluster: str,
     job_ids: Tuple[str, ...],
     provision: bool,
+    autostop: bool,  # pylint: disable=redefined-outer-name
     worker: Optional[int],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
@@ -2320,6 +2326,9 @@ def logs(
 
     4. If the job fails or fetching the logs fails, the command will exit with
     a non-zero return code.
+
+    5. If ``--autostop`` is specified, stream the autostop hook logs from the
+    cluster. This shows the output of the autostop hook script.
     """
     if worker is not None:
         if not provision:
@@ -2328,10 +2337,19 @@ def logs(
         if worker < 1:
             raise click.UsageError('--worker must be a positive integer.')
 
+    if provision and autostop:
+        raise click.UsageError(
+            '--provision and --autostop cannot be used together.')
+
     if provision and (sync_down or status or job_ids):
         raise click.UsageError(
             '--provision cannot be combined with job log options '
             '(--sync-down/--status/job IDs).')
+
+    if autostop and (sync_down or status or job_ids or worker is not None):
+        raise click.UsageError(
+            '--autostop cannot be combined with job log options '
+            '(--sync-down/--status/--worker/job IDs).')
 
     if sync_down and status:
         raise click.UsageError(
@@ -2352,6 +2370,13 @@ def logs(
                                     worker=worker,
                                     follow=follow,
                                     tail=tail))
+
+    if autostop:
+        # Stream autostop hook logs
+        sys.exit(
+            sdk.tail_autostop_logs(cluster_name=cluster,
+                                   follow=follow,
+                                   tail=tail))
 
     if sync_down:
         with rich_utils.client_status(

@@ -1,9 +1,8 @@
 import concurrent.futures
-import os
 import random
 import statistics
 import time
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import pytest
 
@@ -54,8 +53,11 @@ def _simulate_ssh_process_kill(handle, kill_probability: float) -> bool:
 
 
 def _test_autostop(
-        cluster_name: str, num: int, thread_id: int,
-        kill_ssh_probability: float) -> Tuple[List[bool], List[float]]:
+        cluster_name: str,
+        num: int,
+        thread_id: int,
+        kill_ssh_probability: float,
+        hook: Optional[str] = None) -> Tuple[List[bool], List[float]]:
     """Worker function that tests skylet set_autostop integration repeatedly."""
     results = []
     latencies = []
@@ -77,6 +79,8 @@ def _test_autostop(
                 backend=cloud_vm_ray_backend.CloudVmRayBackend.NAME,
                 wait_for=autostopv1_pb2.AUTOSTOP_WAIT_FOR_JOBS_AND_SSH,
                 down=True)
+            if hook is not None:
+                request.hook = hook
             backend_utils.invoke_skylet_with_retries(
                 lambda: cloud_vm_ray_backend.SkyletClient(
                     handle.get_grpc_channel()).set_autostop(request))
@@ -121,8 +125,12 @@ def test_skylet_grpc_connectivity(test_cluster, parallelism: int,
             max_workers=parallelism) as executor:
         futures = []
         for thread_id in range(parallelism):
-            future = executor.submit(_test_autostop, cluster_name, num_tests,
-                                     thread_id, kill_prob)
+            future = executor.submit(_test_autostop,
+                                     cluster_name,
+                                     num_tests,
+                                     thread_id,
+                                     kill_prob,
+                                     hook=f"echo thread {thread_id}")
             futures.append(future)
 
         for future in concurrent.futures.as_completed(futures):
