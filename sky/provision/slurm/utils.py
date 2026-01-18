@@ -723,6 +723,10 @@ def srun_sshd_command(
     # because we override the home directory in SlurmCommandRunner.run.
     user_home_ssh_dir = f'~{unix_user}/.ssh'
 
+    # TODO(kevin): SSH sessions don't inherit Slurm env vars (SLURM_*, CUDA_*,
+    # etc.) because sshd/dropbear spawns a fresh shell. Fix by capturing env
+    # to a file and sourcing it.
+
     if is_container_image:
         # Dropbear + socat bridge for container mode.
         # See slurm-ray.yml.j2 for why we use Dropbear instead of OpenSSH.
