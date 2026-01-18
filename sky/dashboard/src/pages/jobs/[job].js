@@ -922,6 +922,20 @@ function JobDetailsContent({
         </div>
       </div>
 
+      {/* Queue Details section - right column */}
+      {jobData.details && (
+        <PluginSlot
+          name="jobs.detail.queue_details"
+          context={{
+            details: jobData.details,
+            queueName: jobData.kueue_queue_name,
+            infra: jobData.full_infra,
+            jobData: jobData,
+            title: 'Queue Details',
+          }}
+        />
+      )}
+
       {/* Entrypoint section - full width row */}
       {(jobData.entrypoint || jobData.dag_yaml) && (
         <div className="col-span-2">
