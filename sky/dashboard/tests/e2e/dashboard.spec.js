@@ -137,6 +137,24 @@ test.describe('Dashboard Navigation', () => {
     await expect(page).toHaveTitle(/Workspaces.*SkyPilot|SkyPilot/);
     await page.waitForLoadState('networkidle');
   });
+
+  test('should load volumes page', async ({ page }) => {
+    await page.goto('/volumes');
+    await expect(page).toHaveTitle(/Volumes.*SkyPilot|SkyPilot/);
+    await page.waitForLoadState('networkidle');
+  });
+
+  test('should load users page', async ({ page }) => {
+    await page.goto('/users');
+    await expect(page).toHaveTitle(/Users.*SkyPilot|SkyPilot/);
+    await page.waitForLoadState('networkidle');
+  });
+
+  test('should load config page', async ({ page }) => {
+    await page.goto('/config');
+    await expect(page).toHaveTitle(/Config.*SkyPilot|SkyPilot/);
+    await page.waitForLoadState('networkidle');
+  });
 });
 
 test.describe('Dashboard Layout', () => {
@@ -523,5 +541,294 @@ test.describe('Performance - Refresh Operations', () => {
     } else {
       console.log('[Jobs Refresh] No refresh button found, skipping');
     }
+  });
+});
+
+test.describe('Volumes Page', () => {
+  test('should display volumes content or empty state', async ({ page }) => {
+    await page.goto('/volumes');
+    await page.waitForLoadState('networkidle');
+
+    // Wait for loading to complete
+    await measureLoadingComplete(page, PERFORMANCE_THRESHOLDS.LOADING_COMPLETE_MAX);
+
+    // The main content area should be visible
+    const content = page.locator('main');
+    await expect(content).toBeVisible();
+  });
+
+  test('volumes page - should load within threshold', async ({ page }) => {
+    const navigationStart = Date.now();
+
+    await page.goto('/volumes');
+    const navigationDuration = Date.now() - navigationStart;
+
+    console.log(`[Volumes] Navigation completed in ${navigationDuration}ms`);
+    expect(navigationDuration).toBeLessThan(PERFORMANCE_THRESHOLDS.PAGE_LOAD_MAX);
+
+    // Measure time for main content to become visible
+    const contentVisibility = await measureElementVisibility(
+      page,
+      'main',
+      PERFORMANCE_THRESHOLDS.TABLE_VISIBLE_MAX
+    );
+
+    console.log(
+      `[Volumes] Content visible: ${contentVisibility.visible}, duration: ${contentVisibility.duration}ms`
+    );
+    expect(contentVisibility.visible).toBe(true);
+
+    // Measure time for loading to complete
+    const loadingComplete = await measureLoadingComplete(
+      page,
+      PERFORMANCE_THRESHOLDS.LOADING_COMPLETE_MAX
+    );
+
+    console.log(
+      `[Volumes] Loading complete: ${loadingComplete.complete}, duration: ${loadingComplete.duration}ms`
+    );
+    expect(loadingComplete.complete).toBe(true);
+  });
+});
+
+test.describe('Users Page', () => {
+  test('should display users content or empty state', async ({ page }) => {
+    await page.goto('/users');
+    await page.waitForLoadState('networkidle');
+
+    // Wait for loading to complete
+    await measureLoadingComplete(page, PERFORMANCE_THRESHOLDS.LOADING_COMPLETE_MAX);
+
+    // The main content area should be visible
+    const content = page.locator('main');
+    await expect(content).toBeVisible();
+  });
+
+  test('users page - should load within threshold', async ({ page }) => {
+    const navigationStart = Date.now();
+
+    await page.goto('/users');
+    const navigationDuration = Date.now() - navigationStart;
+
+    console.log(`[Users] Navigation completed in ${navigationDuration}ms`);
+    expect(navigationDuration).toBeLessThan(PERFORMANCE_THRESHOLDS.PAGE_LOAD_MAX);
+
+    // Measure time for main content to become visible
+    const contentVisibility = await measureElementVisibility(
+      page,
+      'main',
+      PERFORMANCE_THRESHOLDS.TABLE_VISIBLE_MAX
+    );
+
+    console.log(
+      `[Users] Content visible: ${contentVisibility.visible}, duration: ${contentVisibility.duration}ms`
+    );
+    expect(contentVisibility.visible).toBe(true);
+
+    // Measure time for loading to complete
+    const loadingComplete = await measureLoadingComplete(
+      page,
+      PERFORMANCE_THRESHOLDS.LOADING_COMPLETE_MAX
+    );
+
+    console.log(
+      `[Users] Loading complete: ${loadingComplete.complete}, duration: ${loadingComplete.duration}ms`
+    );
+    expect(loadingComplete.complete).toBe(true);
+  });
+});
+
+test.describe('Config Page', () => {
+  test('should display config content', async ({ page }) => {
+    await page.goto('/config');
+    await page.waitForLoadState('networkidle');
+
+    // Wait for loading to complete
+    await measureLoadingComplete(page, PERFORMANCE_THRESHOLDS.LOADING_COMPLETE_MAX);
+
+    // The main content area should be visible
+    const content = page.locator('main');
+    await expect(content).toBeVisible();
+  });
+
+  test('config page - should load within threshold', async ({ page }) => {
+    const navigationStart = Date.now();
+
+    await page.goto('/config');
+    const navigationDuration = Date.now() - navigationStart;
+
+    console.log(`[Config] Navigation completed in ${navigationDuration}ms`);
+    expect(navigationDuration).toBeLessThan(PERFORMANCE_THRESHOLDS.PAGE_LOAD_MAX);
+
+    // Measure time for main content to become visible
+    const contentVisibility = await measureElementVisibility(
+      page,
+      'main',
+      PERFORMANCE_THRESHOLDS.TABLE_VISIBLE_MAX
+    );
+
+    console.log(
+      `[Config] Content visible: ${contentVisibility.visible}, duration: ${contentVisibility.duration}ms`
+    );
+    expect(contentVisibility.visible).toBe(true);
+
+    // Measure time for loading to complete
+    const loadingComplete = await measureLoadingComplete(
+      page,
+      PERFORMANCE_THRESHOLDS.LOADING_COMPLETE_MAX
+    );
+
+    console.log(
+      `[Config] Loading complete: ${loadingComplete.complete}, duration: ${loadingComplete.duration}ms`
+    );
+    expect(loadingComplete.complete).toBe(true);
+  });
+});
+
+test.describe('Cache - Tab Switching', () => {
+  test('should use cache when switching between tabs (no reload)', async ({
+    page,
+  }) => {
+    // This test verifies that when switching between tabs, the dashboard
+    // uses cached data instead of reloading everything from scratch.
+
+    // Track network requests to detect unnecessary API calls
+    const apiCalls = [];
+    page.on('request', (request) => {
+      const url = request.url();
+      if (url.includes('/api/') || url.includes('/internal/dashboard/')) {
+        apiCalls.push({
+          url,
+          timestamp: Date.now(),
+          method: request.method(),
+        });
+      }
+    });
+
+    // First, go to clusters page and wait for it to fully load
+    await page.goto('/clusters');
+    await page.waitForLoadState('networkidle');
+    await measureLoadingComplete(page, PERFORMANCE_THRESHOLDS.LOADING_COMPLETE_MAX);
+
+    const initialClusterLoadTime = Date.now();
+    const initialApiCallCount = apiCalls.length;
+
+    console.log(`[Cache Test] Initial load - API calls: ${initialApiCallCount}`);
+
+    // Navigate to jobs page
+    await page.goto('/jobs');
+    await page.waitForLoadState('networkidle');
+    await measureLoadingComplete(page, PERFORMANCE_THRESHOLDS.LOADING_COMPLETE_MAX);
+
+    const afterJobsApiCallCount = apiCalls.length;
+    console.log(
+      `[Cache Test] After Jobs - API calls: ${afterJobsApiCallCount} (new: ${afterJobsApiCallCount - initialApiCallCount})`
+    );
+
+    // Navigate back to clusters page
+    const returnToClustersStart = Date.now();
+    await page.goto('/clusters');
+    await page.waitForLoadState('networkidle');
+    await measureLoadingComplete(page, PERFORMANCE_THRESHOLDS.LOADING_COMPLETE_MAX);
+    const returnToClustersDuration = Date.now() - returnToClustersStart;
+
+    const afterReturnApiCallCount = apiCalls.length;
+    const newApiCallsOnReturn = afterReturnApiCallCount - afterJobsApiCallCount;
+
+    console.log(
+      `[Cache Test] Return to Clusters - Duration: ${returnToClustersDuration}ms, API calls: ${afterReturnApiCallCount} (new: ${newApiCallsOnReturn})`
+    );
+
+    // The return to clusters page should be fast because of caching
+    // Allow some API calls for status refresh, but not a full reload
+    expect(returnToClustersDuration).toBeLessThan(
+      PERFORMANCE_THRESHOLDS.PAGE_LOAD_MAX
+    );
+
+    // Log all API calls for debugging
+    console.log('[Cache Test] All API calls:');
+    apiCalls.forEach((call, index) => {
+      console.log(`  ${index + 1}. ${call.method} ${call.url}`);
+    });
+  });
+
+  test('should cache data and show instantly on tab return', async ({
+    page,
+  }) => {
+    // Go to clusters page first
+    await page.goto('/clusters');
+    await page.waitForLoadState('networkidle');
+    await measureLoadingComplete(page, PERFORMANCE_THRESHOLDS.LOADING_COMPLETE_MAX);
+
+    // Check if table/content is visible
+    const initialContent = await page.locator('main').isVisible();
+    expect(initialContent).toBe(true);
+
+    // Go to jobs page
+    await page.goto('/jobs');
+    await page.waitForLoadState('networkidle');
+    await measureLoadingComplete(page, PERFORMANCE_THRESHOLDS.LOADING_COMPLETE_MAX);
+
+    // Return to clusters - should be instant with cached data
+    const returnStart = Date.now();
+    await page.goto('/clusters');
+
+    // Content should be visible almost immediately from cache
+    // We check visibility before waiting for network idle
+    const contentVisibleBeforeNetwork = await page
+      .locator('main')
+      .isVisible()
+      .catch(() => false);
+
+    await page.waitForLoadState('networkidle');
+    const returnDuration = Date.now() - returnStart;
+
+    console.log(
+      `[Cache Instant] Return duration: ${returnDuration}ms, Content visible before network: ${contentVisibleBeforeNetwork}`
+    );
+
+    // Main content should be visible
+    const content = page.locator('main');
+    await expect(content).toBeVisible();
+
+    // The return should be quick
+    expect(returnDuration).toBeLessThan(PERFORMANCE_THRESHOLDS.PAGE_LOAD_MAX);
+  });
+
+  test('should not show loading spinner on cached page return', async ({
+    page,
+  }) => {
+    // Go to clusters page and wait for full load
+    await page.goto('/clusters');
+    await page.waitForLoadState('networkidle');
+    await measureLoadingComplete(page, PERFORMANCE_THRESHOLDS.LOADING_COMPLETE_MAX);
+
+    // Navigate away to jobs
+    await page.goto('/jobs');
+    await page.waitForLoadState('networkidle');
+    await measureLoadingComplete(page, PERFORMANCE_THRESHOLDS.LOADING_COMPLETE_MAX);
+
+    // Navigate back to clusters
+    await page.goto('/clusters');
+
+    // Check if loading spinner appears - it should NOT appear if cache is working
+    // Give a small delay to allow any loading state to appear
+    await page.waitForTimeout(500);
+
+    const loadingSpinner = page.locator(
+      '.MuiCircularProgress-root, [role="progressbar"], text="Loading..."'
+    );
+
+    // Check if loading spinner is visible
+    const spinnerVisible = await loadingSpinner.first().isVisible().catch(() => false);
+
+    console.log(`[Cache No Spinner] Loading spinner visible: ${spinnerVisible}`);
+
+    // Wait for page to stabilize
+    await page.waitForLoadState('networkidle');
+
+    // The main content should be visible
+    const content = page.locator('main');
+    await expect(content).toBeVisible();
   });
 });

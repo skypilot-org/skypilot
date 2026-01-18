@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 from types import MethodType
 from typing import (Any, BinaryIO, Callable, Dict, Generator, List, NamedTuple,
