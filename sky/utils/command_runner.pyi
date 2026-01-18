@@ -245,6 +245,7 @@ class KubernetesCommandRunner(CommandRunner):
         self,
         node: Tuple[Tuple[str, Optional[str]], str],
         deployment: Optional[str] = ...,
+        container: Optional[str] = ...,
         **kwargs,
     ) -> None:
         ...
