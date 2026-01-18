@@ -234,8 +234,8 @@ function JobDetails() {
             {/* Details Section */}
             <div id="details-section">
               <Card>
-                <div className="flex items-center justify-between px-4 pt-4">
-                  <h3 className="text-lg font-semibold">Details</h3>
+                <div className="flex items-center justify-between px-3 py-2.5">
+                  <h3 className="text-[15px] font-semibold tracking-[0.01em]">Details</h3>
                 </div>
                 <div className="p-4">
                   <JobDetailsContent
@@ -272,9 +272,9 @@ function JobDetails() {
             {/* Logs Section */}
             <div id="logs-section" className="mt-6">
               <Card>
-                <div className="flex items-center justify-between px-4 pt-4">
+                <div className="flex items-center justify-between px-3 py-2.5">
                   <div className="flex items-center">
-                    <h3 className="text-lg font-semibold">Logs</h3>
+                    <h3 className="text-[15px] font-semibold tracking-[0.01em]">Logs</h3>
                     <span className="ml-2 text-xs text-gray-500">
                       (Logs are not streaming; click refresh to fetch the latest
                       logs.)
@@ -340,6 +340,21 @@ function JobDetails() {
               wrapperClassName="mt-6"
             />
 
+            {/* Plugin Slot: Job Detail Nodes */}
+            <PluginSlot
+              name="jobs.detail.nodes"
+              context={{
+                jobId: detailJobData.id,
+                jobName: detailJobData.name,
+                pool: detailJobData.pool,
+                infra: detailJobData.infra,
+                full_infra: detailJobData.full_infra,
+                current_cluster_name: detailJobData.current_cluster_name,
+                refreshTrigger: refreshTrigger,
+              }}
+              wrapperClassName="mt-6"
+            />
+
             {/* Controller Logs Section - Collapsible */}
             <ControllerLogsSection
               jobId={jobId}
@@ -396,18 +411,18 @@ function ControllerLogsSection({
     <div id="controller-logs-section" className="mt-6">
       <Card>
         <div
-          className={`flex items-center justify-between px-4 ${isExpanded ? 'pt-4' : 'py-4'}`}
+          className={`flex items-center justify-between px-3 ${isExpanded ? 'pt-2.5' : 'py-2.5'}`}
         >
           <button
             onClick={toggleExpanded}
             className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
           >
             {isExpanded ? (
-              <ChevronDownIcon className="w-5 h-5 mr-2" />
+              <ChevronDownIcon className="w-4 h-4 mr-1.5" />
             ) : (
-              <ChevronRightIcon className="w-5 h-5 mr-2" />
+              <ChevronRightIcon className="w-4 h-4 mr-1.5" />
             )}
-            <h3 className="text-lg font-semibold">Controller Logs</h3>
+            <h3 className="text-[15px] font-semibold tracking-[0.01em]">Controller Logs</h3>
             <span className="ml-2 text-xs text-gray-500">
               (Logs are not streaming; click refresh to fetch the latest logs.)
             </span>
