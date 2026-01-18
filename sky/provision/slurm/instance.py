@@ -270,22 +270,11 @@ def _create_virtual_instance(
     if container_image is not None:
         container_mounts = ','.join([
             f'{remote_home_dir}:{remote_home_dir}',
-            f'{sky_home_dir}/sky_logs:/root/sky_logs',
-            f'{sky_home_dir}/sky_workdir:/root/sky_workdir',
         ])
         container_init_script = textwrap.dedent("""\
             set -e
-            PACKAGES="ca-certificates rsync curl git wget fuse"
-            if command -v apt-get >/dev/null 2>&1; then
-                apt-get update
-                apt-get install -y $PACKAGES
-            elif command -v yum >/dev/null 2>&1; then
-                yum install -y $PACKAGES fuse-libs
-            elif command -v dnf >/dev/null 2>&1; then
-                dnf install -y $PACKAGES fuse-libs
-            elif command -v apk >/dev/null 2>&1; then
-                apk add --no-cache $PACKAGES
-            fi
+            apt-get update
+            apt-get install -y ca-certificates rsync curl git wget fuse
             """)
         container_marker_file = (f'{sky_home_dir}/'
                                  f'{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
