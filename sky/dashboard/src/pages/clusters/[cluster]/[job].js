@@ -8,6 +8,7 @@ import {
   formatFullTimestamp,
   LogFilter,
 } from '@/components/utils';
+import { VirtualizedLogViewer } from '@/components/VirtualizedLogViewer';
 import {
   RotateCwIcon,
   Download,
@@ -15,6 +16,8 @@ import {
   ChevronRightIcon,
   PlayIcon,
   PauseIcon,
+  Trash2Icon,
+  AlertTriangleIcon,
 } from 'lucide-react';
 import { CircularProgress } from '@mui/material';
 import {
@@ -163,7 +166,16 @@ export function JobDetailPage() {
     console.error('Error streaming cluster logs:', error);
   }, []);
 
-  const { lines: displayLines, isLoading: isLoadingLogs } = useLogStreamer({
+  const {
+    lines: displayLines,
+    isLoading: isLoadingLogs,
+    lineCount,
+    maxRenderLines,
+    isNearMaxLines,
+    isAtMaxLines,
+    isPausedByVisibility,
+    clearLogs,
+  } = useLogStreamer({
     streamFn: streamClusterJobLogs,
     streamArgs: logStreamArgs,
     enabled: Boolean(cluster && job) && !isPending && isLogsExpanded,
@@ -444,6 +456,42 @@ export function JobDetailPage() {
                 </div>
                 {isLogsExpanded && (
                   <div className="p-4">
+                    {/* Performance indicators */}
+                    {displayLines.length > 0 && (
+                      <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
+                        <div className="flex items-center space-x-2">
+                          <span>
+                            {lineCount.toLocaleString()} /{' '}
+                            {maxRenderLines.toLocaleString()} lines
+                          </span>
+                          {isNearMaxLines && !isAtMaxLines && (
+                            <span className="flex items-center text-yellow-600">
+                              <AlertTriangleIcon className="w-3 h-3 mr-1" />
+                              Approaching limit
+                            </span>
+                          )}
+                          {isAtMaxLines && (
+                            <span className="flex items-center text-orange-600">
+                              <AlertTriangleIcon className="w-3 h-3 mr-1" />
+                              At limit (oldest logs removed)
+                            </span>
+                          )}
+                          {isPausedByVisibility && (
+                            <span className="text-blue-600">
+                              Paused (tab hidden)
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={clearLogs}
+                          className="flex items-center text-gray-500 hover:text-gray-700"
+                          title="Clear logs"
+                        >
+                          <Trash2Icon className="w-3 h-3 mr-1" />
+                          Clear
+                        </button>
+                      </div>
+                    )}
                     {isPending ? (
                       <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
                         <span>
@@ -457,9 +505,10 @@ export function JobDetailPage() {
                         <span>Loading...</span>
                       </div>
                     ) : (
-                      <div className="max-h-96 overflow-y-auto">
-                        <LogFilter logs={displayLines} />
-                      </div>
+                      <VirtualizedLogViewer
+                        lines={displayLines}
+                        maxHeight={384}
+                      />
                     )}
                   </div>
                 )}

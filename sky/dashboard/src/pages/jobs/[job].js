@@ -19,6 +19,8 @@ import {
   Download,
   PlayIcon,
   PauseIcon,
+  Trash2Icon,
+  AlertTriangleIcon,
 } from 'lucide-react';
 import {
   CustomTooltip as Tooltip,
@@ -26,6 +28,7 @@ import {
   renderPoolLink,
 } from '@/components/utils';
 import { LogFilter } from '@/components/utils';
+import { VirtualizedLogViewer } from '@/components/VirtualizedLogViewer';
 import {
   streamManagedJobLogs,
   downloadManagedJobLogs,
@@ -726,6 +729,12 @@ function JobDetailsContent({
     lines: logs,
     isLoading: streamingLogsLoading,
     hasReceivedFirstChunk: hasReceivedLogChunk,
+    lineCount: logLineCount,
+    maxRenderLines: logMaxLines,
+    isNearMaxLines: isLogsNearMax,
+    isAtMaxLines: isLogsAtMax,
+    isPausedByVisibility: isLogsPausedByVisibility,
+    clearLogs: clearJobLogs,
   } = useLogStreamer({
     streamFn: streamManagedJobLogs,
     streamArgs: logStreamArgs,
@@ -739,6 +748,12 @@ function JobDetailsContent({
     lines: controllerLogs,
     isLoading: streamingControllerLogsLoading,
     hasReceivedFirstChunk: hasReceivedControllerChunk,
+    lineCount: controllerLogLineCount,
+    maxRenderLines: controllerLogMaxLines,
+    isNearMaxLines: isControllerLogsNearMax,
+    isAtMaxLines: isControllerLogsAtMax,
+    isPausedByVisibility: isControllerLogsPausedByVisibility,
+    clearLogs: clearControllerLogs,
   } = useLogStreamer({
     streamFn: streamManagedJobLogs,
     streamArgs: controllerStreamArgs,
@@ -843,7 +858,41 @@ function JobDetailsContent({
 
   if (activeTab === 'logs') {
     return (
-      <div className="max-h-96 overflow-y-auto" ref={logsContainerRef}>
+      <div ref={logsContainerRef}>
+        {/* Performance indicators */}
+        {logs.length > 0 && (
+          <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
+            <div className="flex items-center space-x-2">
+              <span>
+                {logLineCount.toLocaleString()} / {logMaxLines.toLocaleString()}{' '}
+                lines
+              </span>
+              {isLogsNearMax && !isLogsAtMax && (
+                <span className="flex items-center text-yellow-600">
+                  <AlertTriangleIcon className="w-3 h-3 mr-1" />
+                  Approaching limit
+                </span>
+              )}
+              {isLogsAtMax && (
+                <span className="flex items-center text-orange-600">
+                  <AlertTriangleIcon className="w-3 h-3 mr-1" />
+                  At limit (oldest logs removed)
+                </span>
+              )}
+              {isLogsPausedByVisibility && (
+                <span className="text-blue-600">Paused (tab hidden)</span>
+              )}
+            </div>
+            <button
+              onClick={clearJobLogs}
+              className="flex items-center text-gray-500 hover:text-gray-700"
+              title="Clear logs"
+            >
+              <Trash2Icon className="w-3 h-3 mr-1" />
+              Clear
+            </button>
+          </div>
+        )}
         {isPending ? (
           <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
             <span>Waiting for the job to start; refresh in a few moments.</span>
@@ -855,14 +904,14 @@ function JobDetailsContent({
             </span>
           </div>
         ) : hasReceivedLogChunk || logs.length ? (
-          <LogFilter logs={logs} />
+          <VirtualizedLogViewer lines={logs} maxHeight={384} />
         ) : isLoadingLogs ? (
           <div className="flex items-center justify-center py-4">
             <CircularProgress size={20} className="mr-2" />
             <span>Loading logs...</span>
           </div>
         ) : (
-          <LogFilter logs={logs} />
+          <VirtualizedLogViewer lines={logs} maxHeight={384} />
         )}
       </div>
     );
@@ -870,10 +919,41 @@ function JobDetailsContent({
 
   if (activeTab === 'controllerlogs') {
     return (
-      <div
-        className="max-h-96 overflow-y-auto"
-        ref={controllerLogsContainerRef}
-      >
+      <div ref={controllerLogsContainerRef}>
+        {/* Performance indicators */}
+        {controllerLogs.length > 0 && (
+          <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
+            <div className="flex items-center space-x-2">
+              <span>
+                {controllerLogLineCount.toLocaleString()} /{' '}
+                {controllerLogMaxLines.toLocaleString()} lines
+              </span>
+              {isControllerLogsNearMax && !isControllerLogsAtMax && (
+                <span className="flex items-center text-yellow-600">
+                  <AlertTriangleIcon className="w-3 h-3 mr-1" />
+                  Approaching limit
+                </span>
+              )}
+              {isControllerLogsAtMax && (
+                <span className="flex items-center text-orange-600">
+                  <AlertTriangleIcon className="w-3 h-3 mr-1" />
+                  At limit (oldest logs removed)
+                </span>
+              )}
+              {isControllerLogsPausedByVisibility && (
+                <span className="text-blue-600">Paused (tab hidden)</span>
+              )}
+            </div>
+            <button
+              onClick={clearControllerLogs}
+              className="flex items-center text-gray-500 hover:text-gray-700"
+              title="Clear logs"
+            >
+              <Trash2Icon className="w-3 h-3 mr-1" />
+              Clear
+            </button>
+          </div>
+        )}
         {isPreStart ? (
           <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
             <span>
@@ -882,14 +962,14 @@ function JobDetailsContent({
             </span>
           </div>
         ) : hasReceivedControllerChunk || controllerLogs.length ? (
-          <LogFilter logs={controllerLogs} controller={true} />
+          <VirtualizedLogViewer lines={controllerLogs} maxHeight={384} />
         ) : isLoadingControllerLogs ? (
           <div className="flex items-center justify-center py-4">
             <CircularProgress size={20} className="mr-2" />
             <span>Loading logs...</span>
           </div>
         ) : (
-          <LogFilter logs={controllerLogs} controller={true} />
+          <VirtualizedLogViewer lines={controllerLogs} maxHeight={384} />
         )}
       </div>
     );

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { stripAnsiCodes, shouldDropLogLine } from '@/components/utils';
 
+// Performance constants
+const DEFAULT_MAX_RENDER_LINES = 1000; // Reduced from 5000 to prevent browser crashes
+const WARNING_THRESHOLD = 0.8; // Warn at 80% capacity
+
 /**
  * Shared log streaming hook used by both managed job and cluster pages.
  * @param {Object} options
@@ -13,6 +17,7 @@ import { stripAnsiCodes, shouldDropLogLine } from '@/components/utils';
  * @param {number} options.maxRenderLines - Max lines to keep in memory
  * @param {number} options.flushIntervalMs - How often to flush buffered lines to state
  * @param {Function} options.onError - Error callback
+ * @param {Function} options.onMaxLinesReached - Called when max lines reached (for auto-pause)
  */
 export function useLogStreamer({
   streamFn,
@@ -21,17 +26,20 @@ export function useLogStreamer({
   refreshTrigger = 0,
   follow = false,
   maxLineChars = 2000,
-  maxRenderLines = 5000,
+  maxRenderLines = DEFAULT_MAX_RENDER_LINES,
   flushIntervalMs = 100,
   onError = (error) => {
     // mark parameter as used to satisfy lint while keeping signature
     void error;
   },
+  onMaxLinesReached = () => {},
 }) {
   const [logLines, setLogLines] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasReceivedFirstChunk, setHasReceivedFirstChunk] = useState(false);
   const [progressTick, setProgressTick] = useState(0);
+  const [isPausedByVisibility, setIsPausedByVisibility] = useState(false);
+  const [isAtMaxLines, setIsAtMaxLines] = useState(false);
 
   const bufferRef = useRef([]);
   const partialLineRef = useRef('');
@@ -40,18 +48,57 @@ export function useLogStreamer({
   const controllerRef = useRef(null);
   const hasFirstChunkRef = useRef(false);
   const onErrorRef = useRef(onError);
+  const onMaxLinesReachedRef = useRef(onMaxLinesReached);
+  const maxLinesNotifiedRef = useRef(false);
 
   useEffect(() => {
     onErrorRef.current = onError;
   }, [onError]);
+
+  useEffect(() => {
+    onMaxLinesReachedRef.current = onMaxLinesReached;
+  }, [onMaxLinesReached]);
+
+  // Auto-pause streaming when tab is hidden (performance optimization)
+  useEffect(() => {
+    if (!follow) return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setIsPausedByVisibility(true);
+        // Abort the current stream when tab is hidden
+        if (controllerRef.current) {
+          controllerRef.current.abort();
+        }
+      } else {
+        setIsPausedByVisibility(false);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [follow]);
 
   const resetState = useCallback(() => {
     bufferRef.current = [];
     partialLineRef.current = '';
     progressMapRef.current = new Map();
     hasFirstChunkRef.current = false;
+    maxLinesNotifiedRef.current = false;
     setLogLines([]);
     setHasReceivedFirstChunk(false);
+    setIsAtMaxLines(false);
+  }, []);
+
+  // Clear logs function for manual clearing
+  const clearLogs = useCallback(() => {
+    bufferRef.current = [];
+    progressMapRef.current = new Map();
+    maxLinesNotifiedRef.current = false;
+    setLogLines([]);
+    setIsAtMaxLines(false);
   }, []);
 
   const displayLines = useMemo(
@@ -64,17 +111,33 @@ export function useLogStreamer({
     setLogLines((prev) => {
       const next = [...prev, ...bufferRef.current];
       bufferRef.current = [];
+
+      // Check if we've hit max lines
+      if (next.length >= maxRenderLines) {
+        setIsAtMaxLines(true);
+        // Notify once when max lines reached
+        if (!maxLinesNotifiedRef.current && follow) {
+          maxLinesNotifiedRef.current = true;
+          // Call the callback asynchronously to avoid state update during render
+          setTimeout(() => {
+            const cb = onMaxLinesReachedRef.current;
+            if (cb) cb();
+          }, 0);
+        }
+      }
+
       return next.length > maxRenderLines
         ? next.slice(next.length - maxRenderLines)
         : next;
     });
-  }, [maxRenderLines]);
+  }, [maxRenderLines, follow]);
 
   useEffect(() => {
     let active = true;
     resetState();
 
-    if (!enabled || !streamFn) {
+    // Don't start streaming if disabled, paused by visibility, or no stream function
+    if (!enabled || !streamFn || (follow && isPausedByVisibility)) {
       setIsLoading(false);
       return () => {};
     }
@@ -197,6 +260,7 @@ export function useLogStreamer({
     enabled,
     refreshTrigger,
     follow,
+    isPausedByVisibility,
     flushBufferedLines,
     flushIntervalMs,
     maxLineChars,
@@ -204,10 +268,22 @@ export function useLogStreamer({
     resetState,
   ]);
 
+  // Calculate warning state
+  const lineCount = displayLines.length;
+  const isNearMaxLines = lineCount >= maxRenderLines * WARNING_THRESHOLD;
+
   return {
     lines: displayLines,
     isLoading,
     hasReceivedFirstChunk,
     isStreaming: follow && isLoading,
+    // Performance-related state
+    lineCount,
+    maxRenderLines,
+    isNearMaxLines,
+    isAtMaxLines,
+    isPausedByVisibility,
+    // Actions
+    clearLogs,
   };
 }
