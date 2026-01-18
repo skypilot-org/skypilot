@@ -28,7 +28,7 @@ test.describe('Cluster Data Visibility', () => {
   test.skip(!EXPECTED_CLUSTER, 'No EXPECTED_CLUSTER_NAME provided');
 
   test('cluster should appear in clusters table', async ({ page }) => {
-    await page.goto('/clusters');
+    await page.goto('/dashboard/clusters');
     await page.waitForLoadState('networkidle');
 
     // Wait for the table to load
@@ -64,7 +64,7 @@ test.describe('Cluster Data Visibility', () => {
 
   test('cluster details page should load', async ({ page }) => {
     // Navigate directly to cluster details
-    await page.goto(`/clusters/${EXPECTED_CLUSTER}`);
+    await page.goto(`/dashboard/clusters/${EXPECTED_CLUSTER}`);
 
     // Wait for page to load
     await page.waitForLoadState('networkidle');
@@ -82,7 +82,7 @@ test.describe('Job Data Visibility', () => {
   test.skip(!EXPECTED_JOB, 'No EXPECTED_JOB_NAME provided');
 
   test('job should appear in jobs table', async ({ page }) => {
-    await page.goto('/jobs');
+    await page.goto('/dashboard/jobs');
     await page.waitForLoadState('networkidle');
 
     // Wait for the table to load
@@ -118,7 +118,7 @@ test.describe('Job Data Visibility', () => {
 
   test('job details page should load', async ({ page }) => {
     // First get the job ID from the jobs list
-    await page.goto('/jobs');
+    await page.goto('/dashboard/jobs');
     await page.waitForLoadState('networkidle');
 
     // Wait for the table to load
@@ -158,7 +158,7 @@ test.describe('Table Row Count Verification', () => {
   test('clusters page should show expected number of clusters', async ({
     page,
   }) => {
-    await page.goto('/clusters');
+    await page.goto('/dashboard/clusters');
     await page.waitForLoadState('networkidle');
 
     // Wait for the table to load
@@ -185,7 +185,7 @@ test.describe('Table Row Count Verification', () => {
   });
 
   test('jobs page should show expected number of jobs', async ({ page }) => {
-    await page.goto('/jobs');
+    await page.goto('/dashboard/jobs');
     await page.waitForLoadState('networkidle');
 
     // Wait for the table to load
@@ -214,7 +214,7 @@ test.describe('Table Row Count Verification', () => {
 
 test.describe('Data Refresh Verification', () => {
   test('clusters page should refresh data correctly', async ({ page }) => {
-    await page.goto('/clusters');
+    await page.goto('/dashboard/clusters');
     await page.waitForLoadState('networkidle');
 
     // Wait for initial load
@@ -253,7 +253,7 @@ test.describe('Data Refresh Verification', () => {
   });
 
   test('jobs page should refresh data correctly', async ({ page }) => {
-    await page.goto('/jobs');
+    await page.goto('/dashboard/jobs');
     await page.waitForLoadState('networkidle');
 
     // Wait for initial load
