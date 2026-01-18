@@ -391,9 +391,11 @@ def test_autostop_hook_timeout(generic_cloud: str):
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
     # the VM is stopped.
     autostop_timeout = 600 if generic_cloud == 'azure' else 250
-    # Use a short timeout with a long-running hook to trigger timeout
-    hook_timeout = 5  # seconds
-    hook_duration = 60  # seconds (longer than timeout)
+    # Use a timeout longer than the polling interval (10s) to ensure
+    # AUTOSTOPPING state is visible during status polling, but shorter than
+    # hook_duration to verify the timeout actually triggers.
+    hook_timeout = 30  # seconds
+    hook_duration = 120  # seconds (longer than timeout)
 
     # Load the existing minimal.yaml and add resources section with autostop hook
     minimal_yaml_path = 'tests/test_yamls/minimal.yaml'
@@ -434,8 +436,12 @@ def test_autostop_hook_timeout(generic_cloud: str):
                     cluster_status=[sky.ClusterStatus.STOPPED],
                     timeout=autostop_timeout),
 
-                # Launch again to check logs
-                f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+                # Launch again to check logs. Use simple validation since
+                # restarting a just-stopped cluster may show warnings about
+                # instance still being in STOPPING state, which breaks the
+                # standard VALIDATE_LAUNCH_OUTPUT grep patterns.
+                f'sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml',
+                f'sky status -r {name} | grep UP',
 
                 # Verify hook started but timed out by checking skylet logs
                 f'skylet_log_output=$(sky exec {name} "cat ~/{constants.SKYLET_LOG_FILE}") && echo "$skylet_log_output" | grep "timed out"',
