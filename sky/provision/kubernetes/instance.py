@@ -1507,12 +1507,6 @@ def get_cluster_info(
             limits = (getattr(resources, 'limits', None) if resources else None)
             cpu_request = ((requests or {}).get('cpu') or
                            (limits or {}).get('cpu'))
-            if cpu_request is None:
-                container_name = getattr(primary_container, 'name', '<unknown>')
-                logger.warning(
-                    'Missing CPU request/limit for primary container %r in pod '
-                    '%r; defaulting Ray CPUs to 1.', container_name, pod_name)
-                cpu_request = '1'
 
     if cpu_request is None:
         raise RuntimeError(f'Pod {cluster_name_on_cloud}-head not found'
