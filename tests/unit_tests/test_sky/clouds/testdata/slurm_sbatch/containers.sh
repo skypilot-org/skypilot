@@ -44,9 +44,19 @@ touch /home/testuser/.sky_clusters/test-cluster/.sky_slurm_cluster
 # Suppress login messages.
 touch /home/testuser/.sky_clusters/test-cluster/.hushlogin
 echo "Initializing container test-cluster on all nodes..."
-srun --overlap --nodes=1 --ntasks-per-node=1 --container-image='nvcr.io#nvidia/pytorch:24.01-py3' --container-name=test-cluster:create --container-mounts="/home/testuser:/home/testuser" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
+rm -rf /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done
+mkdir -p /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done
+srun --overlap --label --unbuffered --nodes=1 --ntasks-per-node=1 --container-image='nvcr.io#nvidia/pytorch:24.01-py3' --container-name=test-cluster:create --container-mounts="/home/testuser:/home/testuser" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
 apt-get update
 apt-get install -y ca-certificates rsync curl git wget fuse
-touch /home/testuser/.sky_clusters/test-cluster/.sky_slurm_container /home/testuser/.sky_clusters/test-cluster/.sky_sbatch_ready && sleep infinity' &
-# ready_signal touched inside container
+touch /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done/$SLURM_PROCID && sleep infinity' &
+while true; do
+  num_ready=$(ls -1 /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done 2>/dev/null | wc -l)
+  if [ "$num_ready" -ge "1" ]; then
+    break
+  fi
+  sleep 1
+done
+touch /home/testuser/.sky_clusters/test-cluster/.sky_slurm_container /home/testuser/.sky_clusters/test-cluster/.sky_sbatch_ready
+
 wait

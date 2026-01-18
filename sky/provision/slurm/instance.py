@@ -278,23 +278,35 @@ def _create_virtual_instance(
             """)
         container_marker_file = (f'{sky_home_dir}/'
                                  f'{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
-        # Run container init, touch marker and ready signal, then sleep infinity
+        container_init_done_dir = f'{sky_home_dir}/.sky_container_init_done'
+        # Run container init, touch per-node "done" marker, then sleep infinity
         # to keep container running. Use --overlap so subsequent sruns can share
         # the allocation. Background with & so sbatch continues.
         container_cmd = shlex.quote(
             f'{container_init_script}'
-            f'touch {container_marker_file} {ready_signal}'
-            f' && sleep infinity')
+            f'touch {container_init_done_dir}/$SLURM_PROCID && sleep infinity')
         container_block = (
             f'echo "Initializing container {container_name} on all nodes..."\n'
-            f'srun --overlap --nodes={num_nodes} --ntasks-per-node=1 '
+            f'rm -rf {container_init_done_dir}\n'
+            f'mkdir -p {container_init_done_dir}\n'
+            f'srun --overlap --label --unbuffered '
+            f'--nodes={num_nodes} --ntasks-per-node=1 '
             f'--container-image={shlex.quote(container_image)} '
             f'--container-name={shlex.quote(container_name)}:create '
             f'--container-mounts="{container_mounts}" '
             f'--container-remap-root '
             f'--no-container-mount-home '
             f'--container-writable '
-            f'bash -c {container_cmd} &')
+            f'bash -c {container_cmd} &\n'
+            f'while true; do\n'
+            f'  num_ready=$(ls -1 {container_init_done_dir} 2>/dev/null | '
+            f'wc -l)\n'
+            f'  if [ "$num_ready" -ge "{num_nodes}" ]; then\n'
+            f'    break\n'
+            f'  fi\n'
+            f'  sleep 1\n'
+            f'done\n'
+            f'touch {container_marker_file} {ready_signal}')
 
     # By default stdout and stderr will be written to $HOME/slurm-%j.out
     # (because we invoke sbatch from $HOME). Redirect elsewhere to not pollute
@@ -348,7 +360,7 @@ touch {slurm_marker_file}
 # Suppress login messages.
 touch {sky_home_dir}/.hushlogin
 {container_block}
-{f'touch {ready_signal}' if container_image is None else '# ready_signal touched inside container'}
+{f'touch {ready_signal}' if container_image is None else ''}
 {'sleep infinity' if container_image is None else 'wait'}
 """
     # fmt: on
