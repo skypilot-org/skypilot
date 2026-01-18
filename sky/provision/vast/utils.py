@@ -6,6 +6,7 @@
 #
 """Vast library wrapper for SkyPilot."""
 from pathlib import Path
+import shlex
 from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
@@ -209,7 +210,8 @@ def launch(name: str,
             'chmod 700 ~/.ssh',
             # Add a newline first to ensure keys are on separate lines
             'echo "" >> ~/.ssh/authorized_keys',
-            f'echo "{ssh_public_key.strip()}" >> ~/.ssh/authorized_keys',
+            (f'echo "{shlex.quote(ssh_public_key.strip())}" >> '
+             '~/.ssh/authorized_keys'),
             'chmod 600 ~/.ssh/authorized_keys',
         ])
         logger.debug('Added SSH key injection to onstart_cmd')
