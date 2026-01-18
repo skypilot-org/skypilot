@@ -746,6 +746,9 @@ export function ContextDetails({
                       <th className="p-3 text-left font-medium text-gray-600">
                         GPU Utilization
                       </th>
+                      <th className="p-3 text-left font-medium text-gray-600">
+                        Node Status
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -787,10 +790,50 @@ export function ContextDetails({
                         }
                       }
 
-                      const utilizationStr =
-                        node.is_ready === false
-                          ? `0 of ${node.gpu_total} free (Node NotReady)`
-                          : `${node.gpu_free} of ${node.gpu_total} free`;
+                      // Build utilization string
+                      const utilizationStr = `${node.gpu_free} of ${node.gpu_total} free`;
+
+                      // Build node status string
+                      const statusInfo = [];
+
+                      // Add not ready info
+                      if (node.is_ready === false) {
+                        statusInfo.push('NotReady');
+                      }
+
+                      // Add cordoned info
+                      if (node.is_cordoned === true) {
+                        statusInfo.push('Cordoned');
+                      }
+
+                      // Build taint info separately
+                      const taints = node.taints || [];
+                      let taintInfo = null;
+                      if (taints.length > 0) {
+                        const taintsByEffect = {};
+                        for (const taint of taints) {
+                          const effect = taint.effect;
+                          const key = taint.key;
+                          if (!taintsByEffect[effect]) {
+                            taintsByEffect[effect] = [];
+                          }
+                          taintsByEffect[effect].push(key);
+                        }
+                        const taintStrs = Object.entries(taintsByEffect).map(
+                          ([effect, keys]) =>
+                            `${effect} Taint [${keys.join(', ')}]`
+                        );
+                        if (taintStrs.length > 0) {
+                          taintInfo = taintStrs.join(', ');
+                        }
+                      }
+
+                      const nodeStatusStr =
+                        statusInfo.length > 0 || taintInfo
+                          ? statusInfo.join(', ')
+                          : 'Healthy';
+                      const isNodeHealthy =
+                        statusInfo.length === 0 && !taintInfo;
 
                       return (
                         <tr
@@ -814,6 +857,26 @@ export function ContextDetails({
                           </td>
                           <td className="p-3 whitespace-nowrap text-gray-700">
                             {utilizationStr}
+                          </td>
+                          <td className="p-3 max-w-xs">
+                            <div className="flex flex-col gap-1.5">
+                              {nodeStatusStr && (
+                                <span
+                                  className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit ${
+                                    isNodeHealthy
+                                      ? 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20'
+                                      : 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20'
+                                  }`}
+                                >
+                                  {nodeStatusStr}
+                                </span>
+                              )}
+                              {taintInfo && (
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit bg-gray-50 text-gray-700 ring-1 ring-inset ring-gray-600/20">
+                                  {taintInfo}
+                                </span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
