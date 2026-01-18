@@ -128,6 +128,7 @@ async def logs(
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
         kill_request_on_disconnect=kill_request_on_disconnect,
+        follow=jobs_logs_body.follow,
     )
 
 

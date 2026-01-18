@@ -370,6 +370,7 @@ def stream_response_for_long_request(
     logs_path: pathlib.Path,
     background_tasks: fastapi.BackgroundTasks,
     kill_request_on_disconnect: bool = True,
+    follow: bool = True,
 ) -> fastapi.responses.StreamingResponse:
     """Stream the logs of a long request."""
     return stream_response(
@@ -378,6 +379,7 @@ def stream_response_for_long_request(
         background_tasks,
         polling_interval=LONG_REQUEST_POLL_INTERVAL,
         kill_request_on_disconnect=kill_request_on_disconnect,
+        follow=follow,
     )
 
 
@@ -387,6 +389,7 @@ def stream_response(
     background_tasks: fastapi.BackgroundTasks,
     polling_interval: float = DEFAULT_POLL_INTERVAL,
     kill_request_on_disconnect: bool = True,
+    follow: bool = True,
 ) -> fastapi.responses.StreamingResponse:
 
     if kill_request_on_disconnect:
@@ -401,7 +404,10 @@ def stream_response(
         background_tasks.add_task(on_disconnect)
 
     return fastapi.responses.StreamingResponse(
-        log_streamer(request_id, logs_path, polling_interval=polling_interval),
+        log_streamer(request_id,
+                     logs_path,
+                     polling_interval=polling_interval,
+                     follow=follow),
         media_type='text/plain',
         headers={
             'Cache-Control': 'no-cache, no-transform',

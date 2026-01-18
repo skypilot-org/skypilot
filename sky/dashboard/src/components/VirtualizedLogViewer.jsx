@@ -17,7 +17,6 @@ export function VirtualizedLogViewer({
   const containerRef = useRef(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
-  const lastScrollTime = useRef(0);
   const prevLinesLength = useRef(lines.length);
 
   // Calculate visible range
