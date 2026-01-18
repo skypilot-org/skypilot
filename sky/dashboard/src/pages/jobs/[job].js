@@ -235,7 +235,9 @@ function JobDetails() {
             <div id="details-section">
               <Card>
                 <div className="flex items-center justify-between px-3 py-2.5">
-                  <h3 className="text-[15px] font-semibold tracking-[0.01em]">Details</h3>
+                  <h3 className="text-[15px] font-semibold tracking-[0.01em]">
+                    Details
+                  </h3>
                 </div>
                 <div className="p-4">
                   <JobDetailsContent
@@ -274,7 +276,9 @@ function JobDetails() {
               <Card>
                 <div className="flex items-center justify-between px-3 py-2.5">
                   <div className="flex items-center">
-                    <h3 className="text-[15px] font-semibold tracking-[0.01em]">Logs</h3>
+                    <h3 className="text-[15px] font-semibold tracking-[0.01em]">
+                      Logs
+                    </h3>
                     <span className="ml-2 text-xs text-gray-500">
                       (Logs are not streaming; click refresh to fetch the latest
                       logs.)
@@ -422,7 +426,9 @@ function ControllerLogsSection({
             ) : (
               <ChevronRightIcon className="w-4 h-4 mr-1.5" />
             )}
-            <h3 className="text-[15px] font-semibold tracking-[0.01em]">Controller Logs</h3>
+            <h3 className="text-[15px] font-semibold tracking-[0.01em]">
+              Controller Logs
+            </h3>
             <span className="ml-2 text-xs text-gray-500">
               (Logs are not streaming; click refresh to fetch the latest logs.)
             </span>

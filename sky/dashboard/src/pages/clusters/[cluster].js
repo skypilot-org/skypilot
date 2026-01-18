@@ -758,7 +758,9 @@ function ActiveTab({
                   ) : (
                     <ChevronRightIcon className="w-4 h-4 mr-1.5" />
                   )}
-                  <h3 className="text-[15px] font-semibold tracking-[0.01em]">GPU Metrics</h3>
+                  <h3 className="text-[15px] font-semibold tracking-[0.01em]">
+                    GPU Metrics
+                  </h3>
                 </button>
               </div>
               {isGpuMetricsExpanded && (
