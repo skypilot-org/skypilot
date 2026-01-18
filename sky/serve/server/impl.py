@@ -634,6 +634,24 @@ def update(
                                      {remote_task_yaml_path: service_file.name},
                                      storage_mounts=None)
 
+        try:
+            code = serve_utils.ServeCodeGen.backfill_version_yaml_content(
+                service_name, current_version)
+            returncode, _, stderr = backend.run_on_head(handle,
+                                                        code,
+                                                        require_outputs=True,
+                                                        stream_logs=False,
+                                                        separate_stderr=True)
+            subprocess_utils.handle_returncode(
+                returncode,
+                code,
+                f'Failed to backfill version {current_version} metadata',
+                stderr,
+                stream_logs=True)
+        except exceptions.CommandError as e:
+            logger.warning('Failed to backfill serve version metadata for '
+                           f'{service_name} v{current_version}: {e}')
+
         use_legacy = not handle.is_grpc_enabled_with_flag
 
         if not use_legacy:

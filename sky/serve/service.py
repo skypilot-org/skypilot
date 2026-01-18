@@ -9,7 +9,7 @@ import pathlib
 import shutil
 import time
 import traceback
-from typing import Dict
+from typing import Dict, Optional, Tuple
 
 import filelock
 
@@ -251,13 +251,55 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
             return f.read()
 
+    def _read_yaml_if_exists(yaml_path: Optional[str]) -> Optional[str]:
+        if yaml_path is None:
+            return None
+        try:
+            return _read_yaml_content(yaml_path)
+        except FileNotFoundError:
+            return None
+
+    def _resolve_yaml_content(
+            version: int,
+            allow_tmp_fallback: bool) -> Tuple[Optional[str], bool]:
+        yaml_content = serve_state.get_yaml_content(service_name, version)
+        if yaml_content is not None:
+            return yaml_content, False
+
+        task_yaml = serve_utils.generate_task_yaml_file_name(
+            service_name, version)
+        yaml_content = _read_yaml_if_exists(task_yaml)
+        if yaml_content is not None:
+            return yaml_content, True
+
+        if allow_tmp_fallback:
+            yaml_content = _read_yaml_if_exists(tmp_task_yaml)
+            if yaml_content is not None:
+                return yaml_content, True
+
+        return None, False
+
+    yaml_content = None
+    version = None
+    backfilled_from_file = False
     if is_recovery:
-        yaml_content = service['yaml_content']
-        # Backward compatibility for old service records that
-        # does not dump the yaml content to version database.
-        # TODO(tian): Remove this after 2 minor releases, i.e. 0.13.0.
-        if yaml_content is None:
-            yaml_content = _read_yaml_content(tmp_task_yaml)
+        versions = sorted(serve_state.get_service_versions(service_name),
+                          reverse=True)
+        if not versions:
+            raise ValueError(f'No version found for service {service_name}')
+        for idx, candidate in enumerate(versions):
+            yaml_content, backfilled_from_file = _resolve_yaml_content(
+                candidate, allow_tmp_fallback=(idx == 0))
+            if yaml_content is None:
+                logger.warning(
+                    f'Skipping version {candidate} for service {service_name}: '
+                    'yaml_content missing and task yaml unavailable.')
+                continue
+            version = candidate
+            break
+        if yaml_content is None or version is None:
+            raise ValueError(f'No valid yaml content found for service '
+                             f'{service_name}')
     else:
         yaml_content = _read_yaml_content(tmp_task_yaml)
 
@@ -304,9 +346,11 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         serve_state.add_or_update_version(service_name, version, service_spec,
                                           yaml_content)
     else:
-        version = serve_state.get_latest_version(service_name)
-        if version is None:
-            raise ValueError(f'No version found for service {service_name}')
+        assert version is not None
+        existing_spec = serve_state.get_spec(service_name, version)
+        if backfilled_from_file or existing_spec is None:
+            serve_state.add_or_update_version(service_name, version,
+                                              service_spec, yaml_content)
         serve_state.update_service_controller_pid(service_name, os.getpid())
 
     controller_process = None
