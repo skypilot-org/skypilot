@@ -265,31 +265,65 @@ def run_with_log(
                         _handle_io_stream,
                         args=err_args,
                     )
-            if ctx is not None:
-                # When runs in a coroutine, always process the subprocess
-                # stream to:
-                # 1. handle context cancellation
-                # 2. redirect subprocess stdout/stderr to the contextual
-                #    stdout/stderr of current coroutine.
-                stdout, stderr = context_utils.pipe_and_wait_process(
-                    ctx,
-                    proc,
-                    stdout_stream_handler=stdout_stream_handler,
-                    stderr_stream_handler=stderr_stream_handler)
-            elif process_stream:
-                # When runs in a process, only process subprocess stream if
-                # necessary to avoid unnecessary stream handling overhead.
-                stdout, stderr = process_subprocess_stream(
-                    proc, stdout_stream_handler, stderr_stream_handler)
-            # Ensure returncode is set.
-            try:
-                proc.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                # Kill the process and all its children
+            # Use a timer to enforce timeout during stream processing.
+            # Without this, process_subprocess_stream blocks until the process
+            # finishes, making the timeout at proc.wait() ineffective.
+            timeout_triggered = False
+            timer = None
+
+            def _timeout_handler():
+                nonlocal timeout_triggered
+                timeout_triggered = True
                 subprocess_utils.kill_children_processes(proc.pid)
+
+            if timeout is not None:
+                timer = threading.Timer(timeout, _timeout_handler)
+                timer.start()
+
+            try:
+                if ctx is not None:
+                    # When runs in a coroutine, always process the subprocess
+                    # stream to:
+                    # 1. handle context cancellation
+                    # 2. redirect subprocess stdout/stderr to the contextual
+                    #    stdout/stderr of current coroutine.
+                    stdout, stderr = context_utils.pipe_and_wait_process(
+                        ctx,
+                        proc,
+                        stdout_stream_handler=stdout_stream_handler,
+                        stderr_stream_handler=stderr_stream_handler)
+                elif process_stream:
+                    # When runs in a process, only process subprocess stream if
+                    # necessary to avoid unnecessary stream handling overhead.
+                    stdout, stderr = process_subprocess_stream(
+                        proc, stdout_stream_handler, stderr_stream_handler)
+            finally:
+                if timer is not None:
+                    timer.cancel()
+
+            # Check if timeout was triggered during stream processing
+            if timeout_triggered:
                 logger.error(
                     f'Command timed out after {timeout} seconds: {cmd}')
-                raise
+                raise subprocess.TimeoutExpired(cmd, timeout)
+
+            # Ensure returncode is set.
+            if ctx is not None or process_stream:
+                # Stream processing already waited for process completion, so
+                # proc.wait() will return immediately. We still call it to
+                # ensure proc.returncode is set.
+                proc.wait()
+            else:
+                # No stream processing - use proc.wait with timeout as primary
+                # timeout mechanism.
+                try:
+                    proc.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    # Kill the process and all its children
+                    subprocess_utils.kill_children_processes(proc.pid)
+                    logger.error(
+                        f'Command timed out after {timeout} seconds: {cmd}')
+                    raise
             if require_outputs:
                 return proc.returncode, stdout, stderr
             return proc.returncode
