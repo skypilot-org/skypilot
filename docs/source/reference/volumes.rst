@@ -149,7 +149,7 @@ Persistent volumes are created and managed independently using the ``sky volumes
   # volume.yaml
   name: my-volume
   type: k8s-pvc
-  infra: kubernetes  # or k8s or k8s/<context>
+  infra: k8s  # or k8s/<context>
   size: 10Gi
 
   # Optional: To use an existing PVC instead of creating a new one, set to `true` and set `name` to the existing PVC name.
@@ -175,7 +175,7 @@ Persistent volumes are created and managed independently using the ``sky volumes
 Ephemeral volumes
 ~~~~~~~~~~~~~~~~~
 
-Unlike persistent volumes must be managed independently via ``sky volumes`` CLI commands, ephemeral volumes are automatically created when a cluster is launched via ``sky launch`` and deleted when the cluster is terminated via ``sky down`` or autodowned.
+Unlike persistent volumes, which must be managed independently via ``sky volumes`` CLI commands, ephemeral volumes are automatically created when a cluster is launched via ``sky launch`` and deleted when the cluster is terminated via ``sky down`` or autodowned.
 
 - **Automatic lifecycle management**: No need to manually create or delete volumes
 - **Cluster-bound**: Created with the cluster and deleted when the cluster is terminated
