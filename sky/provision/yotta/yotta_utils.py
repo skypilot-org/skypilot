@@ -67,7 +67,7 @@ def _load_credentials() -> Tuple[str, str]:
             f'Credentials file not found at {CREDENTIALS_FILE_PATH}')
 
     try:
-        with open(CREDENTIALS_FILE_PATH, 'r') as f:
+        with open(CREDENTIALS_FILE_PATH, 'r', encoding='utf-8') as f:
             credentials = {}
             for line in f:
                 if '=' in line:
