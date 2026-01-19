@@ -949,7 +949,7 @@ class JobController:
             task: Task to prepare.
             task_id: Task ID.
             job_group_name: JobGroup name.
-            other_job_names: Other job names in the group (to wait for).
+            other_job_names: Other task names in the group (to wait for).
 
         Returns:
             Tuple of (cluster_name, executor).
@@ -1005,7 +1005,7 @@ class JobController:
         all_tasks_handles: List[Tuple['sky.Task', typing.Any]],
         force_transit_to_recovering: bool = False,
     ) -> bool:
-        """Monitor a single job in a JobGroup until completion.
+        """Monitor a single task in a JobGroup until completion.
 
         Wraps _monitor_one_task with JobGroup-specific recovery callback
         for re-setting up networking after recovery.
@@ -1022,7 +1022,7 @@ class JobController:
                 iteration (used when resuming from controller failure).
 
         Returns:
-            True if job succeeded, False otherwise.
+            True if task succeeded, False otherwise.
         """
 
         async def on_recovery() -> None:

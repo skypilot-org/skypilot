@@ -9,17 +9,17 @@ Job Groups
 
 .. tip::
 
-  Job Groups are ideal for heterogeneous parallel workloads where multiple jobs
+  Job Groups are ideal for heterogeneous parallel workloads where multiple tasks
   with different resource requirements need to run together and communicate
   with each other.
 
-Job Groups allow you to run multiple related jobs in parallel as a single managed unit.
+Job Groups allow you to run multiple related tasks in parallel as a single managed unit.
 Unlike :ref:`managed jobs <managed-jobs>` which run tasks sequentially (pipelines),
-Job Groups launch all jobs simultaneously, enabling complex distributed architectures.
+Job Groups launch all tasks simultaneously, enabling complex distributed architectures.
 
 Common use cases include:
 
-- **RL post-training**: Separate jobs for trainer, reward modeling, rollout server, and data serving
+- **RL post-training**: Separate tasks for trainer, reward modeling, rollout server, and data serving
 - **Parallel train-eval**: Training and evaluation running in parallel with shared storage
 
 .. figure:: ../images/job-groups-rl-architecture.svg
@@ -28,8 +28,8 @@ Common use cases include:
    :alt: RL Post-Training Architecture with Job Groups
 
    Example: RL post-training architecture where each component (ppo-trainer, rollout-server,
-   reward-server, replay-buffer, data-server) runs as a separate job within a single Job Group.
-   Jobs can have different resource requirements and communicate via service discovery.
+   reward-server, replay-buffer, data-server) runs as a separate task within a single Job Group.
+   Tasks can have different resource requirements and communicate via service discovery.
 
 .. contents:: Contents
    :local:
@@ -40,7 +40,7 @@ Creating a job group
 --------------------
 
 A Job Group is defined using a multi-document YAML file. The first document is the
-**header** that defines the group's properties, followed by individual job definitions:
+**header** that defines the group's properties, followed by individual task definitions:
 
 .. code-block:: yaml
 
@@ -48,17 +48,17 @@ A Job Group is defined using a multi-document YAML file. The first document is t
     ---
     # Header: Job Group configuration
     name: my-job-group
-    placement: SAME_INFRA    # All jobs run on the same infrastructure
-    execution: parallel      # All jobs run in parallel (default)
+    placement: SAME_INFRA    # All tasks run on the same infrastructure
+    execution: parallel      # All tasks run in parallel (default)
     ---
-    # Job 1: Trainer
+    # Task 1: Trainer
     name: trainer
     resources:
       accelerators: A100:1
     run: |
       python train.py
     ---
-    # Job 2: Evaluator
+    # Task 2: Evaluator
     name: evaluator
     resources:
       accelerators: A100:1
@@ -88,41 +88,41 @@ The header document supports the following fields:
      - Name of the Job Group
    * - ``placement``
      - ``SAME_INFRA``
-     - Where jobs are placed. Currently only ``SAME_INFRA`` is supported
+     - Where tasks are placed. Currently only ``SAME_INFRA`` is supported
    * - ``execution``
      - ``parallel``
      - Execution mode. Currently only ``parallel`` is supported
 
-Each job document after the header follows the standard :ref:`SkyPilot task YAML format <yaml-spec>`.
+Each task document after the header follows the standard :ref:`SkyPilot task YAML format <yaml-spec>`.
 
 .. note::
 
-    Every job in a Job Group **must have a unique name**. The name is used for
+    Every task in a Job Group **must have a unique name**. The name is used for
     service discovery and log viewing.
 
 
 Service discovery
 -----------------
 
-Jobs in a Job Group can discover each other using hostnames. SkyPilot automatically
-configures networking so that jobs can communicate.
+Tasks in a Job Group can discover each other using hostnames. SkyPilot automatically
+configures networking so that tasks can communicate.
 
 Hostname format
 ~~~~~~~~~~~~~~~
 
-Each job's head node is accessible via the hostname:
+Each task's head node is accessible via the hostname:
 
 .. code-block:: text
 
-    {job_name}-0.{job_group_name}
+    {task_name}-0.{job_group_name}
 
-For multi-node jobs, worker nodes use:
+For multi-node tasks, worker nodes use:
 
 .. code-block:: text
 
-    {job_name}-{node_index}.{job_group_name}
+    {task_name}-{node_index}.{job_group_name}
 
-For example, in a Job Group named ``rlhf-experiment`` with a 2-node ``trainer`` job:
+For example, in a Job Group named ``rlhf-experiment`` with a 2-node ``trainer`` task:
 
 - ``trainer-0.rlhf-experiment`` - Head node (rank 0)
 - ``trainer-1.rlhf-experiment`` - Worker node (rank 1)
@@ -130,7 +130,7 @@ For example, in a Job Group named ``rlhf-experiment`` with a 2-node ``trainer`` 
 Environment variables
 ~~~~~~~~~~~~~~~~~~~~~
 
-SkyPilot injects the following environment variables into all jobs:
+SkyPilot injects the following environment variables into all tasks:
 
 .. list-table::
    :widths: 40 60
@@ -140,14 +140,14 @@ SkyPilot injects the following environment variables into all jobs:
      - Description
    * - ``SKYPILOT_JOBGROUP_NAME``
      - Name of the Job Group
-   * - ``SKYPILOT_JOBGROUP_HOST_{JOB_NAME}``
-     - Address of each job's head node (uppercase, hyphens become underscores)
+   * - ``SKYPILOT_JOBGROUP_HOST_{TASK_NAME}``
+     - Address of each task's head node (uppercase, hyphens become underscores)
 
-Example usage in a job:
+Example usage in a task:
 
 .. code-block:: bash
 
-    # Access the trainer job from the evaluator
+    # Access the trainer task from the evaluator
     curl http://${SKYPILOT_JOBGROUP_HOST_TRAINER}:8000/status
 
     # Or use the hostname directly
@@ -157,17 +157,17 @@ Example usage in a job:
 Viewing logs
 ------------
 
-View logs for a specific job within a Job Group:
+View logs for a specific task within a Job Group:
 
 .. code-block:: console
 
-    # View logs for a specific job by name
+    # View logs for a specific task by name
     $ sky jobs logs <job_id> trainer
 
-    # View logs for a specific job by task ID
+    # View logs for a specific task by task ID
     $ sky jobs logs <job_id> 0
 
-    # View all job logs (default)
+    # View all task logs (default)
     $ sky jobs logs <job_id>
 
 When viewing logs for a multi-task job, SkyPilot displays a hint:
@@ -214,7 +214,7 @@ See the full example at ``llm/train-eval-jobgroup/`` in the SkyPilot repository.
 RL post-training architecture
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This example demonstrates a distributed RL post-training architecture with 5 components:
+This example demonstrates a distributed RL post-training architecture with 5 tasks:
 
 .. code-block:: yaml
 
@@ -264,11 +264,11 @@ See the full RL post-training example at ``llm/rl-post-training-jobgroup/`` in t
 Current limitations
 -------------------
 
-- **Placement**: Only ``SAME_INFRA`` is currently supported. All jobs must run on
+- **Placement**: Only ``SAME_INFRA`` is currently supported. All tasks must run on
   the same Kubernetes cluster or cloud region.
 
 - **Recovery**: Job Groups do not currently support automatic preemption recovery.
-  If a job is preempted, the entire group fails.
+  If a task is preempted, the entire group fails.
 
 - **Execution**: Only ``parallel`` execution is supported. Sequential execution
   should use :ref:`managed job pipelines <pipeline>` instead.
@@ -276,6 +276,6 @@ Current limitations
 
 .. seealso::
 
-   :ref:`managed-jobs` for single jobs or sequential pipelines.
+   :ref:`managed-jobs` for single tasks or sequential pipelines.
 
-   :ref:`dist-jobs` for multi-node jobs within a single task.
+   :ref:`dist-jobs` for multi-node distributed training within a single task.
