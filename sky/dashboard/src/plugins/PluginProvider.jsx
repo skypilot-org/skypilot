@@ -662,3 +662,75 @@ export function useTableColumns(tableName, context = {}) {
     });
   }, [tableName, tableColumns, JSON.stringify(context)]);
 }
+
+/**
+ * Hook to merge base columns with plugin columns, automatically handling replacements.
+ * Plugin columns with the same ID as base columns will replace the base columns.
+ *
+ * @param {string} tableName - The table name (e.g., 'clusters', 'jobs')
+ * @param {Array} baseColumns - Array of base column definitions
+ * @param {object} context - Optional context for filtering columns and conditional display
+ * @param {function} transformPluginColumn - Optional function to transform plugin columns into the format expected by the table
+ * @returns {Array} Merged and filtered columns, sorted by order
+ */
+export function useMergedTableColumns(
+  tableName,
+  baseColumns = [],
+  context = {},
+  transformPluginColumn = null
+) {
+  const pluginColumns = useTableColumns(tableName, context);
+
+  return useMemo(() => {
+    // Transform plugin columns if a transform function is provided
+    const pluginColumnDefs = transformPluginColumn
+      ? pluginColumns.map((col) => transformPluginColumn(col))
+      : pluginColumns.map((col) => ({
+          id: col.id,
+          order: col.header.order,
+          isPlugin: true,
+          pluginColumn: col,
+        }));
+
+    // Create a set of plugin column IDs to identify replacements
+    const pluginColumnIds = new Set(pluginColumnDefs.map((col) => col.id));
+
+    // Merge base and plugin columns, sort by order
+    const allColumns = [...baseColumns, ...pluginColumnDefs].sort(
+      (a, b) => a.order - b.order
+    );
+
+    // Filter columns:
+    // 1. Remove base columns that have a plugin replacement (same ID)
+    // 2. Handle conditional columns based on context
+    const visibleColumns = allColumns.filter((col) => {
+      // Filter out base columns that have a plugin replacement
+      if (!col.isPlugin && pluginColumnIds.has(col.id)) {
+        return false;
+      }
+
+      // Handle conditional columns
+      if (col.conditional) {
+        // Allow context to provide a function to check conditional columns
+        if (
+          context.shouldShowColumn &&
+          typeof context.shouldShowColumn === 'function'
+        ) {
+          return context.shouldShowColumn(col.id);
+        }
+        // Default: don't show conditional columns unless explicitly enabled
+        return false;
+      }
+
+      return true;
+    });
+
+    return visibleColumns;
+  }, [
+    tableName,
+    baseColumns,
+    pluginColumns,
+    transformPluginColumn,
+    JSON.stringify(context),
+  ]);
+}
