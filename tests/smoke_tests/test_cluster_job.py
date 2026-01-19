@@ -1320,7 +1320,7 @@ def test_container_logs_multinode_kubernetes():
             [
                 smoke_tests_utils.launch_cluster_for_cloud_cmd(
                     'kubernetes', name),
-                f'sky launch -y -c {name} {task_yaml} --num-nodes 2',
+                f'sky launch -y -c {name} --infra kubernetes {task_yaml} --num-nodes 2',
                 _check_container_logs(name, head_logs, 9, 1),
                 _check_container_logs(name, worker_logs, 9, 1),
             ],
@@ -1374,7 +1374,7 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
             [
                 smoke_tests_utils.launch_cluster_for_cloud_cmd(
                     'kubernetes', name),
-                f'sky launch -y -c {name}',
+                f'sky launch -y -c {name} --infra kubernetes',
                 f'sky exec -c {name} -d {task_yaml}',
                 f'sky exec -c {name} -d {task_yaml}',
                 'sleep 30',
