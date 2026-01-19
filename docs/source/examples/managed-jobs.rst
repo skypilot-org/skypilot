@@ -410,6 +410,10 @@ A pipeline is a managed job that contains a sequence of tasks running one after 
 This is useful for running a sequence of tasks that depend on each other, e.g., training a model and then running inference on it.
 Different tasks can have different resource requirements to use appropriate per-task resources, which saves costs, while  keeping the burden of managing the tasks off the user.
 
+.. seealso::
+
+  :ref:`job-groups` for running multiple tasks **in parallel** instead of sequentially.
+
 .. note::
   In other words, a managed job is either a single task or a pipeline of tasks. All managed jobs are submitted by :code:`sky jobs launch`.
 
