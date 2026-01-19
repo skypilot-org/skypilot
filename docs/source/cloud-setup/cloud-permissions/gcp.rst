@@ -195,9 +195,16 @@ The :ref:`Medium Permissions <gcp-medium-permissions>` assigns admin permissions
 
     compute.reservations.list
 
-9. Click **Create** to create the role.
-10. Go back to the "IAM" tab and click on **GRANT ACCESS**.
-11. Fill in the email address of the user in the “Add principals” section, and select ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
+10. **Optional**: If your GCP project has `OS Login <https://cloud.google.com/compute/docs/oslogin>`__ enabled, add one of the following roles:
+
+.. code-block:: text
+
+    roles/compute.osLogin         # Standard SSH access
+    roles/compute.osAdminLogin    # SSH access with sudo (recommended)
+
+11. Click **Create** to create the role.
+12. Go back to the "IAM" tab and click on **GRANT ACCESS**.
+13. Fill in the email address of the user in the "Add principals" section, and select ``minimal-skypilot-role`` in the "Assign roles" section. Click **Save**.
 
 
 .. image:: ../../images/screenshots/gcp/create-iam.png
@@ -205,7 +212,7 @@ The :ref:`Medium Permissions <gcp-medium-permissions>` assigns admin permissions
     :align: center
     :alt: GCP Grant Access
 
-12. The user should receive an invitation to the project and should be able to setup SkyPilot by following the instructions in :ref:`Installation <installation-gcp>`.
+14. The user should receive an invitation to the project and should be able to setup SkyPilot by following the instructions in :ref:`Installation <installation-gcp>`.
 
 .. note::
 
