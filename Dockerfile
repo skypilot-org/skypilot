@@ -71,7 +71,7 @@ ARG NEXT_BASE_PATH=/dashboard
 # Install system packages
 RUN apt-get update -y && \
     apt-get install --no-install-recommends -y \
-        git build-essential rsync sudo patch openssh-server \
+        git gcc rsync sudo patch openssh-server \
         pciutils nano fuse socat netcat-openbsd curl tini autossh jq logrotate && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
