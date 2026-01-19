@@ -24,17 +24,41 @@ export function relativeTime(date) {
   }
 
   const now = new Date();
-  const differenceInDays = (now - date) / (1000 * 3600 * 24);
-  if (Math.abs(differenceInDays) < 7) {
-    const originalTimeString = formatDistance(date, now, { addSuffix: true });
-    const shortenedTimeString = shortenTimeString(originalTimeString);
+  const diff = now - date;
+
+  // Time constants for readability
+  const ONE_SECOND_MS = 1000;
+  const ONE_MINUTE_MS = 60 * ONE_SECOND_MS;
+  const ONE_HOUR_MS = 60 * ONE_MINUTE_MS;
+  const ONE_DAY_MS = 24 * ONE_HOUR_MS;
+  const ONE_WEEK_MS = 7 * ONE_DAY_MS;
+
+  let displayText;
+  // Use precise time calculation to avoid rounding issues with date-fns formatDistance
+  // (e.g., 50 minutes should show "50m ago" not "about 1 hour ago")
+  if (diff < ONE_WEEK_MS) {
+    if (diff < 5 * ONE_SECOND_MS) {
+      displayText = 'just now';
+    } else if (diff < ONE_MINUTE_MS) {
+      const seconds = Math.floor(diff / ONE_SECOND_MS);
+      displayText = `${seconds}s ago`;
+    } else if (diff < ONE_HOUR_MS) {
+      const minutes = Math.floor(diff / ONE_MINUTE_MS);
+      displayText = `${minutes}m ago`;
+    } else if (diff < ONE_DAY_MS) {
+      const hours = Math.floor(diff / ONE_HOUR_MS);
+      displayText = `${hours}h ago`;
+    } else {
+      const days = Math.floor(diff / ONE_DAY_MS);
+      displayText = `${days}d ago`;
+    }
 
     return (
       <CustomTooltip
         content={formatDateTime(date)}
         className="capitalize text-sm text-muted-foreground"
       >
-        {shortenedTimeString}
+        {displayText}
       </CustomTooltip>
     );
   } else {
@@ -497,7 +521,6 @@ export function TimestampWithTooltip({ date }) {
   }
 
   const now = new Date();
-  const differenceInDays = (now - date) / (1000 * 3600 * 24);
 
   // Format the full timestamp in '2025-06-13, 03:53:33 PM PDT' format
   const dateStr =
@@ -515,10 +538,37 @@ export function TimestampWithTooltip({ date }) {
   });
   const fullLocalTimestamp = dateStr + ' ' + timeStr;
 
+  // Use precise time calculation to avoid rounding issues with date-fns formatDistance
+  // (e.g., 50 minutes should show "50m ago" not "about 1 hour ago")
+  const diff = now - date;
+
+  // Time constants for readability
+  const ONE_SECOND_MS = 1000;
+  const ONE_MINUTE_MS = 60 * ONE_SECOND_MS;
+  const ONE_HOUR_MS = 60 * ONE_MINUTE_MS;
+  const ONE_DAY_MS = 24 * ONE_HOUR_MS;
+  const ONE_WEEK_MS = 7 * ONE_DAY_MS;
+
   let displayText;
-  // Always show relative time with shortened format
-  const originalTimeString = formatDistance(date, now, { addSuffix: true });
-  displayText = shortenTimeString(originalTimeString);
+  if (diff < 5 * ONE_SECOND_MS) {
+    displayText = 'just now';
+  } else if (diff < ONE_MINUTE_MS) {
+    const seconds = Math.floor(diff / ONE_SECOND_MS);
+    displayText = `${seconds}s ago`;
+  } else if (diff < ONE_HOUR_MS) {
+    const minutes = Math.floor(diff / ONE_MINUTE_MS);
+    displayText = `${minutes}m ago`;
+  } else if (diff < ONE_DAY_MS) {
+    const hours = Math.floor(diff / ONE_HOUR_MS);
+    displayText = `${hours}h ago`;
+  } else if (diff < ONE_WEEK_MS) {
+    const days = Math.floor(diff / ONE_DAY_MS);
+    displayText = `${days}d ago`;
+  } else {
+    // For times older than a week, use formatDistance for readability
+    const originalTimeString = formatDistance(date, now, { addSuffix: true });
+    displayText = shortenTimeString(originalTimeString);
+  }
 
   return (
     <CustomTooltip

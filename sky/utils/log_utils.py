@@ -232,8 +232,6 @@ def readable_time_duration(start: Optional[float],
         return '-'
     if end == start == 0:
         return '-'
-    # Track whether end was explicitly provided (for suffix determination later)
-    end_was_none = end is None
     if end is not None:
         end = pendulum.from_timestamp(end)
     start_time = pendulum.from_timestamp(start)
@@ -255,64 +253,12 @@ def readable_time_duration(start: Optional[float],
         diff = diff.replace(' months', 'mo')
         diff = diff.replace(' month', 'mo')
     else:
-        # Use precise time formatting instead of pendulum's diff_for_humans()
-        # which rounds aggressively (e.g., 50 minutes becomes "about 1 hour").
-        total_seconds = duration.in_seconds()
-        # Determine suffix: "ago" if start is in the past (relative to end),
-        # "before" if start is before the explicitly provided end time
-        is_past = total_seconds < 0  # start is after end (unusual case)
-        total_seconds = abs(total_seconds)
-
-        # For very long durations (1 week+), use pendulum for readability
-        if total_seconds >= 604800:
-            diff = start_time.diff_for_humans(end)
-            diff = diff.replace('second', 'sec')
-            diff = diff.replace('minute', 'min')
-            diff = diff.replace('hour', 'hr')
-            return diff
-
-        # Determine the suffix based on direction
-        # If end was explicitly provided and start < end, use "before"
-        # If end defaults to now and start is in the past, use "ago"
-        if is_past:
-            suffix = 'from now'
-        elif end_was_none:
-            # end defaults to now, so this is a "time ago" situation
-            suffix = 'ago'
-        else:
-            # end was explicitly provided
-            suffix = 'before'
-
-        if total_seconds < 1:
-            diff = '< 1 sec'
-        elif total_seconds < 60:
-            # Less than 1 minute: show seconds
-            secs = int(total_seconds)
-            if secs == 1:
-                diff = f'1 sec {suffix}'
-            else:
-                diff = f'{secs} secs {suffix}'
-        elif total_seconds < 3600:
-            # Less than 1 hour: show precise minutes
-            minutes = int(total_seconds // 60)
-            if minutes == 1:
-                diff = f'1 min {suffix}'
-            else:
-                diff = f'{minutes} mins {suffix}'
-        elif total_seconds < 86400:
-            # Less than 1 day: show hours
-            hours = int(total_seconds // 3600)
-            if hours == 1:
-                diff = f'1 hr {suffix}'
-            else:
-                diff = f'{hours} hrs {suffix}'
-        else:
-            # Less than 1 week: show days
-            days = int(total_seconds // 86400)
-            if days == 1:
-                diff = f'1 day {suffix}'
-            else:
-                diff = f'{days} days {suffix}'
+        diff = start_time.diff_for_humans(end)
+        if duration.in_seconds() < 1:
+            diff = '< 1 second'
+        diff = diff.replace('second', 'sec')
+        diff = diff.replace('minute', 'min')
+        diff = diff.replace('hour', 'hr')
 
     return diff
 
