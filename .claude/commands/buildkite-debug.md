@@ -148,6 +148,13 @@ docker exec -it <container-name> /bin/bash
 cd <working-directory>
 ```
 
+**Note**: Inside the container, the kind Kubernetes cluster (or any k8s cluster configured for CI) is accessible via `kubectl`. You can use `kubectl` commands to inspect pods, logs, and cluster state:
+```bash
+kubectl get pods -A
+kubectl get nodes
+kubectl logs <pod-name> -n <namespace>
+```
+
 2. **Verify git commit (CRITICAL):**
 ```bash
 git rev-parse HEAD
@@ -172,8 +179,8 @@ sky logs <cluster-name>
 sky api status
 sky api logs
 
-# Re-run the failing test
-pytest <test-file>::<test-name> -v
+# Re-run the failing test (LOG_TO_STDOUT=1 outputs logs to terminal)
+LOG_TO_STDOUT=1 pytest <test-file>::<test-name> -v
 ```
 
 ### Step 7: Code Analysis (when SSH not available)
@@ -208,7 +215,6 @@ Provide a structured report:
 - **Branch**: <branch-name>
 - **Commit**: <commit-sha>
 - **Previous Branch**: <previous-branch> (if synced)
-- **Stashed Changes**: <stash-ref> (if any)
 
 ## Failures Found
 ### 1. <test_name>
