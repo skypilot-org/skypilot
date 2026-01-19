@@ -1261,12 +1261,21 @@ def _check_container_logs(name, logs, total_lines, count, timeout=60):
     between job completion and when container logs become fully available via
     kubectl logs.
     """
-    # Build the check conditions for all numbers
-    check_conditions = []
-    for num in range(1, total_lines + 1):
-        check_conditions.append(
-            f'[ "$(echo "$s" | grep -x "{num}" | wc -l)" -eq {count} ]')
-    all_checks = ' && '.join(check_conditions)
+    # The awk script checks if each number from 1 to total_lines appears
+    # exactly 'count' times and that no other numbers are present.
+    awk_check = f"""awk '
+  /^[0-9]+$/ {{ counts[$0]++ }}
+  END {{
+    if (length(counts) != {total_lines}) {{
+      exit 1
+    }}
+    for (i = 1; i <= {total_lines}; i++) {{
+      if (counts[i] != {count}) {{
+        exit 1
+      }}
+    }}
+    exit 0
+  }}'"""
 
     # Wrap in a retry loop with timeout
     output_cmd = f'''
@@ -1277,7 +1286,7 @@ while true; do
         exit 1
     fi
     s=$({logs})
-    if {all_checks}; then
+    if echo "$s" | {awk_check}; then
         echo "Container logs verified successfully"
         break
     fi
