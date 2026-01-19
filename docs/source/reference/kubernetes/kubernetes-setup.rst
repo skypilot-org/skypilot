@@ -268,7 +268,7 @@ SkyPilot supports mounting various types of volumes to your pods on Kubernetes:
 
 * :ref:`Other volume types <advanced-mount-pvc-with-kubernetes-configs>`: Mount hostPath, NFS, and other Kubernetes volume types by overriding SkyPilot's ``pod_config``.
 
-For detailed information on configuring and using volumes, see :ref:`volumes-on-kubernetes`.
+For detailed information on configuring and using volumes, see :ref:`Volumes on Kubernetes <volumes-quickstart>`.
 
 .. _kubernetes-setup-priority:
 
