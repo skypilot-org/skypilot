@@ -495,7 +495,7 @@ def test_docker_preinstalled_package_slurm_sqsh(generic_cloud: str):
             f'SLURM_HOME=$(ssh -F ~/.slurm/config $SLURM_CLUSTER "echo \\$HOME") && '
             f'echo "Remote home: $SLURM_HOME" && '
             # Import nginx image to create .sqsh file in ~/nginx+latest.sqsh
-            f'ssh -F ~/.slurm/config $SLURM_CLUSTER "enroot import docker://nginx:latest" && '
+            f'ssh -F ~/.slurm/config $SLURM_CLUSTER "srun enroot import docker://nginx:latest" && '
             # Test 1: Absolute path - launch with full path to .sqsh
             f'sky launch -y -c {name} --infra slurm/$SLURM_CLUSTER '
             f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
