@@ -753,6 +753,19 @@ class TestBackwardCompatibility:
 
     def test_server_downgrade_upgrade_compatibility(self, generic_cloud: str):
         """Test server compatibility between downgrade and upgrade."""
+        # Check skylet version compatibility
+        # PR 8324 introduced a breaking change in skylet version 28 that adds
+        # user-specific exit codes. If one version is >= 28 and the other is
+        # not, the test should be skipped as they are incompatible.
+        base_skylet_version = int(self._get_base_skylet_version())
+        current_skylet_version = int(skylet_constants.SKYLET_VERSION)
+        if (base_skylet_version >= 28) != (current_skylet_version >= 28):
+            pytest.skip(
+                f'Skipping test due to incompatible skylet versions: '
+                f'base={base_skylet_version}, current={current_skylet_version}. '
+                f'Skylet version 28 introduced breaking changes for '
+                f'user-specific exit codes.')
+
         cluster_name = smoke_tests_utils.get_cluster_name()
 
         commands = [

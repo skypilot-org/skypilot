@@ -3,33 +3,72 @@
 import { getErrorMessageFromResponse } from '@/data/utils';
 import { ENDPOINT } from './constants';
 
-export const apiClient = {
-  fetch: async (path, body, method = 'POST') => {
-    try {
-      const headers =
-        method === 'POST'
-          ? {
-              'Content-Type': 'application/json',
-            }
-          : {};
+// Wait for plugins that need early initialization (e.g., fetch interceptors)
+// Such plugins are marked with data-requires-early-init="true" and set
+// window.__skyPluginsReady = true when ready
+let pluginsReadyPromise = null;
 
-      const baseUrl = window.location.origin;
-      const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
+async function waitForPlugins() {
+  if (window.__skyPluginsReady) return;
+  if (pluginsReadyPromise) return pluginsReadyPromise;
 
-      if (body !== undefined) {
-        body.env_vars = {
-          ...(body.env_vars || {}),
-          SKYPILOT_IS_FROM_DASHBOARD: 'true',
-          SKYPILOT_USER_ID: 'dashboard',
-          SKYPILOT_USER: 'dashboard',
-        };
+  // Check if any plugin needs early init
+  const needsWait = document.querySelector(
+    'script[src*="/plugins/"][data-requires-early-init="true"]'
+  );
+  if (!needsWait) return;
+
+  // Wait for plugin to signal ready (max 1s)
+  pluginsReadyPromise = new Promise((resolve) => {
+    const start = Date.now();
+    const check = setInterval(() => {
+      if (window.__skyPluginsReady || Date.now() - start >= 1000) {
+        clearInterval(check);
+        resolve();
       }
+    }, 50);
+  });
+  return pluginsReadyPromise;
+}
 
-      const response = await fetch(fullUrl, {
-        method,
-        headers,
-        body: method === 'POST' ? JSON.stringify(body) : undefined,
-      });
+export const apiClient = {
+  fetchImmediate: async (path, body, method = 'POST', options = {}) => {
+    // Wait for plugins to be ready before making API calls
+    await waitForPlugins();
+
+    // Call a skypilot API and get the result
+    const headers =
+      method === 'POST'
+        ? {
+            'Content-Type': 'application/json',
+            ...(options.headers || {}),
+          }
+        : { ...(options.headers || {}) };
+
+    const baseUrl = window.location.origin;
+    const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
+
+    if (body !== undefined) {
+      body.env_vars = {
+        ...(body.env_vars || {}),
+        SKYPILOT_IS_FROM_DASHBOARD: 'true',
+        SKYPILOT_USER_ID: 'dashboard',
+        SKYPILOT_USER: 'dashboard',
+      };
+    }
+
+    return await fetch(fullUrl, {
+      method,
+      headers,
+      body: method === 'POST' ? JSON.stringify(body) : undefined,
+      signal: options.signal,
+    });
+  },
+  fetch: async (path, body, method = 'POST') => {
+    // Call the server API and get the result via /api/get, the API must return a request ID
+    try {
+      const baseUrl = window.location.origin;
+      const response = await apiClient.fetchImmediate(path, body, method);
 
       // Check if initial request succeeded
       if (!response.ok) {

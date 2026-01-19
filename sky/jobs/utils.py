@@ -40,7 +40,6 @@ from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common_utils
-from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import infra_utils
 from sky.utils import log_utils
@@ -344,7 +343,7 @@ async def get_job_status(
     # TODO(zhwu, cooperc): Make this get job status aware of cluster status, so
     # that it can exit retry early if the cluster is down.
     # TODO(luca) make this async
-    handle = await context_utils.to_thread(
+    handle = await asyncio.to_thread(
         global_user_state.get_handle_from_cluster_name, cluster_name)
     if handle is None:
         # This can happen if the cluster was preempted and background status
@@ -356,10 +355,10 @@ async def get_job_status(
     try:
         logger.info('=== Checking the job status... ===')
         statuses = await asyncio.wait_for(
-            context_utils.to_thread(backend.get_job_status,
-                                    handle,
-                                    job_ids=job_ids,
-                                    stream_logs=False),
+            asyncio.to_thread(backend.get_job_status,
+                              handle,
+                              job_ids=job_ids,
+                              stream_logs=False),
             timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
         status = list(statuses.values())[0]
         if status is None:
@@ -774,7 +773,7 @@ def event_callback_func(
         logger.info(f'=== END: event callback for {status!r} ===')
 
     async def async_callback_func(status: str):
-        return await context_utils.to_thread(callback_func, status)
+        return await asyncio.to_thread(callback_func, status)
 
     return async_callback_func
 
@@ -1433,6 +1432,61 @@ def _cluster_handle_not_required(fields: List[str]) -> bool:
     return not any(field in fields for field in _CLUSTER_HANDLE_FIELDS)
 
 
+def _format_job_details(*, job: Dict[str, Any],
+                        highest_blocking_priority: int) -> None:
+    """Add details about schedule state / backoff."""
+    state_details = None
+    if job['schedule_state'] == 'ALIVE_BACKOFF':
+        state_details = 'In backoff, waiting for resources'
+    elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
+        priority = job.get('priority')
+        if (priority is not None and priority < highest_blocking_priority):
+            # Job is lower priority than some other blocking job.
+            state_details = 'Waiting for higher priority jobs to launch'
+        else:
+            state_details = 'Waiting for other jobs to launch'
+
+    if state_details and job['failure_reason']:
+        job['details'] = f'{state_details} - {job["failure_reason"]}'
+    elif state_details:
+        job['details'] = state_details
+    elif job['failure_reason']:
+        job['details'] = f'Failure: {job["failure_reason"]}'
+    else:
+        job['details'] = None
+
+
+def _populate_job_records_from_handles(
+        jobs_with_handle: List[Dict[str, Any]]) -> None:
+    """Populate the job records from the handles."""
+    for job_with_handle in jobs_with_handle:
+        _populate_job_record_from_handle(
+            job=job_with_handle['job'],
+            cluster_name=job_with_handle['cluster_name'],
+            handle=job_with_handle['handle'])
+
+
+def _populate_job_record_from_handle(
+        *, job: Dict[str, Any], cluster_name: str,
+        handle: 'backends.CloudVmRayResourceHandle') -> None:
+    """Populate the job record from the handle."""
+    del cluster_name
+    resources_str_simple, resources_str_full = (
+        resources_utils.get_readable_resources_repr(handle,
+                                                    simplified_only=False))
+    assert resources_str_full is not None
+    job['cluster_resources'] = resources_str_simple
+    job['cluster_resources_full'] = resources_str_full
+    job['cloud'] = str(handle.launched_resources.cloud)
+    job['region'] = handle.launched_resources.region
+    job['zone'] = handle.launched_resources.zone
+    job['infra'] = infra_utils.InfraInfo(
+        str(handle.launched_resources.cloud), handle.launched_resources.region,
+        handle.launched_resources.zone).formatted_str()
+    job['accelerators'] = handle.launched_resources.accelerators
+    job['labels'] = handle.launched_resources.labels
+
+
 def get_managed_job_queue(
     skip_finished: bool = False,
     accessible_workspaces: Optional[List[str]] = None,
@@ -1514,6 +1568,7 @@ def get_managed_job_queue(
         highest_blocking_priority = (
             managed_job_state.get_managed_jobs_highest_priority())
 
+    jobs_with_handle = []
     for job in jobs:
         if not fields or 'job_duration' in fields:
             end_at = job['end_at']
@@ -1546,20 +1601,11 @@ def get_managed_job_queue(
             handle = cluster_name_to_handle.get(
                 cluster_name, None) if cluster_name is not None else None
             if isinstance(handle, backends.CloudVmRayResourceHandle):
-                resources_str_simple, resources_str_full = (
-                    resources_utils.get_readable_resources_repr(
-                        handle, simplified_only=False))
-                assert resources_str_full is not None
-                job['cluster_resources'] = resources_str_simple
-                job['cluster_resources_full'] = resources_str_full
-                job['cloud'] = str(handle.launched_resources.cloud)
-                job['region'] = handle.launched_resources.region
-                job['zone'] = handle.launched_resources.zone
-                job['infra'] = infra_utils.InfraInfo(
-                    str(handle.launched_resources.cloud),
-                    handle.launched_resources.region,
-                    handle.launched_resources.zone).formatted_str()
-                job['accelerators'] = handle.launched_resources.accelerators
+                jobs_with_handle.append({
+                    'job': job,
+                    'handle': handle,
+                    'cluster_name': cluster_name,
+                })
             else:
                 # FIXME(zongheng): display the last cached values for these.
                 job['cluster_resources'] = '-'
@@ -1568,29 +1614,14 @@ def get_managed_job_queue(
                 job['region'] = '-'
                 job['zone'] = '-'
                 job['infra'] = '-'
+                job['labels'] = None
 
+    _populate_job_records_from_handles(jobs_with_handle)
+
+    for job in jobs:
         if not fields or 'details' in fields:
-            # Add details about schedule state / backoff.
-            state_details = None
-            if job['schedule_state'] == 'ALIVE_BACKOFF':
-                state_details = 'In backoff, waiting for resources'
-            elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
-                priority = job.get('priority')
-                if (priority is not None and
-                        priority < highest_blocking_priority):
-                    # Job is lower priority than some other blocking job.
-                    state_details = 'Waiting for higher priority jobs to launch'
-                else:
-                    state_details = 'Waiting for other jobs to launch'
-
-            if state_details and job['failure_reason']:
-                job['details'] = f'{state_details} - {job["failure_reason"]}'
-            elif state_details:
-                job['details'] = state_details
-            elif job['failure_reason']:
-                job['details'] = f'Failure: {job["failure_reason"]}'
-            else:
-                job['details'] = None
+            _format_job_details(
+                job=job, highest_blocking_priority=highest_blocking_priority)
 
     return {
         'jobs': jobs,
@@ -2164,6 +2195,11 @@ class ManagedJobCodeGen:
         from sky.jobs import constants as managed_job_constants
 
         managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
+
+        # Plugins are only loaded for managed jobs version 13 and above.
+        if managed_job_version >= 13:
+            from sky.server import plugins
+            plugins.load_plugins(plugins.ExtensionContext())
         """)
 
     @classmethod

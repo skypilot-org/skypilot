@@ -21,9 +21,10 @@ import {
   UsersIcon,
   StarIcon,
   VolumeIcon,
+  KueueIcon,
   KeyIcon,
 } from '@/components/elements/icons';
-import { Settings, User } from 'lucide-react';
+import { Settings, User, Clock } from 'lucide-react';
 
 // Map icon names to icon components for plugin nav links
 const ICON_MAP = {
@@ -34,10 +35,13 @@ const ICON_MAP = {
   book: BookDocIcon,
   users: UsersIcon,
   volume: VolumeIcon,
+  clock: Clock,
+  kueue: KueueIcon,
 };
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
+import { UpgradeHint } from '@/components/elements/version-display';
 import { useGroupedNavLinks, usePluginRoutes } from '@/plugins/PluginProvider';
 
 // Create a context for sidebar state management
@@ -621,6 +625,9 @@ export function TopBar() {
 
                 <div className="border-l border-gray-200 h-6"></div>
 
+                {/* Version Display */}
+                <UpgradeHint />
+
                 {/* Config Button */}
                 <CustomTooltip
                   content="Configuration"
@@ -708,8 +715,6 @@ export function TopBar() {
               </div>
             )}
           </div>
-
-          <div className="border-l border-gray-200 h-6 mx-1"></div>
         </div>
       </div>
 

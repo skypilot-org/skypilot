@@ -139,3 +139,146 @@ Alternatively, pass the ``--wait-for`` flag to either ``sky autostop`` or ``sky 
 
    # Hard time limit: Stop after 10 minutes, regardless of running jobs or SSH sessions.
    sky autostop mycluster -i 10 --wait-for none
+
+.. _auto-stop-hooks:
+
+Autostop hooks
+~~~~~~~~~~~~~~
+
+To execute a script before autostopping, specify a hook in the autostop configuration.
+The hook script runs on the remote cluster before the cluster is stopped or torn down.
+This is useful for tasks like committing code, saving checkpoints, or performing cleanup operations.
+
+.. code-block:: yaml
+
+   resources:
+     autostop:
+       idle_minutes: 10
+       hook: |
+         cd my-code-base
+         git add .
+         git commit -m "Commit my code"
+         git push
+       hook_timeout: 300
+
+The hook script runs on the cluster and has access to the cluster's filesystem and environment variables.
+If the hook script fails (non-zero exit code), the autostop process will still continue,
+but a warning will be logged.
+
+**Hook Timeout**
+
+By default, autostop hooks have a **1-hour (3600 seconds) timeout**. If your hook
+takes longer than this, it will be killed and autostop will proceed. To
+customize the timeout in your YAML configuration:
+
+.. code-block:: yaml
+
+   resources:
+     autostop:
+       idle_minutes: 10
+       hook: |
+         # Long-running backup operation
+         tar -czf backup.tar.gz /large/dataset
+         aws s3 cp backup.tar.gz s3://my-bucket/
+       hook_timeout: 7200  # 2 hours in seconds
+
+**Important Notes:**
+
+- If the hook times out, autostop will proceed after logging a warning
+- The minimum timeout is 1 second
+- Hook execution will keep the cluster from terminating while it runs, occupying the resources. Be aware of that when setting ``idle_minutes``
+
+Common use cases for autostop hooks:
+
+.. dropdown:: Committing and pushing code changes
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             cd my-code-base
+             git add .
+             git commit -m "Auto-commit before shutdown"
+             git push
+
+.. dropdown:: Saving model checkpoints to persistent storage
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             # Save checkpoints to a mounted volume or cloud storage
+             cp -r /workspace/checkpoints/* /mnt/persistent-storage/checkpoints/
+             # Or upload to S3
+             aws s3 sync /workspace/checkpoints/ s3://my-bucket/checkpoints/
+
+.. dropdown:: Uploading logs or results to cloud storage
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             # Upload logs to S3
+             aws s3 sync /workspace/logs/ s3://my-bucket/logs/$(date +%Y%m%d)/
+             # Or upload to GCS
+             gcloud storage cp -r /workspace/results/ gs://my-bucket/results/$(date +%Y%m%d)/
+
+.. dropdown:: Syncing W&B runs before shutdown
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             # Sync W&B runs to the cloud before shutdown
+             # Sync all runs in the wandb directory
+             wandb sync ./wandb
+             # Or sync a specific run
+             # wandb sync ./wandb/run-20250813_124246-n67z9ude
+
+.. dropdown:: Sending notifications about the cluster shutdown
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             # Send email notification
+             echo "Cluster shutting down after idle period" | \
+               mail -s "Cluster Autostop" user@example.com
+             # Or send Slack notification via webhook
+             curl -X POST -H 'Content-type: application/json' \
+               --data '{"text":"Cluster shutting down after idle period"}' \
+               https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+
+.. dropdown:: Triggering downstream workflows
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             # Trigger an evaluation pipeline in Airflow
+             curl -X POST https://airflow.example.com/api/v1/dags/model_eval/dag_runs \
+                  -H "Content-Type: application/json" \
+                  -d '{"conf": {"model_path": "s3://my-bucket/models/v1"}}'
+
+.. dropdown:: Pushing model to Hugging Face Hub
+
+    .. code-block:: yaml
+
+       resources:
+         autostop:
+           idle_minutes: 10
+           hook: |
+             # Upload the trained model to Hugging Face Hub
+             huggingface-cli upload my-org/my-model /workspace/model-output .

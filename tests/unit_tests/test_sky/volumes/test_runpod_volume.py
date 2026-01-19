@@ -821,7 +821,8 @@ class TestRunPodProvisionVolume:
         monkeypatch.setattr('sky.utils.common_utils.get_user_hash',
                             lambda: 'user-hash')
         config = Cfg()
-        used_pods, used_clusters = runpod_prov.get_all_volumes_usedby([config])
+        used_pods, used_clusters, _ = runpod_prov.get_all_volumes_usedby(
+            [config])
         used_pods, used_clusters = runpod_prov.map_all_volumes_usedby(
             used_pods, used_clusters, config)
         assert used_pods == ['cluster-a-user-hash-head']
@@ -961,3 +962,71 @@ class TestRunPodProvisionVolume:
         used_pods, used_clusters = runpod_prov.get_volume_usedby(Cfg())
         assert used_pods == ['c1-head']
         assert used_clusters == []
+
+    def test_get_all_volumes_usedby_exception_handling(self, monkeypatch):
+        """Test that exceptions in get_volume_usedby are caught and handled."""
+
+        class CfgSuccess:
+            id_on_cloud = 'VID1'
+            name_on_cloud = 'vol-success'
+            name = 'vol-success'
+            zone = 'iad-1'
+            config = {}
+
+        class CfgFailure:
+            id_on_cloud = 'VID2'
+            name_on_cloud = 'vol-failure'
+            name = 'vol-failure'
+            zone = 'iad-1'
+            config = {}
+
+        # Mock GraphQL to raise exception for one volume but succeed for another
+        call_count = [0]
+
+        class _API:
+
+            class api:
+
+                class graphql:
+
+                    @staticmethod
+                    def run_graphql_query(query):
+                        call_count[0] += 1
+                        # First call (for vol-success) succeeds
+                        if call_count[0] == 1:
+                            return {
+                                'data': {
+                                    'myself': {
+                                        'pods': [{
+                                            'id': 'p1',
+                                            'name': 'cluster-a-user-hash-head',
+                                            'networkVolumeId': 'VID1'
+                                        }]
+                                    }
+                                }
+                            }
+                        # Second call (for vol-failure) raises exception
+                        raise RuntimeError('GraphQL query failed')
+
+        monkeypatch.setattr('sky.adaptors.runpod.runpod', _API)
+        monkeypatch.setattr('sky.global_user_state.get_clusters', lambda: [{
+            'name': 'cluster-a'
+        }])
+        monkeypatch.setattr('sky.utils.common_utils.get_user_hash',
+                            lambda: 'user-hash')
+
+        configs = [CfgSuccess(), CfgFailure()]
+        used_pods, used_clusters, failed_volume_names = runpod_prov.get_all_volumes_usedby(
+            configs)
+
+        # Successful volume should be in the results
+        assert 'vol-success' in used_pods
+        assert used_pods['vol-success'] == ['cluster-a-user-hash-head']
+        assert 'vol-success' in used_clusters
+        assert used_clusters['vol-success'] == ['cluster-a']
+
+        # Failed volume should not be in results but should be in failed_volume_names
+        assert 'vol-failure' not in used_pods
+        assert 'vol-failure' not in used_clusters
+        assert 'vol-failure' in failed_volume_names
+        assert len(failed_volume_names) == 1

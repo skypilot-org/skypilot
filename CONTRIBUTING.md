@@ -18,12 +18,13 @@ We use GitHub to track issues and features. For new contributors, we recommend l
 
 Follow the steps below to set up a local development environment for contributing to SkyPilot.
 
-#### Create a conda environment
-To avoid package conflicts, create and activate a clean conda environment:
+#### Create a virtual environment
+To avoid package conflicts, create and activate a clean virtual environment using [uv](https://docs.astral.sh/uv/):
 ```bash
-# SkyPilot requires 3.7 <= python <= 3.11.
-conda create -y -n sky python=3.10
-conda activate sky
+# SkyPilot requires python 3.9-3.11.
+# --seed is required to ensure pip is installed (needed for building wheels)
+uv venv --seed --python 3.11
+source .venv/bin/activate
 ```
 
 #### Install SkyPilot
@@ -37,18 +38,18 @@ cd skypilot
 git remote add upstream https://github.com/skypilot-org/skypilot.git
 
 # Install SkyPilot in editable mode
-pip install -e ".[all]"
+uv pip install -e ".[all]"
 # Alternatively, install specific cloud support only:
-# pip install -e ".[aws,azure,gcp,lambda]"
+# uv pip install -e ".[aws,azure,gcp,lambda]"
 
 # Install development dependencies
-pip install -r requirements-dev.txt
+uv pip install -r requirements-dev.txt
 ```
 
 #### (Optional) Install `pre-commit`
 You can also install `pre-commit` hooks to help automatically format your code on commit:
 ```bash
-pip install pre-commit
+uv pip install pre-commit
 pre-commit install
 ```
 
@@ -93,7 +94,7 @@ pytest tests/test_smoke.py --generic-cloud azure
 For profiling code, use:
 
 ```
-pip install py-spy # py-spy is a sampling profiler for Python programs
+uv pip install py-spy # py-spy is a sampling profiler for Python programs
 py-spy record -t -o sky.svg -- python -m sky.cli status # Or some other command
 py-spy top -- python -m sky.cli status # Get a live top view
 py-spy -h # For more options
@@ -158,7 +159,38 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
 - `export SKYPILOT_DEBUG=1` to show debugging logs (use logging.DEBUG level).
 - `export SKYPILOT_MINIMIZE_LOGGING=1` to minimize logging. Useful when trying to avoid multiple lines of output, such as for demos.
 
-### Test API server on Helm chart deployment
+### Testing the API server
+
+#### Local API server (recommended for development)
+
+For most development work, test with the local API server:
+
+```bash
+# Always restart API server after code changes to pick up changes
+sky api stop
+sky api start
+
+# Verify server is running
+sky api status
+```
+
+#### Mocking remote API server locally
+
+To test remote API server behavior locally:
+
+```bash
+# Start local API server (runs on port 46580 by default)
+sky api stop
+sky api start
+
+# Forward to a different port to simulate remote server
+socat TCP-LISTEN:46590,fork TCP:127.0.0.1:46580 &
+
+# Connect to the forwarded port as if it were a remote server
+sky api login -e http://127.0.0.1:46590
+```
+
+#### Test API server on Helm chart deployment
 
 By default, the [Helm Chart Deployment](https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html) will use the latest released API Server. To test the local change on API Server, you can follow the steps below.
 

@@ -26,7 +26,12 @@ provider:
 
 auth:
   ssh_user: {{ssh_user}}
-  # TODO(jwj): Modify this tmp workaround.
+  # TODO(jwj,kevin): Modify this tmp workaround.
+  # Right now there's a chicken-and-egg problem:
+  # 1. ssh_credential_from_yaml reads from the auth.ssh_private_key: ~/.sky/clients/.../ssh/sky-key
+  # 2. This is SkyPilot's generated key, not the Slurm cluster's key
+  # 3. The internal_file_mounts stage tries to rsync using sky-key, but its public key isn't on the remote yet
+  # 4. The public key only gets added by setup_commands, which runs AFTER file_mounts
   # ssh_private_key: {{ssh_private_key}}
   ssh_private_key: {{slurm_private_key}}
   ssh_proxy_command: {{slurm_proxy_command | tojson }}
@@ -70,9 +75,31 @@ initialization_commands: []
 # Increment the following for catching performance bugs easier:
 #   current num items (num SSH connections): 1
 setup_commands:
-  - {%- for initial_setup_command in initial_setup_commands %}
+  - |
+    {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
+    # Generate host key for sshd -i if not exists
+    mkdir -p ~{{ssh_user}}/.ssh && chmod 700 ~{{ssh_user}}/.ssh
+    [ -f ~{{ssh_user}}/.ssh/{{slurm_sshd_host_key_filename}} ] || ssh-keygen -t ed25519 -f ~{{ssh_user}}/.ssh/{{slurm_sshd_host_key_filename}} -N "" -q
+    # Add public key to user's authorized_keys if not already present
+    grep -qF 'skypilot:ssh_public_key_content' ~{{ssh_user}}/.ssh/authorized_keys 2>/dev/null || cat >> ~{{ssh_user}}/.ssh/authorized_keys <<'SKYPILOT_SSH_KEY_EOF'
+    skypilot:ssh_public_key_content
+    SKYPILOT_SSH_KEY_EOF
+    chmod 600 ~{{ssh_user}}/.ssh/authorized_keys
+
+    mkdir -p ~{{ssh_user}}/.sky
+    cat > ~{{ssh_user}}/.sky_ssh_rc <<'SKYPILOT_SSH_RC'
+    # Added by SkyPilot: override HOME for Slurm interactive sessions
+    if [ -n "${{slurm_cluster_name_env_var}}" ]; then
+        CLUSTER_DIR=~/.sky_clusters/${{slurm_cluster_name_env_var}}
+        if [ -d "$CLUSTER_DIR" ]; then
+            cd "$CLUSTER_DIR"
+            export HOME=$(pwd)
+        fi
+    fi
+    SKYPILOT_SSH_RC
+    grep -q "source ~/.sky_ssh_rc" ~{{ssh_user}}/.bashrc 2>/dev/null || (echo "" >> ~{{ssh_user}}/.bashrc && echo "source ~/.sky_ssh_rc" >> ~{{ssh_user}}/.bashrc)
     {{ setup_sky_dirs_commands }}
     {{ conda_installation_commands }}
     {{ skypilot_wheel_installation_commands }}
