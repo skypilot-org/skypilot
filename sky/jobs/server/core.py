@@ -581,8 +581,9 @@ def launch(
                     backend.run_on_head(local_handle,
                                         run_script,
                                         log_path=log_path)
-                    ux_utils.starting_message(
-                        f'Job submitted, ID: {consolidation_mode_job_id}')
+                    logger.info(
+                        ux_utils.starting_message(
+                            f'Job submitted, ID: {consolidation_mode_job_id}'))
                     return consolidation_mode_job_id, local_handle
 
     if pool is None:
