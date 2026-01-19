@@ -5,8 +5,10 @@ import warnings
 
 from sky.schemas.generated import managed_jobsv1_pb2 as sky_dot_schemas_dot_generated_dot_managed__jobsv1__pb2
 
-GRPC_GENERATED_VERSION = '1.76.0'
+GRPC_GENERATED_VERSION = '1.63.0'
 GRPC_VERSION = grpc.__version__
+EXPECTED_ERROR_RELEASE = '1.65.0'
+SCHEDULED_RELEASE_DATE = 'June 25, 2024'
 _version_not_supported = False
 
 try:
@@ -16,12 +18,15 @@ except ImportError:
     _version_not_supported = True
 
 if _version_not_supported:
-    raise RuntimeError(
+    warnings.warn(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in sky/schemas/generated/managed_jobsv1_pb2_grpc.py depends on'
+        + f' but the generated code in sky/schemas/generated/managed_jobsv1_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
+        + f' This warning will become an error in {EXPECTED_ERROR_RELEASE},'
+        + f' scheduled for release on {SCHEDULED_RELEASE_DATE}.',
+        RuntimeWarning
     )
 
 
@@ -131,7 +136,6 @@ def add_ManagedJobsServiceServicer_to_server(servicer, server):
     generic_handler = grpc.method_handlers_generic_handler(
             'managed_jobs.v1.ManagedJobsService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('managed_jobs.v1.ManagedJobsService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
