@@ -49,8 +49,14 @@ fi
 CURRENT_JOBS_MODE=$(echo "$CURRENT_CONFIG" | jq -r '.jobs.controller.consolidation_mode // false' 2>/dev/null || echo 'false')
 CURRENT_SERVE_MODE=$(echo "$CURRENT_CONFIG" | jq -r '.serve.controller.consolidation_mode // false' 2>/dev/null || echo 'false')
 
-NEEDS_JOBS_MODE=$([ "$JOBS_CONSOLIDATION" = true ] && [ "$CURRENT_JOBS_MODE" != "true" ] && echo "true" || echo "false")
-NEEDS_SERVE_MODE=$([ "$SERVE_CONSOLIDATION" = true ] && [ "$CURRENT_SERVE_MODE" != "true" ] && echo "true" || echo "false")
+NEEDS_JOBS_MODE=false
+if [ "$JOBS_CONSOLIDATION" = true ] && [ "$CURRENT_JOBS_MODE" != "true" ]; then
+    NEEDS_JOBS_MODE=true
+fi
+NEEDS_SERVE_MODE=false
+if [ "$SERVE_CONSOLIDATION" = true ] && [ "$CURRENT_SERVE_MODE" != "true" ]; then
+    NEEDS_SERVE_MODE=true
+fi
 
 # Only restart if needed
 if [ "$NEEDS_JOBS_MODE" = true ] || [ "$NEEDS_SERVE_MODE" = true ]; then
