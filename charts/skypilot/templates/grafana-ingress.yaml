@@ -1,4 +1,4 @@
-{{- if and .Values.grafana.enabled .Values.grafana.ingress.enableAuthedIngress }}
+{{- if and (not .Values.ingress.unified) .Values.grafana.enabled .Values.grafana.ingress.enableAuthedIngress }}
 {{- $fullName := include "skypilot.fullname" . -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -23,6 +23,9 @@ metadata:
     {{- end }}
     nginx.ingress.kubernetes.io/configuration-snippet: |
       proxy_set_header X-WEBAUTH-USER admin;
+    {{- if .Values.grafana.ingress.annotations }}
+    {{- toYaml .Values.grafana.ingress.annotations | nindent 4 }}
+    {{- end }}
 spec:
   ingressClassName: {{ .Values.grafana.ingress.ingressClassName }}
   rules:

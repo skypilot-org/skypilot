@@ -71,3 +71,6 @@ class VolumeStatus(enum.Enum):
 
     # Volume is being used
     IN_USE = 'IN_USE'
+
+    # Volume is not ready (e.g., PVC is pending, may eventually become ready)
+    NOT_READY = 'NOT_READY'

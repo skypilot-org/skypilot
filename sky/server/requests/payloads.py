@@ -487,7 +487,7 @@ class VolumeDeleteBody(RequestBody):
 
 class VolumeListBody(RequestBody):
     """The request body for the volume list endpoint."""
-    pass
+    refresh: bool = False
 
 
 class VolumeValidateBody(RequestBody):
@@ -864,6 +864,7 @@ class RequestPayload(BasePayload):
 
 class SlurmGpuAvailabilityRequestBody(RequestBody):
     """Request body for getting Slurm real-time GPU availability."""
+    slurm_cluster_name: Optional[str] = None
     name_filter: Optional[str] = None
     quantity_filter: Optional[int] = None
 

@@ -66,6 +66,7 @@ from sky.server import plugins
 from sky.server import server_utils
 from sky.server import state
 from sky.server import stream_utils
+from sky.server import version_check
 from sky.server import versions
 from sky.server.auth import authn
 from sky.server.auth import loopback
@@ -222,8 +223,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if request.state.auth_user is not None:
             return await call_next(request)
 
-        if managed_job_utils.is_consolidation_mode(
-        ) and loopback.is_loopback_request(request):
+        if loopback.is_loopback_request(request):
             return await call_next(request)
 
         if request.url.path.startswith('/api/health'):
@@ -530,6 +530,8 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             logger.debug(f'Request {event.id} already exists.')
     await schedule_on_boot_check_async()
     asyncio.create_task(cleanup_upload_ids())
+    # Start periodic version check task (runs daily)
+    asyncio.create_task(version_check.check_versions_periodically())
     if metrics_utils.METRICS_ENABLED:
         # Start monitoring the event loop lag in each server worker
         # event loop (process).
@@ -933,7 +935,7 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
         # Apply admin policy and validate DAG is blocking, run it in a separate
         # thread executor to avoid blocking the uvicorn event loop.
-        await context_utils.to_thread(validate_dag, dag)
+        await asyncio.to_thread(validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
         # Print the exception to the API server log.
         if env_options.Options.SHOW_DEBUG_INFO.get():
@@ -1072,7 +1074,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     logger.info(f'Uploaded zip file: {zip_file_path}')
     await unzip_file(zip_file_path, client_file_mounts_dir)
     if total_chunks > 1:
-        await context_utils.to_thread(shutil.rmtree, chunk_dir)
+        await asyncio.to_thread(shutil.rmtree, chunk_dir)
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
 
@@ -1149,7 +1151,7 @@ async def unzip_file(zip_file_path: pathlib.Path,
             # success/failure handling above
             zip_file_path.unlink(missing_ok=True)
 
-    await context_utils.to_thread(_do_unzip)
+    await asyncio.to_thread(_do_unzip)
 
 
 @app.post('/launch')
@@ -1416,8 +1418,7 @@ async def download(download_body: payloads.DownloadBody,
                 # CLI-friendly (default): entries with full paths for mapping
                 storage_utils.zip_files_and_folders(folders, zip_path)
 
-        await context_utils.to_thread(_zip_files_and_folders, folder_paths,
-                                      zip_path)
+        await asyncio.to_thread(_zip_files_and_folders, folder_paths, zip_path)
 
         # Add home path to the response headers, so that the client can replace
         # the remote path in the zip file to the local path.
@@ -1843,6 +1844,7 @@ async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
     for plugin_info in plugins.get_plugins():
         info = {
             'js_extension_path': plugin_info.js_extension_path,
+            'requires_early_init': plugin_info.requires_early_init,
         }
         for attr in ('name', 'version', 'commit'):
             value = getattr(plugin_info, attr, None)
@@ -1899,6 +1901,11 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
                                         detail='Authentication required')
 
     logger.debug(f'Health endpoint: request.state.auth_user = {user}')
+
+    # Get latest version from cache (returns None for dev versions
+    # or if not available)
+    latest_version = version_check.get_latest_version_for_current()
+
     return responses.APIHealthResponse(
         status=server_status,
         # Kept for backward compatibility, clients before 0.11.0 will read this
@@ -1920,6 +1927,8 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         ingress_basic_auth_enabled=os.environ.get(
             constants.SKYPILOT_INGRESS_BASIC_AUTH_ENABLED,
             'false').lower() == 'true',
+        # Latest version info (if available and newer than current)
+        latest_version=latest_version,
     )
 
 
@@ -2397,19 +2406,19 @@ async def all_contexts(request: fastapi.Request) -> None:
 # === Internal APIs ===
 @app.get('/api/completion/cluster_name')
 async def complete_cluster_name(incomplete: str,) -> List[str]:
-    return await context_utils.to_thread(
+    return await asyncio.to_thread(
         global_user_state.get_cluster_names_start_with, incomplete)
 
 
 @app.get('/api/completion/storage_name')
 async def complete_storage_name(incomplete: str,) -> List[str]:
-    return await context_utils.to_thread(
+    return await asyncio.to_thread(
         global_user_state.get_storage_names_start_with, incomplete)
 
 
 @app.get('/api/completion/volume_name')
 async def complete_volume_name(incomplete: str,) -> List[str]:
-    return await context_utils.to_thread(
+    return await asyncio.to_thread(
         global_user_state.get_volume_names_start_with, incomplete)
 
 

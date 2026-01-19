@@ -56,7 +56,6 @@ function JobDetails() {
   const [refreshLogsFlag, setRefreshLogsFlag] = useState(0);
   const [refreshControllerLogsFlag, setRefreshControllerLogsFlag] = useState(0);
   const [logExtractedLinks, setLogExtractedLinks] = useState({});
-  const [isLinksExpanded, setIsLinksExpanded] = useState(false);
   const isMobile = useMobile();
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
@@ -269,57 +268,6 @@ function JobDetails() {
               }}
               wrapperClassName="mt-6"
             />
-            {/* Links Section */}
-            <div id="links-section" className="mt-6">
-              <Card>
-                <button
-                  onClick={() => setIsLinksExpanded(!isLinksExpanded)}
-                  className="flex items-center justify-between w-full px-4 py-4 text-left focus:outline-none"
-                >
-                  <div className="flex items-center">
-                    {isLinksExpanded ? (
-                      <ChevronDownIcon className="w-5 h-5 mr-2 text-gray-500" />
-                    ) : (
-                      <ChevronRightIcon className="w-5 h-5 mr-2 text-gray-500" />
-                    )}
-                    <h3 className="text-lg font-semibold">Links</h3>
-                    {detailJobData.links &&
-                      Object.keys(detailJobData.links).length > 0 && (
-                        <span className="ml-2 text-sm text-gray-500">
-                          ({Object.keys(detailJobData.links).length})
-                        </span>
-                      )}
-                  </div>
-                </button>
-                {isLinksExpanded && (
-                  <div className="px-4 pb-4">
-                    {detailJobData.links &&
-                    Object.keys(detailJobData.links).length > 0 ? (
-                      <div className="space-y-4">
-                        {Object.entries(detailJobData.links).map(
-                          ([label, url]) => (
-                            <div key={label}>
-                              <a
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:text-blue-800 hover:underline text-base"
-                              >
-                                {label}
-                              </a>
-                            </div>
-                          )
-                        )}
-                      </div>
-                    ) : (
-                      <div className="text-gray-500 text-sm">
-                        No links found
-                      </div>
-                    )}
-                  </div>
-                )}
-              </Card>
-            </div>
 
             {/* Logs Section */}
             <div id="logs-section" className="mt-6">
@@ -955,49 +903,16 @@ function JobDetailsContent({
                     ? url
                     : `https://${url}`;
 
-                // Check if URL points to an image
-                const imageExtensions = [
-                  '.png',
-                  '.jpg',
-                  '.jpeg',
-                  '.gif',
-                  '.webp',
-                  '.svg',
-                  '.bmp',
-                ];
-                const isImage = imageExtensions.some((ext) =>
-                  url.toLowerCase().endsWith(ext)
-                );
-
                 return (
-                  <div key={label} className="flex flex-col">
-                    <a
-                      href={normalizedUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-800 hover:underline"
-                    >
-                      {label}
-                    </a>
-                    {isImage && (
-                      <a
-                        href={normalizedUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-2"
-                      >
-                        <img
-                          src={normalizedUrl}
-                          alt={label}
-                          className="max-w-full max-h-48 rounded-md border border-gray-200 shadow-sm hover:shadow-md transition-shadow"
-                          onError={(e) => {
-                            // Hide the image if it fails to load
-                            e.target.style.display = 'none';
-                          }}
-                        />
-                      </a>
-                    )}
-                  </div>
+                  <a
+                    key={label}
+                    href={normalizedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                  >
+                    {label}
+                  </a>
                 );
               })}
             </div>
@@ -1006,6 +921,20 @@ function JobDetailsContent({
           )}
         </div>
       </div>
+
+      {/* Queue Details section - right column */}
+      {jobData.details && (
+        <PluginSlot
+          name="jobs.detail.queue_details"
+          context={{
+            details: jobData.details,
+            queueName: jobData.kueue_queue_name,
+            infra: jobData.full_infra,
+            jobData: jobData,
+            title: 'Queue Details',
+          }}
+        />
+      )}
 
       {/* Entrypoint section - full width row */}
       {(jobData.entrypoint || jobData.dag_yaml) && (

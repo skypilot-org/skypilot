@@ -536,7 +536,7 @@ def test_aws_manual_restart_recovery():
             # instance would get a new IP address.
             # We should see a warning message on how to recover
             # from this state.
-            f'sky status -r {name} | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."',
+            f's=$(sky status -r {name}) && echo "$s" && echo "$s" | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."',
             # Recover the cluster.
             f'sky start -y {name}',
             # Wait for the cluster to be up.
@@ -1735,9 +1735,9 @@ def test_loopback_access_with_basic_auth(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'loopback_access',
         [
-            # Without consolidation mode, loopback access should not be allowed.
+            # Without consolidation mode, loopback access should be allowed.
             f'export {constants.ENV_VAR_ENABLE_BASIC_AUTH}=true && {smoke_tests_utils.SKY_API_RESTART}',
-            f's=$(SKYPILOT_DEBUG=0 sky status 2>&1 || true) && echo "$s" | grep "401 Client Error: Unauthorized for url: http://127.0.0.1:46580"',
+            f's=$(SKYPILOT_DEBUG=0 sky status) && echo "$s" | grep "Clusters"',
             # With consolidation mode, loopback access should be allowed.
             f'export {constants.ENV_VAR_ENABLE_BASIC_AUTH}=true && export {skypilot_config.ENV_VAR_GLOBAL_CONFIG}={server_config_path} && {smoke_tests_utils.SKY_API_RESTART}',
             f's=$(SKYPILOT_DEBUG=0 sky status) && echo "$s" | grep "Clusters"',

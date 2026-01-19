@@ -4,7 +4,7 @@ import collections
 import dataclasses
 import getpass
 import os
-from typing import Any, ClassVar, Dict, Optional
+from typing import Any, ClassVar, Dict, List, Optional
 
 import pydantic
 
@@ -79,6 +79,11 @@ class KubernetesNodeInfo:
     memory_free_gb: Optional[float] = None
     # Whether the node is ready (all conditions are satisfied)
     is_ready: bool = True
+    # Whether the node is cordoned (spec.unschedulable is true)
+    is_cordoned: bool = False
+    # List of taints on the node, each taint is a dict with 'key', 'value',
+    # 'effect'
+    taints: Optional[List[Dict[str, Any]]] = None
 
 
 @dataclasses.dataclass

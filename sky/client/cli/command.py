@@ -1807,6 +1807,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     # Do not show job queue if user specifies clusters, and if user
     # specifies --ip or --endpoint(s).
     show_managed_jobs = show_managed_jobs and not any([clusters, ip, endpoints])
+    show_pools = show_pools and not any([clusters, ip, endpoints])
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
@@ -3734,7 +3735,10 @@ def show_gpus(
                     continue
 
                 node_is_ready = getattr(node_info, 'is_ready', True)
-                if not node_is_ready:
+                node_is_cordoned = getattr(node_info, 'is_cordoned', False)
+                node_taints = getattr(node_info, 'taints', None) or []
+                node_is_tainted = len(node_taints) > 0
+                if not node_is_ready or node_is_cordoned or node_is_tainted:
                     not_ready_counts[accelerator_type] += accelerator_count
             return not_ready_counts
 
@@ -3806,7 +3810,8 @@ def show_gpus(
 
     def _get_slurm_realtime_gpu_tables(
         name_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None
+        quantity_filter: Optional[int] = None,
+        slurm_cluster_name: Optional[str] = None,
     ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
                Optional['prettytable.PrettyTable']]:
         """Get Slurm GPU availability tables.
@@ -3825,7 +3830,9 @@ def show_gpus(
 
         realtime_gpu_availability_lists = sdk.stream_and_get(
             sdk.realtime_slurm_gpu_availability(
-                name_filter=name_filter, quantity_filter=quantity_filter))
+                name_filter=name_filter,
+                quantity_filter=quantity_filter,
+                slurm_cluster_name=slurm_cluster_name))
         if not realtime_gpu_availability_lists:
             err_msg = 'No GPUs found in any Slurm partition. '
             debug_msg = 'To further debug, run: sky check slurm '
@@ -3887,7 +3894,7 @@ def show_gpus(
             context_title_str: str = 'CONTEXT') -> str:
         node_table = log_utils.create_table([
             context_title_str, 'NODE', 'vCPU', 'Memory (GB)', 'GPU',
-            'GPU UTILIZATION'
+            'GPU UTILIZATION', 'NODE STATUS'
         ])
 
         no_permissions_str = '<no permissions>'
@@ -3946,15 +3953,41 @@ def show_gpus(
                 utilization_str = (
                     f'{available} of '
                     f'{node_info.total["accelerator_count"]} free')
+
+                # Build node status string
+                status_info = []
                 # Check if node is ready (defaults to True for backward
                 # compatibility with older server versions)
                 node_is_ready = getattr(node_info, 'is_ready', True)
                 if not node_is_ready:
-                    utilization_str += ' (Node NotReady)'
+                    status_info.append('NotReady')
+                node_is_cordoned = getattr(node_info, 'is_cordoned', False)
+                if node_is_cordoned:
+                    status_info.append('Cordoned')
+                # Add taint info grouped by effect
+                taints = getattr(node_info, 'taints', None)
+                if taints:
+                    # Group taints by effect: 'NoSchedule Taint [key1, key2],
+                    # NoExecute Taint [key3]'
+                    taints_by_effect: Dict[str, List[str]] = {}
+                    for taint in taints:
+                        effect = taint['effect']
+                        key = taint['key']
+                        if effect not in taints_by_effect:
+                            taints_by_effect[effect] = []
+                        taints_by_effect[effect].append(key)
+                    taints_strs = []
+                    for effect, keys in taints_by_effect.items():
+                        taints_strs.append(
+                            f'{effect} Taint [{", ".join(keys)}]')
+                    if taints_strs:
+                        status_info.append(', '.join(taints_strs))
 
+                status_str = ', '.join(
+                    status_info) if status_info else 'Healthy'
                 node_table.add_row([
                     context_name, node_name, cpu_str, memory_str, acc_type,
-                    utilization_str
+                    utilization_str, status_str
                 ])
 
         k8s_per_node_acc_message = (f'{cloud_str} per-node GPU availability')
@@ -4203,7 +4236,8 @@ def show_gpus(
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
                     slurm_realtime_infos, total_table = (
-                        _get_slurm_realtime_gpu_tables())
+                        _get_slurm_realtime_gpu_tables(
+                            slurm_cluster_name=region))
                 except ValueError as e:
                     if not cloud_is_slurm:
                         # Make it a note if cloud is not slurm
@@ -4334,7 +4368,8 @@ def show_gpus(
             try:
                 slurm_realtime_infos, total_table = (
                     _get_slurm_realtime_gpu_tables(name_filter=name,
-                                                   quantity_filter=quantity))
+                                                   quantity_filter=quantity,
+                                                   slurm_cluster_name=region))
 
                 yield from _format_slurm_realtime_gpu(total_table,
                                                       slurm_realtime_infos,
@@ -4712,10 +4747,18 @@ def _build_volume_override_config(
               is_flag=True,
               required=False,
               help='Show all information in full.')
+@click.option('--refresh',
+              '-r',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Refresh volume state from cloud APIs before listing. '
+              'Without this flag, cached data is returned which is updated '
+              'periodically by the background daemon.')
 @usage_lib.entrypoint
-def volumes_ls(verbose: bool):
+def volumes_ls(verbose: bool, refresh: bool):
     """List volumes managed by SkyPilot."""
-    request_id = volumes_sdk.ls()
+    request_id = volumes_sdk.ls(refresh=refresh)
     all_volumes = sdk.stream_and_get(request_id)
     volume_table = table_utils.format_volume_table(all_volumes,
                                                    show_all=verbose)
@@ -6635,6 +6678,9 @@ def api_start(deploy: bool, host: str, foreground: bool,
                   host=host,
                   foreground=foreground,
                   enable_basic_auth=enable_basic_auth)
+    api_server_url = server_common.get_server_url(host)
+    api_server_info = server_common.get_api_server_status(api_server_url)
+    server_common.check_and_print_upgrade_hint(api_server_info, api_server_url)
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
@@ -6906,6 +6952,8 @@ def api_info():
                f'version: {api_server_info.version}\n'
                f'{ux_utils.INDENT_SYMBOL}User: {user.name} ({user.id})\n'
                f'{ux_utils.INDENT_LAST_SYMBOL}{location}')
+    # Show upgrade hint if available
+    server_common.check_and_print_upgrade_hint(api_server_info, url)
 
 
 @cli.group(cls=_NaturalOrderGroup)

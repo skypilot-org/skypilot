@@ -84,6 +84,8 @@ class APIHealthResponse(ResponseBaseModel):
     service_account_token_enabled: bool = False
     # Whether basic auth on ingress is enabled
     ingress_basic_auth_enabled: bool = False
+    # Latest version info (if available)
+    latest_version: Optional[str] = None
 
 
 class StatusResponse(ResponseBaseModel):
@@ -229,3 +231,6 @@ class VolumeRecord(ResponseBaseModel):
     usedby_clusters: List[str]
     is_ephemeral: bool = False
     usedby_fetch_failed: bool = False
+    # Error message for volume in ERROR state (e.g., PVC pending due to
+    # access mode mismatch)
+    error_message: Optional[str] = None

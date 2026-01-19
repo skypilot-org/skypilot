@@ -196,6 +196,9 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`vast <config-yaml-vast>`:
     :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
+    :ref:`create_instance_kwargs <config-yaml-vast-create-instance-kwargs>`:
+      template_hash: f0e124f0e98bfbc2ecb05dc713009ee7
+      env: "-e YOUR_CUSTOM=YOUR_VAL"
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
@@ -1265,6 +1268,7 @@ Can be one of:
 
 - ``loadbalancer``: Use LoadBalancer service to expose ports.
 - ``nodeport``: Use NodePort service to expose ports.
+- ``podip``: Use Pod IPs to expose ports. Cannot be accessed from outside the cluster.
 
 Default: ``loadbalancer``.
 
@@ -1713,6 +1717,108 @@ may only be available on non-datacenter offers. This config filters both the cat
 can be overridden per task via :ref:`config flag <config-client-cli-flag>`.
 
 Default: ``false``
+
+.. _config-yaml-vast-create-instance-kwargs:
+
+``vast.create_instance_kwargs``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Additional parameters to pass to the Vast API when creating instances (optional).
+
+This allows full access to Vast's instance creation options. User-provided
+parameters are passed through to the Vast API.
+
+.. dropdown:: Supported parameters
+
+    ``image``
+        Docker image to use for the instance. If not specified, SkyPilot uses the image from the task
+        configuration. When using a template, this is not required. (e.g vastai/base-image:@vastai-automatic-tag)
+
+    ``env``
+        Environment variables and port mappings (e.g., ``"-e KEY=value -p 8080:8080"``).
+
+    ``price`` / ``bid_price``
+        Bid price for the instance. For preemptible instances, if not specified,
+        SkyPilot uses the minimum bid price from the offer.
+
+    ``disk``
+        Disk size in GB. If not specified, SkyPilot uses the disk size from the
+        task configuration.
+
+    ``label``
+        Instance label. If not specified, SkyPilot uses the cluster name
+        (e.g., ``cluster-name-head`` or ``cluster-name-worker``).
+
+    ``extra``
+        Extra docker run arguments to pass to the container.
+
+    ``onstart_cmd``
+        Command to run on instance start. SkyPilot prepends its own initialization
+        commands to this.
+
+    ``onstart``
+        Path to a local script file to run on instance start. The file contents
+        are read and appended to ``onstart_cmd``.
+
+    ``login``
+        Docker registry login credentials (e.g., ``"-u user -p pass registry"``).
+        Required when using private Docker registries.
+
+    ``image_login``
+        Docker registry credentials if needed.
+        Required when using private Docker registries.
+
+    ``python_utf8``
+        Enable Python UTF-8 mode (boolean true | false).
+
+    ``lang_utf8``
+        Enable system UTF-8 locale (boolean true | false).
+
+    ``jupyter_lab``
+        Use JupyterLab instead of Jupyter Notebook (boolean true | false).
+
+    ``jupyter_dir``
+        Jupyter notebook directory path.
+
+    ``force``
+        Force instance creation even if warnings are present (boolean true | false).
+
+    ``cancel_unavail``
+        Cancel the request if the instance becomes unavailable (boolean true | false).
+
+    ``template_hash`` / ``template_hash_id``
+        Use a Vast template by its hash ID. When specified, ``image`` and ``disk``
+        are not required as they come from the template.
+
+    ``args``
+        Custom docker command arguments as a list of strings.
+
+    ``user``
+        Run the container as a specific user.
+
+    ``vm``
+        Whether this is a VM instance. (boolean true | false)
+
+Example:
+
+.. code-block:: yaml
+
+  vast:
+    datacenter_only: true
+    create_instance_kwargs:
+      python_utf8: true
+      lang_utf8: true
+      extra: "--shm-size=16g"
+      onstart_cmd: "echo 'Instance started'"
+
+Example using a Vast template:
+
+.. code-block:: yaml
+
+  vast:
+    create_instance_kwargs:
+      template_hash_id: "abc123def456"
+      price: 0.50
 
 .. _config-yaml-rbac:
 
