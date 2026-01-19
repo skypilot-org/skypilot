@@ -449,7 +449,7 @@ FAQs
         rm -rf /var/lib/apt/lists/*
 
     # Install conda and other python dependencies
-    RUN curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && \
+    RUN curl https://repo.anaconda.com/miniconda/Miniconda3-py311_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && \
         bash Miniconda3-Linux-x86_64.sh -b && \
         eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true && conda activate base && \
         grep "# >>> conda initialize >>>" ~/.bashrc || { conda init && source ~/.bashrc; } && \
