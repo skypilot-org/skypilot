@@ -306,6 +306,12 @@
                 "type": "object"
             }
         },
+        "fullnameOverride": {
+            "type": [
+                "string",
+                "null"
+            ]
+        },
         "gcpCredentials": {
             "type": "object",
             "properties": {
@@ -465,6 +471,9 @@
                             "type": "boolean"
                         }
                     }
+                },
+                "unified": {
+                    "type": "boolean"
                 }
             }
         },

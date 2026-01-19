@@ -55,11 +55,17 @@ import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import {
+  useTableColumns,
+  usePluginComponents,
+  useMergedTableColumns,
+} from '@/plugins/PluginProvider';
+import {
   FilterDropdown,
   Filters,
   updateURLParams as sharedUpdateURLParams,
   updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
   buildFilterUrl,
+  evaluateCondition,
 } from '@/components/shared/FilterSystem';
 
 // Define status groups for active and finished jobs
@@ -100,6 +106,10 @@ const PROPERTY_OPTIONS = [
   {
     label: 'Pool',
     value: 'pool',
+  },
+  {
+    label: 'Labels',
+    value: 'labels',
   },
 ];
 
@@ -186,6 +196,7 @@ export function ManagedJobs() {
     user: [],
     workspace: [],
     pool: [],
+    labels: [],
   });
   const [preloadingComplete, setPreloadingComplete] = useState(false);
   const [lastFetchedTime, setLastFetchedTime] = useState(null);
@@ -268,6 +279,7 @@ export function ManagedJobs() {
     propertyMap.set('user', 'User');
     propertyMap.set('workspace', 'Workspace');
     propertyMap.set('pool', 'Pool');
+    propertyMap.set('labels', 'Labels');
 
     const urlFilters = sharedUpdateFiltersByURLParams(router, propertyMap);
     setFilters(urlFilters);
@@ -655,12 +667,20 @@ export function ManagedJobsTable({
     const users = new Set();
     const workspaces = new Set();
     const pools = new Set();
+    const labels = new Set();
 
     data.forEach((job) => {
       if (job.name) names.add(job.name);
       if (job.user) users.add(job.user);
       if (job.workspace) workspaces.add(job.workspace);
       if (job.pool) pools.add(job.pool);
+
+      // Extract labels - add only key:value pairs
+      const jobLabels = job.labels || {};
+      Object.entries(jobLabels).forEach(([key, value]) => {
+        // Add key:value pair format only
+        labels.add(`${key}:${value}`);
+      });
     });
 
     // Extract pool names from poolsData, but only include pools that:
@@ -696,23 +716,30 @@ export function ManagedJobsTable({
       user: Array.from(users).sort(),
       workspace: Array.from(workspaces).sort(),
       pool: Array.from(pools).sort(),
+      labels: Array.from(labels).sort(),
     });
   }, [data, poolsData, setValueList]);
 
-  const requestSort = (key) => {
-    let direction = 'ascending';
-    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
-      direction = 'descending';
-    }
-    setSortConfig({ key, direction });
-  };
+  const requestSort = React.useCallback(
+    (key) => {
+      let direction = 'ascending';
+      if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+        direction = 'descending';
+      }
+      setSortConfig({ key, direction });
+    },
+    [sortConfig]
+  );
 
-  const getSortDirection = (key) => {
-    if (sortConfig.key === key) {
-      return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
-    }
-    return '';
-  };
+  const getSortDirection = React.useCallback(
+    (key) => {
+      if (sortConfig.key === key) {
+        return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
+      }
+      return '';
+    },
+    [sortConfig]
+  );
 
   // Calculate active and finished counts
   const counts = React.useMemo(() => {
@@ -742,10 +769,24 @@ export function ManagedJobsTable({
     return statusGroups[activeTab].includes(status);
   };
 
-  // Server already applied all filters including status filtering
+  // Server already applied some filters (name, user, workspace, pool, status)
+  // But we need to apply client-side filtering for labels
   const filteredData = React.useMemo(() => {
-    return data;
-  }, [data]);
+    let filtered = data;
+
+    // Apply client-side label filtering if present
+    const labelFilter = filters?.find(
+      (f) => (f.property || '').toLowerCase() === 'labels'
+    );
+
+    if (labelFilter && labelFilter.value) {
+      filtered = filtered.filter((item) => {
+        return evaluateCondition(item, labelFilter);
+      });
+    }
+
+    return filtered;
+  }, [data, filters]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -818,6 +859,387 @@ export function ManagedJobsTable({
     setPageSize(newSize);
     setCurrentPage(1); // Reset to first page when changing page size
   };
+
+  // Define base columns with their order
+  const baseColumns = React.useMemo(
+    () => [
+      {
+        id: 'id',
+        order: 0,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('id')}
+          >
+            ID{getSortDirection('id')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            <Link href={`/jobs/${item.id}`} className="text-blue-600">
+              {item.id}
+            </Link>
+          </TableCell>
+        ),
+      },
+      {
+        id: 'name',
+        order: 1,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('name')}
+          >
+            Name{getSortDirection('name')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            <Link href={`/jobs/${item.id}`} className="text-blue-600">
+              {item.name}
+            </Link>
+          </TableCell>
+        ),
+      },
+      {
+        id: 'user',
+        order: 2,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('user')}
+          >
+            User{getSortDirection('user')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            <UserDisplay username={item.user} userHash={item.user_hash} />
+          </TableCell>
+        ),
+      },
+      {
+        id: 'workspace',
+        order: 2.5,
+        conditional: true, // Only show when shouldShowWorkspace is true
+        renderHeader: () =>
+          shouldShowWorkspace ? (
+            <TableHead
+              className="sortable whitespace-nowrap"
+              onClick={() => requestSort('workspace')}
+            >
+              Workspace{getSortDirection('workspace')}
+            </TableHead>
+          ) : null,
+        renderCell: (item) =>
+          shouldShowWorkspace ? (
+            <TableCell>
+              <Link
+                href="/workspaces"
+                className="text-gray-700 hover:text-blue-600 hover:underline"
+              >
+                {item.workspace || 'default'}
+              </Link>
+            </TableCell>
+          ) : null,
+      },
+      {
+        id: 'submitted',
+        order: 3,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('submitted_at')}
+          >
+            Submitted{getSortDirection('submitted_at')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>{formatSubmittedTime(item.submitted_at)}</TableCell>
+        ),
+      },
+      {
+        id: 'duration',
+        order: 4,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('job_duration')}
+          >
+            Duration{getSortDirection('job_duration')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>{formatDuration(item.job_duration)}</TableCell>
+        ),
+      },
+      {
+        id: 'status',
+        order: 5,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('status')}
+          >
+            Status{getSortDirection('status')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            <PluginSlot
+              name="jobs.table.status.badge"
+              context={item}
+              fallback={
+                <StatusBadge
+                  status={item.status}
+                  statusTooltip={item.statusTooltip}
+                />
+              }
+            />
+          </TableCell>
+        ),
+      },
+      {
+        id: 'infra',
+        order: 6,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('infra')}
+          >
+            Infra{getSortDirection('infra')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            {item.infra && item.infra !== '-' ? (
+              <NonCapitalizedTooltip
+                content={item.full_infra || item.infra}
+                className="text-sm text-muted-foreground"
+              >
+                <span>
+                  <Link href="/infra" className="text-blue-600 hover:underline">
+                    {item.cloud || item.infra.split('(')[0].trim()}
+                  </Link>
+                  {item.infra.includes('(') && (
+                    <span>
+                      {' ' +
+                        (() => {
+                          const NAME_TRUNCATE_LENGTH =
+                            UI_CONFIG.NAME_TRUNCATE_LENGTH;
+                          const fullRegionPart = item.infra.substring(
+                            item.infra.indexOf('(')
+                          );
+                          const regionContent = fullRegionPart.substring(
+                            1,
+                            fullRegionPart.length - 1
+                          );
+
+                          if (regionContent.length <= NAME_TRUNCATE_LENGTH) {
+                            return fullRegionPart;
+                          }
+
+                          const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+                          return `(${truncatedRegion})`;
+                        })()}
+                    </span>
+                  )}
+                </span>
+              </NonCapitalizedTooltip>
+            ) : (
+              <span>{item.infra || '-'}</span>
+            )}
+          </TableCell>
+        ),
+      },
+      {
+        id: 'requested_resources',
+        order: 7,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('cluster')}
+          >
+            Requested Resources{getSortDirection('cluster')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            <NonCapitalizedTooltip
+              content={
+                item.requested_resources ||
+                item.resources_str_full ||
+                item.resources_str ||
+                '-'
+              }
+              className="text-sm text-muted-foreground"
+            >
+              <span>
+                {item.requested_resources || item.resources_str || '-'}
+              </span>
+            </NonCapitalizedTooltip>
+          </TableCell>
+        ),
+      },
+      {
+        id: 'recoveries',
+        order: 8,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('recoveries')}
+          >
+            Recoveries{getSortDirection('recoveries')}
+          </TableHead>
+        ),
+        renderCell: (item) => <TableCell>{item.recoveries}</TableCell>,
+      },
+      {
+        id: 'pool',
+        order: 9.5,
+        conditional: true, // Only show when shouldShowPool is true
+        renderHeader: () =>
+          shouldShowPool ? (
+            <TableHead
+              className="sortable whitespace-nowrap"
+              onClick={() => requestSort('pool')}
+            >
+              Pool{getSortDirection('pool')}
+            </TableHead>
+          ) : null,
+        renderCell: (item) =>
+          shouldShowPool ? (
+            <TableCell>
+              <div
+                className={
+                  poolsLoading ? 'blur-sm transition-all duration-300' : ''
+                }
+              >
+                {poolsLoading
+                  ? '-'
+                  : renderPoolLink(item.pool, item.pool_hash, poolsData)}
+              </div>
+            </TableCell>
+          ) : null,
+      },
+      {
+        id: 'details',
+        order: 10,
+        renderHeader: () => <TableHead>Details</TableHead>,
+        renderCell: (item) => (
+          <TableCell>
+            {item.details ? (
+              <TruncatedDetails
+                text={item.details}
+                rowId={item.id}
+                expandedRowId={expandedRowId}
+                setExpandedRowId={setExpandedRowId}
+              />
+            ) : (
+              '-'
+            )}
+          </TableCell>
+        ),
+      },
+      {
+        id: 'logs',
+        order: 11,
+        renderHeader: () => <TableHead>Logs</TableHead>,
+        renderCell: (item) => (
+          <TableCell>
+            <Status2Actions
+              jobParent="/jobs"
+              jobId={item.id}
+              managed={true}
+              workspace={item.workspace}
+            />
+          </TableCell>
+        ),
+      },
+    ],
+    [
+      requestSort,
+      getSortDirection,
+      shouldShowWorkspace,
+      shouldShowPool,
+      expandedRowId,
+      poolsLoading,
+      poolsData,
+    ]
+  );
+
+  // Transform function to convert plugin columns to the format expected by the table
+  const transformPluginColumn = React.useCallback(
+    (col) => ({
+      id: col.id,
+      order: col.header.order,
+      isPlugin: true,
+      pluginColumn: col,
+      renderHeader: () => {
+        const baseClasses = col.header.sortKey
+          ? 'sortable whitespace-nowrap'
+          : 'whitespace-nowrap';
+        const className = `${baseClasses}${col.header.className ? ' ' + col.header.className : ''}`;
+        return (
+          <TableHead
+            className={className}
+            onClick={
+              col.header.sortKey
+                ? () => requestSort(col.header.sortKey)
+                : undefined
+            }
+          >
+            {col.header.label}
+            {col.header.sortKey ? getSortDirection(col.header.sortKey) : ''}
+          </TableHead>
+        );
+      },
+      renderCell: (item) => {
+        const context = {
+          item,
+          shouldShowWorkspace,
+          shouldShowPool,
+          expandedRowId,
+          setExpandedRowId,
+          expandedRowRef,
+        };
+        const cellContent = col.cell.render(item, context);
+        return (
+          <TableCell className={col.cell.className || ''}>
+            {cellContent}
+          </TableCell>
+        );
+      },
+    }),
+    [
+      requestSort,
+      getSortDirection,
+      shouldShowWorkspace,
+      shouldShowPool,
+      expandedRowId,
+      setExpandedRowId,
+      expandedRowRef,
+    ]
+  );
+
+  // Merge base and plugin columns using the plugin system
+  // Plugin columns with the same ID as base columns will automatically replace them
+  const visibleColumns = useMergedTableColumns(
+    'jobs',
+    baseColumns,
+    {
+      shouldShowColumn: (columnId) => {
+        // Handle conditional columns
+        if (columnId === 'workspace') return shouldShowWorkspace;
+        if (columnId === 'pool') return shouldShowPool;
+        return true;
+      },
+    },
+    transformPluginColumn
+  );
+
+  // Calculate dynamic colSpan (used for expanded rows)
+  const totalColSpan = visibleColumns.length;
 
   return (
     <div className="relative">
@@ -984,90 +1406,16 @@ export function ManagedJobsTable({
           <Table className="min-w-full">
             <TableHeader>
               <TableRow>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('id')}
-                >
-                  ID{getSortDirection('id')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('name')}
-                >
-                  Name{getSortDirection('name')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('user')}
-                >
-                  User{getSortDirection('user')}
-                </TableHead>
-                {shouldShowWorkspace && (
-                  <TableHead
-                    className="sortable whitespace-nowrap"
-                    onClick={() => requestSort('workspace')}
-                  >
-                    Workspace{getSortDirection('workspace')}
-                  </TableHead>
+                {visibleColumns.map((col) =>
+                  React.cloneElement(col.renderHeader(), { key: col.id })
                 )}
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('submitted_at')}
-                >
-                  Submitted{getSortDirection('submitted_at')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('job_duration')}
-                >
-                  Duration{getSortDirection('job_duration')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('status')}
-                >
-                  Status{getSortDirection('status')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('infra')}
-                >
-                  Infra{getSortDirection('infra')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('cluster')}
-                >
-                  Resources{getSortDirection('cluster')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('recoveries')}
-                >
-                  Recoveries{getSortDirection('recoveries')}
-                </TableHead>
-                {shouldShowPool && (
-                  <TableHead
-                    className="sortable whitespace-nowrap"
-                    onClick={() => requestSort('pool')}
-                  >
-                    Pool{getSortDirection('pool')}
-                  </TableHead>
-                )}
-
-                <TableHead>Details</TableHead>
-                <TableHead>Logs</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading && isInitialLoad ? (
                 <TableRow>
                   <TableCell
-                    colSpan={
-                      11 +
-                      (shouldShowWorkspace ? 1 : 0) +
-                      (shouldShowPool ? 1 : 0)
-                    }
+                    colSpan={totalColSpan}
                     className="text-center py-6 text-gray-500"
                   >
                     <div className="flex justify-center items-center">
@@ -1081,163 +1429,16 @@ export function ManagedJobsTable({
                   {paginatedData.map((item) => (
                     <React.Fragment key={item.task_job_id}>
                       <TableRow>
-                        <TableCell>
-                          <Link
-                            href={`/jobs/${item.id}`}
-                            className="text-blue-600"
-                          >
-                            {item.id}
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <Link
-                            href={`/jobs/${item.id}`}
-                            className="text-blue-600"
-                          >
-                            {item.name}
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <UserDisplay
-                            username={item.user}
-                            userHash={item.user_hash}
-                          />
-                        </TableCell>
-                        {shouldShowWorkspace && (
-                          <TableCell>
-                            <Link
-                              href="/workspaces"
-                              className="text-gray-700 hover:text-blue-600 hover:underline"
-                            >
-                              {item.workspace || 'default'}
-                            </Link>
-                          </TableCell>
+                        {visibleColumns.map((col) =>
+                          React.cloneElement(col.renderCell(item), {
+                            key: col.id,
+                          })
                         )}
-                        <TableCell>
-                          {formatSubmittedTime(item.submitted_at)}
-                        </TableCell>
-                        <TableCell>
-                          {formatDuration(item.job_duration)}
-                        </TableCell>
-                        <TableCell>
-                          <PluginSlot
-                            name="jobs.table.status.badge"
-                            context={item}
-                            fallback={
-                              <StatusBadge
-                                status={item.status}
-                                statusTooltip={item.statusTooltip}
-                              />
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {item.infra && item.infra !== '-' ? (
-                            <NonCapitalizedTooltip
-                              content={item.full_infra || item.infra}
-                              className="text-sm text-muted-foreground"
-                            >
-                              <span>
-                                <Link
-                                  href="/infra"
-                                  className="text-blue-600 hover:underline"
-                                >
-                                  {item.cloud ||
-                                    item.infra.split('(')[0].trim()}
-                                </Link>
-                                {item.infra.includes('(') && (
-                                  <span>
-                                    {' ' +
-                                      (() => {
-                                        const NAME_TRUNCATE_LENGTH =
-                                          UI_CONFIG.NAME_TRUNCATE_LENGTH;
-                                        const fullRegionPart =
-                                          item.infra.substring(
-                                            item.infra.indexOf('(')
-                                          );
-                                        const regionContent =
-                                          fullRegionPart.substring(
-                                            1,
-                                            fullRegionPart.length - 1
-                                          );
-
-                                        if (
-                                          regionContent.length <=
-                                          NAME_TRUNCATE_LENGTH
-                                        ) {
-                                          return fullRegionPart;
-                                        }
-
-                                        const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
-                                        return `(${truncatedRegion})`;
-                                      })()}
-                                  </span>
-                                )}
-                              </span>
-                            </NonCapitalizedTooltip>
-                          ) : (
-                            <span>{item.infra || '-'}</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <NonCapitalizedTooltip
-                            content={
-                              item.resources_str_full || item.resources_str
-                            }
-                            className="text-sm text-muted-foreground"
-                          >
-                            <span>{item.resources_str}</span>
-                          </NonCapitalizedTooltip>
-                        </TableCell>
-                        <TableCell>{item.recoveries}</TableCell>
-                        {shouldShowPool && (
-                          <TableCell>
-                            <div
-                              className={
-                                poolsLoading
-                                  ? 'blur-sm transition-all duration-300'
-                                  : ''
-                              }
-                            >
-                              {poolsLoading
-                                ? '-'
-                                : renderPoolLink(
-                                    item.pool,
-                                    item.pool_hash,
-                                    poolsData
-                                  )}
-                            </div>
-                          </TableCell>
-                        )}
-                        <TableCell>
-                          {item.details ? (
-                            <TruncatedDetails
-                              text={item.details}
-                              rowId={item.id}
-                              expandedRowId={expandedRowId}
-                              setExpandedRowId={setExpandedRowId}
-                            />
-                          ) : (
-                            '-'
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Status2Actions
-                            jobParent="/jobs"
-                            jobId={item.id}
-                            managed={true}
-                            workspace={item.workspace}
-                          />
-                        </TableCell>
                       </TableRow>
                       {expandedRowId === item.id && (
                         <ExpandedDetailsRow
                           text={item.details}
-                          colSpan={
-                            11 +
-                            (shouldShowWorkspace ? 1 : 0) +
-                            (shouldShowPool ? 1 : 0)
-                          }
+                          colSpan={totalColSpan}
                           innerRef={expandedRowRef}
                         />
                       )}
@@ -1873,10 +2074,13 @@ function ExpandedDetailsRow({ text, colSpan, innerRef }) {
 
 function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
   const safeText = text || '';
-  const isTruncated = safeText.length > 50;
+  const lines = safeText.split('\n');
+  const isMultiLine = lines.length > 1;
   const isExpanded = expandedRowId === rowId;
-  // Always show truncated text in the table cell
-  const displayText = isTruncated ? `${safeText.substring(0, 50)}` : safeText;
+  // Always show first line in the table cell
+  let displayText = lines[0] || '';
+  const isTruncated = displayText.length > 50;
+  displayText = isTruncated ? `${displayText.substring(0, 50)}` : displayText;
   const buttonRef = useRef(null);
 
   const handleClick = (e) => {
@@ -1888,7 +2092,7 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
   return (
     <div className="truncated-details relative max-w-full flex items-center">
       <span className="truncate">{displayText}</span>
-      {isTruncated && (
+      {(isTruncated || isMultiLine) && (
         <button
           ref={buttonRef}
           type="button"
@@ -1896,7 +2100,7 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
           className="text-blue-600 hover:text-blue-800 font-medium ml-1 flex-shrink-0"
           data-button-type="show-more-less"
         >
-          {isExpanded ? '... show less' : '... show more'}
+          {isExpanded ? '  show less' : '  show more'}
         </button>
       )}
     </div>

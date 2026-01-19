@@ -55,6 +55,7 @@ function JobDetails() {
   const [domReady, setDomReady] = useState(false);
   const [refreshLogsFlag, setRefreshLogsFlag] = useState(0);
   const [refreshControllerLogsFlag, setRefreshControllerLogsFlag] = useState(0);
+  const [logExtractedLinks, setLogExtractedLinks] = useState({});
   const isMobile = useMobile();
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
@@ -246,6 +247,8 @@ function JobDetails() {
                     isLoadingControllerLogs={isLoadingControllerLogs}
                     refreshFlag={0}
                     poolsData={poolsData}
+                    links={detailJobData.links}
+                    logExtractedLinks={logExtractedLinks}
                   />
                 </div>
               </Card>
@@ -261,6 +264,7 @@ function JobDetails() {
                 pool: detailJobData.pool,
                 userHash: detailJobData.user_hash,
                 infra: detailJobData.full_infra || detailJobData.infra,
+                refreshTrigger: refreshTrigger,
               }}
               wrapperClassName="mt-6"
             />
@@ -321,6 +325,7 @@ function JobDetails() {
                     isLoadingControllerLogs={isLoadingControllerLogs}
                     refreshFlag={refreshLogsFlag}
                     poolsData={poolsData}
+                    onLinksExtracted={setLogExtractedLinks}
                   />
                 </div>
               </Card>
@@ -460,6 +465,12 @@ function ControllerLogsSection({
     </div>
   );
 }
+// URL patterns for extracting links from logs
+// Each pattern has a name (used as link label) and a regex to match entire tokens
+// Patterns use ^ and $ anchors for exact token matching
+const URL_PATTERNS = {
+  'W&B Run': /^https:\/\/wandb\.ai\/[^\/]+\/[^\/]+\/runs\/[^\/]+$/,
+};
 
 function JobDetailsContent({
   jobData,
@@ -470,6 +481,9 @@ function JobDetailsContent({
   isLoadingControllerLogs,
   refreshFlag,
   poolsData,
+  links,
+  logExtractedLinks: logExtractedLinksFromParent,
+  onLinksExtracted,
 }) {
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
   const [expandedYamlDocs, setExpandedYamlDocs] = useState({});
@@ -613,6 +627,74 @@ function JobDetailsContent({
   useEffect(() => {
     setIsLoadingControllerLogs(streamingControllerLogsLoading);
   }, [streamingControllerLogsLoading, setIsLoadingControllerLogs]);
+
+  // Persist extracted links across tab changes using a ref
+  const extractedLinksRef = useRef({});
+
+  // Extract URLs from logs using whitelisted patterns
+  // Processes line-by-line with tokenization for exact word-level matching
+  // Updates are accumulated in a ref so they persist when switching tabs
+  const logExtractedLinks = useMemo(() => {
+    // Start with previously found links
+    const extractedLinks = { ...extractedLinksRef.current };
+    const foundPatterns = new Set(Object.keys(extractedLinks));
+
+    // Process line by line to avoid creating one large string
+    for (const line of logs) {
+      // Skip if we've found all patterns
+      if (foundPatterns.size === Object.keys(URL_PATTERNS).length) {
+        break;
+      }
+
+      // Split line into tokens by whitespace and common delimiters
+      // This handles cases like: "URL: https://..." or "(https://...)"
+      const tokens = line.split(/[\s"'<>()[\]{},;]+/);
+
+      for (const token of tokens) {
+        // Clean up trailing punctuation that might be attached
+        const cleanToken = token.replace(/[.,:;!?]+$/, '');
+        if (!cleanToken) continue;
+
+        // Check each pattern against the clean token
+        for (const [linkName, pattern] of Object.entries(URL_PATTERNS)) {
+          if (foundPatterns.has(linkName)) continue;
+
+          if (pattern.test(cleanToken)) {
+            extractedLinks[linkName] = cleanToken;
+            foundPatterns.add(linkName);
+            break;
+          }
+        }
+      }
+    }
+
+    // Persist to ref so links survive tab switches
+    extractedLinksRef.current = extractedLinks;
+    return extractedLinks;
+  }, [logs]);
+
+  // Notify parent when links are extracted (for cross-component sharing)
+  useEffect(() => {
+    if (onLinksExtracted && Object.keys(logExtractedLinks).length > 0) {
+      onLinksExtracted(logExtractedLinks);
+    }
+  }, [logExtractedLinks, onLinksExtracted]);
+
+  // Combine database links with log-extracted links
+  // Use logExtractedLinksFromParent if provided (for info tab), otherwise use local extraction
+  const combinedLinks = useMemo(() => {
+    // Start with database links (they take priority if there's a conflict)
+    const combined = { ...(links || {}) };
+    // Use parent-provided links (for info tab) or locally extracted links (for logs tab)
+    const extractedToUse = logExtractedLinksFromParent || logExtractedLinks;
+    // Add log-extracted links (only if not already present)
+    for (const [key, value] of Object.entries(extractedToUse)) {
+      if (!combined[key]) {
+        combined[key] = value;
+      }
+    }
+    return combined;
+  }, [links, logExtractedLinks, logExtractedLinksFromParent]);
 
   // Auto-scroll to bottom when logs change or tab changes
   useEffect(() => {
@@ -806,7 +888,55 @@ function JobDetailsContent({
         </div>
       </div>
 
-      {/* Entrypoint section - spans both columns */}
+      {/* External Links section - full width row */}
+      <div className="col-span-2">
+        <div className="text-gray-600 font-medium text-base">
+          External Links
+        </div>
+        <div className="text-base mt-1">
+          {combinedLinks && Object.keys(combinedLinks).length > 0 ? (
+            <div className="flex flex-wrap gap-4">
+              {Object.entries(combinedLinks).map(([label, url]) => {
+                // Normalize URL - add https:// if no protocol specified
+                const normalizedUrl =
+                  url.startsWith('http://') || url.startsWith('https://')
+                    ? url
+                    : `https://${url}`;
+
+                return (
+                  <a
+                    key={label}
+                    href={normalizedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                  >
+                    {label}
+                  </a>
+                );
+              })}
+            </div>
+          ) : (
+            <span className="text-gray-400">-</span>
+          )}
+        </div>
+      </div>
+
+      {/* Queue Details section - right column */}
+      {jobData.details && (
+        <PluginSlot
+          name="jobs.detail.queue_details"
+          context={{
+            details: jobData.details,
+            queueName: jobData.kueue_queue_name,
+            infra: jobData.full_infra,
+            jobData: jobData,
+            title: 'Queue Details',
+          }}
+        />
+      )}
+
+      {/* Entrypoint section - full width row */}
       {(jobData.entrypoint || jobData.dag_yaml) && (
         <div className="col-span-2">
           <div className="flex items-center">
@@ -972,6 +1102,9 @@ JobDetailsContent.propTypes = {
   isLoadingControllerLogs: PropTypes.bool,
   refreshFlag: PropTypes.number,
   poolsData: PropTypes.array,
+  links: PropTypes.object,
+  logExtractedLinks: PropTypes.object,
+  onLinksExtracted: PropTypes.func,
 };
 
 export default JobDetails;

@@ -7,6 +7,7 @@ import {
 } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
 import { apiClient } from './client';
+import { applyEnhancements } from '@/plugins/dataEnhancement';
 
 // Configuration
 const DEFAULT_TAIL_LINES = 5000;
@@ -31,6 +32,7 @@ const DEFAULT_FIELDS = [
   'pool_hash',
   'details',
   'failure_reason',
+  'links',
 ];
 
 export async function getManagedJobs(options = {}) {
@@ -214,16 +216,25 @@ export async function getManagedJobs(options = {}) {
         dag_yaml: job.user_yaml,
         entrypoint: job.entrypoint,
         git_commit: job.metadata?.git_commit || '-',
+        links: job.links || {},
         pool: job.pool,
         pool_hash: job.pool_hash,
         current_cluster_name: job.current_cluster_name,
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
         accelerators: job.accelerators, // Include accelerators field
+        labels: job.labels || {}, // Include labels field
       };
     });
 
+    // Apply plugin data enhancements
+    // Pass raw backend data so enhancements can extract fields directly
+    const enhancedJobs = await applyEnhancements(jobData, 'jobs', {
+      dashboardCache,
+      rawData: managedJobs, // Raw backend response for field extraction
+    });
+
     return {
-      jobs: jobData,
+      jobs: enhancedJobs,
       total,
       totalNoFilter,
       controllerStopped: false,

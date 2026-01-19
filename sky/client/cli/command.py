@@ -216,45 +216,27 @@ def _get_cluster_records_and_set_ssh_config(
                 f'\"{escaped_executable_path} '
                 f'{escaped_websocket_proxy_path} '
                 f'{server_common.get_server_url()} '
-                f'{handle.cluster_name}\"')
+                f'{handle.cluster_name} '
+                f'kubernetes-pod-ssh-proxy\"')
             credentials['ssh_proxy_command'] = proxy_command
         elif isinstance(handle.launched_resources.cloud, clouds.Slurm):
-            # TODO(kevin): This is a temporary workaround, ideally we want to
-            # get a shell through srun --pty bash on the existing sbatch job.
-
-            # Proxy through the controller/login node to reach the worker node.
-            if (handle.cached_internal_ips is None or
-                    not handle.cached_internal_ips):
-                logger.debug(
-                    f'Cluster {name} does not have cached internal IPs. '
-                    'Skipping SSH config update.')
-                cluster_utils.SSHConfigHelper.remove_cluster(name)
-                continue
-
-            escaped_key_path = shlex.quote(
-                cluster_utils.SSHConfigHelper.generate_local_key_file(
-                    handle.cluster_name, credentials))
-            controller_host = handle.cached_external_ips[0]
-
-            # Build jump proxy: ssh to worker via controller/login node
-            proxy_command = (f'ssh -tt -i {escaped_key_path} '
-                             '-o StrictHostKeyChecking=no '
-                             '-o UserKnownHostsFile=/dev/null '
-                             '-o IdentitiesOnly=yes '
-                             '-W %h:%p '
-                             f'{handle.ssh_user}@{controller_host}')
-            original_proxy = credentials.get('ssh_proxy_command')
-            if original_proxy:
-                proxy_command += (
-                    f' -o ProxyCommand={shlex.quote(original_proxy)}')
-
+            # Replace the proxy command to proxy through the SkyPilot API
+            # server with websocket.
+            escaped_executable_path = shlex.quote(sys.executable)
+            escaped_websocket_proxy_path = shlex.quote(
+                f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
+            # %w is a placeholder for the node index, substituted per-node
+            # in cluster_utils.SSHConfigHelper.add_cluster().
+            proxy_command = (f'{escaped_executable_path} '
+                             f'{escaped_websocket_proxy_path} '
+                             f'{server_common.get_server_url()} '
+                             f'{handle.cluster_name} '
+                             f'slurm-job-ssh-proxy %w')
             credentials['ssh_proxy_command'] = proxy_command
-
-            # For Slurm, use the worker's internal IP as the SSH target
-            ips = handle.cached_internal_ips
 
         cluster_utils.SSHConfigHelper.add_cluster(
             handle.cluster_name,
+            handle.cluster_name_on_cloud,
             ips,
             credentials,
             handle.cached_external_ssh_ports,
@@ -1648,7 +1630,8 @@ def _show_endpoint(query_clusters: Optional[List[str]],
                     ('endpoint port' if show_single_endpoint else 'endpoints')))
 
     cluster_record = cluster_records[0]
-    if cluster_record['status'] != status_lib.ClusterStatus.UP:
+    if cluster_record['status'] not in (status_lib.ClusterStatus.UP,
+                                        status_lib.ClusterStatus.AUTOSTOPPING):
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Cluster {cluster_record["name"]!r} '
                                'is not in UP status.')
@@ -1825,6 +1808,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     # Do not show job queue if user specifies clusters, and if user
     # specifies --ip or --endpoint(s).
     show_managed_jobs = show_managed_jobs and not any([clusters, ip, endpoints])
+    show_pools = show_pools and not any([clusters, ip, endpoints])
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
@@ -2265,6 +2249,10 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
               is_flag=True,
               default=False,
               help='Stream the cluster provisioning logs (provision.log).')
+@click.option('--autostop',
+              is_flag=True,
+              default=False,
+              help='Stream the autostop hook logs from the cluster.')
 @click.option('--worker',
               '-w',
               default=None,
@@ -2308,6 +2296,7 @@ def logs(
     cluster: str,
     job_ids: Tuple[str, ...],
     provision: bool,
+    autostop: bool,  # pylint: disable=redefined-outer-name
     worker: Optional[int],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
@@ -2337,6 +2326,9 @@ def logs(
 
     4. If the job fails or fetching the logs fails, the command will exit with
     a non-zero return code.
+
+    5. If ``--autostop`` is specified, stream the autostop hook logs from the
+    cluster. This shows the output of the autostop hook script.
     """
     if worker is not None:
         if not provision:
@@ -2345,10 +2337,19 @@ def logs(
         if worker < 1:
             raise click.UsageError('--worker must be a positive integer.')
 
+    if provision and autostop:
+        raise click.UsageError(
+            '--provision and --autostop cannot be used together.')
+
     if provision and (sync_down or status or job_ids):
         raise click.UsageError(
             '--provision cannot be combined with job log options '
             '(--sync-down/--status/job IDs).')
+
+    if autostop and (sync_down or status or job_ids or worker is not None):
+        raise click.UsageError(
+            '--autostop cannot be combined with job log options '
+            '(--sync-down/--status/--worker/job IDs).')
 
     if sync_down and status:
         raise click.UsageError(
@@ -2369,6 +2370,13 @@ def logs(
                                     worker=worker,
                                     follow=follow,
                                     tail=tail))
+
+    if autostop:
+        # Stream autostop hook logs
+        sys.exit(
+            sdk.tail_autostop_logs(cluster_name=cluster,
+                                   follow=follow,
+                                   tail=tail))
 
     if sync_down:
         with rich_utils.client_status(
@@ -3471,7 +3479,12 @@ def _down_or_stop_clusters(
                     click.echo(f'      {name} ({first})')
 
     if failures:
-        click.echo('Cluster(s) failed. See details above.')
+        failure_str = 'Cluster(s) failed. See details above.'
+        if down:
+            failure_str += (
+                ' If you want to ignore the errors and remove the '
+                'cluster(s) from the status table, use `sky down --purge`.')
+        click.echo(failure_str)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -3747,7 +3760,10 @@ def show_gpus(
                     continue
 
                 node_is_ready = getattr(node_info, 'is_ready', True)
-                if not node_is_ready:
+                node_is_cordoned = getattr(node_info, 'is_cordoned', False)
+                node_taints = getattr(node_info, 'taints', None) or []
+                node_is_tainted = len(node_taints) > 0
+                if not node_is_ready or node_is_cordoned or node_is_tainted:
                     not_ready_counts[accelerator_type] += accelerator_count
             return not_ready_counts
 
@@ -3819,7 +3835,8 @@ def show_gpus(
 
     def _get_slurm_realtime_gpu_tables(
         name_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None
+        quantity_filter: Optional[int] = None,
+        slurm_cluster_name: Optional[str] = None,
     ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
                Optional['prettytable.PrettyTable']]:
         """Get Slurm GPU availability tables.
@@ -3838,7 +3855,9 @@ def show_gpus(
 
         realtime_gpu_availability_lists = sdk.stream_and_get(
             sdk.realtime_slurm_gpu_availability(
-                name_filter=name_filter, quantity_filter=quantity_filter))
+                name_filter=name_filter,
+                quantity_filter=quantity_filter,
+                slurm_cluster_name=slurm_cluster_name))
         if not realtime_gpu_availability_lists:
             err_msg = 'No GPUs found in any Slurm partition. '
             debug_msg = 'To further debug, run: sky check slurm '
@@ -3898,8 +3917,10 @@ def show_gpus(
             contexts_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
             cloud_str: str = 'Kubernetes',
             context_title_str: str = 'CONTEXT') -> str:
-        node_table = log_utils.create_table(
-            [context_title_str, 'NODE', 'GPU', 'UTILIZATION'])
+        node_table = log_utils.create_table([
+            context_title_str, 'NODE', 'vCPU', 'Memory (GB)', 'GPU',
+            'GPU UTILIZATION', 'NODE STATUS'
+        ])
 
         no_permissions_str = '<no permissions>'
         hints = []
@@ -3916,16 +3937,83 @@ def show_gpus(
                 acc_type = node_info.accelerator_type
                 if acc_type is None:
                     acc_type = '-'
+
+                # Format CPU and memory: "X of Y free" or just "Y" if
+                # free is unknown
+                cpu_str = '-'
+                if node_info.cpu_count is not None:
+                    cpu_total_str = common_utils.format_float(
+                        node_info.cpu_count, precision=0)
+
+                    # Check if we have free CPU info (use hasattr to
+                    # check if field exists, then access directly)
+                    cpu_free = None
+                    if hasattr(node_info, 'cpu_free'):
+                        cpu_free = node_info.cpu_free
+                    if cpu_free is not None:
+                        cpu_free_str = common_utils.format_float(cpu_free,
+                                                                 precision=0)
+                        cpu_str = f'{cpu_free_str} of {cpu_total_str} free'
+                    else:
+                        cpu_str = cpu_total_str
+
+                memory_str = '-'
+                if node_info.memory_gb is not None:
+                    memory_total_str = common_utils.format_float(
+                        node_info.memory_gb, precision=0)
+
+                    # Check if we have free memory info (use hasattr
+                    # to check if field exists, then access directly)
+                    memory_free_gb = None
+                    if hasattr(node_info, 'memory_free_gb'):
+                        memory_free_gb = node_info.memory_free_gb
+                    if memory_free_gb is not None:
+                        memory_free_str = common_utils.format_float(
+                            memory_free_gb, precision=0)
+                        memory_str = (
+                            f'{memory_free_str} of {memory_total_str} free')
+                    else:
+                        memory_str = memory_total_str
+
                 utilization_str = (
                     f'{available} of '
                     f'{node_info.total["accelerator_count"]} free')
+
+                # Build node status string
+                status_info = []
                 # Check if node is ready (defaults to True for backward
                 # compatibility with older server versions)
                 node_is_ready = getattr(node_info, 'is_ready', True)
                 if not node_is_ready:
-                    utilization_str += ' (Node NotReady)'
-                node_table.add_row(
-                    [context_name, node_name, acc_type, utilization_str])
+                    status_info.append('NotReady')
+                node_is_cordoned = getattr(node_info, 'is_cordoned', False)
+                if node_is_cordoned:
+                    status_info.append('Cordoned')
+                # Add taint info grouped by effect
+                taints = getattr(node_info, 'taints', None)
+                if taints:
+                    # Group taints by effect: 'NoSchedule Taint [key1, key2],
+                    # NoExecute Taint [key3]'
+                    taints_by_effect: Dict[str, List[str]] = {}
+                    for taint in taints:
+                        effect = taint['effect']
+                        key = taint['key']
+                        if effect not in taints_by_effect:
+                            taints_by_effect[effect] = []
+                        taints_by_effect[effect].append(key)
+                    taints_strs = []
+                    for effect, keys in taints_by_effect.items():
+                        taints_strs.append(
+                            f'{effect} Taint [{", ".join(keys)}]')
+                    if taints_strs:
+                        status_info.append(', '.join(taints_strs))
+
+                status_str = ', '.join(
+                    status_info) if status_info else 'Healthy'
+                node_table.add_row([
+                    context_name, node_name, cpu_str, memory_str, acc_type,
+                    utilization_str, status_str
+                ])
 
         k8s_per_node_acc_message = (f'{cloud_str} per-node GPU availability')
         if hints:
@@ -4173,7 +4261,8 @@ def show_gpus(
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
                     slurm_realtime_infos, total_table = (
-                        _get_slurm_realtime_gpu_tables())
+                        _get_slurm_realtime_gpu_tables(
+                            slurm_cluster_name=region))
                 except ValueError as e:
                     if not cloud_is_slurm:
                         # Make it a note if cloud is not slurm
@@ -4304,7 +4393,8 @@ def show_gpus(
             try:
                 slurm_realtime_infos, total_table = (
                     _get_slurm_realtime_gpu_tables(name_filter=name,
-                                                   quantity_filter=quantity))
+                                                   quantity_filter=quantity,
+                                                   slurm_cluster_name=region))
 
                 yield from _format_slurm_realtime_gpu(total_table,
                                                       slurm_realtime_infos,
@@ -4682,10 +4772,18 @@ def _build_volume_override_config(
               is_flag=True,
               required=False,
               help='Show all information in full.')
+@click.option('--refresh',
+              '-r',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Refresh volume state from cloud APIs before listing. '
+              'Without this flag, cached data is returned which is updated '
+              'periodically by the background daemon.')
 @usage_lib.entrypoint
-def volumes_ls(verbose: bool):
+def volumes_ls(verbose: bool, refresh: bool):
     """List volumes managed by SkyPilot."""
-    request_id = volumes_sdk.ls()
+    request_id = volumes_sdk.ls(refresh=refresh)
     all_volumes = sdk.stream_and_get(request_id)
     volume_table = table_utils.format_volume_table(all_volumes,
                                                    show_all=verbose)
@@ -6605,6 +6703,9 @@ def api_start(deploy: bool, host: str, foreground: bool,
                   host=host,
                   foreground=foreground,
                   enable_basic_auth=enable_basic_auth)
+    api_server_url = server_common.get_server_url(host)
+    api_server_info = server_common.get_api_server_status(api_server_url)
+    server_common.check_and_print_upgrade_hint(api_server_info, api_server_url)
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
@@ -6765,9 +6866,11 @@ def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
             if not verbose:
                 r_id = common_utils.truncate_long_string(r_id, 36)
             req_status = requests.RequestStatus(request.status)
-            row = [r_id, request.user_name, request.name]
+            user_display = status_utils.get_user_display_name(
+                request.user_name or '-', request.user_id)
+            row = [r_id, user_display, request.name]
             if verbose:
-                row.append(request.cluster_name)
+                row.append(request.cluster_name or '-')
             row.extend([
                 log_utils.readable_time_duration(request.created_at),
                 req_status.colored_str()
@@ -6874,6 +6977,8 @@ def api_info():
                f'version: {api_server_info.version}\n'
                f'{ux_utils.INDENT_SYMBOL}User: {user.name} ({user.id})\n'
                f'{ux_utils.INDENT_LAST_SYMBOL}{location}')
+    # Show upgrade hint if available
+    server_common.check_and_print_upgrade_hint(api_server_info, url)
 
 
 @cli.group(cls=_NaturalOrderGroup)

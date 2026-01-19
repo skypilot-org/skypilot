@@ -150,6 +150,20 @@ def get_volume_usedby(
 
 
 @_route_to_cloud_impl
+def refresh_volume_config(
+    provider_name: str,
+    volume_config: models.VolumeConfig,
+) -> Tuple[bool, models.VolumeConfig]:
+    """Whether need to refresh the volume config in the cloud.
+
+    Returns:
+        need_refresh: Whether need to refresh the volume config.
+        volume_config: The volume config to be refreshed.
+    """
+    return False, volume_config
+
+
+@_route_to_cloud_impl
 def get_all_volumes_usedby(
     provider_name: str, configs: List[models.VolumeConfig]
 ) -> Tuple[Dict[str, Any], Dict[str, Any], Set[str]]:
@@ -175,6 +189,27 @@ def map_all_volumes_usedby(
         config: models.VolumeConfig) -> Tuple[List[str], List[str]]:
     """Map the usedby resources of a volume."""
     raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def get_all_volumes_errors(
+        provider_name: str,
+        configs: List[models.VolumeConfig]) -> Dict[str, Optional[str]]:
+    """Get error messages for all volumes.
+
+    Checks if volumes have errors (e.g., pending state due to
+    misconfiguration) and returns appropriate error messages.
+
+    Args:
+        provider_name: Name of the provider.
+        configs: List of VolumeConfig objects.
+
+    Returns:
+        Dictionary mapping volume name to error message (None if no error).
+    """
+    # Default implementation returns empty dict (no error checking)
+    del provider_name, configs
+    return {}
 
 
 @_route_to_cloud_impl

@@ -20,7 +20,7 @@ addopts = "-s -n 16 -q --tb=short --dist loadgroup --disable-warnings"
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.9"
 follow_imports = "skip"
 ignore_missing_imports = true
 allow_redefinition = true

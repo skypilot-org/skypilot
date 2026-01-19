@@ -16,7 +16,7 @@ jobs:
   python-test-optimizer:
     strategy:
       matrix:
-        python-version: ["3.8"]
+        python-version: ["3.9"]
         test-path:
           - "tests/test_optimizer_dryruns.py -k \"partial\""
           - "tests/test_optimizer_dryruns.py -k \"not partial\""

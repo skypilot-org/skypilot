@@ -3,12 +3,12 @@
 Advanced Configuration
 ======================
 
-You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file.
+You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file (for :ref:`local API server <sky-api-server-local>`) or on your SkyPilot API server dashboard (for :ref:`remote API server <sky-api-server-remote>`) at ``http://<api-server-url>/dashboard/config``.
 
 Configuration sources and overrides
 -----------------------------------
 
-SkyPilot allows you to set configuration globally in ``~/.sky/config.yaml``, in your project, or for specific jobs, providing flexibility in how you manage your configurations.
+SkyPilot allows you to set configuration globally in ``~/.sky/config.yaml`` (for :ref:`local API server <sky-api-server-local>`) or on the API server dashboard (for :ref:`remote API server <sky-api-server-remote>`) at ``http://<api-server-url>/dashboard/config``, in your project, or for specific jobs, providing flexibility in how you manage your configurations.
 
 For example, you can have a :ref:`user configuration<config-client-user-config>` to apply globally to all projects, a :ref:`project configuration<config-client-project-config>` storing default values for all jobs in a project, and :ref:`Task YAML overrides<config-client-cli-flag>` for specific jobs.
 
@@ -123,6 +123,7 @@ Below is the configuration syntax and some example values. See detailed explanat
       Owner: user-unique-name
     :ref:`vpc_name <config-yaml-aws-vpc-name>`: skypilot-vpc
     :ref:`use_internal_ips <config-yaml-aws-use-internal-ips>`: true
+    :ref:`use_ssm <config-yaml-aws-use-ssm>`: true
     :ref:`ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`security_group_name <config-yaml-aws-security-group-name>`: my-security-group
     :ref:`disk_encrypted <config-yaml-aws-disk-encrypted>`: false
@@ -195,6 +196,9 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`vast <config-yaml-vast>`:
     :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
+    :ref:`create_instance_kwargs <config-yaml-vast-create-instance-kwargs>`:
+      template_hash: f0e124f0e98bfbc2ecb05dc713009ee7
+      env: "-e YOUR_CUSTOM=YOUR_VAL"
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
@@ -205,6 +209,10 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`store <config-yaml-logs-store>`: gcp
     gcp:
       project_id: my-project-id
+
+  :ref:`data <config-yaml-data>`:
+    :ref:`mount_cached <config-yaml-data-mount-cached>`:
+      :ref:`sequential_upload <config-yaml-data-mount-cached-sequential-upload>`: false
 
   :ref:`daemons <config-yaml-daemons>`:
     skypilot-status-refresh-daemon:
@@ -681,7 +689,17 @@ Private subnets are defined as those satisfying both of these properties:
      (the ``map_public_ip_on_launch`` attribute is ``false``).
 
 This flag is typically set together with ``vpc_name`` above and
-``ssh_proxy_command`` below.
+``ssh_proxy_command`` or ``use_ssm`` below.
+
+Default: ``false``.
+
+.. _config-yaml-aws-use-ssm:
+
+``aws.use_ssm``
+~~~~~~~~~~~~~~~~
+
+Use SSM to communicate with SkyPilot nodes. This flag is typically set together with ``vpc_name`` and
+``use_internal_ips`` above. This is useful for launching clusters in private VPCs without public IPs, refer to :ref:`aws-ssm` for more details.
 
 Default: ``false``.
 
@@ -1250,6 +1268,7 @@ Can be one of:
 
 - ``loadbalancer``: Use LoadBalancer service to expose ports.
 - ``nodeport``: Use NodePort service to expose ports.
+- ``podip``: Use Pod IPs to expose ports. Cannot be accessed from outside the cluster.
 
 Default: ``loadbalancer``.
 
@@ -1699,6 +1718,108 @@ can be overridden per task via :ref:`config flag <config-client-cli-flag>`.
 
 Default: ``false``
 
+.. _config-yaml-vast-create-instance-kwargs:
+
+``vast.create_instance_kwargs``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Additional parameters to pass to the Vast API when creating instances (optional).
+
+This allows full access to Vast's instance creation options. User-provided
+parameters are passed through to the Vast API.
+
+.. dropdown:: Supported parameters
+
+    ``image``
+        Docker image to use for the instance. If not specified, SkyPilot uses the image from the task
+        configuration. When using a template, this is not required. (e.g vastai/base-image:@vastai-automatic-tag)
+
+    ``env``
+        Environment variables and port mappings (e.g., ``"-e KEY=value -p 8080:8080"``).
+
+    ``price`` / ``bid_price``
+        Bid price for the instance. For preemptible instances, if not specified,
+        SkyPilot uses the minimum bid price from the offer.
+
+    ``disk``
+        Disk size in GB. If not specified, SkyPilot uses the disk size from the
+        task configuration.
+
+    ``label``
+        Instance label. If not specified, SkyPilot uses the cluster name
+        (e.g., ``cluster-name-head`` or ``cluster-name-worker``).
+
+    ``extra``
+        Extra docker run arguments to pass to the container.
+
+    ``onstart_cmd``
+        Command to run on instance start. SkyPilot prepends its own initialization
+        commands to this.
+
+    ``onstart``
+        Path to a local script file to run on instance start. The file contents
+        are read and appended to ``onstart_cmd``.
+
+    ``login``
+        Docker registry login credentials (e.g., ``"-u user -p pass registry"``).
+        Required when using private Docker registries.
+
+    ``image_login``
+        Docker registry credentials if needed.
+        Required when using private Docker registries.
+
+    ``python_utf8``
+        Enable Python UTF-8 mode (boolean true | false).
+
+    ``lang_utf8``
+        Enable system UTF-8 locale (boolean true | false).
+
+    ``jupyter_lab``
+        Use JupyterLab instead of Jupyter Notebook (boolean true | false).
+
+    ``jupyter_dir``
+        Jupyter notebook directory path.
+
+    ``force``
+        Force instance creation even if warnings are present (boolean true | false).
+
+    ``cancel_unavail``
+        Cancel the request if the instance becomes unavailable (boolean true | false).
+
+    ``template_hash`` / ``template_hash_id``
+        Use a Vast template by its hash ID. When specified, ``image`` and ``disk``
+        are not required as they come from the template.
+
+    ``args``
+        Custom docker command arguments as a list of strings.
+
+    ``user``
+        Run the container as a specific user.
+
+    ``vm``
+        Whether this is a VM instance. (boolean true | false)
+
+Example:
+
+.. code-block:: yaml
+
+  vast:
+    datacenter_only: true
+    create_instance_kwargs:
+      python_utf8: true
+      lang_utf8: true
+      extra: "--shm-size=16g"
+      onstart_cmd: "echo 'Instance started'"
+
+Example using a Vast template:
+
+.. code-block:: yaml
+
+  vast:
+    create_instance_kwargs:
+      template_hash_id: "abc123def456"
+      price: 0.50
+
 .. _config-yaml-rbac:
 
 ``rbac``
@@ -1783,6 +1904,46 @@ The type of external logging storage to use. Each logging storage might have its
 
   logs:
     store: gcp
+
+.. _config-yaml-data:
+
+``data``
+~~~~~~~~
+
+Data storage configuration (optional).
+
+.. code-block:: yaml
+
+  data:
+    mount_cached:
+      sequential_upload: false
+
+.. _config-yaml-data-mount-cached:
+
+``data.mount_cached``
+~~~~~~~~~~~~~~~~~~~~~
+
+Configuration for MOUNT_CACHED storage mode.
+
+.. _config-yaml-data-mount-cached-sequential-upload:
+
+``data.mount_cached.sequential_upload``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether to upload files sequentially to the remote storage (default: ``false``).
+
+When set to ``true``, files written to the mounted directory are uploaded one at a time
+in the order they were written. This is useful when your framework relies on the order
+of files being uploaded (e.g., checkpoint files that need to appear in sequence).
+
+When set to ``false`` (default), files are uploaded in parallel for better performance.
+The upload order is not guaranteed, but throughput is significantly higher.
+
+.. code-block:: yaml
+
+  data:
+    mount_cached:
+      sequential_upload: true
 
 .. _config-yaml-daemons:
 

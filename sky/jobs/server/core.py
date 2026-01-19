@@ -105,6 +105,14 @@ def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
     if os.environ.get(skylet_constants.SKYPILOT_ROLLING_UPDATE_ENABLED) is None:
         return
 
+    # If persistent storage is enabled (via Helm storage.enabled=true or by
+    # default for local deployments), file mounts are persisted and will
+    # survive rolling updates. Default to True if not explicitly set to False.
+    storage_enabled_str = os.environ.get(
+        skylet_constants.SKYPILOT_API_SERVER_STORAGE_ENABLED, 'true')
+    if storage_enabled_str.lower() == 'true':
+        return
+
     # If consolidation mode is not enabled, don't warn.
     if not managed_job_utils.is_consolidation_mode():
         return
@@ -136,7 +144,10 @@ def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
         'with rolling update enabled for API server. To persist files'
         ' across API server restarts/update, use buckets, volumes, or git '
         'for your file mounts; or, configure a bucket in your SkyPilot config '
-        f'under `jobs.bucket`. {colorama.Style.RESET_ALL}')
+        'under `jobs.bucket`; or, enable persistent storage in Helm with '
+        '`storage.enabled=true`. See: https://docs.skypilot.co/en/latest/'
+        'reference/kubernetes/kubernetes-deployment.html'
+        f'{colorama.Style.RESET_ALL}')
 
 
 def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
@@ -524,15 +535,19 @@ def launch(
                     # intermediate bucket and newly created bucket should be in
                     # workspace A.
                     if consolidation_mode_job_id is None:
-                        return execution.launch(
-                            task=controller_task,
-                            cluster_name=controller_name,
-                            stream_logs=stream_logs,
-                            retry_until_up=True,
-                            fast=True,
-                            _request_name=request_names.AdminPolicyRequestName.
-                            JOBS_LAUNCH_CONTROLLER,
-                            _disable_controller_check=True)
+                        # Job controller is not placed in kueue, as the
+                        # controller pod is considered a "system" pod
+                        # and is not subject to queue limits or preemption.
+                        with skypilot_config.remove_queue_name_from_config():
+                            return execution.launch(
+                                task=controller_task,
+                                cluster_name=controller_name,
+                                stream_logs=stream_logs,
+                                retry_until_up=True,
+                                fast=True,
+                                _request_name=request_names.
+                                AdminPolicyRequestName.JOBS_LAUNCH_CONTROLLER,
+                                _disable_controller_check=True)
                     # Manually launch the scheduler in consolidation mode.
                     local_handle = backend_utils.is_controller_accessible(
                         controller=controller, stopped_message='')
@@ -557,16 +572,18 @@ def launch(
                         for k, v in controller_task.envs.items()
                     ]
                     run_script = '\n'.join(env_cmds + [run_script])
-                    log_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
-                                           'managed_jobs')
+                    log_dir = os.path.expanduser(
+                        os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
+                                     'managed_jobs'))
                     os.makedirs(log_dir, exist_ok=True)
                     log_path = os.path.join(
                         log_dir, f'submit-job-{consolidation_mode_job_id}.log')
                     backend.run_on_head(local_handle,
                                         run_script,
                                         log_path=log_path)
-                    ux_utils.starting_message(
-                        f'Job submitted, ID: {consolidation_mode_job_id}')
+                    logger.info(
+                        ux_utils.starting_message(
+                            f'Job submitted, ID: {consolidation_mode_job_id}'))
                     return consolidation_mode_job_id, local_handle
 
     if pool is None:

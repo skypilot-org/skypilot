@@ -892,9 +892,9 @@ class Task:
                         raise exceptions.VolumeTopologyConflictError(
                             f'Volume {vol.volume_name} can only be attached on '
                             f'{key}:{req}, which conflicts with another volume '
-                            f'{vol_name} that requires {key}:{previous_req}.'
+                            f'{vol_name} that requires {key}:{previous_req}. '
                             f'Please use different volumes and retry.')
-                    topology[key] = (vol_name, req)
+                    topology[key] = (vol.volume_name, req)
         # Now we have the topology requirements from the intersection of all
         # volumes. Check if there is topology conflict with the resources.
         # Volume must have no conflict with ALL resources even if user
@@ -1118,6 +1118,22 @@ class Task:
     def get_estimated_outputs_size_gigabytes(self) -> Optional[float]:
         return self.estimated_outputs_size_gigabytes
 
+    @staticmethod
+    def _ensure_consistent_priority(
+        resources: Union[List['resources_lib.Resources'],
+                         Set['resources_lib.Resources']]
+    ) -> None:
+        priority = None
+        for r in resources:
+            if r.priority is None:
+                continue
+            if priority is None:
+                priority = r.priority
+            else:
+                if priority != r.priority:
+                    raise ValueError('Priority is not consistent '
+                                     f'across resources: {resources}')
+
     def set_resources(
         self, resources: Union['resources_lib.Resources',
                                List['resources_lib.Resources'],
@@ -1139,6 +1155,7 @@ class Task:
             resources = resources_lib.Resources.from_yaml_config(resources)
         elif isinstance(resources, resources_lib.Resources):
             resources = {resources}
+        self._ensure_consistent_priority(resources)
         # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs,
                                                    self.secrets)

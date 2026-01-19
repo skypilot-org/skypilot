@@ -28,8 +28,8 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
-from sky.utils import context_utils
 from sky.utils import env_options
+from sky.utils import instance_links as instance_links_utils
 from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils import ux_utils
@@ -201,7 +201,7 @@ class StrategyExecutor:
     async def _try_cancel_jobs(self):
         if self.cluster_name is None:
             return
-        handle = await context_utils.to_thread(
+        handle = await asyncio.to_thread(
             global_user_state.get_handle_from_cluster_name, self.cluster_name)
         if handle is None or self.pool is not None:
             return
@@ -228,21 +228,21 @@ class StrategyExecutor:
             # then kill the user process on remaining worker nodes.
             # Only cancel the corresponding job for pool.
             if self.pool is None:
-                request_id = await context_utils.to_thread(
+                request_id = await asyncio.to_thread(
                     sdk.cancel,
                     cluster_name=self.cluster_name,
                     all=True,
                     _try_cancel_if_cluster_is_init=True,
                 )
             else:
-                request_id = await context_utils.to_thread(
+                request_id = await asyncio.to_thread(
                     sdk.cancel,
                     cluster_name=self.cluster_name,
                     job_ids=[self.job_id_on_pool_cluster],
                     _try_cancel_if_cluster_is_init=True,
                 )
             logger.debug(f'sdk.cancel request ID: {request_id}')
-            await context_utils.to_thread(
+            await asyncio.to_thread(
                 sdk.get,
                 request_id,
             )
@@ -253,7 +253,7 @@ class StrategyExecutor:
                         f'{common_utils.format_exception(e)}\n'
                         'Terminating the cluster explicitly to ensure no '
                         'remaining job process interferes with recovery.')
-            await context_utils.to_thread(self._cleanup_cluster)
+            await asyncio.to_thread(self._cleanup_cluster)
 
     async def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
         """Wait for MAX_JOB_CHECKING_RETRY times until job starts on the cluster
@@ -269,7 +269,7 @@ class StrategyExecutor:
             # Avoid the infinite loop, if any bug happens.
             job_checking_retry_cnt += 1
             try:
-                cluster_status, _ = (await context_utils.to_thread(
+                cluster_status, _ = (await asyncio.to_thread(
                     backend_utils.refresh_cluster_status_handle,
                     self.cluster_name,
                     force_refresh_statuses=set(status_lib.ClusterStatus)))
@@ -281,7 +281,8 @@ class StrategyExecutor:
                 logger.info(f'Unexpected exception: {e}\nFailed to get the '
                             'refresh the cluster status. Retrying.')
                 continue
-            if cluster_status != status_lib.ClusterStatus.UP:
+            if cluster_status not in (status_lib.ClusterStatus.UP,
+                                      status_lib.ClusterStatus.AUTOSTOPPING):
                 # The cluster can be preempted before the job is
                 # launched.
                 # Break to let the retry launch kick in.
@@ -316,7 +317,7 @@ class StrategyExecutor:
             # Check the job status until it is not in initialized status
             if status is not None and status > job_lib.JobStatus.INIT:
                 try:
-                    job_submitted_at = await context_utils.to_thread(
+                    job_submitted_at = await asyncio.to_thread(
                         managed_job_utils.get_job_timestamp,
                         self.backend,
                         self.cluster_name,
@@ -416,7 +417,7 @@ class StrategyExecutor:
                                                  f'{env_var}')
                                 logger.debug('Env vars for api_start: '
                                              f'{os.environ}')
-                                await context_utils.to_thread(sdk.api_start)
+                                await asyncio.to_thread(sdk.api_start)
                                 logger.info('API server started.')
                             finally:
                                 for env_var, value in vars_to_restore.items():
@@ -427,7 +428,7 @@ class StrategyExecutor:
 
                             request_id = None
                             try:
-                                request_id = await context_utils.to_thread(
+                                request_id = await asyncio.to_thread(
                                     sdk.launch,
                                     self.dag,
                                     cluster_name=self.cluster_name,
@@ -447,19 +448,18 @@ class StrategyExecutor:
                                 )
                                 logger.debug('sdk.launch request ID: '
                                              f'{request_id}')
-                                await context_utils.to_thread(
+                                await asyncio.to_thread(
                                     sdk.stream_and_get,
                                     request_id,
                                 )
                             except asyncio.CancelledError:
                                 if request_id:
-                                    req = await context_utils.to_thread(
+                                    req = await asyncio.to_thread(
                                         sdk.api_cancel, request_id)
                                     logger.debug('sdk.api_cancel request '
                                                  f'ID: {req}')
                                     try:
-                                        await context_utils.to_thread(
-                                            sdk.get, req)
+                                        await asyncio.to_thread(sdk.get, req)
                                     except Exception as e:  # pylint: disable=broad-except
                                         # we must still return a CancelledError
                                         logger.error(
@@ -474,7 +474,7 @@ class StrategyExecutor:
                                 task = self.dag.tasks[self.task_id]
                                 task_resources = task.resources
 
-                            self.cluster_name = await (context_utils.to_thread(
+                            self.cluster_name = await (asyncio.to_thread(
                                 serve_utils.get_next_cluster_name, self.pool,
                                 self.job_id, task_resources))
                             if self.cluster_name is None:
@@ -482,25 +482,25 @@ class StrategyExecutor:
                                     'No cluster name found in the pool.')
                             request_id = None
                             try:
-                                request_id = await context_utils.to_thread(
+                                request_id = await asyncio.to_thread(
                                     sdk.exec,
                                     self.dag,
                                     cluster_name=self.cluster_name,
                                 )
                                 logger.debug('sdk.exec request ID: '
                                              f'{request_id}')
-                                job_id_on_pool_cluster, _ = (
-                                    await context_utils.to_thread(
-                                        sdk.get, request_id))
+                                job_id_on_pool_cluster, _ = (await
+                                                             asyncio.to_thread(
+                                                                 sdk.get,
+                                                                 request_id))
                             except asyncio.CancelledError:
                                 if request_id:
-                                    req = await context_utils.to_thread(
+                                    req = await asyncio.to_thread(
                                         sdk.api_cancel, request_id)
                                     logger.debug('sdk.api_cancel request '
                                                  f'ID: {req}')
                                     try:
-                                        await context_utils.to_thread(
-                                            sdk.get, req)
+                                        await asyncio.to_thread(sdk.get, req)
                                     except Exception as e:  # pylint: disable=broad-except
                                         # we must still return a CancelledError
                                         logger.error(
@@ -567,6 +567,52 @@ class StrategyExecutor:
                         # At this point, a sky.launch() has succeeded. Cluster
                         # may be UP (no preemption since) or DOWN (newly
                         # preempted).
+                        # Auto-populate instance links if cluster is on a real
+                        # cloud
+                        if self.cluster_name is not None and self.pool is None:
+                            try:
+                                handle = await asyncio.to_thread(
+                                    global_user_state.
+                                    get_handle_from_cluster_name,
+                                    self.cluster_name)
+                                if (handle is not None and hasattr(
+                                        handle, 'cached_cluster_info') and
+                                        handle.cached_cluster_info is not None):
+                                    cluster_info = handle.cached_cluster_info
+                                    instance_links = (instance_links_utils.
+                                                      generate_instance_links(
+                                                          cluster_info,
+                                                          self.cluster_name))
+                                    if instance_links:
+                                        # Store instance links directly in
+                                        # database
+                                        await state.update_links_async(
+                                            self.job_id, self.task_id,
+                                            instance_links)
+                                        logger.debug(
+                                            f'Auto-populated instance links: '
+                                            f'{instance_links}')
+                                    else:
+                                        logger.debug('Failed to generate '
+                                                     'instance links')
+                                else:
+                                    logger.debug(
+                                        'Cluster handle not found or '
+                                        'cached cluster info is None so'
+                                        'not populating instance links')
+                            except Exception as e:  # pylint: disable=broad-except
+                                # Don't fail the launch if we can't generate
+                                # links
+                                logger.debug(
+                                    'Failed to auto-populate instance links: '
+                                    f'{e}')
+                        else:
+                            if self.pool:
+                                logger.debug('Not populating instance links '
+                                             'since the cluster is for a pool')
+                            else:
+                                logger.debug('Not populating instance links '
+                                             'since the cluster name is None')
                         job_submitted_at = await (
                             self._wait_until_job_starts_on_cluster())
                         if job_submitted_at is not None:
@@ -583,7 +629,7 @@ class StrategyExecutor:
 
                     # If we get here, the launch did not succeed. Tear down the
                     # cluster and retry.
-                    await context_utils.to_thread(self._cleanup_cluster)
+                    await asyncio.to_thread(self._cleanup_cluster)
                     if max_retry is not None and retry_cnt >= max_retry:
                         # Retry forever if max_retry is None.
                         if raise_on_failure:
@@ -689,7 +735,7 @@ class FailoverStrategyExecutor(StrategyExecutor):
                                                  recovery)
         if job_submitted_at is not None and self.cluster_name is not None:
             # Only record the cloud/region if the launch is successful.
-            handle = await context_utils.to_thread(
+            handle = await asyncio.to_thread(
                 global_user_state.get_handle_from_cluster_name,
                 self.cluster_name)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), (
@@ -732,7 +778,7 @@ class FailoverStrategyExecutor(StrategyExecutor):
             # Step 2
             logger.debug('Terminating unhealthy cluster and reset cloud '
                          'region.')
-            await context_utils.to_thread(self._cleanup_cluster)
+            await asyncio.to_thread(self._cleanup_cluster)
 
             # Step 3
             logger.debug('Relaunch the cluster  without constraining to prior '
@@ -791,7 +837,7 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
 
         # Step 1
         logger.debug('Terminating unhealthy cluster and reset cloud region.')
-        await context_utils.to_thread(self._cleanup_cluster)
+        await asyncio.to_thread(self._cleanup_cluster)
 
         # Step 2
         logger.debug('Relaunch the cluster skipping the previously launched '
