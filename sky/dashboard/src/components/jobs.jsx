@@ -873,12 +873,12 @@ export function ManagedJobsTable({
         const aggregatedStatus = getAggregatedStatus(tasks, primaryTasks);
 
         // Compute status tooltip showing all task statuses
-        // Also indicate which tasks are primary
+        // Also indicate which tasks are primary with a star marker
         const statusTooltip = primaryTasks
           ? `Task statuses:\n${tasks.map((t, i) => {
               const isPrimary = primaryTasks.includes(t.task);
-              return `Task ${i}${isPrimary ? ' [P]' : ''}: ${t.status}`;
-            }).join('\n')}`
+              return `Task ${i}${isPrimary ? ' ★' : ''}: ${t.status}`;
+            }).join('\n')}\n\n★ = Primary task`
           : `Task statuses:\n${tasks.map((t, i) => `Task ${i}: ${t.status}`).join('\n')}`;
 
         // Compute aggregated resources

@@ -1,14 +1,14 @@
 """Networking utilities for JobGroups.
 
-This module provides functions to set up networking between jobs in a JobGroup.
+This module provides functions to set up networking between tasks in a JobGroup.
 
 Architecture:
     Layer 1: User Interface (environment variables)
-        - SKYPILOT_JOBGROUP_HOST_{JOB_NAME} = <address>
+        - SKYPILOT_JOBGROUP_HOST_{TASK_NAME} = <address>
         - SKYPILOT_JOBGROUP_NAME = <job_group_name>
 
     Layer 2: JobAddressResolver
-        - Resolves job addresses based on placement mode
+        - Resolves task addresses based on placement mode
         - Supports internal (SAME_INFRA) and external (future) addresses
 
     Layer 3: NetworkConfigurator
@@ -18,7 +18,7 @@ Architecture:
 Design Goals:
     - Future-proof: Currently implements SAME_INFRA, but architecture supports
       CROSS_INFRA and mixed cloud scenarios
-    - Unified interface: All jobs access addresses via environment variables
+    - Unified interface: All tasks access addresses via environment variables
     - Platform abstraction: K8s uses native DNS, SSH clouds use /etc/hosts
 """
 import asyncio
@@ -200,7 +200,7 @@ def _generate_hosts_entries(
 
     Args:
         job_group_name: Name of the JobGroup.
-        tasks_handles: List of (Task, ResourceHandle) tuples for each job.
+        tasks_handles: List of (Task, ResourceHandle) tuples for each task.
 
     Returns:
         String containing /etc/hosts entries, one per line.
@@ -209,20 +209,20 @@ def _generate_hosts_entries(
 
     for task, handle in tasks_handles:
         if handle is None:
-            logger.warning(f'Skipping job {task.name}: no handle')
+            logger.warning(f'Skipping task {task.name}: no handle')
             continue
 
         if _is_kubernetes(handle):
             continue
 
         if handle.stable_internal_external_ips is None:
-            logger.warning(f'Skipping job {task.name}: no IP information')
+            logger.warning(f'Skipping task {task.name}: no IP information')
             continue
 
-        job_name = task.name
+        task_name = task.name
         for node_idx, (internal_ip,
                        _) in enumerate(handle.stable_internal_external_ips):
-            hostname = f'{job_name}-{node_idx}.{job_group_name}'
+            hostname = f'{task_name}-{node_idx}.{job_group_name}'
             entries.append(f'{internal_ip} {hostname}')
             logger.debug(f'Host entry (SSH): {internal_ip} -> {hostname}')
 
@@ -559,13 +559,13 @@ async def setup_job_group_networking(
                               'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
     placement: PlacementMode = PlacementMode.SAME_INFRA,
 ) -> bool:
-    """Set up networking for all jobs in a JobGroup.
+    """Set up networking for all tasks in a JobGroup.
 
     This is the main entry point for JobGroup networking setup.
 
     Args:
         job_group_name: Name of the JobGroup.
-        tasks_handles: List of (Task, ResourceHandle) tuples for each job.
+        tasks_handles: List of (Task, ResourceHandle) tuples for each task.
         placement: Placement mode (default: SAME_INFRA).
 
     Returns:
@@ -585,9 +585,9 @@ def get_job_group_env_vars(
     job_id: Optional[int] = None,
     placement: PlacementMode = PlacementMode.SAME_INFRA,
 ) -> Dict[str, str]:
-    """Get environment variables for JobGroup jobs.
+    """Get environment variables for JobGroup tasks.
 
-    This function generates environment variables that allow jobs to discover
+    This function generates environment variables that allow tasks to discover
     each other's addresses using the consistent hostname format.
 
     Args:
@@ -657,14 +657,14 @@ def generate_wait_for_networking_script(job_group_name: str,
 
     Args:
         job_group_name: Name of the JobGroup.
-        other_job_names: List of other job names in the group to wait for.
+        other_job_names: List of other task names in the group to wait for.
 
     Returns:
         Bash script as a string.
     """
     # Generate hostnames to wait for
     hostnames = [
-        f'{job_name}-0.{job_group_name}' for job_name in other_job_names
+        f'{task_name}-0.{job_group_name}' for task_name in other_job_names
     ]
 
     if not hostnames:

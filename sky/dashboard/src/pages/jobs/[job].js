@@ -46,6 +46,7 @@ import {
   downloadManagedJobLogs,
 } from '@/data/connectors/jobs';
 import { StatusBadge } from '@/components/elements/StatusBadge';
+import { PrimaryBadge } from '@/components/elements/PrimaryBadge';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { NonCapitalizedTooltip } from '@/components/utils';
@@ -259,7 +260,7 @@ function JobDetails() {
               {jobId} {detailJobData?.name ? `(${detailJobData.name})` : ''}
               {isMultiTask && (
                 <span className="ml-2 text-xs text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded">
-                  {allTasks.length} jobs
+                  {allTasks.length} tasks
                 </span>
               )}
             </Link>
@@ -318,19 +319,19 @@ function JobDetails() {
               </Card>
             </div>
 
-            {/* Jobs Section - only show for multi-task jobs */}
+            {/* Tasks Section - only show for multi-task jobs */}
             {isMultiTask && (
-              <div id="jobs-section" className="mt-6">
+              <div id="tasks-section" className="mt-6">
                 <Card>
                   <div className="flex items-center justify-between px-4 pt-4">
                     <h3 className="text-lg font-semibold flex items-center">
-                      Jobs in JobGroup
+                      Tasks
                       <span className="ml-2 text-sm font-normal text-gray-500">
-                        ({allTasks.length} jobs)
+                        ({allTasks.length} tasks)
                       </span>
                       {jobPlacement === 'SAME_INFRA' && (
                         <Tooltip
-                          content="All jobs in this job group are co-located on the same infrastructure"
+                          content="All tasks in this job group are co-located on the same infrastructure"
                           className="text-muted-foreground"
                         >
                           <span className="ml-3 px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 cursor-help">
@@ -391,16 +392,11 @@ function JobDetails() {
                                   className="text-blue-600 hover:underline"
                                 >
                                   {task.task || `Job ${index}`}
-                                  {/* Show [P] marker for primary tasks */}
+                                  {/* Show Primary badge for primary tasks */}
                                   {detailJobData?.primary_tasks?.includes(task.task) && (
-                                    <Tooltip
-                                      content="Primary task - job group status is determined by primary tasks"
-                                      className="text-muted-foreground"
-                                    >
-                                      <span className="ml-1 text-xs text-blue-600 font-medium cursor-help">
-                                        [P]
-                                      </span>
-                                    </Tooltip>
+                                    <span className="ml-1.5">
+                                      <PrimaryBadge />
+                                    </span>
                                   )}
                                 </Link>
                               </TableCell>
@@ -1138,10 +1134,10 @@ function JobDetailsContent({
         <div className="text-base mt-1">
           {allTasks.length > 1 ? (
             <NonCapitalizedTooltip
-              content={`Aggregated from ${allTasks.length} jobs:\n${allTasks
+              content={`Aggregated from ${allTasks.length} tasks:\n${allTasks
                 .map(
                   (task, index) =>
-                    `Job ${index}${task.task ? ` (${task.task})` : ''}: ${task.requested_resources || task.resources_str || 'N/A'}`
+                    `Task ${index}${task.task ? ` (${task.task})` : ''}: ${task.requested_resources || task.resources_str || 'N/A'}`
                 )
                 .join('\n')}`}
               className="text-sm text-muted-foreground"
@@ -1153,7 +1149,7 @@ function JobDetailsContent({
                     .filter(Boolean);
                   const uniqueResources = [...new Set(resourcesList)];
                   return uniqueResources.length === 1
-                    ? `${uniqueResources[0]} (x${allTasks.length} jobs)`
+                    ? `${uniqueResources[0]} (x${allTasks.length} tasks)`
                     : `${resourcesList[0]} (+${allTasks.length - 1} more)`;
                 })()}
               </span>

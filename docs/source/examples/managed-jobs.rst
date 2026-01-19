@@ -11,7 +11,7 @@ Managed Jobs
 
    :doc:`pools` for running batch inference workloads across multiple infrastructure.
 
-   :ref:`job-groups` for running multiple heterogeneous jobs in parallel that
+   :ref:`job-groups` for running multiple heterogeneous tasks in parallel that
    can communicate with each other.
 
 SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically retry failures, recover from spot instance preemptions, and clean up when done.
@@ -410,8 +410,12 @@ A pipeline is a managed job that contains a sequence of tasks running one after 
 This is useful for running a sequence of tasks that depend on each other, e.g., training a model and then running inference on it.
 Different tasks can have different resource requirements to use appropriate per-task resources, which saves costs, while  keeping the burden of managing the tasks off the user.
 
+.. seealso::
+
+  :ref:`job-groups` for running multiple tasks **in parallel** instead of sequentially.
+
 .. note::
-  In other words, a managed job is either a single task or a pipeline of tasks. All managed jobs are submitted by :code:`sky jobs launch`.
+  In other words, a managed job is either a single task, a pipeline (sequential tasks), or a :ref:`job group <job-groups>` (parallel tasks). All managed jobs are submitted by :code:`sky jobs launch`.
 
 To run a pipeline, specify the sequence of tasks in a YAML file. Here is an example:
 
