@@ -135,7 +135,22 @@ class YottaClient:
     """Yotta API Client"""
 
     def __init__(self):
-        self.org_id, self.api_key = _load_credentials()
+        self._org_id = None
+        self._api_key = None
+
+    @property
+    def org_id(self):
+        self._ensure_credentials_loaded()
+        return self._org_id
+
+    @property
+    def api_key(self):
+        self._ensure_credentials_loaded()
+        return self._api_key
+
+    def _ensure_credentials_loaded(self):
+        if self._org_id is None or self._api_key is None:
+            self._org_id, self._api_key = _load_credentials()
 
     def check_api_key(self) -> bool:
         url = f'{ENDPOINT}/key/check?orgId={self.org_id}'
