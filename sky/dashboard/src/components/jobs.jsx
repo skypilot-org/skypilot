@@ -51,6 +51,7 @@ import {
 import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
+import { PrimaryBadge } from '@/components/elements/PrimaryBadge';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
 import dashboardCache from '@/lib/cache';
@@ -1585,6 +1586,12 @@ export function ManagedJobsTable({
                                   >
                                     {task.task || `Task ${taskIndex}`}
                                   </Link>
+                                  {/* Show Primary badge for primary tasks */}
+                                  {tasks[0]?.primary_tasks?.includes(task.task) && (
+                                    <span className="ml-1.5">
+                                      <PrimaryBadge />
+                                    </span>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <UserDisplay

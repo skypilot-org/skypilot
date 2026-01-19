@@ -4,8 +4,7 @@ import { NonCapitalizedTooltip as Tooltip } from '@/components/utils';
 /**
  * A compact badge indicating a primary task in a job group.
  * Primary tasks determine the overall job group status - when all primary
- * tasks succeed, the job group is considered successful even if auxiliary
- * tasks are cancelled.
+ * tasks complete, auxiliary tasks are automatically terminated.
  */
 export const PrimaryBadge = ({
   showTooltip = true,
@@ -22,8 +21,6 @@ export const PrimaryBadge = ({
         border border-emerald-200
         rounded
         shadow-sm
-        transition-all duration-200
-        hover:shadow hover:border-emerald-300 hover:from-emerald-100 hover:to-teal-100
         cursor-help
         select-none
         ${className}
@@ -52,7 +49,7 @@ export const PrimaryBadge = ({
 
   return (
     <Tooltip
-      content="Primary task – job group status is determined by primary tasks"
+      content="Primary task – other tasks will be terminated once all primary tasks finish"
       className="text-muted-foreground"
     >
       {badge}
