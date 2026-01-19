@@ -415,7 +415,7 @@ Different tasks can have different resource requirements to use appropriate per-
   :ref:`job-groups` for running multiple tasks **in parallel** instead of sequentially.
 
 .. note::
-  In other words, a managed job is either a single task or a pipeline of tasks. All managed jobs are submitted by :code:`sky jobs launch`.
+  In other words, a managed job is either a single task, a pipeline (sequential tasks), or a :ref:`job group <job-groups>` (parallel tasks). All managed jobs are submitted by :code:`sky jobs launch`.
 
 To run a pipeline, specify the sequence of tasks in a YAML file. Here is an example:
 
