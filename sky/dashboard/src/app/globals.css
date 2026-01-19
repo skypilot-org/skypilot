@@ -521,7 +521,12 @@
 .infra-skeleton-text {
   display: inline-block;
   height: 0.75rem;
-  background: linear-gradient(90deg, #e5e7eb 0%, #f3f4f6 50%, #e5e7eb 100%);
+  background: linear-gradient(
+    90deg,
+    hsl(var(--border)) 0%,
+    hsl(var(--secondary)) 50%,
+    hsl(var(--border)) 100%
+  );
   background-size: 200% 100%;
   animation: infra-shimmer 1.5s infinite;
   border-radius: 3px;

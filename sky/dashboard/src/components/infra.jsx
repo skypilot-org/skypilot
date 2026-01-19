@@ -153,7 +153,7 @@ const GpuUtilizationBar = ({
 
 // Skeleton badge for loading cells - replaces CircularProgress size={12}
 const SkeletonBadge = () => (
-  <span className="px-2 py-0.5 bg-gray-100 rounded text-xs font-medium inline-flex items-center">
+  <span className="px-2 py-0.5 bg-muted rounded text-xs font-medium inline-flex items-center">
     <span
       className="infra-skeleton-text"
       style={{ width: '20px', height: '12px' }}
@@ -226,6 +226,16 @@ export function InfrastructureSection({
     );
   }
 
+  // Determine if table should show refreshing state
+  // For K8s: show during loading or when contexts haven't all loaded yet
+  // For SSH/Slurm: only show during loading
+  const isTableRefreshing =
+    !isInitialLoad &&
+    (isLoading ||
+      (!(isSlurm || isSSH) &&
+        safeContexts.length > 0 &&
+        !safeContexts.every((c) => loadedContexts.has(c))));
+
   // Show table if we have contexts to display, even if some data is still loading
   if (safeContexts.length > 0) {
     return (
@@ -254,14 +264,8 @@ export function InfrastructureSection({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <div
-                className={`overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white ${
-                  !isInitialLoad &&
-                  (isLoading ||
-                    (!(isSlurm || isSSH) &&
-                      safeContexts.length > 0 &&
-                      !safeContexts.every((c) => loadedContexts.has(c))))
-                    ? 'infra-table-refreshing'
-                    : ''
+                className={`overflow-x-auto rounded-md border shadow-sm bg-card ${
+                  isTableRefreshing ? 'infra-table-refreshing' : ''
                 }`}
               >
                 <table className="min-w-full text-sm">
@@ -371,7 +375,7 @@ export function InfrastructureSection({
                       return (
                         <tr
                           key={context}
-                          className={`hover:bg-gray-50 ${
+                          className={`hover:bg-muted/50 ${
                             !hasGpuData && !isInitialLoad
                               ? 'infra-loading-row'
                               : ''
@@ -486,14 +490,8 @@ export function InfrastructureSection({
             {gpus && gpus.length > 0 && (
               <div>
                 <div
-                  className={`overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white ${
-                    !isInitialLoad &&
-                    (isLoading ||
-                      (!(isSlurm || isSSH) &&
-                        safeContexts.length > 0 &&
-                        !safeContexts.every((c) => loadedContexts.has(c))))
-                      ? 'infra-table-refreshing'
-                      : ''
+                  className={`overflow-x-auto rounded-md border shadow-sm bg-card ${
+                    isTableRefreshing ? 'infra-table-refreshing' : ''
                   }`}
                 >
                   <table className="min-w-full text-sm">
@@ -2162,15 +2160,6 @@ export function GPUs() {
                 [context]: gpuData.error,
               }));
             }
-
-            // Decrement pending count and check if ALL fetches are complete
-            pendingContextCountRef.current--;
-            if (
-              pendingContextCountRef.current === 0 &&
-              mainFetchDoneRef.current
-            ) {
-              setIsFetching(false); // Everything done, stop spinner
-            }
           })
           .catch((error) => {
             // Mark context as loaded even on error to prevent infinite spinner
@@ -2179,7 +2168,8 @@ export function GPUs() {
               ...prev,
               [context]: error.message || 'Failed to load GPU data',
             }));
-
+          })
+          .finally(() => {
             // Decrement pending count and check if ALL fetches are complete
             pendingContextCountRef.current--;
             if (
@@ -2837,7 +2827,7 @@ export function GPUs() {
             </p>
           ) : (
             <div
-              className={`overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white ${
+              className={`overflow-x-auto rounded-md border shadow-sm bg-card ${
                 !isInitialLoad &&
                 (clusterDataLoading || sshAndKubeJobsDataLoading)
                   ? 'infra-table-refreshing'
@@ -2858,7 +2848,7 @@ export function GPUs() {
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="bg-card divide-y divide-gray-200">
                   {filteredCloudInfraData.map((cloud) => {
                     // Use separate loading states for progressive loading
                     // Clusters and jobs load independently (clusters often ready first)
@@ -2867,7 +2857,7 @@ export function GPUs() {
                     const jobCount = cloudJobCounts[cloud.name] ?? cloud.jobs;
 
                     return (
-                      <tr key={cloud.name} className="hover:bg-gray-50">
+                      <tr key={cloud.name} className="hover:bg-muted/50">
                         <td className="p-3 font-medium text-gray-700">
                           {cloud.name}
                         </td>
