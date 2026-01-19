@@ -6,7 +6,13 @@
 #
 # Architecture:
 #   - trainer: Trains ResNet-18 on CIFAR-10, saves checkpoints to shared volume
-#   - evaluator: Watches for new checkpoints, evaluates and reports accuracy
+#   - evaluator: Watches for checkpoints, evaluates and reports accuracy
+#
+# Completion Behavior:
+#   When training completes, the trainer writes a "training_complete" marker
+#   file to the shared volume. The evaluator detects this marker, finishes
+#   evaluating any remaining checkpoints, and exits gracefully. Both tasks
+#   complete naturally without forced termination.
 #
 # Usage:
 #   # First, create the shared volume:

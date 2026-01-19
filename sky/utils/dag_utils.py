@@ -1,10 +1,12 @@
 """Utilities for loading and dumping DAGs from/to YAML files."""
 import copy
+import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky import dag as dag_lib
 from sky import sky_logging
 from sky import task as task_lib
+from sky.skylet import constants
 from sky.utils import cluster_utils
 from sky.utils import registry
 from sky.utils import ux_utils
@@ -13,7 +15,9 @@ from sky.utils import yaml_utils
 logger = sky_logging.init_logger(__name__)
 
 # JobGroup header fields
-_JOB_GROUP_HEADER_FIELDS = {'name', 'placement', 'execution'}
+_JOB_GROUP_HEADER_FIELDS = {
+    'name', 'placement', 'execution', 'primary_tasks', 'termination_delay'
+}
 _JOB_GROUP_REQUIRED_HEADER_FIELDS = {'name'}
 # Fields that indicate this is a JobGroup header (not a task)
 _JOB_GROUP_INDICATOR_FIELDS = {'placement', 'execution'}
@@ -549,10 +553,86 @@ def _load_job_group(
     dag.name = group_name
     dag.set_dag_config(placement, execution)
 
+    # Parse and validate primary_tasks
+    primary_tasks = header.get('primary_tasks')
+    if primary_tasks is not None:
+        if not isinstance(primary_tasks, list):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'primary_tasks must be a list of job names, '
+                                 f'got {type(primary_tasks).__name__}')
+        # Empty list is treated as "all jobs are primary"
+        if primary_tasks:
+            for job_name in primary_tasks:
+                if not isinstance(job_name, str):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'primary_tasks entries must be strings, '
+                            f'got {type(job_name).__name__}')
+                if job_name not in job_names:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'primary_tasks references unknown job: {job_name}. '
+                            f'Available jobs: {sorted(job_names)}')
+            dag.primary_tasks = primary_tasks
+        # Empty list means all jobs are primary (same as not setting it)
+
+    # Parse and validate termination_delay
+    termination_delay = header.get('termination_delay')
+    if termination_delay is not None:
+        if isinstance(termination_delay, (str, int)):
+            # Simple format: "30s" or 30
+            _validate_time_duration(str(termination_delay), 'termination_delay')
+            dag.termination_delay = str(termination_delay)
+        elif isinstance(termination_delay, dict):
+            # Dict format: {"default": "30s", "replay-buffer": "1m"}
+            for key, value in termination_delay.items():
+                if not isinstance(key, str) or not isinstance(
+                        value, (str, int)):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'termination_delay dict must have string keys and '
+                            f'string/int values, got {key!r}: {value!r}')
+                if key != 'default' and key not in job_names:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'termination_delay references unknown job: {key}. '
+                            f'Available jobs: {sorted(job_names)} (or "default")'
+                        )
+                _validate_time_duration(str(value),
+                                        f'termination_delay[{key!r}]')
+            # Convert all values to strings
+            dag.termination_delay = {
+                k: str(v) for k, v in termination_delay.items()
+            }
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'termination_delay must be a string, int, or dict, '
+                    f'got {type(termination_delay).__name__}')
+
     logger.info(f'Loaded JobGroup "{group_name}" with {len(dag.tasks)} jobs: '
                 f'{[t.name for t in dag.tasks]}')
 
     return dag
+
+
+def _validate_time_duration(duration: str, field_name: str) -> None:
+    """Validate a time duration string.
+
+    Args:
+        duration: Time duration string (e.g., '30s', '5m', '1h', or '30')
+        field_name: Name of the field for error messages
+
+    Raises:
+        ValueError: If the duration is invalid.
+    """
+    # TIME_PATTERN_SECONDS already enforces non-negative integers with optional
+    # unit suffix, so we only need to check the pattern match.
+    if not re.match(constants.TIME_PATTERN_SECONDS, duration):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Invalid time duration for {field_name}: {duration!r}. '
+                f'Expected format: NUMBER[s|m|h|d|w] (e.g., "30s", "5m", "1h")')
 
 
 def dump_job_group_to_yaml_str(dag: dag_lib.Dag,
@@ -569,16 +649,20 @@ def dump_job_group_to_yaml_str(dag: dag_lib.Dag,
     assert dag.is_job_group(), 'DAG is not a JobGroup'
 
     # Build header
-    header = {
+    header: Dict[str, Any] = {
         'name': dag.name,
     }
     if dag.placement is not None:
         header['placement'] = dag.placement.value
     if dag.execution is not None:
         header['execution'] = dag.execution.value
+    if dag.primary_tasks is not None:
+        header['primary_tasks'] = dag.primary_tasks
+    if dag.termination_delay is not None:
+        header['termination_delay'] = dag.termination_delay
 
     # Build job configs
-    configs = [header]
+    configs: List[Dict[str, Any]] = [header]
     for task in dag.tasks:
         job_config = task.to_yaml_config(
             use_user_specified_yaml=use_user_specified_yaml)

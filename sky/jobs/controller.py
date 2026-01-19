@@ -1266,10 +1266,32 @@ class JobController:
 
         logger.info('JobGroup setup complete, all jobs are running')
 
-        # Phase 4: Monitor all jobs in parallel (only non-terminal tasks)
+        # Phase 4: Monitor all jobs in parallel with primary/auxiliary support
         logger.info('Phase 4: Monitoring all jobs...')
-        monitor_tasks = []
-        monitor_task_ids = []
+
+        # Determine primary vs auxiliary jobs
+        primary_job_names = self._dag.primary_tasks
+        if not primary_job_names:
+            # All jobs are primary (traditional behavior)
+            primary_task_ids: Set[int] = set(range(len(tasks)))
+            auxiliary_task_ids: Set[int] = set()
+        else:
+            primary_task_ids = {
+                tid for tid, t in enumerate(tasks)
+                if t.name in primary_job_names
+            }
+            auxiliary_task_ids = set(range(len(tasks))) - primary_task_ids
+
+        if auxiliary_task_ids:
+            logger.info(
+                f'Primary jobs: {[tasks[tid].name for tid in primary_task_ids]}'
+            )
+            logger.info(f'Auxiliary jobs: '
+                        f'{[tasks[tid].name for tid in auxiliary_task_ids]}')
+
+        # Create asyncio.Task objects for all non-terminal tasks
+        # Maps task_id -> asyncio.Task
+        monitor_async_tasks: Dict[int, asyncio.Task] = {}
         for task_id, task in enumerate(tasks):
             if is_terminal(task_id):
                 continue
@@ -1282,22 +1304,101 @@ class JobController:
                 f'Handle for non-terminal task {task_id} should not be None')
             assert cluster_name is not None
             assert executor is not None
-            monitor_tasks.append(
-                self._monitor_job_group_task(task_id, task, task_handle,
-                                             cluster_name, executor,
-                                             job_group_name, tasks_handles,
-                                             force_recovery))
-            monitor_task_ids.append(task_id)
+            coro = self._monitor_job_group_task(task_id, task, task_handle,
+                                                cluster_name, executor,
+                                                job_group_name, tasks_handles,
+                                                force_recovery)
+            monitor_async_tasks[task_id] = asyncio.create_task(
+                coro, name=f'monitor_{task.name}')
+
+        # Track results: task_id -> success (True/False/Exception)
+        task_results: Dict[int, typing.Union[bool, Exception]] = {}
+        # Track remaining primary task IDs (non-terminal ones)
+        remaining_primary = primary_task_ids - {
+            tid for tid in range(len(tasks)) if is_terminal(tid)
+        }
+        # Reverse mapping: asyncio.Task -> task_id for efficient lookup
+        async_task_to_id: Dict[asyncio.Task, int] = {
+            at: tid for tid, at in monitor_async_tasks.items()
+        }
 
         try:
-            results = await asyncio.gather(*monitor_tasks,
-                                           return_exceptions=True)
+            # Monitor with primary/auxiliary termination logic
+            while monitor_async_tasks:
+                # Wait for any task to complete
+                done, _ = await asyncio.wait(
+                    monitor_async_tasks.values(),
+                    return_when=asyncio.FIRST_COMPLETED)
+
+                for completed_task in done:
+                    completed_task_id = async_task_to_id[completed_task]
+
+                    # Remove from monitoring
+                    del monitor_async_tasks[completed_task_id]
+                    del async_task_to_id[completed_task]
+
+                    # Get result
+                    try:
+                        task_result: typing.Union[bool, Exception] = (
+                            completed_task.result())
+                        task_results[completed_task_id] = task_result
+                        if task_result:
+                            logger.info(
+                                f'Job {tasks[completed_task_id].name} succeeded'
+                            )
+                        else:
+                            logger.info(
+                                f'Job {tasks[completed_task_id].name} failed')
+                    except asyncio.CancelledError:
+                        # Task was cancelled (auxiliary job termination)
+                        task_results[completed_task_id] = False
+                        logger.info(
+                            f'Job {tasks[completed_task_id].name} was terminated'
+                        )
+                    except Exception as e:
+                        task_results[completed_task_id] = e
+                        logger.error(
+                            f'Job {tasks[completed_task_id].name} failed with '
+                            f'exception: {e}')
+
+                    # If this was a primary task, check if all primary done
+                    if completed_task_id in remaining_primary:
+                        remaining_primary.discard(completed_task_id)
+
+                        if not remaining_primary:
+                            # All primary jobs are done
+                            logger.info('All primary jobs completed')
+
+                            # Check if all primary jobs succeeded. For terminal
+                            # tasks, check their status; for others, check result.
+                            def primary_task_succeeded(tid: int) -> bool:
+                                if is_terminal(tid):
+                                    return (task_resume_info[tid][0] ==
+                                            managed_job_state.ManagedJobStatus.
+                                            SUCCEEDED)
+                                return task_results.get(tid, True) is True
+
+                            all_primary_succeeded = all(
+                                primary_task_succeeded(tid)
+                                for tid in primary_task_ids)
+
+                            # Terminate remaining auxiliary jobs
+                            if monitor_async_tasks:
+                                await self._terminate_auxiliary_jobs(
+                                    tasks, monitor_async_tasks, cluster_names,
+                                    all_primary_succeeded)
+                                # All auxiliary jobs terminated, exit loop
+                                break
+
         except Exception as e:
             logger.error(f'Monitoring failed: {e}')
+            # Cancel all remaining tasks
+            for task_id, async_task in monitor_async_tasks.items():
+                async_task.cancel()
             await self._cleanup_job_group_clusters(cluster_names)
             raise
 
-        # Check results (include terminal tasks that already succeeded)
+        # Check results (include terminal tasks)
         all_succeeded = True
         for task_id, task in enumerate(tasks):
             if is_terminal(task_id):
@@ -1307,19 +1408,87 @@ class JobController:
                     all_succeeded = False
                 continue
 
-            # Find the result for this task
-            result_idx = monitor_task_ids.index(task_id)
-            result = results[result_idx]
-            if isinstance(result, Exception):
-                logger.error(f'Job {task.name} monitoring failed: {result}')
+            # Check the result for this task
+            check_result = task_results.get(task_id)
+            if isinstance(check_result, Exception):
+                logger.error(
+                    f'Job {task.name} monitoring failed: {check_result}')
                 all_succeeded = False
-            elif not result:
+            elif check_result is not True:
                 all_succeeded = False
-            else:
-                logger.info(f'Job {task.name} completed successfully')
 
         await self._cleanup_job_group_clusters(cluster_names)
         return all_succeeded
+
+    async def _terminate_auxiliary_jobs(self, tasks: List['task_lib.Task'],
+                                        monitor_async_tasks: Dict[int,
+                                                                  asyncio.Task],
+                                        cluster_names: List[Optional[str]],
+                                        all_primary_succeeded: bool) -> None:
+        """Terminate auxiliary jobs after all primary jobs complete.
+
+        Args:
+            tasks: List of all tasks in the job group.
+            monitor_async_tasks: Dict mapping task_id to asyncio.Task for
+                remaining (auxiliary) jobs.
+            cluster_names: List of cluster names for each task.
+            all_primary_succeeded: Whether all primary jobs succeeded. If True,
+                use configured termination delays. If False, terminate
+                immediately.
+        """
+        if not monitor_async_tasks:
+            return
+
+        async def terminate_one(task_id: int, async_task: asyncio.Task,
+                                delay_secs: int) -> None:
+            """Terminate a single auxiliary job after optional delay."""
+            task_name = tasks[task_id].name
+            if delay_secs > 0:
+                logger.info(f'Waiting {delay_secs}s before terminating '
+                            f'auxiliary job {task_name}...')
+                await asyncio.sleep(delay_secs)
+
+            logger.info(f'Terminating auxiliary job {task_name}')
+
+            # Cancel the monitoring task
+            async_task.cancel()
+            try:
+                await async_task
+            except asyncio.CancelledError:
+                pass
+
+            # Set the task status to cancelled
+            callback_func = managed_job_utils.event_callback_func(
+                job_id=self._job_id, task_id=task_id, task=tasks[task_id])
+            await managed_job_state.set_cancelling_async(
+                job_id=self._job_id, callback_func=callback_func)
+
+            # Clean up the cluster
+            cluster_name = cluster_names[task_id]
+            if cluster_name is not None:
+                try:
+                    await self._cleanup_cluster(cluster_name)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning(
+                        f'Failed to cleanup cluster for {task_name}: {e}')
+
+            await managed_job_state.set_cancelled_async(
+                job_id=self._job_id, callback_func=callback_func)
+
+        # Build termination coroutines with appropriate delays
+        termination_coros = []
+        for task_id, async_task in list(monitor_async_tasks.items()):
+            if all_primary_succeeded:
+                delay_secs = self._dag.get_termination_delay_secs(
+                    tasks[task_id].name)
+            else:
+                # Primary job failed - terminate immediately
+                delay_secs = 0
+            termination_coros.append(
+                terminate_one(task_id, async_task, delay_secs))
+
+        # Run all terminations in parallel
+        await asyncio.gather(*termination_coros, return_exceptions=True)
 
     async def _cleanup_job_group_clusters(
             self, cluster_names: typing.List[typing.Optional[str]]) -> None:

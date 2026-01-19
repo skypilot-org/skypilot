@@ -324,7 +324,7 @@ function JobDetails() {
                 <Card>
                   <div className="flex items-center justify-between px-4 pt-4">
                     <h3 className="text-lg font-semibold flex items-center">
-                      Jobs
+                      Jobs in JobGroup
                       <span className="ml-2 text-sm font-normal text-gray-500">
                         ({allTasks.length} jobs)
                       </span>

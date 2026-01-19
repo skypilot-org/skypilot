@@ -3,7 +3,7 @@ import enum
 import pprint
 import threading
 import typing
-from typing import List, Optional
+from typing import Dict, List, Optional, Union
 
 if typing.TYPE_CHECKING:
     from sky import task
@@ -54,6 +54,15 @@ class Dag:
         self.placement: Optional[DagPlacement] = None
         self.execution: Optional[DagExecution] = None
 
+        # Primary/auxiliary task support for job groups
+        # If set, only the named tasks are "primary"; others are "auxiliary".
+        # When all primary tasks complete, auxiliary tasks are terminated.
+        self.primary_tasks: Optional[List[str]] = None
+        # Termination delay for auxiliary tasks when primary tasks complete.
+        # Can be a string like "30s" (applies to all auxiliary tasks) or
+        # a dict like {"default": "30s", "replay-buffer": "1m"}.
+        self.termination_delay: Optional[Union[str, Dict[str, str]]] = None
+
     def add(self, task: 'task.Task') -> None:
         self.graph.add_node(task)
         self.tasks.append(task)
@@ -98,6 +107,31 @@ class Dag:
         """Configure this DAG with the given placement and execution mode."""
         self.placement = placement
         self.execution = execution
+
+    def get_termination_delay_secs(self, task_name: str) -> int:
+        """Get termination delay in seconds for a specific task.
+
+        Args:
+            task_name: The name of the task to get the delay for.
+
+        Returns:
+            Termination delay in seconds. Returns 0 if not configured.
+        """
+        if self.termination_delay is None:
+            return 0
+
+        # Import here to avoid circular imports
+        from sky.utils import (
+            resources_utils)  # pylint: disable=import-outside-toplevel
+
+        # Get the delay string based on format (str or dict)
+        if isinstance(self.termination_delay, str):
+            delay_str = self.termination_delay
+        else:
+            delay_str = self.termination_delay.get(
+                task_name, self.termination_delay.get('default', '0s'))
+
+        return resources_utils.parse_time_seconds(delay_str)
 
     def is_chain(self) -> bool:
         """Check if the DAG is a linear chain of tasks."""

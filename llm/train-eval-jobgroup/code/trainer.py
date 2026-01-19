@@ -194,6 +194,19 @@ def main():
             save_checkpoint(model, optimizer, epoch, train_loss,
                             args.checkpoint_dir)
 
+    # Write training complete marker for evaluator
+    complete_marker = os.path.join(args.checkpoint_dir, 'training_complete')
+    with open(complete_marker, 'w') as f:
+        json.dump(
+            {
+                'final_epoch': args.num_epochs,
+                'final_loss': train_loss,
+                'timestamp': time.time(),
+            },
+            f,
+            indent=2)
+    print(f"Wrote completion marker: {complete_marker}")
+
     print("\n" + "=" * 60)
     print("Training Complete!")
     print("=" * 60)

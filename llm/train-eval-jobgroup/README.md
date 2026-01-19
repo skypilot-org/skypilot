@@ -26,6 +26,13 @@ This example demonstrates SkyPilot job groups with parallel training and evaluat
 1. **trainer**: Trains ResNet-18 on CIFAR-10, saves checkpoints every N epochs to shared storage
 2. **evaluator**: Watches the checkpoint directory, evaluates new checkpoints as they appear, reports test accuracy
 
+### Graceful Completion
+
+Both tasks complete naturally without forced termination:
+- When training finishes, the trainer writes a `training_complete` marker file to the shared volume
+- The evaluator detects this marker, finishes evaluating any remaining checkpoints, and exits gracefully
+- This pattern avoids the need for `primary_tasks` and `termination_delay` settings
+
 ## Usage
 
 ### Create the Shared Volume

@@ -1283,9 +1283,12 @@ class Optimizer:
                 for resources in candidates[cloud]:
                     if resources.region == region or resources.region is None:
                         # Estimate score for this resource
-                        runtime = task.estimate_runtime(resources)
-                        if runtime is None:
+                        if task.time_estimator_func is None:
                             runtime = 3600  # Default 1 hour
+                        else:
+                            runtime = task.estimate_runtime(resources)
+                            if runtime is None:
+                                runtime = 3600  # Default 1 hour
 
                         if minimize_cost:
                             hourly_cost = resources.get_cost(runtime)
