@@ -344,7 +344,10 @@ def _get_single_resources_schema():
                     },
                     'tpu_vm': {
                         'type': 'boolean',
-                    }
+                    },
+                    'gcp_queued_resource': {
+                        'type': 'boolean',
+                    },
                 }
             },
             '_no_missing_accel_warnings': {
