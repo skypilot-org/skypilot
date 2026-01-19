@@ -67,4 +67,9 @@ def serialize_kubernetes_node_info(return_value: Dict[str, Any]) -> str:
                 node_info.pop('memory_gb', None)
                 node_info.pop('cpu_free', None)
                 node_info.pop('memory_free_gb', None)
+            if remote_api_version < 28:
+                # Remove is_cordoned and taints fields for old clients that
+                # don't recognize them
+                node_info.pop('is_cordoned', None)
+                node_info.pop('taints', None)
     return orjson.dumps(return_value).decode('utf-8')

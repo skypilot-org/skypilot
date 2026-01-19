@@ -95,12 +95,20 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     GCP_GPUDIRECT_RDMA = 'gcp_gpudirect_rdma'
     NEBIUS = 'nebius'
     COREWEAVE = 'coreweave'
+    TOGETHER = 'together'
     NONE = 'none'
 
     def get_network_env_vars(self) -> Dict[str, str]:
         """Get network environment variables for this cluster type."""
         if self == KubernetesHighPerformanceNetworkType.NEBIUS:
             # Nebius cluster with InfiniBand - use InfiniBand optimizations
+            return {
+                'NCCL_IB_HCA': 'mlx5',
+                'UCX_NET_DEVICES': ('mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,'
+                                    'mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1')
+            }
+        elif self == KubernetesHighPerformanceNetworkType.TOGETHER:
+            # Together AI cluster with InfiniBand - use InfiniBand optimizations
             return {
                 'NCCL_IB_HCA': 'mlx5',
                 'UCX_NET_DEVICES': ('mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,'
@@ -1222,14 +1230,31 @@ class V1NodeStatus:
 
 
 @dataclasses.dataclass
+class V1Taint:
+    """Represents a Kubernetes node taint."""
+    key: str
+    effect: str
+    value: Optional[str] = None
+
+
+@dataclasses.dataclass
+class V1NodeSpec:
+    """Represents a Kubernetes node spec."""
+    unschedulable: bool
+    taints: List[V1Taint]
+
+
+@dataclasses.dataclass
 class V1Node:
     """Represents a Kubernetes node."""
     metadata: V1ObjectMeta
     status: V1NodeStatus
+    spec: V1NodeSpec
 
     @classmethod
     def from_dict(cls, data: dict) -> 'V1Node':
         """Create V1Node from a dictionary."""
+        spec_data = data.get('spec', {})
         return cls(metadata=V1ObjectMeta(
             name=data['metadata']['name'],
             labels=data['metadata'].get('labels', {}),
@@ -1246,7 +1271,15 @@ class V1Node:
                            V1NodeCondition(type=cond['type'],
                                            status=cond['status'])
                            for cond in data['status'].get('conditions', [])
-                       ]))
+                       ]),
+                   spec=V1NodeSpec(unschedulable=spec_data.get(
+                       'unschedulable', False),
+                                   taints=[
+                                       V1Taint(key=taint['key'],
+                                               effect=taint['effect'],
+                                               value=taint.get('value'))
+                                       for taint in spec_data.get('taints', [])
+                                   ]))
 
     def is_ready(self) -> bool:
         """Check if the node is ready based on its conditions.
@@ -1258,6 +1291,50 @@ class V1Node:
             if condition.type == 'Ready':
                 return condition.status == 'True'
         return False
+
+    def is_cordoned(self) -> bool:
+        """Check if the node is cordoned based on its spec.unschedulable."""
+        return self.spec.unschedulable
+
+    def get_taints(
+        self,
+        exclude_cordon: bool = False,
+        exclude_not_ready: bool = False,
+        exclude_effects: Optional[List[str]] = None,
+        exclude_keys: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get the taints on the node.
+
+        Args:
+            exclude_cordon: Whether to exclude the cordon taint.
+            exclude_not_ready: Whether to exclude the not ready taint.
+            exclude_effects: The taint effects to exclude,
+              e.g. ['PreferNoSchedule'].
+            exclude_keys: The taint keys to exclude.
+
+        Returns:
+            List[Dict[str, Any]]: The taints on the node.
+        """
+        taints = []
+        for t in self.spec.taints:
+            if (exclude_cordon and
+                    t.key == 'node.kubernetes.io/unschedulable' and
+                    t.effect == 'NoSchedule'):
+                continue
+            if (exclude_not_ready and
+                    t.key == 'node.kubernetes.io/unreachable' and
+                (t.effect == 'NoSchedule' or t.effect == 'NoExecute')):
+                continue
+            if exclude_effects and t.effect in exclude_effects:
+                continue
+            if exclude_keys and t.key in exclude_keys:
+                continue
+            taints.append({
+                'key': t.key,
+                'value': t.value if t.value else None,
+                'effect': t.effect
+            })
+        return taints
 
 
 @annotations.lru_cache(scope='request', maxsize=10)
@@ -3077,6 +3154,15 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
     return unlabeled_nodes
 
 
+def get_handled_taint_keys() -> List[str]:
+    """Get the taint keys that will be handled automatically by SkyPilot."""
+    keys = [TPU_RESOURCE_KEY, *SUPPORTED_GPU_RESOURCE_KEYS.values()]
+    custom_key = os.getenv('CUSTOM_GPU_RESOURCE_KEY', None)
+    if custom_key:
+        keys.append(custom_key)
+    return keys
+
+
 def get_kubernetes_node_info(
         context: Optional[str] = None) -> models.KubernetesNodesInfo:
     """Gets the resource information for all the nodes in the cluster.
@@ -3207,6 +3293,11 @@ def get_kubernetes_node_info(
 
         # Check if node is ready
         node_is_ready = node.is_ready()
+        node_taints = node.get_taints(exclude_cordon=True,
+                                      exclude_not_ready=True,
+                                      exclude_effects=['PreferNoSchedule'],
+                                      exclude_keys=get_handled_taint_keys())
+        node_is_tainted = len(node_taints) > 0
 
         if accelerator_count == 0:
             node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
@@ -3219,11 +3310,14 @@ def get_kubernetes_node_info(
                 memory_gb=memory_gb,
                 cpu_free=cpu_free,
                 memory_free_gb=memory_free_gb,
-                is_ready=node_is_ready)
+                is_ready=node_is_ready,
+                is_cordoned=node.is_cordoned(),
+                taints=node_taints,
+            )
             continue
 
-        if not node_is_ready:
-            # If node is not ready, report 0 available GPUs
+        if not node_is_ready or node.is_cordoned() or node_is_tainted:
+            # If node is not ready, cordoned, or tainted, report 0 available GPUs
             accelerators_available = 0
         elif not has_accelerator_nodes or error_on_get_allocated_resources:
             accelerators_available = -1
@@ -3248,7 +3342,10 @@ def get_kubernetes_node_info(
             memory_gb=memory_gb,
             cpu_free=cpu_free,
             memory_free_gb=memory_free_gb,
-            is_ready=node_is_ready)
+            is_ready=node_is_ready,
+            is_cordoned=node.is_cordoned(),
+            taints=node_taints,
+        )
     hint = ''
     if has_multi_host_tpu:
         hint = ('(Note: Multi-host TPUs are detected and excluded from the '
@@ -3897,3 +3994,25 @@ def get_cleaned_context_and_cloud_str(
         cloud_str = 'ssh'
         context = context[len('ssh-'):]
     return context, cloud_str
+
+
+def get_pvc_events(context: Optional[str],
+                   namespace: str,
+                   pvc_name: str,
+                   reverse: bool = True) -> List[Any]:
+    """Get the events for a PVC, sorted by creation_timestamp."""
+    try:
+        pvc_events = kubernetes.core_api(context).list_namespaced_event(
+            namespace,
+            field_selector=(f'involvedObject.name={pvc_name},'
+                            'involvedObject.kind=PersistentVolumeClaim'),
+            _request_timeout=kubernetes.API_TIMEOUT)
+    except (kubernetes.max_retry_error(), kubernetes.api_exception(),
+            kubernetes.config_exception()) as e:
+        logger.warning(f'Failed to get PVC events: {e}')
+        return []
+
+    return sorted(pvc_events.items,
+                  key=lambda e:
+                  (e.last_timestamp or e.metadata.creation_timestamp),
+                  reverse=reverse)

@@ -183,12 +183,14 @@ export const CustomTooltip = ({ children, ...props }) => {
 export const NonCapitalizedTooltip = ({ children, ...props }) => {
   const content = props.content;
   props.content = undefined;
+  // Remove className from props to prevent it from affecting tooltip styling
+  const { className: _unused, ...restProps } = props;
   return (
     <Tooltip
       {...DEFAULT_TOOLTIP_PROPS}
-      {...props}
+      {...restProps}
       content={
-        <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 text-sm rounded whitespace-pre-line">
+        <span className="left-full w-max px-2 py-1 text-sm text-gray-100 bg-gray-500 rounded whitespace-pre-line normal-case">
           {content}
         </span>
       }
