@@ -18,6 +18,7 @@ import {
   ChevronRightIcon,
   CopyIcon,
   CheckIcon,
+  ExternalLinkIcon,
 } from 'lucide-react';
 import yaml from 'js-yaml';
 import {
@@ -25,7 +26,11 @@ import {
   NonCapitalizedTooltip,
   formatFullTimestamp,
 } from '@/components/utils';
-import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
+import {
+  checkGrafanaAvailability,
+  getGrafanaUrl,
+  buildGrafanaUrl,
+} from '@/utils/grafana';
 import {
   SSHInstructionsModal,
   VSCodeInstructionsModal,
@@ -69,6 +74,9 @@ function ClusterDetails() {
   const [historyData, setHistoryData] = useState(null);
   const [isHistoricalCluster, setIsHistoricalCluster] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // Counter incremented on refresh to force GPU metrics iframes to reload.
+  // When this value changes, the iframe key changes, causing React to remount the iframe.
+  const [gpuMetricsRefreshTrigger, setGpuMetricsRefreshTrigger] = useState(0);
   const isMobile = useMobile();
   const [timeRange, setTimeRange] = useState({
     from: 'now-1h',
@@ -195,6 +203,8 @@ function ClusterDetails() {
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     await refreshData();
+    // Increment GPU metrics refresh trigger to force iframe reload
+    setGpuMetricsRefreshTrigger((prev) => prev + 1);
     setIsRefreshing(false);
   };
 
@@ -297,6 +307,7 @@ function ClusterDetails() {
             matchedClusterName={matchedClusterName}
             isLoadingClusterMatch={isLoadingClusterMatch}
             isGrafanaAvailable={isGrafanaAvailable}
+            gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
             isHistoricalCluster={false}
           />
         ) : isHistoricalCluster && historyData ? (
@@ -313,6 +324,7 @@ function ClusterDetails() {
             matchedClusterName={null}
             isLoadingClusterMatch={false}
             isGrafanaAvailable={false}
+            gpuMetricsRefreshTrigger={0}
             isHistoricalCluster={true}
           />
         ) : (
@@ -354,8 +366,17 @@ function ActiveTab({
   matchedClusterName,
   isLoadingClusterMatch,
   isGrafanaAvailable,
+  gpuMetricsRefreshTrigger,
   isHistoricalCluster = false,
 }) {
+  // Define panel data
+  const gpuPanels = [
+    { id: '1', title: 'GPU Utilization', keyPrefix: 'gpu-util' },
+    { id: '2', title: 'GPU Memory Utilization', keyPrefix: 'gpu-memory' },
+    { id: '3', title: 'GPU Temperature', keyPrefix: 'gpu-temp' },
+    { id: '4', title: 'GPU Power Usage', keyPrefix: 'gpu-power' },
+  ];
+
   const GPU_METRICS_EXPANDED_KEY = 'skypilot-gpu-metrics-expanded';
 
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
@@ -614,6 +635,20 @@ function ActiveTab({
                 </div>
               )}
 
+              {/* Queue Details section - right column */}
+              {clusterData.details && (
+                <PluginSlot
+                  name="clusters.detail.queue_details"
+                  context={{
+                    details: clusterData.details,
+                    queueName: clusterData.kueue_queue_name,
+                    infra: clusterData.full_infra,
+                    clusterData: clusterData,
+                    title: 'Queue Details',
+                  }}
+                />
+              )}
+
               {/* Created by section - spans both columns */}
               {hasCreationArtifacts && (
                 <div className="col-span-2">
@@ -744,6 +779,37 @@ function ActiveTab({
                   )}
                   <h3 className="text-lg font-semibold">GPU Metrics</h3>
                 </button>
+                <Tooltip content="Open in Grafana">
+                  <button
+                    onClick={() => {
+                      const clusterParam =
+                        matchedClusterName ||
+                        clusterData?.cluster_name_on_cloud ||
+                        clusterData?.cluster;
+                      const dashboardPath =
+                        '/d/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics';
+                      const queryParams = new URLSearchParams({
+                        orgId: '1',
+                        from: timeRange.from,
+                        to: timeRange.to,
+                        timezone: 'browser',
+                        'var-cluster': clusterParam,
+                        'var-node': '$__all',
+                        'var-gpu': '$__all',
+                      });
+                      window.open(
+                        buildGrafanaUrl(
+                          `${dashboardPath}?${queryParams.toString()}`
+                        ),
+                        '_blank'
+                      );
+                    }}
+                    className="p-1.5 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                    aria-label="Open in Grafana"
+                  >
+                    <ExternalLinkIcon className="w-4 h-4" />
+                  </button>
+                </Tooltip>
               </div>
               {isGpuMetricsExpanded && (
                 <div className="p-5">
@@ -792,51 +858,25 @@ function ActiveTab({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                    {/* GPU Utilization */}
-                    <div className="bg-white rounded-md border border-gray-200 shadow-sm">
-                      <div className="p-2">
-                        <iframe
-                          src={buildGrafanaMetricsUrl('1')}
-                          width="100%"
-                          height="400"
-                          frameBorder="0"
-                          title="GPU Utilization"
-                          className="rounded"
-                          key={`gpu-util-${clusterData?.cluster}-${timeRange.from}-${timeRange.to}`}
-                        />
+                  <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
+                    {gpuPanels.map((panel) => (
+                      <div
+                        key={panel.id}
+                        className="bg-white rounded-md border border-gray-200 shadow-sm"
+                      >
+                        <div className="p-2">
+                          <iframe
+                            src={buildGrafanaMetricsUrl(panel.id)}
+                            width="100%"
+                            height="400"
+                            frameBorder="0"
+                            title={panel.title}
+                            className="rounded"
+                            key={`${panel.keyPrefix}-${clusterData?.cluster}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger || 0}`}
+                          />
+                        </div>
                       </div>
-                    </div>
-
-                    {/* GPU Memory Utilization */}
-                    <div className="bg-white rounded-md border border-gray-200 shadow-sm">
-                      <div className="p-2">
-                        <iframe
-                          src={buildGrafanaMetricsUrl('2')}
-                          width="100%"
-                          height="400"
-                          frameBorder="0"
-                          title="GPU Memory Utilization"
-                          className="rounded"
-                          key={`gpu-memory-${clusterData?.cluster}-${timeRange.from}-${timeRange.to}`}
-                        />
-                      </div>
-                    </div>
-
-                    {/* GPU Power Usage */}
-                    <div className="bg-white rounded-md border border-gray-200 shadow-sm">
-                      <div className="p-2">
-                        <iframe
-                          src={buildGrafanaMetricsUrl('4')}
-                          width="100%"
-                          height="400"
-                          frameBorder="0"
-                          title="GPU Power Usage"
-                          className="rounded"
-                          key={`gpu-power-${clusterData?.cluster}-${timeRange.from}-${timeRange.to}`}
-                        />
-                      </div>
-                    </div>
+                    ))}
                   </div>
                 </div>
               )}

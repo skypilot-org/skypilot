@@ -1,0 +1,44 @@
+# Pool configuration for SAM3 video segmentation workers.
+# Creates GPU workers with pre-loaded dependencies and datasets.
+#
+# Usage:
+#
+#  sky jobs pool apply -p sam3-pool sam3-pool.yaml --env OUTPUT_BUCKET_NAME=my-bucket
+#
+# Then submit jobs with:
+#
+#  sky jobs launch --pool sam3-pool --num-jobs 10 --secret HF_TOKEN sam3-job.yaml
+
+pool:
+  workers: 3
+
+resources:
+  accelerators: L40S:1
+
+envs:
+  OUTPUT_BUCKET_NAME:  # S3 bucket for storing datasets and results
+
+file_mounts:
+  ~/.kaggle/kaggle.json: ~/.kaggle/kaggle.json
+  /outputs:
+    name: $OUTPUT_BUCKET_NAME
+    mode: MOUNT
+
+workdir: .
+
+setup: |
+  # Setup runs once on all workers (must be non-blocking)
+  sudo apt-get update && sudo apt-get install -y unzip ffmpeg
+  uv venv .venv --python 3.12
+  source .venv/bin/activate
+  uv pip install -r requirements.txt
+  # Download soccer video dataset from Kaggle (store in S3 to avoid re-downloading)
+  DATASET_PATH=/outputs/datasets/soccer-videos
+  if [ ! -d "$DATASET_PATH" ]; then
+    echo "Downloading dataset from Kaggle to S3..."
+    mkdir -p /outputs/datasets
+    kaggle datasets download shreyamainkar/football-soccer-videos-dataset --force
+    unzip -q football-soccer-videos-dataset.zip -d $DATASET_PATH
+    rm -f football-soccer-videos-dataset.zip
+  fi
+  echo "Setup complete!"

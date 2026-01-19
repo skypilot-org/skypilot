@@ -5,6 +5,7 @@ import { showToast } from '@/data/connectors/toast';
 import { apiClient } from '@/data/connectors/client';
 import { ENDPOINT } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
+import { applyEnhancements } from '@/plugins/dataEnhancement';
 
 const DEFAULT_TAIL_LINES = 5000;
 
@@ -44,6 +45,7 @@ const clusterStatusMap = {
   UP: 'RUNNING',
   STOPPED: 'STOPPED',
   INIT: 'LAUNCHING',
+  PENDING: 'PENDING',
   null: 'TERMINATED',
 };
 
@@ -102,6 +104,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         last_event: cluster.last_event,
         to_down: cluster.to_down,
         cluster_name_on_cloud: cluster.cluster_name_on_cloud,
+        labels: cluster.labels || {},
         jobs: [],
         command: cluster.last_creation_command || cluster.last_use,
         task_yaml: cluster.last_creation_yaml || '{}',
@@ -113,7 +116,15 @@ export async function getClusters({ clusterNames = null } = {}) {
         ],
       };
     });
-    return clusterData;
+
+    // Apply plugin data enhancements
+    // Pass raw backend data so enhancements can extract fields directly
+    const enhancedClusters = await applyEnhancements(clusterData, 'clusters', {
+      dashboardCache,
+      rawData: clusters, // Raw backend response for field extraction
+    });
+
+    return enhancedClusters;
   } catch (error) {
     console.error('Error fetching clusters:', error);
     throw error;
@@ -187,8 +198,13 @@ export async function getClusterHistory(clusterHash = null, days = 30) {
       };
     });
 
-    console.log('Processed cluster history data:', historyData); // Debug log
-    return historyData;
+    // Apply plugin data enhancements
+    // Pass raw backend data so enhancements can extract fields directly
+    const enhancedHistory = await applyEnhancements(historyData, 'clusters', {
+      dashboardCache,
+      rawData: history, // Raw backend response for field extraction
+    });
+    return enhancedHistory;
   } catch (error) {
     console.error('Error fetching cluster history:', error);
     throw error;

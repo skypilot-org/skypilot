@@ -1990,5 +1990,569 @@ class TestKubernetesRegionsWithOffering(unittest.TestCase):
         self.assertEqual(len(regions), 0)
 
 
+class TestKubernetesDetectNetworkType(unittest.TestCase):
+    """Test cases for Kubernetes._detect_network_type method."""
+
+    def _create_mock_node(self, labels=None):
+        """Helper to create a mock Kubernetes node with labels."""
+        mock_node = mock.MagicMock()
+        mock_node.metadata.labels = labels or {}
+        return mock_node
+
+    def test_network_tier_none_returns_none(self):
+        """Test that when network_tier is None, returns NONE type."""
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context', network_tier=None)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, ''))
+
+    def test_network_tier_not_best_returns_none(self):
+        """Test that when network_tier is not BEST, returns NONE type."""
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.STANDARD)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, ''))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_nebius_cluster_detection(self, mock_get_nodes):
+        """Test detection of Nebius clusters via node labels."""
+        mock_node = self._create_mock_node({
+            'nebius.com/gpu-model': 'h100',
+            'kubernetes.io/hostname': 'node-1'
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NEBIUS, ''))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_coreweave_cluster_detection(self, mock_get_nodes):
+        """Test detection of CoreWeave clusters via node labels."""
+        mock_node = self._create_mock_node({
+            'ib.coreweave.cloud/enabled': 'true',
+            'kubernetes.io/hostname': 'node-1'
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.COREWEAVE,
+             ''))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_together_cluster_detection(self, mock_get_nodes):
+        """Test detection of Together AI clusters via node labels."""
+        mock_node = self._create_mock_node({
+            'node-role.together.ai/gpu': 'true',
+            'kubernetes.io/hostname': 'node-1'
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.TOGETHER,
+             ''))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_gke_a3_highgpu_detection(self, mock_get_nodes):
+        """Test detection of GKE A3 highgpu instance type."""
+        mock_node = self._create_mock_node({
+            'cloud.google.com/machine-family': 'a3',
+            'node.kubernetes.io/instance-type': 'a3-highgpu-8g',
+            'cloud.google.com/gke-accelerator': 'nvidia-h100-80gb'
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.GCP_TCPX,
+             'a3-highgpu-8g'))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_gke_a3_edgegpu_detection(self, mock_get_nodes):
+        """Test detection of GKE A3 edgegpu instance type."""
+        mock_node = self._create_mock_node({
+            'cloud.google.com/machine-family': 'a3',
+            'node.kubernetes.io/instance-type': 'a3-edgegpu-8g',
+            'cloud.google.com/gke-accelerator': 'nvidia-h100-80gb'
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.GCP_TCPX,
+             'a3-edgegpu-8g'))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_gke_a3_megagpu_detection(self, mock_get_nodes):
+        """Test detection of GKE A3 megagpu instance type (TCPXO)."""
+        mock_node = self._create_mock_node({
+            'cloud.google.com/machine-family': 'a3',
+            'node.kubernetes.io/instance-type': 'a3-megagpu-8g',
+            'cloud.google.com/gke-accelerator': 'nvidia-h100-80gb'
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.GCP_TCPXO,
+             'a3-megagpu-8g'))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_gke_a4_highgpu_detection(self, mock_get_nodes):
+        """Test detection of GKE A4 highgpu instance type (GPUDirect RDMA)."""
+        mock_node = self._create_mock_node({
+            'cloud.google.com/machine-family': 'a4',
+            'node.kubernetes.io/instance-type': 'a4-highgpu-8g',
+            'cloud.google.com/gke-accelerator': 'nvidia-b200'
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(result,
+                         (kubernetes_utils.KubernetesHighPerformanceNetworkType.
+                          GCP_GPUDIRECT_RDMA, 'a4-highgpu-8g'))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_gke_a3_ultragpu_detection(self, mock_get_nodes):
+        """Test detection of GKE A3 ultragpu instance type (GPUDirect RDMA)."""
+        mock_node = self._create_mock_node({
+            'cloud.google.com/machine-family': 'a3',
+            'node.kubernetes.io/instance-type': 'a3-ultragpu-8g',
+            'cloud.google.com/gke-accelerator': 'nvidia-h200'
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(result,
+                         (kubernetes_utils.KubernetesHighPerformanceNetworkType.
+                          GCP_GPUDIRECT_RDMA, 'a3-ultragpu-8g'))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_gke_a4_generic_fallback(self, mock_get_nodes):
+        """Test generic A4 machine family detection as fallback."""
+        mock_node = self._create_mock_node({
+            'cloud.google.com/machine-family': 'a4',
+            'node.kubernetes.io/instance-type': 'a4-unknown-type',
+            'cloud.google.com/gke-accelerator': 'nvidia-b200'
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(result,
+                         (kubernetes_utils.KubernetesHighPerformanceNetworkType.
+                          GCP_GPUDIRECT_RDMA, 'a4'))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_gke_tcpx_fallback_with_h100(self, mock_get_nodes):
+        """Test TCPX fallback detection via GPU and instance type."""
+        mock_node = self._create_mock_node({
+            'node.kubernetes.io/instance-type': 'a3-highgpu-8g',
+            'cloud.google.com/gke-accelerator': 'nvidia-h100-80gb'
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.GCP_TCPX,
+             'a3-highgpu-8g'))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_gke_tcpx_fallback_with_h200(self, mock_get_nodes):
+        """Test TCPX fallback detection via H200 GPU."""
+        mock_node = self._create_mock_node({
+            'node.kubernetes.io/instance-type': 'a3-edgegpu-8g',
+            'cloud.google.com/gke-accelerator': 'nvidia-h200-141gb'
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.GCP_TCPX,
+             'a3-edgegpu-8g'))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_gke_tcpx_fallback_with_b200(self, mock_get_nodes):
+        """Test TCPX fallback detection via B200 GPU."""
+        mock_node = self._create_mock_node({
+            'node.kubernetes.io/instance-type': 'a3-highgpu-8g',
+            'cloud.google.com/gke-accelerator': 'nvidia-b200-180gb'
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.GCP_TCPX,
+             'a3-highgpu-8g'))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_no_high_perf_gpu_returns_none_from_node_loop(self, mock_get_nodes):
+        """Test node with TCPX instance but no high-perf GPU doesn't match."""
+        mock_node = self._create_mock_node({
+            'node.kubernetes.io/instance-type': 'a3-highgpu-8g',
+            'cloud.google.com/gke-accelerator': 'nvidia-t4'
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        # This should not match the TCPX fallback, so continue to autoscaler check
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   return_value=None):
+            result = kubernetes.Kubernetes._detect_network_type(
+                context='test-context',
+                network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, ''))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_node_without_labels_continues_iteration(self, mock_get_nodes):
+        """Test that nodes without labels are skipped."""
+        mock_node_no_labels = mock.MagicMock()
+        mock_node_no_labels.metadata.labels = None
+
+        mock_node_with_labels = self._create_mock_node(
+            {'nebius.com/gpu-model': 'h100'})
+
+        mock_get_nodes.return_value = [
+            mock_node_no_labels, mock_node_with_labels
+        ]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NEBIUS, ''))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_kube_api_unreachable_falls_through(self, mock_get_nodes):
+        """Test that KubeAPIUnreachableError is caught and continues."""
+        from sky import exceptions
+        mock_get_nodes.side_effect = exceptions.KubeAPIUnreachableError(
+            'Cannot reach cluster')
+
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   return_value=None):
+            result = kubernetes.Kubernetes._detect_network_type(
+                context='test-context',
+                network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, ''))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_autoscaler_non_gke_returns_none(self, mock_get_config,
+                                             mock_get_nodes):
+        """Test that non-GKE autoscaler returns NONE."""
+        mock_get_nodes.return_value = []
+        mock_get_config.return_value = 'karpenter'
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, ''))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.provision.kubernetes.utils.get_autoscaler')
+    def test_gke_autoscaler_a3_highgpu(self, mock_get_autoscaler,
+                                       mock_get_config, mock_get_nodes):
+        """Test GKE autoscaler with a3-highgpu-8g machine type."""
+        mock_get_nodes.return_value = []
+        mock_get_config.return_value = 'gke'
+
+        mock_autoscaler = mock.MagicMock()
+        mock_autoscaler.get_available_machine_types.return_value = [
+            'n1-standard-4', 'a3-highgpu-8g', 'n2-standard-8'
+        ]
+        mock_get_autoscaler.return_value = mock_autoscaler
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.GCP_TCPX,
+             'a3-highgpu-8g'))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.provision.kubernetes.utils.get_autoscaler')
+    def test_gke_autoscaler_a3_edgegpu(self, mock_get_autoscaler,
+                                       mock_get_config, mock_get_nodes):
+        """Test GKE autoscaler with a3-edgegpu-8g machine type."""
+        mock_get_nodes.return_value = []
+        mock_get_config.return_value = 'gke'
+
+        mock_autoscaler = mock.MagicMock()
+        mock_autoscaler.get_available_machine_types.return_value = [
+            'n1-standard-4', 'a3-edgegpu-8g'
+        ]
+        mock_get_autoscaler.return_value = mock_autoscaler
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.GCP_TCPX,
+             'a3-edgegpu-8g'))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.provision.kubernetes.utils.get_autoscaler')
+    def test_gke_autoscaler_a3_megagpu(self, mock_get_autoscaler,
+                                       mock_get_config, mock_get_nodes):
+        """Test GKE autoscaler with a3-megagpu-8g machine type."""
+        mock_get_nodes.return_value = []
+        mock_get_config.return_value = 'gke'
+
+        mock_autoscaler = mock.MagicMock()
+        mock_autoscaler.get_available_machine_types.return_value = [
+            'n1-standard-4', 'a3-megagpu-8g'
+        ]
+        mock_get_autoscaler.return_value = mock_autoscaler
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.GCP_TCPXO,
+             'a3-megagpu-8g'))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.provision.kubernetes.utils.get_autoscaler')
+    def test_gke_autoscaler_a4_highgpu(self, mock_get_autoscaler,
+                                       mock_get_config, mock_get_nodes):
+        """Test GKE autoscaler with a4-highgpu-8g machine type."""
+        mock_get_nodes.return_value = []
+        mock_get_config.return_value = 'gke'
+
+        mock_autoscaler = mock.MagicMock()
+        mock_autoscaler.get_available_machine_types.return_value = [
+            'n1-standard-4', 'a4-highgpu-8g'
+        ]
+        mock_get_autoscaler.return_value = mock_autoscaler
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(result,
+                         (kubernetes_utils.KubernetesHighPerformanceNetworkType.
+                          GCP_GPUDIRECT_RDMA, 'a4-highgpu-8g'))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.provision.kubernetes.utils.get_autoscaler')
+    def test_gke_autoscaler_a3_ultragpu(self, mock_get_autoscaler,
+                                        mock_get_config, mock_get_nodes):
+        """Test GKE autoscaler with a3-ultragpu-8g machine type."""
+        mock_get_nodes.return_value = []
+        mock_get_config.return_value = 'gke'
+
+        mock_autoscaler = mock.MagicMock()
+        mock_autoscaler.get_available_machine_types.return_value = [
+            'n1-standard-4', 'a3-ultragpu-8g'
+        ]
+        mock_get_autoscaler.return_value = mock_autoscaler
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(result,
+                         (kubernetes_utils.KubernetesHighPerformanceNetworkType.
+                          GCP_GPUDIRECT_RDMA, 'a3-ultragpu-8g'))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.provision.kubernetes.utils.get_autoscaler')
+    def test_gke_autoscaler_no_high_perf_types(self, mock_get_autoscaler,
+                                               mock_get_config, mock_get_nodes):
+        """Test GKE autoscaler without high-performance machine types."""
+        mock_get_nodes.return_value = []
+        mock_get_config.return_value = 'gke'
+
+        mock_autoscaler = mock.MagicMock()
+        mock_autoscaler.get_available_machine_types.return_value = [
+            'n1-standard-4', 'n2-standard-8'
+        ]
+        mock_get_autoscaler.return_value = mock_autoscaler
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, ''))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    def test_autoscaler_none_returns_none(self, mock_get_config,
+                                          mock_get_nodes):
+        """Test that None autoscaler config returns NONE."""
+        mock_get_nodes.return_value = []
+        mock_get_config.return_value = None
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, ''))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_empty_node_list_falls_through_to_autoscaler(self, mock_get_nodes):
+        """Test that empty node list falls through to autoscaler check."""
+        mock_get_nodes.return_value = []
+
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   return_value=None):
+            result = kubernetes.Kubernetes._detect_network_type(
+                context='test-context',
+                network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, ''))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_a3_without_specific_instance_no_fallback(self, mock_get_nodes):
+        """Test A3 machine family without specific instance type doesn't match A4 fallback."""
+        mock_node = self._create_mock_node({
+            'cloud.google.com/machine-family': 'a3',
+            'node.kubernetes.io/instance-type': 'a3-some-other-type',
+            'cloud.google.com/gke-accelerator': 'nvidia-v100'
+        })
+        mock_get_nodes.return_value = [mock_node]
+
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   return_value=None):
+            result = kubernetes.Kubernetes._detect_network_type(
+                context='test-context',
+                network_tier=resources_utils.NetworkTier.BEST)
+
+        # A3 family without specific instance type and without high-perf GPU
+        # should fall through to NONE
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NONE, ''))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.provision.kubernetes.utils.get_autoscaler')
+    def test_gke_autoscaler_priority_order(self, mock_get_autoscaler,
+                                           mock_get_config, mock_get_nodes):
+        """Test that autoscaler checks machine types in priority order.
+
+        When multiple high-perf types available, a3-highgpu-8g should be
+        returned first.
+        """
+        mock_get_nodes.return_value = []
+        mock_get_config.return_value = 'gke'
+
+        mock_autoscaler = mock.MagicMock()
+        # Include multiple high-perf types, but a3-highgpu-8g should match first
+        mock_autoscaler.get_available_machine_types.return_value = [
+            'a3-ultragpu-8g', 'a4-highgpu-8g', 'a3-megagpu-8g', 'a3-edgegpu-8g',
+            'a3-highgpu-8g'
+        ]
+        mock_get_autoscaler.return_value = mock_autoscaler
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        # a3-highgpu-8g is checked first in the elif chain
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.GCP_TCPX,
+             'a3-highgpu-8g'))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_multiple_nodes_first_match_wins(self, mock_get_nodes):
+        """Test that first matching node determines the result."""
+        nebius_node = self._create_mock_node({'nebius.com/gpu-model': 'h100'})
+        coreweave_node = self._create_mock_node(
+            {'ib.coreweave.cloud/enabled': 'true'})
+
+        mock_get_nodes.return_value = [nebius_node, coreweave_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        # Nebius is detected first
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.NEBIUS, ''))
+
+
 if __name__ == '__main__':
     unittest.main()

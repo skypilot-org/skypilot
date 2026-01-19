@@ -351,6 +351,13 @@ def validate_service_task(task: 'sky.Task', pool: bool) -> None:
                              f'file does not match the pool argument. '
                              f'To fix, add a valid `{field_name}` field.')
 
+    # Validate that pools do not use ordered resources
+    if pool and isinstance(task.resources, list):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Ordered resources are not supported for pools. '
+                'Use `any_of` instead, or specify a single resource.')
+
     policy_description = ('on-demand'
                           if task.service.dynamic_ondemand_fallback else 'spot')
     for resource in list(task.resources):
@@ -360,22 +367,6 @@ def validate_service_task(task: 'sky.Task', pool: bool) -> None:
                 raise ValueError(f'job_recovery is disabled for {sys_name}. '
                                  f'{sys_name} will replenish preempted spot '
                                  f'with {policy_description} instances.')
-
-    if pool:
-        accelerators = set()
-        for resource in task.resources:
-            if resource.accelerators is not None:
-                if isinstance(resource.accelerators, str):
-                    accelerators.add(resource.accelerators)
-                elif isinstance(resource.accelerators, dict):
-                    accelerators.update(resource.accelerators.keys())
-                elif isinstance(resource.accelerators, list):
-                    accelerators.update(resource.accelerators)
-        if len(accelerators) > 1:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Heterogeneous clusters are not supported for '
-                                 'pools please specify one accelerator '
-                                 'for all workers.')
 
     # Try to create a spot placer from the task yaml. Check if the task yaml
     # is valid for spot placer.
@@ -931,6 +922,7 @@ def get_next_cluster_name(
 
     with filelock.FileLock(get_service_filelock_path(service_name)):
         free_resources = get_free_worker_resources(service_name)
+        logger.debug(f'Free resources: {free_resources!r}')
         logger.debug(f'Get next cluster name for pool {service_name!r}')
         ready_replicas = get_ready_replicas(service_name)
 
@@ -951,16 +943,16 @@ def get_next_cluster_name(
         # 1. There are task resources.
         # 2. The first task resource has some resources listed.
         # 3. There are free resources.
-        # 4. The first free resource has some resources listed.
+        # 4. Any free resource has some resources listed.
         resource_aware = len(task_resources_list) > 0
         resource_aware = (resource_aware and
                           not _is_empty_resource(task_resources_list[0]))
         resource_aware = resource_aware and free_resources is not None
         if free_resources is not None:
-            first_free_resource = list(free_resources.values())[0]
-            if first_free_resource is not None:
-                resource_aware = resource_aware and not _is_empty_resource(
-                    first_free_resource)
+            for free_resource in free_resources.values():
+                if free_resource is not None and not _is_empty_resource(
+                        free_resource):
+                    break
             else:
                 resource_aware = False
         else:
@@ -1024,6 +1016,28 @@ def get_next_cluster_name(
         logger.info(f'Selected replica {replica_info.replica_id} with cluster '
                     f'{replica_info.cluster_name!r} for job {job_id!r} in pool '
                     f'{service_name!r}')
+
+        # If job has heterogeneous resources (any_of/ordered), update
+        # full_resources to the specific resource that was selected for this
+        # worker. This must happen before releasing the filelock to ensure
+        # atomicity with the scheduling decision.
+        if resource_aware and len(task_resources_list) > 1:
+            assert free_resources is not None
+            free_resources_on_worker = free_resources.get(
+                replica_info.cluster_name)
+            if free_resources_on_worker is not None:
+                # Find which task resource fits on this worker
+                for task_res in task_resources_list:
+                    if _task_fits(task_res, free_resources_on_worker):
+                        # Update full_resources in database to this specific
+                        # resource
+                        logger.debug(
+                            f'Updating full_resources for job {job_id!r} '
+                            f'to selected resource: {task_res!r}')
+                        managed_job_state.update_job_full_resources(
+                            job_id, task_res.to_yaml_config())
+                        break
+
         managed_job_state.set_current_cluster_name(job_id,
                                                    replica_info.cluster_name)
         return replica_info.cluster_name
@@ -1288,7 +1302,8 @@ def _process_line(
     # We should tail the detailed logs for user.
     def cluster_is_up() -> bool:
         status = global_user_state.get_status_from_cluster_name(cluster_name)
-        return status == status_lib.ClusterStatus.UP
+        return status in (status_lib.ClusterStatus.UP,
+                          status_lib.ClusterStatus.AUTOSTOPPING)
 
     provision_api_log_prompt = re.match(_SKYPILOT_PROVISION_API_LOG_PATTERN,
                                         line)

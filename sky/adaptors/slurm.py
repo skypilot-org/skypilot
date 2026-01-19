@@ -3,12 +3,11 @@
 import ipaddress
 import logging
 import re
-import socket
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
+from sky.adaptors import common
 from sky.utils import command_runner
-from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
@@ -22,14 +21,28 @@ SEP = r'\x1f'
 # Matches PartitionName=<name> and captures until the next field
 _PARTITION_NAME_REGEX = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
 
+# Regex pattern to extract MAXTIME from scontrol output
+# Matches MaxTime=<time> and captures the time
+_MAXTIME_REGEX = re.compile(r'MaxTime=((?:\d+-)?\d{1,2}:\d{2}:\d{2}|UNLIMITED)')
+
 # Default timeout for waiting for job nodes to be allocated, in seconds.
 _SLURM_DEFAULT_PROVISION_TIMEOUT = 10
+
+_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Slurm. '
+                         'Try running: pip install "skypilot[slurm]"')
+hostlist = common.LazyImport('hostlist',
+                             import_error_message=_IMPORT_ERROR_MESSAGE)
+
+_UNRESOLVED_HOSTNAME_MARKER = 'UNRESOLVED'
 
 
 class SlurmPartition(NamedTuple):
     """Information about the Slurm partitions."""
     name: str
     is_default: bool
+    # The maximum time a job can run in seconds.
+    # None if the maximum time is unlimited.
+    maxtime: Optional[int]
 
 
 # TODO(kevin): Add more API types for other client functions.
@@ -43,6 +56,27 @@ class NodeInfo(NamedTuple):
     # The default partition contains a '*' at the end of the name.
     # It is the caller's responsibility to strip the '*' if needed.
     partition: str
+
+
+def _parse_maxtime(line: str) -> Optional[int]:
+    """Parse the maximum time a job can run from the scontrol output."""
+    maxtime_match = _MAXTIME_REGEX.search(line)
+    if not maxtime_match:
+        return None
+    maxtime_str = maxtime_match.group(1).strip()
+    if maxtime_str == 'UNLIMITED':
+        return None
+
+    # Convert maxTime from '[days-]hours:minutes:seconds' to seconds.
+    # Example: "2-12:30:05" => (2*86400) + (12*3600) + (30*60) + 5
+    days = 0
+    time_part = maxtime_str
+    if '-' in maxtime_str:
+        days_part, time_part = maxtime_str.split('-', 1)
+        days = int(days_part)
+
+    h, m, s = map(int, time_part.split(':'))
+    return days * 86400 + h * 3600 + m * 60 + s
 
 
 class SlurmClient:
@@ -260,6 +294,38 @@ class SlurmClient:
             stderr=f'{stdout}\n{stderr}')
         return stdout.splitlines()
 
+    def get_all_jobs_gres(self) -> Dict[str, List[str]]:
+        """Get GRES allocation for all running jobs, grouped by node.
+
+        Returns:
+            Dict mapping node_name -> list of GRES strings for jobs on that
+            node.
+        """
+        cmd = f'squeue -h --states=running,completing -o "%N{SEP}%b"'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(rc,
+                                           cmd,
+                                           'Failed to get all jobs GRES.',
+                                           stderr=f'{stdout}\n{stderr}')
+
+        nodes_to_gres: Dict[str, List[str]] = {}
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(SEP)
+            if len(parts) != 2:
+                # We should never reach here, but just in case.
+                continue
+            nodelist_str, gres_str = parts
+            if not gres_str or gres_str == 'N/A':
+                continue
+
+            for node in hostlist.expand_hostlist(nodelist_str):
+                nodes_to_gres.setdefault(node, []).append(gres_str)
+
+        return nodes_to_gres
+
     def get_job_state(self, job_id: str) -> Optional[str]:
         """Get the state of a Slurm job.
 
@@ -408,6 +474,8 @@ class SlurmClient:
         logger.debug(f'Successfully got nodes for job {job_id}: {stdout}')
 
         node_info = {}
+        nodes_to_resolve: List[Tuple[str, str]] = []
+
         for line in stdout.strip().splitlines():
             line = line.strip()
             if line:
@@ -415,23 +483,52 @@ class SlurmClient:
                 if len(parts) >= 2:
                     node_name = parts[0]
                     node_addr = parts[1]
-                    # Resolve hostname to IP if node_addr is not already
-                    # an IP address.
                     try:
                         ipaddress.ip_address(node_addr)
-                        # Already an IP address
-                        node_ip = node_addr
+                        node_info[node_name] = node_addr  # Already an IP
                     except ValueError:
-                        # It's a hostname, resolve it to an IP
-                        try:
-                            node_ip = socket.gethostbyname(node_addr)
-                        except socket.gaierror as e:
-                            raise RuntimeError(
-                                f'Failed to resolve hostname {node_addr} to IP '
-                                f'for node {node_name}: '
-                                f'{common_utils.format_exception(e)}') from e
+                        nodes_to_resolve.append((node_name, node_addr))
 
-                    node_info[node_name] = node_ip
+        if nodes_to_resolve:
+            hostnames = [h for _, h in nodes_to_resolve]
+            # The output of `getent ahostsv4` is as follows:
+            # 10.0.0.0     STREAM worker-0
+            # 10.0.0.0     DGRAM
+            # 10.0.0.0     RAW
+            resolve_ip_cmd = (
+                f'for h in {" ".join(hostnames)}; do '
+                f'ip=$(getent ahostsv4 "$h" | head -1 | awk \'{{print $1}}\'); '
+                f'if [ -n "$ip" ]; then echo "$h $ip"; '
+                f'else echo "$h {_UNRESOLVED_HOSTNAME_MARKER}"; fi; '
+                f'done')
+            rc, resolve_stdout, stderr = self._run_slurm_cmd(resolve_ip_cmd)
+            subprocess_utils.handle_returncode(
+                rc,
+                resolve_ip_cmd,
+                f'Failed to resolve hostnames for: {hostnames}',
+                stderr=f'{resolve_stdout}\n{stderr}')
+
+            hostname_to_ip = {}
+            unresolved = []
+            for line in resolve_stdout.strip().splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    hostname = parts[0]
+                    ip = parts[1]
+                    if ip == _UNRESOLVED_HOSTNAME_MARKER:
+                        unresolved.append(hostname)
+                    else:
+                        hostname_to_ip[hostname] = ip
+
+            if unresolved:
+                raise RuntimeError(
+                    f'Failed to resolve hostnames for: {unresolved}')
+
+            for node_name, hostname in nodes_to_resolve:
+                if hostname not in hostname_to_ip:
+                    raise RuntimeError(
+                        f'Failed to resolve {hostname} for node {node_name}')
+                node_info[node_name] = hostname_to_ip[hostname]
 
         nodes = list(node_info.keys())
         node_ips = [node_info[node] for node in nodes]
@@ -498,11 +595,14 @@ class SlurmClient:
             match = _PARTITION_NAME_REGEX.search(line)
             if 'Default=YES' in line:
                 is_default = True
+            maxtime = _parse_maxtime(line)
             if match:
                 partition = match.group(1).strip()
                 if partition:
                     partitions.append(
-                        SlurmPartition(name=partition, is_default=is_default))
+                        SlurmPartition(name=partition,
+                                       is_default=is_default,
+                                       maxtime=maxtime))
         return partitions
 
     def get_default_partition(self) -> Optional[str]:

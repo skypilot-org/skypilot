@@ -1,18 +1,19 @@
 {{- if .Values.prometheus.enabled}}
+{{- $fullName := include "skypilot.fullname" . -}}
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-dcgm-exporter
+  name: {{ $fullName }}-dcgm-exporter
   namespace: {{ .Release.Namespace }}
   labels:
-    app: {{ .Release.Name }}-dcgm-exporter
+    app: {{ $fullName }}-dcgm-exporter
   annotations:
     prometheus.io/scrape: "true"
     prometheus.io/port: "9400"
     prometheus.io/path: "/metrics"
 spec:
   selector:
-    app.kubernetes.io/name: {{ .Release.Name }}-dcgm-exporter
+    app.kubernetes.io/name: {{ $fullName }}-dcgm-exporter
   ports:
   - name: metrics
     port: 9400

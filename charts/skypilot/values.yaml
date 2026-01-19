@@ -10,6 +10,10 @@ global:
   # @schema type: [array, null]; item: object
   extraEnvs: null
 
+# Override the base name of the resources created by this chart.
+# @schema type: [string, null]
+fullnameOverride: null
+
 
 apiService:
   # Docker image to use for the API server. The default value will be updated by the release pipeline to be consistent with the SkyPilot release or nightly build.
@@ -32,6 +36,9 @@ apiService:
   # - Recreate: delete the old pod first and create a new one (has downtime).
   # - RollingUpdate: [EXPERIMENTAL] create a new pod first, wait for it to be ready, then delete the old one (zero downtime).
   # Default to Recreate. When set to RollingUpdate, an external database must be configured via .apiService.dbConnectionSecretName or .apiService.dbConnectionString.
+  # For persistent storage with RollingUpdate, use storage.accessMode=ReadWriteMany with an RWX-capable storage class.
+  # If storage.enabled=false with RollingUpdate, file mounts and logs will be lost on pod restart; consider configuring
+  # 'jobs.bucket' in the SkyPilot config to persist file mounts to cloud storage.
   upgradeStrategy: Recreate
   # Deprecated: use other auth methods instead.
   # Refer to https://docs.skypilot.co/en/latest/reference/auth.html for more details.
@@ -256,11 +263,28 @@ auth:
 storage:
   # Enable/disable persistent storage
   # With this enabled, SkyPilot will use a PV to persist the internal data like states, logs, lock files, catalog, etc.
+  # Persisted data includes:
+  # - Managed job logs (accessible via `sky jobs logs <job_id>` and `sky jobs logs --controller <job_id>`)
+  # - File mounts uploaded during managed job submission
+  # - API server state and configuration
+  # Note: Transient cluster logs (sky-*) and api_server logs are NOT persisted to minimize storage usage.
   # Refer to https://docs.skypilot.co/en/latest/reference/architecture/state.html for more details.
+  #
+  # IMPORTANT: When using RollingUpdate upgrade strategy:
+  # - ReadWriteOnce (RWO): NOT supported - the PVC cannot be mounted by both old and new pods during rolling update.
+  # - ReadWriteMany (RWX): Supported - requires an RWX-capable storage class (e.g., NFS-backed storage like Google Filestore,
+  #   AWS EFS, Azure Files, or an NFS provisioner). Both pods can mount the same PVC during the rolling update.
+  # - storage.enabled=false: Supported - but file mounts and logs will be lost on pod restart. Consider configuring
+  #   'jobs.bucket' in the SkyPilot config to use cloud storage for file mounts.
   enabled: true
   # Storage class name - leave empty to use cluster default
+  # For RWX storage with RollingUpdate, use a storage class that supports ReadWriteMany access mode:
+  # - GKE: Create a Filestore-backed storage class (https://cloud.google.com/filestore/docs/accessing-fileshares)
+  # - EKS: Use EFS CSI driver (https://docs.aws.amazon.com/eks/latest/userguide/efs-csi.html)
+  # - AKS: Use Azure Files (https://docs.microsoft.com/azure/aks/azure-files-dynamic-pv)
   storageClassName: ""
   # Access modes - ReadWriteOnce or ReadWriteMany depending on what is supported by the storage class
+  # When using RollingUpdate upgrade strategy, ReadWriteMany is required for persistent storage.
   accessMode: ReadWriteOnce
   # Storage size
   size: 10Gi
@@ -275,6 +299,9 @@ storage:
 
 
 ingress:
+  # Whether to use a unified ingress resource for the API server and other services like Grafana.
+  # @schema type: [boolean]
+  unified: false
   enabled: true
   # Name of the secret containing basic auth credentials for ingress. If not specified, a new secret will be created using authCredentials
   # Example:
@@ -566,14 +593,20 @@ prometheus:
   server:
     persistentVolume:
       enabled: true
-      size: 10Gi
+      size: 50Gi
+    retention: "1000d"
+    # The Prometheus documentations recommends setting the retention size to be 80-85% of the persistent volume size.
+    # ref: https://prometheus.io/docs/prometheus/latest/storage/#right-sizing-retention-size
+    # 43GB is roughly 80% of the 50Gi persistent volume size. We use Gi for the PV size and GB for the retention size
+    # because these are the units set by the Prometheus chart schema for each respective field.
+    retentionSize: "43GB"
   # Configure additional scrape configs using extraScrapeConfigs
   extraScrapeConfigs: |
     # Static scrape target for SkyPilot API server GPU metrics
     - job_name: 'skypilot-api-server-gpu-metrics'
       static_configs:
         # Use the API service created by this Helm chart
-        - targets: ['{{ .Release.Name }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:9090']
+        - targets: ['{{ include "skypilot.fullname" . }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:9090']
       metrics_path: '/gpu-metrics'
       scrape_interval: 15s
       scrape_timeout: 10s
@@ -664,6 +697,9 @@ grafana:
     # If you set hosts to null, the Grafana Helm chart will use its default value ([chart-example.local]).
     # To match all hosts, set hosts to an empty array ([]).
     hosts: []
+    # Custom annotations for the ingress
+    annotations: null
+
   grafana.ini:
     server:
       domain: localhost

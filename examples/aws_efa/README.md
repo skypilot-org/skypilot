@@ -191,26 +191,26 @@ To run the NCCL test with EFA support with AWS VM:
 sky launch -c efa efa_vm.yaml
 ```
 
-Check the [`efa_vm.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/efa_vm.yaml) for the complete SkyPilot cluster yaml configurations.
+Check the [`efa_vm.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/efa_vm.yaml) for the complete SkyPilot cluster YAML configurations. Behind the scenes, SkyPilot leverages the [AWS Deep Learning Base GPU AMI](https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-x86-base-gpu-ami-ubuntu-22-04.html), which includes the EFA drivers and modules pre-installed.
+
+For containerized workloads on AWS VMs, see the [`efa_container.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/efa_container.yaml) configuration. This example uses the [public.ecr.aws/hpc-cloud/nccl-tests:latest](https://github.com/aws-samples/awsome-distributed-training/blob/main/micro-benchmarks/nccl-tests/nccl-tests.Dockerfile) image, which provides the EFA drivers and modules in a containerized environment.
 
 > **NOTE:** For VMs that support multiple EFA interfaces (e.g., `p4d.24xlarge` with 4 EFA interfaces), you must configure SkyPilot to use internal IPs to access all EFA interfaces.
 >
-> Add the following configuration to `~/.sky/config.yaml`:
+> Add the following configuration to [SkyPilot config](https://docs.skypilot.co/en/latest/reference/config.html):
 >
-> **Option 1: Using SSH proxy**
+> **Option 1: Using AWS Systems Manager (SSM) Session Manager**
 > ```yaml
 > aws:
 >   use_internal_ips: true
->   vpc_name: <vpc name>
->   ssh_proxy_command: ssh -W %h:%p -i <ssh key path> -o StrictHostKeyChecking=no <user>@<jump server public ip>
+>   use_ssm: true
 > ```
 >
-> **Option 2: Using AWS Systems Manager (SSM) Session Manager**
+> **Option 2: Using SSH proxy**
 > ```yaml
 > aws:
 >   use_internal_ips: true
->   vpc_name: <vpc name>
->   use_ssm: true
+>   ssh_proxy_command: ssh -W %h:%p -i <ssh key path> -o StrictHostKeyChecking=no <user>@<jump server public ip>
 > ```
 >
 > For more details, refer to the [configuration documentation](https://docs.skypilot.co/en/latest/reference/config.html#aws-use-internal-ips).

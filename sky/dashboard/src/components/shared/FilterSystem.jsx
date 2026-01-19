@@ -21,7 +21,27 @@ export const evaluateCondition = (item, filter) => {
     );
   }
 
-  const itemValue = item[property.toLowerCase()]?.toString().toLowerCase();
+  const propertyLower = property.toLowerCase();
+
+  // Special handling for labels filtering
+  if (propertyLower === 'labels') {
+    const labels = item.labels || {};
+    const filterValue = value.toString().toLowerCase();
+
+    // Check if filter is in key:value format
+    if (filterValue.includes(':')) {
+      const [key, ...valParts] = filterValue.split(':');
+      const val = valParts.join(':').trim();
+      return labels[key.trim()] === val;
+    } else {
+      // Match any label value
+      return Object.values(labels).some((val) =>
+        val?.toString().toLowerCase().includes(filterValue)
+      );
+    }
+  }
+
+  const itemValue = item[propertyLower]?.toString().toLowerCase();
   const filterValue = value.toString().toLowerCase();
 
   switch (operator) {
@@ -171,8 +191,24 @@ export const FilterDropdown = ({
   useEffect(() => {
     let updatedValueOptions = [];
 
-    if (valueList && typeof valueList === 'object') {
-      updatedValueOptions = valueList[propertyValue] || [];
+    if (valueList && typeof valueList === 'object' && propertyValue) {
+      // Ensure we're reading the correct property from valueList
+      // Explicitly handle the labels property case
+      let propertyValues;
+      if (propertyValue === 'labels' && valueList.labels) {
+        propertyValues = valueList.labels;
+      } else {
+        propertyValues = valueList[propertyValue];
+      }
+
+      if (Array.isArray(propertyValues)) {
+        updatedValueOptions = propertyValues;
+      } else if (propertyValues !== undefined && propertyValues !== null) {
+        // Handle case where propertyValues might be a non-array value
+        updatedValueOptions = [propertyValues];
+      } else {
+        updatedValueOptions = [];
+      }
     }
 
     // Filter options based on current input value
@@ -250,7 +286,14 @@ export const FilterDropdown = ({
   return (
     <div className="flex flex-row border border-gray-300 rounded-md overflow-visible bg-white">
       <div className="border-r border-gray-300 flex-shrink-0">
-        <Select onValueChange={setPropertyValue} value={propertyValue}>
+        <Select
+          onValueChange={(val) => {
+            setPropertyValue(val);
+            // Reset input value when property changes to ensure dropdown shows all options
+            setValue('');
+          }}
+          value={propertyValue}
+        >
           <SelectTrigger
             aria-label="Filter Property"
             className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-20 sm:w-24 md:w-32 h-8 text-xs sm:text-sm bg-white"

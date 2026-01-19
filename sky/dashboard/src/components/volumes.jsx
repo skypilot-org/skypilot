@@ -400,7 +400,10 @@ function VolumesTable({
                     <TableCell className="font-medium">{volume.name}</TableCell>
                     <TableCell>{volume.infra || 'N/A'}</TableCell>
                     <TableCell>
-                      <StatusBadge status={volume.status} />
+                      <StatusBadge
+                        status={volume.status}
+                        statusTooltip={volume.error_message || volume.status}
+                      />
                     </TableCell>
                     <TableCell>{formatSize(volume.size)}</TableCell>
                     <TableCell>{volume.user_name || 'N/A'}</TableCell>
