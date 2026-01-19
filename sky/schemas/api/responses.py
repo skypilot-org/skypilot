@@ -208,6 +208,12 @@ class ManagedJobRecord(ResponseBaseModel):
     accelerators: Optional[Dict[str, int]] = None
     labels: Optional[Dict[str, str]] = None
     links: Optional[Dict[str, str]] = None
+    # JobGroup fields
+    is_job_group: Optional[bool] = None
+    placement: Optional[str] = None
+    execution: Optional[str] = None
+    primary_tasks: Optional[List[str]] = None
+    termination_delay: Optional[Any] = None
 
 
 class VolumeRecord(ResponseBaseModel):

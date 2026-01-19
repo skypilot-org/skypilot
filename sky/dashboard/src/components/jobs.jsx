@@ -105,14 +105,25 @@ const STATUS_PRIORITY = {
 
 // Helper function to aggregate status for a job group
 // Returns the "worst" status based on priority
-export function getAggregatedStatus(tasks) {
+// For job groups with primary_tasks, status is determined only by primary tasks
+export function getAggregatedStatus(tasks, primaryTasks = null) {
   if (!tasks || tasks.length === 0) return 'PENDING';
   if (tasks.length === 1) return tasks[0].status;
+
+  // If primary_tasks is defined, filter to only those tasks for status determination
+  let tasksForStatus = tasks;
+  if (primaryTasks && primaryTasks.length > 0) {
+    const primaryTaskSet = new Set(primaryTasks);
+    const primaryTasksList = tasks.filter(t => primaryTaskSet.has(t.task));
+    if (primaryTasksList.length > 0) {
+      tasksForStatus = primaryTasksList;
+    }
+  }
 
   let worstStatus = 'SUCCEEDED';
   let worstPriority = 0;
 
-  for (const task of tasks) {
+  for (const task of tasksForStatus) {
     const priority = STATUS_PRIORITY[task.status] ?? 0;
     if (priority > worstPriority) {
       worstPriority = priority;
@@ -855,11 +866,20 @@ export function ManagedJobsTable({
     const aggregates = new Map();
     groupedJobs.forEach((tasks, jobId) => {
       if (tasks.length > 1) {
-        // Compute aggregated status
-        const aggregatedStatus = getAggregatedStatus(tasks);
+        // Get primary_tasks from the first task (it's the same for all tasks in a job group)
+        const primaryTasks = tasks[0]?.primary_tasks;
 
-        // Compute status tooltip
-        const statusTooltip = `Task statuses:\n${tasks.map((t, i) => `Task ${i}: ${t.status}`).join('\n')}`;
+        // Compute aggregated status (respects primary_tasks if defined)
+        const aggregatedStatus = getAggregatedStatus(tasks, primaryTasks);
+
+        // Compute status tooltip showing all task statuses
+        // Also indicate which tasks are primary
+        const statusTooltip = primaryTasks
+          ? `Task statuses:\n${tasks.map((t, i) => {
+              const isPrimary = primaryTasks.includes(t.task);
+              return `Task ${i}${isPrimary ? ' [P]' : ''}: ${t.status}`;
+            }).join('\n')}`
+          : `Task statuses:\n${tasks.map((t, i) => `Task ${i}: ${t.status}`).join('\n')}`;
 
         // Compute aggregated resources
         const resourcesList = tasks
