@@ -69,6 +69,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
+from sky.usage import constants as usage_constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import context
@@ -120,6 +121,26 @@ _GLOBAL_CONFIG_PATH = '~/.sky/config.yaml'
 _PROJECT_CONFIG_PATH = '.sky.yaml'
 
 API_SERVER_CONFIG_KEY = 'api_server_config'
+
+_CONFIG_WARNINGS_DIR = '~/.sky/api_server/config_warnings/'
+
+
+def _has_warned_for_run_id(run_id: Optional[str]) -> bool:
+    """Check if config warning was already shown for this run_id."""
+    if not run_id:
+        return False
+    path = os.path.join(os.path.expanduser(_CONFIG_WARNINGS_DIR), run_id)
+    return os.path.exists(path)
+
+
+def _mark_warned_for_run_id(run_id: Optional[str]) -> None:
+    """Mark that config warning was shown for this run_id."""
+    if not run_id:
+        return
+    dir_path = os.path.expanduser(_CONFIG_WARNINGS_DIR)
+    os.makedirs(dir_path, exist_ok=True)
+    pathlib.Path(os.path.join(dir_path, run_id)).touch()
+
 
 _SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
 _SQLALCHEMY_ENGINE_LOCK = threading.Lock()
@@ -759,13 +780,18 @@ def override_skypilot_config(
             disallowed_diff_keys.append('.'.join(key))
     # Only warn if there is a diff in disallowed override keys, as the client
     # use the same config file when connecting to a local server.
+    # Deduplicate warnings using Redis to avoid showing same warning twice
+    # for requests from the same CLI invocation (e.g., sky exec + tail logs).
     if disallowed_diff_keys:
-        logger.warning(
-            f'The following keys ({json.dumps(disallowed_diff_keys)}) have '
-            'different values in the client SkyPilot config with the server '
-            'and will be ignored. Remove these keys to disable this warning. '
-            'If you want to specify it, please modify it on server side or '
-            'contact your administrator.')
+        run_id = os.environ.get(usage_constants.USAGE_RUN_ID_ENV_VAR)
+        if not _has_warned_for_run_id(run_id):
+            logger.warning(
+                f'The following keys ({json.dumps(disallowed_diff_keys)}) '
+                'have different values in the client SkyPilot config with '
+                'the server and will be ignored. Remove these keys to '
+                'disable this warning. If you want to specify it, please '
+                'modify it on server side or contact your administrator.')
+            _mark_warned_for_run_id(run_id)
     config = original_config.get_nested(
         keys=tuple(),
         default_value=None,
