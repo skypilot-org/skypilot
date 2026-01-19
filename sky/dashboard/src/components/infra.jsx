@@ -151,6 +151,16 @@ const GpuUtilizationBar = ({
   );
 };
 
+// Skeleton badge for loading cells - replaces CircularProgress size={12}
+const SkeletonBadge = () => (
+  <span className="px-2 py-0.5 bg-gray-100 rounded text-xs font-medium inline-flex items-center">
+    <span
+      className="infra-skeleton-text"
+      style={{ width: '20px', height: '12px' }}
+    />
+  </span>
+);
+
 // Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
 export function InfrastructureSection({
   title,
@@ -243,7 +253,17 @@ export function InfrastructureSection({
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+              <div
+                className={`overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white ${
+                  !isInitialLoad &&
+                  (isLoading ||
+                    (!(isSlurm || isSSH) &&
+                      safeContexts.length > 0 &&
+                      !safeContexts.every((c) => loadedContexts.has(c))))
+                    ? 'infra-table-refreshing'
+                    : ''
+                }`}
+              >
                 <table className="min-w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
@@ -349,7 +369,14 @@ export function InfrastructureSection({
                           : '';
 
                       return (
-                        <tr key={context} className="hover:bg-gray-50">
+                        <tr
+                          key={context}
+                          className={`hover:bg-gray-50 ${
+                            !hasGpuData && !isInitialLoad
+                              ? 'infra-loading-row'
+                              : ''
+                          }`}
+                        >
                           <td className="p-3">
                             <NonCapitalizedTooltip
                               content={`${displayName}${workspaceDisplay}`}
@@ -372,9 +399,7 @@ export function InfrastructureSection({
                           </td>
                           <td className="p-3">
                             {isClusterDataLoading ? (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                <CircularProgress size={12} />
-                              </span>
+                              <SkeletonBadge />
                             ) : (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 {stats.clusters}
@@ -383,9 +408,7 @@ export function InfrastructureSection({
                           </td>
                           <td className="p-3">
                             {isJobsDataLoading ? (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                <CircularProgress size={12} />
-                              </span>
+                              <SkeletonBadge />
                             ) : (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 {jobsData[contextStatsKey]?.jobs || 0}
@@ -394,9 +417,7 @@ export function InfrastructureSection({
                           </td>
                           <td className="p-3">
                             {!hasNodeData ? (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                <CircularProgress size={12} />
-                              </span>
+                              <SkeletonBadge />
                             ) : (
                               <span
                                 className={`px-2 py-0.5 rounded text-xs font-medium ${
@@ -418,9 +439,7 @@ export function InfrastructureSection({
                           {!isSlurm && (
                             <td className="p-3">
                               {!hasNodeData ? (
-                                <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                  <CircularProgress size={12} />
-                                </span>
+                                <SkeletonBadge />
                               ) : (
                                 <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                   {formatCpu(aggregatedCpu)}
@@ -431,9 +450,7 @@ export function InfrastructureSection({
                           {!isSlurm && (
                             <td className="p-3">
                               {!hasNodeData ? (
-                                <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                  <CircularProgress size={12} />
-                                </span>
+                                <SkeletonBadge />
                               ) : (
                                 <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                   {formatMemory(aggregatedMemory)}
@@ -443,9 +460,7 @@ export function InfrastructureSection({
                           )}
                           <td className="p-3">
                             {!hasGpuData ? (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                <CircularProgress size={12} />
-                              </span>
+                              <SkeletonBadge />
                             ) : (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 {gpuTypes || '-'}
@@ -454,9 +469,7 @@ export function InfrastructureSection({
                           </td>
                           <td className="p-3">
                             {!hasGpuData ? (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                <CircularProgress size={12} />
-                              </span>
+                              <SkeletonBadge />
                             ) : (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 {totalGpus}
@@ -472,7 +485,17 @@ export function InfrastructureSection({
             </div>
             {gpus && gpus.length > 0 && (
               <div>
-                <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+                <div
+                  className={`overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white ${
+                    !isInitialLoad &&
+                    (isLoading ||
+                      (!(isSlurm || isSSH) &&
+                        safeContexts.length > 0 &&
+                        !safeContexts.every((c) => loadedContexts.has(c))))
+                      ? 'infra-table-refreshing'
+                      : ''
+                  }`}
+                >
                   <table className="min-w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
@@ -2112,42 +2135,60 @@ export function GPUs() {
         const gpuDataPromise = forceRefresh
           ? getContextGPUData(context)
           : dashboardCache.get(getContextGPUData, [context]);
-        gpuDataPromise.then((gpuData) => {
-          // Mark this context as loaded (even if it has no GPUs)
-          setLoadedContexts((prev) => new Set([...prev, context]));
+        gpuDataPromise
+          .then((gpuData) => {
+            // Mark this context as loaded (even if it has no GPUs)
+            setLoadedContexts((prev) => new Set([...prev, context]));
 
-          // Update perContextGPUs - merge in data for this context
-          setPerContextGPUs((prev) => {
-            // Remove any existing entries for this context, then add new ones
-            const filtered = prev.filter((gpu) => gpu.context !== context);
-            return [...filtered, ...gpuData.perContextGPUs];
-          });
+            // Update perContextGPUs - merge in data for this context
+            setPerContextGPUs((prev) => {
+              // Remove any existing entries for this context, then add new ones
+              const filtered = prev.filter((gpu) => gpu.context !== context);
+              return [...filtered, ...gpuData.perContextGPUs];
+            });
 
-          // Update perNodeGPUs - merge in data for this context
-          setPerNodeGPUs((prev) => {
-            const filtered = prev.filter((node) => node.context !== context);
-            return [...filtered, ...gpuData.perNodeGPUs];
-          });
+            // Update perNodeGPUs - merge in data for this context
+            setPerNodeGPUs((prev) => {
+              const filtered = prev.filter((node) => node.context !== context);
+              return [...filtered, ...gpuData.perNodeGPUs];
+            });
 
-          // Note: allGPUs is computed via useEffect when perContextGPUs changes
+            // Note: allGPUs is computed via useEffect when perContextGPUs changes
 
-          // Update context errors if there was an error
-          if (gpuData.error) {
+            // Update context errors if there was an error
+            if (gpuData.error) {
+              setContextErrors((prev) => ({
+                ...prev,
+                [context]: gpuData.error,
+              }));
+            }
+
+            // Decrement pending count and check if ALL fetches are complete
+            pendingContextCountRef.current--;
+            if (
+              pendingContextCountRef.current === 0 &&
+              mainFetchDoneRef.current
+            ) {
+              setIsFetching(false); // Everything done, stop spinner
+            }
+          })
+          .catch((error) => {
+            // Mark context as loaded even on error to prevent infinite spinner
+            setLoadedContexts((prev) => new Set([...prev, context]));
             setContextErrors((prev) => ({
               ...prev,
-              [context]: gpuData.error,
+              [context]: error.message || 'Failed to load GPU data',
             }));
-          }
 
-          // Decrement pending count and check if ALL fetches are complete
-          pendingContextCountRef.current--;
-          if (
-            pendingContextCountRef.current === 0 &&
-            mainFetchDoneRef.current
-          ) {
-            setIsFetching(false); // Everything done, stop spinner
-          }
-        });
+            // Decrement pending count and check if ALL fetches are complete
+            pendingContextCountRef.current--;
+            if (
+              pendingContextCountRef.current === 0 &&
+              mainFetchDoneRef.current
+            ) {
+              setIsFetching(false); // Everything done, stop spinner
+            }
+          });
       });
     } catch (error) {
       console.error('Error in fetchKubernetesData:', error);
@@ -2795,7 +2836,14 @@ export function GPUs() {
                 : `No enabled clouds for workspace "${selectedWorkspace}".`}
             </p>
           ) : (
-            <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+            <div
+              className={`overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white ${
+                !isInitialLoad &&
+                (clusterDataLoading || sshAndKubeJobsDataLoading)
+                  ? 'infra-table-refreshing'
+                  : ''
+              }`}
+            >
               <table className="min-w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
@@ -2825,9 +2873,7 @@ export function GPUs() {
                         </td>
                         <td className="p-3">
                           {clusterDataLoading ? (
-                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                              <CircularProgress size={12} />
-                            </span>
+                            <SkeletonBadge />
                           ) : (
                             <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                               {clusterCount ?? 0}
@@ -2836,9 +2882,7 @@ export function GPUs() {
                         </td>
                         <td className="p-3">
                           {sshAndKubeJobsDataLoading ? (
-                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                              <CircularProgress size={12} />
-                            </span>
+                            <SkeletonBadge />
                           ) : (
                             <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                               {jobCount ?? 0}
