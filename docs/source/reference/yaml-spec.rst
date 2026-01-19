@@ -49,6 +49,12 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`autostop <yaml-spec-resources-autostop>`:
       idle_minutes: 10
       wait_for: none
+      :ref:`hook <auto-stop-hooks>`: |
+        cd my-code-base
+        git add .
+        git commit -m "Auto-commit before shutdown"
+        git push
+      hook_timeout: 300
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
       - infra: aws/us-west-2
@@ -270,6 +276,12 @@ Format:
     - ``jobs_and_ssh`` (default): Wait for in‑progress jobs and SSH connections to finish
     - ``jobs``: Only wait for in‑progress jobs
     - ``none``: Wait for nothing; autostop right after ``idle_minutes``
+  - ``hook``: Optional script to execute before autostop. The script runs on the remote cluster before stopping or tearing down. If the hook fails, autostop will still proceed but a warning will be logged.
+
+    See :ref:`Autostop hooks <auto-stop-hooks>` for detailed explanation and examples.
+
+  - ``hook_timeout``: Timeout in seconds for hook execution (default: 3600 = 1 hour, minimum: 1).
+    If the hook exceeds this timeout, it will be terminated and autostop continues.
 
 ``<unit>`` can be one of:
 - ``m``: minutes (default if not specified)
@@ -316,6 +328,20 @@ OR
     autostop:
       idle_minutes: 10
       wait_for: none  # Stop after 10 minutes, regardless of running jobs or SSH connections
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    autostop:
+      idle_minutes: 10
+      hook: |
+        cd my-code-base
+        git add .
+        git commit -m "Auto-commit before shutdown"
+        git push
+      hook_timeout: 300
 
 
 .. _yaml-spec-resources-accelerators:
@@ -876,7 +902,7 @@ Example:
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 The recovery strategy for managed jobs (optional).
 
-In effect for managed jobs. Possible values are ``FAILOVER`` and ``EAGER_NEXT_REGION``.
+We can specify the strategy for which region to recover the job to when it fails. Possible values are ``FAILOVER`` and ``EAGER_NEXT_REGION``.
 
 If ``FAILOVER`` is specified, the job will be restarted in the same region if the node fails, and go to the next region if no available resources are found in the same region.
 
@@ -899,7 +925,40 @@ OR
   resources:
     job_recovery:
       strategy: EAGER_NEXT_REGION
+
+We can also specify the maximum number of times to restart the job on user code errors (non-zero exit codes).
+
+.. code-block:: yaml
+
+  resources:
+    job_recovery:
       max_restarts_on_errors: 3
+
+We can also specify the exit codes that should always trigger recovery, regardless of the :code:`max_restarts_on_errors` limit. This is useful when certain exit codes indicate transient errors that should always be retried (e.g., NCCL timeouts, specific GPU driver issues).
+
+We can specify multiple exit codes:
+
+.. code-block:: yaml
+
+  resources:
+    job_recovery:
+      # Always recover on these exit codes
+      recover_on_exit_codes: [33, 34]
+
+Or a single exit code:
+
+.. code-block:: yaml
+
+  resources:
+    job_recovery:
+      # Always recover on these exit codes
+      recover_on_exit_codes: 33
+
+Available fields:
+
+- :code:`strategy`: The recovery strategy to use (:code:`FAILOVER` or :code:`EAGER_NEXT_REGION`)
+- :code:`max_restarts_on_errors`: Maximum number of times to restart the job on user code errors (non-zero exit codes)
+- :code:`recover_on_exit_codes`: Exit code(s) (0-255) that should always trigger recovery. Can be a single integer (e.g., :code:`33`) or a list (e.g., :code:`[33, 34]`). Restarts triggered by these exit codes do not count towards the :code:`max_restarts_on_errors` limit. Useful for specific transient errors like NCCL timeouts.
 
 
 .. _yaml-spec-envs:

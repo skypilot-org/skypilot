@@ -40,7 +40,6 @@ from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common_utils
-from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import infra_utils
 from sky.utils import log_utils
@@ -80,9 +79,8 @@ JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
-_JOB_STATUS_FETCH_MAX_RETRIES = 3
-_JOB_K8S_TRANSIENT_NW_MSG = 'Unable to connect to the server: dial tcp'
 _JOB_STATUS_FETCH_TIMEOUT_SECONDS = 30
+JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS = 60
 
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
@@ -329,99 +327,90 @@ def ha_recovery_for_consolidation_mode() -> None:
 
 
 async def get_job_status(
-        backend: 'backends.CloudVmRayBackend', cluster_name: str,
-        job_id: Optional[int]) -> Optional['job_lib.JobStatus']:
+    backend: 'backends.CloudVmRayBackend', cluster_name: str,
+    job_id: Optional[int]
+) -> Tuple[Optional['job_lib.JobStatus'], Optional[str]]:
     """Check the status of the job running on a managed job cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_DRIVER,
     FAILED_SETUP or CANCELLED.
+
+    Returns:
+        job_status: The status of the job.
+        transient_error_reason: None if successful or fatal error; otherwise,
+            the detailed reason for the transient error.
     """
+    # TODO(zhwu, cooperc): Make this get job status aware of cluster status, so
+    # that it can exit retry early if the cluster is down.
     # TODO(luca) make this async
-    handle = await context_utils.to_thread(
+    handle = await asyncio.to_thread(
         global_user_state.get_handle_from_cluster_name, cluster_name)
     if handle is None:
         # This can happen if the cluster was preempted and background status
         # refresh already noticed and cleaned it up.
         logger.info(f'Cluster {cluster_name} not found.')
-        return None
+        return None, None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     job_ids = None if job_id is None else [job_id]
-    for i in range(_JOB_STATUS_FETCH_MAX_RETRIES):
-        try:
-            logger.info('=== Checking the job status... ===')
-            statuses = await asyncio.wait_for(
-                context_utils.to_thread(backend.get_job_status,
-                                        handle,
-                                        job_ids=job_ids,
-                                        stream_logs=False),
-                timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
-            status = list(statuses.values())[0]
-            if status is None:
-                logger.info('No job found.')
+    try:
+        logger.info('=== Checking the job status... ===')
+        statuses = await asyncio.wait_for(
+            asyncio.to_thread(backend.get_job_status,
+                              handle,
+                              job_ids=job_ids,
+                              stream_logs=False),
+            timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
+        status = list(statuses.values())[0]
+        if status is None:
+            logger.info('No job found.')
+        else:
+            logger.info(f'Job status: {status}')
+        logger.info('=' * 34)
+        return status, None
+    except (exceptions.CommandError, grpc.RpcError, grpc.FutureTimeoutError,
+            ValueError, TypeError, asyncio.TimeoutError) as e:
+        # Note: Each of these exceptions has some additional conditions to
+        # limit how we handle it and whether or not we catch it.
+        potential_transient_error_reason = None
+        if isinstance(e, exceptions.CommandError):
+            returncode = e.returncode
+            potential_transient_error_reason = (f'Returncode: {returncode}. '
+                                                f'{e.detailed_reason}')
+        elif isinstance(e, grpc.RpcError):
+            potential_transient_error_reason = e.details()
+        elif isinstance(e, grpc.FutureTimeoutError):
+            potential_transient_error_reason = 'grpc timeout'
+        elif isinstance(e, asyncio.TimeoutError):
+            potential_transient_error_reason = (
+                'Job status check timed out after '
+                f'{_JOB_STATUS_FETCH_TIMEOUT_SECONDS}s')
+        # TODO(cooperc): Gracefully handle these exceptions in the backend.
+        elif isinstance(e, ValueError):
+            # If the cluster yaml is deleted in the middle of getting the
+            # SSH credentials, we could see this. See
+            # sky/global_user_state.py get_cluster_yaml_dict.
+            if re.search(r'Cluster yaml .* not found', str(e)):
+                potential_transient_error_reason = 'Cluster yaml was deleted'
             else:
-                logger.info(f'Job status: {status}')
-            logger.info('=' * 34)
-            return status
-        except (exceptions.CommandError, grpc.RpcError, grpc.FutureTimeoutError,
-                ValueError, TypeError, asyncio.TimeoutError) as e:
-            # Note: Each of these exceptions has some additional conditions to
-            # limit how we handle it and whether or not we catch it.
-            # Retry on k8s transient network errors. This is useful when using
-            # coreweave which may have transient network issue sometimes.
-            is_transient_error = False
-            detailed_reason = None
-            if isinstance(e, exceptions.CommandError):
-                detailed_reason = e.detailed_reason
-                if (detailed_reason is not None and
-                        _JOB_K8S_TRANSIENT_NW_MSG in detailed_reason):
-                    is_transient_error = True
-            elif isinstance(e, grpc.RpcError):
-                detailed_reason = e.details()
-                if e.code() in [
-                        grpc.StatusCode.UNAVAILABLE,
-                        grpc.StatusCode.DEADLINE_EXCEEDED
-                ]:
-                    is_transient_error = True
-            elif isinstance(e, grpc.FutureTimeoutError):
-                detailed_reason = 'Timeout'
-            elif isinstance(e, asyncio.TimeoutError):
-                detailed_reason = ('Job status check timed out after '
-                                   f'{_JOB_STATUS_FETCH_TIMEOUT_SECONDS}s')
-            # TODO(cooperc): Gracefully handle these exceptions in the backend.
-            elif isinstance(e, ValueError):
-                # If the cluster yaml is deleted in the middle of getting the
-                # SSH credentials, we could see this. See
-                # sky/global_user_state.py get_cluster_yaml_dict.
-                if re.search(r'Cluster yaml .* not found', str(e)):
-                    detailed_reason = 'Cluster yaml was deleted'
-                else:
-                    raise
-            elif isinstance(e, TypeError):
-                # We will grab the SSH credentials from the cluster yaml, but if
-                # handle.cluster_yaml is None, we will just return an empty dict
-                # for the credentials. See
-                # backend_utils.ssh_credential_from_yaml. Then, the credentials
-                # are passed as kwargs to SSHCommandRunner.__init__ - see
-                # cloud_vm_ray_backend.get_command_runners. So we can hit this
-                # TypeError if the cluster yaml is removed from the handle right
-                # when we pull it before the cluster is fully deleted.
-                error_msg_to_check = (
-                    'SSHCommandRunner.__init__() missing 2 required positional '
-                    'arguments: \'ssh_user\' and \'ssh_private_key\'')
-                if str(e) == error_msg_to_check:
-                    detailed_reason = 'SSH credentials were already cleaned up'
-                else:
-                    raise
-            if is_transient_error:
-                logger.info('Failed to connect to the cluster. Retrying '
-                            f'({i + 1}/{_JOB_STATUS_FETCH_MAX_RETRIES})...')
-                logger.info('=' * 34)
-                await asyncio.sleep(1)
+                raise
+        elif isinstance(e, TypeError):
+            # We will grab the SSH credentials from the cluster yaml, but if
+            # handle.cluster_yaml is None, we will just return an empty dict
+            # for the credentials. See
+            # backend_utils.ssh_credential_from_yaml. Then, the credentials
+            # are passed as kwargs to SSHCommandRunner.__init__ - see
+            # cloud_vm_ray_backend.get_command_runners. So we can hit this
+            # TypeError if the cluster yaml is removed from the handle right
+            # when we pull it before the cluster is fully deleted.
+            error_msg_to_check = (
+                'SSHCommandRunner.__init__() missing 2 required positional '
+                'arguments: \'ssh_user\' and \'ssh_private_key\'')
+            if str(e) == error_msg_to_check:
+                potential_transient_error_reason = ('SSH credentials were '
+                                                    'already cleaned up')
             else:
-                logger.info(f'Failed to get job status: {detailed_reason}')
-                logger.info('=' * 34)
-                return None
-    return None
+                raise
+        return None, potential_transient_error_reason
 
 
 def controller_process_alive(record: managed_job_state.ControllerPidRecord,
@@ -784,7 +773,7 @@ def event_callback_func(
         logger.info(f'=== END: event callback for {status!r} ===')
 
     async def async_callback_func(status: str):
-        return await context_utils.to_thread(callback_func, status)
+        return await asyncio.to_thread(callback_func, status)
 
     return async_callback_func
 
@@ -1443,6 +1432,61 @@ def _cluster_handle_not_required(fields: List[str]) -> bool:
     return not any(field in fields for field in _CLUSTER_HANDLE_FIELDS)
 
 
+def _format_job_details(*, job: Dict[str, Any],
+                        highest_blocking_priority: int) -> None:
+    """Add details about schedule state / backoff."""
+    state_details = None
+    if job['schedule_state'] == 'ALIVE_BACKOFF':
+        state_details = 'In backoff, waiting for resources'
+    elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
+        priority = job.get('priority')
+        if (priority is not None and priority < highest_blocking_priority):
+            # Job is lower priority than some other blocking job.
+            state_details = 'Waiting for higher priority jobs to launch'
+        else:
+            state_details = 'Waiting for other jobs to launch'
+
+    if state_details and job['failure_reason']:
+        job['details'] = f'{state_details} - {job["failure_reason"]}'
+    elif state_details:
+        job['details'] = state_details
+    elif job['failure_reason']:
+        job['details'] = f'Failure: {job["failure_reason"]}'
+    else:
+        job['details'] = None
+
+
+def _populate_job_records_from_handles(
+        jobs_with_handle: List[Dict[str, Any]]) -> None:
+    """Populate the job records from the handles."""
+    for job_with_handle in jobs_with_handle:
+        _populate_job_record_from_handle(
+            job=job_with_handle['job'],
+            cluster_name=job_with_handle['cluster_name'],
+            handle=job_with_handle['handle'])
+
+
+def _populate_job_record_from_handle(
+        *, job: Dict[str, Any], cluster_name: str,
+        handle: 'backends.CloudVmRayResourceHandle') -> None:
+    """Populate the job record from the handle."""
+    del cluster_name
+    resources_str_simple, resources_str_full = (
+        resources_utils.get_readable_resources_repr(handle,
+                                                    simplified_only=False))
+    assert resources_str_full is not None
+    job['cluster_resources'] = resources_str_simple
+    job['cluster_resources_full'] = resources_str_full
+    job['cloud'] = str(handle.launched_resources.cloud)
+    job['region'] = handle.launched_resources.region
+    job['zone'] = handle.launched_resources.zone
+    job['infra'] = infra_utils.InfraInfo(
+        str(handle.launched_resources.cloud), handle.launched_resources.region,
+        handle.launched_resources.zone).formatted_str()
+    job['accelerators'] = handle.launched_resources.accelerators
+    job['labels'] = handle.launched_resources.labels
+
+
 def get_managed_job_queue(
     skip_finished: bool = False,
     accessible_workspaces: Optional[List[str]] = None,
@@ -1524,6 +1568,7 @@ def get_managed_job_queue(
         highest_blocking_priority = (
             managed_job_state.get_managed_jobs_highest_priority())
 
+    jobs_with_handle = []
     for job in jobs:
         if not fields or 'job_duration' in fields:
             end_at = job['end_at']
@@ -1556,20 +1601,11 @@ def get_managed_job_queue(
             handle = cluster_name_to_handle.get(
                 cluster_name, None) if cluster_name is not None else None
             if isinstance(handle, backends.CloudVmRayResourceHandle):
-                resources_str_simple, resources_str_full = (
-                    resources_utils.get_readable_resources_repr(
-                        handle, simplified_only=False))
-                assert resources_str_full is not None
-                job['cluster_resources'] = resources_str_simple
-                job['cluster_resources_full'] = resources_str_full
-                job['cloud'] = str(handle.launched_resources.cloud)
-                job['region'] = handle.launched_resources.region
-                job['zone'] = handle.launched_resources.zone
-                job['infra'] = infra_utils.InfraInfo(
-                    str(handle.launched_resources.cloud),
-                    handle.launched_resources.region,
-                    handle.launched_resources.zone).formatted_str()
-                job['accelerators'] = handle.launched_resources.accelerators
+                jobs_with_handle.append({
+                    'job': job,
+                    'handle': handle,
+                    'cluster_name': cluster_name,
+                })
             else:
                 # FIXME(zongheng): display the last cached values for these.
                 job['cluster_resources'] = '-'
@@ -1578,29 +1614,14 @@ def get_managed_job_queue(
                 job['region'] = '-'
                 job['zone'] = '-'
                 job['infra'] = '-'
+                job['labels'] = None
 
+    _populate_job_records_from_handles(jobs_with_handle)
+
+    for job in jobs:
         if not fields or 'details' in fields:
-            # Add details about schedule state / backoff.
-            state_details = None
-            if job['schedule_state'] == 'ALIVE_BACKOFF':
-                state_details = 'In backoff, waiting for resources'
-            elif job['schedule_state'] in ('WAITING', 'ALIVE_WAITING'):
-                priority = job.get('priority')
-                if (priority is not None and
-                        priority < highest_blocking_priority):
-                    # Job is lower priority than some other blocking job.
-                    state_details = 'Waiting for higher priority jobs to launch'
-                else:
-                    state_details = 'Waiting for other jobs to launch'
-
-            if state_details and job['failure_reason']:
-                job['details'] = f'{state_details} - {job["failure_reason"]}'
-            elif state_details:
-                job['details'] = state_details
-            elif job['failure_reason']:
-                job['details'] = f'Failure: {job["failure_reason"]}'
-            else:
-                job['details'] = None
+            _format_job_details(
+                job=job, highest_blocking_priority=highest_blocking_priority)
 
     return {
         'jobs': jobs,
@@ -2174,6 +2195,11 @@ class ManagedJobCodeGen:
         from sky.jobs import constants as managed_job_constants
 
         managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
+
+        # Plugins are only loaded for managed jobs version 13 and above.
+        if managed_job_version >= 13:
+            from sky.server import plugins
+            plugins.load_plugins(plugins.ExtensionContext())
         """)
 
     @classmethod

@@ -1,5 +1,6 @@
 """Autostop utilities."""
 import enum
+import os
 import pickle
 import shlex
 import subprocess
@@ -11,6 +12,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import configs
 from sky.skylet import constants
+from sky.skylet import log_lib
 from sky.utils import message_utils
 from sky.utils import ux_utils
 
@@ -123,7 +125,9 @@ class AutostopConfig:
                  boot_time: float,
                  backend: Optional[str],
                  wait_for: AutostopWaitFor,
-                 down: bool = False):
+                 down: bool = False,
+                 hook: Optional[str] = None,
+                 hook_timeout: Optional[int] = None):
         assert autostop_idle_minutes < 0 or backend is not None, (
             autostop_idle_minutes, backend)
         self.autostop_idle_minutes = autostop_idle_minutes
@@ -131,9 +135,17 @@ class AutostopConfig:
         self.backend = backend
         self.wait_for = wait_for
         self.down = down
+        self.hook = hook
+        # Use the constant if hook_timeout is not specified
+        if hook_timeout is None:
+            hook_timeout = constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS
+        self.hook_timeout = hook_timeout
 
     def __setstate__(self, state: dict):
         state.setdefault('down', False)
+        state.setdefault('hook', None)
+        state.setdefault('hook_timeout',
+                         constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS)
         self.__dict__.update(state)
 
 
@@ -141,17 +153,41 @@ def get_autostop_config() -> AutostopConfig:
     config_str = configs.get_config(_AUTOSTOP_CONFIG_KEY)
     if config_str is None:
         return AutostopConfig(-1, -1, None, DEFAULT_AUTOSTOP_WAIT_FOR)
-    return pickle.loads(config_str)
+    config = pickle.loads(config_str)
+    # Ensure backward compatibility: set hook and hook_timeout if not present
+    if not hasattr(config, 'hook'):
+        config.hook = None
+    if not hasattr(config, 'hook_timeout'):
+        config.hook_timeout = constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS
+    return config
 
 
-def set_autostop(idle_minutes: int, backend: Optional[str],
-                 wait_for: AutostopWaitFor, down: bool) -> None:
+def set_autostop(idle_minutes: int,
+                 backend: Optional[str],
+                 wait_for: AutostopWaitFor,
+                 down: bool,
+                 hook: Optional[str] = None,
+                 hook_timeout: Optional[int] = None) -> None:
+    """Set autostop configuration.
+
+    Args:
+        idle_minutes: Minutes of idleness before autostop.
+        backend: Backend name.
+        wait_for: Condition for resetting idleness timer.
+        down: Whether to tear down (autodown) instead of stop.
+        hook: Hook script to execute before autostop.
+        hook_timeout: Timeout in seconds for hook execution. If None, uses
+            DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour).
+    """
     boot_time = psutil.boot_time()
+
     autostop_config = AutostopConfig(idle_minutes, boot_time, backend, wait_for,
-                                     down)
+                                     down, hook, hook_timeout)
     configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))
-    logger.debug(f'set_autostop(): idle_minutes {idle_minutes}, down {down}, '
-                 f'wait_for {wait_for.value}.')
+    logger.debug(
+        f'set_autostop(): idle_minutes {idle_minutes}, down {down}, '
+        f'wait_for {wait_for.value}, hook {"present" if hook else "none"}, '
+        f'hook_timeout {hook_timeout}s.')
     # Reset timer whenever an autostop setting is submitted, i.e. the idle
     # time will be counted from now.
     set_last_active_time_to_now()
@@ -219,6 +255,59 @@ def has_active_ssh_sessions() -> bool:
         return False
 
 
+def execute_autostop_hook(hook: Optional[str],
+                          hook_timeout: Optional[int] = None) -> bool:
+    """Execute the autostop hook script if provided.
+
+    Args:
+        hook: The hook script to execute, or None if no hook is set.
+        hook_timeout: Timeout in seconds for hook execution. If None, uses
+            DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour).
+
+    Returns:
+        True if hook executed successfully (or no hook), False if hook failed.
+    """
+    if hook is None or not hook.strip():
+        return True
+
+    if hook_timeout is None:
+        hook_timeout = constants.DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS
+
+    logger.info(f'Executing autostop hook (timeout: {hook_timeout}s)...')
+    log_path = os.path.expanduser(constants.AUTOSTOP_HOOK_LOG_FILE)
+    try:
+        # Execute the hook script and log output to file
+        returncode, stdout, stderr = log_lib.run_with_log(hook,
+                                                          log_path,
+                                                          require_outputs=True,
+                                                          shell=True,
+                                                          process_stream=True,
+                                                          timeout=hook_timeout)
+
+        if returncode != 0:
+            logger.error(f'Autostop hook failed with return code {returncode}. '
+                         f'Check {log_path} for details. '
+                         f'stdout: {stdout}, stderr: {stderr}')
+            return False
+
+        logger.info(
+            f'Autostop hook executed successfully. Logs saved to {log_path}. '
+            f'stdout: {stdout}')
+        if stderr:
+            logger.error(f'Hook stderr: {stderr}')
+        return True
+    except subprocess.TimeoutExpired:
+        logger.error(f'Autostop hook timed out after {hook_timeout} seconds. '
+                     f'Check {log_path} for details.')
+        return False
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(
+            f'Error executing autostop hook: {e}. '
+            f'Check {log_path} for details.',
+            exc_info=True)
+        return False
+
+
 class AutostopCodeGen:
     """Code generator for autostop utility functions.
 
@@ -233,15 +322,23 @@ class AutostopCodeGen:
                      idle_minutes: int,
                      backend: str,
                      wait_for: Optional[AutostopWaitFor],
-                     down: bool = False) -> str:
+                     down: bool = False,
+                     hook: Optional[str] = None,
+                     hook_timeout: Optional[int] = None) -> str:
         if wait_for is None:
             wait_for = DEFAULT_AUTOSTOP_WAIT_FOR
         code = [
-            f'\nif getattr(constants, "SKYLET_LIB_VERSION", 1) < 4: '
-            f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, {down})'
-            f'\nelse: '
+            '\nskylet_lib_version = getattr(constants, "SKYLET_LIB_VERSION", 1)'
+            '\nif skylet_lib_version < 4: '
             f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
-            f'autostop_lib.{wait_for}, {down})',
+            f'{down})'
+            '\nelif skylet_lib_version < 5: '
+            f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
+            f'autostop_lib.{wait_for}, {down})'
+            '\nelse: '
+            f'\n autostop_lib.set_autostop({idle_minutes}, {backend!r}, '
+            f'autostop_lib.{wait_for}, {down}, hook={hook!r}, '
+            f'hook_timeout={hook_timeout})',
         ]
         return cls._build(code)
 

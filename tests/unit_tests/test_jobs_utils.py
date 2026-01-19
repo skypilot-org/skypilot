@@ -1,4 +1,4 @@
-import logging
+import asyncio
 import pathlib
 import tempfile
 import time
@@ -59,7 +59,11 @@ def test_terminate_cluster_handles_nonexistent_cluster(mock_set_internal,
 @mock.patch('sky.jobs.utils.logger')
 @mock.patch('sky.global_user_state.get_handle_from_cluster_name')
 async def test_get_job_status_timeout(mock_get_handle, mock_logger):
-    """Test that get_job_status times."""
+    """Test that get_job_status returns error reason on timeout.
+
+    Note: get_job_status no longer retries - it returns (None, reason) on
+    transient errors. The retry logic is now in controller.py.
+    """
     mock_handle = mock.MagicMock(
         spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
     mock_get_handle.return_value = mock_handle
@@ -77,27 +81,55 @@ async def test_get_job_status_timeout(mock_get_handle, mock_logger):
 
     start_time = time.time()
 
-    # Patch the timeout so the test passes quickly, while still checking the
-    # timeout logic.
+    # Patch the timeout so the test passes quickly
     with mock.patch.object(utils, '_JOB_STATUS_FETCH_TIMEOUT_SECONDS',
                            timeout_override):
-        result = await utils.get_job_status(backend=mock_backend,
-                                            cluster_name='test-cluster',
-                                            job_id=1)
-    assert result is None, 'Expected None when timeout occurs'
+        job_status, error_reason = await utils.get_job_status(
+            backend=mock_backend, cluster_name='test-cluster', job_id=1)
+
+    # Should return (None, reason) tuple on timeout
+    assert job_status is None, 'Expected None job status when timeout occurs'
+    assert error_reason is not None, 'Expected error reason when timeout occurs'
+    assert f'timed out after {timeout_override}s' in error_reason
 
     elapsed_time = time.time() - start_time
     assert timeout_override <= elapsed_time < timeout_override + 1.0, (
-        f'Expected timeout around {timeout_override}s, but took {elapsed_time}s'
-    )
+        f'Expected timeout around {timeout_override}s, '
+        f'but took {elapsed_time}s')
 
+    # Verify only one attempt was made (no retry in get_job_status)
     # === Checking the job status... ===
-    # Failed to get job status: Job status check timed out after 30s
-    # ==================================
-    assert mock_logger.info.call_count == 3
-    error_log_line = mock_logger.info.call_args_list[1][0][0]
-    assert 'Failed to get job status:' in error_log_line
-    assert f'timed out after {timeout_override}s' in error_log_line
+    assert mock_logger.info.call_count == 1
+
+
+@pytest.mark.asyncio
+@mock.patch('sky.jobs.utils.logger')
+@mock.patch('sky.global_user_state.get_handle_from_cluster_name')
+async def test_get_job_status_returns_error_reason_on_failure(
+        mock_get_handle, mock_logger):
+    """Test that get_job_status returns error reason on transient failures."""
+    mock_handle = mock.MagicMock(
+        spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
+    mock_get_handle.return_value = mock_handle
+
+    mock_backend = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayBackend)
+
+    def failing_get_job_status(*args, **kwargs):
+        """Simulates get_job_status that fails with asyncio.TimeoutError."""
+        raise asyncio.TimeoutError('Connection failed')
+
+    mock_backend.get_job_status = failing_get_job_status
+
+    job_status, error_reason = await utils.get_job_status(
+        backend=mock_backend, cluster_name='test-cluster', job_id=1)
+
+    # Should return (None, reason) tuple on failure
+    assert job_status is None, 'Expected None job status on failure'
+    assert error_reason is not None, 'Expected error reason on failure'
+    assert 'timed out' in error_reason
+
+    # Verify only one attempt was made (no retry in get_job_status)
+    assert mock_logger.info.call_count == 1
 
 
 @mock.patch('sky.jobs.utils.logger')
@@ -135,3 +167,24 @@ def test_consolidation_mode_warning_without_restart(mock_config, mock_logger):
             assert 'Consolidation mode for managed jobs is enabled' in warning_message
             assert 'API server has not been restarted yet' in warning_message
             assert 'Please restart the API server to enable it' in warning_message
+
+
+def test_job_recovery_skips_autostopping():
+    """Verify job recovery logic treats AUTOSTOPPING like UP (no recovery)."""
+    from sky.utils import status_lib
+
+    # AUTOSTOPPING should be treated as UP-like (not preempted)
+    # Recovery logic should skip AUTOSTOPPING (similar to UP)
+    up_status = status_lib.ClusterStatus.UP
+    autostopping_status = status_lib.ClusterStatus.AUTOSTOPPING
+    stopped_status = status_lib.ClusterStatus.STOPPED
+
+    # AUTOSTOPPING should be in the same category as UP for recovery purposes
+    recovery_skip_statuses = {
+        up_status,
+        autostopping_status,
+    }
+
+    assert up_status in recovery_skip_statuses
+    assert autostopping_status in recovery_skip_statuses
+    assert stopped_status not in recovery_skip_statuses

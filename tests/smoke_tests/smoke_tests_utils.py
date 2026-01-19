@@ -304,6 +304,41 @@ def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
         timeout=timeout)
 
 
+_WAIT_UNTIL_PIPELINE_TASK_STATUS = (
+    # A while loop to wait until a pipeline task (identified by line number)
+    # reaches a certain status, with timeout.
+    'start_time=$SECONDS; '
+    'while true; do '
+    'if (( $SECONDS - $start_time > {timeout} )); then '
+    '  echo "Timeout after {timeout} seconds waiting for task {task_line} to be {expected_status}"; exit 1; '
+    'fi; '
+    's=$(sky jobs queue); echo "$s"; '
+    'task_status=$(echo "$s" | grep -A 4 {job_name} | sed -n {task_line}p); '
+    'if echo "$task_status" | grep -E -q "{expected_status}"; then '
+    '  echo "Task {task_line} reached status {expected_status}."; break; '
+    'fi; '
+    'echo "Waiting for task {task_line} to be {expected_status}, current: $task_status"; '
+    'sleep 5; '
+    'done')
+
+
+def get_cmd_wait_until_pipeline_task_status(job_name: str, task_line: int,
+                                            expected_status: str, timeout: int):
+    """Get a command that waits until a pipeline task reaches a certain status.
+
+    Args:
+        job_name: The name of the job
+        task_line: The line number in the pipeline output (2 = first task, 3 = second, etc.)
+        expected_status: The expected status string (e.g., "CANCELLING|CANCELLED")
+        timeout: Timeout in seconds
+    """
+    return _WAIT_UNTIL_PIPELINE_TASK_STATUS.format(
+        job_name=job_name,
+        task_line=task_line,
+        expected_status=expected_status,
+        timeout=timeout)
+
+
 _WAIT_UNTIL_JOB_STATUS_SUCCEEDED = (
     'start_time=$SECONDS; '
     'while true; do '
@@ -637,20 +672,50 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             test.echo(msg)
             write(msg)
 
-        if proc.returncode and not is_remote_server_test():
-            test.echo('=== Sky API Server Log (last 100 lines) ===')
-            # Read the log file directly and echo it
-            log_path = os.path.expanduser('~/.sky/api_server/server.log')
-            if os.path.exists(log_path):
-                with open(log_path, 'r') as f:
-                    lines = f.readlines()
-                    # Get last 100 lines
-                    last_lines = lines[-100:] if len(lines) > 100 else lines
-                    for line in last_lines:
-                        test.echo(line.rstrip())
+        if proc.returncode:
+            # Fetch controller logs for failed jobs
+            script_path = os.path.join(os.path.dirname(__file__), 'scripts',
+                                       'fetch_failed_job_logs.sh')
+            if os.path.exists(script_path):
+                write('=== Fetching Failed Job Logs ===\n')
+                flush()
+                write(f'+ bash {script_path}\n')
+                flush()
+                script_proc = subprocess.Popen(
+                    f'bash {script_path}',
+                    stdout=subprocess_out,
+                    stderr=subprocess.STDOUT,
+                    shell=True,
+                    executable='/bin/bash',
+                    env=env_dict,
+                )
+                try:
+                    script_proc.wait(timeout=300)  # 5 minutes timeout
+                except subprocess.TimeoutExpired:
+                    write('Timeout after 300 seconds fetching failed job logs.')
+                    script_proc.terminate()
+                write('=== End of Failed Job Logs ===\n')
+                flush()
             else:
-                test.echo(f'Server log file not found: {log_path}')
-            test.echo('=== End of Sky API Server Log ===')
+                error_msg = (f'Script not found: {script_path}, '
+                             f'skipping failed job log fetch')
+                write(error_msg + '\n')
+                flush()
+
+            if not is_remote_server_test():
+                write('=== Sky API Server Log (last 100 lines) ===')
+                # Read the log file directly and echo it
+                log_path = os.path.expanduser('~/.sky/api_server/server.log')
+                if os.path.exists(log_path):
+                    with open(log_path, 'r') as f:
+                        lines = f.readlines()
+                        # Get last 100 lines
+                        last_lines = lines[-100:] if len(lines) > 100 else lines
+                        for line in last_lines:
+                            write(line.rstrip())
+                else:
+                    write(f'Server log file not found: {log_path}')
+                write('=== End of Sky API Server Log ===')
 
         if (proc.returncode == 0 or
                 pytest.terminate_on_failure) and test.teardown is not None:

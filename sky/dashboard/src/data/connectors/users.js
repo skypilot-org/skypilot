@@ -1,5 +1,21 @@
 import { apiClient } from '@/data/connectors/client';
 
+export async function getServiceAccountTokens() {
+  try {
+    const response = await apiClient.get('/users/service-account-tokens');
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch service account tokens with status ${response.status}`
+      );
+    }
+    const data = await response.json();
+    return data || [];
+  } catch (error) {
+    console.error('Failed to fetch service account tokens:', error);
+    throw error;
+  }
+}
+
 export async function getUsers() {
   try {
     const response = await apiClient.get(`/users`);

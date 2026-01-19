@@ -69,13 +69,24 @@ https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.
 {{- end -}}
 
 {{/*
+Compute full release name with optional fullnameOverride.
+*/}}
+{{- define "skypilot.fullname" -}}
+{{- if .Values.fullnameOverride -}}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Create the name of the service account to use
 */}}
 {{- define "skypilot.serviceAccountName" -}}
 {{- if .Values.rbac.serviceAccountName -}}
 {{ .Values.rbac.serviceAccountName }}
 {{- else -}}
-{{ .Release.Name }}-api-sa
+{{ include "skypilot.fullname" . }}-api-sa
 {{- end -}}
 {{- end -}}
 
@@ -108,7 +119,7 @@ false
 {{- if .Values.apiService.initialBasicAuthSecret -}}
 {{ .Values.apiService.initialBasicAuthSecret }}
 {{- else if .Values.apiService.initialBasicAuthCredentials -}}
-{{ printf "%s-initial-basic-auth" .Release.Name }}
+{{ printf "%s-initial-basic-auth" (include "skypilot.fullname" .) }}
 {{- else -}}
 {{- /* Return empty string */ -}}
 {{ "" }}
@@ -121,7 +132,7 @@ false
 {{- end -}}
 
 {{- define "skypilot.oauth2ProxyURL" -}}
-http://{{ .Release.Name }}-oauth2-proxy:4180
+http://{{ include "skypilot.fullname" . }}-oauth2-proxy:4180
 {{- end -}}
 
 {{- define "skypilot.ingressBasicAuthEnabled" -}}

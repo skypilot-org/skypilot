@@ -173,7 +173,11 @@ class InfraInfo:
             return '-'
 
         region_or_zone = None
-        if self.zone is not None and self.zone != '*':
+        # For Slurm, zones = partitions. We want to show the cluster
+        # name (region) instead of the partition name (zone), as different
+        # Slurm clusters can easily have same partition name.
+        is_slurm = self.cloud.lower() == 'slurm'
+        if not is_slurm and self.zone is not None and self.zone != '*':
             region_or_zone = self.zone
         elif self.region is not None and self.region != '*':
             # If using region, we remove the ssh- prefix if it exists for SSH
