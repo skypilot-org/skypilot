@@ -2630,7 +2630,9 @@ def set_job_info(job_id: int,
                  pool_hash: Optional[str],
                  user_hash: Optional[str] = None,
                  execution: Optional[str] = None,
-                 placement: Optional[str] = None):
+                 placement: Optional[str] = None,
+                 primary_tasks: Optional[List[str]] = None,
+                 termination_delay: Optional[Any] = None):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -2652,6 +2654,8 @@ def set_job_info(job_id: int,
             user_hash=user_hash,
             execution=execution,
             placement=placement,
+            primary_tasks=primary_tasks,
+            termination_delay=termination_delay,
         )
         session.execute(insert_stmt)
         session.commit()

@@ -2542,6 +2542,9 @@ class ManagedJobCodeGen:
                      if managed_job_dag.execution else None)
         placement = (managed_job_dag.placement.value
                      if managed_job_dag.placement else None)
+        # Get primary_tasks and termination_delay for primary/auxiliary support
+        primary_tasks = managed_job_dag.primary_tasks
+        termination_delay = managed_job_dag.termination_delay
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
             set_job_info_kwargs = {{'workspace': {workspace!r}}}
@@ -2561,6 +2564,8 @@ class ManagedJobCodeGen:
             if managed_job_version >= 13:
                 set_job_info_kwargs['execution'] = {execution!r}
                 set_job_info_kwargs['placement'] = {placement!r}
+                set_job_info_kwargs['primary_tasks'] = {primary_tasks!r}
+                set_job_info_kwargs['termination_delay'] = {termination_delay!r}
             managed_job_state.set_job_info(
                 {job_id}, {dag_name!r}, **set_job_info_kwargs)
             """)
