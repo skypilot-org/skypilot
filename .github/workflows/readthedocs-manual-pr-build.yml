@@ -55,8 +55,8 @@ jobs:
             return true;
           result-encoding: string
 
-      - name: Get PR branch
-        id: get-branch
+      - name: Get PR details
+        id: get-pr-details
         uses: actions/github-script@v7
         with:
           script: |
@@ -65,14 +65,52 @@ jobs:
               repo: context.repo.repo,
               pull_number: context.issue.number
             });
-            return pr.data.head.ref;
-          result-encoding: string
+            const isFork = pr.data.head.repo.full_name !== pr.data.base.repo.full_name;
+            const result = {
+              branch: pr.data.head.ref,
+              isFork: isFork,
+              forkOwner: pr.data.head.repo.owner.login,
+              forkRepo: pr.data.head.repo.name,
+              prNumber: context.issue.number
+            };
+            console.log('PR details:', JSON.stringify(result, null, 2));
+            return result;
+
+      - name: Checkout repository
+        if: fromJSON(steps.get-pr-details.outputs.result).isFork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push fork branch to main repo
+        if: fromJSON(steps.get-pr-details.outputs.result).isFork
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_DETAILS='${{ steps.get-pr-details.outputs.result }}'
+          BRANCH=$(echo "$PR_DETAILS" | jq -r '.branch')
+          FORK_OWNER=$(echo "$PR_DETAILS" | jq -r '.forkOwner')
+          FORK_REPO=$(echo "$PR_DETAILS" | jq -r '.forkRepo')
+          PR_NUMBER=$(echo "$PR_DETAILS" | jq -r '.prNumber')
+
+          echo "Fetching branch '${BRANCH}' from fork ${FORK_OWNER}/${FORK_REPO}..."
+
+          # Add fork as remote and fetch the branch
+          git remote add fork "https://github.com/${FORK_OWNER}/${FORK_REPO}.git"
+          git fetch fork "${BRANCH}"
+
+          # Push to main repo with the same branch name
+          # This makes the branch available for ReadTheDocs to sync
+          echo "Pushing branch '${BRANCH}' to main repository..."
+          git push origin "fork/${BRANCH}:refs/heads/${BRANCH}" --force
+
+          echo "✅ Fork branch pushed to main repository successfully"
 
       - name: Trigger ReadTheDocs build
         env:
           READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
           READTHEDOCS_PROJECT: ${{ secrets.READTHEDOCS_PROJECT }}
-          BRANCH_NAME: ${{ steps.get-branch.outputs.result }}
+          BRANCH_NAME: ${{ fromJSON(steps.get-pr-details.outputs.result).branch }}
         run: |
           # Trigger a build for the PR branch on ReadTheDocs
           # The branch needs to exist as a version on ReadTheDocs
@@ -185,10 +223,12 @@ jobs:
         if: success()
         env:
           READTHEDOCS_PROJECT: ${{ secrets.READTHEDOCS_PROJECT }}
+          PR_DETAILS: ${{ steps.get-pr-details.outputs.result }}
         uses: actions/github-script@v7
         with:
           script: |
-            const branch = '${{ steps.get-branch.outputs.result }}';
+            const prDetails = JSON.parse(process.env.PR_DETAILS);
+            const branch = prDetails.branch;
             const projectSlug = process.env.READTHEDOCS_PROJECT;
 
             // ReadTheDocs automatically replaces forward slashes with dashes when generating version slugs
@@ -221,7 +261,7 @@ jobs:
       - name: Comment on failure
         if: failure()
         env:
-          BRANCH_NAME: ${{ steps.get-branch.outputs.result || 'unknown' }}
+          BRANCH_NAME: ${{ fromJSON(steps.get-pr-details.outputs.result).branch || 'unknown' }}
         uses: actions/github-script@v7
         with:
           script: |
@@ -241,6 +281,42 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'rtd-preview')
     runs-on: ubuntu-latest
     steps:
+      - name: Check if PR is from fork
+        id: check-fork
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const isFork = pr.head.repo.full_name !== pr.base.repo.full_name;
+            console.log(`PR is from fork: ${isFork}`);
+            return isFork;
+
+      - name: Delete fork branch from main repo
+        if: fromJSON(steps.check-fork.outputs.result)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+        run: |
+          echo "Deleting fork branch '${BRANCH_NAME}' from main repository..."
+
+          # Delete the branch that was pushed for the RTD preview
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE \
+            "https://api.github.com/repos/${{ github.repository }}/git/refs/heads/${BRANCH_NAME}" \
+            -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github.v3+json")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+
+          if [ "$HTTP_CODE" -eq 204 ]; then
+            echo "✅ Fork branch deleted from main repository"
+          elif [ "$HTTP_CODE" -eq 422 ] || [ "$HTTP_CODE" -eq 404 ]; then
+            echo "ℹ️ Branch not found in main repository (may not have been pushed or already deleted)"
+          else
+            echo "⚠️ Failed to delete branch. HTTP status: $HTTP_CODE"
+            echo "$RESPONSE"
+            # Don't fail - this is just cleanup
+          fi
+
       - name: Deactivate ReadTheDocs preview
         env:
           READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
