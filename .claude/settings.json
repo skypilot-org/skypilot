@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__buildkite__*",
+      "Bash(aws ec2 describe-instances:*)",
+      "Bash(aws ec2-instance-connect ssh:*)",
+      "Bash(git:*)",
+      "Read"
+    ]
+  }
+}
