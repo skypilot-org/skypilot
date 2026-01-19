@@ -1,5 +1,6 @@
 """gRPC service implementations for skylet."""
 
+import json
 import os
 from typing import List, Optional
 
@@ -508,7 +509,11 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     metadata=converted_metadata,
                     pool=job.get('pool'),
                     pool_hash=job.get('pool_hash'),
-                    links=job.get('links'))
+                    links=job.get('links'),
+                    # Primary/auxiliary task support
+                    primary_tasks=job.get('primary_tasks') or [],
+                    termination_delay=json.dumps(job.get('termination_delay'))
+                    if job.get('termination_delay') is not None else None)
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(

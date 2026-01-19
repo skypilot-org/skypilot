@@ -8,6 +8,7 @@ import asyncio
 import collections
 from datetime import datetime
 import enum
+import json
 import os
 import pathlib
 import re
@@ -2161,8 +2162,10 @@ def format_job_table(
             job_table.add_row(job_values)
 
         # Get primary_tasks list for marking primary tasks with [P]
-        primary_tasks_list = job_tasks[0].get('primary_tasks') if job_tasks else None
-        primary_tasks_set = set(primary_tasks_list) if primary_tasks_list else None
+        primary_tasks_list = job_tasks[0].get(
+            'primary_tasks') if job_tasks else None
+        primary_tasks_set = set(
+            primary_tasks_list) if primary_tasks_list else None
 
         for task in job_tasks:
             # The job['job_duration'] is already calculated in
@@ -2319,6 +2322,10 @@ def _job_proto_to_dict(
             job_dict['schedule_state']))
     job_dict['schedule_state'] = (schedule_state_enum.value
                                   if schedule_state_enum is not None else None)
+    # Parse termination_delay from JSON string back to original format
+    if job_dict.get('termination_delay') is not None:
+        job_dict['termination_delay'] = json.loads(
+            job_dict['termination_delay'])
     return job_dict
 
 
