@@ -6,6 +6,7 @@
 #
 """Vast library wrapper for SkyPilot."""
 from pathlib import Path
+import shlex
 from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
@@ -44,7 +45,8 @@ def launch(name: str,
            secure_only: bool,
            private_docker_registry: Optional[bool] = None,
            login: Optional[str] = None,
-           create_instance_kwargs: Optional[Dict[str, Any]] = None) -> str:
+           create_instance_kwargs: Optional[Dict[str, Any]] = None,
+           ssh_public_key: Optional[str] = None) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the Vast GPU name, finds the specs for the
@@ -199,6 +201,21 @@ def launch(name: str,
         'touch ~/.no_auto_tmux',
         f'echo "{vast.vast().api_key_access}" > ~/.vast_api_key',
     ]
+
+    # Inject SSH public key into authorized_keys if provided
+    if ssh_public_key:
+        # Add commands to inject SSH key into authorized_keys
+        skypilot_onstart.extend([
+            'mkdir -p ~/.ssh',
+            'chmod 700 ~/.ssh',
+            # Add a newline first to ensure keys are on separate lines
+            'echo "" >> ~/.ssh/authorized_keys',
+            (f'echo "{shlex.quote(ssh_public_key.strip())}" >> '
+             '~/.ssh/authorized_keys'),
+            'chmod 600 ~/.ssh/authorized_keys',
+        ])
+        logger.debug('Added SSH key injection to onstart_cmd')
+
     if user_onstart_cmd:
         skypilot_onstart.append(user_onstart_cmd)
     launch_params['onstart_cmd'] = ';'.join(skypilot_onstart)
