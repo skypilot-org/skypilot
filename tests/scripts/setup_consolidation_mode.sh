@@ -37,12 +37,12 @@ fi
 CURRENT_CONFIG=$(sky config show -o json 2>/dev/null || echo '{}')
 
 # Build consolidation config
-CONSOLIDATION_CONFIG="{}"
+CONSOLIDATION_CONFIG="$CURRENT_CONFIG"
 if [ "$JOBS_CONSOLIDATION" = true ]; then
-    CONSOLIDATION_CONFIG=$(echo "$CURRENT_CONFIG" | jq '.jobs.controller.consolidation_mode = true' 2>/dev/null || echo '{"jobs": {"controller": {"consolidation_mode": true}}}')
+    CONSOLIDATION_CONFIG=$(echo "$CONSOLIDATION_CONFIG" | jq '.jobs.controller.consolidation_mode = true')
 fi
 if [ "$SERVE_CONSOLIDATION" = true ]; then
-    CONSOLIDATION_CONFIG=$(echo "$CONSOLIDATION_CONFIG" | jq '.serve.controller.consolidation_mode = true' 2>/dev/null || echo '{"serve": {"controller": {"consolidation_mode": true}}}')
+    CONSOLIDATION_CONFIG=$(echo "$CONSOLIDATION_CONFIG" | jq '.serve.controller.consolidation_mode = true')
 fi
 
 # Check if consolidation mode is already enabled
