@@ -541,6 +541,11 @@ IS_SKYPILOT_SERVE_CONTROLLER = 'IS_SKYPILOT_SERVE_CONTROLLER'
 # Environment variable that is set to 'true' if rolling update strategy is
 # enabled for the API server deployment.
 SKYPILOT_ROLLING_UPDATE_ENABLED = 'SKYPILOT_ROLLING_UPDATE_ENABLED'
+# Environment variable that is set to 'true' if persistent storage is enabled
+# for the API server deployment (via Helm storage.enabled=true).
+# This enables persistence of managed job logs and file mounts across rolling
+# updates.
+SKYPILOT_API_SERVER_STORAGE_ENABLED = 'SKYPILOT_API_SERVER_STORAGE_ENABLED'
 
 SERVE_OVERRIDE_CONCURRENT_LAUNCHES = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SERVE_OVERRIDE_CONCURRENT_LAUNCHES')
@@ -620,6 +625,7 @@ MEMORY_SIZE_PATTERN = (
 
 LAST_USE_TRUNC_LENGTH = 25
 USED_BY_TRUNC_LENGTH = 25
+ERROR_MESSAGE_TRUNC_LENGTH = 60
 
 MIN_PRIORITY = -1000
 MAX_PRIORITY = 1000
