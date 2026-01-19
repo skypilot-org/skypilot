@@ -231,3 +231,6 @@ class VolumeRecord(ResponseBaseModel):
     usedby_clusters: List[str]
     is_ephemeral: bool = False
     usedby_fetch_failed: bool = False
+    # Error message for volume in ERROR state (e.g., PVC pending due to
+    # access mode mismatch)
+    error_message: Optional[str] = None

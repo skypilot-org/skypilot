@@ -115,11 +115,6 @@ jobs:
           line=$(grep -n "^-----*$" src/README.md | cut -d: -f1 | head -n 1)
           tail -n +$line src/README.md >> src/charts/skypilot/README.md
 
-          # Update the version in the external-metrics chart (prometheus server)
-          # todo(rohan): update name the way we do for the main skypilot chart?
-          sed -i "s/^version:.*$/version: ${semversion}/" src/charts/external-metrics/Chart.yaml
-          sed -i "s/^appVersion:.*$/appVersion: ${version}/" src/charts/external-metrics/Chart.yaml
-
       - name: Update docker image in charts
         if: inputs.version != ''
         run: |
