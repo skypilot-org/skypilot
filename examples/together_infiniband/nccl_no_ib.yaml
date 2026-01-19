@@ -5,7 +5,7 @@ name: nccl-no-ib
 resources:
   infra: k8s
   accelerators: H100:8
-  image_id: docker:cr.eu-north1.nebius.cloud/nebius-benchmarks/nccl-tests:2.23.4-ubu22.04-cu12.4
+  image_id: docker:nvcr.io/nvidia/pytorch:24.07-py3
 
 num_nodes: 2
 
@@ -41,7 +41,7 @@ run: |
       -x UCX_NET_DEVICES \
       -x SHARP_COLL_ENABLE_PCI_RELAXED_ORDERING=1 \
       -x NCCL_COLLNET_ENABLE=0 \
-      /opt/nccl-tests/build/all_reduce_perf \
+      /usr/local/bin/all_reduce_perf_mpi \
       -b 512M \
       -e 8G \
       -f 2 \
