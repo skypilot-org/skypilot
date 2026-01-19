@@ -11,7 +11,7 @@ Managed Jobs
 
    :doc:`pools` for running batch inference workloads across multiple infrastructure.
 
-   :ref:`job-groups` for running multiple heterogeneous jobs in parallel that
+   :ref:`job-groups` for running multiple heterogeneous tasks in parallel that
    can communicate with each other.
 
 SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically retry failures, recover from spot instance preemptions, and clean up when done.
