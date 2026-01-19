@@ -133,6 +133,31 @@ class Dag:
 
         return resources_utils.parse_time_seconds(delay_str)
 
+    def is_primary_task(self, task_name: str) -> bool:
+        """Check if a task is a primary task.
+
+        Args:
+            task_name: The name of the task to check.
+
+        Returns:
+            True if the task is primary. When primary_tasks is None or empty,
+            all tasks are considered primary.
+        """
+        if self.primary_tasks is None or len(self.primary_tasks) == 0:
+            return True
+        return task_name in self.primary_tasks
+
+    def get_auxiliary_task_names(self) -> typing.List[str]:
+        """Get the names of all auxiliary (non-primary) tasks.
+
+        Returns:
+            List of auxiliary task names. Returns empty list if all tasks
+            are primary (when primary_tasks is None or empty).
+        """
+        if self.primary_tasks is None or len(self.primary_tasks) == 0:
+            return []
+        return [t.name for t in self.tasks if t.name not in self.primary_tasks]
+
     def is_chain(self) -> bool:
         """Check if the DAG is a linear chain of tasks."""
 
