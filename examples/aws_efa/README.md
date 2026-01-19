@@ -6,22 +6,14 @@ Elastic Fabric Adapter (EFA) is an AWS alternative to Nvidia infiniband that ena
 
 ### TL;DR: enable EFA with SkyPilot
 
-You can enable EFA on AWS HyperPod/EKS clusters with an simple additional setting in your SkyPilot YAML:
+You can enable EFA on AWS HyperPod/EKS clusters by simply adding ``network_tier: best`` to your resources specification:
 
 ```yaml
-config:
-  kubernetes:
-    pod_config:
-      spec:
-        containers:
-        - resources:
-            limits:
-              vpc.amazonaws.com/efa: 4
-            requests:
-              vpc.amazonaws.com/efa: 4
+resources:
+  infra: k8s
+  accelerators: A100:8
+  network_tier: best
 ```
-
-
 
 ### Enable EFA with HyperPod/EKS
 
@@ -40,36 +32,7 @@ hyperpod-i-0da69b9076c7ff6a4   ml.p4d.24xlarge   8     4
 ...
 ```
 
-### Access HyperPod and run distributed job with SkyPilot
-
-To access HyperPod and run distributed job with SkyPilot, see the SkyPilot [HyperPod example](https://github.com/skypilot-org/skypilot/blob/master/examples/hyperpod-eks).
-
-#### Adding EFA configurations in SkyPilot YAML
-
-To enable EFA in SkyPilot YAML, you can specify the following section in the SkyPilot YAML:
-
-```yaml
-config:
-  kubernetes:
-    pod_config:
-      spec:
-        containers:
-        - resources:
-            limits:
-              vpc.amazonaws.com/efa: 4
-            requests:
-              vpc.amazonaws.com/efa: 4
-```
-
-This section is important for EFA integration:
-
-- `config.kubernetes.pod_config`: Provides Kubernetes-specific pod configuration
-- `spec.containers[0].resources`: Defines resource requirements
-  - `limits.vpc.amazonaws.com/efa: 4`: Limits the Pod to use 4 EFA devices
-  - `requests.vpc.amazonaws.com/efa: 4`: Requests 4 EFA devices for the Pod
-
-
-The `vpc.amazonaws.com/efa` resource type is exposed by the AWS EFA device plugin in Kubernetes.
+The `vpc.amazonaws.com/efa` resource is exposed by the AWS EFA device plugin in Kubernetes.
 To see how many EFA are available for each instance types that have EFA, see the [Network cards](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-eni.html#network-cards) list in the Amazon EC2 User Guide.
 
 Check the following table for the GPU and EFA count mapping for AWS instance types:
@@ -104,14 +67,11 @@ Check the following table for the GPU and EFA count mapping for AWS instance typ
 | g6e.48xlarge  | L40S:8   | 4    |
 | gr6.8xlarge   | L4:1     | 1    |
 
-
-Update the EFA number in the [`nccl_efa.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/nccl_efa.yaml) for the GPUs you use.
-
 ### Running NCCL test with EFA using SkyPilot
 
 Check the [`nccl_efa.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/nccl_efa.yaml) for the complete SkyPilot cluster yaml configurations.
 
-The `image_id` provides the environment setup for [NCCL](https://developer.nvidia.com/nccl) (NVIDIA Collective Communications Library) and EFA (Elastic Fabric Adapter).
+The `image_id` will be set to `public.ecr.aws/hpc-cloud/nccl-tests:latest` by default, which provides the environment setup for [NCCL](https://developer.nvidia.com/nccl) (NVIDIA Collective Communications Library) and EFA (Elastic Fabric Adapter).
 
 To run the NCCL test with EFA support:
 
@@ -126,10 +86,7 @@ SkyPilot will:
 4. Output performance metrics showing the benefits of EFA for distributed training
 
 > **NOTE:**
-> We can turn off EFA with `nccl_efa.yaml` by passing an env:
-> ```bash
-> sky launch -c efa --env USE_EFA=false nccl_efa.yaml
-> ```
+> We can turn off EFA with `nccl_efa.yaml` by commenting out `network_tier: best`.
 
 #### Benchmark results
 
@@ -181,7 +138,7 @@ EFA provides much higher throughput than the traditional TCP transport. Enabling
 
 ## Using EFA on AWS VM
 
-For the instance types listed in the GPU and EFA count mapping table in the [Adding EFA configurations in SkyPilot YAML](#adding-efa-configurations-in-skypilot-yaml) section, the EFA can be enabled by setting `resources.network_tier: best` in the task YAML.
+For the instance types listed in the GPU and EFA count mapping table in the [Enable EFA with HyperPod/EKS](#enable-efa-with-hyperpodeks) section, the EFA can be enabled by setting `resources.network_tier: best` in the task YAML.
 
 ```yaml
 resources:
