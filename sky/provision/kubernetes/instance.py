@@ -1112,11 +1112,15 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             pod_spec['spec']['imagePullSecrets'] = []
         pod_spec['spec']['imagePullSecrets'].append({'name': secret_name})
 
-        # Add server prefix to image if not already present
+        # Add server prefix to image for the ray-node container only.
+        # We don't modify other containers (e.g., sidecars) as they may use
+        # different registries.
         for container in pod_spec['spec']['containers']:
-            image = container.get('image', '')
-            if image:
-                container['image'] = docker_login_config.format_image(image)
+            if container.get('name') == k8s_constants.SKYPILOT_CONTAINER_NAME:
+                image = container.get('image', '')
+                if image:
+                    container['image'] = docker_login_config.format_image(image)
+                break
 
         logger.info(f'Using Docker registry credentials for private image '
                     f'from {docker_login_config.server}')
