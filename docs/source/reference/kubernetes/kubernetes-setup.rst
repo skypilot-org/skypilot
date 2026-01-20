@@ -257,18 +257,18 @@ The following setup steps are optional and can be performed based on your specif
 
 .. _kubernetes-setup-volumes:
 
-Set up volumes
-^^^^^^^^^^^^^^^
+Set up NFS and other volumes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 SkyPilot supports mounting various types of volumes to your pods on Kubernetes:
 
-* **Persistent volumes**: Independently managed volumes with lifecycle separate from clusters, ideal for long-term data storage and sharing datasets across clusters. These can be backed by block storage (e.g., AWS EBS, GCP Persistent Disk) or distributed file systems (e.g., JuiceFS, Nebius shared file system, AWS EFS, GCP Filestore).
+* :ref:`Persistent volumes <volumes-quickstart>`: Independently managed volumes with lifecycle separate from clusters, ideal for long-term data storage and sharing datasets across clusters. These are backed by Kubernetes PVCs on block storage (e.g., AWS EBS, GCP Persistent Disk) or distributed file systems (e.g., JuiceFS, Nebius shared file system, AWS EFS, GCP Filestore).
 
-* **Ephemeral volumes**: Automatically created and deleted with your cluster, suitable for temporary storage and caches that are cluster-specific.
+* :ref:`Ephemeral volumes <ephemeral-volumes>`: Automatically created and deleted with your cluster, suitable for temporary storage and caches that are cluster-specific. Also backed by Kubernetes PVCs.
 
-* **Other volume types**: You can also mount hostPath, NFS, etc. as needed.
+* :ref:`Other volume types <advanced-mount-pvc-with-kubernetes-configs>`: Mount hostPath, NFS, and other Kubernetes volume types by overriding SkyPilot's ``pod_config``.
 
-For detailed information on configuring and using volumes, see :ref:`volumes-on-kubernetes`.
+For detailed information on configuring and using volumes, see :ref:`Volumes on Kubernetes <volumes-quickstart>`.
 
 .. _kubernetes-setup-priority:
 
