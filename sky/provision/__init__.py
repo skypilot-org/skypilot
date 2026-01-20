@@ -22,7 +22,6 @@ from sky.provision import gcp
 from sky.provision import hyperbolic
 from sky.provision import kubernetes
 from sky.provision import lambda_cloud
-from sky.provision import mithril
 from sky.provision import nebius
 from sky.provision import oci
 from sky.provision import primeintellect
@@ -59,7 +58,6 @@ def _route_to_cloud_impl(func):
         if module_name == 'lambda':
             module_name = 'lambda_cloud'
         module = globals().get(module_name)
-
         assert module is not None, f'Unknown provider: {module_name}'
 
         impl = getattr(module, func.__name__, None)

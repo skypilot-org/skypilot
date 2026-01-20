@@ -212,28 +212,15 @@ def _make_request(
                 time.sleep(sleep_time)
                 continue
 
-            # Try to parse response as JSON
             try:
                 response_data = response.json()
-                logger.debug(
-                    f'Response body: {json.dumps(response_data, indent=2)}')
-            except json.JSONDecodeError as exc:
-                response_text = response.text
-                logger.debug(f'Response body (raw): {response_text}')
-                if not response.ok:
-                    raise MithrilHttpError(
-                        f'API request failed with status '
-                        f'{response.status_code}: {response_text}',
-                        status_code=response.status_code,
-                    ) from exc
-                return {}
+            except json.JSONDecodeError:
+                response_data = {}
 
             if not response.ok:
-                error_msg = response_data.get(
-                    'error', response_data.get('message', response.text))
                 raise MithrilHttpError(
                     f'API request failed with status '
-                    f'{response.status_code}: {error_msg}',
+                    f'{response.status_code}: {response.text}',
                     status_code=response.status_code,
                 )
 

@@ -32,7 +32,7 @@ def _filter_instances(
     filtered_instances: Dict[str, Dict[str, Any]] = {}
 
     for instance_id, instance in instances.items():
-        instance_name = instance.get('name', '')
+        instance_name = instance['name']
         if not instance_name.startswith(cluster_name_on_cloud):
             continue
 
