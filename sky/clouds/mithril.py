@@ -19,30 +19,25 @@ if typing.TYPE_CHECKING:
 class Mithril(clouds.Cloud):
     """Mithril Cloud Provider."""
 
-    _REPR = "Mithril"
+    _REPR = 'Mithril'
     _MAX_CLUSTER_NAME_LEN_LIMIT = 60
-    CREDENTIALS_PATH = "~/.mithril/config.yaml"
+    CREDENTIALS_PATH = '~/.mithril/config.yaml'
 
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: (
-            "Custom disk tiers not supported."
-        ),
-        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS: (
-            "High availability controllers not supported."
-        ),
-        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: (
-            "Disk cloning not supported."
-        ),
-        clouds.CloudImplementationFeatures.OPEN_PORTS: "Opening ports not supported.",
-        clouds.CloudImplementationFeatures.IMAGE_ID: (
-            "Custom image IDs not supported."
-        ),
-        clouds.CloudImplementationFeatures.HOST_CONTROLLERS: (
-            "Host controllers not supported."
-        ),
-        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK: (
-            "Customized multiple network interfaces not supported."
-        ),
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
+            ('Custom disk tiers not supported.'),
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            ('High availability controllers not supported.'),
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+            ('Disk cloning not supported.'),
+        clouds.CloudImplementationFeatures.OPEN_PORTS:
+            ('Opening ports not supported.'),
+        clouds.CloudImplementationFeatures.IMAGE_ID:
+            ('Custom image IDs not supported.'),
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
+            ('Host controllers not supported.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces not supported.'),
     }
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
@@ -51,7 +46,7 @@ class Mithril(clouds.Cloud):
     @classmethod
     def _unsupported_features_for_resources(
         cls,
-        resources: "resources_lib.Resources",
+        resources: 'resources_lib.Resources',
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         del resources, region
@@ -62,7 +57,7 @@ class Mithril(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return catalog.instance_type_exists(instance_type, "mithril")
+        return catalog.instance_type_exists(instance_type, 'mithril')
 
     @classmethod
     def regions_with_offering(
@@ -72,23 +67,22 @@ class Mithril(clouds.Cloud):
         use_spot: bool,
         region: Optional[str],
         zone: Optional[str],
-        resources: Optional["resources_lib.Resources"] = None,
+        resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
-        assert zone is None, "Mithril does not support zones."
+        assert zone is None, 'Mithril does not support zones.'
         del accelerators, zone, resources  # Unused
 
         regions = catalog.get_region_zones_for_instance_type(
-            instance_type, use_spot, "mithril"
-        )
+            instance_type, use_spot, 'mithril')
         if region is not None:
             regions = [r for r in regions if r.name == region]
         return regions
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
-        cls, instance_type: str
-    ) -> Tuple[Optional[float], Optional[float]]:
-        return catalog.get_vcpus_mem_from_instance_type(instance_type, clouds="mithril")
+            cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+        return catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                        clouds='mithril')
 
     def instance_type_to_hourly_cost(
         self,
@@ -97,9 +91,11 @@ class Mithril(clouds.Cloud):
         region: Optional[str] = None,
         zone: Optional[str] = None,
     ) -> float:
-        return catalog.get_hourly_cost(
-            instance_type, use_spot=use_spot, region=region, zone=zone, clouds="mithril"
-        )
+        return catalog.get_hourly_cost(instance_type,
+                                       use_spot=use_spot,
+                                       region=region,
+                                       zone=zone,
+                                       clouds='mithril')
 
     @classmethod
     def get_default_instance_type(
@@ -116,21 +112,19 @@ class Mithril(clouds.Cloud):
             disk_tier=disk_tier,
             region=region,
             zone=zone,
-            clouds="mithril",
+            clouds='mithril',
         )
 
     @classmethod
     def get_accelerators_from_instance_type(
-        cls, instance_type: str
-    ) -> Optional[Dict[str, Union[int, float]]]:
-        return catalog.get_accelerators_from_instance_type(
-            instance_type, clouds="mithril"
-        )
+            cls, instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
+        return catalog.get_accelerators_from_instance_type(instance_type,
+                                                           clouds='mithril')
 
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        api_key = os.environ.get("MITHRIL_API_KEY")
-        project_id = os.environ.get("MITHRIL_PROJECT")
+        api_key = os.environ.get('MITHRIL_API_KEY')
+        project_id = os.environ.get('MITHRIL_PROJECT')
 
         # If both env vars are set, credentials are valid
         if api_key and project_id:
@@ -141,12 +135,12 @@ class Mithril(clouds.Cloud):
             return True, None
 
         return False, (
-            f"Mithril credentials not found at {cls.CREDENTIALS_PATH}. "
-            "Run `ml setup` to setup your credentials or set MITHRIL_API_KEY "
-            "and MITHRIL_PROJECT environment variables.\n"
-            "    For more information, see: "
-            "https://docs.skypilot.co/en/latest/getting-started/installation.html#mithril"
-        )
+            f'Mithril credentials not found at {cls.CREDENTIALS_PATH}. '
+            'Run `ml setup` to setup your credentials or set MITHRIL_API_KEY '
+            'and MITHRIL_PROJECT environment variables.\n'
+            '    For more information, see: '
+            'https://docs.skypilot.co/en/latest/getting-started/'
+            'installation.html#mithril')
 
     @classmethod
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
@@ -163,8 +157,8 @@ class Mithril(clouds.Cloud):
         return self._REPR
 
     def _get_feasible_launchable_resources(
-        self, resources: "resources_lib.Resources"
-    ) -> "resources_utils.FeasibleResources":
+        self, resources: 'resources_lib.Resources'
+    ) -> 'resources_utils.FeasibleResources':
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Instance type already describes the accelerator on Mithril.
@@ -199,40 +193,38 @@ class Mithril(clouds.Cloud):
                 return resources_utils.FeasibleResources([], [], None)
             else:
                 return resources_utils.FeasibleResources(
-                    _make([default_instance_type]), [], None
-                )
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list) = (
-            catalog.get_instance_type_for_accelerator(
-                acc,
-                acc_count,
-                use_spot=resources.use_spot,
-                cpus=resources.cpus,
-                memory=resources.memory,
-                region=resources.region,
-                zone=resources.zone,
-                clouds="mithril",
-            )
-        )
+        (instance_list,
+         fuzzy_candidate_list) = (catalog.get_instance_type_for_accelerator(
+             acc,
+             acc_count,
+             use_spot=resources.use_spot,
+             cpus=resources.cpus,
+             memory=resources.memory,
+             region=resources.region,
+             zone=resources.zone,
+             clouds='mithril',
+         ))
         if instance_list is None:
-            return resources_utils.FeasibleResources([], fuzzy_candidate_list, None)
-        return resources_utils.FeasibleResources(
-            _make(instance_list), fuzzy_candidate_list, None
-        )
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
+        return resources_utils.FeasibleResources(_make(instance_list),
+                                                 fuzzy_candidate_list, None)
 
     def validate_region_zone(
-        self, region: Optional[str], zone: Optional[str]
-    ) -> Tuple[Optional[str], Optional[str]]:
+            self, region: Optional[str],
+            zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
         if zone is not None:
-            raise ValueError("Mithril does not support zones.")
-        return catalog.validate_region_zone(region, zone, "mithril")
+            raise ValueError('Mithril does not support zones.')
+        return catalog.validate_region_zone(region, zone, 'mithril')
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
         """Returns the list of regions in Mithril's catalog."""
-        return catalog.regions("mithril")
+        return catalog.regions('mithril')
 
     @classmethod
     def zones_provision_loop(
@@ -264,27 +256,29 @@ class Mithril(clouds.Cloud):
 
     def make_deploy_resources_variables(
         self,
-        resources: "resources_lib.Resources",
+        resources: 'resources_lib.Resources',
         cluster_name: resources_utils.ClusterName,
-        region: "clouds.Region",
-        zones: Optional[List["clouds.Zone"]],
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
         num_nodes: int,
         dryrun: bool = False,
-        volume_mounts: Optional[List["volume_lib.VolumeMount"]] = None,
+        volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
     ) -> Dict[str, Any]:
         """Returns a dict of variables for the deployment template."""
         del dryrun, cluster_name  # unused
-        assert zones is None, ("Mithril does not support zones", zones)
+        assert zones is None, ('Mithril does not support zones', zones)
 
         resources = resources.assert_launchable()
         # resources.accelerators is cleared but .instance_type encodes the info.
-        acc_dict = self.get_accelerators_from_instance_type(resources.instance_type)
-        custom_resources = resources_utils.make_ray_custom_resources_str(acc_dict)
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         resources_vars: Dict[str, Any] = {
-            "instance_type": resources.instance_type,
-            "custom_resources": custom_resources,
-            "region": region.name,
+            'instance_type': resources.instance_type,
+            'custom_resources': custom_resources,
+            'region': region.name,
         }
 
         if acc_dict is not None:
@@ -294,6 +288,6 @@ class Mithril(clouds.Cloud):
             # 'nvidia-container-runtime', which may not be present even though
             # `--gpus all` works. We explicitly add it here to ensure Docker
             # containers can access GPUs.
-            resources_vars["docker_run_options"] = ["--gpus all"]
+            resources_vars['docker_run_options'] = ['--gpus all']
 
         return resources_vars

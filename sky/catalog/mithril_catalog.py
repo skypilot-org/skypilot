@@ -17,7 +17,8 @@ if typing.TYPE_CHECKING:
 # skypilot-catalog/.github/workflows/update-mithril-catalog.yml
 _PULL_FREQUENCY_HOURS = 7
 
-_df = common.read_catalog("mithril/vms.csv", pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+_df = common.read_catalog('mithril/vms.csv',
+                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -25,12 +26,12 @@ def instance_type_exists(instance_type: str) -> bool:
 
 
 def validate_region_zone(
-    region: Optional[str], zone: Optional[str]
-) -> Tuple[Optional[str], Optional[str]]:
+        region: Optional[str],
+        zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError("Mithril Cloud does not support zones.")
-    return common.validate_region_zone_impl("mithril", _df, region, zone)
+            raise ValueError('Mithril Cloud does not support zones.')
+    return common.validate_region_zone_impl('mithril', _df, region, zone)
 
 
 def get_hourly_cost(
@@ -42,19 +43,18 @@ def get_hourly_cost(
     """Returns the cost, or the cheapest cost among all zones for spot."""
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError("Mithril Cloud does not support zones.")
-    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region, zone)
+            raise ValueError('Mithril Cloud does not support zones.')
+    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
+                                       zone)
 
 
 def get_vcpus_mem_from_instance_type(
-    instance_type: str,
-) -> Tuple[Optional[float], Optional[float]]:
+    instance_type: str,) -> Tuple[Optional[float], Optional[float]]:
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
 def get_accelerators_from_instance_type(
-    instance_type: str,
-) -> Optional[Dict[str, Union[int, float]]]:
+    instance_type: str,) -> Optional[Dict[str, Union[int, float]]]:
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 
@@ -66,7 +66,8 @@ def get_default_instance_type(
     zone: Optional[str] = None,
 ) -> Optional[str]:
     del disk_tier  # Unused
-    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory, region, zone)
+    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory, region,
+                                                      zone)
 
 
 def get_instance_type_for_accelerator(
@@ -85,7 +86,7 @@ def get_instance_type_for_accelerator(
     """
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError("Mithril Cloud does not support zones.")
+            raise ValueError('Mithril Cloud does not support zones.')
     return common.get_instance_type_for_accelerator_impl(
         df=_df,
         acc_name=acc_name,
@@ -98,14 +99,13 @@ def get_instance_type_for_accelerator(
     )
 
 
-def regions() -> List["cloud.Region"]:
+def regions() -> List['cloud.Region']:
     return common.get_region_zones(_df, use_spot=False)
 
 
-def get_region_zones_for_instance_type(
-    instance_type: str, use_spot: bool
-) -> List["cloud.Region"]:
-    df = _df[_df["InstanceType"] == instance_type]
+def get_region_zones_for_instance_type(instance_type: str,
+                                       use_spot: bool) -> List['cloud.Region']:
+    df = _df[_df['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
 
 
@@ -121,7 +121,7 @@ def list_accelerators(
     """Returns all instance types in Mithril Cloud offering accelerators."""
     del require_price  # Unused
     return common.list_accelerators_impl(
-        "Mithril",
+        'Mithril',
         _df,
         gpus_only,
         name_filter,
