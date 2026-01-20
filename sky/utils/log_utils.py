@@ -263,6 +263,34 @@ def readable_time_duration(start: Optional[float],
     return diff
 
 
+def readable_time_duration_ago(start: Optional[float],
+                               end: Optional[float] = None,
+                               precision: int = 2) -> str:
+    """Human readable time duration with ' ago' suffix.
+
+    Calls readable_time_duration with absolute=True, limits to first N units,
+    and appends ' ago'.
+
+    Args:
+        start: Start timestamp.
+        end: End timestamp. If None, current time is used.
+        precision: Maximum number of time units to show (default 2).
+            E.g., precision=2: "1h 12m ago", precision=1: "1h ago"
+
+    Returns:
+        Human readable time with ' ago' suffix, e.g., "1h 12m ago".
+        Returns '-' for invalid inputs.
+    """
+    result = readable_time_duration(start, end, absolute=True)
+    if result == '-':
+        return result
+    # Limit to first N units (e.g., "1d 2h 30m" -> "1d 2h" with precision=2)
+    parts = result.split()
+    if len(parts) > precision:
+        result = ' '.join(parts[:precision])
+    return result + ' ago'
+
+
 def human_duration(start: int, end: Optional[int] = None) -> str:
     """Calculates the time elapsed between two timestamps and returns
        it as a human-readable string, similar to Kubernetes' duration format.
