@@ -353,6 +353,7 @@ export function useClusterDetails({ cluster, job = null }) {
   const [clusterJobData, setClusterJobData] = useState(null);
   const [loadingClusterData, setLoadingClusterData] = useState(true);
   const [loadingClusterJobData, setLoadingClusterJobData] = useState(true);
+  const [clusterJobError, setClusterJobError] = useState(null);
 
   // Separate loading states - cluster details vs cluster jobs
   const clusterDetailsLoading = loadingClusterData;
@@ -388,6 +389,7 @@ export function useClusterDetails({ cluster, job = null }) {
       if (cluster) {
         try {
           setLoadingClusterJobData(true);
+          setClusterJobError(null);
           // Use dashboard cache for cluster jobs
           const data = await dashboardCache.get(getClusterJobs, [
             {
@@ -398,6 +400,7 @@ export function useClusterDetails({ cluster, job = null }) {
           setClusterJobData(data);
         } catch (error) {
           console.error('Error fetching cluster job data:', error);
+          setClusterJobError(error.message || 'Failed to fetch cluster jobs');
         } finally {
           setLoadingClusterJobData(false);
         }
@@ -450,6 +453,7 @@ export function useClusterDetails({ cluster, job = null }) {
   return {
     clusterData,
     clusterJobData,
+    clusterJobError,
     loading: clusterDetailsLoading, // Only cluster details loading for initial page render
     clusterDetailsLoading,
     clusterJobsLoading,
