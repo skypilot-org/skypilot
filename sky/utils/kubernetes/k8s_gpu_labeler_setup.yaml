@@ -19,7 +19,7 @@ metadata:
 rules:
 - apiGroups: [""]
   resources: ["nodes"]
-  verbs: ["patch"]
+  verbs: ["get", "patch"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -62,6 +62,8 @@ data:
         'A10', 'P100', 'P40', 'P4', 'L4'
     ]
 
+    LABEL_KEY = 'skypilot.co/accelerator'
+
 
     def get_gpu_name() -> Optional[str]:
         try:
@@ -78,6 +80,22 @@ data:
             return None
 
 
+    def is_node_labeled() -> bool:
+        """Check if the current node already has the GPU label."""
+        try:
+            config.load_incluster_config()
+            v1 = client.CoreV1Api()
+            node_name = os.environ.get('MY_NODE_NAME')
+            if not node_name:
+                raise ValueError('Failed to get node name from environment')
+            node = v1.read_node(node_name)
+            labels = node.metadata.labels or {}
+            return LABEL_KEY in labels
+        except Exception as e:
+            print(f'Error checking node labels: {e}')
+            return False
+
+
     def label_node(gpu_name: str) -> None:
         try:
             config.load_incluster_config()  # Load in-cluster configuration
@@ -89,7 +107,7 @@ data:
                 raise ValueError('Failed to get node name from environment')
 
             # Label the node with the GPU name
-            body = {'metadata': {'labels': {'skypilot.co/accelerator': gpu_name}}}
+            body = {'metadata': {'labels': {LABEL_KEY: gpu_name}}}
             v1.patch_node(node_name, body)
 
             print(f'Labeled node {node_name} with GPU {gpu_name}')
@@ -99,6 +117,12 @@ data:
 
 
     def main():
+        # Check if node is already labeled (idempotency for DaemonSet)
+        if is_node_labeled():
+            node_name = os.environ.get('MY_NODE_NAME', 'unknown')
+            print(f'Node {node_name} is already labeled with {LABEL_KEY}, skipping.')
+            return
+
         gpu_name = get_gpu_name()
         if gpu_name is not None:
             labelled = False
