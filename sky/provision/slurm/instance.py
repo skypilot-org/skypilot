@@ -284,6 +284,17 @@ def _create_virtual_instance(
             set -e
             apt-get update
             apt-get install -y ca-certificates rsync curl git wget fuse
+            # Create a fake sudo script since we're already root in the container.
+            # This allows scripts with 'sudo' commands to work without modification.
+            # Note: Unlike Kubernetes which adds 'alias sudo=""' to ~/.bashrc, we
+            # cannot modify bashrc here because on Slurm the user's home directory
+            # is shared across all sessions (not container-specific), so modifying
+            # bashrc would affect all their non-containerized sessions too.
+            cat > /usr/local/bin/sudo << 'SUDO_EOF'
+#!/bin/bash
+exec "$@"
+SUDO_EOF
+            chmod +x /usr/local/bin/sudo
             """)
         container_marker_file = (f'{sky_home_dir}/'
                                  f'{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
