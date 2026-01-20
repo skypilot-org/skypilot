@@ -595,7 +595,7 @@ CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
               'paperspace', 'primeintellect', 'do', 'nebius', 'ssh', 'slurm',
-              'hyperbolic', 'seeweb', 'shadeform')
+              'hyperbolic', 'seeweb', 'shadeform', 'mithril')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.

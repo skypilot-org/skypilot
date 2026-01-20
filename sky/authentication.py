@@ -385,6 +385,22 @@ def setup_hyperbolic_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return configure_ssh_info(config)
 
 
+def setup_mithril_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Mithril."""
+    _, public_key_path = auth_utils.get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read().strip()
+
+    config['public_key'] = public_key
+
+    # Set up auth section for Ray template
+    config.setdefault('auth', {})
+    config['auth']['ssh_user'] = 'ubuntu'
+    config['auth']['ssh_public_key'] = public_key_path
+
+    return configure_ssh_info(config)
+
+
 def setup_shadeform_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     """Sets up SSH authentication for Shadeform.
     - Generates a new SSH key pair if one does not exist.
