@@ -57,8 +57,9 @@ def test_unzip_file(skyignore_dir, tmp_path):
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_dir_path = pathlib.Path(temp_dir)
 
-        # Call server.unzip_file
-        asyncio.run(server.unzip_file(zip_path, temp_dir_path))
+        # Call server.unzip_file with an upload_id
+        upload_id = 'test-upload-id'
+        asyncio.run(server.unzip_file(zip_path, temp_dir_path, upload_id))
 
         # Verify the zip file was deleted
         assert not zip_path.exists()
@@ -84,7 +85,8 @@ def test_unzip_file(skyignore_dir, tmp_path):
 
         # Get list of files in unzipped directory
         unzipped_files = []
-        unzipped_dir = os.path.join(str(temp_dir_path),
+        # Files are now extracted to temp_dir_path/{upload_id}/{path}
+        unzipped_dir = os.path.join(str(temp_dir_path), upload_id,
                                     str(skyignore_dir).lstrip('/'))
         unzipped_dir = pathlib.Path(unzipped_dir)
         print('unzipped_dir', unzipped_dir)
@@ -115,3 +117,48 @@ def test_unzip_file(skyignore_dir, tmp_path):
         # Verify empty folders are preserved
         assert (unzipped_dir / 'empty-folder').is_dir()
         assert not any((unzipped_dir / 'empty-folder').iterdir())
+
+
+def test_unzip_file_upload_id_paths(tmp_path):
+    """Test that different upload_ids create separate directories."""
+    # First upload
+    zip_path1 = tmp_path / 'upload1.zip'
+    source_dir1 = tmp_path / 'source1'
+    source_dir1.mkdir()
+    (source_dir1 / 'file_a.txt').write_text('a')
+    (source_dir1 / 'file_b.txt').write_text('b')
+    (source_dir1 / 'old_file.txt').write_text('delete me')
+
+    storage_utils.zip_files_and_folders([str(source_dir1)], zip_path1,
+                                        io.StringIO())
+
+    extract_dir = tmp_path / 'extract'
+    extract_dir.mkdir()
+    upload_id1 = 'test-upload-id-1'
+    asyncio.run(server.unzip_file(zip_path1, extract_dir, upload_id1))
+
+    # Verify all files exist under extract_dir/{upload_id1}/
+    extracted1 = extract_dir / upload_id1 / str(source_dir1).lstrip('/')
+    assert (extracted1 / 'file_a.txt').exists()
+    assert (extracted1 / 'file_b.txt').exists()
+    assert (extracted1 / 'old_file.txt').exists()
+
+    # Delete old_file.txt from source to simulate local deletion
+    (source_dir1 / 'old_file.txt').unlink()
+
+    # Second upload WITHOUT old_file.txt (using different upload_id)
+    zip_path2 = tmp_path / 'upload2.zip'
+
+    storage_utils.zip_files_and_folders([str(source_dir1)], zip_path2,
+                                        io.StringIO())
+    upload_id2 = 'test-upload-id-2'
+    asyncio.run(server.unzip_file(zip_path2, extract_dir, upload_id2))
+
+    # Verify second upload has only new files
+    extracted2 = extract_dir / upload_id2 / str(source_dir1).lstrip('/')
+    assert (extracted2 / 'file_a.txt').exists()
+    assert (extracted2 / 'file_b.txt').exists()
+    assert not (extracted2 / 'old_file.txt').exists()
+
+    # First upload directory still exists with old file
+    assert (extracted1 / 'old_file.txt').exists()
