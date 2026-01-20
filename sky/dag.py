@@ -121,8 +121,8 @@ class Dag:
             return 0
 
         # Import here to avoid circular imports
-        from sky.utils import (
-            resources_utils)  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.utils import resources_utils
 
         # Get the delay string based on format (str or dict)
         if isinstance(self.termination_delay, str):
