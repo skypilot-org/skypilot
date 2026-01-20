@@ -472,6 +472,13 @@ second task has name :code:`eval`. The tasks are separated by a line with three
 dashes :code:`---`. Each task has its own :code:`resources`, :code:`setup`, and
 :code:`run` sections. Tasks are executed sequentially. If a task fails, later tasks are skipped.
 
+.. tip::
+
+   To explicitly indicate a pipeline (sequential execution), you can add
+   :code:`execution: serial` to the header. This is optional since pipelines
+   are the default when :code:`execution` is omitted. Use :code:`execution: parallel`
+   for :ref:`job groups <job-groups>` instead.
+
 To pass data between the tasks, use a shared file mount. In this example, the :code:`train` task writes its output to the :code:`/checkpoint` file mount, which the :code:`eval` task is then able to read from.
 
 To submit the pipeline, the same command :code:`sky jobs launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky jobs queue` or :code:`sky dashboard`.

@@ -19,8 +19,6 @@ _JOB_GROUP_HEADER_FIELDS = {
     'name', 'placement', 'execution', 'primary_tasks', 'termination_delay'
 }
 _JOB_GROUP_REQUIRED_HEADER_FIELDS = {'name'}
-# Fields that indicate this is a JobGroup header (not a task)
-_JOB_GROUP_INDICATOR_FIELDS = {'placement', 'execution'}
 
 # Message thrown when APIs sky.{exec,launch,jobs.launch}() received a string
 # instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
@@ -79,16 +77,44 @@ def _load_chain_dag(
         env_overrides: Optional[List[Tuple[str, str]]] = None,
         secrets_overrides: Optional[List[Tuple[str,
                                                str]]] = None) -> dag_lib.Dag:
-    """Loads a chain DAG from a list of YAML configs."""
+    """Loads a chain DAG (pipeline) from a list of YAML configs.
+
+    A pipeline YAML can have an optional header as the first document with:
+    - name: The pipeline name
+    - execution: Must be 'serial' or omitted (omitted defaults to serial)
+
+    If the first document contains only pipeline header fields, it's treated
+    as the header. Otherwise, all documents are treated as task definitions.
+    """
     dag_name = None
-    if set(configs[0].keys()) == {'name'}:
-        dag_name = configs[0]['name']
+    first_config = configs[0] if configs else None
+
+    # Check if the first document is a pipeline header.
+    # A header has only 'name', or 'name' + 'execution' (for explicit serial).
+    is_header = False
+    if first_config is not None:
+        first_keys = set(first_config.keys())
+        is_header = first_keys == {'name'
+                                  } or first_keys == {'name', 'execution'}
+
+    if is_header:
+        assert first_config is not None  # For mypy
+        dag_name = first_config['name']
+        # Validate execution mode if specified
+        execution = first_config.get('execution')
+        if execution is not None and execution != 'serial':
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Invalid execution mode for pipeline: {execution!r}. '
+                    'Pipelines must use execution: serial (or omit it). '
+                    'Use execution: parallel for job groups.')
         configs = configs[1:]
-    elif len(configs) == 1:
-        dag_name = configs[0].get('name')
+    elif len(configs) == 1 and first_config is not None:
+        # Single document: the task itself may have a name
+        dag_name = first_config.get('name')
 
     if not configs:
-        # YAML has only `name: xxx`. Still instantiate a task.
+        # YAML has only header. Still instantiate a task.
         configs = [{'name': dag_name}]
 
     current_task = None
@@ -102,6 +128,8 @@ def _load_chain_dag(
                 current_task >> task  # pylint: disable=pointless-statement
             current_task = task
     dag.name = dag_name
+    # Pipelines have serial execution (explicitly or by default)
+    dag.execution = dag_lib.DagExecution.SERIAL
     return dag
 
 
@@ -373,7 +401,11 @@ def get_job_group_config_from_yaml_str(yaml_str: str) -> Dict[str, Any]:
 
 
 def _is_job_group_configs(configs: List[Dict[str, Any]]) -> bool:
-    """Check if configs represent a JobGroup."""
+    """Check if configs represent a JobGroup.
+
+    A YAML is a JobGroup if and only if execution is set to 'parallel'.
+    If execution is omitted or set to 'serial', it's a pipeline.
+    """
     if not configs or len(configs) < 2:
         # JobGroup needs at least header + 1 job
         return False
@@ -382,9 +414,9 @@ def _is_job_group_configs(configs: List[Dict[str, Any]]) -> bool:
     if header is None:
         return False
 
-    # Check if header contains JobGroup indicator fields
-    header_keys = set(header.keys())
-    return bool(header_keys & _JOB_GROUP_INDICATOR_FIELDS)
+    # Check if execution mode is explicitly set to 'parallel'
+    execution = header.get('execution')
+    return execution == 'parallel'
 
 
 def load_job_group_from_yaml(

@@ -24,7 +24,8 @@ class DagExecution(enum.Enum):
 
     This controls how tasks in a multi-task DAG are executed.
     """
-    PARALLEL = 'parallel'  # All tasks start in parallel
+    SERIAL = 'serial'  # Tasks execute sequentially (pipeline)
+    PARALLEL = 'parallel'  # All tasks start in parallel (job group)
 
 
 class Dag:
@@ -96,11 +97,10 @@ class Dag:
     def is_job_group(self) -> bool:
         """Check if this DAG represents a JobGroup.
 
-        A DAG is a JobGroup if it has parallel execution and SAME_INFRA
-        placement. This is derived from the placement and execution settings.
+        A DAG is a JobGroup if it has parallel execution mode. This is the
+        defining characteristic that distinguishes job groups from pipelines.
         """
-        return (self.execution == DagExecution.PARALLEL and
-                self.placement == DagPlacement.SAME_INFRA)
+        return self.execution == DagExecution.PARALLEL
 
     def set_dag_config(self, placement: 'DagPlacement',
                        execution: 'DagExecution') -> None:

@@ -190,6 +190,7 @@ class TestJobGroupOptimizer:
         """Test _select_best_infra selects cheapest option."""
         task = MagicMock(spec=task_lib.Task)
         task.estimate_runtime = MagicMock(return_value=3600)
+        task.time_estimator_func = MagicMock()
         task.num_nodes = 1
 
         # us-east-1 costs 1.0, us-west-2 costs 1.5
@@ -218,10 +219,12 @@ class TestJobGroupOptimizer:
         """Test _select_best_infra considers all tasks."""
         task1 = MagicMock(spec=task_lib.Task)
         task1.estimate_runtime = MagicMock(return_value=3600)
+        task1.time_estimator_func = MagicMock()
         task1.num_nodes = 1
 
         task2 = MagicMock(spec=task_lib.Task)
         task2.estimate_runtime = MagicMock(return_value=7200)
+        task2.time_estimator_func = MagicMock()
         task2.num_nodes = 2
 
         common_infras = [(mock_aws_cloud, 'us-east-1'),
