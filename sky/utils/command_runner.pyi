@@ -20,6 +20,7 @@ RSYNC_FILTER_GITIGNORE: str
 RSYNC_FILTER_SKYIGNORE: str
 RSYNC_EXCLUDE_OPTION: str
 ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD: str
+DEFAULT_SSH_CONTROL_NAME: str
 
 
 def ssh_options_list(
@@ -64,6 +65,7 @@ class CommandRunner:
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> int:
         ...
 
@@ -79,6 +81,7 @@ class CommandRunner:
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -94,6 +97,7 @@ class CommandRunner:
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
@@ -136,6 +140,7 @@ class SSHCommandRunner(CommandRunner):
     docker_user: str
     disable_control_master: Optional[bool]
     port_forward_execute_remote_command: Optional[bool]
+    enable_interactive_auth: bool
 
     def __init__(
         self,
@@ -148,6 +153,7 @@ class SSHCommandRunner(CommandRunner):
         docker_user: Optional[str] = ...,
         disable_control_master: Optional[bool] = ...,
         port_forward_execute_remote_command: Optional[bool] = ...,
+        enable_interactive_auth: bool = ...,
     ) -> None:
         ...
 
@@ -165,6 +171,7 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> int:
         ...
 
@@ -182,6 +189,7 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -199,6 +207,7 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
@@ -254,6 +263,7 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> int:
         ...
 
@@ -271,6 +281,7 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -288,6 +299,7 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
@@ -350,6 +362,7 @@ class LocalProcessCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> int:
         ...
 
@@ -367,6 +380,7 @@ class LocalProcessCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -384,5 +398,6 @@ class LocalProcessCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...

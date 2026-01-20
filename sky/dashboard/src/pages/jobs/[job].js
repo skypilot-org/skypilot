@@ -36,6 +36,7 @@ import { formatJobYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
 import dashboardCache from '@/lib/cache';
+import { PluginSlot } from '@/plugins/PluginSlot';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import PropTypes from 'prop-types';
 
@@ -54,6 +55,7 @@ function JobDetails() {
   const [domReady, setDomReady] = useState(false);
   const [refreshLogsFlag, setRefreshLogsFlag] = useState(0);
   const [refreshControllerLogsFlag, setRefreshControllerLogsFlag] = useState(0);
+  const [logExtractedLinks, setLogExtractedLinks] = useState({});
   const isMobile = useMobile();
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
@@ -245,10 +247,27 @@ function JobDetails() {
                     isLoadingControllerLogs={isLoadingControllerLogs}
                     refreshFlag={0}
                     poolsData={poolsData}
+                    links={detailJobData.links}
+                    logExtractedLinks={logExtractedLinks}
                   />
                 </div>
               </Card>
             </div>
+
+            {/* GPU Metrics Plugin Slot */}
+            <PluginSlot
+              name="jobs.detail.gpu-metrics"
+              context={{
+                jobId: detailJobData.id,
+                jobName: detailJobData.name,
+                jobData: detailJobData,
+                pool: detailJobData.pool,
+                userHash: detailJobData.user_hash,
+                infra: detailJobData.full_infra || detailJobData.infra,
+                refreshTrigger: refreshTrigger,
+              }}
+              wrapperClassName="mt-6"
+            />
 
             {/* Logs Section */}
             <div id="logs-section" className="mt-6">
@@ -306,71 +325,32 @@ function JobDetails() {
                     isLoadingControllerLogs={isLoadingControllerLogs}
                     refreshFlag={refreshLogsFlag}
                     poolsData={poolsData}
+                    onLinksExtracted={setLogExtractedLinks}
                   />
                 </div>
               </Card>
             </div>
 
-            {/* Controller Logs Section */}
-            <div id="controller-logs-section" className="mt-6">
-              <Card>
-                <div className="flex items-center justify-between px-4 pt-4">
-                  <div className="flex items-center">
-                    <h3 className="text-lg font-semibold">Controller Logs</h3>
-                    <span className="ml-2 text-xs text-gray-500">
-                      (Logs are not streaming; click refresh to fetch the latest
-                      logs.)
-                    </span>
-                  </div>
-                  <div className="flex items-center space-x-3">
-                    <Tooltip
-                      content="Download full controller logs"
-                      className="text-muted-foreground"
-                    >
-                      <button
-                        onClick={() =>
-                          downloadManagedJobLogs({
-                            jobId: parseInt(
-                              Array.isArray(jobId) ? jobId[0] : jobId
-                            ),
-                            controller: true,
-                          })
-                        }
-                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-                      >
-                        <Download className="w-4 h-4" />
-                      </button>
-                    </Tooltip>
-                    <Tooltip
-                      content="Refresh controller logs"
-                      className="text-muted-foreground"
-                    >
-                      <button
-                        onClick={handleControllerLogsRefresh}
-                        disabled={isLoadingControllerLogs}
-                        className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-                      >
-                        <RotateCwIcon
-                          className={`w-4 h-4 ${isLoadingControllerLogs ? 'animate-spin' : ''}`}
-                        />
-                      </button>
-                    </Tooltip>
-                  </div>
-                </div>
-                <div className="p-4">
-                  <JobDetailsContent
-                    jobData={detailJobData}
-                    activeTab="controllerlogs"
-                    setIsLoadingLogs={setIsLoadingLogs}
-                    setIsLoadingControllerLogs={setIsLoadingControllerLogs}
-                    isLoadingLogs={isLoadingLogs}
-                    isLoadingControllerLogs={isLoadingControllerLogs}
-                    refreshFlag={refreshControllerLogsFlag}
-                    poolsData={poolsData}
-                  />
-                </div>
-              </Card>
-            </div>
+            {/* Plugin Slot: Job Detail Events */}
+            <PluginSlot
+              name="jobs.detail.events"
+              context={{
+                jobId: detailJobData.id,
+              }}
+              wrapperClassName="mt-6"
+            />
+
+            {/* Controller Logs Section - Collapsible */}
+            <ControllerLogsSection
+              jobId={jobId}
+              detailJobData={detailJobData}
+              isLoadingControllerLogs={isLoadingControllerLogs}
+              handleControllerLogsRefresh={handleControllerLogsRefresh}
+              setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+              setIsLoadingLogs={setIsLoadingLogs}
+              refreshControllerLogsFlag={refreshControllerLogsFlag}
+              poolsData={poolsData}
+            />
           </div>
         ) : (
           <div className="flex items-center justify-center py-32">
@@ -382,6 +362,116 @@ function JobDetails() {
   );
 }
 
+function ControllerLogsSection({
+  jobId,
+  detailJobData,
+  isLoadingControllerLogs,
+  handleControllerLogsRefresh,
+  setIsLoadingControllerLogs,
+  setIsLoadingLogs,
+  refreshControllerLogsFlag,
+  poolsData,
+}) {
+  const CONTROLLER_LOGS_EXPANDED_KEY = 'skypilot-controller-logs-expanded';
+
+  // Initialize state from localStorage
+  const [isExpanded, setIsExpanded] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(CONTROLLER_LOGS_EXPANDED_KEY);
+      return saved === 'true';
+    }
+    return false;
+  });
+
+  // Persist state to localStorage when it changes
+  const toggleExpanded = () => {
+    const newValue = !isExpanded;
+    setIsExpanded(newValue);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(CONTROLLER_LOGS_EXPANDED_KEY, String(newValue));
+    }
+  };
+
+  return (
+    <div id="controller-logs-section" className="mt-6">
+      <Card>
+        <div
+          className={`flex items-center justify-between px-4 ${isExpanded ? 'pt-4' : 'py-4'}`}
+        >
+          <button
+            onClick={toggleExpanded}
+            className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
+          >
+            {isExpanded ? (
+              <ChevronDownIcon className="w-5 h-5 mr-2" />
+            ) : (
+              <ChevronRightIcon className="w-5 h-5 mr-2" />
+            )}
+            <h3 className="text-lg font-semibold">Controller Logs</h3>
+            <span className="ml-2 text-xs text-gray-500">
+              (Logs are not streaming; click refresh to fetch the latest logs.)
+            </span>
+          </button>
+          {isExpanded && (
+            <div className="flex items-center space-x-3">
+              <Tooltip
+                content="Download full controller logs"
+                className="text-muted-foreground"
+              >
+                <button
+                  onClick={() =>
+                    downloadManagedJobLogs({
+                      jobId: parseInt(Array.isArray(jobId) ? jobId[0] : jobId),
+                      controller: true,
+                    })
+                  }
+                  className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                >
+                  <Download className="w-4 h-4" />
+                </button>
+              </Tooltip>
+              <Tooltip
+                content="Refresh controller logs"
+                className="text-muted-foreground"
+              >
+                <button
+                  onClick={handleControllerLogsRefresh}
+                  disabled={isLoadingControllerLogs}
+                  className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                >
+                  <RotateCwIcon
+                    className={`w-4 h-4 ${isLoadingControllerLogs ? 'animate-spin' : ''}`}
+                  />
+                </button>
+              </Tooltip>
+            </div>
+          )}
+        </div>
+        {isExpanded && (
+          <div className="p-4">
+            <JobDetailsContent
+              jobData={detailJobData}
+              activeTab="controllerlogs"
+              setIsLoadingLogs={setIsLoadingLogs}
+              setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+              isLoadingLogs={false}
+              isLoadingControllerLogs={isLoadingControllerLogs}
+              refreshFlag={refreshControllerLogsFlag}
+              poolsData={poolsData}
+            />
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+// URL patterns for extracting links from logs
+// Each pattern has a name (used as link label) and a regex to match entire tokens
+// Patterns use ^ and $ anchors for exact token matching
+const URL_PATTERNS = {
+  'W&B Run': /^https:\/\/wandb\.ai\/[^\/]+\/[^\/]+\/runs\/[^\/]+$/,
+};
+
 function JobDetailsContent({
   jobData,
   activeTab,
@@ -391,6 +481,9 @@ function JobDetailsContent({
   isLoadingControllerLogs,
   refreshFlag,
   poolsData,
+  links,
+  logExtractedLinks: logExtractedLinksFromParent,
+  onLinksExtracted,
 }) {
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
   const [expandedYamlDocs, setExpandedYamlDocs] = useState({});
@@ -535,6 +628,74 @@ function JobDetailsContent({
     setIsLoadingControllerLogs(streamingControllerLogsLoading);
   }, [streamingControllerLogsLoading, setIsLoadingControllerLogs]);
 
+  // Persist extracted links across tab changes using a ref
+  const extractedLinksRef = useRef({});
+
+  // Extract URLs from logs using whitelisted patterns
+  // Processes line-by-line with tokenization for exact word-level matching
+  // Updates are accumulated in a ref so they persist when switching tabs
+  const logExtractedLinks = useMemo(() => {
+    // Start with previously found links
+    const extractedLinks = { ...extractedLinksRef.current };
+    const foundPatterns = new Set(Object.keys(extractedLinks));
+
+    // Process line by line to avoid creating one large string
+    for (const line of logs) {
+      // Skip if we've found all patterns
+      if (foundPatterns.size === Object.keys(URL_PATTERNS).length) {
+        break;
+      }
+
+      // Split line into tokens by whitespace and common delimiters
+      // This handles cases like: "URL: https://..." or "(https://...)"
+      const tokens = line.split(/[\s"'<>()[\]{},;]+/);
+
+      for (const token of tokens) {
+        // Clean up trailing punctuation that might be attached
+        const cleanToken = token.replace(/[.,:;!?]+$/, '');
+        if (!cleanToken) continue;
+
+        // Check each pattern against the clean token
+        for (const [linkName, pattern] of Object.entries(URL_PATTERNS)) {
+          if (foundPatterns.has(linkName)) continue;
+
+          if (pattern.test(cleanToken)) {
+            extractedLinks[linkName] = cleanToken;
+            foundPatterns.add(linkName);
+            break;
+          }
+        }
+      }
+    }
+
+    // Persist to ref so links survive tab switches
+    extractedLinksRef.current = extractedLinks;
+    return extractedLinks;
+  }, [logs]);
+
+  // Notify parent when links are extracted (for cross-component sharing)
+  useEffect(() => {
+    if (onLinksExtracted && Object.keys(logExtractedLinks).length > 0) {
+      onLinksExtracted(logExtractedLinks);
+    }
+  }, [logExtractedLinks, onLinksExtracted]);
+
+  // Combine database links with log-extracted links
+  // Use logExtractedLinksFromParent if provided (for info tab), otherwise use local extraction
+  const combinedLinks = useMemo(() => {
+    // Start with database links (they take priority if there's a conflict)
+    const combined = { ...(links || {}) };
+    // Use parent-provided links (for info tab) or locally extracted links (for logs tab)
+    const extractedToUse = logExtractedLinksFromParent || logExtractedLinks;
+    // Add log-extracted links (only if not already present)
+    for (const [key, value] of Object.entries(extractedToUse)) {
+      if (!combined[key]) {
+        combined[key] = value;
+      }
+    }
+    return combined;
+  }, [links, logExtractedLinks, logExtractedLinksFromParent]);
+
   // Auto-scroll to bottom when logs change or tab changes
   useEffect(() => {
     const performScroll = () => {
@@ -618,7 +779,11 @@ function JobDetailsContent({
       <div>
         <div className="text-gray-600 font-medium text-base">Status</div>
         <div className="text-base mt-1">
-          <StatusBadge status={jobData.status} />
+          <PluginSlot
+            name="jobs.detail.status.badge"
+            context={jobData}
+            fallback={<StatusBadge status={jobData.status} />}
+          />
         </div>
       </div>
       <div>
@@ -723,7 +888,55 @@ function JobDetailsContent({
         </div>
       </div>
 
-      {/* Entrypoint section - spans both columns */}
+      {/* External Links section - full width row */}
+      <div className="col-span-2">
+        <div className="text-gray-600 font-medium text-base">
+          External Links
+        </div>
+        <div className="text-base mt-1">
+          {combinedLinks && Object.keys(combinedLinks).length > 0 ? (
+            <div className="flex flex-wrap gap-4">
+              {Object.entries(combinedLinks).map(([label, url]) => {
+                // Normalize URL - add https:// if no protocol specified
+                const normalizedUrl =
+                  url.startsWith('http://') || url.startsWith('https://')
+                    ? url
+                    : `https://${url}`;
+
+                return (
+                  <a
+                    key={label}
+                    href={normalizedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                  >
+                    {label}
+                  </a>
+                );
+              })}
+            </div>
+          ) : (
+            <span className="text-gray-400">-</span>
+          )}
+        </div>
+      </div>
+
+      {/* Queue Details section - right column */}
+      {jobData.details && (
+        <PluginSlot
+          name="jobs.detail.queue_details"
+          context={{
+            details: jobData.details,
+            queueName: jobData.kueue_queue_name,
+            infra: jobData.full_infra,
+            jobData: jobData,
+            title: 'Queue Details',
+          }}
+        />
+      )}
+
+      {/* Entrypoint section - full width row */}
       {(jobData.entrypoint || jobData.dag_yaml) && (
         <div className="col-span-2">
           <div className="flex items-center">
@@ -889,6 +1102,9 @@ JobDetailsContent.propTypes = {
   isLoadingControllerLogs: PropTypes.bool,
   refreshFlag: PropTypes.number,
   poolsData: PropTypes.array,
+  links: PropTypes.object,
+  logExtractedLinks: PropTypes.object,
+  onLinksExtracted: PropTypes.func,
 };
 
 export default JobDetails;

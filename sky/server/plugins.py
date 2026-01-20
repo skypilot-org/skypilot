@@ -91,8 +91,34 @@ class BasePlugin(abc.ABC):
     """Base class for all SkyPilot server plugins."""
 
     @property
+    def name(self) -> Optional[str]:
+        """Plugin name for display purposes."""
+        return None
+
+    @property
     def js_extension_path(self) -> Optional[str]:
         """Optional API route to the JavaScript extension to load."""
+        return None
+
+    @property
+    def requires_early_init(self) -> bool:
+        """Whether this plugin needs to initialize before dashboard API calls.
+
+        Set to True if the plugin needs to intercept fetch requests or
+        otherwise must be ready before the dashboard makes API calls.
+        The dashboard will wait for window.__skyPluginsReady before
+        proceeding with API calls when this is True.
+        """
+        return False
+
+    @property
+    def version(self) -> Optional[str]:
+        """Plugin version."""
+        return None
+
+    @property
+    def commit(self) -> Optional[str]:
+        """Plugin git commit hash."""
         return None
 
     @abc.abstractmethod
@@ -164,6 +190,7 @@ def load_plugins(extension_context: ExtensionContext):
 
     for plugin_config in config.get('plugins', []):
         class_path = plugin_config['class']
+        logger.debug(f'Loading plugins: {class_path}')
         module_path, class_name = class_path.rsplit('.', 1)
         try:
             module = importlib.import_module(module_path)

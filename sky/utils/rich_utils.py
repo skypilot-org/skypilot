@@ -362,13 +362,13 @@ def decode_rich_status(
                     # Replace `\r\n` with `\n`, as printing a line ends with
                     # `\r\n` in linux will cause the line to be empty.
                     line = line[:-2] + '\n'
-                is_payload, line = message_utils.decode_payload(
+                is_payload, decoded_line = message_utils.decode_payload(
                     line, raise_for_mismatch=False)
-                control = None
-                if is_payload:
-                    control, encoded_status = Control.decode(line)
-                if control is None:
+                if not is_payload:
                     yield line
+                    continue
+                control, encoded_status = Control.decode(decoded_line)
+                if control is None:
                     continue
 
                 if control == Control.RETRY:
@@ -481,15 +481,13 @@ async def decode_rich_status_async(
                     # Replace `\r\n` with `\n`, as printing a line ends with
                     # `\r\n` in linux will cause the line to be empty.
                     line = line[:-2] + '\n'
-                is_payload, line = message_utils.decode_payload(
+                is_payload, decoded_line = message_utils.decode_payload(
                     line, raise_for_mismatch=False)
-                if line is None:
-                    continue
-                control = None
-                if is_payload:
-                    control, encoded_status = Control.decode(line)
-                if control is None:
+                if not is_payload:
                     yield line
+                    continue
+                control, encoded_status = Control.decode(decoded_line)
+                if control is None:
                     continue
 
                 if control == Control.RETRY:

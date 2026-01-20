@@ -128,6 +128,15 @@
                 "resources": {
                     "type": "object"
                 },
+                "sidecarContainers": {
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "items": {
+                        "type": "object"
+                    }
+                },
                 "skipResourceCheck": {
                     "type": "boolean"
                 },
@@ -297,6 +306,12 @@
                 "type": "object"
             }
         },
+        "fullnameOverride": {
+            "type": [
+                "string",
+                "null"
+            ]
+        },
         "gcpCredentials": {
             "type": "object",
             "properties": {
@@ -456,6 +471,9 @@
                             "type": "boolean"
                         }
                     }
+                },
+                "unified": {
+                    "type": "boolean"
                 }
             }
         },

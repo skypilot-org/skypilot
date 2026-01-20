@@ -70,6 +70,8 @@ class AutostopConfig:
     idle_minutes: int = 0
     down: bool = False
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None
+    hook: Optional[str] = None
+    hook_timeout: Optional[int] = None
 
     def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
         if not self.enabled:
@@ -80,6 +82,10 @@ class AutostopConfig:
         }
         if self.wait_for is not None:
             config['wait_for'] = self.wait_for.value
+        if self.hook is not None:
+            config['hook'] = self.hook
+        if self.hook_timeout is not None:
+            config['hook_timeout'] = self.hook_timeout
         return config
 
     @classmethod
@@ -111,6 +117,10 @@ class AutostopConfig:
             if 'wait_for' in config:
                 autostop_config.wait_for = (
                     autostop_lib.AutostopWaitFor.from_str(config['wait_for']))
+            if 'hook' in config:
+                autostop_config.hook = config['hook']
+            if 'hook_timeout' in config:
+                autostop_config.hook_timeout = config['hook_timeout']
             return autostop_config
 
         return None
@@ -219,6 +229,9 @@ class Resources:
             - strategy: the recovery strategy to use.
             - max_restarts_on_errors: the max number of restarts on user code
               errors.
+            - recover_on_exit_codes: a list of exit codes that should trigger
+              job recovery. If any task exits with a code in this list, the job
+              will be recovered regardless of max_restarts_on_errors limit.
 
           region: the region to use. Deprecated. Use `infra` instead.
           zone: the zone to use. Deprecated. Use `infra` instead.
@@ -569,7 +582,8 @@ class Resources:
         if self.cloud is not None and self._instance_type is not None:
             vcpus, _ = self.cloud.get_vcpus_mem_from_instance_type(
                 self._instance_type)
-            return str(vcpus)
+            if vcpus is not None:
+                return str(vcpus)
         return None
 
     @property
@@ -579,12 +593,15 @@ class Resources:
         For example, memory='16' means each instance must have exactly 16GB
         memory; memory='16+' means each instance must have at least 16GB
         memory.
-
-        (Developer note: The memory field is only used to select the instance
-        type at launch time. Thus, Resources in the backend's ResourceHandle
-        will always have the memory field set to None.)
         """
-        return self._memory
+        if self._memory is not None:
+            return self._memory
+        if self.cloud is not None and self._instance_type is not None:
+            _, memory = self.cloud.get_vcpus_mem_from_instance_type(
+                self._instance_type)
+            if memory is not None:
+                return str(memory)
+        return None
 
     @property
     @annotations.lru_cache(scope='global', maxsize=1)
@@ -1922,7 +1939,7 @@ class Resources:
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
             cpus=override.pop('cpus', self._cpus),
-            memory=override.pop('memory', self.memory),
+            memory=override.pop('memory', self._memory),
             accelerators=override.pop('accelerators', self.accelerators),
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
