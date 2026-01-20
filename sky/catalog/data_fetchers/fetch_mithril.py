@@ -60,7 +60,8 @@ def get_config() -> Dict[str, str]:
     }
 
 
-def parse_gpu_info(gpu_name: str, gpu_count: int, gpu_memory_gb: int) -> str:
+def make_gpu_info_json(gpu_name: str, gpu_count: int,
+                       gpu_memory_gb: int) -> str:
     """Create GPU info JSON string.
 
     Args:
@@ -206,7 +207,7 @@ def create_catalog(output_path: str = 'mithril/vms.csv') -> None:
             if not regions_with_prices:
                 continue
 
-            gpu_info = (parse_gpu_info(gpu_name, gpu_count, gpu_memory_gb)
+            gpu_info = (make_gpu_info_json(gpu_name, gpu_count, gpu_memory_gb)
                         if gpu_count else '')
 
             price = instance_pricing[inst['fid']]
