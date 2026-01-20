@@ -58,6 +58,11 @@ import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import {
+  useTableColumns,
+  usePluginComponents,
+  useMergedTableColumns,
+} from '@/plugins/PluginProvider';
+import {
   FilterDropdown,
   Filters,
   updateURLParams as sharedUpdateURLParams,
@@ -767,20 +772,26 @@ export function ManagedJobsTable({
     });
   }, [data, poolsData, setValueList]);
 
-  const requestSort = (key) => {
-    let direction = 'ascending';
-    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
-      direction = 'descending';
-    }
-    setSortConfig({ key, direction });
-  };
+  const requestSort = React.useCallback(
+    (key) => {
+      let direction = 'ascending';
+      if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+        direction = 'descending';
+      }
+      setSortConfig({ key, direction });
+    },
+    [sortConfig]
+  );
 
-  const getSortDirection = (key) => {
-    if (sortConfig.key === key) {
-      return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
-    }
-    return '';
-  };
+  const getSortDirection = React.useCallback(
+    (key) => {
+      if (sortConfig.key === key) {
+        return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
+      }
+      return '';
+    },
+    [sortConfig]
+  );
 
   // Calculate active and finished counts
   const counts = React.useMemo(() => {
@@ -987,6 +998,560 @@ export function ManagedJobsTable({
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
+  // Define base columns with their order
+  // Each column's renderCell receives a context object:
+  // - item: The task data
+  // - renderMode: 'single' | 'groupParent' | 'groupChild'
+  // - jobId, tasks, taskIndex, aggregates (for job groups)
+  // - isExpanded, toggleJobGroup, hasAnyJobGroups (for job group UI)
+  const baseColumns = React.useMemo(
+    () => [
+      {
+        id: 'id',
+        order: 0,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('id')}
+          >
+            ID{getSortDirection('id')}
+          </TableHead>
+        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, jobId, taskIndex, isExpanded, toggleJobGroup, hasAnyJobGroups } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell>
+                <div className="flex items-center">
+                  <button
+                    onClick={() => toggleJobGroup(jobId)}
+                    className="p-1 hover:bg-gray-200 rounded mr-1"
+                  >
+                    {isExpanded ? (
+                      <ChevronDownIcon className="w-4 h-4 text-gray-500" />
+                    ) : (
+                      <ChevronRightIcon className="w-4 h-4 text-gray-500" />
+                    )}
+                  </button>
+                  <Link href={`/jobs/${jobId}`} className="text-blue-600">
+                    {jobId}
+                  </Link>
+                </div>
+              </TableCell>
+            );
+          }
+
+          if (renderMode === 'groupChild') {
+            return (
+              <TableCell className="whitespace-nowrap relative">
+                <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-300"></div>
+                <span className="text-gray-500 pl-6">{taskIndex}</span>
+              </TableCell>
+            );
+          }
+
+          // Single task
+          return (
+            <TableCell>
+              {hasAnyJobGroups ? (
+                <div className="flex items-center">
+                  <span className="w-6 mr-1" aria-hidden="true" />
+                  <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                    {item.id}
+                  </Link>
+                </div>
+              ) : (
+                <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                  {item.id}
+                </Link>
+              )}
+            </TableCell>
+          );
+        },
+      },
+      {
+        id: 'name',
+        order: 1,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('name')}
+          >
+            Name{getSortDirection('name')}
+          </TableHead>
+        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, jobId, tasks, taskIndex, toggleJobGroup } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell className="whitespace-nowrap">
+                <div className="flex items-center">
+                  <Link href={`/jobs/${jobId}`} className="text-blue-600">
+                    {item.name}
+                  </Link>
+                  <button
+                    onClick={() => toggleJobGroup(jobId)}
+                    className="ml-2 text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
+                  >
+                    JobGroup: {tasks.length} tasks
+                  </button>
+                </div>
+              </TableCell>
+            );
+          }
+
+          if (renderMode === 'groupChild') {
+            const primaryTasks = tasks[0]?.primary_tasks || [];
+            return (
+              <TableCell className="whitespace-nowrap">
+                <Link
+                  href={`/jobs/${item.id}/${taskIndex}`}
+                  className="text-blue-600 hover:underline"
+                >
+                  {item.task || `Task ${taskIndex}`}
+                </Link>
+                {primaryTasks.includes(item.task) && (
+                  <span className="ml-1.5">
+                    <PrimaryBadge />
+                  </span>
+                )}
+              </TableCell>
+            );
+          }
+
+          // Single task
+          return (
+            <TableCell className="whitespace-nowrap">
+              <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                {item.name}
+              </Link>
+            </TableCell>
+          );
+        },
+      },
+      {
+        id: 'user',
+        order: 2,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('user')}
+          >
+            User{getSortDirection('user')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            <UserDisplay username={item.user} userHash={item.user_hash} />
+          </TableCell>
+        ),
+      },
+      {
+        id: 'workspace',
+        order: 2.5,
+        conditional: true,
+        renderHeader: () =>
+          shouldShowWorkspace ? (
+            <TableHead
+              className="sortable whitespace-nowrap"
+              onClick={() => requestSort('workspace')}
+            >
+              Workspace{getSortDirection('workspace')}
+            </TableHead>
+          ) : null,
+        renderCell: (item) =>
+          shouldShowWorkspace ? (
+            <TableCell>
+              <Link
+                href="/workspaces"
+                className="text-gray-700 hover:text-blue-600 hover:underline"
+              >
+                {item.workspace || 'default'}
+              </Link>
+            </TableCell>
+          ) : null,
+      },
+      {
+        id: 'submitted',
+        order: 3,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('submitted_at')}
+          >
+            Submitted{getSortDirection('submitted_at')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>{formatSubmittedTime(item.submitted_at)}</TableCell>
+        ),
+      },
+      {
+        id: 'duration',
+        order: 4,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('job_duration')}
+          >
+            Duration{getSortDirection('job_duration')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>{formatDuration(item.job_duration)}</TableCell>
+        ),
+      },
+      {
+        id: 'status',
+        order: 5,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('status')}
+          >
+            Status{getSortDirection('status')}
+          </TableHead>
+        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, aggregates } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell>
+                <NonCapitalizedTooltip
+                  content={aggregates?.statusTooltip}
+                  className="text-sm text-muted-foreground"
+                >
+                  <span>
+                    <StatusBadge status={aggregates?.aggregatedStatus} />
+                  </span>
+                </NonCapitalizedTooltip>
+              </TableCell>
+            );
+          }
+
+          // Single task or group child
+          return (
+            <TableCell>
+              <PluginSlot
+                name="jobs.table.status.badge"
+                context={item}
+                fallback={
+                  <StatusBadge
+                    status={item.status}
+                    statusTooltip={item.statusTooltip}
+                  />
+                }
+              />
+            </TableCell>
+          );
+        },
+      },
+      {
+        id: 'infra',
+        order: 6,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('infra')}
+          >
+            Infra{getSortDirection('infra')}
+          </TableHead>
+        ),
+        renderCell: (item, ctx) => {
+          const { renderMode } = ctx || {};
+
+          // For group parent, show simplified infra (no tooltip with region details)
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell>
+                {item.infra && item.infra !== '-' ? (
+                  <span>{item.cloud || item.infra.split('(')[0].trim()}</span>
+                ) : (
+                  <span>-</span>
+                )}
+              </TableCell>
+            );
+          }
+
+          // Single task or group child - show full infra with tooltip
+          return (
+            <TableCell>
+              {item.infra && item.infra !== '-' ? (
+                <NonCapitalizedTooltip
+                  content={item.full_infra || item.infra}
+                  className="text-sm text-muted-foreground"
+                >
+                  <span>
+                    <Link href="/infra" className="text-blue-600 hover:underline">
+                      {item.cloud || item.infra.split('(')[0].trim()}
+                    </Link>
+                    {item.infra.includes('(') && (
+                      <span>
+                        {' ' +
+                          (() => {
+                            const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
+                            const fullRegionPart = item.infra.substring(item.infra.indexOf('('));
+                            const regionContent = fullRegionPart.substring(1, fullRegionPart.length - 1);
+                            if (regionContent.length <= NAME_TRUNCATE_LENGTH) {
+                              return fullRegionPart;
+                            }
+                            const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+                            return `(${truncatedRegion})`;
+                          })()}
+                      </span>
+                    )}
+                  </span>
+                </NonCapitalizedTooltip>
+              ) : (
+                <span>{item.infra || '-'}</span>
+              )}
+            </TableCell>
+          );
+        },
+      },
+      {
+        id: 'requested_resources',
+        order: 7,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('cluster')}
+          >
+            Requested Resources{getSortDirection('cluster')}
+          </TableHead>
+        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, aggregates } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell>
+                {aggregates?.resourcesTooltip ? (
+                  <NonCapitalizedTooltip
+                    content={aggregates.resourcesTooltip}
+                    className="text-sm text-muted-foreground"
+                  >
+                    <span>{aggregates.resourcesDisplay}</span>
+                  </NonCapitalizedTooltip>
+                ) : (
+                  <span>{aggregates?.resourcesDisplay}</span>
+                )}
+              </TableCell>
+            );
+          }
+
+          // Single task or group child
+          return (
+            <TableCell>
+              <NonCapitalizedTooltip
+                content={
+                  item.requested_resources ||
+                  item.resources_str_full ||
+                  item.resources_str ||
+                  '-'
+                }
+                className="text-sm text-muted-foreground"
+              >
+                <span>
+                  {item.requested_resources || item.resources_str || '-'}
+                </span>
+              </NonCapitalizedTooltip>
+            </TableCell>
+          );
+        },
+      },
+      {
+        id: 'recoveries',
+        order: 8,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('recoveries')}
+          >
+            Recoveries{getSortDirection('recoveries')}
+          </TableHead>
+        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, aggregates } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return <TableCell>{aggregates?.totalRecoveries}</TableCell>;
+          }
+
+          return <TableCell>{item.recoveries}</TableCell>;
+        },
+      },
+      {
+        id: 'pool',
+        order: 9.5,
+        conditional: true,
+        renderHeader: () =>
+          shouldShowPool ? (
+            <TableHead
+              className="sortable whitespace-nowrap"
+              onClick={() => requestSort('pool')}
+            >
+              Pool{getSortDirection('pool')}
+            </TableHead>
+          ) : null,
+        renderCell: (item) =>
+          shouldShowPool ? (
+            <TableCell>
+              <div
+                className={
+                  poolsLoading ? 'blur-sm transition-all duration-300' : ''
+                }
+              >
+                {poolsLoading
+                  ? '-'
+                  : renderPoolLink(item.pool, item.pool_hash, poolsData)}
+              </div>
+            </TableCell>
+          ) : null,
+      },
+      {
+        id: 'details',
+        order: 10,
+        renderHeader: () => <TableHead>Details</TableHead>,
+        renderCell: (item, ctx) => {
+          const { renderMode } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return <TableCell>-</TableCell>;
+          }
+
+          // Use task_job_id for group children to avoid conflicts
+          const rowId = ctx?.renderMode === 'groupChild' ? item.task_job_id : item.id;
+
+          return (
+            <TableCell>
+              {item.details ? (
+                <TruncatedDetails
+                  text={item.details}
+                  rowId={rowId}
+                  expandedRowId={expandedRowId}
+                  setExpandedRowId={setExpandedRowId}
+                />
+              ) : (
+                '-'
+              )}
+            </TableCell>
+          );
+        },
+      },
+      {
+        id: 'logs',
+        order: 11,
+        renderHeader: () => <TableHead>Logs</TableHead>,
+        renderCell: (item, ctx) => {
+          const { renderMode, jobId } = ctx || {};
+
+          // For group parent, use jobId; otherwise use item.id
+          const logJobId = renderMode === 'groupParent' ? jobId : item.id;
+
+          return (
+            <TableCell>
+              <Status2Actions
+                jobParent="/jobs"
+                jobId={logJobId}
+                managed={true}
+                workspace={item.workspace}
+              />
+            </TableCell>
+          );
+        },
+      },
+    ],
+    [
+      requestSort,
+      getSortDirection,
+      shouldShowWorkspace,
+      shouldShowPool,
+      expandedRowId,
+      poolsLoading,
+      poolsData,
+    ]
+  );
+
+  // Transform function to convert plugin columns to the format expected by the table
+  const transformPluginColumn = React.useCallback(
+    (col) => ({
+      id: col.id,
+      order: col.header.order,
+      isPlugin: true,
+      pluginColumn: col,
+      renderHeader: () => {
+        const baseClasses = col.header.sortKey
+          ? 'sortable whitespace-nowrap'
+          : 'whitespace-nowrap';
+        const className = `${baseClasses}${col.header.className ? ' ' + col.header.className : ''}`;
+        return (
+          <TableHead
+            className={className}
+            onClick={
+              col.header.sortKey
+                ? () => requestSort(col.header.sortKey)
+                : undefined
+            }
+          >
+            {col.header.label}
+            {col.header.sortKey ? getSortDirection(col.header.sortKey) : ''}
+          </TableHead>
+        );
+      },
+      renderCell: (item, ctx) => {
+        // Merge job group context with plugin context
+        const context = {
+          item,
+          shouldShowWorkspace,
+          shouldShowPool,
+          expandedRowId,
+          setExpandedRowId,
+          expandedRowRef,
+          // Forward job group context for plugins that need it
+          ...(ctx || {}),
+        };
+        const cellContent = col.cell.render(item, context);
+        return (
+          <TableCell className={col.cell.className || ''}>
+            {cellContent}
+          </TableCell>
+        );
+      },
+    }),
+    [
+      requestSort,
+      getSortDirection,
+      shouldShowWorkspace,
+      shouldShowPool,
+      expandedRowId,
+      setExpandedRowId,
+      expandedRowRef,
+    ]
+  );
+
+  // Merge base and plugin columns using the plugin system
+  // Plugin columns with the same ID as base columns will automatically replace them
+  const visibleColumns = useMergedTableColumns(
+    'jobs',
+    baseColumns,
+    {
+      shouldShowColumn: (columnId) => {
+        // Handle conditional columns
+        if (columnId === 'workspace') return shouldShowWorkspace;
+        if (columnId === 'pool') return shouldShowPool;
+        return true;
+      },
+    },
+    transformPluginColumn
+  );
+
+  // Calculate dynamic colSpan (used for expanded rows)
+  const totalColSpan = visibleColumns.length;
+
   return (
     <div className="relative">
       <div className="flex flex-col space-y-1 mb-1">
@@ -1152,90 +1717,16 @@ export function ManagedJobsTable({
           <Table className="min-w-full border-collapse">
             <TableHeader>
               <TableRow>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('id')}
-                >
-                  ID{getSortDirection('id')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('name')}
-                >
-                  Name{getSortDirection('name')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('user')}
-                >
-                  User{getSortDirection('user')}
-                </TableHead>
-                {shouldShowWorkspace && (
-                  <TableHead
-                    className="sortable whitespace-nowrap"
-                    onClick={() => requestSort('workspace')}
-                  >
-                    Workspace{getSortDirection('workspace')}
-                  </TableHead>
+                {visibleColumns.map((col) =>
+                  React.cloneElement(col.renderHeader(), { key: col.id })
                 )}
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('submitted_at')}
-                >
-                  Submitted{getSortDirection('submitted_at')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('job_duration')}
-                >
-                  Duration{getSortDirection('job_duration')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('status')}
-                >
-                  Status{getSortDirection('status')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('infra')}
-                >
-                  Infra{getSortDirection('infra')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('cluster')}
-                >
-                  Requested Resources{getSortDirection('cluster')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('recoveries')}
-                >
-                  Recoveries{getSortDirection('recoveries')}
-                </TableHead>
-                {shouldShowPool && (
-                  <TableHead
-                    className="sortable whitespace-nowrap"
-                    onClick={() => requestSort('pool')}
-                  >
-                    Pool{getSortDirection('pool')}
-                  </TableHead>
-                )}
-
-                <TableHead>Details</TableHead>
-                <TableHead>Logs</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading && isInitialLoad ? (
                 <TableRow>
                   <TableCell
-                    colSpan={
-                      11 +
-                      (shouldShowWorkspace ? 1 : 0) +
-                      (shouldShowPool ? 1 : 0)
-                    }
+                    colSpan={totalColSpan}
                     className="text-center py-6 text-gray-500"
                   >
                     <div className="flex justify-center items-center">
@@ -1251,192 +1742,25 @@ export function ManagedJobsTable({
                     const isExpanded = isJobGroupExpanded(jobId);
                     const firstTask = tasks[0];
 
-                    // For single-task jobs, render as before
+                    // For single-task jobs, render using plugin columns
                     if (!isMultiTask) {
                       const item = firstTask;
+                      const singleCtx = {
+                        renderMode: 'single',
+                        hasAnyJobGroups,
+                      };
                       return (
                         <React.Fragment key={item.task_job_id}>
                           <TableRow>
-                            <TableCell>
-                              {hasAnyJobGroups ? (
-                                <div className="flex items-center">
-                                  {/* Invisible placeholder to align with job group expand buttons */}
-                                  <span
-                                    className="w-6 mr-1"
-                                    aria-hidden="true"
-                                  />
-                                  <Link
-                                    href={`/jobs/${item.id}`}
-                                    className="text-blue-600"
-                                  >
-                                    {item.id}
-                                  </Link>
-                                </div>
-                              ) : (
-                                <Link
-                                  href={`/jobs/${item.id}`}
-                                  className="text-blue-600"
-                                >
-                                  {item.id}
-                                </Link>
-                              )}
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap">
-                              <Link
-                                href={`/jobs/${item.id}`}
-                                className="text-blue-600"
-                              >
-                                {item.name}
-                              </Link>
-                            </TableCell>
-                            <TableCell>
-                              <UserDisplay
-                                username={item.user}
-                                userHash={item.user_hash}
-                              />
-                            </TableCell>
-                            {shouldShowWorkspace && (
-                              <TableCell>
-                                <Link
-                                  href="/workspaces"
-                                  className="text-gray-700 hover:text-blue-600 hover:underline"
-                                >
-                                  {item.workspace || 'default'}
-                                </Link>
-                              </TableCell>
-                            )}
-                            <TableCell>
-                              {formatSubmittedTime(item.submitted_at)}
-                            </TableCell>
-                            <TableCell>
-                              {formatDuration(item.job_duration)}
-                            </TableCell>
-                            <TableCell>
-                              <PluginSlot
-                                name="jobs.table.status.badge"
-                                context={item}
-                                fallback={
-                                  <StatusBadge
-                                    status={item.status}
-                                    statusTooltip={item.statusTooltip}
-                                  />
-                                }
-                              />
-                            </TableCell>
-                            <TableCell>
-                              {item.infra && item.infra !== '-' ? (
-                                <NonCapitalizedTooltip
-                                  content={item.full_infra || item.infra}
-                                  className="text-sm text-muted-foreground"
-                                >
-                                  <span>
-                                    <Link
-                                      href="/infra"
-                                      className="text-blue-600 hover:underline"
-                                    >
-                                      {item.cloud ||
-                                        item.infra.split('(')[0].trim()}
-                                    </Link>
-                                    {item.infra.includes('(') && (
-                                      <span>
-                                        {' ' +
-                                          (() => {
-                                            const NAME_TRUNCATE_LENGTH =
-                                              UI_CONFIG.NAME_TRUNCATE_LENGTH;
-                                            const fullRegionPart =
-                                              item.infra.substring(
-                                                item.infra.indexOf('(')
-                                              );
-                                            const regionContent =
-                                              fullRegionPart.substring(
-                                                1,
-                                                fullRegionPart.length - 1
-                                              );
-
-                                            if (
-                                              regionContent.length <=
-                                              NAME_TRUNCATE_LENGTH
-                                            ) {
-                                              return fullRegionPart;
-                                            }
-
-                                            const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
-                                            return `(${truncatedRegion})`;
-                                          })()}
-                                      </span>
-                                    )}
-                                  </span>
-                                </NonCapitalizedTooltip>
-                              ) : (
-                                <span>{item.infra || '-'}</span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <NonCapitalizedTooltip
-                                content={
-                                  item.requested_resources ||
-                                  item.resources_str_full ||
-                                  item.resources_str ||
-                                  '-'
-                                }
-                                className="text-sm text-muted-foreground"
-                              >
-                                <span>
-                                  {item.requested_resources ||
-                                    item.resources_str ||
-                                    '-'}
-                                </span>
-                              </NonCapitalizedTooltip>
-                            </TableCell>
-                            <TableCell>{item.recoveries}</TableCell>
-                            {shouldShowPool && (
-                              <TableCell>
-                                <div
-                                  className={
-                                    poolsLoading
-                                      ? 'blur-sm transition-all duration-300'
-                                      : ''
-                                  }
-                                >
-                                  {poolsLoading
-                                    ? '-'
-                                    : renderPoolLink(
-                                        item.pool,
-                                        item.pool_hash,
-                                        poolsData
-                                      )}
-                                </div>
-                              </TableCell>
-                            )}
-                            <TableCell>
-                              {item.details ? (
-                                <TruncatedDetails
-                                  text={item.details}
-                                  rowId={item.id}
-                                  expandedRowId={expandedRowId}
-                                  setExpandedRowId={setExpandedRowId}
-                                />
-                              ) : (
-                                '-'
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <Status2Actions
-                                jobParent="/jobs"
-                                jobId={item.id}
-                                managed={true}
-                                workspace={item.workspace}
-                              />
-                            </TableCell>
+                            {visibleColumns.map((col) => {
+                              const cell = col.renderCell(item, singleCtx);
+                              return cell ? React.cloneElement(cell, { key: col.id }) : null;
+                            })}
                           </TableRow>
                           {expandedRowId === item.id && (
                             <ExpandedDetailsRow
                               text={item.details}
-                              colSpan={
-                                11 +
-                                (shouldShowWorkspace ? 1 : 0) +
-                                (shouldShowPool ? 1 : 0)
-                              }
+                              colSpan={totalColSpan}
                               innerRef={expandedRowRef}
                             />
                           )}
@@ -1447,285 +1771,57 @@ export function ManagedJobsTable({
                     // For multi-task jobs, render parent row with expand toggle
                     // Get pre-computed aggregates for this job group
                     const aggregates = jobGroupAggregates.get(jobId) || {};
+                    const parentCtx = {
+                      renderMode: 'groupParent',
+                      jobId,
+                      tasks,
+                      aggregates,
+                      isExpanded,
+                      toggleJobGroup,
+                      hasAnyJobGroups,
+                    };
 
                     return (
                       <React.Fragment key={`group-${jobId}`}>
                         {/* Parent row for job group */}
                         <TableRow className="hover:bg-gray-50">
-                          <TableCell>
-                            <div className="flex items-center">
-                              <button
-                                onClick={() => toggleJobGroup(jobId)}
-                                className="p-1 hover:bg-gray-200 rounded mr-1"
-                              >
-                                {isExpanded ? (
-                                  <ChevronDownIcon className="w-4 h-4 text-gray-500" />
-                                ) : (
-                                  <ChevronRightIcon className="w-4 h-4 text-gray-500" />
-                                )}
-                              </button>
-                              <Link
-                                href={`/jobs/${jobId}`}
-                                className="text-blue-600"
-                              >
-                                {jobId}
-                              </Link>
-                            </div>
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap">
-                            <div className="flex items-center">
-                              <Link
-                                href={`/jobs/${jobId}`}
-                                className="text-blue-600"
-                              >
-                                {firstTask.name}
-                              </Link>
-                              <button
-                                onClick={() => toggleJobGroup(jobId)}
-                                className="ml-2 text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
-                              >
-                                JobGroup: {tasks.length} tasks
-                              </button>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <UserDisplay
-                              username={firstTask.user}
-                              userHash={firstTask.user_hash}
-                            />
-                          </TableCell>
-                          {shouldShowWorkspace && (
-                            <TableCell>
-                              <Link
-                                href="/workspaces"
-                                className="text-gray-700 hover:text-blue-600 hover:underline"
-                              >
-                                {firstTask.workspace || 'default'}
-                              </Link>
-                            </TableCell>
-                          )}
-                          <TableCell>
-                            {formatSubmittedTime(firstTask.submitted_at)}
-                          </TableCell>
-                          <TableCell>
-                            {formatDuration(firstTask.job_duration)}
-                          </TableCell>
-                          <TableCell>
-                            {/* Show aggregated status for job group */}
-                            <NonCapitalizedTooltip
-                              content={aggregates.statusTooltip}
-                              className="text-sm text-muted-foreground"
-                            >
-                              <span>
-                                <StatusBadge
-                                  status={aggregates.aggregatedStatus}
-                                />
-                              </span>
-                            </NonCapitalizedTooltip>
-                          </TableCell>
-                          <TableCell>
-                            {firstTask.infra && firstTask.infra !== '-' ? (
-                              <span>
-                                {firstTask.cloud ||
-                                  firstTask.infra.split('(')[0].trim()}
-                              </span>
-                            ) : (
-                              <span>-</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {aggregates.resourcesTooltip ? (
-                              <NonCapitalizedTooltip
-                                content={aggregates.resourcesTooltip}
-                                className="text-sm text-muted-foreground"
-                              >
-                                <span>{aggregates.resourcesDisplay}</span>
-                              </NonCapitalizedTooltip>
-                            ) : (
-                              <span>{aggregates.resourcesDisplay}</span>
-                            )}
-                          </TableCell>
-                          <TableCell>{aggregates.totalRecoveries}</TableCell>
-                          {shouldShowPool && (
-                            <TableCell>
-                              {poolsLoading
-                                ? '-'
-                                : renderPoolLink(
-                                    firstTask.pool,
-                                    firstTask.pool_hash,
-                                    poolsData
-                                  )}
-                            </TableCell>
-                          )}
-                          <TableCell>-</TableCell>
-                          <TableCell>
-                            <Status2Actions
-                              jobParent="/jobs"
-                              jobId={jobId}
-                              managed={true}
-                              workspace={firstTask.workspace}
-                            />
-                          </TableCell>
+                          {visibleColumns.map((col) => {
+                            const cell = col.renderCell(firstTask, parentCtx);
+                            return cell ? React.cloneElement(cell, { key: col.id }) : null;
+                          })}
                         </TableRow>
 
                         {/* Child task rows when expanded */}
                         {isExpanded &&
-                          tasks.map((task, taskIndex) => (
-                            <React.Fragment key={task.task_job_id}>
-                              <TableRow className="bg-gray-50/50">
-                                <TableCell className="whitespace-nowrap relative">
-                                  <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-300"></div>
-                                  <span className="text-gray-500 pl-6">
-                                    {taskIndex}
-                                  </span>
-                                </TableCell>
-                                <TableCell className="whitespace-nowrap">
-                                  <Link
-                                    href={`/jobs/${task.id}/${taskIndex}`}
-                                    className="text-blue-600 hover:underline"
-                                  >
-                                    {task.task || `Task ${taskIndex}`}
-                                  </Link>
-                                  {/* Show Primary badge for primary tasks */}
-                                  {tasks[0]?.primary_tasks?.includes(task.task) && (
-                                    <span className="ml-1.5">
-                                      <PrimaryBadge />
-                                    </span>
-                                  )}
-                                </TableCell>
-                                <TableCell>
-                                  <UserDisplay
-                                    username={task.user}
-                                    userHash={task.user_hash}
+                          tasks.map((task, taskIndex) => {
+                            const childCtx = {
+                              renderMode: 'groupChild',
+                              jobId,
+                              tasks,
+                              taskIndex,
+                              aggregates,
+                              isExpanded,
+                              toggleJobGroup,
+                              hasAnyJobGroups,
+                            };
+                            return (
+                              <React.Fragment key={task.task_job_id}>
+                                <TableRow className="bg-gray-50/50">
+                                  {visibleColumns.map((col) => {
+                                    const cell = col.renderCell(task, childCtx);
+                                    return cell ? React.cloneElement(cell, { key: col.id }) : null;
+                                  })}
+                                </TableRow>
+                                {expandedRowId === task.task_job_id && (
+                                  <ExpandedDetailsRow
+                                    text={task.details}
+                                    colSpan={totalColSpan}
+                                    innerRef={expandedRowRef}
                                   />
-                                </TableCell>
-                                {shouldShowWorkspace && (
-                                  <TableCell>
-                                    <Link
-                                      href="/workspaces"
-                                      className="text-gray-700 hover:text-blue-600 hover:underline"
-                                    >
-                                      {task.workspace || 'default'}
-                                    </Link>
-                                  </TableCell>
                                 )}
-                                <TableCell>
-                                  {formatSubmittedTime(task.submitted_at)}
-                                </TableCell>
-                                <TableCell>
-                                  {formatDuration(task.job_duration)}
-                                </TableCell>
-                                <TableCell>
-                                  <PluginSlot
-                                    name="jobs.table.status.badge"
-                                    context={task}
-                                    fallback={
-                                      <StatusBadge
-                                        status={task.status}
-                                        statusTooltip={task.statusTooltip}
-                                      />
-                                    }
-                                  />
-                                </TableCell>
-                                <TableCell>
-                                  {task.infra && task.infra !== '-' ? (
-                                    <NonCapitalizedTooltip
-                                      content={task.full_infra || task.infra}
-                                      className="text-sm text-muted-foreground"
-                                    >
-                                      <span>
-                                        <Link
-                                          href="/infra"
-                                          className="text-blue-600 hover:underline"
-                                        >
-                                          {task.cloud ||
-                                            task.infra.split('(')[0].trim()}
-                                        </Link>
-                                        {task.infra.includes('(') && (
-                                          <span>
-                                            {' ' +
-                                              task.infra.substring(
-                                                task.infra.indexOf('(')
-                                              )}
-                                          </span>
-                                        )}
-                                      </span>
-                                    </NonCapitalizedTooltip>
-                                  ) : (
-                                    <span>{task.infra || '-'}</span>
-                                  )}
-                                </TableCell>
-                                <TableCell>
-                                  <NonCapitalizedTooltip
-                                    content={
-                                      task.requested_resources ||
-                                      task.resources_str_full ||
-                                      task.resources_str ||
-                                      '-'
-                                    }
-                                    className="text-sm text-muted-foreground"
-                                  >
-                                    <span>
-                                      {task.requested_resources ||
-                                        task.resources_str ||
-                                        '-'}
-                                    </span>
-                                  </NonCapitalizedTooltip>
-                                </TableCell>
-                                <TableCell>{task.recoveries}</TableCell>
-                                {shouldShowPool && (
-                                  <TableCell>
-                                    <div
-                                      className={
-                                        poolsLoading
-                                          ? 'blur-sm transition-all duration-300'
-                                          : ''
-                                      }
-                                    >
-                                      {poolsLoading
-                                        ? '-'
-                                        : renderPoolLink(
-                                            task.pool,
-                                            task.pool_hash,
-                                            poolsData
-                                          )}
-                                    </div>
-                                  </TableCell>
-                                )}
-                                <TableCell>
-                                  {task.details ? (
-                                    <TruncatedDetails
-                                      text={task.details}
-                                      rowId={task.task_job_id}
-                                      expandedRowId={expandedRowId}
-                                      setExpandedRowId={setExpandedRowId}
-                                    />
-                                  ) : (
-                                    '-'
-                                  )}
-                                </TableCell>
-                                <TableCell>
-                                  <Status2Actions
-                                    jobParent="/jobs"
-                                    jobId={task.id}
-                                    managed={true}
-                                    workspace={task.workspace}
-                                  />
-                                </TableCell>
-                              </TableRow>
-                              {expandedRowId === task.task_job_id && (
-                                <ExpandedDetailsRow
-                                  text={task.details}
-                                  colSpan={
-                                    11 +
-                                    (shouldShowWorkspace ? 1 : 0) +
-                                    (shouldShowPool ? 1 : 0)
-                                  }
-                                  innerRef={expandedRowRef}
-                                />
-                              )}
-                            </React.Fragment>
-                          ))}
+                              </React.Fragment>
+                            );
+                          })}
                       </React.Fragment>
                     );
                   })}
@@ -1733,11 +1829,7 @@ export function ManagedJobsTable({
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={
-                      11 +
-                      (shouldShowWorkspace ? 1 : 0) +
-                      (shouldShowPool ? 1 : 0)
-                    }
+                    colSpan={totalColSpan}
                     className="text-center py-6"
                   >
                     <div className="flex flex-col items-center space-y-4">

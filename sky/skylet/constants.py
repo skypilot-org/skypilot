@@ -148,13 +148,17 @@ SKYLET_VERSION = '30'  # conditional plugin loading for jobs bwcompat
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 4  # add wait_for param to set_autostop
+SKYLET_LIB_VERSION = 5  # add wait_for param to set_autostop
 SKYLET_VERSION_FILE = '.sky/skylet_version'
 SKYLET_LOG_FILE = '.sky/skylet.log'
 SKYLET_PID_FILE = '.sky/skylet_pid'
 SKYLET_PORT_FILE = '.sky/skylet_port'
 SKYLET_GRPC_PORT = 46590
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
+AUTOSTOP_HOOK_LOG_FILE = '.sky/autostop_hook.log'
+
+# Autostop hook timeout default (1 hour in seconds)
+DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS = 3600
 
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'

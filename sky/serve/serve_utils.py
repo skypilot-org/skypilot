@@ -1302,7 +1302,8 @@ def _process_line(
     # We should tail the detailed logs for user.
     def cluster_is_up() -> bool:
         status = global_user_state.get_status_from_cluster_name(cluster_name)
-        return status == status_lib.ClusterStatus.UP
+        return status in (status_lib.ClusterStatus.UP,
+                          status_lib.ClusterStatus.AUTOSTOPPING)
 
     provision_api_log_prompt = re.match(_SKYPILOT_PROVISION_API_LOG_PATTERN,
                                         line)
