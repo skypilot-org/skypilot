@@ -203,6 +203,8 @@ def _find_package_root_from_module(module) -> Optional[str]:
 
     The package root is the directory containing pyproject.toml or setup.py.
     Walks up from the module file's directory until it finds one of these files.
+    Also handles namespace packages
+    (where __file__ is None but __path__ exists).
 
     Args:
         module: The Python module object.
@@ -210,11 +212,18 @@ def _find_package_root_from_module(module) -> Optional[str]:
     Returns:
         Path to the package root directory, or None if not found.
     """
+    # Handle namespace packages (where __file__ is None)
     if not hasattr(module, '__file__') or module.__file__ is None:
-        return None
+        if hasattr(module, '__path__') and module.__path__:
+            # For namespace packages, use the first path in __path__
+            start_dir = os.path.abspath(module.__path__[0])
+        else:
+            return None
+    else:
+        module_file = os.path.abspath(module.__file__)
+        start_dir = os.path.dirname(module_file)
 
-    module_file = os.path.abspath(module.__file__)
-    current_dir = os.path.dirname(module_file)
+    current_dir = start_dir
 
     # Walk up the directory tree looking for pyproject.toml or setup.py
     while current_dir != os.path.dirname(
