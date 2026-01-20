@@ -504,6 +504,13 @@ export async function getContextGPUData(context) {
         const totalCount = nodeData['total']?.['accelerator_count'] || 0;
         const freeCount = nodeData['free']?.['accelerators_available'] || 0;
         const isReady = nodeData['is_ready'] !== false;
+        // Check if node is cordoned (defaults to false for backward compatibility)
+        const isCordoned = nodeData['is_cordoned'] === true;
+        // Check if node has taints (defaults to empty for backward compatibility)
+        const taints = nodeData['taints'] || [];
+        const isTainted = taints.length > 0;
+        // Node is considered not ready if it's not ready, cordoned, or tainted
+        const isNodeNotReady = !isReady || isCordoned || isTainted;
 
         // Per-node data - use same field names as original getKubernetesGPUsFromContexts
         perNodeGPUs.push({
@@ -512,6 +519,8 @@ export async function getContextGPUData(context) {
           gpu_total: totalCount,
           gpu_free: freeCount,
           is_ready: isReady,
+          is_cordoned: isCordoned,
+          taints: taints,
           context: context,
           ip_address: nodeData['ip_address'] || null,
           cpu_count: nodeData['cpu_count'] ?? null,
@@ -534,7 +543,7 @@ export async function getContextGPUData(context) {
           }
           gpuToData[gpuName].gpu_total += totalCount;
           gpuToData[gpuName].gpu_free += freeCount;
-          if (!isReady) {
+          if (isNodeNotReady) {
             gpuToData[gpuName].gpu_not_ready += totalCount;
           }
           gpuToData[gpuName].gpu_requestable_qty_per_node = totalCount;
@@ -633,6 +642,13 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           const freeCount = nodeData['free']?.['accelerators_available'] || 0;
           // Check if node is ready (defaults to true for backward compatibility)
           const isReady = nodeData['is_ready'] !== false;
+          // Check if node is cordoned (defaults to false for backward compatibility)
+          const isCordoned = nodeData['is_cordoned'] === true;
+          // Check if node has taints (defaults to empty for backward compatibility)
+          const taints = nodeData['taints'] || [];
+          const isTainted = taints.length > 0;
+          // Node is considered not ready if it's not ready, cordoned, or tainted
+          const isNodeNotReady = !isReady || isCordoned || isTainted;
 
           if (totalCount > 0) {
             if (!gpuToData[gpuName]) {
@@ -647,7 +663,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             }
             gpuToData[gpuName].gpu_total += totalCount;
             gpuToData[gpuName].gpu_free += freeCount;
-            if (isReady === false) {
+            if (isNodeNotReady) {
               gpuToData[gpuName].gpu_not_ready += totalCount;
             }
             gpuToData[gpuName].gpu_requestable_qty_per_node = totalCount;
@@ -696,6 +712,10 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             nodeData['free']?.['accelerators_available'] ?? 0;
           // Check if node is ready (defaults to true for backward compatibility)
           const nodeIsReady = nodeData['is_ready'] !== false;
+          // Check if node is cordoned (defaults to false for backward compatibility)
+          const nodeIsCordoned = nodeData['is_cordoned'] === true;
+          // Get taints (defaults to empty for backward compatibility)
+          const nodeTaints = nodeData['taints'] || [];
 
           // Extract CPU and memory information
           const cpuCount = nodeData['cpu_count'] ?? null;
@@ -715,6 +735,8 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             cpu_free: cpuFree,
             memory_free_gb: memoryFreeGb,
             is_ready: nodeIsReady,
+            is_cordoned: nodeIsCordoned,
+            taints: nodeTaints,
           };
 
           // If this node provides a GPU type not found via GPU availability,
