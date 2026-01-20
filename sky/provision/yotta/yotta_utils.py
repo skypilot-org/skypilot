@@ -205,7 +205,8 @@ class YottaClient:
 
     def create_cluster(self, cluster_name: str, instance_type: str, region: str,
                        image_name: str, ports: Optional[List[int]],
-                       public_key: str, ssh_user: str, node_num: int) -> str:
+                       disk_size: int, public_key: str, ssh_user: str,
+                       node_num: int) -> str:
         url = f'{ENDPOINT}/v1/pods/cluster/create'
         expose = []
         if ports is not None:
@@ -232,6 +233,7 @@ class YottaClient:
             'nodeNum': node_num,
             'clusterType': ClusterTypeEnum.PRIVATE.value,
             'source': ClusterSourceEnum.SKY_PILOT.value,
+            'containerVolumeInGb': disk_size,
         }
         response = requests.post(url,
                                  headers={API_KEY_HEADER: self.api_key},
