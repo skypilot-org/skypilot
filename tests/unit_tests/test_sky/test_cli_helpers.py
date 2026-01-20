@@ -705,3 +705,154 @@ def test_natural_order_group_list_commands_hides_aliases_and_hidden():
     group.add_command(other_cmd, name='other')
 
     assert group.list_commands(ctx=None) == ['volumes', 'other']
+
+
+class TestJobsCancelConfirmation:
+    """Tests for jobs cancel confirmation message with job names."""
+
+    def test_jobs_cancel_shows_job_names_in_confirmation(self):
+        """Test that jobs cancel confirmation shows job names."""
+        # Create mock managed job records
+        mock_job_1 = responses.ManagedJobRecord(
+            job_id=1,
+            job_name='my-training-job',
+            status=managed_jobs.ManagedJobStatus.RUNNING,
+        )
+        mock_job_2 = responses.ManagedJobRecord(
+            job_id=2,
+            job_name='my-inference-job',
+            status=managed_jobs.ManagedJobStatus.RUNNING,
+        )
+
+        managed_jobs_list = [mock_job_1, mock_job_2]
+        mock_result = (managed_jobs_list, 2, {}, 0)
+
+        request_id = 'test-request-id'
+        captured_confirm_message = None
+
+        def capture_confirm(message, **kwargs):
+            nonlocal captured_confirm_message
+            captured_confirm_message = message
+            # Don't abort, just return
+            return True
+
+        with mock.patch.object(cli_utils,
+                               'get_managed_job_queue',
+                               return_value=(request_id, None)):
+            with mock.patch.object(client_sdk,
+                                   'stream_and_get',
+                                   return_value=mock_result):
+                with mock.patch.object(click,
+                                       'confirm',
+                                       side_effect=capture_confirm):
+                    with mock.patch.object(managed_jobs,
+                                           'cancel',
+                                           return_value='cancel-request-id'):
+                        # Invoke jobs_cancel with job_ids
+                        runner = click.testing.CliRunner()
+                        # We need to test the internal logic, so call the function directly
+                        # with mocked dependencies
+                        try:
+                            command.jobs_cancel.callback(
+                                job_ids=(1, 2),
+                                name=None,
+                                pool=None,
+                                all=False,
+                                all_users=False,
+                                yes=False,
+                            )
+                        except SystemExit:
+                            pass  # click.confirm may raise SystemExit
+
+        # Verify the confirmation message contains job names
+        assert captured_confirm_message is not None
+        assert '1 (my-training-job)' in captured_confirm_message
+        assert '2 (my-inference-job)' in captured_confirm_message
+        assert 'managed jobs:' in captured_confirm_message
+
+    def test_jobs_cancel_shows_only_id_when_job_has_no_name(self):
+        """Test that jobs without names show only the ID."""
+        # Create mock job without a name
+        mock_job = responses.ManagedJobRecord(
+            job_id=1,
+            job_name=None,
+            status=managed_jobs.ManagedJobStatus.RUNNING,
+        )
+
+        managed_jobs_list = [mock_job]
+        mock_result = (managed_jobs_list, 1, {}, 0)
+
+        request_id = 'test-request-id'
+        captured_confirm_message = None
+
+        def capture_confirm(message, **kwargs):
+            nonlocal captured_confirm_message
+            captured_confirm_message = message
+            return True
+
+        with mock.patch.object(cli_utils,
+                               'get_managed_job_queue',
+                               return_value=(request_id, None)):
+            with mock.patch.object(client_sdk,
+                                   'stream_and_get',
+                                   return_value=mock_result):
+                with mock.patch.object(click,
+                                       'confirm',
+                                       side_effect=capture_confirm):
+                    with mock.patch.object(managed_jobs,
+                                           'cancel',
+                                           return_value='cancel-request-id'):
+                        try:
+                            command.jobs_cancel.callback(
+                                job_ids=(1,),
+                                name=None,
+                                pool=None,
+                                all=False,
+                                all_users=False,
+                                yes=False,
+                            )
+                        except SystemExit:
+                            pass
+
+        # Verify the confirmation message shows just the ID (no parentheses)
+        assert captured_confirm_message is not None
+        assert 'managed job: 1' in captured_confirm_message
+        assert '(' not in captured_confirm_message
+
+    def test_jobs_cancel_falls_back_on_query_failure(self):
+        """Test that jobs cancel falls back to IDs when query fails."""
+        request_id = 'test-request-id'
+        captured_confirm_message = None
+
+        def capture_confirm(message, **kwargs):
+            nonlocal captured_confirm_message
+            captured_confirm_message = message
+            return True
+
+        with mock.patch.object(cli_utils,
+                               'get_managed_job_queue',
+                               side_effect=Exception('Query failed')):
+            with mock.patch.object(click,
+                                   'confirm',
+                                   side_effect=capture_confirm):
+                with mock.patch.object(client_sdk,
+                                       'stream_and_get',
+                                       return_value=None):
+                    with mock.patch.object(managed_jobs,
+                                           'cancel',
+                                           return_value='cancel-request-id'):
+                        try:
+                            command.jobs_cancel.callback(
+                                job_ids=(1, 2),
+                                name=None,
+                                pool=None,
+                                all=False,
+                                all_users=False,
+                                yes=False,
+                            )
+                        except SystemExit:
+                            pass
+
+        # Verify the confirmation message falls back to showing just IDs
+        assert captured_confirm_message is not None
+        assert 'managed jobs with IDs 1,2' in captured_confirm_message
