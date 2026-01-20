@@ -1,8 +1,5 @@
 """Tests for Mithril cloud provider."""
 
-from pathlib import Path
-import tempfile
-
 import pytest
 
 from sky.clouds import mithril
@@ -64,17 +61,27 @@ class TestMithrilCredentials:
         assert not valid
         assert 'Mithril credentials not found' in msg
 
-    def test_credential_file_mounts_when_file_exists(self):
-        """Test get_credential_file_mounts returns mapping when file exists."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cred_path = Path(tmpdir) / 'config.yaml'
-            cred_path.touch()
-            with pytest.MonkeyPatch.context() as m:
-                m.setattr(mithril.Mithril, 'CREDENTIALS_PATH', str(cred_path))
-                mounts = mithril.Mithril.get_credential_file_mounts()
+    def test_credential_file_mounts_when_file_exists(self, monkeypatch,
+                                                     tmp_path):
+        """Test get_credential_file_mounts returns correct expanded->unexpanded mapping."""
+        # Create the credential file in tmp_path simulating ~/.mithril/
+        cred_file = tmp_path / '.mithril' / 'config.yaml'
+        cred_file.parent.mkdir(parents=True)
+        cred_file.touch()
 
-                assert str(cred_path) in mounts
-                assert mounts[str(cred_path)] == '~/.mithril/config.yaml'
+        # Use a path with ~ that will be expanded
+        unexpanded_path = '~/.mithril/config.yaml'
+        monkeypatch.setenv('HOME', str(tmp_path))
+        monkeypatch.setattr(mithril.Mithril, 'CREDENTIALS_PATH',
+                            unexpanded_path)
+
+        mounts = mithril.Mithril.get_credential_file_mounts()
+
+        # The method returns {expanded_path: CREDENTIALS_PATH}
+        # Key should be the expanded path, value should be the unexpanded path
+        expected_expanded = str(cred_file)
+        assert expected_expanded in mounts
+        assert mounts[expected_expanded] == unexpanded_path
 
     def test_credential_file_mounts_when_file_missing(self, monkeypatch,
                                                       tmp_path):
