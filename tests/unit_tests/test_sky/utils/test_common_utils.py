@@ -483,3 +483,112 @@ async def test_set_request_context_coroutine_is_context_safe():
     # Process-scope var should not be unchanged
     assert common_utils.get_current_user().name == original_user.name
     assert common_utils.get_current_user().id == original_user.id
+
+
+class TestValidateSchema:
+    """Tests for validate_schema function."""
+
+    def test_anyof_error_shows_unsupported_fields(self):
+        """Test that anyOf validation errors show which fields are unsupported.
+
+        This tests the improved error messaging when a schema with anyOf and
+        additionalProperties: false fails due to unknown fields.
+        """
+        # Schema similar to autostop schema (without hook/hook_timeout)
+        schema = {
+            '$schema': 'http://json-schema.org/draft-07/schema#',
+            'type': 'object',
+            'properties': {
+                'config': {
+                    'anyOf': [{
+                        'type': 'boolean'
+                    }, {
+                        'type': 'integer'
+                    }, {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            'field1': {
+                                'type': 'string'
+                            },
+                            'field2': {
+                                'type': 'integer'
+                            },
+                        }
+                    }]
+                }
+            }
+        }
+
+        # Config with unsupported fields
+        config = {
+            'config': {
+                'field1': 'valid',
+                'unsupported_field': 'invalid',
+                'another_bad_field': 123
+            }
+        }
+
+        with pytest.raises(exceptions.InvalidSkyPilotConfigError) as exc_info:
+            common_utils.validate_schema(config, schema, 'Test: ')
+
+        error_msg = str(exc_info.value)
+        # Check that the error message mentions the unsupported fields
+        assert 'unsupported_field' in error_msg
+        assert 'another_bad_field' in error_msg
+        assert 'Found unsupported field' in error_msg
+
+    def test_anyof_error_fallback_to_generic_message(self):
+        """Test that anyOf errors without additionalProperties use generic msg.
+
+        When anyOf fails for reasons other than unsupported fields (e.g., type
+        mismatch), it should still show a useful error message.
+        """
+        schema = {
+            '$schema': 'http://json-schema.org/draft-07/schema#',
+            'type': 'object',
+            'properties': {
+                'value': {
+                    'anyOf': [
+                        {
+                            'type': 'boolean'
+                        },
+                        {
+                            'type': 'integer'
+                        },
+                    ]
+                }
+            }
+        }
+
+        # Config with wrong type (string instead of boolean/integer)
+        config = {'value': 'not_valid'}
+
+        with pytest.raises(exceptions.InvalidSkyPilotConfigError) as exc_info:
+            common_utils.validate_schema(config, schema, 'Test: ')
+
+        error_msg = str(exc_info.value)
+        # Should contain the generic anyOf error message
+        assert 'not valid under any of the given schemas' in error_msg
+
+    def test_additional_properties_error_message(self):
+        """Test that additionalProperties errors show unsupported fields."""
+        schema = {
+            '$schema': 'http://json-schema.org/draft-07/schema#',
+            'type': 'object',
+            'additionalProperties': False,
+            'properties': {
+                'valid_field': {
+                    'type': 'string'
+                }
+            }
+        }
+
+        config = {'valid_field': 'ok', 'completely_unknown': 'bad'}
+
+        with pytest.raises(exceptions.InvalidSkyPilotConfigError) as exc_info:
+            common_utils.validate_schema(config, schema, 'Test: ')
+
+        error_msg = str(exc_info.value)
+        assert 'completely_unknown' in error_msg
+        assert 'unsupported field' in error_msg.lower()

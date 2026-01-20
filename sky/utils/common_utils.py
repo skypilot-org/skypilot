@@ -759,6 +759,32 @@ def format_float(num: Union[float, int], precision: int = 1) -> str:
     return '{:.0f}'.format(num) if num.is_integer() else f'{num:.{precision}f}'
 
 
+def _get_unsupported_fields_from_anyof_error(
+        e: 'jsonschema.ValidationError') -> List[str]:
+    """Extract unsupported field names from anyOf validation errors.
+
+    When an anyOf validation fails due to additionalProperties, this function
+    finds the unsupported fields from the sub-errors to provide a more helpful
+    error message.
+
+    Args:
+        e: The ValidationError from an anyOf validator.
+
+    Returns:
+        A list of unsupported field names, or an empty list if none found.
+    """
+    unsupported_fields = []
+    for ctx in e.context:
+        if ctx.validator == 'additionalProperties':
+            # Found an additionalProperties sub-error
+            if isinstance(ctx.schema, dict) and isinstance(ctx.instance, dict):
+                known_fields = set(ctx.schema.get('properties', {}).keys())
+                for field in ctx.instance:
+                    if field not in known_fields:
+                        unsupported_fields.append(field)
+    return unsupported_fields
+
+
 def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
     """Validates an object against a given JSON schema.
 
@@ -806,6 +832,22 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
                                         f'{most_similar_field[0]!r}?')
                         else:
                             err_msg += f'Found unsupported field {field!r}.'
+        elif e.validator == 'anyOf' and e.context:
+            # For anyOf errors, check if any sub-errors are due to
+            # additionalProperties (unsupported fields). This provides a more
+            # helpful error message than the generic "not valid under any of
+            # the given schemas".
+            unsupported_fields = _get_unsupported_fields_from_anyof_error(e)
+            if unsupported_fields:
+                err_msg = err_msg_prefix
+                for field in unsupported_fields:
+                    err_msg += f'Found unsupported field {field!r}. '
+                err_msg += f'Check problematic field(s): {e.json_path}'
+            else:
+                message = e.message
+                message = message.replace('type \'object\'', 'type \'dict\'')
+                err_msg = (err_msg_prefix + message +
+                           f'. Check problematic field(s): {e.json_path}')
         else:
             message = e.message
             # Object in jsonschema is represented as dict in Python. Replace
