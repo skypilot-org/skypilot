@@ -4060,6 +4060,29 @@ def show_gpus(
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
 
+    def _get_labeled_zero_gpu_hint(
+            all_nodes_info: List[Tuple[str,
+                                       'models.KubernetesNodesInfo']]) -> str:
+        """Returns a hint if any nodes have GPU labels but 0 GPU resources."""
+        # Collect nodes with GPU labels but 0 GPU resources
+        labeled_zero_gpu_nodes = [
+            (context, node_name)
+            for context, nodes_info in all_nodes_info
+            for node_name, node_info in nodes_info.node_info_dict.items()
+            if (node_info.accelerator_type is not None and
+                node_info.total.get('accelerator_count', 0) == 0)
+        ]
+
+        if not labeled_zero_gpu_nodes:
+            return ''
+
+        node_list = ', '.join(
+            f'{ctx}/{name}' for ctx, name in labeled_zero_gpu_nodes[:3])
+        ellipsis = '...' if len(labeled_zero_gpu_nodes) > 3 else ''
+        return (f'Note: Some Kubernetes nodes have GPU labels but report 0 GPU '
+                f'resources. Please check the node labels and configuration. '
+                f'Affected nodes: {node_list}{ellipsis}.')
+
     def _format_kubernetes_realtime_gpu(
             total_table: Optional['prettytable.PrettyTable'],
             k8s_realtime_infos: List[Tuple[str, 'prettytable.PrettyTable']],
@@ -4125,6 +4148,11 @@ def show_gpus(
                                                            show_node_info=True,
                                                            is_ssh=is_ssh)
 
+                # Check for nodes with GPU labels but 0 GPU resources
+                labeled_zero_hint = _get_labeled_zero_gpu_hint(all_nodes_info)
+                if labeled_zero_hint:
+                    k8s_messages += labeled_zero_hint
+
             if kubernetes_autoscaling:
                 k8s_messages += ('\n' +
                                  kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
@@ -4167,6 +4195,11 @@ def show_gpus(
                                                            all_nodes_info,
                                                            show_node_info=False,
                                                            is_ssh=is_ssh)
+
+                # Check for nodes with GPU labels but 0 GPU resources
+                labeled_zero_hint = _get_labeled_zero_gpu_hint(all_nodes_info)
+                if labeled_zero_hint:
+                    k8s_messages += labeled_zero_hint
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
                 # immediately (e.g., "Resources H100 not found ...")
