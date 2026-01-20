@@ -1,6 +1,5 @@
 """Service specification for SkyServe."""
 import json
-import os
 import textwrap
 from typing import Any, Dict, List, Optional, Union
 
@@ -286,8 +285,23 @@ class SkyServiceSpec:
 
     @staticmethod
     def from_yaml(yaml_path: str) -> 'SkyServiceSpec':
-        with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
-            yaml_content = f.read()
+        """Initializes a service spec from a YAML file, URL, or cloud storage.
+
+        Supports loading from:
+          - Local files: /path/to/service.yaml, ~/service.yaml
+          - HTTP/HTTPS URLs: https://example.com/service.yaml
+          - Cloud storage: s3://bucket/service.yaml, gs://bucket/service.yaml,
+            az://container/service.yaml
+
+        Args:
+            yaml_path: Path to a valid service spec YAML file. Can be a local
+                file path, HTTP/HTTPS URL, or cloud storage URL (s3://, gs://,
+                az://).
+
+        Returns:
+            SkyServiceSpec instance.
+        """
+        yaml_content = yaml_utils.read_file_or_url(yaml_path)
         return SkyServiceSpec.from_yaml_str(yaml_content)
 
     def to_yaml_config(self) -> Dict[str, Any]:
