@@ -190,40 +190,40 @@ export function JobDetailPage() {
             <span>Loading...</span>
           </div>
         ) : (
-          <div className="space-y-8">
+          <div className="space-y-4">
             {/* Info Section */}
             <div id="details">
               <Card>
-                <div className="flex items-center justify-between px-4 pt-4">
-                  <h2 className="text-lg font-semibold">Details</h2>
+                <div className="flex items-center justify-between px-3 pt-3 pb-2">
+                  <h2 className="text-base font-semibold">Details</h2>
                 </div>
-                <div className="p-4">
-                  <div className="grid grid-cols-2 gap-6">
+                <div className="px-3 pb-3">
+                  <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <div className="text-gray-600 font-medium text-base">
+                      <div className="text-gray-600 font-medium text-sm">
                         Job ID
                       </div>
-                      <div className="text-base mt-1">{jobData.id}</div>
+                      <div className="text-sm mt-0.5">{jobData.id}</div>
                     </div>
                     <div>
-                      <div className="text-gray-600 font-medium text-base">
+                      <div className="text-gray-600 font-medium text-sm">
                         Job Name
                       </div>
-                      <div className="text-base mt-1">{jobData.job}</div>
+                      <div className="text-sm mt-0.5">{jobData.job}</div>
                     </div>
                     <div>
-                      <div className="text-gray-600 font-medium text-base">
+                      <div className="text-gray-600 font-medium text-sm">
                         Status
                       </div>
-                      <div className="text-base mt-1">
+                      <div className="text-sm mt-0.5">
                         <StatusBadge status={jobData.status} />
                       </div>
                     </div>
                     <div>
-                      <div className="text-gray-600 font-medium text-base">
+                      <div className="text-gray-600 font-medium text-sm">
                         User
                       </div>
-                      <div className="text-base mt-1">
+                      <div className="text-sm mt-0.5">
                         <UserDisplay
                           username={jobData.user}
                           userHash={jobData.user_hash}
@@ -231,10 +231,10 @@ export function JobDetailPage() {
                       </div>
                     </div>
                     <div>
-                      <div className="text-gray-600 font-medium text-base">
+                      <div className="text-gray-600 font-medium text-sm">
                         Submitted
                       </div>
-                      <div className="text-base mt-1">
+                      <div className="text-sm mt-0.5">
                         {jobData.submitted_at
                           ? formatFullTimestamp(jobData.submitted_at)
                           : 'N/A'}
@@ -242,20 +242,20 @@ export function JobDetailPage() {
                     </div>
                     {jobData.resources && (
                       <div>
-                        <div className="text-gray-600 font-medium text-base">
+                        <div className="text-gray-600 font-medium text-sm">
                           Requested Resources
                         </div>
-                        <div className="text-base mt-1">
+                        <div className="text-sm mt-0.5">
                           {jobData.resources || 'N/A'}
                         </div>
                       </div>
                     )}
                     {jobData.cluster && (
                       <div>
-                        <div className="text-gray-600 font-medium text-base">
+                        <div className="text-gray-600 font-medium text-sm">
                           Cluster
                         </div>
-                        <div className="text-base mt-1">
+                        <div className="text-sm mt-0.5">
                           <Link
                             href={`/clusters/${jobData.cluster}`}
                             className="text-sky-blue hover:underline"
@@ -266,7 +266,7 @@ export function JobDetailPage() {
                       </div>
                     )}
                     <div>
-                      <div className="text-gray-600 font-medium text-base">
+                      <div className="text-gray-600 font-medium text-sm">
                         Git Commit
                       </div>
                       <div className="text-base mt-1 flex items-center">
@@ -306,11 +306,11 @@ export function JobDetailPage() {
             </div>
 
             {/* Logs Section */}
-            <div id="logs" className="mt-6">
+            <div id="logs">
               <Card>
-                <div className="flex items-center justify-between px-4 pt-4">
+                <div className="flex items-center justify-between px-3 pt-3 pb-2">
                   <div className="flex items-center">
-                    <h2 className="text-lg font-semibold">Logs</h2>
+                    <h2 className="text-base font-semibold">Logs</h2>
                     <span className="ml-2 text-xs text-gray-500">
                       (Logs are not streaming; click refresh to fetch the latest
                       logs.)
@@ -350,7 +350,7 @@ export function JobDetailPage() {
                     </Tooltip>
                   </div>
                 </div>
-                <div className="p-4">
+                <div className="px-3 pb-3">
                   {isPending ? (
                     <div className="bg-[#f7f7f7] flex items-center justify-center py-4 text-gray-500">
                       <span>

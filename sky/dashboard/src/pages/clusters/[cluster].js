@@ -481,20 +481,20 @@ function ActiveTab({
   return (
     <div>
       {/* Cluster Info Card */}
-      <div className="mb-6">
+      <div className="mb-4">
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
-          <div className="flex items-center justify-between px-4 pt-4">
-            <h3 className="text-lg font-semibold">
+          <div className="flex items-center justify-between px-3 pt-3 pb-2">
+            <h3 className="text-base font-semibold">
               {isHistoricalCluster ? 'Historical Cluster Details' : 'Details'}
             </h3>
           </div>
-          <div className="p-4">
-            <div className="grid grid-cols-2 gap-6">
+          <div className="px-3 pb-3">
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-gray-600 font-medium text-sm">
                   Status
                 </div>
-                <div className="text-base mt-1">
+                <div className="text-sm mt-0.5">
                   <PluginSlot
                     name="clusters.detail.status.badge"
                     context={clusterData}
@@ -503,10 +503,10 @@ function ActiveTab({
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-gray-600 font-medium text-sm">
                   Cluster
                 </div>
-                <div className="text-base mt-1">
+                <div className="text-sm mt-0.5">
                   {clusterData.cluster_name_on_cloud ? (
                     <NonCapitalizedTooltip
                       content={`Name on ${clusterData.cloud || clusterData.infra?.split('(')[0]?.trim() || 'cloud'}: ${clusterData.cluster_name_on_cloud}`}
@@ -522,8 +522,8 @@ function ActiveTab({
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">User</div>
-                <div className="text-base mt-1">
+                <div className="text-gray-600 font-medium text-sm">User</div>
+                <div className="text-sm mt-0.5">
                   <UserDisplay
                     username={clusterData.user}
                     userHash={clusterData.user_hash}
@@ -531,10 +531,10 @@ function ActiveTab({
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-gray-600 font-medium text-sm">
                   {isHistoricalCluster ? 'Cloud' : 'Infra'}
                 </div>
-                <div className="text-base mt-1">
+                <div className="text-sm mt-0.5">
                   {isHistoricalCluster ? (
                     clusterData.cloud || 'N/A'
                   ) : clusterData.infra ? (
@@ -566,30 +566,30 @@ function ActiveTab({
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-gray-600 font-medium text-sm">
                   Resources
                 </div>
-                <div className="text-base mt-1">
+                <div className="text-sm mt-0.5">
                   {clusterData.resources_str_full ||
                     clusterData.resources_str ||
                     'N/A'}
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-gray-600 font-medium text-sm">
                   Started
                 </div>
-                <div className="text-base mt-1">
+                <div className="text-sm mt-0.5">
                   {clusterData.time
                     ? formatFullTimestamp(new Date(clusterData.time))
                     : 'N/A'}
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-gray-600 font-medium text-sm">
                   Last Event
                 </div>
-                <div className="text-base mt-1">
+                <div className="text-sm mt-0.5">
                   <PluginSlot
                     name="clusters.detail.last_event"
                     context={{ last_event: clusterData.last_event }}
@@ -608,28 +608,28 @@ function ActiveTab({
               {isHistoricalCluster ? (
                 <>
                   <div>
-                    <div className="text-gray-600 font-medium text-base">
+                    <div className="text-gray-600 font-medium text-sm">
                       Duration
                     </div>
-                    <div className="text-base mt-1">
+                    <div className="text-sm mt-0.5">
                       {formatDuration(clusterData.duration)}
                     </div>
                   </div>
                   <div>
-                    <div className="text-gray-600 font-medium text-base">
+                    <div className="text-gray-600 font-medium text-sm">
                       Cost
                     </div>
-                    <div className="text-base mt-1">
+                    <div className="text-sm mt-0.5">
                       {formatCost(clusterData.total_cost)}
                     </div>
                   </div>
                 </>
               ) : (
                 <div>
-                  <div className="text-gray-600 font-medium text-base">
+                  <div className="text-gray-600 font-medium text-sm">
                     Autostop
                   </div>
-                  <div className="text-base mt-1">
+                  <div className="text-sm mt-0.5">
                     {formatAutostop(clusterData.autostop, clusterData.to_down)}
                   </div>
                 </div>
@@ -655,7 +655,7 @@ function ActiveTab({
                   {(clusterData.command ||
                     clusterData.last_creation_command) && (
                     <div className="flex items-center">
-                      <div className="text-gray-600 font-medium text-base">
+                      <div className="text-gray-600 font-medium text-sm">
                         Entrypoint
                       </div>
                       {clusterData.command && (
@@ -678,12 +678,12 @@ function ActiveTab({
                     </div>
                   )}
 
-                  <div className="space-y-4 mt-3">
+                  <div className="space-y-3 mt-2">
                     {/* Creation Command */}
                     {(clusterData.command ||
                       clusterData.last_creation_command) && (
                       <div>
-                        <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
+                        <div className="bg-gray-50 border border-gray-200 rounded-md p-2">
                           <code className="text-sm text-gray-800 font-mono break-all">
                             {clusterData.command ||
                               clusterData.last_creation_command}
@@ -737,7 +737,7 @@ function ActiveTab({
                           </div>
 
                           {isYamlExpanded && (
-                            <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
+                            <div className="bg-gray-50 border border-gray-200 rounded-md p-2 max-h-96 overflow-y-auto">
                               <YamlHighlighter className="whitespace-pre-wrap">
                                 {formatYaml(
                                   clusterData.task_yaml ||
@@ -763,21 +763,21 @@ function ActiveTab({
         !clusterData.full_infra.includes('SSH') &&
         !clusterData.full_infra.includes('ssh') &&
         isGrafanaAvailable && (
-          <div className="mb-6">
+          <div className="mb-4">
             <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
               <div
-                className={`flex items-center justify-between px-4 ${isGpuMetricsExpanded ? 'pt-4' : 'py-4'}`}
+                className={`flex items-center justify-between px-3 ${isGpuMetricsExpanded ? 'pt-3 pb-2' : 'py-3'}`}
               >
                 <button
                   onClick={toggleGpuMetricsExpanded}
                   className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
                 >
                   {isGpuMetricsExpanded ? (
-                    <ChevronDownIcon className="w-5 h-5 mr-2" />
+                    <ChevronDownIcon className="w-4 h-4 mr-2" />
                   ) : (
-                    <ChevronRightIcon className="w-5 h-5 mr-2" />
+                    <ChevronRightIcon className="w-4 h-4 mr-2" />
                   )}
-                  <h3 className="text-lg font-semibold">GPU Metrics</h3>
+                  <h3 className="text-base font-semibold">GPU Metrics</h3>
                 </button>
                 <Tooltip content="Open in Grafana">
                   <button
@@ -812,9 +812,9 @@ function ActiveTab({
                 </Tooltip>
               </div>
               {isGpuMetricsExpanded && (
-                <div className="p-5">
+                <div className="px-3 pb-3">
                   {/* Filtering Controls */}
-                  <div className="mb-4 p-4 bg-gray-50 rounded-md border border-gray-200">
+                  <div className="mb-3 p-3 bg-gray-50 rounded-md border border-gray-200">
                     <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
                       {/* Time Range Selection */}
                       <div className="flex items-center gap-2">
@@ -886,7 +886,7 @@ function ActiveTab({
 
       {/* Jobs Table - Only show for active clusters */}
       {!isHistoricalCluster && (
-        <div className="mb-8">
+        <div className="mb-4">
           <ClusterJobs
             clusterName={clusterData.cluster}
             clusterJobData={clusterJobData}
@@ -903,7 +903,7 @@ function ActiveTab({
         context={{
           clusterHash: clusterData.cluster_hash,
         }}
-        wrapperClassName="mb-8"
+        wrapperClassName="mb-4"
       />
     </div>
   );

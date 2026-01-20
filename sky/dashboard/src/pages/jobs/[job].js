@@ -230,14 +230,14 @@ function JobDetails() {
             <span>Loading...</span>
           </div>
         ) : detailJobData ? (
-          <div className="space-y-8">
+          <div className="space-y-4">
             {/* Details Section */}
             <div id="details-section">
               <Card>
-                <div className="flex items-center justify-between px-4 pt-4">
-                  <h3 className="text-lg font-semibold">Details</h3>
+                <div className="flex items-center justify-between px-3 pt-3 pb-2">
+                  <h3 className="text-base font-semibold">Details</h3>
                 </div>
-                <div className="p-4">
+                <div className="px-3 pb-3">
                   <JobDetailsContent
                     jobData={detailJobData}
                     activeTab="info"
@@ -266,15 +266,15 @@ function JobDetails() {
                 infra: detailJobData.full_infra || detailJobData.infra,
                 refreshTrigger: refreshTrigger,
               }}
-              wrapperClassName="mt-6"
+              wrapperClassName=""
             />
 
             {/* Logs Section */}
-            <div id="logs-section" className="mt-6">
+            <div id="logs-section">
               <Card>
-                <div className="flex items-center justify-between px-4 pt-4">
+                <div className="flex items-center justify-between px-3 pt-3 pb-2">
                   <div className="flex items-center">
-                    <h3 className="text-lg font-semibold">Logs</h3>
+                    <h3 className="text-base font-semibold">Logs</h3>
                     <span className="ml-2 text-xs text-gray-500">
                       (Logs are not streaming; click refresh to fetch the latest
                       logs.)
@@ -315,7 +315,7 @@ function JobDetails() {
                     </Tooltip>
                   </div>
                 </div>
-                <div className="p-4">
+                <div className="px-3 pb-3">
                   <JobDetailsContent
                     jobData={detailJobData}
                     activeTab="logs"
@@ -337,7 +337,7 @@ function JobDetails() {
               context={{
                 jobId: detailJobData.id,
               }}
-              wrapperClassName="mt-6"
+              wrapperClassName=""
             />
 
             {/* Controller Logs Section - Collapsible */}
@@ -393,21 +393,21 @@ function ControllerLogsSection({
   };
 
   return (
-    <div id="controller-logs-section" className="mt-6">
+    <div id="controller-logs-section">
       <Card>
         <div
-          className={`flex items-center justify-between px-4 ${isExpanded ? 'pt-4' : 'py-4'}`}
+          className={`flex items-center justify-between px-3 ${isExpanded ? 'pt-3 pb-2' : 'py-3'}`}
         >
           <button
             onClick={toggleExpanded}
             className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
           >
             {isExpanded ? (
-              <ChevronDownIcon className="w-5 h-5 mr-2" />
+              <ChevronDownIcon className="w-4 h-4 mr-2" />
             ) : (
-              <ChevronRightIcon className="w-5 h-5 mr-2" />
+              <ChevronRightIcon className="w-4 h-4 mr-2" />
             )}
-            <h3 className="text-lg font-semibold">Controller Logs</h3>
+            <h3 className="text-base font-semibold">Controller Logs</h3>
             <span className="ml-2 text-xs text-gray-500">
               (Logs are not streaming; click refresh to fetch the latest logs.)
             </span>
@@ -448,7 +448,7 @@ function ControllerLogsSection({
           )}
         </div>
         {isExpanded && (
-          <div className="p-4">
+          <div className="px-3 pb-3">
             <JobDetailsContent
               jobData={detailJobData}
               activeTab="controllerlogs"
@@ -769,16 +769,16 @@ function JobDetailsContent({
 
   // Default 'info' tab content
   return (
-    <div className="grid grid-cols-2 gap-6">
+    <div className="grid grid-cols-2 gap-4">
       <div>
-        <div className="text-gray-600 font-medium text-base">Job ID (Name)</div>
-        <div className="text-base mt-1">
+        <div className="text-gray-600 font-medium text-sm">Job ID (Name)</div>
+        <div className="text-sm mt-0.5">
           {jobData.id} {jobData.name ? `(${jobData.name})` : ''}
         </div>
       </div>
       <div>
-        <div className="text-gray-600 font-medium text-base">Status</div>
-        <div className="text-base mt-1">
+        <div className="text-gray-600 font-medium text-sm">Status</div>
+        <div className="text-sm mt-0.5">
           <PluginSlot
             name="jobs.detail.status.badge"
             context={jobData}
@@ -787,14 +787,14 @@ function JobDetailsContent({
         </div>
       </div>
       <div>
-        <div className="text-gray-600 font-medium text-base">User</div>
-        <div className="text-base mt-1">
+        <div className="text-gray-600 font-medium text-sm">User</div>
+        <div className="text-sm mt-0.5">
           <UserDisplay username={jobData.user} userHash={jobData.user_hash} />
         </div>
       </div>
       <div>
-        <div className="text-gray-600 font-medium text-base">Workspace</div>
-        <div className="text-base mt-1">
+        <div className="text-gray-600 font-medium text-sm">Workspace</div>
+        <div className="text-sm mt-0.5">
           <Link
             href="/workspaces"
             className="text-gray-700 hover:text-blue-600 hover:underline"
@@ -804,24 +804,24 @@ function JobDetailsContent({
         </div>
       </div>
       <div>
-        <div className="text-gray-600 font-medium text-base">Submitted</div>
-        <div className="text-base mt-1">
+        <div className="text-gray-600 font-medium text-sm">Submitted</div>
+        <div className="text-sm mt-0.5">
           {jobData.submitted_at
             ? formatFullTimestamp(jobData.submitted_at)
             : 'N/A'}
         </div>
       </div>
       <div>
-        <div className="text-gray-600 font-medium text-base">
+        <div className="text-gray-600 font-medium text-sm">
           Requested Resources
         </div>
-        <div className="text-base mt-1">
+        <div className="text-sm mt-0.5">
           {jobData.requested_resources || 'N/A'}
         </div>
       </div>
       <div>
-        <div className="text-gray-600 font-medium text-base">Infra</div>
-        <div className="text-base mt-1">
+        <div className="text-gray-600 font-medium text-sm">Infra</div>
+        <div className="text-sm mt-0.5">
           {jobData.infra ? (
             <NonCapitalizedTooltip
               content={jobData.full_infra || jobData.infra}
@@ -844,13 +844,13 @@ function JobDetailsContent({
         </div>
       </div>
       <div>
-        <div className="text-gray-600 font-medium text-base">Resources</div>
-        <div className="text-base mt-1">
+        <div className="text-gray-600 font-medium text-sm">Resources</div>
+        <div className="text-sm mt-0.5">
           {jobData.resources_str_full || jobData.resources_str || '-'}
         </div>
       </div>
       <div>
-        <div className="text-gray-600 font-medium text-base">Git Commit</div>
+        <div className="text-gray-600 font-medium text-sm">Git Commit</div>
         <div className="text-base mt-1 flex items-center">
           {jobData.git_commit && jobData.git_commit !== '-' ? (
             <span className="flex items-center mr-2">
@@ -882,18 +882,18 @@ function JobDetailsContent({
       </div>
 
       <div>
-        <div className="text-gray-600 font-medium text-base">Pool</div>
-        <div className="text-base mt-1">
+        <div className="text-gray-600 font-medium text-sm">Pool</div>
+        <div className="text-sm mt-0.5">
           {renderPoolLink(jobData.pool, jobData.pool_hash, poolsData)}
         </div>
       </div>
 
       {/* External Links section - full width row */}
       <div className="col-span-2">
-        <div className="text-gray-600 font-medium text-base">
+        <div className="text-gray-600 font-medium text-sm">
           External Links
         </div>
-        <div className="text-base mt-1">
+        <div className="text-sm mt-0.5">
           {combinedLinks && Object.keys(combinedLinks).length > 0 ? (
             <div className="flex flex-wrap gap-4">
               {Object.entries(combinedLinks).map(([label, url]) => {
@@ -940,7 +940,7 @@ function JobDetailsContent({
       {(jobData.entrypoint || jobData.dag_yaml) && (
         <div className="col-span-2">
           <div className="flex items-center">
-            <div className="text-gray-600 font-medium text-base">
+            <div className="text-gray-600 font-medium text-sm">
               Entrypoint
             </div>
             {jobData.entrypoint && (
@@ -962,11 +962,11 @@ function JobDetailsContent({
             )}
           </div>
 
-          <div className="space-y-4 mt-3">
+          <div className="space-y-3 mt-2">
             {/* Launch Command */}
             {jobData.entrypoint && (
               <div>
-                <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
+                <div className="bg-gray-50 border border-gray-200 rounded-md p-2">
                   <code className="text-sm text-gray-800 font-mono break-all">
                     {jobData.entrypoint}
                   </code>
@@ -1008,7 +1008,7 @@ function JobDetailsContent({
                 </div>
 
                 {isYamlExpanded && (
-                  <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
+                  <div className="bg-gray-50 border border-gray-200 rounded-md p-2 max-h-96 overflow-y-auto">
                     {(() => {
                       const yamlDocs = formatJobYaml(jobData.dag_yaml);
                       if (yamlDocs.length === 0) {
@@ -1025,7 +1025,7 @@ function JobDetailsContent({
                       } else {
                         // Multiple documents - show with collapsible sections
                         return (
-                          <div className="space-y-4">
+                          <div className="space-y-3">
                             {yamlDocs.map((doc, index) => (
                               <div
                                 key={index}
