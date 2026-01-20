@@ -742,6 +742,18 @@ class FailoverStrategyExecutor(StrategyExecutor):
                 'Cluster should be launched.', handle)
             launched_resources = handle.launched_resources
             self._launched_resources = launched_resources
+
+            # Persist infra info to database for sorting/filtering
+            if launched_resources is not None:
+                cloud = str(launched_resources.cloud
+                            ) if launched_resources.cloud else None
+                await asyncio.to_thread(
+                    state.set_job_infra,
+                    self.job_id,
+                    cloud=cloud,
+                    region=launched_resources.region,
+                    zone=launched_resources.zone,
+                )
         else:
             self._launched_resources = None
         return job_submitted_at

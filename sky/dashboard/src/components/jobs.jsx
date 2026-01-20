@@ -25,7 +25,12 @@ import {
   renderPoolLink,
 } from '@/components/utils';
 import { UI_CONFIG } from '@/lib/config';
-import { getPoolStatus } from '@/data/connectors/jobs';
+import {
+  getPoolStatus,
+  getPluginJobsFetcher,
+  hasPluginJobsProvider,
+  onJobsProviderRegistration,
+} from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
@@ -389,6 +394,22 @@ export function ManagedJobsTable({
   // Guards multiple concurrent fetches: only latest response should commit
   const requestSeqRef = useRef(0);
 
+  // Plugin provider support
+  const [isServerPagination, setIsServerPagination] = useState(false);
+  const [pluginVersion, setPluginVersion] = useState(0);
+  const lastLoggedModeRef = useRef(null);
+
+  // Subscribe to plugin registration events
+  useEffect(() => {
+    if (hasPluginJobsProvider()) {
+      setPluginVersion((v) => v + 1);
+    }
+    const unsubscribe = onJobsProviderRegistration(() => {
+      setPluginVersion((v) => v + 1);
+    });
+    return unsubscribe;
+  }, []);
+
   // Determine if we should show the Workspace column
   // Only show if there are multiple workspaces or a workspace other than 'default'
   const shouldShowWorkspace = React.useMemo(() => {
@@ -428,6 +449,42 @@ export function ManagedJobsTable({
       },
     });
   };
+
+  // Fetch jobs using the plugin's server-side pagination
+  const fetchJobsWithPlugin = React.useCallback(
+    async (pluginFetcher, statusesParam) => {
+      const pluginOptions = {
+        page: currentPage,
+        limit: pageSize,
+        sortBy: sortConfig.key || 'submitted_at',
+        sortOrder: sortConfig.direction === 'ascending' ? 'asc' : 'desc',
+        filters: filters || [],
+        statuses: statusesParam || [],
+      };
+
+      console.log('Fetching jobs with plugin:', pluginOptions);
+
+      const response = await dashboardCache.get(
+        pluginFetcher,
+        [pluginOptions],
+        { ttl: 30000 }
+      );
+
+      // Map plugin response to expected format
+      if (response) {
+        return {
+          jobs: response.items || response.data || [],
+          total: response.total || 0,
+          totalNoFilter: response.totalNoFilter || response.total || 0,
+          controllerStopped: response.controllerStopped || false,
+          statusCounts: response.statusCounts || {},
+          cacheStatus: 'plugin',
+        };
+      }
+      return null;
+    },
+    [currentPage, pageSize, sortConfig, filters]
+  );
 
   const fetchData = React.useCallback(
     async (options = {}) => {
@@ -477,6 +534,22 @@ export function ManagedJobsTable({
         let jobsResponse;
         let clustersData = null;
 
+        // Check if plugin provider is available
+        const pluginFetcher = getPluginJobsFetcher();
+        const usePlugin = !!pluginFetcher;
+
+        // Log mode change
+        if (lastLoggedModeRef.current !== usePlugin) {
+          lastLoggedModeRef.current = usePlugin;
+          if (usePlugin) {
+            console.log(
+              '[ManagedJobsTable] Using plugin fetcher for server-side pagination'
+            );
+          } else {
+            console.log('[ManagedJobsTable] Using default jobsCacheManager');
+          }
+        }
+
         // Check cache status before making requests
         const isDataCached = jobsCacheManager.isDataCached(params);
         const isDataLoading = jobsCacheManager.isDataLoading(params);
@@ -488,7 +561,16 @@ export function ManagedJobsTable({
             console.error('Error fetching clusters:', error);
           }
         }
-        jobsResponse = await jobsCacheManager.getPaginatedJobs(params);
+
+        if (usePlugin) {
+          // Use plugin's fetch function
+          jobsResponse = await fetchJobsWithPlugin(pluginFetcher, statusesParam);
+          setIsServerPagination(true);
+        } else {
+          // Use default jobsCacheManager
+          jobsResponse = await jobsCacheManager.getPaginatedJobs(params);
+          setIsServerPagination(false);
+        }
 
         // Always process the response, even if it's null
         const {
@@ -562,6 +644,9 @@ export function ManagedJobsTable({
       selectedStatuses,
       showAllMode,
       activeTab,
+      sortConfig,
+      pluginVersion,
+      fetchJobsWithPlugin,
     ]
   );
 

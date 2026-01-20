@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import {
   CLUSTER_NOT_UP_ERROR,
@@ -8,6 +8,55 @@ import {
 import dashboardCache from '@/lib/cache';
 import { apiClient } from './client';
 import { applyEnhancements } from '@/plugins/dataEnhancement';
+
+// ============ Plugin Data Provider Support ============
+
+// Plugin provider storage
+let pluginJobsProvider = null;
+const jobsProviderListeners = [];
+
+/**
+ * Allow plugins to set a custom jobs data provider
+ * @param {Object} provider - Provider with fetch function
+ */
+export function setJobsDataProvider(provider) {
+  pluginJobsProvider = provider;
+  console.log('[JobsConnector] Jobs data provider set:', provider);
+  // Notify listeners
+  jobsProviderListeners.forEach((fn) => fn(provider));
+}
+
+/**
+ * Check if a plugin jobs provider is registered
+ */
+export function hasPluginJobsProvider() {
+  return !!pluginJobsProvider;
+}
+
+/**
+ * Get the plugin's fetch function
+ */
+export function getPluginJobsFetcher() {
+  return pluginJobsProvider?.fetch || null;
+}
+
+/**
+ * Subscribe to jobs provider registration events
+ */
+export function onJobsProviderRegistration(callback) {
+  jobsProviderListeners.push(callback);
+  return () => {
+    const index = jobsProviderListeners.indexOf(callback);
+    if (index > -1) {
+      jobsProviderListeners.splice(index, 1);
+    }
+  };
+}
+
+// Expose setter on window for plugin access
+if (typeof window !== 'undefined') {
+  window.__skySetJobsDataProvider = setJobsDataProvider;
+}
 
 // Configuration
 const DEFAULT_TAIL_LINES = 5000;
@@ -779,4 +828,267 @@ export async function downloadManagedJobLogs({
     console.error('Error downloading managed job logs:', error);
     showToast(`Error downloading managed job logs: ${error.message}`, 'error');
   }
+}
+
+// ============ useJobsData Hook ============
+
+/**
+ * Hook for jobs data with pagination support.
+ * If a plugin has registered a data provider, uses it for server-side pagination.
+ * Otherwise, falls back to client-side pagination with getManagedJobs.
+ *
+ * @param {Object} options - Hook options
+ * @param {number} options.refreshInterval - Auto-refresh interval in ms
+ * @param {Object} options.sortConfig - Sort configuration { key, direction }
+ * @param {Array} options.filters - Array of filter objects
+ * @param {Array} options.statuses - Array of status strings to filter by
+ * @returns {Object} Jobs data with pagination state and actions
+ */
+export function useJobsData(options = {}) {
+  const {
+    refreshInterval = null,
+    sortConfig = { key: null, direction: 'ascending' },
+    filters = [],
+    statuses = [],
+  } = options;
+
+  // Convert sortConfig to API format
+  // Default to submitted_at desc (newest first) when no sort is specified
+  const sortBy = sortConfig.key || 'submitted_at';
+  const sortOrder = sortConfig.key
+    ? sortConfig.direction === 'ascending'
+      ? 'asc'
+      : 'desc'
+    : 'desc';
+
+  // Serialize filters for stable dependency comparison
+  const filtersKey = JSON.stringify(filters);
+  const statusesKey = JSON.stringify(statuses);
+
+  const [data, setData] = useState([]);
+  const [fullData, setFullData] = useState([]); // Full dataset for client-side filtering
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [total, setTotal] = useState(0);
+  const [totalNoFilter, setTotalNoFilter] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [hasNext, setHasNext] = useState(false);
+  const [hasPrev, setHasPrev] = useState(false);
+  const [error, setError] = useState(null);
+  const [isServerPagination, setIsServerPagination] = useState(false);
+  const [controllerStopped, setControllerStopped] = useState(false);
+  const [statusCounts, setStatusCounts] = useState({});
+
+  // Track plugin registration to trigger re-fetch
+  const [pluginVersion, setPluginVersion] = useState(0);
+  const lastLoggedModeRef = useRef(null);
+
+  // Subscribe to plugin registration events
+  useEffect(() => {
+    // If plugin is already registered, trigger a fetch
+    if (hasPluginJobsProvider()) {
+      setPluginVersion((v) => v + 1);
+    }
+
+    const unsubscribe = onJobsProviderRegistration(() => {
+      setPluginVersion((v) => v + 1);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [filtersKey, statusesKey]);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    // Check if plugin provider is available
+    const pluginFetcher = getPluginJobsFetcher();
+    const usePlugin = !!pluginFetcher;
+
+    // Log mode change
+    if (lastLoggedModeRef.current !== usePlugin) {
+      lastLoggedModeRef.current = usePlugin;
+      if (usePlugin) {
+        console.log(
+          '[useJobsData] Using plugin fetcher for server-side pagination'
+        );
+      } else {
+        console.log('[useJobsData] Using default client-side pagination');
+      }
+    }
+
+    try {
+      if (usePlugin) {
+        // Use plugin's fetch function with pagination params
+        const result = await dashboardCache.get(
+          pluginFetcher,
+          [
+            {
+              page,
+              limit,
+              sortBy,
+              sortOrder,
+              filters,
+              statuses,
+            },
+          ],
+          { ttl: 30000 }
+        );
+
+        // Handle controller stopped
+        if (result.controllerStopped) {
+          setControllerStopped(true);
+          setData([]);
+          setFullData([]);
+          setTotal(0);
+          setTotalPages(0);
+          setLoading(false);
+          return;
+        }
+
+        const itemCount = (result.items || result.data || []).length;
+        const resultTotal = result.total || 0;
+        const resultTotalNoFilter = result.totalNoFilter || resultTotal;
+        const resultTotalPages = result.totalPages || result.total_pages || 1;
+        const resultHasNext = result.hasNext || result.has_next || false;
+        const resultHasPrev = result.hasPrev || result.has_prev || false;
+
+        const resultData = result.items || result.data || [];
+        setData(resultData);
+        setFullData(resultData);
+        setTotal(resultTotal);
+        setTotalNoFilter(resultTotalNoFilter);
+        setTotalPages(resultTotalPages);
+        setHasNext(resultHasNext);
+        setHasPrev(resultHasPrev);
+        setIsServerPagination(true);
+        setControllerStopped(false);
+        setStatusCounts(result.statusCounts || {});
+
+        // Prefetch next page in background if there is one
+        if (resultHasNext) {
+          const nextPageOptions = {
+            page: page + 1,
+            limit,
+            sortBy,
+            sortOrder,
+            filters,
+            statuses,
+          };
+          dashboardCache
+            .get(pluginFetcher, [nextPageOptions], { ttl: 30000 })
+            .then(() => console.log('[useJobsData] Prefetched page', page + 1))
+            .catch((err) =>
+              console.warn('[useJobsData] Prefetch failed:', err)
+            );
+        }
+      } else {
+        // Default: fetch all jobs and paginate client-side
+        const response = await dashboardCache.get(getManagedJobs, [
+          { allUsers: true },
+        ]);
+
+        // Handle controller stopped
+        if (response.controllerStopped) {
+          setControllerStopped(true);
+          setData([]);
+          setFullData([]);
+          setTotal(0);
+          setTotalPages(0);
+          setLoading(false);
+          return;
+        }
+
+        // Check if plugin became available while we were fetching
+        if (getPluginJobsFetcher()) {
+          console.log(
+            '[useJobsData] Plugin became available during default fetch, skipping state update'
+          );
+          return;
+        }
+
+        const allJobs = response.jobs || [];
+
+        // Client-side pagination
+        const clientTotal = allJobs.length;
+        const clientTotalPages = Math.ceil(clientTotal / limit) || 1;
+        const startIndex = (page - 1) * limit;
+        const paginatedData = allJobs.slice(startIndex, startIndex + limit);
+
+        setData(paginatedData);
+        setFullData(allJobs);
+        setTotal(clientTotal);
+        setTotalNoFilter(response.totalNoFilter || clientTotal);
+        setTotalPages(clientTotalPages);
+        setHasNext(page < clientTotalPages);
+        setHasPrev(page > 1);
+        setIsServerPagination(false);
+        setControllerStopped(false);
+        setStatusCounts(response.statusCounts || {});
+      }
+    } catch (fetchError) {
+      console.error('[useJobsData] Error fetching jobs:', fetchError);
+      setError(fetchError);
+      setData([]);
+      setFullData([]);
+    }
+
+    setLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, limit, sortBy, sortOrder, filtersKey, statusesKey, pluginVersion]);
+
+  // Fetch data on mount and when dependencies change
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Auto-refresh
+  useEffect(() => {
+    if (!refreshInterval) return;
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchData();
+      }
+    }, refreshInterval);
+    return () => clearInterval(interval);
+  }, [refreshInterval, fetchData]);
+
+  // Handle limit change - reset to page 1
+  const handleSetLimit = useCallback((newLimit) => {
+    setLimit(newLimit);
+    setPage(1);
+  }, []);
+
+  return {
+    // Data - current page slice (paginated)
+    data,
+    // allData - full dataset for client-side filtering (in server mode, same as data)
+    allData: fullData,
+    total,
+    totalNoFilter,
+    statusCounts,
+
+    // Pagination state
+    page,
+    limit,
+    totalPages,
+    hasNext,
+    hasPrev,
+
+    // Pagination actions
+    setPage,
+    setLimit: handleSetLimit,
+
+    // Other
+    loading,
+    error,
+    refresh: fetchData,
+    isServerPagination,
+    controllerStopped,
+  };
 }
