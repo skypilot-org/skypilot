@@ -234,6 +234,13 @@ def pytest_addoption(parser):
               'has no effect when running locally)'),
     )
     parser.addoption(
+        '--submodule-base-branch',
+        type=str,
+        default=None,
+        help=('Base branch for submodule tests (configured in Buildkite '
+              'pipeline; has no effect when running locally)'),
+    )
+    parser.addoption(
         '--backend-test-cluster',
         type=str,
         default=None,
