@@ -398,11 +398,11 @@ function normalizeTableColumn(config) {
 /**
  * Normalizes a URL by stripping credentials and ensuring it's safe for history API.
  * This prevents SecurityError when the current URL has credentials but the target URL doesn't.
+ * Relative URLs are returned as-is since they're safe for history API.
  * @param {string} url - The URL to normalize
- * @param {string} baseUrl - Optional base URL for relative URLs
- * @returns {string} Normalized URL without credentials
+ * @returns {string} Normalized URL without credentials, or the original URL if it's relative or invalid
  */
-function normalizeUrlForHistory(url, baseUrl = null) {
+function normalizeUrlForHistory(url) {
   if (!url || typeof url !== 'string') {
     return url;
   }
