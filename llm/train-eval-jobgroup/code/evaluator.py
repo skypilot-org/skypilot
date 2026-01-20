@@ -135,8 +135,11 @@ def main():
     print("Waiting for checkpoints...")
     print("-" * 60)
 
-    no_new_count = 0
-    while no_new_count < 24:  # Exit after ~120 seconds with no new checkpoints
+    training_complete = False
+    complete_marker_path = os.path.join(args.checkpoint_dir,
+                                        'training_complete')
+
+    while True:
         # Get current checkpoint files
         current_checkpoints = get_checkpoint_files(args.checkpoint_dir)
 
@@ -144,8 +147,6 @@ def main():
         new_checkpoints = current_checkpoints - evaluated_checkpoints
 
         if new_checkpoints:
-            no_new_count = 0  # Reset counter
-
             # Sort by epoch number
             sorted_checkpoints = sorted(
                 new_checkpoints,
@@ -176,27 +177,19 @@ def main():
                     print(f"Error evaluating {checkpoint_path}: {e}")
                     # Don't mark as evaluated, will retry next poll
                     continue
-        else:
-            no_new_count += 1
 
-        # Check if training is complete (look for latest.json)
-        latest_path = os.path.join(args.checkpoint_dir, 'latest.json')
-        if os.path.exists(latest_path) and no_new_count >= 2:
-            try:
-                import json
-                with open(latest_path, 'r') as f:
-                    latest = json.load(f)
-                # Check if we've evaluated the latest checkpoint
-                latest_ckpt = os.path.join(args.checkpoint_dir,
-                                           latest['checkpoint'])
-                if latest_ckpt in evaluated_checkpoints:
-                    # Wait a bit more to ensure no more checkpoints
-                    time.sleep(args.poll_interval * 2)
-                    if get_checkpoint_files(
-                            args.checkpoint_dir) == evaluated_checkpoints:
-                        break
-            except Exception:
-                pass
+        # Check if training is complete (look for training_complete marker)
+        if os.path.exists(complete_marker_path):
+            if not training_complete:
+                print("\nDetected training completion marker.")
+                training_complete = True
+
+            # Evaluate any remaining checkpoints
+            remaining = get_checkpoint_files(
+                args.checkpoint_dir) - evaluated_checkpoints
+            if not remaining:
+                print("All checkpoints evaluated. Exiting.")
+                break
 
         time.sleep(args.poll_interval)
 

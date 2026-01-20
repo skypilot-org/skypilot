@@ -3,12 +3,18 @@
 # This is a simplified CPU-only version for testing the job group functionality.
 # It demonstrates the service connectivity without requiring GPUs.
 #
+# Primary/Auxiliary Behavior:
+#   The test-client is the primary task. When tests complete, all auxiliary
+#   services are terminated after a 5-second grace period.
+#
 # Usage:
 #   sky jobs launch llm/rl-post-training-jobgroup/rlhf-math-jobgroup-cpu.yaml
 ---
 name: rlhf-math-cpu
 placement: SAME_INFRA
 execution: parallel
+primary_tasks: [test-client]
+termination_delay: 5s
 
 ---
 # Data Server: Serves math prompts from GSM8K dataset

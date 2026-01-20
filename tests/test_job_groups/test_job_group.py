@@ -11,6 +11,7 @@ from sky import dag as dag_lib
 from sky import resources as resources_lib
 from sky import task as task_lib
 from sky.utils import dag_utils
+from sky.utils import resources_utils
 
 
 class TestJobGroupYamlParsing:
@@ -178,6 +179,256 @@ run: echo hello
                 os.unlink(f.name)
 
 
+class TestPrimaryJobsParsing:
+    """Tests for primary_tasks and termination_delay parsing."""
+
+    def test_load_job_group_with_primary_tasks(self):
+        """Test loading JobGroup with primary_tasks field."""
+        yaml_content = """
+---
+name: test-rl
+placement: SAME_INFRA
+execution: parallel
+primary_tasks: [trainer]
+---
+name: trainer
+run: python train.py
+---
+name: replay-buffer
+run: python replay_buffer.py
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                dag = dag_utils.load_job_group_from_yaml(f.name)
+                assert dag.primary_tasks == ['trainer']
+                assert dag.termination_delay is None
+            finally:
+                os.unlink(f.name)
+
+    def test_load_job_group_with_simple_termination_delay(self):
+        """Test loading JobGroup with simple termination_delay string."""
+        yaml_content = """
+---
+name: test-rl
+placement: SAME_INFRA
+execution: parallel
+primary_tasks: [trainer]
+termination_delay: 30s
+---
+name: trainer
+run: echo trainer
+---
+name: replay-buffer
+run: echo buffer
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                dag = dag_utils.load_job_group_from_yaml(f.name)
+                assert dag.primary_tasks == ['trainer']
+                assert dag.termination_delay == '30s'
+                assert dag.get_termination_delay_secs('replay-buffer') == 30
+            finally:
+                os.unlink(f.name)
+
+    def test_load_job_group_with_dict_termination_delay(self):
+        """Test loading JobGroup with dict termination_delay."""
+        yaml_content = """
+---
+name: test-rl
+placement: SAME_INFRA
+execution: parallel
+primary_tasks: [trainer]
+termination_delay:
+  default: 10s
+  replay-buffer: 30s
+  evaluator: 1m
+---
+name: trainer
+run: echo trainer
+---
+name: replay-buffer
+run: echo buffer
+---
+name: evaluator
+run: echo eval
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                dag = dag_utils.load_job_group_from_yaml(f.name)
+                assert dag.primary_tasks == ['trainer']
+                assert isinstance(dag.termination_delay, dict)
+                assert dag.get_termination_delay_secs('replay-buffer') == 30
+                assert dag.get_termination_delay_secs('evaluator') == 60
+                # Unknown job gets default
+                assert dag.get_termination_delay_secs('unknown') == 10
+            finally:
+                os.unlink(f.name)
+
+    def test_load_job_group_invalid_primary_job_name(self):
+        """Test that referencing unknown job in primary_tasks raises error."""
+        yaml_content = """
+---
+name: test-group
+placement: SAME_INFRA
+primary_tasks: [nonexistent]
+---
+name: job1
+run: echo hello
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                with pytest.raises(
+                        ValueError,
+                        match='primary_tasks references unknown job'):
+                    dag_utils.load_job_group_from_yaml(f.name)
+            finally:
+                os.unlink(f.name)
+
+    def test_load_job_group_invalid_termination_delay_format(self):
+        """Test that invalid termination_delay format raises error."""
+        yaml_content = """
+---
+name: test-group
+placement: SAME_INFRA
+primary_tasks: [job1]
+termination_delay: invalid
+---
+name: job1
+run: echo hello
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                with pytest.raises(ValueError, match='Invalid time duration'):
+                    dag_utils.load_job_group_from_yaml(f.name)
+            finally:
+                os.unlink(f.name)
+
+    def test_load_job_group_termination_delay_dict_unknown_job(self):
+        """Test that termination_delay dict with unknown job raises error."""
+        yaml_content = """
+---
+name: test-group
+placement: SAME_INFRA
+primary_tasks: [job1]
+termination_delay:
+  unknown-job: 30s
+---
+name: job1
+run: echo hello
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                with pytest.raises(
+                        ValueError,
+                        match='termination_delay references unknown job'):
+                    dag_utils.load_job_group_from_yaml(f.name)
+            finally:
+                os.unlink(f.name)
+
+    def test_get_termination_delay_secs_no_delay(self):
+        """Test get_termination_delay_secs returns 0 when not configured."""
+        dag = dag_lib.Dag()
+        assert dag.get_termination_delay_secs('any-job') == 0
+
+    def test_get_termination_delay_secs_simple_string(self):
+        """Test get_termination_delay_secs with simple string."""
+        dag = dag_lib.Dag()
+        dag.termination_delay = '45s'
+        assert dag.get_termination_delay_secs('any-job') == 45
+
+    def test_get_termination_delay_secs_dict_with_default(self):
+        """Test get_termination_delay_secs with dict and default."""
+        dag = dag_lib.Dag()
+        dag.termination_delay = {'default': '20s', 'special-job': '2m'}
+        assert dag.get_termination_delay_secs('special-job') == 120
+        assert dag.get_termination_delay_secs('other-job') == 20
+
+    def test_get_termination_delay_secs_dict_no_default(self):
+        """Test get_termination_delay_secs with dict but no default."""
+        dag = dag_lib.Dag()
+        dag.termination_delay = {'special-job': '30s'}
+        assert dag.get_termination_delay_secs('special-job') == 30
+        assert dag.get_termination_delay_secs('other-job') == 0  # No default
+
+    def test_dump_job_group_with_primary_tasks(self):
+        """Test dumping JobGroup with primary_tasks to YAML."""
+        dag = dag_lib.Dag()
+        dag.name = 'test-group'
+        dag.set_dag_config(dag_lib.DagPlacement.SAME_INFRA,
+                           dag_lib.DagExecution.PARALLEL)
+        dag.primary_tasks = ['job1']
+        dag.termination_delay = '30s'
+
+        # Add tasks
+        task1 = task_lib.Task(name='job1')
+        task1.set_resources(resources_lib.Resources())
+        task2 = task_lib.Task(name='job2')
+        task2.set_resources(resources_lib.Resources())
+        dag.add(task1)
+        dag.add(task2)
+
+        yaml_str = dag_utils.dump_job_group_to_yaml_str(dag)
+
+        # Reload and verify
+        reloaded_dag = dag_utils.load_job_group_from_yaml_str(yaml_str)
+        assert reloaded_dag.primary_tasks == ['job1']
+        assert reloaded_dag.termination_delay == '30s'
+
+    def test_duration_parsing_various_formats(self):
+        """Test that various time formats are parsed correctly."""
+        from sky.utils import resources_utils
+
+        # Seconds
+        assert resources_utils.parse_time_seconds('30') == 30
+        assert resources_utils.parse_time_seconds('30s') == 30
+        assert resources_utils.parse_time_seconds('30S') == 30
+
+        # Minutes
+        assert resources_utils.parse_time_seconds('5m') == 300
+        assert resources_utils.parse_time_seconds('5M') == 300
+
+        # Hours
+        assert resources_utils.parse_time_seconds('1h') == 3600
+        assert resources_utils.parse_time_seconds('2H') == 7200
+
+        # Days
+        assert resources_utils.parse_time_seconds('1d') == 86400
+
+    def test_duration_parsing_invalid_format(self):
+        """Test that invalid duration format raises ValueError."""
+        from sky.utils import resources_utils
+
+        with pytest.raises(ValueError, match='Invalid time format'):
+            resources_utils.parse_time_seconds('invalid')
+
+        with pytest.raises(ValueError, match='Invalid time format'):
+            resources_utils.parse_time_seconds('30x')
+
+
 class TestDagJobGroup:
     """Tests for DAG JobGroup functionality."""
 
@@ -194,6 +445,12 @@ class TestDagJobGroup:
         assert dag.is_job_group() is True
         assert dag.placement == dag_lib.DagPlacement.SAME_INFRA
         assert dag.execution == dag_lib.DagExecution.PARALLEL
+
+    def test_primary_tasks_default(self):
+        """Test that primary_tasks is None by default."""
+        dag = dag_lib.Dag()
+        assert dag.primary_tasks is None
+        assert dag.termination_delay is None
 
 
 class TestJobGroupNetworking:
@@ -672,6 +929,356 @@ class TestDocstringQuality:
         for typo in typos:
             assert typo not in source.lower(), (
                 f'Found typo "{typo}" in controller.py')
+
+
+class TestPrimaryAuxiliaryLogic:
+    """Tests for primary/auxiliary job logic and edge cases."""
+
+    def test_multiple_primary_tasks(self):
+        """Test JobGroup with multiple primary tasks."""
+        yaml_content = """
+---
+name: multi-primary
+placement: SAME_INFRA
+execution: parallel
+primary_tasks: [trainer, evaluator]
+termination_delay: 30s
+---
+name: trainer
+run: echo trainer
+---
+name: evaluator
+run: echo evaluator
+---
+name: replay-buffer
+run: echo buffer
+---
+name: data-server
+run: echo data
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                dag = dag_utils.load_job_group_from_yaml(f.name)
+                assert set(dag.primary_tasks) == {'trainer', 'evaluator'}
+                assert len(dag.tasks) == 4
+                # Verify non-primary tasks get the delay
+                assert dag.get_termination_delay_secs('replay-buffer') == 30
+                assert dag.get_termination_delay_secs('data-server') == 30
+                # Primary tasks also get the delay (though they won't be terminated)
+                assert dag.get_termination_delay_secs('trainer') == 30
+            finally:
+                os.unlink(f.name)
+
+    def test_empty_primary_tasks_list_means_all_primary(self):
+        """Test that empty primary_tasks list means all jobs are primary.
+
+        An empty list is treated as equivalent to not setting primary_tasks
+        (all jobs are primary), so it's stored as None.
+        """
+        yaml_content = """
+---
+name: all-primary
+placement: SAME_INFRA
+execution: parallel
+primary_tasks: []
+---
+name: job1
+run: echo job1
+---
+name: job2
+run: echo job2
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                dag = dag_utils.load_job_group_from_yaml(f.name)
+                # Empty list is treated as "all primary" (same as None)
+                assert dag.primary_tasks is None
+            finally:
+                os.unlink(f.name)
+
+    def test_no_primary_tasks_field_means_all_primary(self):
+        """Test that omitting primary_tasks means all jobs are primary."""
+        yaml_content = """
+---
+name: default-all-primary
+placement: SAME_INFRA
+execution: parallel
+---
+name: job1
+run: echo job1
+---
+name: job2
+run: echo job2
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                dag = dag_utils.load_job_group_from_yaml(f.name)
+                assert dag.primary_tasks is None
+            finally:
+                os.unlink(f.name)
+
+    def test_termination_delay_without_primary_tasks_allowed(self):
+        """Test that termination_delay without primary_tasks is allowed.
+
+        When primary_tasks is not specified, all jobs are primary, so
+        termination_delay has no effect but is still allowed.
+        """
+        yaml_content = """
+---
+name: delay-no-primary
+placement: SAME_INFRA
+execution: parallel
+termination_delay: 30s
+---
+name: job1
+run: echo job1
+---
+name: job2
+run: echo job2
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                dag = dag_utils.load_job_group_from_yaml(f.name)
+                # termination_delay is set even without primary_tasks
+                assert dag.termination_delay == '30s'
+                # primary_tasks is None (all jobs are primary)
+                assert dag.primary_tasks is None
+            finally:
+                os.unlink(f.name)
+
+    def test_primary_task_can_be_single_item(self):
+        """Test primary_tasks with a single item works."""
+        yaml_content = """
+---
+name: single-primary
+placement: SAME_INFRA
+execution: parallel
+primary_tasks: [trainer]
+---
+name: trainer
+run: echo trainer
+---
+name: aux1
+run: echo aux1
+---
+name: aux2
+run: echo aux2
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                dag = dag_utils.load_job_group_from_yaml(f.name)
+                assert dag.primary_tasks == ['trainer']
+            finally:
+                os.unlink(f.name)
+
+    def test_dict_termination_delay_with_partial_jobs(self):
+        """Test dict termination_delay with only some jobs specified."""
+        yaml_content = """
+---
+name: partial-delays
+placement: SAME_INFRA
+execution: parallel
+primary_tasks: [trainer]
+termination_delay:
+  replay-buffer: 1m
+---
+name: trainer
+run: echo trainer
+---
+name: replay-buffer
+run: echo buffer
+---
+name: data-server
+run: echo data
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                dag = dag_utils.load_job_group_from_yaml(f.name)
+                # replay-buffer has explicit delay
+                assert dag.get_termination_delay_secs('replay-buffer') == 60
+                # data-server has no entry and no default, gets 0
+                assert dag.get_termination_delay_secs('data-server') == 0
+            finally:
+                os.unlink(f.name)
+
+    def test_termination_delay_zero_is_valid(self):
+        """Test that termination_delay of 0 or 0s is valid."""
+        yaml_content = """
+---
+name: zero-delay
+placement: SAME_INFRA
+execution: parallel
+primary_tasks: [trainer]
+termination_delay: 0s
+---
+name: trainer
+run: echo trainer
+---
+name: aux
+run: echo aux
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                dag = dag_utils.load_job_group_from_yaml(f.name)
+                assert dag.get_termination_delay_secs('aux') == 0
+            finally:
+                os.unlink(f.name)
+
+    def test_termination_delay_large_value(self):
+        """Test termination_delay with large values like 1 hour."""
+        yaml_content = """
+---
+name: large-delay
+placement: SAME_INFRA
+execution: parallel
+primary_tasks: [trainer]
+termination_delay: 1h
+---
+name: trainer
+run: echo trainer
+---
+name: aux
+run: echo aux
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                dag = dag_utils.load_job_group_from_yaml(f.name)
+                assert dag.get_termination_delay_secs('aux') == 3600
+            finally:
+                os.unlink(f.name)
+
+    def test_round_trip_serialization_with_primary_auxiliary(self):
+        """Test that primary_tasks survives YAML round-trip."""
+        dag = dag_lib.Dag()
+        dag.name = 'round-trip-test'
+        dag.set_dag_config(dag_lib.DagPlacement.SAME_INFRA,
+                           dag_lib.DagExecution.PARALLEL)
+        dag.primary_tasks = ['primary1', 'primary2']
+        dag.termination_delay = {'default': '30s', 'aux1': '1m'}
+
+        # Add tasks
+        for name in ['primary1', 'primary2', 'aux1', 'aux2']:
+            task = task_lib.Task(name=name)
+            task.set_resources(resources_lib.Resources())
+            dag.add(task)
+
+        # Serialize to YAML
+        yaml_str = dag_utils.dump_job_group_to_yaml_str(dag)
+
+        # Reload from YAML
+        reloaded = dag_utils.load_job_group_from_yaml_str(yaml_str)
+
+        assert set(reloaded.primary_tasks) == {'primary1', 'primary2'}
+        assert isinstance(reloaded.termination_delay, dict)
+        assert reloaded.get_termination_delay_secs('aux1') == 60
+        assert reloaded.get_termination_delay_secs('aux2') == 30
+        assert reloaded.get_termination_delay_secs('unknown') == 30
+
+
+class TestPrimaryAuxiliaryDagMethods:
+    """Tests for Dag methods related to primary/auxiliary logic."""
+
+    def test_is_primary_task_with_primary_tasks_set(self):
+        """Test is_primary_task when primary_tasks is explicitly set."""
+        dag = dag_lib.Dag()
+        dag.primary_tasks = ['trainer', 'evaluator']
+
+        # Add tasks to the DAG
+        for name in ['trainer', 'evaluator', 'replay-buffer']:
+            task = task_lib.Task(name=name)
+            task.set_resources(resources_lib.Resources())
+            dag.add(task)
+
+        assert dag.is_primary_task('trainer') is True
+        assert dag.is_primary_task('evaluator') is True
+        assert dag.is_primary_task('replay-buffer') is False
+
+    def test_is_primary_task_when_all_primary(self):
+        """Test is_primary_task when primary_tasks is None (all primary)."""
+        dag = dag_lib.Dag()
+        dag.primary_tasks = None
+
+        for name in ['job1', 'job2']:
+            task = task_lib.Task(name=name)
+            task.set_resources(resources_lib.Resources())
+            dag.add(task)
+
+        # All tasks should be primary when primary_tasks is None
+        assert dag.is_primary_task('job1') is True
+        assert dag.is_primary_task('job2') is True
+
+    def test_is_primary_task_empty_list(self):
+        """Test is_primary_task when primary_tasks is empty list."""
+        dag = dag_lib.Dag()
+        dag.primary_tasks = []
+
+        for name in ['job1', 'job2']:
+            task = task_lib.Task(name=name)
+            task.set_resources(resources_lib.Resources())
+            dag.add(task)
+
+        # Empty list means all tasks are primary
+        assert dag.is_primary_task('job1') is True
+        assert dag.is_primary_task('job2') is True
+
+    def test_get_auxiliary_tasks(self):
+        """Test getting auxiliary task names."""
+        dag = dag_lib.Dag()
+        dag.primary_tasks = ['trainer']
+
+        for name in ['trainer', 'aux1', 'aux2']:
+            task = task_lib.Task(name=name)
+            task.set_resources(resources_lib.Resources())
+            dag.add(task)
+
+        auxiliary = dag.get_auxiliary_task_names()
+        assert set(auxiliary) == {'aux1', 'aux2'}
+
+    def test_get_auxiliary_tasks_all_primary(self):
+        """Test get_auxiliary_task_names when all tasks are primary."""
+        dag = dag_lib.Dag()
+        dag.primary_tasks = None
+
+        for name in ['job1', 'job2']:
+            task = task_lib.Task(name=name)
+            task.set_resources(resources_lib.Resources())
+            dag.add(task)
+
+        # All tasks are primary, so no auxiliary tasks
+        auxiliary = dag.get_auxiliary_task_names()
+        assert auxiliary == []
 
 
 if __name__ == '__main__':

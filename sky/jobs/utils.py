@@ -8,6 +8,7 @@ import asyncio
 import collections
 from datetime import datetime
 import enum
+import json
 import os
 import pathlib
 import re
@@ -1851,11 +1852,37 @@ def load_managed_job_queue(
 def _get_job_status_from_tasks(
     job_tasks: Union[List[responses.ManagedJobRecord], List[Dict[str, Any]]]
 ) -> Tuple[managed_job_state.ManagedJobStatus, int]:
-    """Get the current task status and the current task id for a job."""
+    """Get the current task status and the current task id for a job.
+
+    For job groups with primary_tasks defined, the job status is determined
+    only by the primary tasks. If all primary tasks succeed, the job is
+    considered successful even if auxiliary tasks were cancelled.
+    """
+    # Check if this job group has primary_tasks defined
+    primary_tasks = job_tasks[0].get('primary_tasks') if job_tasks else None
+
+    if primary_tasks:
+        # Filter to only primary tasks for status determination
+        primary_task_set = set(primary_tasks)
+        primary_job_tasks = [
+            t for t in job_tasks if t['task_name'] in primary_task_set
+        ]
+        # If we have primary tasks, use them for status; otherwise fall back
+        if primary_job_tasks:
+            job_tasks_for_status = primary_job_tasks
+        else:
+            job_tasks_for_status = job_tasks
+    else:
+        job_tasks_for_status = job_tasks
+
     managed_task_status = managed_job_state.ManagedJobStatus.SUCCEEDED
     current_task_id = 0
-    for task in job_tasks:
-        managed_task_status = task['status']
+    for task in job_tasks_for_status:
+        task_status = task['status']
+        # Handle both enum and string status values
+        if isinstance(task_status, str):
+            task_status = managed_job_state.ManagedJobStatus(task_status)
+        managed_task_status = task_status
         current_task_id = task['task_id']
 
         # Use the first non-succeeded status.
@@ -2134,6 +2161,12 @@ def format_job_table(
                 job_values.insert(0, job_tasks[0].get('user', '-'))
             job_table.add_row(job_values)
 
+        # Get primary_tasks list for marking primary tasks with [P]
+        primary_tasks_list = job_tasks[0].get(
+            'primary_tasks') if job_tasks else None
+        primary_tasks_set = set(
+            primary_tasks_list) if primary_tasks_list else None
+
         for task in job_tasks:
             # The job['job_duration'] is already calculated in
             # dump_managed_job_queue().
@@ -2151,11 +2184,17 @@ def format_job_table(
             if task_job_id in job_to_worker and pool != '-':
                 pool = f'{pool} (worker={job_to_worker[task_job_id]})'
 
+            # Add [P] marker for primary tasks in job groups
+            task_name = task['task_name']
+            if (primary_tasks_set is not None and
+                    task_name in primary_tasks_set):
+                task_name = f'{task_name} [P]'
+
             values = [
                 task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
                 task['task_id'] if len(job_tasks) > 1 else '-',
                 *([task_workspace] if show_workspace else []),
-                task['task_name'],
+                task_name,
                 *user_values,
                 task['resources'],
                 # SUBMITTED
@@ -2283,6 +2322,10 @@ def _job_proto_to_dict(
             job_dict['schedule_state']))
     job_dict['schedule_state'] = (schedule_state_enum.value
                                   if schedule_state_enum is not None else None)
+    # Parse termination_delay from JSON string back to original format
+    if job_dict.get('termination_delay') is not None:
+        job_dict['termination_delay'] = json.loads(
+            job_dict['termination_delay'])
     return job_dict
 
 
@@ -2499,6 +2542,9 @@ class ManagedJobCodeGen:
                      if managed_job_dag.execution else None)
         placement = (managed_job_dag.placement.value
                      if managed_job_dag.placement else None)
+        # Get primary_tasks and termination_delay for primary/auxiliary support
+        primary_tasks = managed_job_dag.primary_tasks
+        termination_delay = managed_job_dag.termination_delay
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
             set_job_info_kwargs = {{'workspace': {workspace!r}}}
@@ -2518,6 +2564,8 @@ class ManagedJobCodeGen:
             if managed_job_version >= 13:
                 set_job_info_kwargs['execution'] = {execution!r}
                 set_job_info_kwargs['placement'] = {placement!r}
+                set_job_info_kwargs['primary_tasks'] = {primary_tasks!r}
+                set_job_info_kwargs['termination_delay'] = {termination_delay!r}
             managed_job_state.set_job_info(
                 {job_id}, {dag_name!r}, **set_job_info_kwargs)
             """)

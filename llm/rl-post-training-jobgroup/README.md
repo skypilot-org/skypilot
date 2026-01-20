@@ -38,26 +38,33 @@ The example consists of 5 task types that communicate over HTTP, with built-in l
                         ▼
            ┌─────────────────────┐
            │    ppo-trainer      │
+           │     (PRIMARY)       │
            │   (2 nodes x GPU)   │
            │  Policy gradient    │
-           │  Weight sync        │
            └─────────────────────┘
 ```
 
 ### Components
 
-1. **data-server**: FastAPI server that serves math prompts from the GSM8K dataset. Provides batches of problems with ground truth answers.
+1. **data-server** (auxiliary): FastAPI server that serves math prompts from the GSM8K dataset. Provides batches of problems with ground truth answers.
 
-2. **rollout-server** (x2): SGLang inference servers with native load balancing:
+2. **rollout-server** (auxiliary, x2): SGLang inference servers with native load balancing:
    - Using `num_nodes: 2` creates two GPU instances for higher throughput
    - Head node (rank 0) runs both SGLang server and SGLang router on port 30000
    - SGLang router provides cache-aware load balancing for optimal KV cache reuse
 
-3. **reward-server**: Verifies mathematical answers by comparing model outputs against ground truth. Returns binary rewards (1.0 for correct, 0.0 for incorrect).
+3. **reward-server** (auxiliary): Verifies mathematical answers by comparing model outputs against ground truth. Returns binary rewards (1.0 for correct, 0.0 for incorrect).
 
-4. **replay-buffer**: Stores experience tuples (prompt, response, reward) for sampling during training. Supports priority-based sampling where high-reward experiences are sampled more frequently.
+4. **replay-buffer** (auxiliary): Stores experience tuples (prompt, response, reward) for sampling during training. Supports priority-based sampling where high-reward experiences are sampled more frequently.
 
-5. **ppo-trainer**: Multi-node training orchestrator that implements GRPO. Coordinates with all other services to fetch prompts, generate responses, compute rewards, store experiences, and update the policy.
+5. **ppo-trainer** (primary): Multi-node training orchestrator that implements GRPO. Coordinates with all other services to fetch prompts, generate responses, compute rewards, store experiences, and update the policy.
+
+### Primary/Auxiliary Tasks
+
+The ppo-trainer is designated as the **primary task**. When training completes:
+- All auxiliary services (data-server, rollout-server, reward-server, replay-buffer) are automatically terminated after a 10-second grace period (`termination_delay: 10s`)
+- This ensures GPU and CPU resources are released promptly once training finishes
+- Without this feature, auxiliary services would run indefinitely
 
 ## Usage
 

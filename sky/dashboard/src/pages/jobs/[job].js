@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useSingleManagedJob, getPoolStatus } from '@/data/connectors/jobs';
+import { useSingleManagedJob, getPoolStatus, computeJobGroupStatus } from '@/data/connectors/jobs';
 import Link from 'next/link';
 import {
   RotateCwIcon,
@@ -46,6 +46,7 @@ import {
   downloadManagedJobLogs,
 } from '@/data/connectors/jobs';
 import { StatusBadge } from '@/components/elements/StatusBadge';
+import { PrimaryBadge } from '@/components/elements/PrimaryBadge';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { NonCapitalizedTooltip } from '@/components/utils';
@@ -391,6 +392,12 @@ function JobDetails() {
                                   className="text-blue-600 hover:underline"
                                 >
                                   {task.task || `Job ${index}`}
+                                  {/* Show Primary badge for primary tasks */}
+                                  {detailJobData?.primary_tasks?.includes(task.task) && (
+                                    <span className="ml-1.5">
+                                      <PrimaryBadge />
+                                    </span>
+                                  )}
                                 </Link>
                               </TableCell>
                               <TableCell>
@@ -797,6 +804,15 @@ function JobDetailsContent({
   const isPreStart = PRE_START_STATUSES.includes(jobData.status);
   const isRecovering = RECOVERING_STATUSES.includes(jobData.status);
 
+  // Compute job group status based on primary tasks
+  // For job groups with primary_tasks defined, status is determined only by primary tasks
+  const computedStatus = useMemo(() => {
+    if (allTasks.length > 1 && jobData.primary_tasks) {
+      return computeJobGroupStatus(allTasks, jobData.primary_tasks);
+    }
+    return jobData.status;
+  }, [allTasks, jobData.primary_tasks, jobData.status]);
+
   const toggleYamlExpanded = () => {
     setIsYamlExpanded(!isYamlExpanded);
   };
@@ -1082,7 +1098,7 @@ function JobDetailsContent({
           <PluginSlot
             name="jobs.detail.status.badge"
             context={jobData}
-            fallback={<StatusBadge status={jobData.status} />}
+            fallback={<StatusBadge status={computedStatus} />}
           />
         </div>
       </div>

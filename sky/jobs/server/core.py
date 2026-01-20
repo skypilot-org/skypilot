@@ -245,7 +245,9 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
                 pool_hash=pool_hash,
                 user_hash=common_utils.get_user_hash(),
                 execution=execution_mode,
-                placement=placement_mode))
+                placement=placement_mode,
+                primary_tasks=dag.primary_tasks,
+                termination_delay=dag.termination_delay))
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)

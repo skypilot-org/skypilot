@@ -5,11 +5,16 @@
 # with verifiable rewards.
 #
 # Architecture:
-#   - data-server: Serves GSM8K math prompts
-#   - rollout-server (x2): SGLang instances + SGLang router on head node
-#   - reward-server: Verifies math answers against ground truth
-#   - replay-buffer: Stores experience tuples for sampling
-#   - ppo-trainer: Orchestrates GRPO training across multiple nodes
+#   - data-server (auxiliary): Serves GSM8K math prompts
+#   - rollout-server (auxiliary, x2): SGLang instances + SGLang router
+#   - reward-server (auxiliary): Verifies math answers against ground truth
+#   - replay-buffer (auxiliary): Stores experience tuples for sampling
+#   - ppo-trainer (primary): Orchestrates GRPO training across multiple nodes
+#
+# Primary/Auxiliary Behavior:
+#   The ppo-trainer is the primary task. When training completes, all auxiliary
+#   services (data-server, rollout-server, reward-server, replay-buffer) are
+#   terminated after a 10-second grace period to ensure clean shutdown.
 #
 # Load Balancing:
 #   The head node runs SGLang's native router (sglang_router) which provides
@@ -30,6 +35,8 @@
 name: rlhf-math
 placement: SAME_INFRA
 execution: parallel
+primary_tasks: [ppo-trainer]
+termination_delay: 10s
 
 ---
 # Data Server: Serves math prompts from GSM8K dataset

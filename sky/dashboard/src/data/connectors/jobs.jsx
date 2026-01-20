@@ -37,8 +37,60 @@ const DEFAULT_FIELDS = [
   'is_job_group',
   'placement',
   'execution',
+  'primary_tasks',
   // Note: 'links' field removed - it may not exist in older database schemas
 ];
+
+/**
+ * Compute the job group status based on primary tasks.
+ * For job groups with primary_tasks defined, the job status is determined
+ * only by the primary tasks. If all primary tasks succeed, the job is
+ * considered successful even if auxiliary tasks were cancelled.
+ *
+ * @param {Array} tasks - Array of task objects with status and task (name) fields
+ * @param {Array|null} primaryTasks - List of primary task names, or null if not defined
+ * @returns {string} - The computed job group status
+ */
+export function computeJobGroupStatus(tasks, primaryTasks) {
+  if (!tasks || tasks.length === 0) {
+    return null;
+  }
+
+  // If primary_tasks is not defined, use traditional behavior
+  if (!primaryTasks || primaryTasks.length === 0) {
+    // Return the first non-SUCCEEDED status, or SUCCEEDED if all succeeded
+    for (const task of tasks) {
+      if (task.status !== 'SUCCEEDED') {
+        return task.status;
+      }
+    }
+    return 'SUCCEEDED';
+  }
+
+  // Filter to only primary tasks
+  const primaryTaskSet = new Set(primaryTasks);
+  const primaryTasksList = tasks.filter(t => primaryTaskSet.has(t.task));
+
+  // If no primary tasks found, fall back to traditional behavior
+  if (primaryTasksList.length === 0) {
+    for (const task of tasks) {
+      if (task.status !== 'SUCCEEDED') {
+        return task.status;
+      }
+    }
+    return 'SUCCEEDED';
+  }
+
+  // Check status of primary tasks only
+  for (const task of primaryTasksList) {
+    if (task.status !== 'SUCCEEDED') {
+      return task.status;
+    }
+  }
+
+  // All primary tasks succeeded
+  return 'SUCCEEDED';
+}
 
 export async function getManagedJobs(options = {}) {
   try {
@@ -232,6 +284,7 @@ export async function getManagedJobs(options = {}) {
         is_job_group: job.is_job_group,
         placement: job.placement,
         execution: job.execution,
+        primary_tasks: job.primary_tasks,
       };
     });
 

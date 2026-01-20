@@ -158,6 +158,14 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('execution', sqlalchemy.Text, server_default=None),
     # Placement mode: 'SAME_INFRA', 'ANY', or None
     sqlalchemy.Column('placement', sqlalchemy.Text, server_default=None),
+    # Primary tasks: JSON list of task names that are "primary" (auxiliary tasks
+    # are terminated when all primary tasks complete). NULL means all tasks are
+    # primary (traditional behavior).
+    sqlalchemy.Column('primary_tasks', sqlalchemy.JSON, server_default=None),
+    # Termination delay: JSON (string like "30s" or dict with task-specific
+    # delays like {"default": "30s", "replay-buffer": "1m"}).
+    sqlalchemy.Column('termination_delay', sqlalchemy.JSON,
+                      server_default=None),
 )
 
 # TODO(cooperc): drop the table in a migration
@@ -415,6 +423,9 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'pool_hash': r.get('pool_hash'),
         # Per-task cluster name for JobGroups
         'cluster_name': r.get('cluster_name'),
+        # Primary/auxiliary job support
+        'primary_tasks': r.get('primary_tasks'),
+        'termination_delay': r.get('termination_delay'),
     }
 
 
@@ -763,7 +774,9 @@ def set_job_info_without_job_id(name: str,
                                 pool_hash: Optional[str],
                                 user_hash: Optional[str],
                                 execution: Optional[str] = None,
-                                placement: Optional[str] = None) -> int:
+                                placement: Optional[str] = None,
+                                primary_tasks: Optional[List[str]] = None,
+                                termination_delay: Optional[Any] = None) -> int:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -785,6 +798,8 @@ def set_job_info_without_job_id(name: str,
             user_hash=user_hash,
             execution=execution,
             placement=placement,
+            primary_tasks=primary_tasks,
+            termination_delay=termination_delay,
         )
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -2615,7 +2630,9 @@ def set_job_info(job_id: int,
                  pool_hash: Optional[str],
                  user_hash: Optional[str] = None,
                  execution: Optional[str] = None,
-                 placement: Optional[str] = None):
+                 placement: Optional[str] = None,
+                 primary_tasks: Optional[List[str]] = None,
+                 termination_delay: Optional[Any] = None):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -2637,6 +2654,8 @@ def set_job_info(job_id: int,
             user_hash=user_hash,
             execution=execution,
             placement=placement,
+            primary_tasks=primary_tasks,
+            termination_delay=termination_delay,
         )
         session.execute(insert_stmt)
         session.commit()
