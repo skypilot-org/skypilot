@@ -398,7 +398,11 @@ class RunPod(clouds.Cloud):
             # available during provisioning. The SDK may not auto-load
             # credentials in all execution contexts.
             from sky.adaptors import runpod as runpod_adaptor
-            runpod_adaptor.runpod.api_key = config[profile]['api_key']
+
+            # Load the module first before setting the API key to ensure
+            # it's set on the actual module, not the LazyImport proxy
+            runpod_adaptor.runpod.load_module(
+            ).api_key = config[profile]['api_key']
 
         except (TypeError, ValueError):
             return False, '~/.runpod/config.toml is not a valid TOML file.'

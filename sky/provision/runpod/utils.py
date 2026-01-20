@@ -13,6 +13,45 @@ from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
+
+def _ensure_api_key_configured() -> None:
+    """Ensure RunPod API key is configured before making API calls.
+
+    This reads credentials from ~/.runpod/config.toml and explicitly sets
+    them in the RunPod SDK. This is necessary because the SDK's auto-loading
+    may not work reliably in all execution contexts (subprocesses, different
+    timing, etc.).
+    """
+    # Check if API key is already set
+    if hasattr(runpod.runpod, 'api_key') and runpod.runpod.api_key:
+        return
+
+    # Try to load from config file
+    import os
+    try:
+        # Prefer stdlib tomllib (Python 3.11+); fallback to tomli
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib  # type: ignore[import-not-found]
+
+        credential_file = os.path.expanduser('~/.runpod/config.toml')
+        if os.path.exists(credential_file):
+            with open(credential_file, 'rb') as f:
+                config = tomllib.load(f)
+                if 'default' in config and 'api_key' in config['default']:
+                    runpod.runpod.load_module(
+                    ).api_key = config['default']['api_key']
+                    logger.debug(
+                        'RunPod API key loaded from ~/.runpod/config.toml')
+                    return
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to load RunPod credentials: {e}')
+
+    # If we reach here, credentials weren't loaded
+    # The SDK will try its auto-loading, or fail with a clear error
+
+
 GPU_NAME_MAP = {
     # AMD
     'MI300X': 'AMD Instinct MI300X OAM',
@@ -186,6 +225,7 @@ def _list_pod_templates_with_container_registry() -> dict:
 
 def list_instances() -> Dict[str, Dict[str, Any]]:
     """Lists instances associated with API key."""
+    _ensure_api_key_configured()
     instances = _sky_get_pods()
 
     instance_dict: Dict[str, Dict[str, Any]] = {}
