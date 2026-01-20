@@ -155,8 +155,9 @@ def _config_schema():
             },
             'upload_to_controller': {
                 # If True, the plugin package will be built as a wheel
-                # and automatically uploaded to remote clusters (jobs controller,
-                # serve controller). The package path is automatically determined
+                # and automatically uploaded to remote clusters
+                # (jobs controller, serve controller).
+                # The package path is automatically determined
                 # from the plugin module's location.
                 # Defaults to False if not specified.
                 'type': 'boolean',
@@ -216,7 +217,8 @@ def _find_package_root_from_module(module) -> Optional[str]:
     current_dir = os.path.dirname(module_file)
 
     # Walk up the directory tree looking for pyproject.toml or setup.py
-    while current_dir != os.path.dirname(current_dir):  # Stop at filesystem root
+    while current_dir != os.path.dirname(
+            current_dir):  # Stop at filesystem root
         if (os.path.exists(os.path.join(current_dir, 'pyproject.toml')) or
                 os.path.exists(os.path.join(current_dir, 'setup.py'))):
             return current_dir
@@ -258,13 +260,14 @@ def get_plugin_packages() -> List[Dict[str, Any]]:
                     plugin_dict['package'] = package_path
                 else:
                     logger.warning(
-                        f'Could not determine package path for plugin {class_path}. '
-                        'Make sure the plugin module is in a directory with '
-                        'pyproject.toml or setup.py.')
+                        'Could not determine package path for plugin '
+                        f'{class_path}. '
+                        'Make sure the plugin module is in a directory '
+                        'with pyproject.toml or setup.py.')
             except ImportError as e:
                 logger.warning(
-                    f'Could not import module {module_path} to determine package '
-                    f'path for plugin {class_path}: {e}')
+                    f'Could not import module {module_path} to determine '
+                    f'package path for plugin {class_path}: {e}')
 
         result.append(plugin_dict)
 

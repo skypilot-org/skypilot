@@ -156,16 +156,16 @@ def _build_plugin_wheels() -> Tuple[Dict[str, pathlib.Path], str]:
 
     with filelock.FileLock(_PLUGIN_WHEEL_LOCK_PATH):
         for plugin_config in plugin_packages:
-            # Only build wheels for plugins that should be uploaded to controllers
+            # Only build wheels for plugins that should be uploaded
+            # to controllers
             if not plugin_config.get('upload_to_controller', False):
                 continue
 
             package_path = plugin_config.get('package')
             if not package_path:
-                logger.warning(
-                    f'Plugin {plugin_config.get("class")} has '
-                    'upload_to_controller=True but no package path '
-                    'could be determined. Skipping wheel build.')
+                logger.warning(f'Plugin {plugin_config.get("class")} has '
+                               'upload_to_controller=True but no package path '
+                               'could be determined. Skipping wheel build.')
                 continue
 
             package_path = os.path.expanduser(package_path)
@@ -304,8 +304,7 @@ def get_filtered_plugins_config_path() -> Optional[str]:
 
     # Filter to only include plugins that should be uploaded to controllers
     plugins_to_upload = [
-        p for p in plugin_packages
-        if p.get('upload_to_controller', False)
+        p for p in plugin_packages if p.get('upload_to_controller', False)
     ]
 
     if not plugins_to_upload:

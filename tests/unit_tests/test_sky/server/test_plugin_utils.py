@@ -235,7 +235,8 @@ def test_get_filtered_plugins_config_path_no_upload_flag(monkeypatch, tmp_path):
     assert result is None
 
 
-def test_get_filtered_plugins_config_path_with_upload_flag(monkeypatch, tmp_path):
+def test_get_filtered_plugins_config_path_with_upload_flag(
+        monkeypatch, tmp_path):
     """Test get_filtered_plugins_config_path with plugins that have upload_to_controller."""
     config = {
         'plugins': [{
