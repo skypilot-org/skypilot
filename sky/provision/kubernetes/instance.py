@@ -162,6 +162,85 @@ def _lack_resource_msg(resource: str,
     return msg
 
 
+def _format_pvc_binding_error(pvc_details: Optional[str], pvc_names: List[str],
+                              namespace: str) -> str:
+    """Format a PVC binding error message.
+
+    Args:
+        pvc_details: Optional details about the PVC issue (e.g., event messages)
+            If None, a generic message is used.
+        pvc_names: List of PVC names that have binding issues.
+        namespace: Kubernetes namespace.
+
+    Returns:
+        Formatted error message with debug instructions.
+    """
+    if pvc_details:
+        header = f'PVC binding issue detected: {pvc_details}.'
+    else:
+        header = 'PVC binding issue detected.'
+    debug_lines = ['To debug, run:', '  sky volumes ls']
+    if pvc_names:
+        # kubectl describe pvc can take multiple PVC names as args
+        pvc_names_str = ' '.join(pvc_names)
+        debug_lines.append(
+            f'  kubectl describe pvc {pvc_names_str} -n {namespace}')
+    return (f'{header}\n'
+            'Check if the storage class supports the requested access '
+            'mode and if there is sufficient storage capacity.\n' +
+            '\n'.join(debug_lines))
+
+
+def _get_pvc_binding_status(namespace: str, context: Optional[str],
+                            pod: Any) -> Optional[str]:
+    """Check if any PVCs used by a pod are pending/unbound.
+
+    Returns an error message if any PVC is pending, None otherwise.
+    """
+    if pod.spec.volumes is None:
+        return None
+
+    pending_pvcs = []  # List of (pvc_name, details_string)
+    for vol in pod.spec.volumes:
+        pvc_claim = vol.persistent_volume_claim
+        if pvc_claim is None:
+            continue
+        pvc_name = pvc_claim.claim_name
+        try:
+            pvc = kubernetes.core_api(
+                context).read_namespaced_persistent_volume_claim(
+                    name=pvc_name,
+                    namespace=namespace,
+                    _request_timeout=kubernetes.API_TIMEOUT)
+            if pvc.status.phase == 'Pending':
+                # Get events for the PVC to understand why it's pending
+                sorted_events = kubernetes_utils.get_pvc_events(context,
+                                                                namespace,
+                                                                pvc_name,
+                                                                reverse=False)
+                event_messages = []
+                for event in sorted_events:
+                    if event.type == 'Warning' or event.reason in (
+                            'ProvisioningFailed', 'WaitForFirstConsumer'):
+                        msg = event.message or ''
+                        if msg:
+                            event_messages.append(f'{event.reason}: {msg}')
+                pending_info = f'{pvc_name} (phase: Pending)'
+                if event_messages:
+                    # Take the most recent event message
+                    pending_info += f' - {event_messages[-1]}'
+                pending_pvcs.append((pvc_name, pending_info))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to get PVC {pvc_name} status: {e}')
+            continue
+
+    if pending_pvcs:
+        pvc_names = [pvc[0] for pvc in pending_pvcs]
+        pvc_details = ', '.join(pvc[1] for pvc in pending_pvcs)
+        return _format_pvc_binding_error(pvc_details, pvc_names, namespace)
+    return None
+
+
 def _raise_pod_scheduling_errors(namespace, context, new_nodes):
     """Raise pod scheduling failure reason.
 
@@ -294,9 +373,24 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                     insufficent_resources=nice_names,
                 )
 
-            raise config_lib.KubernetesError(f'{timeout_err_msg} '
-                                             f'Pod status: {pod_status} '
-                                             f'Details: \'{event_message}\' ')
+        # Check for PVC binding issues
+        pvc_error = _get_pvc_binding_status(namespace, context, pod)
+        has_pvc_issue = (event_message is not None and
+                         'unbound immediate PersistentVolumeClaims'
+                         in event_message)
+        if pvc_error is not None or has_pvc_issue:
+            pvc_msg = pvc_error if pvc_error else (_format_pvc_binding_error(
+                pvc_details=None, pvc_names=[], namespace=namespace))
+            err_msg = f'{pvc_msg}\nPod status: {pod_status}'
+            if event_message:
+                err_msg += f' Details: \'{event_message}\''
+            raise config_lib.KubernetesError(err_msg)
+
+        err_msg = f'{timeout_err_msg} Pod status: {pod_status}'
+        if event_message:
+            err_msg += f' Details: \'{event_message}\''
+        raise config_lib.KubernetesError(err_msg)
+
     raise config_lib.KubernetesError(f'{timeout_err_msg}')
 
 
@@ -1319,8 +1413,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     try:
         return _create_pods(region, cluster_name, cluster_name_on_cloud, config)
     except (kubernetes.api_exception(), config_lib.KubernetesError) as e:
-        e_msg = common_utils.format_exception(e).replace('\n', ' ')
-        logger.warning('run_instances: Error occurred when creating pods: '
+        e_msg = common_utils.format_exception(e)
+        logger.warning('run_instances: Error occurred when creating pods:\n'
                        f'{e_msg}')
         raise
 
