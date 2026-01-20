@@ -409,18 +409,21 @@ function normalizeUrlForHistory(url) {
 
   // If it's a relative URL (starts with / or is a path), keep it relative
   // Relative URLs are safe for history API and don't need normalization
-  if (url.startsWith('/') || (!url.startsWith('http://') && !url.startsWith('https://'))) {
+  if (
+    url.startsWith('/') ||
+    (!url.startsWith('http://') && !url.startsWith('https://'))
+  ) {
     return url;
   }
 
   try {
     // Parse the absolute URL
     const urlObj = new URL(url);
-    
+
     // Strip credentials from the URL
     urlObj.username = '';
     urlObj.password = '';
-    
+
     // Return the normalized URL
     return urlObj.toString();
   } catch (error) {
@@ -444,7 +447,7 @@ function interceptHistoryApi() {
   const originalReplaceState = window.history.replaceState;
 
   // Override pushState
-  window.history.pushState = function(state, title, url) {
+  window.history.pushState = function (state, title, url) {
     let normalizedUrl = url;
     if (url && typeof url === 'string') {
       normalizedUrl = normalizeUrlForHistory(url);
@@ -453,7 +456,11 @@ function interceptHistoryApi() {
       return originalPushState.call(this, state, title, normalizedUrl);
     } catch (error) {
       // If pushState still fails (e.g., due to origin mismatch), try with a relative URL
-      if (error.name === 'SecurityError' && normalizedUrl && typeof normalizedUrl === 'string') {
+      if (
+        error.name === 'SecurityError' &&
+        normalizedUrl &&
+        typeof normalizedUrl === 'string'
+      ) {
         try {
           const urlObj = new URL(normalizedUrl, window.location.href);
           const relativeUrl = urlObj.pathname + urlObj.search + urlObj.hash;
@@ -468,7 +475,7 @@ function interceptHistoryApi() {
   };
 
   // Override replaceState
-  window.history.replaceState = function(state, title, url) {
+  window.history.replaceState = function (state, title, url) {
     let normalizedUrl = url;
     if (url && typeof url === 'string') {
       normalizedUrl = normalizeUrlForHistory(url);
@@ -477,7 +484,11 @@ function interceptHistoryApi() {
       return originalReplaceState.call(this, state, title, normalizedUrl);
     } catch (error) {
       // If replaceState still fails (e.g., due to origin mismatch), try with a relative URL
-      if (error.name === 'SecurityError' && normalizedUrl && typeof normalizedUrl === 'string') {
+      if (
+        error.name === 'SecurityError' &&
+        normalizedUrl &&
+        typeof normalizedUrl === 'string'
+      ) {
         try {
           const urlObj = new URL(normalizedUrl, window.location.href);
           const relativeUrl = urlObj.pathname + urlObj.search + urlObj.hash;
