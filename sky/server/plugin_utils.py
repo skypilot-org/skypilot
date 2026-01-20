@@ -136,7 +136,7 @@ def _build_plugin_wheel(package_path: str) -> pathlib.Path:
 
 
 def _build_plugin_wheels() -> Tuple[Dict[str, pathlib.Path], str]:
-    """Build wheels for all plugins that have package paths specified.
+    """Build wheels for all plugins that should be uploaded to controllers.
 
     Returns:
         A tuple of:
@@ -156,8 +156,16 @@ def _build_plugin_wheels() -> Tuple[Dict[str, pathlib.Path], str]:
 
     with filelock.FileLock(_PLUGIN_WHEEL_LOCK_PATH):
         for plugin_config in plugin_packages:
+            # Only build wheels for plugins that should be uploaded to controllers
+            if not plugin_config.get('upload_to_controller', False):
+                continue
+
             package_path = plugin_config.get('package')
             if not package_path:
+                logger.warning(
+                    f'Plugin {plugin_config.get("class")} has '
+                    'upload_to_controller=True but no package path '
+                    'could be determined. Skipping wheel build.')
                 continue
 
             package_path = os.path.expanduser(package_path)
@@ -212,9 +220,10 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
     if not plugin_packages:
         return {}, ''
 
-    # Check if any plugins have packages to install
-    has_packages = any(p.get('package') for p in plugin_packages)
-    if not has_packages:
+    # Check if any plugins should be uploaded to controllers
+    should_upload = any(
+        p.get('upload_to_controller', False) for p in plugin_packages)
+    if not should_upload:
         return {}, ''
 
     # Build wheels once to ensure consistency between file mounts and commands
@@ -250,16 +259,18 @@ def cleanup_stale_plugin_wheels(keep_hashes: Optional[List[str]] = None):
 
     Args:
         keep_hashes: List of hash prefixes to keep. If None, keeps all
-            wheels for currently configured plugins.
+            wheels for currently configured plugins that should be uploaded.
     """
     if not _PLUGIN_WHEEL_DIR.exists():
         return
 
     if keep_hashes is None:
-        # Compute hashes for current plugins
+        # Compute hashes for current plugins that should be uploaded
         plugin_packages = plugins.get_plugin_packages()
         keep_hashes = []
         for plugin_config in plugin_packages:
+            if not plugin_config.get('upload_to_controller', False):
+                continue
             package_path = plugin_config.get('package')
             if package_path:
                 package_path = os.path.expanduser(package_path)
@@ -274,15 +285,15 @@ def cleanup_stale_plugin_wheels(keep_hashes: Optional[List[str]] = None):
 
 
 def get_filtered_plugins_config_path() -> Optional[str]:
-    """Create a filtered plugins.yaml with only plugins that have `package`.
+    """Create a filtered plugins.yaml with only plugins that should be uploaded.
 
     The controller should only attempt to load plugins that have their packages
-    uploaded. Plugins without `package` specified are intended for API
-    server use only and should not be loaded on the controller.
+    uploaded. Plugins without upload_to_controller=True are intended
+    for API server use only and should not be loaded on the controller.
 
     Returns:
         Path to a temporary file containing the filtered plugins config,
-        or None if no plugins have `package` specified.
+        or None if no plugins should be uploaded.
     """
     # pylint: disable-next=import-outside-toplevel
     from sky.utils import yaml_utils
@@ -291,15 +302,28 @@ def get_filtered_plugins_config_path() -> Optional[str]:
     if not plugin_packages:
         return None
 
-    # Filter to only include plugins with 'package' specified
-    plugins_with_package = [p for p in plugin_packages if p.get('package')]
+    # Filter to only include plugins that should be uploaded to controllers
+    plugins_to_upload = [
+        p for p in plugin_packages
+        if p.get('upload_to_controller', False)
+    ]
 
-    if not plugins_with_package:
-        # No plugins with package specified - don't upload any config
+    if not plugins_to_upload:
+        # No plugins should be uploaded - don't upload any config
         return None
 
-    # Create a filtered config
-    filtered_config = {'plugins': plugins_with_package}
+    # Create a filtered config, removing internal fields that aren't needed
+    # on the controller (package, upload_to_controller)
+    filtered_plugins = []
+    for plugin_config in plugins_to_upload:
+        filtered_plugin = {
+            'class': plugin_config['class'],
+        }
+        if 'parameters' in plugin_config:
+            filtered_plugin['parameters'] = plugin_config['parameters']
+        filtered_plugins.append(filtered_plugin)
+
+    filtered_config = {'plugins': filtered_plugins}
 
     # Write to a temporary file
     # Using delete=False so the file persists until the controller upload
