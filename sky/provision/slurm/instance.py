@@ -57,6 +57,15 @@ def _skypilot_runtime_dir(cluster_name_on_cloud: str) -> str:
     return f'/tmp/{cluster_name_on_cloud}'
 
 
+def _enroot_container_name_global_scope(cluster_name_on_cloud: str) -> str:
+    """Get enroot container name when container_scope=global."""
+    # Not publicly documented, but see:
+    # https://github.com/NVIDIA/pyxis/blob/fb9c2d5a08a778346dd398d670deeb5a569904e5/pyxis_slurmstepd.c#L1104
+    # Added in commit:
+    # https://github.com/NVIDIA/pyxis/commit/a35027cf2ffa45cf702b117d215b1240aa6de22e
+    return f'pyxis_{slurm_utils.pyxis_container_name(cluster_name_on_cloud)}'
+
+
 def _wait_for_job_ready(
     login_node_runner: 'command_runner.SSHCommandRunner',
     client: 'slurm.SlurmClient',
@@ -340,7 +349,7 @@ cleanup() {{
     # This is only needed when container_scope=global.
     # When container_scope=job, named containers are removed automatically
     # at the end of the Slurm job, see: https://github.com/NVIDIA/pyxis/wiki/Setup#slurm-epilog
-    srun --nodes={num_nodes} --ntasks-per-node=1 enroot remove -f {shlex.quote(slurm_utils.enroot_container_name_global_scope(cluster_name_on_cloud))} 2>/dev/null || true
+    srun --nodes={num_nodes} --ntasks-per-node=1 enroot remove -f {shlex.quote(_enroot_container_name_global_scope(cluster_name_on_cloud))} 2>/dev/null || true
     # Clean up sky runtime directory on each node.
     # NOTE: We can do this because --nodes for both this srun and the
     # sbatch is the same number. Otherwise, there are no guarantees

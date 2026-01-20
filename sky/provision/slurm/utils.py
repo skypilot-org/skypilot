@@ -49,15 +49,6 @@ def pyxis_container_name(cluster_name_on_cloud: str) -> str:
     return cluster_name_on_cloud
 
 
-def enroot_container_name_global_scope(cluster_name_on_cloud: str) -> str:
-    """Get enroot container name when container_scope=global."""
-    # Not publicly documented, but see:
-    # https://github.com/NVIDIA/pyxis/blob/fb9c2d5a08a778346dd398d670deeb5a569904e5/pyxis_slurmstepd.c#L1104
-    # Added in commit:
-    # https://github.com/NVIDIA/pyxis/commit/a35027cf2ffa45cf702b117d215b1240aa6de22e
-    return f'pyxis_{pyxis_container_name(cluster_name_on_cloud)}'
-
-
 # SSH host key filename for sshd.
 SLURM_SSHD_HOST_KEY_FILENAME = 'skypilot_host_key'
 
