@@ -488,8 +488,8 @@ def parse_time_seconds(time: str) -> int:
 
     Args:
         time: Time string with optional unit suffix (e.g., '30s', '5m', '1h').
-              Supports: s (seconds), m (minutes), h (hours), d (days), w (weeks).
-              Plain numbers are treated as seconds.
+              Supports: s (seconds), m (minutes), h (hours), d (days),
+              w (weeks). Plain numbers are treated as seconds.
 
     Returns:
         Time in seconds as an integer.

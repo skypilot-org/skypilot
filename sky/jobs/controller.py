@@ -1352,9 +1352,8 @@ class JobController:
                     except asyncio.CancelledError:
                         # Task was cancelled (auxiliary job termination)
                         task_results[completed_task_id] = False
-                        logger.info(
-                            f'Job {tasks[completed_task_id].name} was terminated'
-                        )
+                        task_name = tasks[completed_task_id].name
+                        logger.info(f'Job {task_name} was terminated')
                     except Exception as e:
                         task_results[completed_task_id] = e
                         logger.error(
@@ -1370,7 +1369,8 @@ class JobController:
                             logger.info('All primary jobs completed')
 
                             # Check if all primary jobs succeeded. For terminal
-                            # tasks, check their status; for others, check result.
+                            # tasks, check their status; for others, check
+                            # result.
                             def primary_task_succeeded(tid: int) -> bool:
                                 if is_terminal(tid):
                                     return (task_resume_info[tid][0] ==

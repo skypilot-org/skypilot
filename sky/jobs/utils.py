@@ -1861,6 +1861,9 @@ def _get_job_status_from_tasks(
     # Check if this job group has primary_tasks defined
     primary_tasks = job_tasks[0].get('primary_tasks') if job_tasks else None
 
+    # Determine which tasks to use for status calculation
+    job_tasks_for_status: Union[List[responses.ManagedJobRecord],
+                                List[Dict[str, Any]]] = job_tasks
     if primary_tasks:
         # Filter to only primary tasks for status determination
         primary_task_set = set(primary_tasks)
@@ -1870,10 +1873,6 @@ def _get_job_status_from_tasks(
         # If we have primary tasks, use them for status; otherwise fall back
         if primary_job_tasks:
             job_tasks_for_status = primary_job_tasks
-        else:
-            job_tasks_for_status = job_tasks
-    else:
-        job_tasks_for_status = job_tasks
 
     managed_task_status = managed_job_state.ManagedJobStatus.SUCCEEDED
     current_task_id = 0

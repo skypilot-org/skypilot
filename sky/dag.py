@@ -145,6 +145,7 @@ class Dag:
         """
         if self.primary_tasks is None or len(self.primary_tasks) == 0:
             return True
+        # pylint: disable=unsupported-membership-test
         return task_name in self.primary_tasks
 
     def get_auxiliary_task_names(self) -> typing.List[str]:
@@ -156,7 +157,12 @@ class Dag:
         """
         if self.primary_tasks is None or len(self.primary_tasks) == 0:
             return []
-        return [t.name for t in self.tasks if t.name not in self.primary_tasks]
+        # pylint: disable=unsupported-membership-test
+        return [
+            t.name
+            for t in self.tasks
+            if t.name is not None and t.name not in self.primary_tasks
+        ]
 
     def is_chain(self) -> bool:
         """Check if the DAG is a linear chain of tasks."""

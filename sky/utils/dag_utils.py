@@ -571,8 +571,8 @@ def _load_job_group(
                 if job_name not in job_names:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
-                            f'primary_tasks references unknown job: {job_name}. '
-                            f'Available jobs: {sorted(job_names)}')
+                            f'primary_tasks references unknown job: '
+                            f'{job_name}. Available jobs: {sorted(job_names)}')
             dag.primary_tasks = primary_tasks
         # Empty list means all jobs are primary (same as not setting it)
 
@@ -595,9 +595,9 @@ def _load_job_group(
                 if key != 'default' and key not in job_names:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
-                            f'termination_delay references unknown job: {key}. '
-                            f'Available jobs: {sorted(job_names)} (or "default")'
-                        )
+                            f'termination_delay references unknown job: '
+                            f'{key}. Available jobs: {sorted(job_names)} '
+                            f'(or "default")')
                 _validate_time_duration(str(value),
                                         f'termination_delay[{key!r}]')
             # Convert all values to strings
