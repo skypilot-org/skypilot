@@ -1,8 +1,8 @@
 """Add cloud, region, zone columns to clusters and cluster_history tables.
 
-Revision ID: 012
-Revises: 011
-Create Date: 2026-01-14
+Revision ID: 013
+Revises: 012
+Create Date: 2026-01-20
 
 """
 # pylint: disable=invalid-name
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
-revision: str = '012'
-down_revision: Union[str, Sequence[str], None] = '011'
+revision: str = '013'
+down_revision: Union[str, Sequence[str], None] = '012'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
