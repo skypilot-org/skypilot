@@ -26,7 +26,8 @@ class RunPod(clouds.Cloud):
     """
     _REPR = 'RunPod'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
+        clouds.CloudImplementationFeatures.STOP:
+            'Stopping not supported.',
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
              'are non-trivial on RunPod.'),
@@ -392,6 +393,12 @@ class RunPod(clouds.Cloud):
                     '~/.runpod/config.toml is missing '
                     f'api_key for {profile} profile.',
                 )
+
+            # Explicitly set the API key in the RunPod SDK to ensure it's
+            # available during provisioning. The SDK may not auto-load
+            # credentials in all execution contexts.
+            from sky.adaptors import runpod as runpod_adaptor
+            runpod_adaptor.runpod.api_key = config[profile]['api_key']
 
         except (TypeError, ValueError):
             return False, '~/.runpod/config.toml is not a valid TOML file.'
