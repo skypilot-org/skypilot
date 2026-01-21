@@ -1867,6 +1867,8 @@ async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
     """Return metadata about loaded backend plugins."""
     plugin_infos = []
     for plugin_info in plugins.get_plugins():
+        if plugin_info.hidden_from_display:
+            continue
         info = {
             'js_extension_path': plugin_info.js_extension_path,
             'requires_early_init': plugin_info.requires_early_init,
