@@ -15,6 +15,8 @@ from typing import Any, Dict, List
 import requests
 import yaml
 
+from sky.provision.mithril import utils as mithril_utils
+
 DEFAULT_API_URL = 'https://api.mithril.ai'
 
 
@@ -65,7 +67,7 @@ def get_config() -> Dict[str, str]:
                 api_url = file_config.get('api_url')
 
     if not api_key:
-        raise RuntimeError(
+        raise mithril_utils.MithrilError(
             f'Mithril API key not found. '
             f'Set {ENV_API_KEY} or run `sky check` for setup instructions.')
 
@@ -111,7 +113,8 @@ def fetch_instance_types(api_key: str, api_url: str) -> List[Dict[str, Any]]:
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        raise RuntimeError(f'Failed to fetch instance types: {e}') from e
+        raise mithril_utils.MithrilError(
+            f'Failed to fetch instance types: {e}') from e
 
 
 def fetch_instance_pricing(api_key: str, api_url: str,
@@ -139,7 +142,7 @@ def fetch_instance_pricing(api_key: str, api_url: str,
         data = response.json()
         return data['minimum_price_cents'] / 100.0
     except requests.exceptions.RequestException as e:
-        raise RuntimeError(
+        raise mithril_utils.MithrilError(
             f'Failed to fetch pricing for {instance_fid}: {e}') from e
 
 
@@ -165,7 +168,8 @@ def fetch_spot_availability(api_key: str,
         response.raise_for_status()
         records = response.json()
     except requests.exceptions.RequestException as e:
-        raise RuntimeError(f'Failed to fetch spot availability: {e}') from e
+        raise mithril_utils.MithrilError(
+            f'Failed to fetch spot availability: {e}') from e
 
     availability: Dict[str, List[Dict[str, Any]]] = {}
 
