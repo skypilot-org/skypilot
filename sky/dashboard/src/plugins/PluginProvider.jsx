@@ -18,6 +18,7 @@ const PluginContext = createContext({
   components: {},
   dataEnhancements: {},
   tableColumns: {},
+  dataProviders: {},
 });
 
 const initialState = {
@@ -26,6 +27,7 @@ const initialState = {
   components: {}, // Map of slot name → array of component configs
   dataEnhancements: {}, // Map of dataSource → array of enhancements
   tableColumns: {}, // Map of table name → array of column configs
+  dataProviders: {}, // Map of provider id → provider config (with useHook)
 };
 
 const actions = {
@@ -34,6 +36,7 @@ const actions = {
   REGISTER_COMPONENT: 'REGISTER_COMPONENT',
   REGISTER_DATA_ENHANCEMENT: 'REGISTER_DATA_ENHANCEMENT',
   REGISTER_TABLE_COLUMN: 'REGISTER_TABLE_COLUMN',
+  REGISTER_DATA_PROVIDER: 'REGISTER_DATA_PROVIDER',
 };
 
 function pluginReducer(state, action) {
@@ -108,6 +111,14 @@ function pluginReducer(state, action) {
         },
       };
     }
+    case actions.REGISTER_DATA_PROVIDER:
+      return {
+        ...state,
+        dataProviders: {
+          ...state.dataProviders,
+          [action.payload.id]: action.payload,
+        },
+      };
     default:
       return state;
   }
@@ -597,6 +608,26 @@ function createPluginApi(dispatch) {
         normalizeUrl: normalizeUrlForHistory,
       };
     },
+    registerDataProvider(config) {
+      if (!config?.id) {
+        console.warn(
+          '[SkyDashboardPlugin] Invalid data provider: missing id',
+          config
+        );
+        return null;
+      }
+      const normalized = {
+        id: String(config.id),
+        name: config.name || config.id,
+        useHook: config.useHook,
+      };
+      dispatch({
+        type: actions.REGISTER_DATA_PROVIDER,
+        payload: normalized,
+      });
+      console.log('[SkyDashboardPlugin] Registered data provider:', config.id);
+      return config.id;
+    },
   };
 }
 
@@ -775,6 +806,11 @@ export function useTableColumns(tableName, context = {}) {
       return true;
     });
   }, [tableName, tableColumns, JSON.stringify(context)]);
+}
+
+export function useDataProvider(id) {
+  const { dataProviders } = usePluginState();
+  return dataProviders[id] || null;
 }
 
 /**
