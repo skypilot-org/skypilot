@@ -28,7 +28,7 @@ jobs:
           - test-path: "tests/test_optimizer_dryruns.py -k \"not partial and not accelerator_memory and not accelerator_manufacturer\""
             test-name: "Optimizer Dryruns Part 2"
           - test-path: "tests/test_optimizer_dryruns.py -k \"accelerator_memory or accelerator_manufacturer\""
-            test-name: "Optimizer Dryruns Part 3 (Accelerator Filtering)"
+            test-name: "Optimizer Dryruns Part 3"
           - test-path: tests/test_optimizer_random_dag.py
             test-name: "Optimizer Random DAG Tests"
     runs-on: ubuntu-latest

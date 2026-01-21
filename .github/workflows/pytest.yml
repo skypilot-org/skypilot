@@ -21,7 +21,8 @@ jobs:
           # Group them based on running time to save CI time and resources
           - tests/unit_tests
           - tests/test_cli.py
-          - tests/test_jobs_and_serve.py tests/test_yaml_parser.py tests/test_global_user_state.py tests/test_config.py tests/test_jobs.py tests/test_list_accelerators.py tests/test_wheels.py tests/test_api.py tests/test_storage.py tests/test_api_compatibility.py tests/test_infra_k8s_alias.py
+          - tests/test_jobs.py tests/test_jobs_and_serve.py tests/test_list_accelerators.py tests/test_api.py
+          - tests/test_config.py tests/test_wheels.py tests/test_yaml_parser.py tests/test_global_user_state.py tests/test_storage.py tests/test_api_compatibility.py tests/test_infra_k8s_alias.py
           - tests/test_no_parellel.py
           - tests/test_ssh_proxy_lag.py
         include:
@@ -31,8 +32,10 @@ jobs:
             test-name: "Unit Tests"
           - test-path: tests/test_cli.py
             test-name: "CLI Tests"
-          - test-path: tests/test_jobs_and_serve.py tests/test_yaml_parser.py tests/test_global_user_state.py tests/test_config.py tests/test_jobs.py tests/test_list_accelerators.py tests/test_wheels.py tests/test_api.py tests/test_storage.py tests/test_api_compatibility.py tests/test_infra_k8s_alias.py
-            test-name: "Jobs, Serve, Wheels, API, Config, Optimizer & Storage Tests"
+          - test-path: tests/test_jobs.py tests/test_jobs_and_serve.py tests/test_list_accelerators.py tests/test_api.py
+            test-name: "Jobs & API Tests"
+          - test-path: tests/test_config.py tests/test_wheels.py tests/test_yaml_parser.py tests/test_global_user_state.py tests/test_storage.py tests/test_api_compatibility.py tests/test_infra_k8s_alias.py
+            test-name: "Config, Storage & Compatibility Tests"
           - test-path: tests/test_no_parellel.py
             test-name: "No Parallel Tests"
           - test-path: tests/test_ssh_proxy_lag.py
