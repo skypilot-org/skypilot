@@ -686,6 +686,19 @@ class Kubernetes(clouds.Cloud):
                 keys=('high_availability', 'storage_class_name'),
                 default_value=None))
 
+        # Get the config for setting pod CPU/memory limits relative to requests.
+        # This is useful for clusters that require limits to be set (e.g., for
+        # LimitRange enforcement or resource quotas).
+        # Can be: False (default, no limits), True (limits = requests),
+        # or a number (limits = requests * multiplier).
+        set_pod_resource_limits_config = (
+            skypilot_config.get_effective_workspace_region_config(
+                cloud='kubernetes',
+                region=context,
+                keys=('set_pod_resource_limits',),
+                default_value=False,
+                override_configs=resources.cluster_config_overrides))
+
         k8s_kueue_local_queue_name = (
             skypilot_config.get_effective_workspace_region_config(
                 # TODO(kyuds): Support SSH node pools as well.
@@ -795,6 +808,17 @@ class Kubernetes(clouds.Cloud):
             'k8s_max_run_duration_seconds': max_run_duration_seconds,
             'k8s_network_type': network_type.value,
         }
+
+        # Calculate CPU/memory limits if set_pod_resource_limits is configured.
+        # Convert config: False -> no limits, True -> multiplier 1.0,
+        # number -> that multiplier
+        if set_pod_resource_limits_config is not False:
+            if set_pod_resource_limits_config is True:
+                multiplier = 1.0
+            else:
+                multiplier = float(set_pod_resource_limits_config)
+            deploy_vars['k8s_cpu_limit'] = round(cpus * multiplier, 3)
+            deploy_vars['k8s_memory_limit'] = round(mem * multiplier, 3)
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
         # inside a pod with in-cluster auth.
