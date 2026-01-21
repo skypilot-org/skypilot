@@ -4436,8 +4436,9 @@ def show_gpus(
                                                    min_spot_price=('spot_price',
                                                                    'min'))
             df = df.merge(min_price_df, on='cloud')
-            # Sort within each cloud by price.
-            df = df.groupby('cloud', group_keys=False).apply(
+            # Sort within each cloud by price. Explicitly select df.columns to
+            # include the grouping column in the result and avoid FutureWarning.
+            df = df.groupby('cloud', group_keys=False)[df.columns].apply(
                 lambda x: x.sort_values(by=['price', 'spot_price']))
             # Sort across groups (clouds).
             df = df.sort_values(by=['min_price', 'min_spot_price'])
