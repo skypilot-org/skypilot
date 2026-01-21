@@ -283,7 +283,7 @@ class RichSafeStreamHandler(logging.StreamHandler):
             except ValueError as e:
                 # Ignore "I/O operation on closed file" errors that occur
                 # when pytest-xdist workers close stdout during parallel tests
-                if 'I/O operation on closed file' not in str(e):
+                if str(e) != 'I/O operation on closed file':
                     raise
 
 
