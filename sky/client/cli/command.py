@@ -4283,6 +4283,8 @@ def show_gpus(
                 stop_iter = stop_iter or stop_iter_one
                 print_section_titles = (print_section_titles or
                                         print_section_titles_one)
+                if k8s_messages and k8s_messages_one:
+                    k8s_messages += '\n'
                 k8s_messages += k8s_messages_one
                 prev_print_section_titles = print_section_titles_one
             if stop_iter:

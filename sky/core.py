@@ -1405,11 +1405,13 @@ def realtime_kubernetes_gpu_availability(
             region_filter=context,
             quantity_filter=quantity_filter,
             case_sensitive=False)
-        assert (set(counts.keys()) == set(capacity.keys()) == set(
-            available.keys())), (f'Keys of counts ({list(counts.keys())}), '
-                                 f'capacity ({list(capacity.keys())}), '
-                                 f'and available ({list(available.keys())}) '
-                                 'must be the same.')
+
+        all_keys = set(counts.keys()) | set(capacity.keys()) | set(
+            available.keys())
+        counts = {key: counts.get(key, []) for key in all_keys}
+        capacity = {key: capacity.get(key, 0) for key in all_keys}
+        available = {key: available.get(key, 0) for key in all_keys}
+
         realtime_gpu_availability_list: List[
             models.RealtimeGpuAvailability] = []
 
