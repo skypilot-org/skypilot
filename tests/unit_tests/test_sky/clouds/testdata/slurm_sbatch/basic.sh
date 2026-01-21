@@ -32,6 +32,7 @@ cleanup() {
     # that created the sky directories.
     srun --nodes=1 rm -rf /tmp/test-cluster-no-container
     rm -rf /home/testuser/.sky_clusters/test-cluster-no-container
+    exit 0
 }
 trap cleanup TERM
 
