@@ -1058,6 +1058,7 @@ def launch(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret_file: Optional[Dict[str, str]],
     secret: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
@@ -1094,6 +1095,7 @@ def launch(
     # `launch` submitted asynchronously, the log tailing may overwhelm the API
     # server, if the jobs are long running.
     env = _merge_env_vars(env_file, env)
+    secret = _merge_env_vars(secret_file, secret)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
@@ -1247,6 +1249,7 @@ def exec(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret_file: Optional[Dict[str, str]],
     secret: List[Tuple[str, str]],
     cpus: Optional[str],
     memory: Optional[str],
@@ -1328,6 +1331,7 @@ def exec(
     assert cluster is not None, (cluster, cluster_option, entrypoint)
 
     env = _merge_env_vars(env_file, env)
+    secret = _merge_env_vars(secret_file, secret)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Executing task on it')
 
@@ -4944,6 +4948,7 @@ def jobs_launch(
     job_recovery: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret_file: Optional[Dict[str, str]],
     secret: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
@@ -4981,6 +4986,7 @@ def jobs_launch(
                                    'Use one of the flags as they are alias.')
         name = cluster
     env = _merge_env_vars(env_file, env)
+    secret = _merge_env_vars(secret_file, secret)
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
@@ -5447,6 +5453,7 @@ def jobs_pool_apply(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret_file: Optional[Dict[str, str]],
     secret: List[Tuple[str, str]],
     gpus: Optional[str],
     instance_type: Optional[str],
@@ -5507,6 +5514,7 @@ def jobs_pool_apply(
             image_id=image_id,
             env_file=env_file,
             env=env,
+            secret_file=secret_file,
             secret=secret,
             disk_size=disk_size,
             disk_tier=disk_tier,
@@ -5948,7 +5956,8 @@ def _generate_task_with_service(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
-    secret: Optional[List[Tuple[str, str]]],
+    secret_file: Optional[Dict[str, str]],
+    secret: List[Tuple[str, str]],
     gpus: Optional[str],
     instance_type: Optional[str],
     ports: Optional[Tuple[str]],
@@ -5968,6 +5977,7 @@ def _generate_task_with_service(
     if not is_yaml:
         raise click.UsageError(f'{yaml_name} must be a valid YAML file.')
     env = _merge_env_vars(env_file, env)
+    secret = _merge_env_vars(secret_file, secret)
     # We keep nargs=-1 in service_yaml argument to reuse this function.
     task = _make_task_or_dag_from_entrypoint_with_overrides(
         service_yaml_args,
@@ -6105,6 +6115,7 @@ def serve_up(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret_file: Optional[Dict[str, str]],
     secret: List[Tuple[str, str]],
     gpus: Optional[str],
     instance_type: Optional[str],
@@ -6168,6 +6179,7 @@ def serve_up(
         image_id=image_id,
         env_file=env_file,
         env=env,
+        secret_file=secret_file,
         secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,
@@ -6219,12 +6231,12 @@ def serve_up(
 @timeline.event
 @usage_lib.entrypoint
 def serve_update(
-        service_name: str, service_yaml: Tuple[str,
-                                               ...], workdir: Optional[str],
-        infra: Optional[str], cloud: Optional[str], region: Optional[str],
-        zone: Optional[str], num_nodes: Optional[int], use_spot: Optional[bool],
-        image_id: Optional[str], env_file: Optional[Dict[str, str]],
-        env: List[Tuple[str, str]], secret: List[Tuple[str, str]],
+        service_name: str, service_yaml: Tuple[str, ...],
+        workdir: Optional[str], infra: Optional[str], cloud: Optional[str],
+        region: Optional[str], zone: Optional[str], num_nodes: Optional[int],
+        use_spot: Optional[bool], image_id: Optional[str],
+        env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
+        secret_file: Optional[Dict[str, str]], secret: List[Tuple[str, str]],
         gpus: Optional[str], instance_type: Optional[str], ports: Tuple[str],
         cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
         disk_tier: Optional[str], network_tier: Optional[str], mode: str,
@@ -6278,6 +6290,7 @@ def serve_update(
         image_id=image_id,
         env_file=env_file,
         env=env,
+        secret_file=secret_file,
         secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,

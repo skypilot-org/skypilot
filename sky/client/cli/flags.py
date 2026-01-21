@@ -177,6 +177,16 @@ TASK_OPTIONS = [
         same value of ``$MY_ENV3`` in the local environment.""",
     ),
     click.option(
+        '--secret-file',
+        required=False,
+        type=dotenv.dotenv_values,
+        help="""\
+        Path to a dotenv file with secret variables to set on the remote node.
+
+        If any values from ``--secret-file`` conflict with values set by
+        ``--secret``, the ``--secret`` value will be preferred.""",
+    ),
+    click.option(
         '--secret',
         required=False,
         type=_parse_secret_var,
