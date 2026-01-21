@@ -1405,11 +1405,15 @@ def realtime_kubernetes_gpu_availability(
             region_filter=context,
             quantity_filter=quantity_filter,
             case_sensitive=False)
-        assert (set(counts.keys()) == set(capacity.keys()) == set(
-            available.keys())), (f'Keys of counts ({list(counts.keys())}), '
-                                 f'capacity ({list(capacity.keys())}), '
-                                 f'and available ({list(available.keys())}) '
-                                 'must be the same.')
+        # During k8s cluster scaling, the three dictionaries might have
+        # different keys (e.g., nodes with GPUs exist but are NotReady).
+        # Normalize by using only the intersection of keys that have complete
+        # information, to avoid assertion errors and show only reliable data.
+        common_keys = set(counts.keys()) & set(capacity.keys()) & set(
+            available.keys())
+        counts = {k: counts[k] for k in common_keys}
+        capacity = {k: capacity[k] for k in common_keys}
+        available = {k: available[k] for k in common_keys}
         realtime_gpu_availability_list: List[
             models.RealtimeGpuAvailability] = []
 
