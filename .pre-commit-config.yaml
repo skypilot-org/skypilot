@@ -43,8 +43,6 @@ repos:
             - "sky/backends/monkey_patches"
             - "--exclude"
             - "examples/admin_policy/example_policy/build"
-            - "--cache-dir"
-            - "/dev/null"
             - "--check-untyped-defs"
         pass_filenames: false
         additional_dependencies:
