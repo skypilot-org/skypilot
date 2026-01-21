@@ -188,8 +188,9 @@ def test_api_plugins_endpoint_excludes_hidden_plugins(monkeypatch):
             pass
 
     # Mock get_plugins to return our test plugins
-    monkeypatch.setattr(plugins, 'get_plugins',
-                        lambda: [VisiblePlugin(), HiddenPlugin()])
+    monkeypatch.setattr(
+        plugins, 'get_plugins',
+        lambda: [VisiblePlugin(), HiddenPlugin()])
 
     # Create test client
     client = TestClient(server.app)
@@ -246,8 +247,9 @@ def test_api_plugins_endpoint_includes_visible_plugins(monkeypatch):
             pass
 
     # Mock get_plugins to return our test plugins
-    monkeypatch.setattr(plugins, 'get_plugins',
-                        lambda: [VisiblePlugin1(), VisiblePlugin2()])
+    monkeypatch.setattr(
+        plugins, 'get_plugins',
+        lambda: [VisiblePlugin1(), VisiblePlugin2()])
 
     # Create test client
     client = TestClient(server.app)

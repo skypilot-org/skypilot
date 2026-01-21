@@ -96,7 +96,7 @@ export function VersionTooltip({
         </div>
       )}
       {plugins
-        .filter(plugin => !plugin.hidden_from_display)
+        .filter((plugin) => !plugin.hidden_from_display)
         .map((plugin, index) => {
           const pluginName = plugin.name || 'Unknown Plugin';
           const parts = [];
