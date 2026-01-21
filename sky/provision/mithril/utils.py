@@ -57,8 +57,12 @@ class MithrilHttpError(MithrilError):
 
 def to_cluster_status(
         raw_status: MithrilStatus) -> Optional[status_lib.ClusterStatus]:
-    """Map Mithril API status to ClusterStatus."""
-    mapping = {
+    """Map Mithril API status to ClusterStatus.
+
+    Returns None for terminated instances so they are filtered out when
+    query_instances is called with non_terminated_only=True.
+    """
+    mapping: Dict[MithrilStatus, Optional[status_lib.ClusterStatus]] = {
         'STATUS_CREATING': status_lib.ClusterStatus.INIT,
         'STATUS_STARTING': status_lib.ClusterStatus.INIT,
         'STATUS_INITIALIZING': status_lib.ClusterStatus.INIT,
@@ -66,12 +70,13 @@ def to_cluster_status(
         'STATUS_CONFIRMED': status_lib.ClusterStatus.INIT,
         'STATUS_RUNNING': status_lib.ClusterStatus.UP,
         'STATUS_STOPPING': status_lib.ClusterStatus.INIT,
-        'STATUS_TERMINATING': status_lib.ClusterStatus.INIT,
+        'STATUS_TERMINATING': status_lib.ClusterStatus.UP,  # Being terminated
         'STATUS_STOPPED': status_lib.ClusterStatus.STOPPED,
-        'STATUS_TERMINATED': status_lib.ClusterStatus.STOPPED,
+        'STATUS_TERMINATED': None,  # Fully terminated
         'STATUS_PAUSED': status_lib.ClusterStatus.STOPPED,
-        'STATUS_FAILED': status_lib.ClusterStatus.INIT,
-        'STATUS_ERROR': status_lib.ClusterStatus.INIT,
+        'STATUS_FAILED':
+            status_lib.ClusterStatus.INIT,  # Failed but still exists
+        'STATUS_ERROR': status_lib.ClusterStatus.INIT,  # Error but still exists
     }
     return mapping.get(raw_status)
 
@@ -501,11 +506,13 @@ def launch_instances(
         'project': config['project'],
         'region': region,
         'instance_type': instance_type_fid,
+        # TODO(oliviert): Support configurable limit price
         'limit_price': '$32.00',
         'instance_quantity': instance_quantity,
         'name': name,
         'launch_specification': {
             'ssh_keys': ssh_keys,
+            # TODO(oliviert): Support volumes
             'volumes': [],
         },
     }

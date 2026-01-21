@@ -269,9 +269,6 @@ def query_instances(
     """Returns the status of the specified instances for Mithril."""
     del cluster_name, provider_config, retry_if_missing  # unused
     instances = _filter_instances(cluster_name_on_cloud)
-    if not instances:
-        # No instances found: return empty dict to indicate fully deleted
-        return {}
 
     statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
                               Optional[str]]] = {}
@@ -285,47 +282,12 @@ def query_instances(
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
-    """Wait for instances to reach the desired state."""
-    del region  # unused
-    if state == status_lib.ClusterStatus.UP:
-        # Check if any instances are in RUNNING state
-        instances = _filter_instances(cluster_name_on_cloud,
-                                      status_in=['STATUS_RUNNING'])
-        if not instances:
-            # Check if any instances are in a failed state
-            failed_instances = _filter_instances(
-                cluster_name_on_cloud,
-                status_in=['STATUS_FAILED', 'STATUS_ERROR'])
-            if failed_instances:
-                raise RuntimeError(
-                    f'Cluster {cluster_name_on_cloud} has failed instances: '
-                    f'{failed_instances}')
-            raise RuntimeError('No running instances found for cluster '
-                               f'{cluster_name_on_cloud}')
-    elif state == status_lib.ClusterStatus.STOPPED:
-        # Check if any instances are in TERMINATED state
-        instances = _filter_instances(cluster_name_on_cloud,
-                                      status_in=['STATUS_TERMINATED'])
-        if not instances:
-            # Check if any instances are in a failed state
-            failed_instances = _filter_instances(
-                cluster_name_on_cloud,
-                status_in=['STATUS_FAILED', 'STATUS_ERROR'])
-            if failed_instances:
-                raise RuntimeError(
-                    f'Cluster {cluster_name_on_cloud} has failed instances: '
-                    f'{failed_instances}')
-            raise RuntimeError('No terminated instances found for cluster '
-                               f'{cluster_name_on_cloud}')
-        # Check if any instances are in RUNNING state
-        running_instances = _filter_instances(cluster_name_on_cloud,
-                                              status_in=['STATUS_RUNNING'])
-        if running_instances:
-            raise RuntimeError(
-                f'Cluster {cluster_name_on_cloud} is in STOPPED state, '
-                f'but {len(running_instances)} instances are running.')
-    else:
-        raise RuntimeError(f'Unsupported state: {state}')
+    """Wait for instances to reach the desired state.
+
+    For Mithril, waiting is done in run_instances() via wait_for_bid() and
+    wait_for_ssh_ip(), so this function is a no-op.
+    """
+    del region, cluster_name_on_cloud, state  # unused
 
 
 def stop_instances(
