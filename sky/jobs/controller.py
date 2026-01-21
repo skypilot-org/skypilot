@@ -277,6 +277,278 @@ class JobController:
             await asyncio.to_thread(managed_job_utils.terminate_cluster,
                                     cluster_name)
 
+    async def _get_cluster_job_exit_codes(
+        self, job_id: Optional[int],
+        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
+    ) -> Optional[list]:
+        """Retrieve exit codes from the remote cluster.
+
+        Args:
+            job_id: The job ID on the remote cluster.
+            handle: The handle to the cluster.
+
+        Returns:
+            List of exit codes, or None if not available.
+        """
+        try:
+            # Try gRPC first if enabled
+            if handle.is_grpc_enabled_with_flag:
+                try:
+                    request = jobsv1_pb2.GetJobExitCodesRequest()
+                    if job_id is not None:
+                        request.job_id = job_id
+
+                    response = await asyncio.to_thread(
+                        backend_utils.invoke_skylet_with_retries,
+                        lambda: cloud_vm_ray_backend.SkyletClient(
+                            handle.get_grpc_channel()).get_job_exit_codes(
+                                request))
+
+                    return list(
+                        response.exit_codes) if response.exit_codes else None
+                except exceptions.SkyletMethodNotImplementedError:
+                    pass  # Fall back to legacy SSH-based method
+
+            # Legacy SSH-based method
+            code = job_lib.JobLibCodeGen.get_job_exit_codes(job_id)
+            returncode, stdout, stderr = await asyncio.to_thread(
+                self._backend.run_on_head,
+                handle,
+                code,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
+
+            if returncode != 0:
+                logger.debug(f'Failed to retrieve exit codes: {stderr}')
+                return None
+
+            return json.loads(stdout.strip())
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to retrieve job exit codes: {e}')
+            return None
+
+    async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
+        """Busy loop monitoring cluster status and handling recovery.
+
+        When the task is successfully completed, this function returns True,
+        and will terminate the cluster before returning.
+
+        If the user program fails, i.e. the task is set to FAILED or
+        FAILED_SETUP, this function will return False.
+        In other cases, the function will raise exceptions.
+        All the failure cases will rely on the caller to clean up the spot
+        cluster(s) and storages.
+
+        Returns:
+            True if the job is successfully completed; False otherwise.
+
+        Raises:
+            exceptions.ProvisionPrechecksError: This will be raised when the
+                underlying `sky.launch` fails due to precheck errors only.
+                I.e., none of the failover exceptions, if
+                any, is due to resources unavailability. This exception
+                includes the following cases:
+                1. The optimizer cannot find a feasible solution.
+                2. Precheck errors: invalid cluster name, failure in getting
+                cloud user identity, or unsupported feature.
+            exceptions.ManagedJobReachedMaxRetriesError: This will be raised
+                when all prechecks passed but the maximum number of retries is
+                reached for `sky.launch`. The failure of `sky.launch` can be
+                due to:
+                1. Any of the underlying failover exceptions is due to resources
+                unavailability.
+                2. The cluster is preempted or failed before the job is
+                submitted.
+                3. Any unexpected error happens during the `sky.launch`.
+        Other exceptions may be raised depending on the backend.
+        """
+        _add_k8s_annotations(task, self._job_id)
+        logger.info(
+            f'Starting task {task_id} ({task.name}) for job {self._job_id}')
+
+        latest_task_id, last_task_prev_status = (
+            await
+            managed_job_state.get_latest_task_id_status_async(self._job_id))
+
+        is_resume = False
+        if (latest_task_id is not None and last_task_prev_status !=
+                managed_job_state.ManagedJobStatus.PENDING):
+            assert latest_task_id >= task_id, (latest_task_id, task_id)
+            if latest_task_id > task_id:
+                logger.info(f'Task {task_id} ({task.name}) has already '
+                            'been executed. Skipping...')
+                return True
+            if latest_task_id == task_id:
+                # Start recovery.
+                is_resume = True
+                logger.info(f'Resuming task {task_id} from previous execution')
+
+        callback_func = managed_job_utils.event_callback_func(
+            job_id=self._job_id, task_id=task_id, task=task)
+
+        if task.run is None:
+            logger.info(f'Skip running task {task_id} ({task.name}) due to its '
+                        'run commands being empty.')
+            # Call set_started first to initialize columns in the state table,
+            # including start_at and last_recovery_at to avoid issues for
+            # uninitialized columns.
+            await managed_job_state.set_started_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                start_time=time.time(),
+                callback_func=callback_func)
+            await managed_job_state.set_succeeded_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                end_time=time.time(),
+                callback_func=callback_func)
+            logger.info(f'Empty task {task_id} marked as succeeded immediately')
+            return True
+
+        usage_lib.messages.usage.update_task_id(task_id)
+        task_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
+        assert task.name is not None, task
+        # Set the cluster name to None if the job is submitted
+        # to a pool. This will be updated when we later calls the `launch`
+        # or `recover` function from the strategy executor.
+        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+            task.name, self._job_id) if self._pool is None else None
+        self._strategy_executor = recovery_strategy.StrategyExecutor.make(
+            cluster_name, self._backend, task, self._job_id, task_id,
+            self._pool, self.starting, self.starting_lock, self.starting_signal)
+        if not is_resume:
+            submitted_at = time.time()
+            if task_id == 0:
+                submitted_at = backend_utils.get_timestamp_from_run_timestamp(
+                    self._backend.run_timestamp)
+
+            resources_str = backend_utils.get_task_resources_str(
+                task, is_managed_job=True)
+
+            # Get full_resources_json using get_resource_config which handles
+            # heterogeneous resource configurations (any_of/ordered).
+            full_resources_json = None
+            if task.resources:
+                full_resources_json = task.get_resource_config()
+
+            await managed_job_state.set_starting_async(
+                self._job_id,
+                task_id,
+                self._backend.run_timestamp,
+                submitted_at,
+                resources_str=resources_str,
+                specs={
+                    'max_restarts_on_errors':
+                        self._strategy_executor.max_restarts_on_errors,
+                    'recover_on_exit_codes':
+                        self._strategy_executor.recover_on_exit_codes
+                },
+                callback_func=callback_func,
+                full_resources_json=full_resources_json)
+            logger.info(f'Submitted managed job {self._job_id} '
+                        f'(task: {task_id}, name: {task.name!r}); '
+                        f'{constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
+
+        logger.info('Started monitoring.')
+
+        # Only do the initial cluster launch if not resuming from a controller
+        # failure. Otherwise, we will transit to recovering immediately.
+        remote_job_submitted_at = time.time()
+        if not is_resume:
+            launch_start = time.time()
+
+            # Run the launch in a separate thread to avoid blocking the event
+            # loop. The scheduler functions used internally already have their
+            # own file locks.
+            remote_job_submitted_at = await self._strategy_executor.launch()
+
+            launch_time = time.time() - launch_start
+            logger.info(f'Cluster launch completed in {launch_time:.2f}s')
+            assert remote_job_submitted_at is not None, remote_job_submitted_at
+        job_id_on_pool_cluster: Optional[int] = None
+        if self._pool:
+            # Update the cluster name when using pool.
+            cluster_name, job_id_on_pool_cluster = (
+                await
+                managed_job_state.get_pool_submit_info_async(self._job_id))
+        if cluster_name is None:
+            # Check if we have been cancelled here, in the case where a user
+            # quickly cancels the job we want to gracefully handle it here,
+            # otherwise we will end up in the FAILED_CONTROLLER state.
+            logger.info(f'Cluster name is None for job {self._job_id}, '
+                        f'task {task_id}. Checking if we have been '
+                        'cancelled.')
+            status = await (managed_job_state.get_job_status_with_task_id_async(
+                job_id=self._job_id, task_id=task_id))
+            logger.debug(f'Status for job {self._job_id}, task {task_id}:'
+                         f'{status}')
+            if status == managed_job_state.ManagedJobStatus.CANCELLED:
+                logger.info(f'Job {self._job_id}, task {task_id} has '
+                            'been quickly cancelled.')
+                raise asyncio.CancelledError()
+        assert cluster_name is not None, (cluster_name, job_id_on_pool_cluster)
+
+        if not is_resume:
+            await managed_job_state.set_started_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                start_time=remote_job_submitted_at,
+                callback_func=callback_func)
+
+        async with self.starting_lock:
+            try:
+                self.starting.remove(self._job_id)
+                # its fine if we notify again, better to wake someone up
+                # and have them go to sleep again, then have some stuck
+                # sleeping.
+                # ps. this shouldn't actually happen because if its been
+                # removed from the set then we would get a key error.
+                self.starting_signal.notify()
+            except KeyError:
+                pass
+
+        # NOTE: if we are resuming from a controller failure, we only keep
+        # monitoring if the job is in RUNNING state. For all other cases,
+        # we will directly transit to recovering since we have no idea what
+        # the cluster status is.
+        # Handle resume logic before starting the monitoring loop.
+        # If resuming from a controller failure, check the previous state
+        # and determine if we need to force recovery.
+        force_transit_to_recovering = False
+        if is_resume:
+            prev_status = await (
+                managed_job_state.get_job_status_with_task_id_async(
+                    job_id=self._job_id, task_id=task_id))
+
+            if prev_status is not None:
+                if prev_status.is_terminal():
+                    logger.info(f'Task {task_id} already in terminal state: '
+                                f'{prev_status}')
+                    return (prev_status ==
+                            managed_job_state.ManagedJobStatus.SUCCEEDED)
+                if prev_status == managed_job_state.ManagedJobStatus.CANCELLING:
+                    # If the controller is down when cancelling the job,
+                    # we re-raise the error to run the `_cleanup` function
+                    # again to clean up any remaining resources.
+                    logger.info(f'Task {task_id} was being cancelled, '
+                                're-raising cancellation')
+                    raise asyncio.CancelledError()
+            if prev_status != managed_job_state.ManagedJobStatus.RUNNING:
+                force_transit_to_recovering = True
+
+        logger.info('Started monitoring.')
+        return await self._monitor_one_task(
+            task_id=task_id,
+            task=task,
+            cluster_name=cluster_name,
+            executor=self._strategy_executor,
+            job_id_on_pool_cluster=job_id_on_pool_cluster,
+            callback_func=callback_func,
+            cleanup_cluster_on_success=True,
+            force_transit_to_recovering=force_transit_to_recovering,
+        )
+
     async def _monitor_one_task(
         self,
         task_id: int,
@@ -593,7 +865,8 @@ class JobController:
                                     transient_job_check_error_reason)
                         assert job_check_backoff is not None, (
                             job_check_backoff, transient_job_check_error_reason)
-                        elapsed = time.time() - transient_job_check_error_start_time
+                        elapsed = time.time(
+                        ) - transient_job_check_error_start_time
                         timeout = (managed_job_utils.
                                    JOB_STATUS_FETCH_TOTAL_TIMEOUT_SECONDS)
                         if elapsed < timeout:
@@ -676,278 +949,6 @@ class JobController:
 
             # Reset force flag after first recovery
             force_transit_to_recovering = False
-
-    async def _get_cluster_job_exit_codes(
-        self, job_id: Optional[int],
-        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
-    ) -> Optional[list]:
-        """Retrieve exit codes from the remote cluster.
-
-        Args:
-            job_id: The job ID on the remote cluster.
-            handle: The handle to the cluster.
-
-        Returns:
-            List of exit codes, or None if not available.
-        """
-        try:
-            # Try gRPC first if enabled
-            if handle.is_grpc_enabled_with_flag:
-                try:
-                    request = jobsv1_pb2.GetJobExitCodesRequest()
-                    if job_id is not None:
-                        request.job_id = job_id
-
-                    response = await asyncio.to_thread(
-                        backend_utils.invoke_skylet_with_retries,
-                        lambda: cloud_vm_ray_backend.SkyletClient(
-                            handle.get_grpc_channel()).get_job_exit_codes(
-                                request))
-
-                    return list(
-                        response.exit_codes) if response.exit_codes else None
-                except exceptions.SkyletMethodNotImplementedError:
-                    pass  # Fall back to legacy SSH-based method
-
-            # Legacy SSH-based method
-            code = job_lib.JobLibCodeGen.get_job_exit_codes(job_id)
-            returncode, stdout, stderr = await asyncio.to_thread(
-                self._backend.run_on_head,
-                handle,
-                code,
-                stream_logs=False,
-                require_outputs=True,
-                separate_stderr=True)
-
-            if returncode != 0:
-                logger.debug(f'Failed to retrieve exit codes: {stderr}')
-                return None
-
-            return json.loads(stdout.strip())
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to retrieve job exit codes: {e}')
-            return None
-
-    async def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
-        """Busy loop monitoring cluster status and handling recovery.
-
-        When the task is successfully completed, this function returns True,
-        and will terminate the cluster before returning.
-
-        If the user program fails, i.e. the task is set to FAILED or
-        FAILED_SETUP, this function will return False.
-        In other cases, the function will raise exceptions.
-        All the failure cases will rely on the caller to clean up the spot
-        cluster(s) and storages.
-
-        Returns:
-            True if the job is successfully completed; False otherwise.
-
-        Raises:
-            exceptions.ProvisionPrechecksError: This will be raised when the
-                underlying `sky.launch` fails due to precheck errors only.
-                I.e., none of the failover exceptions, if
-                any, is due to resources unavailability. This exception
-                includes the following cases:
-                1. The optimizer cannot find a feasible solution.
-                2. Precheck errors: invalid cluster name, failure in getting
-                cloud user identity, or unsupported feature.
-            exceptions.ManagedJobReachedMaxRetriesError: This will be raised
-                when all prechecks passed but the maximum number of retries is
-                reached for `sky.launch`. The failure of `sky.launch` can be
-                due to:
-                1. Any of the underlying failover exceptions is due to resources
-                unavailability.
-                2. The cluster is preempted or failed before the job is
-                submitted.
-                3. Any unexpected error happens during the `sky.launch`.
-        Other exceptions may be raised depending on the backend.
-        """
-        _add_k8s_annotations(task, self._job_id)
-        logger.info(
-            f'Starting task {task_id} ({task.name}) for job {self._job_id}')
-
-        latest_task_id, last_task_prev_status = (
-            await
-            managed_job_state.get_latest_task_id_status_async(self._job_id))
-
-        is_resume = False
-        if (latest_task_id is not None and last_task_prev_status !=
-                managed_job_state.ManagedJobStatus.PENDING):
-            assert latest_task_id >= task_id, (latest_task_id, task_id)
-            if latest_task_id > task_id:
-                logger.info(f'Task {task_id} ({task.name}) has already '
-                            'been executed. Skipping...')
-                return True
-            if latest_task_id == task_id:
-                # Start recovery.
-                is_resume = True
-                logger.info(f'Resuming task {task_id} from previous execution')
-
-        callback_func = managed_job_utils.event_callback_func(
-            job_id=self._job_id, task_id=task_id, task=task)
-
-        if task.run is None:
-            logger.info(f'Skip running task {task_id} ({task.name}) due to its '
-                        'run commands being empty.')
-            # Call set_started first to initialize columns in the state table,
-            # including start_at and last_recovery_at to avoid issues for
-            # uninitialized columns.
-            await managed_job_state.set_started_async(
-                job_id=self._job_id,
-                task_id=task_id,
-                start_time=time.time(),
-                callback_func=callback_func)
-            await managed_job_state.set_succeeded_async(
-                job_id=self._job_id,
-                task_id=task_id,
-                end_time=time.time(),
-                callback_func=callback_func)
-            logger.info(f'Empty task {task_id} marked as succeeded immediately')
-            return True
-
-        usage_lib.messages.usage.update_task_id(task_id)
-        task_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
-        assert task.name is not None, task
-        # Set the cluster name to None if the job is submitted
-        # to a pool. This will be updated when we later calls the `launch`
-        # or `recover` function from the strategy executor.
-        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-            task.name, self._job_id) if self._pool is None else None
-        self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._job_id, task_id,
-            self._pool, self.starting, self.starting_lock, self.starting_signal)
-        if not is_resume:
-            submitted_at = time.time()
-            if task_id == 0:
-                submitted_at = backend_utils.get_timestamp_from_run_timestamp(
-                    self._backend.run_timestamp)
-
-            resources_str = backend_utils.get_task_resources_str(
-                task, is_managed_job=True)
-
-            # Get full_resources_json using get_resource_config which handles
-            # heterogeneous resource configurations (any_of/ordered).
-            full_resources_json = None
-            if task.resources:
-                full_resources_json = task.get_resource_config()
-
-            await managed_job_state.set_starting_async(
-                self._job_id,
-                task_id,
-                self._backend.run_timestamp,
-                submitted_at,
-                resources_str=resources_str,
-                specs={
-                    'max_restarts_on_errors':
-                        self._strategy_executor.max_restarts_on_errors,
-                    'recover_on_exit_codes':
-                        self._strategy_executor.recover_on_exit_codes
-                },
-                callback_func=callback_func,
-                full_resources_json=full_resources_json)
-            logger.info(f'Submitted managed job {self._job_id} '
-                        f'(task: {task_id}, name: {task.name!r}); '
-                        f'{constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
-
-        logger.info('Started monitoring.')
-
-        # Only do the initial cluster launch if not resuming from a controller
-        # failure. Otherwise, we will transit to recovering immediately.
-        remote_job_submitted_at = time.time()
-        if not is_resume:
-            launch_start = time.time()
-
-            # Run the launch in a separate thread to avoid blocking the event
-            # loop. The scheduler functions used internally already have their
-            # own file locks.
-            remote_job_submitted_at = await self._strategy_executor.launch()
-
-            launch_time = time.time() - launch_start
-            logger.info(f'Cluster launch completed in {launch_time:.2f}s')
-            assert remote_job_submitted_at is not None, remote_job_submitted_at
-        job_id_on_pool_cluster: Optional[int] = None
-        if self._pool:
-            # Update the cluster name when using pool.
-            cluster_name, job_id_on_pool_cluster = (
-                await
-                managed_job_state.get_pool_submit_info_async(self._job_id))
-        if cluster_name is None:
-            # Check if we have been cancelled here, in the case where a user
-            # quickly cancels the job we want to gracefully handle it here,
-            # otherwise we will end up in the FAILED_CONTROLLER state.
-            logger.info(f'Cluster name is None for job {self._job_id}, '
-                        f'task {task_id}. Checking if we have been '
-                        'cancelled.')
-            status = await (managed_job_state.get_job_status_with_task_id_async(
-                job_id=self._job_id, task_id=task_id))
-            logger.debug(f'Status for job {self._job_id}, task {task_id}:'
-                         f'{status}')
-            if status == managed_job_state.ManagedJobStatus.CANCELLED:
-                logger.info(f'Job {self._job_id}, task {task_id} has '
-                            'been quickly cancelled.')
-                raise asyncio.CancelledError()
-        assert cluster_name is not None, (cluster_name, job_id_on_pool_cluster)
-
-        if not is_resume:
-            await managed_job_state.set_started_async(
-                job_id=self._job_id,
-                task_id=task_id,
-                start_time=remote_job_submitted_at,
-                callback_func=callback_func)
-
-        async with self.starting_lock:
-            try:
-                self.starting.remove(self._job_id)
-                # its fine if we notify again, better to wake someone up
-                # and have them go to sleep again, then have some stuck
-                # sleeping.
-                # ps. this shouldn't actually happen because if its been
-                # removed from the set then we would get a key error.
-                self.starting_signal.notify()
-            except KeyError:
-                pass
-
-        # NOTE: if we are resuming from a controller failure, we only keep
-        # monitoring if the job is in RUNNING state. For all other cases,
-        # we will directly transit to recovering since we have no idea what
-        # the cluster status is.
-        # Handle resume logic before starting the monitoring loop.
-        # If resuming from a controller failure, check the previous state
-        # and determine if we need to force recovery.
-        force_transit_to_recovering = False
-        if is_resume:
-            prev_status = await (
-                managed_job_state.get_job_status_with_task_id_async(
-                    job_id=self._job_id, task_id=task_id))
-
-            if prev_status is not None:
-                if prev_status.is_terminal():
-                    logger.info(f'Task {task_id} already in terminal state: '
-                                f'{prev_status}')
-                    return (prev_status ==
-                            managed_job_state.ManagedJobStatus.SUCCEEDED)
-                if prev_status == managed_job_state.ManagedJobStatus.CANCELLING:
-                    # If the controller is down when cancelling the job,
-                    # we re-raise the error to run the `_cleanup` function
-                    # again to clean up any remaining resources.
-                    logger.info(f'Task {task_id} was being cancelled, '
-                                're-raising cancellation')
-                    raise asyncio.CancelledError()
-            if prev_status != managed_job_state.ManagedJobStatus.RUNNING:
-                force_transit_to_recovering = True
-
-        logger.info('Started monitoring.')
-        return await self._monitor_one_task(
-            task_id=task_id,
-            task=task,
-            cluster_name=cluster_name,
-            executor=self._strategy_executor,
-            job_id_on_pool_cluster=job_id_on_pool_cluster,
-            callback_func=callback_func,
-            cleanup_cluster_on_success=True,
-            force_transit_to_recovering=force_transit_to_recovering,
-        )
 
     async def _prepare_job_group_task_for_launch(
         self, task: 'sky.Task', task_id: int, job_group_name: str,
