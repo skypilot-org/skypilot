@@ -470,6 +470,8 @@ export function ManagedJobsTable({
         { ttl: 30000 }
       );
 
+      console.log('Jobs response:', response);
+
       // Map plugin response to expected format
       if (response) {
         return {
@@ -703,6 +705,14 @@ export function ManagedJobsTable({
       fetchData({ includeStatus: true });
     }
   }, [activeTab, selectedStatuses, showAllMode, fetchData, preloadingComplete]);
+
+  // Fetch on sort config changes for server-side sorting
+  // Skip on initial fetch (sortConfig has default value)
+  React.useEffect(() => {
+    if (!isInitialFetch.current && preloadingComplete) {
+      fetchData({ includeStatus: false });
+    }
+  }, [sortConfig, fetchData, preloadingComplete]);
 
   // Set up periodic refresh interval only after preloading is complete
   useEffect(() => {
