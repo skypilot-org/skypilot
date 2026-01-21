@@ -4521,7 +4521,6 @@ def show_gpus(
 
     outputs = _output()
     if show_all:
-        # print(''.join(outputs))
         click.echo_via_pager(outputs)
     else:
         for out in outputs:
