@@ -4161,6 +4161,8 @@ def show_gpus(
                 if not ssh_is_enabled:
                     yield ('SSH Node Pools are not enabled. To fix, run: '
                            'sky check ssh ')
+                if k8s_messages and print_section_titles:
+                    yield '\n\n'
                 yield k8s_messages
                 return True, print_section_titles, ''
         else:
@@ -4168,6 +4170,8 @@ def show_gpus(
                 if not kubernetes_is_enabled:
                     yield ('Kubernetes is not enabled. To fix, run: '
                            'sky check kubernetes ')
+                if k8s_messages and print_section_titles:
+                    yield '\n\n'
                 yield k8s_messages
                 return True, print_section_titles, ''
         return False, print_section_titles, k8s_messages
