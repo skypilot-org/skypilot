@@ -168,6 +168,8 @@ These modules are optimized for performance. Be cautious about adding blocking c
 - Summary: 1-3 bullet points
 - Test plan: Commands run, verification steps
 
+Always include a manual test plan describing how to verify changes work correctly. Include specific commands, expected outputs, or UI verification steps. Add unit tests and smoke tests when possible.
+
 **Commit message format:** `[Area] Description`
 - Areas: `[Core]`, `[CLI]`, `[API]`, `[AWS]`, `[GCP]`, `[Azure]`, `[Kubernetes]`, `[Jobs]`, `[Dashboard]`, `[Serve]`, `[Docs]`, `[Test]`, `[CI]`
 
@@ -176,8 +178,10 @@ These modules are optimized for performance. Be cautious about adding blocking c
 ```bash
 sky check                      # Check cloud credentials
 sky status                     # View cluster status
+sky launch <cluster> <yaml>    # Launch a cluster
 sky exec <cluster> -- <cmd>    # Run command on cluster
 ssh <cluster>                  # SSH into cluster
+sky jobs launch <yaml>         # Launch a managed job
 
 # Profile CLI performance
 py-spy record -t -o sky.svg -- python -m sky.cli status
