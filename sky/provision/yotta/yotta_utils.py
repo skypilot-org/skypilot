@@ -15,8 +15,7 @@ from sky.skylet import constants
 logger = sky_logging.init_logger(__name__)
 
 CREDENTIALS_FILE_PATH = os.path.expanduser('~/.yotta/credentials')
-# ENDPOINT = "https://api.yottalabs.ai/sdk/api"
-ENDPOINT = 'https://api.dev.yottalabs.ai/openapi'
+ENDPOINT = 'https://api.yottalabs.ai/openapi'
 API_KEY_HEADER = 'X-API-KEY'
 
 
