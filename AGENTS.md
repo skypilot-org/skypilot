@@ -78,6 +78,12 @@ from sky.adaptors.common import LazyImport
 heavy_module = LazyImport('heavy_module')
 ```
 
+Measure import time with:
+```bash
+python -X importtime -c "import sky" 2> import.log
+tuna import.log  # pip install tuna
+```
+
 ## Architecture
 
 ### Cloud Providers
