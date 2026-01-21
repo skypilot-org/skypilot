@@ -3,7 +3,6 @@ import contextlib
 import contextvars
 import enum
 import logging
-import sys
 import threading
 import typing
 from typing import Callable, Iterator, Optional, Tuple, Union
@@ -280,23 +279,22 @@ class RichSafeStreamHandler(logging.StreamHandler):
     This handler addresses an issue with pytest-xdist parallel testing where
     the stream (sys.stdout) captured at handler creation time can become
     invalid when execnet workers redirect or close their I/O channels.
-
-    The fix: refresh self.stream to the current sys.stdout before each emit,
-    and skip logging if the stream is closed.
     """
 
     def emit(self, record: logging.LogRecord) -> None:
-        # Refresh stream to current sys.stdout/stderr in case it was replaced
-        # (e.g., by pytest-xdist workers using execnet gateways)
-        self.stream = sys.stdout
-
         # Skip logging if stream is closed (happens when pytest-xdist workers
         # finish and execnet closes the I/O channel)
         if self.stream.closed:
             return
 
         with safe_logger():
-            return super().emit(record)
+            try:
+                return super().emit(record)
+            except ValueError as e:
+                # Handle "I/O operation on closed file" that can occur due to
+                # race conditions when pytest-xdist workers close their streams
+                if 'I/O operation on closed file' not in str(e):
+                    raise
 
 
 def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
