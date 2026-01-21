@@ -4437,7 +4437,8 @@ def show_gpus(
                                                                    'min'))
             df = df.merge(min_price_df, on='cloud')
             # Sort within each cloud by price.
-            df = df.groupby('cloud', group_keys=False).apply(
+            # using df.cloud.values is a hack to keep the 'cloud' column in the output for pandas>=3.0.0
+            df = df.groupby(df.cloud.values, group_keys=False).apply(
                 lambda x: x.sort_values(by=['price', 'spot_price']))
             # Sort across groups (clouds).
             df = df.sort_values(by=['min_price', 'min_spot_price'])
