@@ -4076,12 +4076,13 @@ def show_gpus(
         if not labeled_zero_gpu_nodes:
             return ''
 
+        num_affected_nodes = len(labeled_zero_gpu_nodes)
         node_list = ', '.join(
             f'{ctx}/{name}' for ctx, name in labeled_zero_gpu_nodes[:3])
         ellipsis = '...' if len(labeled_zero_gpu_nodes) > 3 else ''
         return (f'Note: Some Kubernetes nodes have GPU labels but report 0 GPU '
                 f'resources. Please check the node labels and configuration. '
-                f'Affected nodes: {node_list}{ellipsis}.')
+                f'Affected {num_affected_nodes} node(s): {node_list}{ellipsis}')
 
     def _format_kubernetes_realtime_gpu(
             total_table: Optional['prettytable.PrettyTable'],

@@ -791,4 +791,52 @@ class TestShowGpus:
         # Verify hint message appears at the bottom of output
         assert 'Some Kubernetes nodes have GPU labels but report 0 GPU' in result.output
         assert 'check the node labels and configuration' in result.output
-        assert 'Affected nodes: context1/node1' in result.output
+        assert 'Affected 1 node(s): context1/node1' in result.output
+
+    def test_show_gpus_kubernetes_labeled_zero_gpu_hint_multiple_nodes(self):
+        """Test Kubernetes hint for nodes with GPU labels but 0 GPU resources."""
+        mock_k8s = clouds.Kubernetes()
+        self.cloud_registry_mock.return_value = mock_k8s
+        self.sdk_get_mock.return_value = ['kubernetes']
+
+        node_info_dict = {}
+        for i in range(10):
+            node_info_dict[f'node{i}'] = models.KubernetesNodeInfo(
+                name=f'node{i}',
+                accelerator_type='V100',
+                total={'accelerator_count': 0},
+                free={'accelerators_available': 0},
+                ip_address=None,
+                cpu_count=8.0,
+                memory_gb=16.0,
+                cpu_free=None,
+                memory_free_gb=None,
+                is_ready=True,
+                is_cordoned=False,
+                taints=[])
+
+        mock_nodes_info = models.KubernetesNodesInfo(
+            node_info_dict=node_info_dict, hint='')
+
+        gpu_availability = [('context1', [('V100', [1, 2], 4, 2)])]
+
+        self.stream_and_get_mock.side_effect = [
+            gpu_availability,
+            mock_nodes_info,
+            {},
+        ]
+
+        with mock.patch.object(sdk,
+                               'realtime_kubernetes_gpu_availability',
+                               return_value=mock.MagicMock()):
+            with mock.patch.object(sdk,
+                                   'kubernetes_node_info',
+                                   return_value=mock.MagicMock()):
+                result = self.runner.invoke(command.show_gpus,
+                                            ['--cloud', 'kubernetes'])
+
+        assert result.exit_code == 0
+        # Verify hint message appears at the bottom of output
+        assert 'Some Kubernetes nodes have GPU labels but report 0 GPU' in result.output
+        assert 'check the node labels and configuration' in result.output
+        assert 'Affected 10 node(s): context1/node0, context1/node1, context1/node2...' in result.output
