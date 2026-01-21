@@ -146,13 +146,10 @@ class Mithril(clouds.Cloud):
         if os.path.exists(os.path.expanduser(credentials_path)):
             return True, None
 
-        return False, (
-            f'Mithril credentials not found at {credentials_path}. '
-            'Run `ml setup` to setup your credentials or set MITHRIL_API_KEY '
-            'and MITHRIL_PROJECT environment variables.\n'
-            '    For more information, see: '
-            'https://docs.skypilot.co/en/latest/getting-started/'
-            'installation.html#mithril')
+        return False, (f'Mithril credentials not found at {credentials_path}. '
+                       'For more information, see: '
+                       'https://docs.skypilot.co/en/latest/getting-started/'
+                       'installation.html#mithril')
 
     @classmethod
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:

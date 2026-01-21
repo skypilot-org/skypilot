@@ -120,14 +120,14 @@ def _get_config() -> Dict[str, str]:
 
     # Validate required fields
     if not api_key:
-        raise MithrilError(
-            f'Mithril API key not found. '
-            f'Set {ENV_API_KEY} or run `sky check` for setup instructions.')
+        raise MithrilError(f'Mithril API key not found. '
+                           f'Set {ENV_API_KEY} or run `sky check mithril` '
+                           'for setup instructions.')
 
     if not project_id:
-        raise MithrilError(
-            f'Mithril project ID not found. '
-            f'Set {ENV_PROJECT} or run `sky check` for setup instructions.')
+        raise MithrilError(f'Mithril project ID not found. '
+                           f'Set {ENV_PROJECT} or run `sky check mithril` '
+                           'for setup instructions.')
 
     return {
         'api_key': api_key,
