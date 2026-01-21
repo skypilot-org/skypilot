@@ -615,6 +615,7 @@ export function useClusterData(options = {}) {
         setHasNext(resultHasNext);
         setHasPrev(resultHasPrev);
         setIsServerPagination(true);
+        setLoading(false); // Set loading false immediately so UI can render
 
         // Prefetch next page in background if there is one
         if (resultHasNext) {
@@ -637,6 +638,7 @@ export function useClusterData(options = {}) {
               console.warn('[useClusterData] Prefetch failed:', err)
             );
         }
+        return; // Early return since we already set loading to false
       } else {
         // Default: fetch all clusters and paginate client-side
         const activeClusters = await dashboardCache.get(getClusters);
@@ -700,15 +702,15 @@ export function useClusterData(options = {}) {
         setHasNext(page < clientTotalPages);
         setHasPrev(page > 1);
         setIsServerPagination(false);
+        setLoading(false);
       }
     } catch (fetchError) {
       console.error('[useClusterData] Error fetching clusters:', fetchError);
       setError(fetchError);
       setData([]);
       setFullData([]);
+      setLoading(false);
     }
-
-    setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     page,
