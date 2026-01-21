@@ -21,7 +21,18 @@ class Mithril(clouds.Cloud):
 
     _REPR = 'Mithril'
     _MAX_CLUSTER_NAME_LEN_LIMIT = 60
-    CREDENTIALS_PATH = '~/.mithril/config.yaml'
+
+    @classmethod
+    def get_credentials_path(cls) -> str:
+        """Get the path to the Mithril credentials file.
+
+        Respects XDG_CONFIG_HOME, otherwise defaults to
+        ~/.config/mithril/config.yaml
+        """
+        xdg_config_home = os.environ.get('XDG_CONFIG_HOME')
+        if xdg_config_home:
+            return os.path.join(xdg_config_home, 'mithril', 'config.yaml')
+        return '~/.config/mithril/config.yaml'
 
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
@@ -131,11 +142,12 @@ class Mithril(clouds.Cloud):
             return True, None
 
         # Fall back to checking the config file
-        if os.path.exists(os.path.expanduser(cls.CREDENTIALS_PATH)):
+        credentials_path = cls.get_credentials_path()
+        if os.path.exists(os.path.expanduser(credentials_path)):
             return True, None
 
         return False, (
-            f'Mithril credentials not found at {cls.CREDENTIALS_PATH}. '
+            f'Mithril credentials not found at {credentials_path}. '
             'Run `ml setup` to setup your credentials or set MITHRIL_API_KEY '
             'and MITHRIL_PROJECT environment variables.\n'
             '    For more information, see: '
@@ -148,9 +160,10 @@ class Mithril(clouds.Cloud):
 
     @classmethod
     def get_credential_file_mounts(cls) -> Dict[str, str]:
-        expanded_path = os.path.expanduser(cls.CREDENTIALS_PATH)
+        credentials_path = cls.get_credentials_path()
+        expanded_path = os.path.expanduser(credentials_path)
         if os.path.exists(expanded_path):
-            return {expanded_path: cls.CREDENTIALS_PATH}
+            return {expanded_path: credentials_path}
         return {}
 
     def __repr__(self):

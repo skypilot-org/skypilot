@@ -3,7 +3,8 @@
 Usage:
     python fetch_mithril.py
 
-Requires MITHRIL_API_KEY environment variable or ~/.mithril/config.yaml.
+Requires MITHRIL_API_KEY environment variable or a Mithril config file at
+${XDG_CONFIG_HOME:-~/.config}/mithril/config.yaml.
 """
 
 import csv
@@ -15,7 +16,21 @@ import requests
 import yaml
 
 DEFAULT_API_URL = 'https://api.mithril.ai'
-DEFAULT_CREDENTIALS_PATH = os.path.expanduser('~/.mithril/config.yaml')
+
+
+def _get_credentials_path() -> str:
+    """Get the path to the Mithril credentials file.
+
+    Respects XDG_CONFIG_HOME, otherwise defaults to
+    ~/.config/mithril/config.yaml
+    """
+    xdg_config_home = os.environ.get('XDG_CONFIG_HOME')
+    if xdg_config_home:
+        return os.path.join(xdg_config_home, 'mithril', 'config.yaml')
+    return os.path.expanduser('~/.config/mithril/config.yaml')
+
+
+DEFAULT_CREDENTIALS_PATH = _get_credentials_path()
 
 ENV_API_KEY = 'MITHRIL_API_KEY'
 ENV_API_URL = 'MITHRIL_API_URL'

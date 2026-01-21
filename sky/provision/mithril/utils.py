@@ -105,7 +105,7 @@ def _get_config() -> Dict[str, str]:
 
     # If any required config is missing from env, try to load from file
     if not api_key or not project_id:
-        config_path = os.path.expanduser(Mithril.CREDENTIALS_PATH)
+        config_path = os.path.expanduser(Mithril.get_credentials_path())
         if os.path.exists(config_path):
             with open(config_path, 'r', encoding='utf-8') as f:
                 file_config = yaml.safe_load(f) or {}
