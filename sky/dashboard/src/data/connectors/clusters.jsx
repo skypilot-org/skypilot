@@ -590,7 +590,9 @@ export function useClusterData(options = {}) {
 
   // Helper to use plugin fetcher and update state
   const fetchWithPlugin = async (pluginFetcher) => {
-    console.log('[useClusterData] Using plugin fetcher for server-side pagination');
+    console.log(
+      '[useClusterData] Using plugin fetcher for server-side pagination'
+    );
     lastLoggedModeRef.current = true;
 
     const result = await dashboardCache.get(
@@ -709,7 +711,9 @@ export function useClusterData(options = {}) {
           throw new Error('Plugin not available within timeout');
         }
         // Plugin loaded - fetch with server-side pagination
-        console.log('[useClusterData] Plugin loaded within timeout, using server-side pagination');
+        console.log(
+          '[useClusterData] Plugin loaded within timeout, using server-side pagination'
+        );
         const result = await dashboardCache.get(
           pluginFetcher,
           [
@@ -769,20 +773,28 @@ export function useClusterData(options = {}) {
           };
           dashboardCache
             .get(fetcher, [nextPageOptions], { ttl: 30000 })
-            .then(() => console.log('[useClusterData] Prefetched page', page + 1))
-            .catch((err) => console.warn('[useClusterData] Prefetch failed:', err));
+            .then(() =>
+              console.log('[useClusterData] Prefetched page', page + 1)
+            )
+            .catch((err) =>
+              console.warn('[useClusterData] Prefetch failed:', err)
+            );
         }
       } else if (clientResult.status === 'fulfilled') {
         // Client-side completed - check if plugin loaded during fetch
         if (hasPluginClusterProvider()) {
-          console.log('[useClusterData] Plugin loaded during client fetch, re-fetching with plugin');
+          console.log(
+            '[useClusterData] Plugin loaded during client fetch, re-fetching with plugin'
+          );
           const pluginFetcher = getPluginClusterFetcher();
           await fetchWithPlugin(pluginFetcher);
           return;
         }
 
         // Use client-side data
-        console.log('[useClusterData] Client path won the race, using client-side pagination');
+        console.log(
+          '[useClusterData] Client path won the race, using client-side pagination'
+        );
         const { clusters: allClusters } = clientResult.value;
 
         const clientTotal = allClusters.length;
@@ -804,7 +816,9 @@ export function useClusterData(options = {}) {
         console.error('[useClusterData] Both paths failed');
         const pluginError = pluginResult.reason;
         const clientError = clientResult.reason;
-        throw clientError || pluginError || new Error('Failed to fetch clusters');
+        throw (
+          clientError || pluginError || new Error('Failed to fetch clusters')
+        );
       }
     } catch (fetchError) {
       console.error('[useClusterData] Error fetching clusters:', fetchError);
