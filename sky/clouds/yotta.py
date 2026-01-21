@@ -34,6 +34,10 @@ class Yotta(clouds.Cloud):
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
              'are non-trivial on Yotta.'),
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+            ('Disk cloning not supported yet on Yotta.'),
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
+            ('Spot instances not supported yet on Yotta.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on Yotta.'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
@@ -42,12 +46,21 @@ class Yotta(clouds.Cloud):
             ('Mounting object stores is not supported on Yotta. To read data '
              'from object stores on Yotta, use `mode: COPY` to copy the data '
              'to local disk.'),
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
+            ('Host controllers not supported yet on Yotta.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
-            ('High availability controllers are not supported on Yotta.'),
+            ('High availability controllers are not supported yet on Yotta.'),
+        clouds.CloudImplementationFeatures.AUTO_TERMINATE:
+            ('Auto-termination not supported yet on Yotta.'),
+        clouds.CloudImplementationFeatures.AUTOSTOP:
+            ('Auto-stop not supported yet on Yotta.'),
+        clouds.CloudImplementationFeatures.AUTODOWN:
+            ('Auto-down not supported yet on Yotta.'),
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
-            ('Customized multiple network interfaces are not supported on '
+            ('Customized multiple network interfaces are not supported yet on '
              'Yotta.'),
     }
+
     _MAX_CLUSTER_NAME_LEN_LIMIT = 255
     _regions: List[clouds.Region] = []
 
