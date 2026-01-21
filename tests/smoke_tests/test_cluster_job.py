@@ -1868,13 +1868,19 @@ def test_aws_custom_image():
 
 
 @pytest.mark.aws
-def test_aws_custom_docker_image_with_motd():
+@pytest.mark.parametrize(
+    'image_id',
+    [
+        'docker:verlai/verl:sgl055.latest',
+        'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
+    ])
+def test_aws_custom_docker_image_with_motd(image_id):
     """Test AWS custom image with MOTD contamination"""
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'test-aws-custom-image',
         [
-            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra aws/us-east-2 --image-id docker:verlai/verl:sgl055.latest',
+            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra aws --image-id {image_id}',
             f'sky logs {name} 1 --status',
         ],
         f'sky down -y {name}',
