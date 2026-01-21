@@ -489,7 +489,7 @@ These are the minimal policy rules required by SkyPilot:
 
 .. tip::
 
-    For more restrictive S3 permissions scoped to specific buckets (recommended for production), see the S3 policy examples in :ref:`aws-eks-iam-roles`. While that guide is for EKS, the S3 policy format can be adapted for non-EKS setups as well.
+    If you are using EKS and want to set up S3 access with IAM roles, see :ref:`aws-eks-iam-roles`.
 
 **Once you have added all needed policies, click Next** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
 
