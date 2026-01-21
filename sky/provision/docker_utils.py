@@ -462,7 +462,7 @@ class DockerInitializer:
         # SkyPilot: End of Setup Commands.
         # Pattern matching to prevent MOTD contamination and reliably
         # parse docker user. Refer to CommandRunner::_get_remote_home_dir.
-        docker_user_output = self._run('echo "SKYPILOT_SSH_USER: $(whoami)"', run_env='docker')
+        docker_user_output = self._run('echo "SKYPILOT_DOCKER_USER: $(whoami)"', run_env='docker')
         docker_user_match = _DOCKER_USER_PATTERN.match(docker_user_output)
         if docker_user_match:
             docker_user = docker_user_match.group(1)
