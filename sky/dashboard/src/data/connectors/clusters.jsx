@@ -495,6 +495,33 @@ export function useClusterDetails({ cluster, job = null }) {
 // ============ useClusterData Hook ============
 
 /**
+ * Wait for plugin to register with a timeout.
+ * Returns the plugin fetcher if it registers within the timeout, null otherwise.
+ * @param {number} timeoutMs - Maximum time to wait for plugin
+ * @returns {Promise<Function|null>} Plugin fetcher or null if timeout
+ */
+function waitForPluginWithTimeout(timeoutMs) {
+  return new Promise((resolve) => {
+    // Check if already available
+    if (hasPluginClusterProvider()) {
+      resolve(getPluginClusterFetcher());
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      unsub();
+      resolve(null); // Timeout - no plugin
+    }, timeoutMs);
+
+    const unsub = onClusterProviderRegistration(() => {
+      clearTimeout(timeout);
+      unsub();
+      resolve(getPluginClusterFetcher());
+    });
+  });
+}
+
+/**
  * Hook for cluster data with pagination support.
  * If a plugin has registered a data provider, uses it for server-side pagination.
  * Otherwise, falls back to client-side pagination with getClusters.
@@ -561,30 +588,128 @@ export function useClusterData(options = {}) {
     setPage(1);
   }, [filtersKey]);
 
+  // Helper to use plugin fetcher and update state
+  const fetchWithPlugin = async (pluginFetcher) => {
+    console.log('[useClusterData] Using plugin fetcher for server-side pagination');
+    lastLoggedModeRef.current = true;
+
+    const result = await dashboardCache.get(
+      pluginFetcher,
+      [
+        {
+          page,
+          limit,
+          showHistory,
+          historyDays,
+          sortBy,
+          sortOrder,
+          filters,
+        },
+      ],
+      { ttl: 30000 }
+    );
+
+    const resultTotal = result.total || 0;
+    const resultTotalPages = result.totalPages || result.total_pages || 1;
+    const resultHasNext = result.hasNext || result.has_next || false;
+    const resultHasPrev = result.hasPrev || result.has_prev || false;
+    const resultData = result.items || result.data || [];
+
+    setData(resultData);
+    setFullData(resultData);
+    setTotal(resultTotal);
+    setTotalPages(resultTotalPages);
+    setHasNext(resultHasNext);
+    setHasPrev(resultHasPrev);
+    setIsServerPagination(true);
+    setLoading(false);
+
+    // Prefetch next page in background if there is one
+    if (resultHasNext) {
+      const nextPageOptions = {
+        page: page + 1,
+        limit,
+        showHistory,
+        historyDays,
+        sortBy,
+        sortOrder,
+        filters,
+      };
+      dashboardCache
+        .get(pluginFetcher, [nextPageOptions], { ttl: 30000 })
+        .then(() => console.log('[useClusterData] Prefetched page', page + 1))
+        .catch((err) => console.warn('[useClusterData] Prefetch failed:', err));
+    }
+
+    return { type: 'plugin', result };
+  };
+
+  // Helper to fetch client-side and return result
+  const fetchClientSide = async () => {
+    console.log('[useClusterData] Starting client-side fetch');
+    lastLoggedModeRef.current = false;
+
+    const activeClusters = await dashboardCache.get(getClusters);
+
+    let allClusters;
+    if (showHistory) {
+      let historyClusters = [];
+      try {
+        historyClusters = await dashboardCache.get(getClusterHistory, [
+          null,
+          historyDays,
+        ]);
+      } catch (historyError) {
+        console.error('Error fetching cluster history:', historyError);
+      }
+
+      const markedActive = activeClusters.map((c) => ({
+        ...c,
+        isHistorical: false,
+      }));
+      const markedHistory = historyClusters.map((c) => ({
+        ...c,
+        isHistorical: true,
+      }));
+
+      allClusters = [...markedActive];
+      markedHistory.forEach((hist) => {
+        if (!activeClusters.some((a) => a.cluster_hash === hist.cluster_hash)) {
+          allClusters.push(hist);
+        }
+      });
+    } else {
+      allClusters = activeClusters.map((c) => ({
+        ...c,
+        isHistorical: false,
+      }));
+    }
+
+    return { type: 'client', clusters: allClusters };
+  };
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
 
-    // Check if plugin provider is available
-    const pluginFetcher = getPluginClusterFetcher();
-    const usePlugin = !!pluginFetcher;
-
-    // Log mode change
-    if (lastLoggedModeRef.current !== usePlugin) {
-      lastLoggedModeRef.current = usePlugin;
-      if (usePlugin) {
-        console.log(
-          '[useClusterData] Using plugin fetcher for server-side pagination'
-        );
-      } else {
-        console.log('[useClusterData] Using default client-side pagination');
-      }
-    }
-
     try {
-      if (usePlugin) {
-        // Use plugin's fetch function with pagination params
-        // Wrap with dashboardCache - page/limit/sort/filters in args creates unique cache key
+      // Fast path: If plugin is already available, use it directly
+      const existingPlugin = getPluginClusterFetcher();
+      if (existingPlugin) {
+        await fetchWithPlugin(existingPlugin);
+        return;
+      }
+
+      // Race two paths:
+      // 1. Plugin path: Wait for plugin to load (max 300ms), then fetch
+      // 2. Client path: Start fetching all clusters immediately
+      const pluginPath = async () => {
+        const pluginFetcher = await waitForPluginWithTimeout(300);
+        if (!pluginFetcher) {
+          throw new Error('Plugin not available within timeout');
+        }
+        // Plugin loaded - fetch with server-side pagination
+        console.log('[useClusterData] Plugin loaded within timeout, using server-side pagination');
         const result = await dashboardCache.get(
           pluginFetcher,
           [
@@ -600,24 +725,39 @@ export function useClusterData(options = {}) {
           ],
           { ttl: 30000 }
         );
+        return { type: 'plugin', result, fetcher: pluginFetcher };
+      };
 
-        const itemCount = (result.items || result.data || []).length;
+      const clientPath = fetchClientSide();
+
+      // Race both paths
+      const results = await Promise.allSettled([pluginPath(), clientPath]);
+      const pluginResult = results[0];
+      const clientResult = results[1];
+
+      // Prefer plugin result if it succeeded
+      if (pluginResult.status === 'fulfilled') {
+        console.log('[useClusterData] Plugin path won the race');
+        const { result, fetcher } = pluginResult.value;
+
         const resultTotal = result.total || 0;
         const resultTotalPages = result.totalPages || result.total_pages || 1;
         const resultHasNext = result.hasNext || result.has_next || false;
         const resultHasPrev = result.hasPrev || result.has_prev || false;
-
         const resultData = result.items || result.data || [];
+
         setData(resultData);
-        setFullData(resultData); // Server handles filtering, so full = current page
+        setFullData(resultData);
         setTotal(resultTotal);
         setTotalPages(resultTotalPages);
         setHasNext(resultHasNext);
         setHasPrev(resultHasPrev);
         setIsServerPagination(true);
+        setLoading(false);
+        lastLoggedModeRef.current = true;
 
-        // Prefetch next page in background if there is one
-        if (resultHasNext) {
+        // Prefetch next page
+        if (resultHasNext && fetcher) {
           const nextPageOptions = {
             page: page + 1,
             limit,
@@ -627,88 +767,52 @@ export function useClusterData(options = {}) {
             sortOrder,
             filters,
           };
-          // Fire and forget - don't await, just warm the cache
           dashboardCache
-            .get(pluginFetcher, [nextPageOptions], { ttl: 30000 })
-            .then(() =>
-              console.log('[useClusterData] Prefetched page', page + 1)
-            )
-            .catch((err) =>
-              console.warn('[useClusterData] Prefetch failed:', err)
-            );
+            .get(fetcher, [nextPageOptions], { ttl: 30000 })
+            .then(() => console.log('[useClusterData] Prefetched page', page + 1))
+            .catch((err) => console.warn('[useClusterData] Prefetch failed:', err));
         }
-      } else {
-        // Default: fetch all clusters and paginate client-side
-        const activeClusters = await dashboardCache.get(getClusters);
-
-        let allClusters;
-        if (showHistory) {
-          let historyClusters = [];
-          try {
-            historyClusters = await dashboardCache.get(getClusterHistory, [
-              null,
-              historyDays,
-            ]);
-          } catch (historyError) {
-            console.error('Error fetching cluster history:', historyError);
-          }
-
-          const markedActive = activeClusters.map((c) => ({
-            ...c,
-            isHistorical: false,
-          }));
-          const markedHistory = historyClusters.map((c) => ({
-            ...c,
-            isHistorical: true,
-          }));
-
-          // Combine, preferring active over historical
-          allClusters = [...markedActive];
-          markedHistory.forEach((hist) => {
-            if (
-              !activeClusters.some((a) => a.cluster_hash === hist.cluster_hash)
-            ) {
-              allClusters.push(hist);
-            }
-          });
-        } else {
-          allClusters = activeClusters.map((c) => ({
-            ...c,
-            isHistorical: false,
-          }));
-        }
-
-        // Check if plugin became available while we were fetching
-        // If so, skip updating state - the plugin fetch will handle it
-        if (getPluginClusterFetcher()) {
-          console.log(
-            '[useClusterData] Plugin became available during default fetch, skipping state update'
-          );
+      } else if (clientResult.status === 'fulfilled') {
+        // Client-side completed - check if plugin loaded during fetch
+        if (hasPluginClusterProvider()) {
+          console.log('[useClusterData] Plugin loaded during client fetch, re-fetching with plugin');
+          const pluginFetcher = getPluginClusterFetcher();
+          await fetchWithPlugin(pluginFetcher);
           return;
         }
 
-        // Client-side pagination
+        // Use client-side data
+        console.log('[useClusterData] Client path won the race, using client-side pagination');
+        const { clusters: allClusters } = clientResult.value;
+
         const clientTotal = allClusters.length;
         const clientTotalPages = Math.ceil(clientTotal / limit) || 1;
         const startIndex = (page - 1) * limit;
         const paginatedData = allClusters.slice(startIndex, startIndex + limit);
 
         setData(paginatedData);
-        setFullData(allClusters); // Keep full dataset for client-side filtering
+        setFullData(allClusters);
         setTotal(clientTotal);
         setTotalPages(clientTotalPages);
         setHasNext(page < clientTotalPages);
         setHasPrev(page > 1);
         setIsServerPagination(false);
+        setLoading(false);
+        lastLoggedModeRef.current = false;
+      } else {
+        // Both failed
+        console.error('[useClusterData] Both paths failed');
+        const pluginError = pluginResult.reason;
+        const clientError = clientResult.reason;
+        throw clientError || pluginError || new Error('Failed to fetch clusters');
       }
     } catch (fetchError) {
       console.error('[useClusterData] Error fetching clusters:', fetchError);
       setError(fetchError);
       setData([]);
       setFullData([]);
+      setLoading(false);
     }
-
-    setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     page,
