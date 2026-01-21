@@ -1868,10 +1868,12 @@ def test_aws_custom_image():
 
 
 @pytest.mark.aws
-@pytest.mark.parametrize('image_id', [
-    'docker:verlai/verl:sgl055.latest',
-    # 'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
-])
+@pytest.mark.parametrize(
+    'image_id',
+    [
+        'docker:verlai/verl:sgl055.latest',
+        # 'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
+    ])
 def test_aws_custom_docker_image_with_motd(image_id):
     """Test AWS custom image with MOTD contamination"""
     name = smoke_tests_utils.get_cluster_name()
