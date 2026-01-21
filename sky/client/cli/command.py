@@ -317,8 +317,9 @@ def _async_call_or_wait(request_id: server_common.RequestId[T],
             f'{colorama.Style.RESET_ALL}\n')
 
 
-def _merge_cli_and_file_vars(env_dict: Optional[Dict[str, str]],
-                    env_list: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+def _merge_cli_and_file_vars(
+        env_dict: Optional[Dict[str, str]],
+        env_list: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
     """Merges all values from env_list into env_dict."""
     if not env_dict:
         return env_list
