@@ -1,9 +1,6 @@
 run: |
-  if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
-    echo "Current time (UTC): $(date -u)"
-    echo done
-  else
+  if [ "$SKYPILOT_NODE_RANK" != "0" ]; then
     sleep 30
-    echo "Current time (UTC): $(date -u)"
-    echo done
   fi
+  echo "Current time (UTC): $(date -u)"
+  echo done
