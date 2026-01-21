@@ -91,7 +91,6 @@ class Kubernetes(clouds.Cloud):
 
     IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'
     IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2004'
-    IMAGE_EFA = 'public.ecr.aws/hpc-cloud/nccl-tests:latest'
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
@@ -537,6 +536,27 @@ class Kubernetes(clouds.Cloud):
         else:
             acc_count = acc_count or 0
 
+        def _get_image_id(resources: 'resources_lib.Resources') -> str:
+            image_id_dict = resources.image_id
+            if image_id_dict is not None:
+                # Use custom image specified in resources
+                if None in image_id_dict:
+                    image_id = image_id_dict[None]
+                else:
+                    assert resources.region in image_id_dict, image_id_dict
+                    image_id = image_id_dict[resources.region]
+                if image_id.startswith('docker:'):
+                    image_id = image_id[len('docker:'):]
+            else:
+                # Select image based on whether we are using GPUs or not.
+                image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
+                # Get the container image ID from the service catalog.
+                image_id = catalog.get_image_id_from_tag(image_id,
+                                                         clouds='kubernetes')
+            return image_id
+
+        image_id = _get_image_id(resources)
+
         # Set environment variables for the pod. Note that SkyPilot env vars
         # are set separately when the task is run. These env vars are
         # independent of the SkyPilot task to be run.
@@ -657,31 +677,6 @@ class Kubernetes(clouds.Cloud):
             # cpus is <1.
             'num-cpus': str(max(int(cpus), 1)),
         }
-
-        def _get_image_id(resources: 'resources_lib.Resources') -> str:
-            image_id_dict = resources.image_id
-            if image_id_dict is not None:
-                # Use custom image specified in resources
-                if None in image_id_dict:
-                    image_id = image_id_dict[None]
-                else:
-                    assert resources.region in image_id_dict, image_id_dict
-                    image_id = image_id_dict[resources.region]
-                if image_id.startswith('docker:'):
-                    image_id = image_id[len('docker:'):]
-            else:
-                if k8s_efa_count:
-                    image_id = self.IMAGE_EFA
-                else:
-                    # Select image based on whether we are using GPUs or not.
-                    image_id = (self.IMAGE_GPU
-                                if acc_count > 0 else self.IMAGE_CPU)
-                    # Get the container image ID from the service catalog.
-                    image_id = catalog.get_image_id_from_tag(
-                        image_id, clouds='kubernetes')
-            return image_id
-
-        image_id = _get_image_id(resources)
 
         # Get the storage class name for high availability controller's PVC
         k8s_ha_storage_class_name = (
