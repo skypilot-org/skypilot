@@ -274,25 +274,15 @@ def safe_logger():
 
 
 class RichSafeStreamHandler(logging.StreamHandler):
-    """A logging handler that safely handles Rich status spinners.
-
-    This handler addresses an issue with pytest-xdist parallel testing where
-    the stream (sys.stdout) captured at handler creation time can become
-    invalid when execnet workers redirect or close their I/O channels.
-    """
+    """A logging handler that safely handles Rich status spinners."""
 
     def emit(self, record: logging.LogRecord) -> None:
-        # Skip logging if stream is closed (happens when pytest-xdist workers
-        # finish and execnet closes the I/O channel)
-        if self.stream.closed:
-            return
-
         with safe_logger():
             try:
                 return super().emit(record)
             except ValueError as e:
-                # Handle "I/O operation on closed file" that can occur due to
-                # race conditions when pytest-xdist workers close their streams
+                # Ignore "I/O operation on closed file" errors that occur
+                # when pytest-xdist workers close stdout during parallel tests
                 if 'I/O operation on closed file' not in str(e):
                     raise
 
