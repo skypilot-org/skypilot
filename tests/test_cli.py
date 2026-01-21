@@ -121,13 +121,14 @@ def mock_api_server_calls(monkeypatch):
             self.region = region
 
         def _asdict(self):
+            # Return keys in the same order as InstanceTypeInfo fields
             return {
-                'accelerator_name': self.accelerator_name,
-                'accelerator_count': self.accelerator_count,
                 'cloud': self.cloud,
                 'instance_type': self.instance_type,
-                'device_memory': self.device_memory,
+                'accelerator_name': self.accelerator_name,
+                'accelerator_count': self.accelerator_count,
                 'cpu_count': self.cpu_count,
+                'device_memory': self.device_memory,
                 'memory': self.memory,
                 'price': self.price,
                 'spot_price': self.spot_price,

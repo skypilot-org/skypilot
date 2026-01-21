@@ -4442,6 +4442,9 @@ def show_gpus(
             # Sort across groups (clouds).
             df = df.sort_values(by=['min_price', 'min_spot_price'])
             df = df.drop(columns=['min_price', 'min_spot_price'])
+            # Reorder columns to match InstanceTypeInfo field order for
+            # positional unpacking
+            df = df[list(catalog_common.InstanceTypeInfo._fields)]
             sorted_dataclasses = [
                 catalog_common.InstanceTypeInfo(*row)
                 for row in df.to_records(index=False)
