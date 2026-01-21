@@ -105,7 +105,7 @@ From `requirements-dev.txt`:
 - yapf==0.32.0
 - pylint==2.14.5
 - black==22.10.0
-- mypy==1.14.1
+- mypy==1.19.1
 - isort==5.12.0
 - pylint-quotes==0.2.3
 
