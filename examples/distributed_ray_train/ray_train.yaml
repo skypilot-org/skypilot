@@ -5,9 +5,8 @@
 resources:
   accelerators: L4:2
   memory: 64+
-  # On SLURM, it is recommended to use a Docker image to avoid:
-  # - Permission issues with /tmp: https://github.com/ray-project/ray/issues/3899
-  # - SQLite WAL locking issues on overlayfs (for Kubernetes-based SLURM like SUNK)
+  # On SLURM, it is recommended to use a Docker image to avoid permission
+  # issues with /tmp: https://github.com/ray-project/ray/issues/3899
   # image_id: docker:rayproject/ray:nightly-py39-gpu
 
 num_nodes: 2

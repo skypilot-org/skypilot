@@ -901,12 +901,18 @@ class SlurmCodeGen(TaskCodeGen):
                     # allocation. See:
                     # https://support.schedmd.com/show_bug.cgi?id=14298
                     # https://github.com/huggingface/datatrove/issues/248
-                    bash_cmd = shlex.quote(' '.join([
-                        'unset SKY_RUNTIME_DIR;',
+                    cmd_parts = []
+                    # Only unset SKY_RUNTIME_DIR for container runs. For non-container
+                    # runs, we want to inherit the node-local SKY_RUNTIME_DIR set by
+                    # SlurmCommandRunner to avoid SQLite WAL issues on shared filesystems.
+                    if {True if container_flags else False}:
+                        cmd_parts.append('unset SKY_RUNTIME_DIR;')
+                    cmd_parts.extend([
                         constants.SKY_SLURM_PYTHON_CMD,
                         '-m sky.skylet.executor.slurm',
                         runner_args,
-                    ]))
+                    ])
+                    bash_cmd = shlex.quote(' '.join(cmd_parts))
                     srun_cmd = (
                         "unset $(env | awk -F= '/^SLURM_/ {{print $1}}') && "
                         f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid={self._slurm_job_id} '

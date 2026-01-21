@@ -276,6 +276,13 @@ def _create_virtual_instance(
     # Build container initialization block if container image specified
     container_block = ''
     if container_image is not None:
+        # Note: /dev/shm is NOT mounted here because enroot handles it:
+        # - If ENROOT_RESTRICT_DEV is set: /dev is restricted but /dev/shm is
+        #   explicitly mounted by the 10-devices.sh hook
+        # - If ENROOT_RESTRICT_DEV is unset: /dev is not restricted, so
+        #   /dev/shm is inherited from the host
+        # See:
+        # https://github.com/NVIDIA/enroot/blob/main/conf/hooks/10-devices.sh
         container_mounts = ','.join([
             f'{remote_home_dir}:{remote_home_dir}',
         ])
@@ -367,6 +374,7 @@ cleanup() {{
     # that created the sky directories.
     srun --nodes={num_nodes} rm -rf {skypilot_runtime_dir}
     rm -rf {sky_home_dir}
+    exit 0
 }}
 trap cleanup TERM
 
