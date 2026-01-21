@@ -1940,7 +1940,7 @@ class Resources:
             instance_type=override.pop('instance_type', self.instance_type),
             cpus=override.pop('cpus', self._cpus),
             memory=override.pop('memory', self._memory),
-            accelerators=override.pop('accelerators', self.accelerators),
+            accelerators=override.pop('accelerators', self._accelerators),
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', use_spot),
