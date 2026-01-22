@@ -567,7 +567,7 @@ export function TopBar() {
                   className="text-sm text-muted-foreground"
                 >
                   <a
-                    href="https://skypilot.readthedocs.io/en/latest/"
+                    href="https://docs.skypilot.co/en/latest/"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center align-middle border-b-2 border-transparent px-1 pt-1 space-x-1 text-gray-600 hover:text-blue-600 transition-colors duration-150 cursor-pointer"
@@ -845,7 +845,7 @@ export function TopBar() {
 
                 {/* External links in mobile */}
                 <a
-                  href="https://skypilot.readthedocs.io/en/latest/"
+                  href="https://docs.skypilot.co/en/latest/"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-blue-600 rounded-md transition-colors"
