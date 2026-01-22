@@ -63,9 +63,7 @@ export async function deleteVolume(volumeName) {
         msg: `Failed to delete volume with status ${response.status}`,
       };
     }
-    const id =
-      response.headers.get('X-SkyPilot-Request-ID') ||
-      response.headers.get('X-Request-ID');
+    const id = response.headers.get('X-SkyPilot-Request-ID');
     if (!id) {
       console.error('No request ID received from server for deleting volume');
       return {

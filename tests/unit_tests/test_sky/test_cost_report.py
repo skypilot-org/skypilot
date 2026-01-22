@@ -192,6 +192,7 @@ class TestCostReportServer(unittest.TestCase):
         # Create mock request and body
         mock_request = mock.Mock()
         mock_request.state.request_id = 'test_request_id'
+        mock_request.state.auth_user = None
 
         cost_report_body = payloads.CostReportBody(days=15)
 

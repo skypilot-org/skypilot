@@ -96,7 +96,7 @@ repos:
 
     -   id: dashboard-format
         name: dashboard format
-        entry: bash -c 'cd sky/dashboard && npm run format'
+        entry: bash -c 'cd sky/dashboard && npm run format -- --log-level warn'
         language: node
         language_version: 24.12.0
         files: ^sky/dashboard/

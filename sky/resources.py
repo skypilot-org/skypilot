@@ -1940,7 +1940,10 @@ class Resources:
             instance_type=override.pop('instance_type', self.instance_type),
             cpus=override.pop('cpus', self._cpus),
             memory=override.pop('memory', self._memory),
-            accelerators=override.pop('accelerators', self.accelerators),
+            # Need to pass `self._accelerators` instead of `self.accelerators`
+            # as the latter can auto-infer, causing potential conflicts with
+            # instance_type override.
+            accelerators=override.pop('accelerators', self._accelerators),
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', use_spot),

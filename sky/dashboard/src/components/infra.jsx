@@ -2414,6 +2414,7 @@ export function GPUs() {
     };
 
     initializeData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Effect for interval refresh.

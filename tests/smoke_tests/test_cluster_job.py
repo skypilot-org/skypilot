@@ -2748,6 +2748,62 @@ def test_kubernetes_pod_config_change_detection():
         os.unlink(task_yaml_2_path)
 
 
+# ---------- Testing Kubernetes set_pod_resource_limits ----------
+@pytest.mark.kubernetes
+def test_kubernetes_set_pod_resource_limits():
+    """Test that set_pod_resource_limits config sets CPU/memory limits on pods.
+
+    This test verifies that when kubernetes.set_pod_resource_limits is set to
+    a numeric multiplier, the pod limits are set to requests * multiplier.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+
+    # Config with set_pod_resource_limits with a 2x multiplier
+    config = textwrap.dedent("""
+    kubernetes:
+        set_pod_resource_limits: 2.0
+    """)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as config_file:
+        config_file.write(config)
+        config_file.flush()
+        config_path = config_file.name
+
+        test = smoke_tests_utils.Test(
+            'kubernetes_set_pod_resource_limits',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
+                # Launch a cluster with set_pod_resource_limits=2.0
+                # Using --cpus 2 --memory 2 so limits should be 4 CPU, 4G memory
+                f'sky launch -y -c {name} --infra kubernetes --cpus 2 --memory 2',
+                # Verify CPU limit is set (should be 4 with 2x multiplier)
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'kubectl get pod -l ray-cluster-name={name_on_cloud} '
+                    '-o jsonpath=\'{.items[0].spec.containers[0].resources.limits.cpu}\' '
+                    '| grep -E "^4"'),
+                # Verify memory limit is set (should be 4G with 2x multiplier)
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'kubectl get pod -l ray-cluster-name={name_on_cloud} '
+                    '-o jsonpath=\'{.items[0].spec.containers[0].resources.limits.memory}\' '
+                    '| grep -E "^4.*G"'),
+            ],
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} && '
+            f'rm -f {config_path}',
+            timeout=10 * 60,
+            env={
+                skypilot_config.ENV_VAR_GLOBAL_CONFIG: config_path,
+            },
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # ---------- SSH Proxy Performance Test ----------
 @pytest.mark.kubernetes
 @pytest.mark.no_remote_server

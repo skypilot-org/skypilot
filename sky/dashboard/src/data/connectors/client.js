@@ -76,10 +76,8 @@ export const apiClient = {
         throw new Error(msg);
       }
 
-      // Handle X-Request-ID for API requests
-      const id =
-        response.headers.get('X-Skypilot-Request-ID') ||
-        response.headers.get('X-Request-ID');
+      // Handle X-Skypilot-Request-ID for API requests
+      const id = response.headers.get('X-Skypilot-Request-ID');
 
       // Handle empty request ID
       if (!id) {
