@@ -37,7 +37,7 @@ const DEFAULT_FIELDS = [
   'is_job_group',
   'execution',
   'primary_tasks',
-  // Note: 'links' field removed - it may not exist in older database schemas
+  'links',
 ];
 
 /**
@@ -508,9 +508,9 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
       try {
         setLoadingJobData(true);
 
-        // Fetch the specific job by ID (don't use allFields to avoid missing column errors)
+        // Fetch the specific job by ID with all fields for complete data
         const allJobsData = await dashboardCache.get(getManagedJobs, [
-          { allUsers: true, jobIDs: [jobId] },
+          { allUsers: true, allFields: true, jobIDs: [jobId] },
         ]);
 
         // Filter for ALL tasks matching this job_id (supports multi-task jobs)
