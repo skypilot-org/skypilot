@@ -70,10 +70,8 @@ message ManagedJobInfo {
   string entrypoint = 4;
   repeated ManagedJobTask tasks = 5;
   optional string user_id = 6;
-  // Execution mode: 'parallel' (job group), 'sequential' (chain), or empty
+  // Execution mode: 'parallel' (job group) or 'serial' (pipeline/single job)
   optional string execution = 7;
-  // Placement mode: 'SAME_INFRA', 'ANY', or empty
-  optional string placement = 8;
 }
 
 message ManagedJobTask {
@@ -81,6 +79,10 @@ message ManagedJobTask {
   string name = 2;
   string resources_str = 3;
   string metadata_json = 4;
+  // Whether this task is a primary task (true) or auxiliary task (false)
+  // within a job group. Auxiliary tasks are terminated when all primary tasks
+  // complete. NULL for non-job-group jobs (single jobs and pipelines).
+  optional bool is_primary_in_job_group = 5;
 }
 
 message QueueJobResponse {}

@@ -26,6 +26,7 @@ from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.catalog import common as service_catalog_common
+from sky.dag import DEFAULT_EXECUTION
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
@@ -232,9 +233,10 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
         # each job and then give it a unique name (e.g. append job id after
         # the task name). The name of the dag also needs to be aligned with
         # the task name.
-        # Get execution and placement from the dag (JobGroup fields)
-        execution_mode = dag.execution.value if dag.execution else None
-        placement_mode = dag.placement.value if dag.placement else None
+        # Execution mode: 'parallel' for job groups, 'serial' for pipelines and
+        # single jobs
+        execution_mode = (dag.execution.value
+                          if dag.execution else DEFAULT_EXECUTION.value)
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
                 dag.name,
@@ -244,16 +246,21 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
                 pool=pool,
                 pool_hash=pool_hash,
                 user_hash=common_utils.get_user_hash(),
-                execution=execution_mode,
-                placement=placement_mode,
-                primary_tasks=dag.primary_tasks,
-                termination_delay=dag.termination_delay))
+                execution=execution_mode))
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
+            # For job groups, determine which tasks are primary vs auxiliary.
+            # For non-job-groups (single jobs, pipelines),
+            # is_primary_in_job_group is None for all tasks.
+            is_primary_in_job_group: Optional[bool] = None
+            if dag.is_job_group():
+                is_primary_in_job_group = (dag.primary_tasks is None or
+                                           task.name in dag.primary_tasks)
             managed_job_state.set_pending(consolidation_mode_job_id, task_id,
                                           task.name, resources_str,
-                                          task.metadata_json)
+                                          task.metadata_json,
+                                          is_primary_in_job_group)
         job_ids.append(consolidation_mode_job_id)
     return job_ids
 

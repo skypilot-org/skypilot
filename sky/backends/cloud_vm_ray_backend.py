@@ -44,6 +44,7 @@ from sky.backends import task_codegen
 from sky.backends import wheel_utils
 from sky.clouds import cloud as sky_cloud
 from sky.clouds.utils import gcp_utils
+from sky.dag import DEFAULT_EXECUTION
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import common as provision_common
@@ -3852,18 +3853,25 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     for task_id, task in enumerate(managed_job_dag.tasks):
                         resources_str = backend_utils.get_task_resources_str(
                             task, is_managed_job=True)
-                        managed_job_tasks.append(
-                            jobsv1_pb2.ManagedJobTask(
-                                task_id=task_id,
-                                name=task.name,
-                                resources_str=resources_str,
-                                metadata_json=task.metadata_json))
+                        managed_job_task = jobsv1_pb2.ManagedJobTask(
+                            task_id=task_id,
+                            name=task.name,
+                            resources_str=resources_str,
+                            metadata_json=task.metadata_json)
+                        # Only set is_primary_in_job_group for job groups
+                        if managed_job_dag.is_job_group():
+                            # If primary_task_names is None, all tasks are
+                            # primary
+                            managed_job_task.is_primary_in_job_group = (
+                                managed_job_dag.primary_tasks is None or
+                                task.name in managed_job_dag.primary_tasks)
+                        managed_job_tasks.append(managed_job_task)
 
-                    # Get execution and placement from the dag (JobGroup fields)
+                    # Execution mode: 'parallel' for job groups, 'serial' for
+                    # pipelines and single jobs
                     execution = (managed_job_dag.execution.value
-                                 if managed_job_dag.execution else None)
-                    placement = (managed_job_dag.placement.value
-                                 if managed_job_dag.placement else None)
+                                 if managed_job_dag.execution else
+                                 DEFAULT_EXECUTION.value)
                     managed_job_info = jobsv1_pb2.ManagedJobInfo(
                         name=managed_job_dag.name,
                         pool=managed_job_dag.pool,
@@ -3871,8 +3879,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         entrypoint=entrypoint,
                         tasks=managed_job_tasks,
                         user_id=managed_job_user_id,
-                        execution=execution,
-                        placement=placement)
+                        execution=execution)
 
                 if backend_utils.is_command_length_over_limit(codegen):
                     _dump_code_to_file(codegen)

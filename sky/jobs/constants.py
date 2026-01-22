@@ -54,7 +54,7 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # job.utils.ManagedJobCodeGen to handle the version update.
 # WARNING: If you update this due to a codegen change, make sure to make the
 # corresponding change in the ManagedJobsService AND bump the SKYLET_VERSION.
-MANAGED_JOBS_VERSION = 13  # conditional plugin loading for bwcompat
+MANAGED_JOBS_VERSION = 14  # new fields for job groups
 
 # The command for setting up the jobs dashboard on the controller. It firstly
 # checks if the systemd services are available, and if not (e.g., Kubernetes

@@ -1,12 +1,10 @@
-"""Add primary_tasks and termination_delay columns to job_info table.
+"""Add is_primary_in_job_group column to spot table.
 
-This migration adds support for primary/auxiliary job markers in job groups:
-- primary_tasks: JSON list of job names that are "primary". When all primary
-  jobs complete, auxiliary jobs (all other jobs) are automatically terminated.
-  NULL means all jobs are primary (traditional behavior).
-- termination_delay: JSON (string like "30s" or dict with job-specific delays
-  like {"default": "30s", "replay-buffer": "1m"}). Defines the grace period
-  before auxiliary jobs are terminated after primary jobs complete.
+This migration adds support for primary/auxiliary task markers in job groups:
+- is_primary_in_job_group: Boolean indicating whether this task is "primary"
+  (True) or "auxiliary" (False) within a job group. NULL for non-job-group
+  jobs (single jobs and pipelines). When all primary tasks complete, auxiliary
+  tasks are automatically terminated.
 
 Revision ID: 013
 Revises: 012
@@ -29,19 +27,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    """Add primary_tasks and termination_delay columns to job_info table."""
+    """Add is_primary_in_job_group column to spot table."""
     with op.get_context().autocommit_block():
-        # Add primary_tasks column: JSON list of job names that are "primary".
-        # NULL means all jobs are primary (traditional behavior).
-        db_utils.add_column_to_table_alembic('job_info',
-                                             'primary_tasks',
-                                             sa.JSON(),
-                                             server_default=None)
-        # Add termination_delay column: JSON (string or dict with delays).
-        # NULL means immediate termination (0s delay).
-        db_utils.add_column_to_table_alembic('job_info',
-                                             'termination_delay',
-                                             sa.JSON(),
+        # Add is_primary_in_job_group column: Boolean indicating whether this
+        # task is "primary" (True) or "auxiliary" (False) within a job group.
+        # NULL for non-job-group jobs (single jobs and pipelines).
+        db_utils.add_column_to_table_alembic('spot',
+                                             'is_primary_in_job_group',
+                                             sa.Boolean(),
                                              server_default=None)
 
 

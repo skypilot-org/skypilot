@@ -102,7 +102,8 @@ def _load_chain_dag(
         dag_name = first_config['name']
         # Validate execution mode if specified
         execution = first_config.get('execution')
-        if execution is not None and execution != 'serial':
+        if (execution is not None and
+                execution != dag_lib.DagExecution.SERIAL.value):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Invalid execution mode for pipeline: {execution!r}. '
@@ -416,7 +417,7 @@ def _is_job_group_configs(configs: List[Dict[str, Any]]) -> bool:
 
     # Check if execution mode is explicitly set to 'parallel'
     execution = header.get('execution')
-    return execution == 'parallel'
+    return execution == dag_lib.DagExecution.PARALLEL.value
 
 
 def load_job_group_from_yaml(
@@ -520,7 +521,7 @@ def _load_job_group(
                 'and underscores.')
 
     placement_str = header.get('placement', 'SAME_INFRA')
-    execution_str = header.get('execution', 'parallel')
+    execution_str = header.get('execution', dag_lib.DagExecution.PARALLEL.value)
 
     # Parse placement and execution modes
     try:

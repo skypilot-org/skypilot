@@ -1,11 +1,9 @@
-"""Add job group columns for spot table and job_info table.
+"""Add job group columns to spot and job_info tables.
 
 Adds:
 - cluster_name (TEXT) to spot table for per-task cluster tracking
-- execution (TEXT) to job_info: 'parallel', 'sequential', or NULL
-- placement (TEXT) to job_info: 'SAME_INFRA', 'ANY', or NULL
-
-Note: is_job_group is derived from execution == 'parallel' at query time.
+- execution (TEXT) to job_info table: 'parallel' (job group) or 'serial'
+  (pipeline/single job)
 
 Revision ID: 012
 Revises: 011
@@ -18,6 +16,7 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
+from sky.dag import DagExecution
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
@@ -36,18 +35,17 @@ def upgrade():
                                              'cluster_name',
                                              sa.Text(),
                                              server_default=None)
-        # Add execution column to job_info table
-        # Values: 'parallel' (job group), 'sequential' (chain), or NULL
-        db_utils.add_column_to_table_alembic('job_info',
-                                             'execution',
-                                             sa.Text(),
-                                             server_default=None)
-        # Add placement column to job_info table
-        # Values: 'SAME_INFRA', 'ANY', or NULL
-        db_utils.add_column_to_table_alembic('job_info',
-                                             'placement',
-                                             sa.Text(),
-                                             server_default=None)
+        # Add execution column to job_info table for execution mode:
+        # 'parallel' (job group) or 'serial' (pipeline/single job)
+        db_utils.add_column_to_table_alembic(
+            'job_info',
+            'execution',
+            sa.Text(),
+            server_default=DagExecution.SERIAL.value)
+        # Update existing rows to have 'serial' execution mode
+        op.execute(
+            f'UPDATE job_info SET execution = \'{DagExecution.SERIAL.value}\' '
+            'WHERE execution IS NULL')
 
 
 def downgrade():

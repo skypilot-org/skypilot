@@ -8,7 +8,6 @@ import asyncio
 import collections
 from datetime import datetime
 import enum
-import json
 import os
 import pathlib
 import re
@@ -31,6 +30,8 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.dag import DagExecution
+from sky.dag import DEFAULT_EXECUTION
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
@@ -1726,8 +1727,8 @@ def get_managed_job_queue(
                 job=job, highest_blocking_priority=highest_blocking_priority)
 
         # Derive is_job_group from execution column
-        # execution == 'parallel' means it's a job group
-        job['is_job_group'] = job.get('execution') == 'parallel'
+        job['is_job_group'] = (
+            job.get('execution') == DagExecution.PARALLEL.value)
 
     return {
         'jobs': jobs,
@@ -1854,25 +1855,24 @@ def _get_job_status_from_tasks(
 ) -> Tuple[managed_job_state.ManagedJobStatus, int]:
     """Get the current task status and the current task id for a job.
 
-    For job groups with primary_tasks defined, the job status is determined
+    For job groups with primary/auxiliary tasks, the job status is determined
     only by the primary tasks. If all primary tasks succeed, the job is
     considered successful even if auxiliary tasks were cancelled.
     """
-    # Check if this job group has primary_tasks defined
-    primary_tasks = job_tasks[0].get('primary_tasks') if job_tasks else None
-
-    # Determine which tasks to use for status calculation
+    # Filter to only primary tasks for status determination.
+    # is_primary_in_job_group: True/False for job groups, None for non-groups.
+    # For non-job-groups (None), all tasks count for status.
+    # For job groups, only tasks with is_primary_in_job_group=True count.
+    primary_job_tasks = [
+        t for t in job_tasks
+        if t.get('is_primary_in_job_group') is None or  # Non-job-group
+        t.get('is_primary_in_job_group') is True  # Primary task in job group
+    ]
+    # Use primary tasks for status; fall back to all tasks if none match
     job_tasks_for_status: Union[List[responses.ManagedJobRecord],
-                                List[Dict[str, Any]]] = job_tasks
-    if primary_tasks:
-        # Filter to only primary tasks for status determination
-        primary_task_set = set(primary_tasks)
-        primary_job_tasks = [
-            t for t in job_tasks if t['task_name'] in primary_task_set
-        ]
-        # If we have primary tasks, use them for status; otherwise fall back
-        if primary_job_tasks:
-            job_tasks_for_status = primary_job_tasks
+                                List[Dict[str, Any]]] = (primary_job_tasks
+                                                         if primary_job_tasks
+                                                         else job_tasks)
 
     managed_task_status = managed_job_state.ManagedJobStatus.SUCCEEDED
     current_task_id = 0
@@ -2160,11 +2160,11 @@ def format_job_table(
                 job_values.insert(0, job_tasks[0].get('user', '-'))
             job_table.add_row(job_values)
 
-        # Get primary_tasks list for marking primary tasks with [P]
-        primary_tasks_list = job_tasks[0].get(
-            'primary_tasks') if job_tasks else None
-        primary_tasks_set = set(
-            primary_tasks_list) if primary_tasks_list else None
+        # Check if this is a job group with auxiliary tasks.
+        # is_primary_in_job_group: True/False for job groups, None otherwise.
+        # We show [P] markers only for job groups that have auxiliary tasks.
+        has_auxiliary_tasks = any(
+            t.get('is_primary_in_job_group') is False for t in job_tasks)
 
         for task in job_tasks:
             # The job['job_duration'] is already calculated in
@@ -2183,10 +2183,9 @@ def format_job_table(
             if task_job_id in job_to_worker and pool != '-':
                 pool = f'{pool} (worker={job_to_worker[task_job_id]})'
 
-            # Add [P] marker for primary tasks in job groups
+            # Add [P] marker for primary tasks in job groups with auxiliaries
             task_name = task['task_name']
-            if (primary_tasks_set is not None and
-                    task_name in primary_tasks_set):
+            if has_auxiliary_tasks and task.get('is_primary_in_job_group'):
                 task_name = f'{task_name} [P]'
 
             values = [
@@ -2321,10 +2320,6 @@ def _job_proto_to_dict(
             job_dict['schedule_state']))
     job_dict['schedule_state'] = (schedule_state_enum.value
                                   if schedule_state_enum is not None else None)
-    # Parse termination_delay from JSON string back to original format
-    if job_dict.get('termination_delay') is not None:
-        job_dict['termination_delay'] = json.loads(
-            job_dict['termination_delay'])
     return job_dict
 
 
@@ -2507,8 +2502,8 @@ class ManagedJobCodeGen:
             # Versions before 6 did not support tail parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller})
-        elif managed_job_version < 13:
-            # Versions before 13 did not support task parameter
+        elif managed_job_version < 14:
+            # Versions before 14 did not support task parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r})
         else:
@@ -2536,14 +2531,10 @@ class ManagedJobCodeGen:
                     user_hash: Optional[str] = None) -> str:
         dag_name = managed_job_dag.name
         pool = managed_job_dag.pool
-        # Get execution and placement from the dag (JobGroup fields)
+        # Execution mode: 'parallel' for job groups, 'serial' for pipelines and
+        # single jobs
         execution = (managed_job_dag.execution.value
-                     if managed_job_dag.execution else None)
-        placement = (managed_job_dag.placement.value
-                     if managed_job_dag.placement else None)
-        # Get primary_tasks and termination_delay for primary/auxiliary support
-        primary_tasks = managed_job_dag.primary_tasks
-        termination_delay = managed_job_dag.termination_delay
+                     if managed_job_dag.execution else DEFAULT_EXECUTION.value)
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
             set_job_info_kwargs = {{'workspace': {workspace!r}}}
@@ -2560,25 +2551,34 @@ class ManagedJobCodeGen:
                 set_job_info_kwargs['pool_hash'] = pool_hash
             if managed_job_version >= 11:
                 set_job_info_kwargs['user_hash'] = {user_hash!r}
-            if managed_job_version >= 13:
+            if managed_job_version >= 14:
                 set_job_info_kwargs['execution'] = {execution!r}
-                set_job_info_kwargs['placement'] = {placement!r}
-                set_job_info_kwargs['primary_tasks'] = {primary_tasks!r}
-                set_job_info_kwargs['termination_delay'] = {termination_delay!r}
             managed_job_state.set_job_info(
                 {job_id}, {dag_name!r}, **set_job_info_kwargs)
             """)
         for task_id, task in enumerate(managed_job_dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
+            # For job groups, determine which tasks are primary vs auxiliary.
+            # For non-job-groups, is_primary_in_job_group=None for all tasks.
+            is_primary_in_job_group: Optional[bool] = None
+            if managed_job_dag.is_job_group():
+                is_primary_in_job_group = (
+                    managed_job_dag.primary_tasks is None or
+                    task.name in managed_job_dag.primary_tasks)
             code += textwrap.dedent(f"""\
                 if managed_job_version < 7:
                     managed_job_state.set_pending({job_id}, {task_id},
                                     {task.name!r}, {resources_str!r})
-                else:
+                elif managed_job_version < 14:
                     managed_job_state.set_pending({job_id}, {task_id},
                                     {task.name!r}, {resources_str!r},
                                     {task.metadata_json!r})
+                else:
+                    managed_job_state.set_pending({job_id}, {task_id},
+                                    {task.name!r}, {resources_str!r},
+                                    {task.metadata_json!r},
+                                    {is_primary_in_job_group!r})
                 """)
         return cls._build(code)
 

@@ -123,12 +123,10 @@ message ManagedJobInfo {
   optional int64 _job_id = 29;
   // Links (e.g., instance console URLs) as key-value pairs
   map<string, string> links = 30;
-  // Primary/auxiliary job support: list of task names that are "primary"
-  // When all primary tasks complete, auxiliary tasks are terminated.
-  // Empty means all tasks are primary (traditional behavior).
-  repeated string primary_tasks = 31;
-  // Termination delay for auxiliary tasks (JSON string or dict)
-  optional string termination_delay = 32;
+  // Whether this task is a primary task (true) or auxiliary task (false)
+  // within a job group. Auxiliary tasks are terminated when all primary tasks
+  // complete. NULL for non-job-group jobs (single jobs and pipelines).
+  optional bool is_primary_in_job_group = 31;
 }
 
 message GetJobTableResponse {

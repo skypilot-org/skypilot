@@ -28,6 +28,11 @@ class DagExecution(enum.Enum):
     PARALLEL = 'parallel'  # All tasks start in parallel (job group)
 
 
+# Default execution mode for jobs without an explicit execution mode set.
+# Used for single jobs and as a fallback for pipelines.
+DEFAULT_EXECUTION = DagExecution.SERIAL
+
+
 class Dag:
     """Dag: a user application, represented as a DAG of Tasks.
 

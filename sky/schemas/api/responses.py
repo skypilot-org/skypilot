@@ -209,11 +209,13 @@ class ManagedJobRecord(ResponseBaseModel):
     labels: Optional[Dict[str, str]] = None
     links: Optional[Dict[str, str]] = None
     # JobGroup fields
-    is_job_group: Optional[bool] = None
-    placement: Optional[str] = None
+    # Execution mode: 'parallel' (job group) or 'serial' (pipeline/single job)
     execution: Optional[str] = None
-    primary_tasks: Optional[List[str]] = None
-    termination_delay: Optional[Any] = None
+    is_job_group: Optional[bool] = None
+    # Whether this task is a primary task (True) or auxiliary task (False)
+    # within a job group. NULL for non-job-group jobs (single jobs and
+    # pipelines).
+    is_primary_in_job_group: Optional[bool] = None
 
 
 class VolumeRecord(ResponseBaseModel):

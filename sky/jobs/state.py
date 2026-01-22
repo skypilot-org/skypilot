@@ -30,6 +30,7 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.dag import DagExecution
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils.db import db_utils
@@ -108,6 +109,12 @@ spot_table = sqlalchemy.Table(
     # Per-task cluster name for JobGroups (each task may run on a
     # different cluster)
     sqlalchemy.Column('cluster_name', sqlalchemy.Text, server_default=None),
+    # Whether this task is a primary task (True) or auxiliary task (False)
+    # within a job group. NULL for non-job-group jobs (single jobs/pipelines).
+    # Auxiliary tasks are terminated when all primary tasks complete.
+    sqlalchemy.Column('is_primary_in_job_group',
+                      sqlalchemy.Boolean,
+                      server_default=None),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -154,18 +161,10 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('controller_logs_cleaned_at',
                       sqlalchemy.Float,
                       server_default=None),
-    # DAG execution mode: 'parallel' (job group), 'sequential' (chain), or None
-    sqlalchemy.Column('execution', sqlalchemy.Text, server_default=None),
-    # Placement mode: 'SAME_INFRA', 'ANY', or None
-    sqlalchemy.Column('placement', sqlalchemy.Text, server_default=None),
-    # Primary tasks: JSON list of task names that are "primary" (auxiliary tasks
-    # are terminated when all primary tasks complete). NULL means all tasks are
-    # primary (traditional behavior).
-    sqlalchemy.Column('primary_tasks', sqlalchemy.JSON, server_default=None),
-    # Termination delay: JSON (string like "30s" or dict with task-specific
-    # delays like {"default": "30s", "replay-buffer": "1m"}).
-    sqlalchemy.Column('termination_delay', sqlalchemy.JSON,
-                      server_default=None),
+    # DAG execution mode: 'parallel' (job group) or 'serial' (pipeline/single)
+    sqlalchemy.Column('execution',
+                      sqlalchemy.Text,
+                      server_default=DagExecution.SERIAL.value),
 )
 
 # TODO(cooperc): drop the table in a migration
@@ -423,9 +422,11 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'pool_hash': r.get('pool_hash'),
         # Per-task cluster name for JobGroups
         'cluster_name': r.get('cluster_name'),
-        # Primary/auxiliary job support
-        'primary_tasks': r.get('primary_tasks'),
-        'termination_delay': r.get('termination_delay'),
+        # Whether this task is primary (True) or auxiliary (False) in a job
+        # group. NULL for non-job-group jobs.
+        'is_primary_in_job_group': r.get('is_primary_in_job_group'),
+        # Execution mode: 'parallel' (job group) or 'serial' (pipeline/single)
+        'execution': r.get('execution'),
     }
 
 
@@ -773,10 +774,7 @@ def set_job_info_without_job_id(name: str,
                                 pool: Optional[str],
                                 pool_hash: Optional[str],
                                 user_hash: Optional[str],
-                                execution: Optional[str] = None,
-                                placement: Optional[str] = None,
-                                primary_tasks: Optional[List[str]] = None,
-                                termination_delay: Optional[Any] = None) -> int:
+                                execution: Optional[str] = None) -> int:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -797,9 +795,6 @@ def set_job_info_without_job_id(name: str,
             pool_hash=pool_hash,
             user_hash=user_hash,
             execution=execution,
-            placement=placement,
-            primary_tasks=primary_tasks,
-            termination_delay=termination_delay,
         )
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -826,6 +821,7 @@ def set_pending(
     task_name: str,
     resources_str: str,
     metadata: str,
+    is_primary_in_job_group: Optional[bool] = None,
 ):
     """Set the task to pending state."""
     add_job_event(job_id, task_id, ManagedJobStatus.PENDING,
@@ -841,6 +837,7 @@ def set_pending(
                 resources=resources_str,
                 metadata=metadata,
                 status=ManagedJobStatus.PENDING.value,
+                is_primary_in_job_group=is_primary_in_job_group,
             ))
         session.commit()
 
@@ -2629,10 +2626,7 @@ def set_job_info(job_id: int,
                  pool: Optional[str],
                  pool_hash: Optional[str],
                  user_hash: Optional[str] = None,
-                 execution: Optional[str] = None,
-                 placement: Optional[str] = None,
-                 primary_tasks: Optional[List[str]] = None,
-                 termination_delay: Optional[Any] = None):
+                 execution: Optional[str] = None):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -2653,9 +2647,6 @@ def set_job_info(job_id: int,
             pool_hash=pool_hash,
             user_hash=user_hash,
             execution=execution,
-            placement=placement,
-            primary_tasks=primary_tasks,
-            termination_delay=termination_delay,
         )
         session.execute(insert_stmt)
         session.commit()
