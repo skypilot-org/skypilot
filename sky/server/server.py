@@ -63,12 +63,10 @@ from sky.server import daemons
 from sky.server import metrics
 from sky.server import middleware_utils
 from sky.server import plugins
-from sky.server import server_utils
 from sky.server import state
 from sky.server import stream_utils
 from sky.server import version_check
 from sky.server import versions
-from sky.server.auth import authn
 from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
 from sky.server.requests import executor
@@ -261,7 +259,6 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     common.crypt_ctx.verify(password, user.password)):
                 valid_user = True
                 request.state.auth_user = user
-                await authn.override_user_info_in_request_body(request, user)
                 break
         if not valid_user:
             return _basic_auth_401_response('Invalid credentials')
@@ -384,9 +381,6 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                                     name=user_name or user_info.name)
             request.state.auth_user = auth_user
 
-            # Override user info in request body for service account requests
-            await authn.override_user_info_in_request_body(request, auth_user)
-
             logger.debug(f'Authenticated service account: {user_id}')
 
         except Exception as e:  # pylint: disable=broad-except
@@ -431,7 +425,6 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is not None:
             request.state.auth_user = auth_user
 
-        await authn.override_user_info_in_request_body(request, auth_user)
         return await call_next(request)
 
 
@@ -491,8 +484,7 @@ async def schedule_on_boot_check_async():
         await executor.schedule_request_async(
             request_id='skypilot-server-on-boot-check',
             request_name=request_names.RequestName.CHECK,
-            request_body=server_utils.build_body_at_server(
-                request=None, body_type=payloads.CheckBody),
+            request_body=payloads.CheckBody(),
             func=sky_check.check,
             schedule_type=requests_lib.ScheduleType.SHORT,
             is_skypilot_system=True,
@@ -515,8 +507,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             await executor.schedule_request_async(
                 request_id=event.id,
                 request_name=event.name,
-                request_body=server_utils.build_body_at_server(
-                    request=None, body_type=payloads.RequestBody),
+                request_body=payloads.RequestBody(),
                 func=event.run_event,
                 schedule_type=requests_lib.ScheduleType.SHORT,
                 is_skypilot_system=True,
@@ -771,6 +762,7 @@ async def check(request: fastapi.Request,
         request_body=check_body,
         func=sky_check.check,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -782,13 +774,11 @@ async def enabled_clouds(request: fastapi.Request,
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS,
-        request_body=server_utils.build_body_at_server(
-            request=request,
-            body_type=payloads.EnabledCloudsBody,
-            workspace=workspace,
-            expand=expand),
+        request_body=payloads.EnabledCloudsBody(workspace=workspace,
+                                                expand=expand),
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -805,6 +795,7 @@ async def realtime_kubernetes_gpu_availability(
         request_body=realtime_gpu_availability_body,
         func=core.realtime_kubernetes_gpu_availability,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -820,6 +811,7 @@ async def kubernetes_node_info(
         request_body=kubernetes_node_info_body,
         func=kubernetes_utils.get_kubernetes_node_info,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -835,6 +827,7 @@ async def slurm_gpu_availability(
         request_body=slurm_gpu_availability_body,
         func=core.realtime_slurm_gpu_availability,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -850,6 +843,7 @@ async def slurm_node_info(
         request_body=slurm_node_info_body,
         func=slurm_utils.slurm_node_info,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -860,10 +854,10 @@ async def status_kubernetes(request: fastapi.Request) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STATUS_KUBERNETES,
-        request_body=server_utils.build_body_at_server(
-            request=request, body_type=payloads.RequestBody),
+        request_body=payloads.RequestBody(),
         func=core.status_kubernetes,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -878,6 +872,7 @@ async def list_accelerators(
         request_body=list_accelerator_counts_body,
         func=catalog.list_accelerators,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -893,6 +888,7 @@ async def list_accelerator_counts(
         request_body=list_accelerator_counts_body,
         func=catalog.list_accelerator_counts,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -957,6 +953,7 @@ async def optimize(optimize_body: payloads.OptimizeBody,
         ignore_return_value=True,
         func=core.optimize,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1168,6 +1165,7 @@ async def launch(launch_body: payloads.LaunchBody,
         schedule_type=requests_lib.ScheduleType.LONG,
         request_cluster_name=launch_body.cluster_name,
         retryable=launch_body.retry_until_up,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1187,6 +1185,7 @@ async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
         ),
         schedule_type=requests_lib.ScheduleType.LONG,
         request_cluster_name=cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1201,6 +1200,7 @@ async def stop(request: fastapi.Request,
         func=core.stop,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=stop_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1222,6 +1222,7 @@ async def status(
         schedule_type=(requests_lib.ScheduleType.LONG if
                        status_body.refresh != common_lib.StatusRefreshMode.NONE
                        else requests_lib.ScheduleType.SHORT),
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1236,6 +1237,7 @@ async def endpoints(request: fastapi.Request,
         func=core.endpoints,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=endpoint_body.cluster,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1250,6 +1252,7 @@ async def down(request: fastapi.Request,
         func=core.down,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=down_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1264,6 +1267,7 @@ async def start(request: fastapi.Request,
         func=core.start,
         schedule_type=requests_lib.ScheduleType.LONG,
         request_cluster_name=start_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1278,6 +1282,7 @@ async def autostop(request: fastapi.Request,
         func=core.autostop,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=autostop_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1292,6 +1297,7 @@ async def queue(request: fastapi.Request,
         func=core.queue,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=queue_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1306,6 +1312,7 @@ async def job_status(request: fastapi.Request,
         func=core.job_status,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=job_status_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1320,6 +1327,7 @@ async def cancel(request: fastapi.Request,
         func=core.cancel,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=cancel_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1340,6 +1348,7 @@ async def logs(
         func=core.tail_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=cluster_job_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
     task = executor.execute_request_in_coroutine(request_task)
     background_tasks.add_task(task.cancel)
@@ -1371,6 +1380,7 @@ async def download_logs(
         func=core.download_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=cluster_jobs_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1524,6 +1534,7 @@ async def autostop_logs(
         func=core.tail_autostop_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=autostop_logs_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
     task = executor.execute_request_in_coroutine(request_task)
     background_tasks.add_task(task.cancel)
@@ -1545,6 +1556,7 @@ async def cost_report(request: fastapi.Request,
         request_body=cost_report_body,
         func=core.cost_report,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1560,6 +1572,7 @@ async def cluster_events(
         func=core.get_cluster_events,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=cluster_events_body.cluster_name or '',
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1569,10 +1582,10 @@ async def storage_ls(request: fastapi.Request) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STORAGE_LS,
-        request_body=server_utils.build_body_at_server(
-            request=request, body_type=payloads.RequestBody),
+        request_body=payloads.RequestBody(),
         func=core.storage_ls,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1586,6 +1599,7 @@ async def storage_delete(request: fastapi.Request,
         request_body=storage_body,
         func=core.storage_delete,
         schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1599,6 +1613,7 @@ async def local_up(request: fastapi.Request,
         request_body=local_up_body,
         func=core.local_up,
         schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1612,6 +1627,7 @@ async def local_down(request: fastapi.Request,
         request_body=local_down_body,
         func=core.local_down,
         schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1820,6 +1836,7 @@ async def api_cancel(request: fastapi.Request,
         request_body=request_cancel_body,
         func=requests_lib.kill_requests_with_prefix,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -2422,10 +2439,10 @@ async def all_contexts(request: fastapi.Request) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ALL_CONTEXTS,
-        request_body=server_utils.build_body_at_server(
-            request=request, body_type=payloads.RequestBody),
+        request_body=payloads.RequestBody(),
         func=core.get_all_contexts,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 

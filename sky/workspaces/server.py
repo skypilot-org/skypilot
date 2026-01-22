@@ -29,6 +29,7 @@ async def get(request: fastapi.Request) -> None:
         request_body=request_body,
         func=core.get_workspaces,
         schedule_type=api_requests.ScheduleType.SHORT,
+        auth_user=auth_user,
     )
 
 
@@ -42,6 +43,7 @@ async def update(request: fastapi.Request,
         request_body=update_workspace_body,
         func=core.update_workspace,
         schedule_type=api_requests.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -55,6 +57,7 @@ async def create(request: fastapi.Request,
         request_body=create_workspace_body,
         func=core.create_workspace,
         schedule_type=api_requests.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -68,6 +71,7 @@ async def delete(request: fastapi.Request,
         request_body=delete_workspace_body,
         func=core.delete_workspace,
         schedule_type=api_requests.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -85,6 +89,7 @@ async def get_config(request: fastapi.Request) -> None:
         request_body=get_config_body,
         func=core.get_config,
         schedule_type=api_requests.ScheduleType.SHORT,
+        auth_user=auth_user,
     )
 
 
@@ -98,4 +103,5 @@ async def update_config(request: fastapi.Request,
         request_body=update_config_body,
         func=core.update_config,
         schedule_type=api_requests.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )

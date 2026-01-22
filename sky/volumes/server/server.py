@@ -38,6 +38,7 @@ async def volume_list(request: fastapi.Request, refresh: bool = False) -> None:
         request_body=request_body,
         func=core.volume_list,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=auth_user,
     )
 
 
@@ -51,6 +52,7 @@ async def volume_delete(request: fastapi.Request,
         request_body=volume_delete_body,
         func=core.volume_delete,
         schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -127,4 +129,5 @@ async def volume_apply(request: fastapi.Request,
         request_body=volume_apply_body,
         func=core.volume_apply,
         schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
     )
