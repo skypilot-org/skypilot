@@ -334,7 +334,6 @@ def _ensure_controller_up(
         task_resources: Optional list of task resources. If provided, the
             controller will be launched on the same cloud as the tasks.
     """
-    # Controller is not up, provision it (bring up the cluster)
     controller_name = controller.value.cluster_name
     logger.info(f'{colorama.Fore.YELLOW}'
                 f'Ensuring the jobs controller {controller_name} is up before'
@@ -785,7 +784,7 @@ def launch(
                     # here so we should just be able to use exec, but we need
                     # to work through the logic and make sure there is no issue
                     # with say file mounts.
-                    
+
                     # Job controller is not placed in kueue, as the
                     # controller pod is considered a "system" pod
                     # and is not subject to queue limits or preemption.

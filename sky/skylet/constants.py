@@ -148,7 +148,7 @@ SKYLET_VERSION = '33' # Add better support for launching multiple jobs at once.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 6 # Add better support for launching multiple jobs at once.
+SKYLET_LIB_VERSION = 6  # Add better support for launching many jobs at once.
 SKYLET_VERSION_FILE = '.sky/skylet_version'
 SKYLET_LOG_FILE = '.sky/skylet.log'
 SKYLET_PID_FILE = '.sky/skylet_pid'

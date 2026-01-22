@@ -287,7 +287,7 @@ def submit_jobs(job_ids: List[int], dag_yaml_path: str,
                 # This can happen when HA recovery runs for some reason but the
                 # job controller is still alive.
                 logger.warning(f'Job {job_id} is still alive with controller '
-                            f'{controller_process}, skipping submission')
+                               f'{controller_process}, skipping submission')
                 continue
         job_ids_without_controller_process.append(job_id)
     job_ids = job_ids_without_controller_process

@@ -33,7 +33,6 @@ from sky.adaptors import common as adaptors_common
 from sky.dag import DagExecution
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import context_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
 from sky.utils.plugin_extensions import ExternalClusterFailure
