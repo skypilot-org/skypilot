@@ -1129,8 +1129,10 @@ def test_jobs_launch_and_logs(generic_cloud: str):
             task.set_resources(
                 sky.Resources(infra=generic_cloud,
                               **smoke_tests_utils.LOW_RESOURCE_PARAM))
-            job_id, handle = sky.stream_and_get(sky.jobs.launch(task,
-                                                                name=name))
+            job_ids, handle = sky.stream_and_get(
+                sky.jobs.launch(task, name=name))
+            assert len(job_ids) == 1
+            job_id = job_ids[0]
             assert handle is not None
             # Check the job status from the dashboard
             queue_request_id = (
