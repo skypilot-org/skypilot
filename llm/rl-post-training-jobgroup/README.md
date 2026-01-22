@@ -7,41 +7,45 @@ This example demonstrates a distributed RL post-training architecture using SkyP
 The example consists of 5 task types that communicate over HTTP, with built-in load balancing for scaling inference:
 
 ```
-┌─────────────────────┐
-│    data-server      │  Serves GSM8K math prompts
-│      (CPU)          │  HTTP API on port 8000
-└──────────┬──────────┘
-           │ GET /prompts
-           ▼
-┌─────────────────────────────────────────┐
-│           rollout-server                │
-│  ┌─────────────────────────────────┐    │
-│  │ Head Node (rollout-server-0)    │    │
-│  │  - SGLang on port 30001         │    │
-│  │  - Router on port 30000 ◄───────┼────┼─── Trainer connects here
-│  └─────────────────────────────────┘    │
-│  ┌─────────────────────────────────┐    │
-│  │ Worker Node (rollout-server-1)  │    │
-│  │  - SGLang on port 30001         │    │
-│  └─────────────────────────────────┘    │
-└──────────┬──────────────────────────────┘
-           │ generated responses (load balanced)
-           ▼
-┌─────────────────────┐      ┌─────────────────────┐
-│   reward-server     │      │   replay-buffer     │
-│      (CPU)          │      │      (CPU)          │
-│  Math verification  │      │  Experience storage │
-│  Port 8002          │      │  Port 8003          │
-└──────────┬──────────┘      └──────────┬──────────┘
-           │ reward scores               │ experience replay
-           └────────────┬────────────────┘
-                        ▼
-           ┌─────────────────────┐
-           │    ppo-trainer      │
-           │     (PRIMARY)       │
-           │   (2 nodes x GPU)   │
-           │  Policy gradient    │
-           └─────────────────────┘
+                    ┌─────────────────────┐
+                    │    data-server      │  Serves GSM8K math prompts
+                    │      (CPU)          │  HTTP API on port 8000
+                    └──────────┬──────────┘
+                               │
+                               │ 1. GET /prompts
+                               ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                         ppo-trainer (PRIMARY)                        │
+│                           (2 nodes x GPU)                            │
+│                                                                      │
+│   Orchestrates the RLHF pipeline:                                    │
+│   1. Fetch prompts from data-server                                  │
+│   2. Generate responses via rollout-server                           │
+│   3. Compute rewards via reward-server                               │
+│   4. Store & sample experiences from replay-buffer                   │
+│   5. Update policy using GRPO                                        │
+└───────┬──────────────────────┬───────────────────────┬───────────────┘
+        │                      │                       │
+        │ 2. POST /v1/         │ 3. POST /batch_reward │ 4. POST /add
+        │    completions       │                       │    POST /sample
+        ▼                      ▼                       ▼
+┌───────────────────┐  ┌───────────────────┐  ┌───────────────────┐
+│  rollout-server   │  │   reward-server   │  │   replay-buffer   │
+│    (2x GPU)       │  │      (CPU)        │  │      (CPU)        │
+│                   │  │                   │  │                   │
+│ ┌───────────────┐ │  │ Math verification │  │ Experience store  │
+│ │ Head (rank 0) │ │  │ Port 8002         │  │ Port 8003         │
+│ │ - SGLang      │ │  └───────────────────┘  └───────────────────┘
+│ │   Port 30001  │ │
+│ │ - Router      │ │
+│ │   Port 30000  │ │
+│ └───────────────┘ │
+│ ┌───────────────┐ │
+│ │Worker (rank 1)│ │
+│ │ - SGLang      │ │
+│ │   Port 30001  │ │
+│ └───────────────┘ │
+└───────────────────┘
 ```
 
 ### Components
