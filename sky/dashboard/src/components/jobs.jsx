@@ -25,12 +25,20 @@ import {
   renderPoolLink,
 } from '@/components/utils';
 import { UI_CONFIG } from '@/lib/config';
-import {
-  getPoolStatus,
-  getPluginJobsFetcher,
-  hasPluginJobsProvider,
-  onJobsProviderRegistration,
-} from '@/data/connectors/jobs';
+import { getPoolStatus } from '@/data/connectors/jobs';
+
+// ============ Pagination Plugin Integration ============
+// Check if the jobs pagination plugin is available via window flag
+function isJobsPaginationPluginAvailable() {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.__skyJobsPaginationFetch === 'function'
+  );
+}
+
+function getJobsPaginationFetch() {
+  return typeof window !== 'undefined' ? window.__skyJobsPaginationFetch : null;
+}
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
@@ -396,19 +404,6 @@ export function ManagedJobsTable({
 
   // Plugin provider support
   const [isServerPagination, setIsServerPagination] = useState(false);
-  const [pluginVersion, setPluginVersion] = useState(0);
-  const lastLoggedModeRef = useRef(null);
-
-  // Subscribe to plugin registration events
-  useEffect(() => {
-    if (hasPluginJobsProvider()) {
-      setPluginVersion((v) => v + 1);
-    }
-    const unsubscribe = onJobsProviderRegistration(() => {
-      setPluginVersion((v) => v + 1);
-    });
-    return unsubscribe;
-  }, []);
 
   // Determine if we should show the Workspace column
   // Only show if there are multiple workspaces or a workspace other than 'default'
@@ -537,19 +532,13 @@ export function ManagedJobsTable({
         let clustersData = null;
 
         // Check if plugin provider is available
-        const pluginFetcher = getPluginJobsFetcher();
+        const pluginFetcher = getJobsPaginationFetch();
         const usePlugin = !!pluginFetcher;
 
-        // Log mode change
-        if (lastLoggedModeRef.current !== usePlugin) {
-          lastLoggedModeRef.current = usePlugin;
-          if (usePlugin) {
-            console.log(
-              '[ManagedJobsTable] Using plugin fetcher for server-side pagination'
-            );
-          } else {
-            console.log('[ManagedJobsTable] Using default jobsCacheManager');
-          }
+        if (usePlugin) {
+          console.log('[ManagedJobsTable] Using plugin for server-side pagination');
+        } else {
+          console.log('[ManagedJobsTable] Using default jobsCacheManager');
         }
 
         // Check cache status before making requests
@@ -647,7 +636,6 @@ export function ManagedJobsTable({
       showAllMode,
       activeTab,
       sortConfig,
-      pluginVersion,
       fetchJobsWithPlugin,
     ]
   );

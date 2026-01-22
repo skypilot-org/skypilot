@@ -806,9 +806,6 @@ export function useTableColumns(tableName, context = {}) {
       return true;
     });
   }, [tableName, tableColumns, JSON.stringify(context)]);
-export function useDataProvider(id) {
-  const { dataProviders } = usePluginState();
-  return dataProviders[id] || null;
 }
 
 export function useDataProvider(id) {
