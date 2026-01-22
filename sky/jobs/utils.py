@@ -1356,8 +1356,8 @@ def dump_managed_job_queue(
     return message_utils.encode_payload(
         get_managed_job_queue(skip_finished, accessible_workspaces, job_ids,
                               workspace_match, name_match, pool_match, page,
-                              limit, user_hashes, statuses, fields,
-                              sort_by, sort_order))
+                              limit, user_hashes, statuses, fields, sort_by,
+                              sort_order))
 
 
 def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:

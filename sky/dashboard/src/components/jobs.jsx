@@ -502,19 +502,19 @@ export function ManagedJobsTable({
       requestSeqRef.current = version;
       setLocalLoading(true);
       setLoading(true); // Set parent loading state.
-      
+
       try {
         // Trigger hook to refresh its data
         await hookRefresh();
-        
+
         // Check controller status from clusters
         if (includeStatus) {
           try {
             const clustersData = await dashboardCache.get(getClusters);
-            
+
             let isControllerStopped = false;
             let isLaunching = false;
-            
+
             if (clustersData) {
               const jobControllerCluster = clustersData?.find((c) =>
                 isJobController(c.cluster)
@@ -523,14 +523,17 @@ export function ManagedJobsTable({
                 ? jobControllerCluster.status
                 : 'NOT_FOUND';
               // Use hookControllerStopped from the hook for the API-level stopped flag
-              if (jobControllerClusterStatus === 'STOPPED' && hookControllerStopped) {
+              if (
+                jobControllerClusterStatus === 'STOPPED' &&
+                hookControllerStopped
+              ) {
                 isControllerStopped = true;
               }
               if (jobControllerClusterStatus === 'LAUNCHING') {
                 isLaunching = true;
               }
             }
-            
+
             if (version === requestSeqRef.current) {
               setControllerStopped(!!isControllerStopped);
               setControllerLaunching(!!isLaunching);
@@ -539,7 +542,7 @@ export function ManagedJobsTable({
             console.error('Error fetching clusters:', error);
           }
         }
-        
+
         if (version === requestSeqRef.current) {
           setIsInitialLoad(false);
         }
@@ -839,7 +842,6 @@ export function ManagedJobsTable({
     // Reset to first page when changing status filters
     setCurrentPage(1);
   };
-
 
   // Page navigation handlers
   const goToPreviousPage = () => {

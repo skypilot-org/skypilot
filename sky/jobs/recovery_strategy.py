@@ -746,7 +746,7 @@ class FailoverStrategyExecutor(StrategyExecutor):
             # Persist infra info to database for sorting/filtering
             if launched_resources is not None:
                 cloud = str(launched_resources.cloud
-                            ) if launched_resources.cloud else None
+                           ) if launched_resources.cloud else None
                 await asyncio.to_thread(
                     state.set_job_infra,
                     self.job_id,

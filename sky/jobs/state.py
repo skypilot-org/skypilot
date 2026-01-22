@@ -1604,7 +1604,8 @@ def get_managed_jobs_with_filters(
     if sort_by and sort_by in sort_field_map:
         sort_column = sort_field_map[sort_by]
         if sort_order == 'asc':
-            query = query.order_by(sort_column.asc(), spot_table.c.task_id.asc())
+            query = query.order_by(sort_column.asc(),
+                                   spot_table.c.task_id.asc())
         else:
             query = query.order_by(sort_column.desc(),
                                    spot_table.c.task_id.asc())
