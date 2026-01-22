@@ -13,9 +13,6 @@ from sky.server import constants as server_constants
 from sky.utils import common_utils
 from sky.utils.db import db_utils
 
-# Session expiration time in seconds (5 minutes)
-SESSION_EXPIRATION_SECONDS = 300
-
 # Table name for auth sessions
 _AUTH_SESSIONS_TABLE = 'auth_sessions'
 
@@ -43,7 +40,8 @@ class AuthSessionStore:
 
     def _cleanup_expired(self, cursor: sqlite3.Cursor) -> None:
         """Remove expired sessions."""
-        expiry_time = time.time() - SESSION_EXPIRATION_SECONDS
+        expiry_time = time.time(
+        ) - server_constants.AUTH_SESSION_TIMEOUT_SECONDS
         cursor.execute(
             f'DELETE FROM {_AUTH_SESSIONS_TABLE} WHERE created_at < ?',
             (expiry_time,))
@@ -72,7 +70,8 @@ class AuthSessionStore:
             The token if session exists and is valid, None otherwise.
         """
         code_challenge = common_utils.compute_code_challenge(code_verifier)
-        expiry_threshold = time.time() - SESSION_EXPIRATION_SECONDS
+        expiry_threshold = time.time(
+        ) - server_constants.AUTH_SESSION_TIMEOUT_SECONDS
 
         with self._get_cursor() as cursor:
             self._ensure_table(cursor)

@@ -62,6 +62,10 @@ DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), '..', 'dashboard',
 # The interval (seconds) for the event to be restarted in the background.
 DAEMON_RESTART_INTERVAL_SECONDS = 20
 
+# Timeout for CLI authentication sessions (polling-based auth flow).
+# Used by both client (polling timeout) and server (session expiration).
+AUTH_SESSION_TIMEOUT_SECONDS = 300  # 5 minutes
+
 # Cookie header for stream request id.
 STREAM_REQUEST_HEADER = 'X-SkyPilot-Stream-Request-ID'
 

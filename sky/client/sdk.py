@@ -36,6 +36,7 @@ from sky.jobs import scheduler
 from sky.jobs import utils as managed_job_utils
 from sky.schemas.api import responses
 from sky.server import common as server_common
+from sky.server import constants as server_constants
 from sky.server import rest
 from sky.server import versions
 from sky.server.requests import payloads
@@ -2503,7 +2504,8 @@ def _try_polling_auth(endpoint: str) -> Optional[str]:
 
         # Poll for token
         start_time = time.time()
-        while time.time() - start_time < oauth_lib.AUTH_TIMEOUT:
+        while time.time(
+        ) - start_time < server_constants.AUTH_SESSION_TIMEOUT_SECONDS:
             time.sleep(1)
             resp = requests.get(f'{endpoint}/api/v1/auth/token',
                                 params={'code_verifier': code_verifier},
@@ -2550,8 +2552,8 @@ def _try_localhost_callback_auth(endpoint: str) -> Optional[str]:
                    f'{colorama.Style.RESET_ALL}')
 
         start_time = time.time()
-        while (token_container['token'] is None and
-               time.time() - start_time < oauth_lib.AUTH_TIMEOUT):
+        while (token_container['token'] is None and time.time() - start_time <
+               server_constants.AUTH_SESSION_TIMEOUT_SECONDS):
             time.sleep(1)
 
         if token_container['token'] is None:
