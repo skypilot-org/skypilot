@@ -813,11 +813,6 @@ export function useDataProvider(id) {
   return dataProviders[id] || null;
 }
 
-export function useDataProvider(id) {
-  const { dataProviders } = usePluginState();
-  return dataProviders[id] || null;
-}
-
 /**
  * Hook to merge base columns with plugin columns, automatically handling replacements.
  * Plugin columns with the same ID as base columns will replace the base columns.
