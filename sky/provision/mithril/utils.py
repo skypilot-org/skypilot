@@ -131,7 +131,7 @@ def _get_config() -> Dict[str, str]:
 
     return {
         'api_key': api_key,
-        'project': project_id,
+        'project_id': project_id,
         'api_url': api_url or DEFAULT_API_URL,
     }
 
@@ -251,7 +251,7 @@ def _get_or_create_ssh_key(public_key: str) -> List[str]:
     """Get or create SSH key for instances."""
     config = _get_config()
     endpoint = '/v2/ssh-keys'
-    params = {'project': config['project']}
+    params = {'project': config['project_id']}
 
     # Get existing SSH keys
     key_list: List[Dict[str, Any]] = _make_request('GET',
@@ -281,7 +281,7 @@ def _get_or_create_ssh_key(public_key: str) -> List[str]:
         'POST',
         endpoint,
         payload={
-            'project': config['project'],
+            'project': config['project_id'],
             'name': key_name,
             'public_key': public_key.strip(),
         },
@@ -293,6 +293,7 @@ def _get_or_create_ssh_key(public_key: str) -> List[str]:
 def _wait_for_bid_instances(
     bid_name: str,
     expected_count: int,
+    project_id: str,
     timeout: int = TIMEOUT,
 ) -> List[str]:
     """Wait for a spot bid to create the expected number of instances.
@@ -300,6 +301,7 @@ def _wait_for_bid_instances(
     Args:
         bid_name: The name of the bid (cluster name on cloud).
         expected_count: The expected number of instances to be created.
+        project_id: The project ID the bid belongs to.
         timeout: Maximum time to wait in seconds.
 
     Returns:
@@ -308,7 +310,7 @@ def _wait_for_bid_instances(
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
-            params = {'name': bid_name}
+            params = {'project': project_id, 'name': bid_name}
             response = _make_request('GET', '/v2/spot/bids', params=params)
             bids = response.get('data', [])
 
@@ -338,6 +340,7 @@ def _wait_for_bid_instances(
 def wait_for_bid(
     bid_name: str,
     expected_count: int,
+    project_id: str,
     bid_timeout: int = TIMEOUT,
     ssh_ip_timeout: int = TIMEOUT,
 ) -> List[str]:
@@ -346,6 +349,7 @@ def wait_for_bid(
     Args:
         bid_name: The name of the bid (unique cluster name).
         expected_count: The expected number of instances.
+        project_id: The project ID the bid belongs to.
         bid_timeout: Timeout for waiting for bid to create instances.
         ssh_ip_timeout: Timeout for waiting for each instance to get SSH IP.
 
@@ -359,6 +363,7 @@ def wait_for_bid(
     # Wait for the bid to create all instances
     instance_ids = _wait_for_bid_instances(bid_name,
                                            expected_count,
+                                           project_id=project_id,
                                            timeout=bid_timeout)
 
     if len(instance_ids) < expected_count:
@@ -385,8 +390,8 @@ def list_instances(status: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
     config = _get_config()
     endpoint = '/v2/instances'
     base_params: Dict[str, Any] = ({
-        'project': quote(config['project'])
-    } if config['project'] else {})
+        'project': quote(config['project_id'])
+    } if config['project_id'] else {})
     instances: Dict[str, Dict[str, Any]] = {}
     cursor: Optional[str] = None
 
@@ -503,7 +508,7 @@ def launch_instances(
         f'Using {instance_type} (FID: {instance_type_fid}) in {region}')
 
     bid_payload = {
-        'project': config['project'],
+        'project': config['project_id'],
         'region': region,
         'instance_type': instance_type_fid,
         # TODO(oliviert): Support configurable limit price
@@ -530,7 +535,9 @@ def launch_instances(
                      f'waiting for {instance_quantity} instance(s)...')
 
         # Wait for bid to create instances and for them to have SSH destinations
-        instance_ids = wait_for_bid(name, instance_quantity)
+        instance_ids = wait_for_bid(name,
+                                    instance_quantity,
+                                    project_id=config['project_id'])
         return bid_id, instance_ids
 
     except MithrilError as e:
@@ -550,7 +557,7 @@ def get_bid(bid_name: str) -> Optional[Dict[str, Any]]:
     config = _get_config()
     endpoint = '/v2/spot/bids'
     params = {
-        'project': config['project'],
+        'project': config['project_id'],
         'name': bid_name,
     }
 
@@ -575,7 +582,7 @@ def cancel_bid(bid_id: str) -> bool:
     """
     config = _get_config()
     endpoint = f'/v2/spot/bids/{bid_id}'
-    params = {'project': config['project']}
+    params = {'project': config['project_id']}
 
     try:
         logger.debug(f'Canceling bid {bid_id}')
@@ -605,7 +612,7 @@ def update_bid(bid_id: str, paused: bool) -> Dict[str, Any]:
     """
     config = _get_config()
     endpoint = f'/v2/spot/bids/{bid_id}'
-    params = {'project': config['project']}
+    params = {'project': config['project_id']}
     payload = {'paused': paused}
 
     logger.debug(f'Updating bid {bid_id}, paused: {paused}')

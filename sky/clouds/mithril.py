@@ -160,7 +160,7 @@ class Mithril(clouds.Cloud):
         credentials_path = cls.get_credentials_path()
         expanded_path = os.path.expanduser(credentials_path)
         if os.path.exists(expanded_path):
-            return {expanded_path: credentials_path}
+            return {credentials_path: expanded_path}
         return {}
 
     def __repr__(self):

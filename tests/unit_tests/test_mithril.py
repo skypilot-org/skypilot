@@ -91,7 +91,7 @@ class TestMithrilCredentials:
 
     def test_credential_file_mounts_when_file_exists(self, monkeypatch,
                                                      tmp_path):
-        """Test get_credential_file_mounts returns correct expanded->unexpanded mapping."""
+        """Test get_credential_file_mounts returns correct remote->local mapping."""
         # Create the credential file in tmp_path simulating ~/.config/mithril/
         cred_file = tmp_path / '.config' / 'mithril' / 'config.yaml'
         cred_file.parent.mkdir(parents=True)
@@ -105,11 +105,11 @@ class TestMithrilCredentials:
 
         mounts = mithril.Mithril.get_credential_file_mounts()
 
-        # The method returns {expanded_path: credentials_path}
-        # Key should be the expanded path, value should be the unexpanded path
+        # The method returns {remote_path: local_path}
+        # Key should be the unexpanded remote path, value should be the local expanded path
         expected_expanded = str(cred_file)
-        assert expected_expanded in mounts
-        assert mounts[expected_expanded] == unexpanded_path
+        assert unexpanded_path in mounts
+        assert mounts[unexpanded_path] == expected_expanded
 
     def test_credential_file_mounts_when_file_missing(self, monkeypatch,
                                                       tmp_path):
