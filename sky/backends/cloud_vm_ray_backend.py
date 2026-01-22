@@ -4526,7 +4526,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               controller: bool = False,
                               follow: bool = True,
                               tail: Optional[int] = None,
-                              task: Optional[str] = None) -> int:
+                              task: Optional[Union[str, int]] = None) -> int:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         # TODO(kevin): Migrate stream_logs to gRPC

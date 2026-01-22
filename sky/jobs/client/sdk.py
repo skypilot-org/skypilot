@@ -337,7 +337,7 @@ def tail_logs(name: Optional[str] = None,
               refresh: bool = False,
               tail: Optional[int] = None,
               output_stream: Optional['io.TextIOBase'] = None,
-              task: Optional[str] = None) -> Optional[int]:
+              task: Optional[Union[str, int]] = None) -> Optional[int]:
     """Tails logs of managed jobs.
 
     You can provide either a job name or a job ID to tail logs. If both are not
@@ -353,8 +353,8 @@ def tail_logs(name: Optional[str] = None,
         output_stream: The stream to write the logs to. If None, print to the
             console.
         task: Task identifier to view logs for a specific task in a JobGroup.
-            Can be a task ID (integer as string) or task name. If None, logs
-            for all tasks are shown.
+            If an int, it is treated as a task ID. If a str, it is treated as
+            a task name. If None, logs for all tasks are shown.
 
     Returns:
         Exit code based on success or failure of the job. 0 if success,

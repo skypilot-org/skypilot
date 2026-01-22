@@ -5410,12 +5410,17 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                 logger.info(f'{fore.CYAN}Job {job} logs{controller_str}: '
                             f'{log_local_path}{style.RESET_ALL}')
         else:
+            # Parse task argument: if numeric, treat as task ID (int),
+            # otherwise treat as task name (str)
+            parsed_task: Optional[Union[str, int]] = None
+            if task is not None:
+                parsed_task = int(task) if task.isdigit() else task
             returncode = managed_jobs.tail_logs(name=name,
                                                 job_id=job_id,
                                                 follow=follow,
                                                 controller=controller,
                                                 refresh=refresh,
-                                                task=task)
+                                                task=parsed_task)
             sys.exit(returncode)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():

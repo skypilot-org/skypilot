@@ -2282,6 +2282,86 @@ def test_job_group_task_logs(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_task_logs_sdk(generic_cloud: str):
+    """Test SDK task filtering with typed task parameter (int vs str).
+
+    This test verifies that the SDK correctly handles:
+    - task=int filters by task_id
+    - task=str filters by task_name
+    - Invalid task values return appropriate errors
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml('tests/test_job_groups/smoke_basic.yaml',
+                                       name, generic_cloud)
+
+    def sdk_task_filter_test():
+        # Get job_id for the launched job
+        queue_request_id = jobs_sdk.queue_v2(refresh=False)
+        queue_records = sky.stream_and_get(queue_request_id)
+        # Parse the queue response (queue_v2 returns a tuple)
+        if isinstance(queue_records, tuple):
+            jobs_list, _, _, _ = queue_records
+        else:
+            jobs_list = queue_records
+        job_id = None
+        for job in jobs_list:
+            if job.get('job_name') == name:
+                job_id = job.get('job_id')
+                break
+        assert job_id is not None, f'Job {name} not found in queue'
+
+        # Test 1: task=int(0) should filter by task_id and show only job-a
+        output = io.StringIO()
+        jobs_sdk.tail_logs(job_id=job_id, follow=False, task=0,
+                           output_stream=output)
+        content = output.getvalue()
+        assert 'Job A' in content, f'Expected "Job A" in output for task=0'
+        assert 'Job B' not in content, f'Unexpected "Job B" in output for task=0'
+
+        # Test 2: task=str('job-b') should filter by task_name and show only job-b
+        output = io.StringIO()
+        jobs_sdk.tail_logs(job_id=job_id, follow=False, task='job-b',
+                           output_stream=output)
+        content = output.getvalue()
+        assert 'Job B' in content, f'Expected "Job B" in output for task="job-b"'
+        assert 'Job A' not in content, f'Unexpected "Job A" for task="job-b"'
+
+        # Test 3: task=int(999) should fail (non-existent task_id)
+        output = io.StringIO()
+        jobs_sdk.tail_logs(job_id=job_id, follow=False, task=999,
+                           output_stream=output)
+        content = output.getvalue()
+        assert 'No task found matching 999' in content, (
+            f'Expected error for task=999, got: {content}')
+
+        # Test 4: task=str('nonexistent') should fail (non-existent task_name)
+        output = io.StringIO()
+        jobs_sdk.tail_logs(job_id=job_id, follow=False, task='nonexistent',
+                           output_stream=output)
+        content = output.getvalue()
+        assert 'No task found matching' in content, (
+            f'Expected error for task="nonexistent", got: {content}')
+
+    test = smoke_tests_utils.Test(
+        'job_group_task_logs_sdk',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            sdk_task_filter_test,
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Testing JobGroup Primary/Auxiliary ----------
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop

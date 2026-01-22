@@ -1168,7 +1168,7 @@ def tail_logs(name: Optional[str],
               controller: bool,
               refresh: bool,
               tail: Optional[int] = None,
-              task: Optional[str] = None) -> int:
+              task: Optional[Union[str, int]] = None) -> int:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
 

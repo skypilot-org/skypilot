@@ -584,8 +584,8 @@ class JobsLogsBody(RequestBody):
     controller: bool = False
     refresh: bool = False
     tail: Optional[int] = None
-    # Task identifier (can be task_id as int string or task_name as string)
-    task: Optional[str] = None
+    # Task identifier: int for task_id, str for task_name
+    task: Optional[Union[str, int]] = None
 
 
 class RequestCancelBody(RequestBody):

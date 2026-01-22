@@ -927,7 +927,7 @@ def controller_log_file_for_job(job_id: int,
 def stream_logs_by_id(job_id: int,
                       follow: bool = True,
                       tail: Optional[int] = None,
-                      task: Optional[str] = None) -> Tuple[str, int]:
+                      task: Optional[Union[str, int]] = None) -> Tuple[str, int]:
     """Stream logs by job id.
 
     Args:
@@ -935,8 +935,8 @@ def stream_logs_by_id(job_id: int,
         follow: Whether to follow the logs.
         tail: Number of lines to tail from the end of the log file.
         task: Task identifier to view logs for a specific task in a JobGroup.
-            Can be a task ID (integer as string) or task name. If None, logs
-            for all tasks are shown.
+            If an int, it is treated as a task ID. If a str, it is treated as
+            a task name. If None, logs for all tasks are shown.
 
     Returns:
         A tuple containing the log message and an exit code based on success or
@@ -951,18 +951,17 @@ def stream_logs_by_id(job_id: int,
                 status != managed_job_state.ManagedJobStatus.CANCELLING)
 
     def matches_task_filter(task_id: int, task_name: str,
-                            task_filter: Optional[str]) -> bool:
+                            task_filter: Optional[Union[str, int]]) -> bool:
         """Check if a task matches the task filter.
 
-        The filter can be either a task ID (if it's a numeric string) or a
-        task name (if it's a non-numeric string).
+        If task_filter is an int, it is matched against task_id.
+        If task_filter is a str, it is matched against task_name.
         """
         if task_filter is None:
             return True
-        # Try to match as task ID first (if filter is numeric)
-        if task_filter.isdigit():
-            return task_id == int(task_filter)
-        # Otherwise match by task name
+        if isinstance(task_filter, int):
+            return task_id == task_filter
+        # task_filter is a str, match by task name
         return task_name == task_filter
 
     msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='', job_id=job_id)
@@ -1297,7 +1296,7 @@ def stream_logs(job_id: Optional[int],
                 controller: bool = False,
                 follow: bool = True,
                 tail: Optional[int] = None,
-                task: Optional[str] = None) -> Tuple[str, int]:
+                task: Optional[Union[str, int]] = None) -> Tuple[str, int]:
     """Stream logs by job id or job name.
 
     Args:
@@ -1307,8 +1306,8 @@ def stream_logs(job_id: Optional[int],
         follow: Whether to follow the logs.
         tail: Number of lines to tail from the end of the log file.
         task: Task identifier to view logs for a specific task in a JobGroup.
-            Can be a task ID (integer as string) or task name. If None, logs
-            for all tasks are shown.
+            If an int, it is treated as a task ID. If a str, it is treated as
+            a task name. If None, logs for all tasks are shown.
 
     Returns:
         A tuple containing the log message and the exit code based on success
@@ -2496,7 +2495,7 @@ class ManagedJobCodeGen:
                     follow: bool = True,
                     controller: bool = False,
                     tail: Optional[int] = None,
-                    task: Optional[str] = None) -> str:
+                    task: Optional[Union[str, int]] = None) -> str:
         code = textwrap.dedent(f"""\
         if managed_job_version < 6:
             # Versions before 6 did not support tail parameter
