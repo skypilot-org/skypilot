@@ -36,58 +36,49 @@ const DEFAULT_FIELDS = [
   'entrypoint',
   'is_job_group',
   'execution',
-  'primary_tasks',
+  'is_primary_in_job_group',
   'links',
 ];
 
 /**
  * Compute the job group status based on primary tasks.
- * For job groups with primary_tasks defined, the job status is determined
+ * For job groups with primary/auxiliary tasks, the job status is determined
  * only by the primary tasks. If all primary tasks succeed, the job is
  * considered successful even if auxiliary tasks were cancelled.
  *
- * @param {Array} tasks - Array of task objects with status and task (name) fields
- * @param {Array|null} primaryTasks - List of primary task names, or null if not defined
+ * Uses is_primary_in_job_group per task:
+ * - null: Non-job-group task (counts for status)
+ * - true: Primary task in job group (counts for status)
+ * - false: Auxiliary task in job group (does not count for status)
+ *
+ * @param {Array} tasks - Array of task objects with status and is_primary_in_job_group fields
  * @returns {string} - The computed job group status
  */
-export function computeJobGroupStatus(tasks, primaryTasks) {
+export function computeJobGroupStatus(tasks) {
   if (!tasks || tasks.length === 0) {
     return null;
   }
 
-  // If primary_tasks is not defined, use traditional behavior
-  if (!primaryTasks || primaryTasks.length === 0) {
-    // Return the first non-SUCCEEDED status, or SUCCEEDED if all succeeded
-    for (const task of tasks) {
-      if (task.status !== 'SUCCEEDED') {
-        return task.status;
-      }
-    }
-    return 'SUCCEEDED';
-  }
+  // Filter to only primary tasks for status determination.
+  // is_primary_in_job_group: true/false for job groups, null for non-groups.
+  // For non-job-groups (null), all tasks count for status.
+  // For job groups, only tasks with is_primary_in_job_group=true count.
+  const primaryTasks = tasks.filter(
+    (t) =>
+      t.is_primary_in_job_group === null ||
+      t.is_primary_in_job_group === undefined ||
+      t.is_primary_in_job_group === true
+  );
 
-  // Filter to only primary tasks
-  const primaryTaskSet = new Set(primaryTasks);
-  const primaryTasksList = tasks.filter((t) => primaryTaskSet.has(t.task));
+  // Use primary tasks for status; fall back to all tasks if none match
+  const tasksForStatus = primaryTasks.length > 0 ? primaryTasks : tasks;
 
-  // If no primary tasks found, fall back to traditional behavior
-  if (primaryTasksList.length === 0) {
-    for (const task of tasks) {
-      if (task.status !== 'SUCCEEDED') {
-        return task.status;
-      }
-    }
-    return 'SUCCEEDED';
-  }
-
-  // Check status of primary tasks only
-  for (const task of primaryTasksList) {
+  // Return the first non-SUCCEEDED status, or SUCCEEDED if all succeeded
+  for (const task of tasksForStatus) {
     if (task.status !== 'SUCCEEDED') {
       return task.status;
     }
   }
-
-  // All primary tasks succeeded
   return 'SUCCEEDED';
 }
 
@@ -282,7 +273,7 @@ export async function getManagedJobs(options = {}) {
         // JobGroup fields
         is_job_group: job.is_job_group,
         execution: job.execution,
-        primary_tasks: job.primary_tasks,
+        is_primary_in_job_group: job.is_primary_in_job_group,
       };
     });
 

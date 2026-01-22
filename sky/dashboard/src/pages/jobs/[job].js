@@ -379,14 +379,15 @@ function JobDetails() {
                                   className="text-blue-600 hover:underline"
                                 >
                                   {task.task || `Job ${index}`}
-                                  {/* Show Primary badge for primary tasks */}
-                                  {detailJobData?.primary_tasks?.includes(
-                                    task.task
-                                  ) && (
-                                    <span className="ml-1.5">
-                                      <PrimaryBadge />
-                                    </span>
-                                  )}
+                                  {/* Show Primary badge for primary tasks in job groups with auxiliaries */}
+                                  {allTasks.some(
+                                    (t) => t.is_primary_in_job_group === false
+                                  ) &&
+                                    task.is_primary_in_job_group === true && (
+                                      <span className="ml-1.5">
+                                        <PrimaryBadge />
+                                      </span>
+                                    )}
                                 </Link>
                               </TableCell>
                               <TableCell>
@@ -794,13 +795,13 @@ function JobDetailsContent({
   const isRecovering = RECOVERING_STATUSES.includes(jobData.status);
 
   // Compute job group status based on primary tasks
-  // For job groups with primary_tasks defined, status is determined only by primary tasks
+  // For job groups with primary/auxiliary tasks, status is determined only by primary tasks
   const computedStatus = useMemo(() => {
-    if (allTasks.length > 1 && jobData.primary_tasks) {
-      return computeJobGroupStatus(allTasks, jobData.primary_tasks);
+    if (allTasks.length > 1) {
+      return computeJobGroupStatus(allTasks);
     }
     return jobData.status;
-  }, [allTasks, jobData.primary_tasks, jobData.status]);
+  }, [allTasks, jobData.status]);
 
   const toggleYamlExpanded = () => {
     setIsYamlExpanded(!isYamlExpanded);

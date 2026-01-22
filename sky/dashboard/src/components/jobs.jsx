@@ -111,20 +111,25 @@ const STATUS_PRIORITY = {
 
 // Helper function to aggregate status for a job group
 // Returns the "worst" status based on priority
-// For job groups with primary_tasks, status is determined only by primary tasks
-export function getAggregatedStatus(tasks, primaryTasks = null) {
+// For job groups with primary/auxiliary tasks, status is determined only by primary tasks
+// Uses is_primary_in_job_group per task: null (non-group), true (primary), false (auxiliary)
+export function getAggregatedStatus(tasks) {
   if (!tasks || tasks.length === 0) return 'PENDING';
   if (tasks.length === 1) return tasks[0].status;
 
-  // If primary_tasks is defined, filter to only those tasks for status determination
-  let tasksForStatus = tasks;
-  if (primaryTasks && primaryTasks.length > 0) {
-    const primaryTaskSet = new Set(primaryTasks);
-    const primaryTasksList = tasks.filter((t) => primaryTaskSet.has(t.task));
-    if (primaryTasksList.length > 0) {
-      tasksForStatus = primaryTasksList;
-    }
-  }
+  // Filter to only primary tasks for status determination.
+  // is_primary_in_job_group: true/false for job groups, null/undefined for non-groups.
+  // For non-job-groups (null), all tasks count for status.
+  // For job groups, only tasks with is_primary_in_job_group=true count.
+  const primaryTasks = tasks.filter(
+    (t) =>
+      t.is_primary_in_job_group === null ||
+      t.is_primary_in_job_group === undefined ||
+      t.is_primary_in_job_group === true
+  );
+
+  // Use primary tasks for status; fall back to all tasks if none match
+  const tasksForStatus = primaryTasks.length > 0 ? primaryTasks : tasks;
 
   let worstStatus = 'SUCCEEDED';
   let worstPriority = 0;
@@ -878,18 +883,20 @@ export function ManagedJobsTable({
     const aggregates = new Map();
     groupedJobs.forEach((tasks, jobId) => {
       if (tasks.length > 1) {
-        // Get primary_tasks from the first task (it's the same for all tasks in a job group)
-        const primaryTasks = tasks[0]?.primary_tasks;
+        // Check if this job group has auxiliary tasks (is_primary_in_job_group=false)
+        const hasAuxiliaryTasks = tasks.some(
+          (t) => t.is_primary_in_job_group === false
+        );
 
-        // Compute aggregated status (respects primary_tasks if defined)
-        const aggregatedStatus = getAggregatedStatus(tasks, primaryTasks);
+        // Compute aggregated status (respects is_primary_in_job_group)
+        const aggregatedStatus = getAggregatedStatus(tasks);
 
         // Compute status tooltip showing all task statuses
         // Also indicate which tasks are primary with a star marker
-        const statusTooltip = primaryTasks
+        const statusTooltip = hasAuxiliaryTasks
           ? `Task statuses:\n${tasks
               .map((t, i) => {
-                const isPrimary = primaryTasks.includes(t.task);
+                const isPrimary = t.is_primary_in_job_group === true;
                 return `Task ${i}${isPrimary ? ' ★' : ''}: ${t.status}`;
               })
               .join('\n')}\n\n★ = Primary task`
@@ -1113,7 +1120,10 @@ export function ManagedJobsTable({
           }
 
           if (renderMode === 'groupChild') {
-            const primaryTasks = tasks[0]?.primary_tasks || [];
+            // Check if this job group has auxiliary tasks
+            const hasAuxiliaryTasks = tasks.some(
+              (t) => t.is_primary_in_job_group === false
+            );
             return (
               <TableCell className="whitespace-nowrap">
                 <Link
@@ -1122,7 +1132,7 @@ export function ManagedJobsTable({
                 >
                   {item.task || `Task ${taskIndex}`}
                 </Link>
-                {primaryTasks.includes(item.task) && (
+                {hasAuxiliaryTasks && item.is_primary_in_job_group === true && (
                   <span className="ml-1.5">
                     <PrimaryBadge />
                   </span>
