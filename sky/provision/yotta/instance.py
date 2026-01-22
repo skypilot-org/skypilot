@@ -17,15 +17,18 @@ QUERY_PORTS_TIMEOUT_SECONDS = 30
 
 logger = sky_logging.init_logger(__name__)
 
+HEAD_NODE_SUFFIX = '-head'
+WORKER_NODE_SUFFIX = '-worker'
+
 
 def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[PodStatusEnum]] = None,
                       head_only: bool = False) -> Dict[str, Any]:
 
     instances = yotta_client.list_instances(cluster_name_on_cloud)
-    possible_names = [f'{cluster_name_on_cloud}-head']
+    possible_names = [f'{cluster_name_on_cloud}{HEAD_NODE_SUFFIX}']
     if not head_only:
-        possible_names.append(f'{cluster_name_on_cloud}-worker')
+        possible_names.append(f'{cluster_name_on_cloud}{WORKER_NODE_SUFFIX}')
     logger.debug(f'Possible names: {possible_names}')
     filtered_instances = {}
     for instance_id, instance in instances.items():
@@ -52,7 +55,7 @@ def _filter_instances(cluster_name_on_cloud: str,
 def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     head_instance_id = None
     for inst_id, inst in instances.items():
-        if inst['name'].endswith('-head'):
+        if inst['name'].endswith(HEAD_NODE_SUFFIX):
             head_instance_id = inst_id
             break
     return head_instance_id
@@ -128,8 +131,9 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     created_instance_ids = []
     to_start_count = config.count - len(exist_instances)
     for _ in range(to_start_count):
-        node_type = 'head' if head_instance_id is None else 'worker'
-        name = f'{cluster_name_on_cloud}-{node_type}'
+        node_suffix = (HEAD_NODE_SUFFIX
+                       if head_instance_id is None else WORKER_NODE_SUFFIX)
+        name = f'{cluster_name_on_cloud}{node_suffix}'
         try:
             instance_id = yotta_client.launch(
                 cluster_name=cluster_name_on_cloud,
@@ -253,7 +257,7 @@ def get_cluster_info(
                 tags={},
             )
         ]
-        if instance_info['podName'].endswith('-head'):
+        if instance_info['podName'].endswith(HEAD_NODE_SUFFIX):
             head_instance_id = instance_id
     return common.ClusterInfo(
         instances=instances,

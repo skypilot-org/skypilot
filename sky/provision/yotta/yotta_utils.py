@@ -17,6 +17,7 @@ logger = sky_logging.init_logger(__name__)
 CREDENTIALS_FILE_PATH = os.path.expanduser('~/.yotta/credentials')
 ENDPOINT = 'https://api.yottalabs.ai/openapi'
 API_KEY_HEADER = 'X-API-KEY'
+CLUSTER_NOT_FOUND_CODE = 44003
 
 
 class PodStatusEnum(enum.Enum):
@@ -179,7 +180,7 @@ class YottaClient:
         response_json = response.json()
         logger.debug(f'Listing instances for cluster {cluster_name_on_cloud}'
                      f' response: {response_json}')
-        if response_json['code'] == 44003:
+        if response_json['code'] == CLUSTER_NOT_FOUND_CODE:
             logger.debug('Cluster not found return empty list')
             return {}
         if response_json['code'] != 10000:
@@ -258,33 +259,34 @@ class YottaClient:
         """Launches an instance with the given parameters."""
         url = f'{ENDPOINT}/v1/pods/cluster/create/pod'
 
-        # TODO : keep this align with setups in
-        # `provision.kuberunetes.instance.py`
-        setup_cmd = (
-            'prefix_cmd() '
-            '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
-            '$(prefix_cmd) apt update;'
-            'export DEBIAN_FRONTEND=noninteractive;'
-            '$(prefix_cmd) apt install openssh-server rsync curl patch -y;'
-            '$(prefix_cmd) mkdir -p /var/run/sshd; '
-            '$(prefix_cmd) '
-            'sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" '
-            '/etc/ssh/sshd_config; '
-            '$(prefix_cmd) sed '
-            '"s@session\\s*required\\s*pam_loginuid.so@session optional '
-            'pam_loginuid.so@g" -i /etc/pam.d/sshd; '
-            'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
-            '$(prefix_cmd) mkdir -p ~/.ssh; '
-            '$(prefix_cmd) chown -R $(whoami) ~/.ssh;'
-            '$(prefix_cmd) chmod 700 ~/.ssh; '
-            f'$(prefix_cmd) echo "{public_key}" >> ~/.ssh/authorized_keys; '
-            '$(prefix_cmd) chmod 644 ~/.ssh/authorized_keys; '
-            '$(prefix_cmd) service ssh restart; '
-            '$(prefix_cmd) export -p > ~/container_env_var.sh && '
-            '$(prefix_cmd) '
-            'mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh; '
-            '[ $(id -u) -eq 0 ] && echo alias sudo="" >> ~/.bashrc;'
-            'sleep infinity')
+        setup_cmd = f"""\
+            prefix_cmd() {{
+              if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi
+            }}
+            $(prefix_cmd) apt update
+            export DEBIAN_FRONTEND=noninteractive
+            $(prefix_cmd) apt install openssh-server rsync curl patch -y
+            $(prefix_cmd) mkdir -p /var/run/sshd
+            $(prefix_cmd) sed -i \
+              "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" \
+              /etc/ssh/sshd_config
+            $(prefix_cmd) sed \
+              "s@session\\s*required\\s*pam_loginuid.so@session optional pam_loginuid.so@g" \
+              -i /etc/pam.d/sshd
+            cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A
+            $(prefix_cmd) mkdir -p ~/.ssh
+            $(prefix_cmd) chown -R $(whoami) ~/.ssh
+            $(prefix_cmd) chmod 700 ~/.ssh
+            $(prefix_cmd) echo "{public_key}" \
+              >> ~/.ssh/authorized_keys
+            $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys
+            $(prefix_cmd) service ssh restart
+            $(prefix_cmd) export -p > ~/container_env_var.sh
+            $(prefix_cmd) mv ~/container_env_var.sh \
+              /etc/profile.d/container_env_var.sh
+            [ $(id -u) -eq 0 ] && echo alias sudo="" >> ~/.bashrc
+            sleep infinity\
+            """
         # Use base64 to deal with the tricky quoting
         # issues caused by runpod API.
         encoded = base64.b64encode(setup_cmd.encode('utf-8')).decode('utf-8')
