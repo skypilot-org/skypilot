@@ -1211,18 +1211,20 @@ class Optimizer:
             if best_resources is None:
                 continue
 
-            # Get instance type string
+            # Get instance type string (display '-' for K8s/Slurm in table)
             instance_type = best_resources.instance_type
             if instance_type is None:
-                instance_type = '-'
+                display_instance_type = '-'
             elif isinstance(best_resources.cloud,
                             (clouds.Kubernetes, clouds.Slurm)):
-                instance_type = '-'
+                display_instance_type = '-'
+            else:
+                display_instance_type = instance_type
 
             # Get vCPUs and memory
             vcpus = '-'
             mem = '-'
-            if best_resources.cloud is not None and instance_type != '-':
+            if best_resources.cloud is not None and instance_type is not None:
                 cloud = best_resources.cloud
                 vcpus_, mem_ = cloud.get_vcpus_mem_from_instance_type(
                     instance_type)
@@ -1244,7 +1246,8 @@ class Optimizer:
 
             row = [
                 task.name,
-                str(task.num_nodes), infra, instance_type + spot, vcpus, mem,
+                str(task.num_nodes), infra, display_instance_type + spot, vcpus,
+                mem,
                 str(accelerators)
             ]
             rows.append(row)
