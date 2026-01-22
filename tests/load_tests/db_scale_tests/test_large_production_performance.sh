@@ -42,7 +42,8 @@ JOB_ID_FILE="/tmp/prod_test_job_id_$$"
 
 # Generate a unique suffix to allow multiple concurrent test runs
 # Use short UUID (first 8 chars) for uniqueness while keeping name manageable
-UNIQUE_SUFFIX=$(uuidgen 2>/dev/null | cut -c1-8 | tr '[:upper:]' '[:lower:]' || date +%s%N | sha256sum | cut -c1-8)
+# Fallbacks: uuidgen -> hash of timestamp -> plain timestamp
+UNIQUE_SUFFIX=$( (uuidgen 2>/dev/null || date +%s%N | (sha256sum 2>/dev/null || shasum -a 256) || date +%s) | cut -c1-8 | tr '[:upper:]' '[:lower:]' )
 
 # Cluster names with unique suffix to avoid conflicts
 ACTIVE_CLUSTER_NAME="scale-test-active-${UNIQUE_SUFFIX}"
