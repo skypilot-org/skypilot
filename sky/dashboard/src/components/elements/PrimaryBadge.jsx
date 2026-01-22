@@ -6,10 +6,7 @@ import { NonCapitalizedTooltip as Tooltip } from '@/components/utils';
  * Primary tasks determine the overall job group status - when all primary
  * tasks complete, auxiliary tasks are automatically terminated.
  */
-export const PrimaryBadge = ({
-  showTooltip = true,
-  className = '',
-}) => {
+export const PrimaryBadge = ({ showTooltip = true, className = '' }) => {
   const badge = (
     <span
       className={`

@@ -23,7 +23,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useSingleManagedJob, getPoolStatus, computeJobGroupStatus } from '@/data/connectors/jobs';
+import {
+  useSingleManagedJob,
+  getPoolStatus,
+  computeJobGroupStatus,
+} from '@/data/connectors/jobs';
 import Link from 'next/link';
 import {
   RotateCwIcon,
@@ -393,7 +397,9 @@ function JobDetails() {
                                 >
                                   {task.task || `Job ${index}`}
                                   {/* Show Primary badge for primary tasks */}
-                                  {detailJobData?.primary_tasks?.includes(task.task) && (
+                                  {detailJobData?.primary_tasks?.includes(
+                                    task.task
+                                  ) && (
                                     <span className="ml-1.5">
                                       <PrimaryBadge />
                                     </span>

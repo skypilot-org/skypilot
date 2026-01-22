@@ -69,7 +69,7 @@ export function computeJobGroupStatus(tasks, primaryTasks) {
 
   // Filter to only primary tasks
   const primaryTaskSet = new Set(primaryTasks);
-  const primaryTasksList = tasks.filter(t => primaryTaskSet.has(t.task));
+  const primaryTasksList = tasks.filter((t) => primaryTaskSet.has(t.task));
 
   // If no primary tasks found, fall back to traditional behavior
   if (primaryTasksList.length === 0) {

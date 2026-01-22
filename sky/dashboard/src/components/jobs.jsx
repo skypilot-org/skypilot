@@ -120,7 +120,7 @@ export function getAggregatedStatus(tasks, primaryTasks = null) {
   let tasksForStatus = tasks;
   if (primaryTasks && primaryTasks.length > 0) {
     const primaryTaskSet = new Set(primaryTasks);
-    const primaryTasksList = tasks.filter(t => primaryTaskSet.has(t.task));
+    const primaryTasksList = tasks.filter((t) => primaryTaskSet.has(t.task));
     if (primaryTasksList.length > 0) {
       tasksForStatus = primaryTasksList;
     }
@@ -887,10 +887,12 @@ export function ManagedJobsTable({
         // Compute status tooltip showing all task statuses
         // Also indicate which tasks are primary with a star marker
         const statusTooltip = primaryTasks
-          ? `Task statuses:\n${tasks.map((t, i) => {
-              const isPrimary = primaryTasks.includes(t.task);
-              return `Task ${i}${isPrimary ? ' ★' : ''}: ${t.status}`;
-            }).join('\n')}\n\n★ = Primary task`
+          ? `Task statuses:\n${tasks
+              .map((t, i) => {
+                const isPrimary = primaryTasks.includes(t.task);
+                return `Task ${i}${isPrimary ? ' ★' : ''}: ${t.status}`;
+              })
+              .join('\n')}\n\n★ = Primary task`
           : `Task statuses:\n${tasks.map((t, i) => `Task ${i}: ${t.status}`).join('\n')}`;
 
         // Compute aggregated resources
@@ -1018,7 +1020,14 @@ export function ManagedJobsTable({
           </TableHead>
         ),
         renderCell: (item, ctx) => {
-          const { renderMode, jobId, taskIndex, isExpanded, toggleJobGroup, hasAnyJobGroups } = ctx || {};
+          const {
+            renderMode,
+            jobId,
+            taskIndex,
+            isExpanded,
+            toggleJobGroup,
+            hasAnyJobGroups,
+          } = ctx || {};
 
           if (renderMode === 'groupParent') {
             return (
@@ -1082,7 +1091,8 @@ export function ManagedJobsTable({
           </TableHead>
         ),
         renderCell: (item, ctx) => {
-          const { renderMode, jobId, tasks, taskIndex, toggleJobGroup } = ctx || {};
+          const { renderMode, jobId, tasks, taskIndex, toggleJobGroup } =
+            ctx || {};
 
           if (renderMode === 'groupParent') {
             return (
@@ -1285,16 +1295,25 @@ export function ManagedJobsTable({
                   className="text-sm text-muted-foreground"
                 >
                   <span>
-                    <Link href="/infra" className="text-blue-600 hover:underline">
+                    <Link
+                      href="/infra"
+                      className="text-blue-600 hover:underline"
+                    >
                       {item.cloud || item.infra.split('(')[0].trim()}
                     </Link>
                     {item.infra.includes('(') && (
                       <span>
                         {' ' +
                           (() => {
-                            const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
-                            const fullRegionPart = item.infra.substring(item.infra.indexOf('('));
-                            const regionContent = fullRegionPart.substring(1, fullRegionPart.length - 1);
+                            const NAME_TRUNCATE_LENGTH =
+                              UI_CONFIG.NAME_TRUNCATE_LENGTH;
+                            const fullRegionPart = item.infra.substring(
+                              item.infra.indexOf('(')
+                            );
+                            const regionContent = fullRegionPart.substring(
+                              1,
+                              fullRegionPart.length - 1
+                            );
                             if (regionContent.length <= NAME_TRUNCATE_LENGTH) {
                               return fullRegionPart;
                             }
@@ -1424,7 +1443,8 @@ export function ManagedJobsTable({
           }
 
           // Use task_job_id for group children to avoid conflicts
-          const rowId = ctx?.renderMode === 'groupChild' ? item.task_job_id : item.id;
+          const rowId =
+            ctx?.renderMode === 'groupChild' ? item.task_job_id : item.id;
 
           return (
             <TableCell>
@@ -1754,7 +1774,9 @@ export function ManagedJobsTable({
                           <TableRow>
                             {visibleColumns.map((col) => {
                               const cell = col.renderCell(item, singleCtx);
-                              return cell ? React.cloneElement(cell, { key: col.id }) : null;
+                              return cell
+                                ? React.cloneElement(cell, { key: col.id })
+                                : null;
                             })}
                           </TableRow>
                           {expandedRowId === item.id && (
@@ -1787,7 +1809,9 @@ export function ManagedJobsTable({
                         <TableRow className="hover:bg-gray-50">
                           {visibleColumns.map((col) => {
                             const cell = col.renderCell(firstTask, parentCtx);
-                            return cell ? React.cloneElement(cell, { key: col.id }) : null;
+                            return cell
+                              ? React.cloneElement(cell, { key: col.id })
+                              : null;
                           })}
                         </TableRow>
 
@@ -1809,7 +1833,11 @@ export function ManagedJobsTable({
                                 <TableRow className="bg-gray-50/50">
                                   {visibleColumns.map((col) => {
                                     const cell = col.renderCell(task, childCtx);
-                                    return cell ? React.cloneElement(cell, { key: col.id }) : null;
+                                    return cell
+                                      ? React.cloneElement(cell, {
+                                          key: col.id,
+                                        })
+                                      : null;
                                   })}
                                 </TableRow>
                                 {expandedRowId === task.task_job_id && (

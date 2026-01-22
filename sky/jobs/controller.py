@@ -1364,7 +1364,8 @@ class JobController:
                         task_results[completed_task_id] = False
                         task_name = tasks[completed_task_id].name
                         logger.info(f'Job {task_name} was terminated')
-                    except Exception as e:
+                    except Exception as e:  # pylint: disable=broad-except
+                        # TODO: avoid broad except
                         task_results[completed_task_id] = e
                         logger.error(
                             f'Job {tasks[completed_task_id].name} failed with '

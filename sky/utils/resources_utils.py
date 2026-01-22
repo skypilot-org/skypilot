@@ -433,14 +433,12 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
     raise ValueError(error_msg)
 
 
-def _parse_time_with_units(time: str, time_units: Dict[str, int],
-                           default_unit_name: str) -> int:
+def _parse_time_with_units(time: str, time_units: Dict[str, int]) -> int:
     """Parse a time string using the given unit multipliers.
 
     Args:
         time: Time string with optional unit suffix.
         time_units: Dict mapping unit suffix to multiplier value.
-        default_unit_name: Name of the default unit for error messages.
 
     Returns:
         Time value as an integer in the base unit.
@@ -480,7 +478,7 @@ def parse_time_minutes(time: str) -> int:
     Raises:
         ValueError: If the time format is invalid.
     """
-    return _parse_time_with_units(time, constants.TIME_UNITS, 'minutes')
+    return _parse_time_with_units(time, constants.TIME_UNITS)
 
 
 def parse_time_seconds(time: str) -> int:
@@ -497,7 +495,7 @@ def parse_time_seconds(time: str) -> int:
     Raises:
         ValueError: If the time format is invalid.
     """
-    return _parse_time_with_units(time, constants.TIME_UNITS_SECONDS, 'seconds')
+    return _parse_time_with_units(time, constants.TIME_UNITS_SECONDS)
 
 
 def normalize_any_of_resources_config(
