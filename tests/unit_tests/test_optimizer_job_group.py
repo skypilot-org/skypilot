@@ -474,3 +474,286 @@ class TestModuleLevelOptimizeJobGroup:
             mock_method.assert_called_once_with(dag, common.OptimizeTarget.COST,
                                                 None, True)
             assert result == dag
+
+
+class TestPrintJobGroupPlan:
+    """Tests for _print_job_group_plan output formatting."""
+
+    @pytest.fixture
+    def mock_kubernetes_cloud(self):
+        """Create a mock Kubernetes cloud."""
+        cloud = MagicMock(spec=clouds.Kubernetes)
+        cloud.__str__ = MagicMock(return_value='Kubernetes')
+        cloud.__repr__ = MagicMock(return_value='Kubernetes')
+        # Kubernetes parses instance_type like '2CPU--4GB' to get vCPUs/memory
+        cloud.get_vcpus_mem_from_instance_type = MagicMock(return_value=(2.0,
+                                                                         4.0))
+        return cloud
+
+    @pytest.fixture
+    def mock_aws_cloud(self):
+        """Create a mock AWS cloud."""
+        cloud = MagicMock(spec=clouds.AWS)
+        cloud.__str__ = MagicMock(return_value='AWS')
+        cloud.__repr__ = MagicMock(return_value='AWS')
+        # AWS returns vCPUs/memory based on instance type
+        cloud.get_vcpus_mem_from_instance_type = MagicMock(return_value=(4.0,
+                                                                         16.0))
+        return cloud
+
+    @pytest.fixture
+    def mock_infra(self):
+        """Create a mock InfraInfo."""
+        infra = MagicMock()
+        infra.formatted_str = MagicMock(return_value='Kubernetes (coreweave)')
+        return infra
+
+    @pytest.fixture
+    def mock_infra_aws(self):
+        """Create a mock InfraInfo for AWS."""
+        infra = MagicMock()
+        infra.formatted_str = MagicMock(return_value='AWS (us-east-1)')
+        return infra
+
+    def test_print_job_group_plan_shows_vcpus_memory_for_kubernetes(
+            self, mock_kubernetes_cloud, mock_infra):
+        """Test that vCPUs and memory are shown correctly for Kubernetes."""
+        task = MagicMock(spec=task_lib.Task)
+        task.name = 'data-server'
+        task.num_nodes = 1
+
+        resources = MagicMock(spec=resources_lib.Resources)
+        resources.cloud = mock_kubernetes_cloud
+        resources.instance_type = '2CPU--4GB'
+        resources.get_accelerators_str = MagicMock(return_value='-')
+        resources.get_spot_str = MagicMock(return_value='')
+        resources.infra = mock_infra
+
+        task.best_resources = resources
+
+        # Capture the logger output
+        with patch('sky.optimizer.logger') as mock_logger:
+            optimizer.Optimizer._print_job_group_plan([task])
+
+            # Verify logger.info was called with the table
+            assert mock_logger.info.call_count >= 1
+            # Get the table output (second call contains the table)
+            table_call = mock_logger.info.call_args_list[-1]
+            table_str = str(table_call)
+
+            # Verify the table contains correct values
+            assert 'data-server' in table_str
+            assert '2' in table_str  # vCPUs
+            assert '4' in table_str  # memory
+
+    def test_print_job_group_plan_shows_gpus(self, mock_kubernetes_cloud,
+                                             mock_infra):
+        """Test that GPUs are shown correctly in the optimizer table."""
+        task = MagicMock(spec=task_lib.Task)
+        task.name = 'trainer'
+        task.num_nodes = 2
+
+        resources = MagicMock(spec=resources_lib.Resources)
+        resources.cloud = mock_kubernetes_cloud
+        resources.instance_type = '4CPU--32GB'
+        resources.get_accelerators_str = MagicMock(return_value='H100:1')
+        resources.get_spot_str = MagicMock(return_value='')
+        resources.infra = mock_infra
+
+        # Update mock to return correct values for this instance type
+        mock_kubernetes_cloud.get_vcpus_mem_from_instance_type = MagicMock(
+            return_value=(4.0, 32.0))
+
+        task.best_resources = resources
+
+        with patch('sky.optimizer.logger') as mock_logger:
+            optimizer.Optimizer._print_job_group_plan([task])
+
+            table_call = mock_logger.info.call_args_list[-1]
+            table_str = str(table_call)
+
+            # Verify GPU is shown
+            assert 'H100:1' in table_str
+            assert 'trainer' in table_str
+
+    def test_print_job_group_plan_shows_dash_for_instance_type_on_kubernetes(
+            self, mock_kubernetes_cloud, mock_infra):
+        """Test that instance type shows '-' for Kubernetes."""
+        task = MagicMock(spec=task_lib.Task)
+        task.name = 'service'
+        task.num_nodes = 1
+
+        resources = MagicMock(spec=resources_lib.Resources)
+        resources.cloud = mock_kubernetes_cloud
+        resources.instance_type = '2CPU--8GB'
+        resources.get_accelerators_str = MagicMock(return_value='-')
+        resources.get_spot_str = MagicMock(return_value='')
+        resources.infra = mock_infra
+
+        mock_kubernetes_cloud.get_vcpus_mem_from_instance_type = MagicMock(
+            return_value=(2.0, 8.0))
+
+        task.best_resources = resources
+
+        with patch('sky.optimizer.logger') as mock_logger:
+            optimizer.Optimizer._print_job_group_plan([task])
+
+            table_call = mock_logger.info.call_args_list[-1]
+            table_str = str(table_call)
+
+            # Instance type column should show '-' not '2CPU--8GB'
+            assert '2CPU--8GB' not in table_str
+            # But vCPUs and memory should still be shown
+            assert '2' in table_str  # vCPUs
+            assert '8' in table_str  # memory
+
+    def test_print_job_group_plan_shows_instance_type_for_aws(
+            self, mock_aws_cloud, mock_infra_aws):
+        """Test that instance type is shown for AWS."""
+        task = MagicMock(spec=task_lib.Task)
+        task.name = 'compute'
+        task.num_nodes = 1
+
+        resources = MagicMock(spec=resources_lib.Resources)
+        resources.cloud = mock_aws_cloud
+        resources.instance_type = 'm5.xlarge'
+        resources.get_accelerators_str = MagicMock(return_value='-')
+        resources.get_spot_str = MagicMock(return_value='')
+        resources.infra = mock_infra_aws
+
+        task.best_resources = resources
+
+        with patch('sky.optimizer.logger') as mock_logger:
+            optimizer.Optimizer._print_job_group_plan([task])
+
+            table_call = mock_logger.info.call_args_list[-1]
+            table_str = str(table_call)
+
+            # Instance type should be shown for AWS
+            assert 'm5.xlarge' in table_str
+            assert '4' in table_str  # vCPUs
+            assert '16' in table_str  # memory
+
+    def test_print_job_group_plan_multiple_tasks(self, mock_kubernetes_cloud,
+                                                 mock_infra):
+        """Test that all tasks are shown in the optimizer table."""
+        tasks = []
+        task_names = ['data-server', 'reward-server', 'trainer']
+
+        for i, name in enumerate(task_names):
+            task = MagicMock(spec=task_lib.Task)
+            task.name = name
+            task.num_nodes = 1 if i < 2 else 2
+
+            resources = MagicMock(spec=resources_lib.Resources)
+            resources.cloud = mock_kubernetes_cloud
+            resources.instance_type = '2CPU--4GB'
+            resources.get_accelerators_str = MagicMock(
+                return_value='H100:1' if name == 'trainer' else '-')
+            resources.get_spot_str = MagicMock(return_value='')
+            resources.infra = mock_infra
+
+            task.best_resources = resources
+            tasks.append(task)
+
+        with patch('sky.optimizer.logger') as mock_logger:
+            optimizer.Optimizer._print_job_group_plan(tasks)
+
+            table_call = mock_logger.info.call_args_list[-1]
+            table_str = str(table_call)
+
+            # All task names should be in the table
+            for name in task_names:
+                assert name in table_str
+
+    def test_print_job_group_plan_skips_tasks_without_best_resources(
+            self, mock_kubernetes_cloud, mock_infra):
+        """Test that tasks without best_resources are skipped."""
+        task_with_resources = MagicMock(spec=task_lib.Task)
+        task_with_resources.name = 'has-resources'
+        task_with_resources.num_nodes = 1
+
+        resources = MagicMock(spec=resources_lib.Resources)
+        resources.cloud = mock_kubernetes_cloud
+        resources.instance_type = '2CPU--4GB'
+        resources.get_accelerators_str = MagicMock(return_value='-')
+        resources.get_spot_str = MagicMock(return_value='')
+        resources.infra = mock_infra
+        task_with_resources.best_resources = resources
+
+        task_without_resources = MagicMock(spec=task_lib.Task)
+        task_without_resources.name = 'no-resources'
+        task_without_resources.best_resources = None
+
+        with patch('sky.optimizer.logger') as mock_logger:
+            optimizer.Optimizer._print_job_group_plan(
+                [task_with_resources, task_without_resources])
+
+            table_call = mock_logger.info.call_args_list[-1]
+            table_str = str(table_call)
+
+            # Only the task with resources should be in the table
+            assert 'has-resources' in table_str
+            assert 'no-resources' not in table_str
+
+    def test_print_job_group_plan_handles_spot_instances(
+            self, mock_aws_cloud, mock_infra_aws):
+        """Test that spot instance indicator is shown."""
+        task = MagicMock(spec=task_lib.Task)
+        task.name = 'spot-task'
+        task.num_nodes = 1
+
+        resources = MagicMock(spec=resources_lib.Resources)
+        resources.cloud = mock_aws_cloud
+        resources.instance_type = 'm5.xlarge'
+        resources.get_accelerators_str = MagicMock(return_value='-')
+        resources.get_spot_str = MagicMock(return_value='[Spot]')
+        resources.infra = mock_infra_aws
+
+        task.best_resources = resources
+
+        with patch('sky.optimizer.logger') as mock_logger:
+            optimizer.Optimizer._print_job_group_plan([task])
+
+            table_call = mock_logger.info.call_args_list[-1]
+            table_str = str(table_call)
+
+            # Spot indicator should be appended to instance type
+            assert '[Spot]' in table_str
+
+    def test_print_job_group_plan_handles_none_instance_type(self, mock_infra):
+        """Test handling when instance_type is None."""
+        cloud = MagicMock(spec=clouds.AWS)
+        cloud.__str__ = MagicMock(return_value='AWS')
+
+        task = MagicMock(spec=task_lib.Task)
+        task.name = 'no-instance-type'
+        task.num_nodes = 1
+
+        resources = MagicMock(spec=resources_lib.Resources)
+        resources.cloud = cloud
+        resources.instance_type = None
+        resources.get_accelerators_str = MagicMock(return_value='-')
+        resources.get_spot_str = MagicMock(return_value='')
+        resources.infra = mock_infra
+
+        task.best_resources = resources
+
+        with patch('sky.optimizer.logger') as mock_logger:
+            optimizer.Optimizer._print_job_group_plan([task])
+
+            table_call = mock_logger.info.call_args_list[-1]
+            table_str = str(table_call)
+
+            # Task should still be shown with '-' for instance type
+            assert 'no-instance-type' in table_str
+
+    def test_print_job_group_plan_no_output_for_empty_tasks(self):
+        """Test that no output is produced for empty task list."""
+        with patch('sky.optimizer.logger') as mock_logger:
+            optimizer.Optimizer._print_job_group_plan([])
+
+            # logger.info should not be called with table
+            # (no "Best plan:" message)
+            for call in mock_logger.info.call_args_list:
+                assert 'Best plan' not in str(call)

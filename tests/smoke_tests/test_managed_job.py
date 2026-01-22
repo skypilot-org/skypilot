@@ -2413,8 +2413,10 @@ def test_job_group_primary_auxiliary(generic_cloud: str):
                 f's=$({smoke_tests_utils.GET_JOB_QUEUE} | grep -A 2 {name}); '
                 f'echo "$s"; echo "$s" | grep trainer | grep SUCCEEDED',
                 # Verify auxiliary task was cancelled (terminated after primary)
+                # Check for CANCELLING or CANCELLED as the state may still be
+                # transitioning when we check
                 f's=$({smoke_tests_utils.GET_JOB_QUEUE} | grep -A 2 {name}); '
-                f'echo "$s"; echo "$s" | grep replay-buffer | grep CANCELLED',
+                f'echo "$s"; echo "$s" | grep replay-buffer | grep -E "CANCELLING|CANCELLED"',
                 # Verify logs show the termination delay message
                 f'sky jobs logs --controller -n {name} --no-follow | '
                 f'grep -E "Waiting.*before terminating|Terminating auxiliary"',
@@ -2465,8 +2467,10 @@ def test_job_group_primary_failure_immediate_termination(generic_cloud: str):
                 f's=$({smoke_tests_utils.GET_JOB_QUEUE} | grep -A 2 {name}); '
                 f'echo "$s"; echo "$s" | grep failing-trainer | grep FAILED',
                 # Verify auxiliary task was cancelled (terminated immediately)
+                # Check for CANCELLING or CANCELLED as the state may still be
+                # transitioning when we check
                 f's=$({smoke_tests_utils.GET_JOB_QUEUE} | grep -A 2 {name}); '
-                f'echo "$s"; echo "$s" | grep replay-buffer | grep CANCELLED',
+                f'echo "$s"; echo "$s" | grep replay-buffer | grep -E "CANCELLING|CANCELLED"',
             ],
             f'sky jobs cancel -y -n {name}',
             env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
