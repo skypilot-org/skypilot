@@ -35,15 +35,21 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Configuration
-ACTIVE_CLUSTER_NAME="scale-test-active"
-TERMINATED_CLUSTER_NAME="scale-test-terminated"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INJECT_SCRIPT="${SCRIPT_DIR}/inject_production_scale_data.py"
 CREATE_DB_SCRIPT="${SCRIPT_DIR}/create_aws_postgres_db.sh"
 JOB_ID_FILE="/tmp/prod_test_job_id_$$"
 
-# RDS configuration (instance name related to test case)
-RDS_INSTANCE_ID="skypilot-large-production-test-db"
+# Generate a unique suffix to allow multiple concurrent test runs
+# Use short UUID (first 8 chars) for uniqueness while keeping name manageable
+UNIQUE_SUFFIX=$(uuidgen 2>/dev/null | cut -c1-8 | tr '[:upper:]' '[:lower:]' || date +%s%N | sha256sum | cut -c1-8)
+
+# Cluster names with unique suffix to avoid conflicts
+ACTIVE_CLUSTER_NAME="scale-test-active-${UNIQUE_SUFFIX}"
+TERMINATED_CLUSTER_NAME="scale-test-term-${UNIQUE_SUFFIX}"
+
+# RDS configuration with unique suffix
+RDS_INSTANCE_ID="skypilot-prod-test-db-${UNIQUE_SUFFIX}"
 RDS_REGION="${AWS_REGION:-us-east-2}"
 DB_SUBNET_GROUP_NAME="skypilot-test-subnet-group-${RDS_INSTANCE_ID}"
 SKYPILOT_DB_CONNECTION_URI=""
@@ -289,7 +295,7 @@ echo "✓ sky jobs queue --all test passed (${duration}s)"
 
 # Step 8: Do a minimal sky launch to ensure API server is running
 echo "Step 8: Performing minimal sky launch to ensure API server is running..."
-MINIMAL_CLUSTER_NAME="scale-test-minimal-$$"
+MINIMAL_CLUSTER_NAME="scale-test-min-${UNIQUE_SUFFIX}"
 sky launch --infra k8s -c "$MINIMAL_CLUSTER_NAME" -y "echo 'minimal test cluster'"
 # Get logs and verify the echo content appears
 LOGS_OUTPUT=$(sky logs "$MINIMAL_CLUSTER_NAME" --no-follow 2>&1)
