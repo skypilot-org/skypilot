@@ -49,7 +49,6 @@ A Job Group is defined using a multi-document YAML file. The first document is t
     # Header: Job Group configuration
     name: my-job-group
     execution: parallel      # Required: indicates this is a Job Group
-    placement: SAME_INFRA    # All tasks run on the same infrastructure
     ---
     # Task 1: Trainer
     name: trainer
@@ -89,9 +88,6 @@ The header document supports the following fields:
    * - ``execution``
      - Required
      - Must be ``parallel`` to indicate this is a Job Group
-   * - ``placement``
-     - ``SAME_INFRA``
-     - Where tasks are placed. Currently only ``SAME_INFRA`` is supported
 
 Each task document after the header follows the standard :ref:`SkyPilot task YAML format <yaml-spec>`.
 
@@ -192,7 +188,6 @@ a Kubernetes PVC volume:
     ---
     name: train-eval
     execution: parallel
-    placement: SAME_INFRA
     ---
     name: trainer
     resources:
@@ -222,7 +217,6 @@ This example demonstrates a distributed RL post-training architecture with 5 tas
     ---
     name: rlhf-training
     execution: parallel
-    placement: SAME_INFRA
     ---
     name: data-server
     resources:
@@ -266,8 +260,8 @@ See the full RL post-training example at ``llm/rl-post-training-jobgroup/`` in t
 Current limitations
 -------------------
 
-- **Placement**: Only ``SAME_INFRA`` is currently supported. All tasks must run on
-  the same Kubernetes cluster or cloud region.
+- **Co-location**: All tasks in a Job Group run on the same infrastructure
+  (same Kubernetes cluster or cloud region).
 
 - **Recovery**: Job Groups do not currently support automatic preemption recovery.
   If a task is preempted, the entire group fails.

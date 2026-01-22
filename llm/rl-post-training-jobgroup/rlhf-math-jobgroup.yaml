@@ -33,7 +33,6 @@
 #   - replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:8003
 ---
 name: rlhf-math
-placement: SAME_INFRA
 execution: parallel
 primary_tasks: [ppo-trainer]
 termination_delay: 10s

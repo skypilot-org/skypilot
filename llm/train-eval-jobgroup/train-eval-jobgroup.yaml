@@ -25,7 +25,6 @@
 #   /checkpoints - Shared volume for checkpoint files
 ---
 name: train-eval
-placement: SAME_INFRA
 execution: parallel
 
 ---
