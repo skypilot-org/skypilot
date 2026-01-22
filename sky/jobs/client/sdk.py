@@ -191,6 +191,12 @@ def queue_v2(
           does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+    # Filter out fields not supported by older servers
+    remote_api_version = versions.get_remote_api_version()
+    if fields is not None and (remote_api_version is None or
+                               remote_api_version < 30):
+        fields = [f for f in fields if f != 'is_primary_in_job_group']
+
     body = payloads.JobsQueueV2Body(
         refresh=refresh,
         skip_finished=skip_finished,
