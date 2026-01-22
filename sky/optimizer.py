@@ -1145,14 +1145,16 @@ class Optimizer:
 
         if not quiet:
             cloud, region = best_infra
-            logger.info(f'Selected infrastructure: {cloud} / {region}')
+            # Format infra as lowercase cloud/region (e.g., kubernetes/coreweave)
+            infra_str = f'{str(cloud).lower()}/{region}'
+            logger.info(f'Selected infrastructure: {infra_str}')
             # Hint user about other available infras
             other_infras = [(c, r)
                             for c, r in common_infras
                             if not (str(c) == str(cloud) and r == region)]
             if other_infras:
                 other_infras_str = ', '.join(
-                    [f'{c} / {r}' for c, r in other_infras[:3]])
+                    [f'{str(c).lower()}/{r}' for c, r in other_infras[:3]])
                 if len(other_infras) > 3:
                     other_infras_str += f', ... ({len(other_infras) - 3} more)'
                 logger.info(
@@ -1183,7 +1185,66 @@ class Optimizer:
                         task.set_resources_override(override_params)
                     break
 
+        # Step 5: Print optimizer table for job groups
+        if not quiet and len(tasks) > 1:
+            Optimizer._print_job_group_plan(tasks)
+
         return dag
+
+    @staticmethod
+    def _print_job_group_plan(tasks: List[task_lib.Task]) -> None:
+        """Print the optimizer table for a job group."""
+        resource_fields = ['INFRA', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'GPUS']
+        table = _create_table(['TASK', '#NODES'] + resource_fields)
+
+        rows = []
+        for task in tasks:
+            best_resources = task.best_resources
+            if best_resources is None:
+                continue
+
+            # Get instance type string
+            instance_type = best_resources.instance_type
+            if instance_type is None:
+                instance_type = '-'
+            elif isinstance(best_resources.cloud,
+                            (clouds.Kubernetes, clouds.Slurm)):
+                instance_type = '-'
+
+            # Get vCPUs and memory
+            vcpus = '-'
+            mem = '-'
+            if best_resources.cloud is not None and instance_type != '-':
+                vcpus_, mem_ = best_resources.cloud.get_vcpus_mem_from_instance_type(
+                    best_resources.instance_type)
+                if vcpus_ is not None:
+                    vcpus = (str(int(vcpus_))
+                             if vcpus_.is_integer() else f'{vcpus_:.1f}')
+                if mem_ is not None:
+                    mem = (str(int(mem_))
+                           if mem_.is_integer() else f'{mem_:.1f}')
+
+            # Get accelerators
+            accelerators = best_resources.get_accelerators_str()
+
+            # Get spot string
+            spot = best_resources.get_spot_str()
+
+            # Get infra string
+            infra = best_resources.infra.formatted_str()
+
+            row = [
+                task.name,
+                str(task.num_nodes), infra, instance_type + spot, vcpus, mem,
+                str(accelerators)
+            ]
+            rows.append(row)
+
+        if rows:
+            table.add_rows(rows)
+            logger.info(f'{colorama.Style.BRIGHT}Best plan: '
+                        f'{colorama.Style.RESET_ALL}')
+            logger.info(f'{table}')
 
     @staticmethod
     def _find_common_infras(
