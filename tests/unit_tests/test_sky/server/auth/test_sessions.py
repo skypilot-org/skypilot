@@ -4,6 +4,7 @@ import time
 
 import pytest
 
+from sky.server import constants as server_constants
 from sky.server.auth import sessions
 from sky.utils import common_utils
 
@@ -80,7 +81,8 @@ class TestAuthSessionStore:
         store.create_session(code_challenge, 'my_token')
 
         # Fast-forward time past expiration
-        future_time = time.time() + sessions.SESSION_EXPIRATION_SECONDS + 10
+        future_time = time.time(
+        ) + server_constants.AUTH_SESSION_TIMEOUT_SECONDS + 10
         monkeypatch.setattr(time, 'time', lambda: future_time)
 
         # Should return None due to expiration
@@ -97,7 +99,8 @@ class TestAuthSessionStore:
         store.create_session(code_challenge2, 'token2')
 
         # Fast-forward time past expiration
-        future_time = time.time() + sessions.SESSION_EXPIRATION_SECONDS + 10
+        future_time = time.time(
+        ) + server_constants.AUTH_SESSION_TIMEOUT_SECONDS + 10
         monkeypatch.setattr(time, 'time', lambda: future_time)
 
         # Both should be expired now
