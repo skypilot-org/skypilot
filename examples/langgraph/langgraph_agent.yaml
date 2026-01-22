@@ -1,0 +1,170 @@
+# SkyPilot configuration for deploying a LangGraph agent on cloud GPU
+#
+# This YAML deploys a LangGraph-based AI agent that can:
+# - Run local LLM inference using vLLM
+# - Process complex multi-step reasoning tasks
+# - Serve an HTTP API for agent interactions
+#
+# Usage:
+#   sky launch langgraph_agent.yaml
+#
+# For production with auto-scaling:
+#   sky serve up -n langgraph-agent langgraph_agent_service.yaml
+
+name: langgraph-agent
+
+resources:
+  accelerators: L4:1
+  memory: 16+
+  
+envs:
+  MODEL_NAME: "microsoft/Phi-3.5-mini-instruct"
+  AGENT_PORT: 8080
+
+setup: |
+  # Install core dependencies
+  pip install langgraph langchain langchain-community
+  
+  # Install vLLM for local LLM inference
+  pip install vllm
+  
+  # Install web server dependencies
+  pip install fastapi uvicorn httpx
+
+  # Create the agent server script
+  cat > agent_server.py << 'EOF'
+  """LangGraph Agent Server.
+  
+  A simple agent that uses a local LLM for reasoning and tool use.
+  """
+  import os
+  from typing import Annotated, TypedDict
+  
+  from fastapi import FastAPI
+  from langchain_community.llms import VLLMOpenAI
+  from langgraph.graph import END, StateGraph
+  from langgraph.graph.message import add_messages
+  from pydantic import BaseModel
+  import uvicorn
+  
+  app = FastAPI(title="LangGraph Agent")
+  
+  # Agent state
+  class AgentState(TypedDict):
+      messages: Annotated[list, add_messages]
+      final_answer: str
+  
+  # Request/Response models
+  class QueryRequest(BaseModel):
+      query: str
+      max_iterations: int = 5
+  
+  class QueryResponse(BaseModel):
+      answer: str
+      iterations: int
+  
+  # Initialize LLM (connects to local vLLM server)
+  llm = None
+  agent_graph = None
+  
+  def get_llm():
+      global llm
+      if llm is None:
+          llm = VLLMOpenAI(
+              openai_api_base="http://localhost:8000/v1",
+              openai_api_key="EMPTY",
+              model_name=os.environ.get("MODEL_NAME", "microsoft/Phi-3.5-mini-instruct"),
+              temperature=0.1,
+          )
+      return llm
+  
+  def reason(state: AgentState) -> AgentState:
+      """Reasoning step - use LLM to process the query."""
+      messages = state["messages"]
+      llm = get_llm()
+      
+      # Format messages for the LLM
+      prompt = "\n".join([
+          f"{m['role']}: {m['content']}" 
+          for m in messages if isinstance(m, dict)
+      ])
+      
+      response = llm.invoke(prompt)
+      
+      return {
+          "messages": [{"role": "assistant", "content": response}],
+          "final_answer": response,
+      }
+  
+  def should_continue(state: AgentState) -> str:
+      """Check if we should continue reasoning."""
+      # Simple check - in production you'd have more sophisticated logic
+      answer = state.get("final_answer", "")
+      if "FINAL ANSWER:" in answer or len(state["messages"]) > 10:
+          return "end"
+      return "continue"
+  
+  def build_agent():
+      """Build the LangGraph agent."""
+      global agent_graph
+      if agent_graph is not None:
+          return agent_graph
+      
+      workflow = StateGraph(AgentState)
+      workflow.add_node("reason", reason)
+      workflow.set_entry_point("reason")
+      workflow.add_conditional_edges(
+          "reason",
+          should_continue,
+          {"continue": "reason", "end": END}
+      )
+      agent_graph = workflow.compile()
+      return agent_graph
+  
+  @app.get("/health")
+  def health():
+      return {"status": "healthy"}
+  
+  @app.post("/query", response_model=QueryResponse)
+  def query(request: QueryRequest):
+      agent = build_agent()
+      
+      initial_state = {
+          "messages": [
+              {"role": "system", "content": "You are a helpful AI assistant. When you have a complete answer, prefix it with 'FINAL ANSWER:'"},
+              {"role": "user", "content": request.query}
+          ],
+          "final_answer": "",
+      }
+      
+      result = agent.invoke(initial_state)
+      
+      return QueryResponse(
+          answer=result["final_answer"],
+          iterations=len(result["messages"]) // 2,
+      )
+  
+  if __name__ == "__main__":
+      port = int(os.environ.get("AGENT_PORT", 8080))
+      uvicorn.run(app, host="0.0.0.0", port=port)
+  EOF
+
+run: |
+  # Start vLLM server in background
+  echo "Starting vLLM server..."
+  python -m vllm.entrypoints.openai.api_server \
+    --model $MODEL_NAME \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --max-model-len 4096 &
+  
+  # Wait for vLLM to be ready
+  echo "Waiting for vLLM server to start..."
+  while ! curl -s http://localhost:8000/health > /dev/null 2>&1; do
+    sleep 2
+  done
+  echo "vLLM server is ready!"
+  
+  # Start the agent server
+  echo "Starting LangGraph agent server on port $AGENT_PORT..."
+  python agent_server.py

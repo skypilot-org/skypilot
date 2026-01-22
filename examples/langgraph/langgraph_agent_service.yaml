@@ -1,0 +1,201 @@
+# SkyServe configuration for production deployment of LangGraph agent
+#
+# This YAML deploys a scalable LangGraph agent service with:
+# - Auto-scaling based on load
+# - Health checks and automatic recovery
+# - Load balancing across replicas
+#
+# Usage:
+#   sky serve up -n langgraph-agent langgraph_agent_service.yaml
+#
+# Query the service:
+#   ENDPOINT=$(sky serve status langgraph-agent --endpoint)
+#   curl -X POST "$ENDPOINT/query" \
+#     -H "Content-Type: application/json" \
+#     -d '{"query": "What is the capital of France?"}'
+
+name: langgraph-agent-service
+
+resources:
+  accelerators: L4:1
+  memory: 16+
+  ports: 8080
+
+envs:
+  MODEL_NAME: "microsoft/Phi-3.5-mini-instruct"
+  AGENT_PORT: 8080
+
+service:
+  # Replica scaling configuration
+  replicas: 1
+  
+  # Readiness probe - service is ready when this returns 200
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 120  # vLLM takes time to load model
+    period_seconds: 10
+  
+  # Optional: Auto-scaling configuration
+  # replica_policy:
+  #   min_replicas: 1
+  #   max_replicas: 4
+  #   target_qps_per_replica: 2
+
+setup: |
+  # Install core dependencies
+  pip install langgraph langchain langchain-community
+  
+  # Install vLLM for local LLM inference
+  pip install vllm
+  
+  # Install web server dependencies
+  pip install fastapi uvicorn httpx
+
+  # Create the agent server script
+  cat > agent_server.py << 'AGENT_EOF'
+  """LangGraph Agent Server for SkyServe.
+  
+  Production-ready agent with health checks and graceful shutdown.
+  """
+  import os
+  import signal
+  import sys
+  from typing import Annotated, TypedDict
+  
+  from fastapi import FastAPI, HTTPException
+  from langchain_community.llms import VLLMOpenAI
+  from langgraph.graph import END, StateGraph
+  from langgraph.graph.message import add_messages
+  from pydantic import BaseModel
+  import uvicorn
+  
+  app = FastAPI(title="LangGraph Agent Service")
+  
+  # Global state
+  _llm = None
+  _agent = None
+  _ready = False
+  
+  class AgentState(TypedDict):
+      messages: Annotated[list, add_messages]
+      final_answer: str
+  
+  class QueryRequest(BaseModel):
+      query: str
+      system_prompt: str = "You are a helpful AI assistant. Provide clear, concise answers."
+  
+  class QueryResponse(BaseModel):
+      answer: str
+      model: str
+  
+  def get_llm():
+      global _llm
+      if _llm is None:
+          _llm = VLLMOpenAI(
+              openai_api_base="http://localhost:8000/v1",
+              openai_api_key="EMPTY",
+              model_name=os.environ.get("MODEL_NAME"),
+              temperature=0.1,
+              max_tokens=1024,
+          )
+      return _llm
+  
+  def reason(state: AgentState) -> AgentState:
+      messages = state["messages"]
+      llm = get_llm()
+      prompt = "\n".join([
+          f"{m['role']}: {m['content']}" 
+          for m in messages if isinstance(m, dict)
+      ])
+      response = llm.invoke(prompt)
+      return {
+          "messages": [{"role": "assistant", "content": response}],
+          "final_answer": response,
+      }
+  
+  def build_agent():
+      global _agent
+      if _agent is not None:
+          return _agent
+      
+      workflow = StateGraph(AgentState)
+      workflow.add_node("reason", reason)
+      workflow.set_entry_point("reason")
+      workflow.add_edge("reason", END)
+      _agent = workflow.compile()
+      return _agent
+  
+  @app.on_event("startup")
+  async def startup():
+      global _ready
+      # Pre-initialize LLM and agent
+      try:
+          build_agent()
+          _ready = True
+      except Exception as e:
+          print(f"Failed to initialize agent: {e}")
+  
+  @app.get("/health")
+  def health():
+      if not _ready:
+          raise HTTPException(status_code=503, detail="Agent not ready")
+      return {"status": "healthy", "model": os.environ.get("MODEL_NAME")}
+  
+  @app.post("/query", response_model=QueryResponse)
+  def query(request: QueryRequest):
+      if not _ready:
+          raise HTTPException(status_code=503, detail="Agent not ready")
+      
+      agent = build_agent()
+      
+      initial_state = {
+          "messages": [
+              {"role": "system", "content": request.system_prompt},
+              {"role": "user", "content": request.query}
+          ],
+          "final_answer": "",
+      }
+      
+      result = agent.invoke(initial_state)
+      
+      return QueryResponse(
+          answer=result["final_answer"],
+          model=os.environ.get("MODEL_NAME"),
+      )
+  
+  def signal_handler(sig, frame):
+      print("Shutting down gracefully...")
+      sys.exit(0)
+  
+  if __name__ == "__main__":
+      signal.signal(signal.SIGTERM, signal_handler)
+      signal.signal(signal.SIGINT, signal_handler)
+      
+      port = int(os.environ.get("AGENT_PORT", 8080))
+      uvicorn.run(app, host="0.0.0.0", port=port)
+  AGENT_EOF
+
+run: |
+  # Start vLLM server in background
+  echo "Starting vLLM server with model: $MODEL_NAME"
+  python -m vllm.entrypoints.openai.api_server \
+    --model $MODEL_NAME \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --max-model-len 4096 &
+  
+  VLLM_PID=$!
+  
+  # Wait for vLLM to be ready
+  echo "Waiting for vLLM server..."
+  for i in $(seq 1 60); do
+    if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+      echo "vLLM server is ready!"
+      break
+    fi
+    sleep 5
+  done
+  
+  # Start the agent server
+  echo "Starting LangGraph agent service on port $AGENT_PORT"
+  python agent_server.py
