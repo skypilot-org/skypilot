@@ -1139,9 +1139,7 @@ async function getSlurmClusterGPUs() {
       const msg = `Failed to get slurm cluster GPUs with status ${response.status}`;
       throw new Error(msg);
     }
-    const id =
-      response.headers.get('X-Skypilot-Request-ID') ||
-      response.headers.get('x-request-id');
+    const id = response.headers.get('X-Skypilot-Request-ID');
     if (!id) {
       const msg = 'No request ID received from server for slurm cluster GPUs';
       throw new Error(msg);
@@ -1183,9 +1181,7 @@ async function getSlurmPerNodeGPUs() {
       const msg = `Failed to get slurm node info with status ${response.status}`;
       throw new Error(msg);
     }
-    const id =
-      response.headers.get('X-Skypilot-Request-ID') ||
-      response.headers.get('x-request-id');
+    const id = response.headers.get('X-Skypilot-Request-ID');
     if (!id) {
       const msg = 'No request ID received from server for slurm node info';
       throw new Error(msg);
