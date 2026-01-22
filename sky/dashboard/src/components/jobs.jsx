@@ -25,7 +25,7 @@ import {
   renderPoolLink,
 } from '@/components/utils';
 import { UI_CONFIG } from '@/lib/config';
-import { getPoolStatus } from '@/data/connectors/jobs';
+import { getPoolStatus, useJobsData } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
@@ -33,6 +33,7 @@ import {
   CustomTooltip as Tooltip,
   NonCapitalizedTooltip,
   TimestampWithTooltip,
+  LastUpdatedTimestamp,
 } from '@/components/utils';
 import {
   FileSearchIcon,
@@ -51,12 +52,20 @@ import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
 import dashboardCache from '@/lib/cache';
+import cachePreloader from '@/lib/cache-preloader';
+import { PluginSlot } from '@/plugins/PluginSlot';
+import {
+  useTableColumns,
+  usePluginComponents,
+  useMergedTableColumns,
+} from '@/plugins/PluginProvider';
 import {
   FilterDropdown,
   Filters,
   updateURLParams as sharedUpdateURLParams,
   updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
   buildFilterUrl,
+  evaluateCondition,
 } from '@/components/shared/FilterSystem';
 
 // Define status groups for active and finished jobs
@@ -97,6 +106,10 @@ const PROPERTY_OPTIONS = [
   {
     label: 'Pool',
     value: 'pool',
+  },
+  {
+    label: 'Labels',
+    value: 'labels',
   },
 ];
 
@@ -183,7 +196,10 @@ export function ManagedJobs() {
     user: [],
     workspace: [],
     pool: [],
+    labels: [],
   });
+  const [preloadingComplete, setPreloadingComplete] = useState(false);
+  const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
   const fetchData = React.useCallback(
     async (isRefreshButton = false) => {
@@ -211,7 +227,20 @@ export function ManagedJobs() {
   );
 
   useEffect(() => {
-    fetchData();
+    const preloadData = async () => {
+      try {
+        // Await cache preloading for jobs page
+        await cachePreloader.preloadForPage('jobs');
+      } catch (error) {
+        console.error('Error preloading jobs data:', error);
+      } finally {
+        // Signal completion even on error so the table can load
+        setPreloadingComplete(true);
+        setLastFetchedTime(new Date());
+        fetchData();
+      }
+    };
+    preloadData();
   }, [fetchData]);
 
   const handleRefresh = () => {
@@ -220,13 +249,21 @@ export function ManagedJobs() {
     dashboardCache.invalidate(getPoolStatus, [{}]);
     dashboardCache.invalidate(getWorkspaces);
 
-    // Trigger a re-fetch in both tables via their refreshDataRef
-    if (jobsRefreshRef.current) {
-      jobsRefreshRef.current();
-    }
-    if (poolsRefreshRef.current) {
-      poolsRefreshRef.current();
-    }
+    // Reset preloading state
+    setPreloadingComplete(false);
+
+    // Trigger a new preload cycle
+    cachePreloader.preloadForPage('jobs', { force: true }).then(() => {
+      setPreloadingComplete(true);
+      setLastFetchedTime(new Date());
+      // Trigger a re-fetch in both tables via their refreshDataRef
+      if (jobsRefreshRef.current) {
+        jobsRefreshRef.current();
+      }
+      if (poolsRefreshRef.current) {
+        poolsRefreshRef.current();
+      }
+    });
   };
 
   // Helper function to update URL query parameters
@@ -242,6 +279,7 @@ export function ManagedJobs() {
     propertyMap.set('user', 'User');
     propertyMap.set('workspace', 'Workspace');
     propertyMap.set('pool', 'Pool');
+    propertyMap.set('labels', 'Labels');
 
     const urlFilters = sharedUpdateFiltersByURLParams(router, propertyMap);
     setFilters(urlFilters);
@@ -292,6 +330,8 @@ export function ManagedJobs() {
         poolsData={poolsData}
         poolsLoading={poolsLoading}
         setValueList={setValueList}
+        preloadingComplete={preloadingComplete}
+        lastFetchedTime={lastFetchedTime}
       />
 
       {/* Pools table - always visible */}
@@ -315,10 +355,9 @@ export function ManagedJobsTable({
   poolsData,
   poolsLoading,
   setValueList,
+  preloadingComplete,
+  lastFetchedTime,
 }) {
-  const [data, setData] = useState([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [totalNoFilter, setTotalNoFilter] = useState(0);
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending',
@@ -331,7 +370,6 @@ export function ManagedJobsTable({
   const expandedRowRef = useRef(null);
   const [selectedStatuses, setSelectedStatuses] = useState([]);
   const [statusCounts, setStatusCounts] = useState({});
-  const [apiStatusCounts, setApiStatusCounts] = useState({});
   const [controllerStopped, setControllerStopped] = useState(false);
   const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
@@ -346,6 +384,74 @@ export function ManagedJobsTable({
   const isMobile = useMobile();
   // Guards multiple concurrent fetches: only latest response should commit
   const requestSeqRef = useRef(0);
+
+  // Compute statuses based on UI state for the hook
+  const computedStatuses = React.useMemo(() => {
+    // If specific statuses are selected, use those
+    if (selectedStatuses.length > 0) {
+      return selectedStatuses;
+    }
+    // If not in "show all" mode but no specific statuses selected, show no jobs
+    if (!showAllMode) {
+      return [];
+    }
+    // Show all active jobs
+    if (activeTab === 'active') {
+      return statusGroups.active;
+    }
+    // Show all finished jobs
+    if (activeTab === 'finished') {
+      return statusGroups.finished;
+    }
+    // For activeTab === 'all' and showAllMode === true, show all jobs
+    return [];
+  }, [selectedStatuses, showAllMode, activeTab]);
+
+  // Use the jobs data hook for fetching
+  const {
+    data: hookData,
+    allData: hookAllData,
+    total: hookTotal,
+    totalNoFilter: hookTotalNoFilter,
+    statusCounts: hookStatusCounts,
+    page: hookPage,
+    limit: hookLimit,
+    setPage: hookSetPage,
+    setLimit: hookSetLimit,
+    loading: hookLoading,
+    refresh: hookRefresh,
+    isServerPagination,
+    controllerStopped: hookControllerStopped,
+  } = useJobsData({
+    sortConfig,
+    filters,
+    statuses: computedStatuses,
+    initialPage: currentPage,
+    initialLimit: pageSize,
+  });
+
+  // Sync local page/limit state with hook when they change
+  React.useEffect(() => {
+    if (currentPage !== hookPage) {
+      hookSetPage(currentPage);
+    }
+  }, [currentPage, hookPage, hookSetPage]);
+
+  React.useEffect(() => {
+    if (pageSize !== hookLimit) {
+      hookSetLimit(pageSize);
+    }
+  }, [pageSize, hookLimit, hookSetLimit]);
+
+  // Aliases for hook values to maintain backward compatibility
+  const data = hookData;
+  const totalCount = hookTotal;
+  const totalNoFilter = hookTotalNoFilter;
+
+  // Sync status counts from hook
+  React.useEffect(() => {
+    setStatusCounts(hookStatusCounts);
+  }, [hookStatusCounts]);
 
   // Determine if we should show the Workspace column
   // Only show if there are multiple workspaces or a workspace other than 'default'
@@ -387,6 +493,7 @@ export function ManagedJobsTable({
     });
   };
 
+  // Fetch data - the hook handles jobs fetching, we just check controller status
   const fetchData = React.useCallback(
     async (options = {}) => {
       const includeStatus = options.includeStatus !== false;
@@ -394,133 +501,65 @@ export function ManagedJobsTable({
       const version = requestSeqRef.current + 1;
       requestSeqRef.current = version;
       setLocalLoading(true);
-      setLoading(true); // Set parent loading state
+      setLoading(true); // Set parent loading state.
+
       try {
-        // Build server-side filter params from UI filters
-        const getFilterValue = (prop) => {
-          const f = (filters || []).find(
-            (fi) => (fi.property || '').toLowerCase() === prop
-          );
-          return f && f.value ? String(f.value) : undefined;
-        };
-        // Determine statuses parameter based on current state
-        let statusesParam = undefined;
+        // Trigger hook to refresh its data
+        await hookRefresh();
 
-        // If specific statuses are selected, use those
-        if (selectedStatuses.length > 0) {
-          statusesParam = selectedStatuses;
-        } else if (!showAllMode) {
-          // If not in "show all" mode but no specific statuses selected, show no jobs
-          statusesParam = [];
-        } else if (activeTab === 'active') {
-          // Show all active jobs
-          statusesParam = statusGroups.active;
-        } else if (activeTab === 'finished') {
-          // Show all finished jobs
-          statusesParam = statusGroups.finished;
-        }
-        // For activeTab === 'all' and showAllMode === true, don't set statuses (show all jobs)
-
-        const params = {
-          allUsers: true,
-          nameMatch: getFilterValue('name'),
-          userMatch: getFilterValue('user'),
-          workspaceMatch: getFilterValue('workspace'),
-          poolMatch: getFilterValue('pool'),
-          statuses: statusesParam,
-          page: currentPage, // page index starting from 1
-          limit: pageSize,
-        };
-
-        let jobsResponse;
-        let clustersData = null;
-
-        // Check cache status before making requests
-        const isDataCached = jobsCacheManager.isDataCached(params);
-        const isDataLoading = jobsCacheManager.isDataLoading(params);
-
+        // Check controller status from clusters
         if (includeStatus) {
           try {
-            clustersData = await dashboardCache.get(getClusters);
+            const clustersData = await dashboardCache.get(getClusters);
+
+            let isControllerStopped = false;
+            let isLaunching = false;
+
+            if (clustersData) {
+              const jobControllerCluster = clustersData?.find((c) =>
+                isJobController(c.cluster)
+              );
+              const jobControllerClusterStatus = jobControllerCluster
+                ? jobControllerCluster.status
+                : 'NOT_FOUND';
+              // Use hookControllerStopped from the hook for the API-level stopped flag
+              if (
+                jobControllerClusterStatus === 'STOPPED' &&
+                hookControllerStopped
+              ) {
+                isControllerStopped = true;
+              }
+              if (jobControllerClusterStatus === 'LAUNCHING') {
+                isLaunching = true;
+              }
+            }
+
+            if (version === requestSeqRef.current) {
+              setControllerStopped(!!isControllerStopped);
+              setControllerLaunching(!!isLaunching);
+            }
           } catch (error) {
             console.error('Error fetching clusters:', error);
           }
         }
-        jobsResponse = await jobsCacheManager.getPaginatedJobs(params);
 
-        // Always process the response, even if it's null
-        const {
-          jobs = [],
-          total = 0,
-          totalNoFilter = 0,
-          controllerStopped = false,
-          cacheStatus = 'unknown',
-          statusCounts = {},
-        } = jobsResponse || {};
-
-        let isControllerStopped = false;
-        let isLaunching = false;
-        if (includeStatus && clustersData) {
-          const jobControllerCluster = clustersData?.find((c) =>
-            isJobController(c.cluster)
-          );
-          const jobControllerClusterStatus = jobControllerCluster
-            ? jobControllerCluster.status
-            : 'NOT_FOUND';
-          if (jobControllerClusterStatus == 'STOPPED' && controllerStopped) {
-            isControllerStopped = true;
-          }
-          if (jobControllerClusterStatus == 'LAUNCHING') {
-            isLaunching = true;
-          }
-        }
-
-        // Only commit if this is still the latest request
         if (version === requestSeqRef.current) {
-          setData(jobs);
-          setTotalCount(total || 0);
-          setTotalNoFilter(totalNoFilter || 0);
-          setControllerStopped(!!isControllerStopped);
-          setControllerLaunching(!!isLaunching);
-          setApiStatusCounts(statusCounts);
           setIsInitialLoad(false);
-        }
-
-        // Log cache status for debugging
-        if (process.env.NODE_ENV === 'development') {
-          console.log('Jobs cache status:', {
-            cacheStatus,
-            isDataCached,
-            isDataLoading,
-            jobCount: jobs.length,
-            totalCount: total,
-            totalNoFilter: totalNoFilter,
-          });
         }
       } catch (err) {
         console.error('Error fetching data:', err);
-        // Still set data to empty array on error to show proper UI
         if (version === requestSeqRef.current) {
-          setData([]);
           setControllerStopped(false);
           setIsInitialLoad(false);
         }
       } finally {
         if (version === requestSeqRef.current) {
           setLocalLoading(false);
-          setLoading(false); // Clear parent loading state
+          setLoading(false);
         }
       }
     },
-    [
-      setLoading,
-      filters,
-      currentPage,
-      pageSize,
-      selectedStatuses,
-      showAllMode,
-      activeTab,
-    ]
+    [setLoading, hookRefresh, hookControllerStopped]
   );
 
   // Expose fetchData to parent component
@@ -543,38 +582,54 @@ export function ManagedJobsTable({
   // only trigger on actual user interactions (page change, filter change, etc.)
   const isInitialFetch = React.useRef(true);
 
-  // Initial load - only runs once on mount
+  // Initial load - runs immediately on mount, don't wait for full preloading
+  // The preloader will warm the cache in background, but we fetch jobs data
+  // right away so the table displays as fast as possible
   React.useEffect(() => {
     fetchData({ includeStatus: true });
     // Mark that initial fetch is complete so other effects can run
     isInitialFetch.current = false;
-  }, [fetchData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch on pagination (page) changes without status request
   // Skip on initial fetch (page defaults to 1)
   React.useEffect(() => {
-    if (!isInitialFetch.current) {
+    if (!isInitialFetch.current && preloadingComplete) {
       fetchData({ includeStatus: false });
     }
-  }, [currentPage, fetchData]);
+  }, [currentPage, fetchData, preloadingComplete]);
 
   // Fetch on filters or page size changes with status request
   // Skip on initial fetch (filters default to [] and pageSize to 10)
   React.useEffect(() => {
-    if (!isInitialFetch.current) {
+    if (!isInitialFetch.current && preloadingComplete) {
       fetchData({ includeStatus: true });
     }
-  }, [filters, pageSize, fetchData]);
+  }, [filters, pageSize, fetchData, preloadingComplete]);
 
   // Fetch on status filter changes (activeTab, selectedStatuses, showAllMode)
   // Skip on initial fetch (these have default values)
   React.useEffect(() => {
-    if (!isInitialFetch.current) {
+    if (!isInitialFetch.current && preloadingComplete) {
       fetchData({ includeStatus: true });
     }
-  }, [activeTab, selectedStatuses, showAllMode, fetchData]);
+  }, [activeTab, selectedStatuses, showAllMode, fetchData, preloadingComplete]);
 
+  // Fetch on sort config changes for server-side sorting
+  // Skip on initial fetch (sortConfig has default value)
+  React.useEffect(() => {
+    if (!isInitialFetch.current && preloadingComplete) {
+      fetchData({ includeStatus: false });
+    }
+  }, [sortConfig, fetchData, preloadingComplete]);
+
+  // Set up periodic refresh interval only after preloading is complete
   useEffect(() => {
+    if (!preloadingComplete) {
+      return;
+    }
+
     const interval = setInterval(() => {
       if (
         fetchDataRef.current &&
@@ -589,7 +644,7 @@ export function ManagedJobsTable({
       // Don't invalidate cache on component unmount - this causes premature cache invalidation
       // Cache should only be invalidated on manual refresh or TTL expiration
     };
-  }, [refreshInterval]);
+  }, [refreshInterval, preloadingComplete]);
 
   // Reset to first page when activeTab changes
   useEffect(() => {
@@ -617,12 +672,20 @@ export function ManagedJobsTable({
     const users = new Set();
     const workspaces = new Set();
     const pools = new Set();
+    const labels = new Set();
 
     data.forEach((job) => {
       if (job.name) names.add(job.name);
       if (job.user) users.add(job.user);
       if (job.workspace) workspaces.add(job.workspace);
       if (job.pool) pools.add(job.pool);
+
+      // Extract labels - add only key:value pairs
+      const jobLabels = job.labels || {};
+      Object.entries(jobLabels).forEach(([key, value]) => {
+        // Add key:value pair format only
+        labels.add(`${key}:${value}`);
+      });
     });
 
     // Extract pool names from poolsData, but only include pools that:
@@ -658,23 +721,30 @@ export function ManagedJobsTable({
       user: Array.from(users).sort(),
       workspace: Array.from(workspaces).sort(),
       pool: Array.from(pools).sort(),
+      labels: Array.from(labels).sort(),
     });
   }, [data, poolsData, setValueList]);
 
-  const requestSort = (key) => {
-    let direction = 'ascending';
-    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
-      direction = 'descending';
-    }
-    setSortConfig({ key, direction });
-  };
+  const requestSort = React.useCallback(
+    (key) => {
+      let direction = 'ascending';
+      if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+        direction = 'descending';
+      }
+      setSortConfig({ key, direction });
+    },
+    [sortConfig]
+  );
 
-  const getSortDirection = (key) => {
-    if (sortConfig.key === key) {
-      return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
-    }
-    return '';
-  };
+  const getSortDirection = React.useCallback(
+    (key) => {
+      if (sortConfig.key === key) {
+        return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓';
+      }
+      return '';
+    },
+    [sortConfig]
+  );
 
   // Calculate active and finished counts
   const counts = React.useMemo(() => {
@@ -704,10 +774,24 @@ export function ManagedJobsTable({
     return statusGroups[activeTab].includes(status);
   };
 
-  // Server already applied all filters including status filtering
+  // Server already applied some filters (name, user, workspace, pool, status)
+  // But we need to apply client-side filtering for labels
   const filteredData = React.useMemo(() => {
-    return data;
-  }, [data]);
+    let filtered = data;
+
+    // Apply client-side label filtering if present
+    const labelFilter = filters?.find(
+      (f) => (f.property || '').toLowerCase() === 'labels'
+    );
+
+    if (labelFilter && labelFilter.value) {
+      filtered = filtered.filter((item) => {
+        return evaluateCondition(item, labelFilter);
+      });
+    }
+
+    return filtered;
+  }, [data, filters]);
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
@@ -759,11 +843,6 @@ export function ManagedJobsTable({
     setCurrentPage(1);
   };
 
-  // Update status counts from API data
-  useEffect(() => {
-    setStatusCounts(apiStatusCounts);
-  }, [apiStatusCounts]);
-
   // Page navigation handlers
   const goToPreviousPage = () => {
     setCurrentPage((page) => Math.max(page - 1, 1));
@@ -780,6 +859,387 @@ export function ManagedJobsTable({
     setPageSize(newSize);
     setCurrentPage(1); // Reset to first page when changing page size
   };
+
+  // Define base columns with their order
+  const baseColumns = React.useMemo(
+    () => [
+      {
+        id: 'id',
+        order: 0,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('id')}
+          >
+            ID{getSortDirection('id')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            <Link href={`/jobs/${item.id}`} className="text-blue-600">
+              {item.id}
+            </Link>
+          </TableCell>
+        ),
+      },
+      {
+        id: 'name',
+        order: 1,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('name')}
+          >
+            Name{getSortDirection('name')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            <Link href={`/jobs/${item.id}`} className="text-blue-600">
+              {item.name}
+            </Link>
+          </TableCell>
+        ),
+      },
+      {
+        id: 'user',
+        order: 2,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('user')}
+          >
+            User{getSortDirection('user')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            <UserDisplay username={item.user} userHash={item.user_hash} />
+          </TableCell>
+        ),
+      },
+      {
+        id: 'workspace',
+        order: 2.5,
+        conditional: true, // Only show when shouldShowWorkspace is true
+        renderHeader: () =>
+          shouldShowWorkspace ? (
+            <TableHead
+              className="sortable whitespace-nowrap"
+              onClick={() => requestSort('workspace')}
+            >
+              Workspace{getSortDirection('workspace')}
+            </TableHead>
+          ) : null,
+        renderCell: (item) =>
+          shouldShowWorkspace ? (
+            <TableCell>
+              <Link
+                href="/workspaces"
+                className="text-gray-700 hover:text-blue-600 hover:underline"
+              >
+                {item.workspace || 'default'}
+              </Link>
+            </TableCell>
+          ) : null,
+      },
+      {
+        id: 'submitted',
+        order: 3,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('submitted_at')}
+          >
+            Submitted{getSortDirection('submitted_at')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>{formatSubmittedTime(item.submitted_at)}</TableCell>
+        ),
+      },
+      {
+        id: 'duration',
+        order: 4,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('job_duration')}
+          >
+            Duration{getSortDirection('job_duration')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>{formatDuration(item.job_duration)}</TableCell>
+        ),
+      },
+      {
+        id: 'status',
+        order: 5,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('status')}
+          >
+            Status{getSortDirection('status')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            <PluginSlot
+              name="jobs.table.status.badge"
+              context={item}
+              fallback={
+                <StatusBadge
+                  status={item.status}
+                  statusTooltip={item.statusTooltip}
+                />
+              }
+            />
+          </TableCell>
+        ),
+      },
+      {
+        id: 'infra',
+        order: 6,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('infra')}
+          >
+            Infra{getSortDirection('infra')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            {item.infra && item.infra !== '-' ? (
+              <NonCapitalizedTooltip
+                content={item.full_infra || item.infra}
+                className="text-sm text-muted-foreground"
+              >
+                <span>
+                  <Link href="/infra" className="text-blue-600 hover:underline">
+                    {item.cloud || item.infra.split('(')[0].trim()}
+                  </Link>
+                  {item.infra.includes('(') && (
+                    <span>
+                      {' ' +
+                        (() => {
+                          const NAME_TRUNCATE_LENGTH =
+                            UI_CONFIG.NAME_TRUNCATE_LENGTH;
+                          const fullRegionPart = item.infra.substring(
+                            item.infra.indexOf('(')
+                          );
+                          const regionContent = fullRegionPart.substring(
+                            1,
+                            fullRegionPart.length - 1
+                          );
+
+                          if (regionContent.length <= NAME_TRUNCATE_LENGTH) {
+                            return fullRegionPart;
+                          }
+
+                          const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+                          return `(${truncatedRegion})`;
+                        })()}
+                    </span>
+                  )}
+                </span>
+              </NonCapitalizedTooltip>
+            ) : (
+              <span>{item.infra || '-'}</span>
+            )}
+          </TableCell>
+        ),
+      },
+      {
+        id: 'requested_resources',
+        order: 7,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('cluster')}
+          >
+            Requested Resources{getSortDirection('cluster')}
+          </TableHead>
+        ),
+        renderCell: (item) => (
+          <TableCell>
+            <NonCapitalizedTooltip
+              content={
+                item.requested_resources ||
+                item.resources_str_full ||
+                item.resources_str ||
+                '-'
+              }
+              className="text-sm text-muted-foreground"
+            >
+              <span>
+                {item.requested_resources || item.resources_str || '-'}
+              </span>
+            </NonCapitalizedTooltip>
+          </TableCell>
+        ),
+      },
+      {
+        id: 'recoveries',
+        order: 8,
+        renderHeader: () => (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('recoveries')}
+          >
+            Recoveries{getSortDirection('recoveries')}
+          </TableHead>
+        ),
+        renderCell: (item) => <TableCell>{item.recoveries}</TableCell>,
+      },
+      {
+        id: 'pool',
+        order: 9.5,
+        conditional: true, // Only show when shouldShowPool is true
+        renderHeader: () =>
+          shouldShowPool ? (
+            <TableHead
+              className="sortable whitespace-nowrap"
+              onClick={() => requestSort('pool')}
+            >
+              Pool{getSortDirection('pool')}
+            </TableHead>
+          ) : null,
+        renderCell: (item) =>
+          shouldShowPool ? (
+            <TableCell>
+              <div
+                className={
+                  poolsLoading ? 'blur-sm transition-all duration-300' : ''
+                }
+              >
+                {poolsLoading
+                  ? '-'
+                  : renderPoolLink(item.pool, item.pool_hash, poolsData)}
+              </div>
+            </TableCell>
+          ) : null,
+      },
+      {
+        id: 'details',
+        order: 10,
+        renderHeader: () => <TableHead>Details</TableHead>,
+        renderCell: (item) => (
+          <TableCell>
+            {item.details ? (
+              <TruncatedDetails
+                text={item.details}
+                rowId={item.id}
+                expandedRowId={expandedRowId}
+                setExpandedRowId={setExpandedRowId}
+              />
+            ) : (
+              '-'
+            )}
+          </TableCell>
+        ),
+      },
+      {
+        id: 'logs',
+        order: 11,
+        renderHeader: () => <TableHead>Logs</TableHead>,
+        renderCell: (item) => (
+          <TableCell>
+            <Status2Actions
+              jobParent="/jobs"
+              jobId={item.id}
+              managed={true}
+              workspace={item.workspace}
+            />
+          </TableCell>
+        ),
+      },
+    ],
+    [
+      requestSort,
+      getSortDirection,
+      shouldShowWorkspace,
+      shouldShowPool,
+      expandedRowId,
+      poolsLoading,
+      poolsData,
+    ]
+  );
+
+  // Transform function to convert plugin columns to the format expected by the table
+  const transformPluginColumn = React.useCallback(
+    (col) => ({
+      id: col.id,
+      order: col.header.order,
+      isPlugin: true,
+      pluginColumn: col,
+      renderHeader: () => {
+        const baseClasses = col.header.sortKey
+          ? 'sortable whitespace-nowrap'
+          : 'whitespace-nowrap';
+        const className = `${baseClasses}${col.header.className ? ' ' + col.header.className : ''}`;
+        return (
+          <TableHead
+            className={className}
+            onClick={
+              col.header.sortKey
+                ? () => requestSort(col.header.sortKey)
+                : undefined
+            }
+          >
+            {col.header.label}
+            {col.header.sortKey ? getSortDirection(col.header.sortKey) : ''}
+          </TableHead>
+        );
+      },
+      renderCell: (item) => {
+        const context = {
+          item,
+          shouldShowWorkspace,
+          shouldShowPool,
+          expandedRowId,
+          setExpandedRowId,
+          expandedRowRef,
+        };
+        const cellContent = col.cell.render(item, context);
+        return (
+          <TableCell className={col.cell.className || ''}>
+            {cellContent}
+          </TableCell>
+        );
+      },
+    }),
+    [
+      requestSort,
+      getSortDirection,
+      shouldShowWorkspace,
+      shouldShowPool,
+      expandedRowId,
+      setExpandedRowId,
+      expandedRowRef,
+    ]
+  );
+
+  // Merge base and plugin columns using the plugin system
+  // Plugin columns with the same ID as base columns will automatically replace them
+  const visibleColumns = useMergedTableColumns(
+    'jobs',
+    baseColumns,
+    {
+      shouldShowColumn: (columnId) => {
+        // Handle conditional columns
+        if (columnId === 'workspace') return shouldShowWorkspace;
+        if (columnId === 'pool') return shouldShowPool;
+        return true;
+      },
+    },
+    transformPluginColumn
+  );
+
+  // Calculate dynamic colSpan (used for expanded rows)
+  const totalColSpan = visibleColumns.length;
 
   return (
     <div className="relative">
@@ -885,6 +1345,9 @@ export function ManagedJobsTable({
                 <span className="ml-2 text-gray-500 text-sm">Loading...</span>
               </div>
             )}
+            {!loading && lastFetchedTime && (
+              <LastUpdatedTimestamp timestamp={lastFetchedTime} />
+            )}
             <button
               onClick={() => {
                 // Call the refresh function passed from parent
@@ -943,90 +1406,16 @@ export function ManagedJobsTable({
           <Table className="min-w-full">
             <TableHeader>
               <TableRow>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('id')}
-                >
-                  ID{getSortDirection('id')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('name')}
-                >
-                  Name{getSortDirection('name')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('user')}
-                >
-                  User{getSortDirection('user')}
-                </TableHead>
-                {shouldShowWorkspace && (
-                  <TableHead
-                    className="sortable whitespace-nowrap"
-                    onClick={() => requestSort('workspace')}
-                  >
-                    Workspace{getSortDirection('workspace')}
-                  </TableHead>
+                {visibleColumns.map((col) =>
+                  React.cloneElement(col.renderHeader(), { key: col.id })
                 )}
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('submitted_at')}
-                >
-                  Submitted{getSortDirection('submitted_at')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('job_duration')}
-                >
-                  Duration{getSortDirection('job_duration')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('status')}
-                >
-                  Status{getSortDirection('status')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('infra')}
-                >
-                  Infra{getSortDirection('infra')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('cluster')}
-                >
-                  Resources{getSortDirection('cluster')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('recoveries')}
-                >
-                  Recoveries{getSortDirection('recoveries')}
-                </TableHead>
-                {shouldShowPool && (
-                  <TableHead
-                    className="sortable whitespace-nowrap"
-                    onClick={() => requestSort('pool')}
-                  >
-                    Pool{getSortDirection('pool')}
-                  </TableHead>
-                )}
-
-                <TableHead>Details</TableHead>
-                <TableHead>Logs</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading && isInitialLoad ? (
                 <TableRow>
                   <TableCell
-                    colSpan={
-                      11 +
-                      (shouldShowWorkspace ? 1 : 0) +
-                      (shouldShowPool ? 1 : 0)
-                    }
+                    colSpan={totalColSpan}
                     className="text-center py-6 text-gray-500"
                   >
                     <div className="flex justify-center items-center">
@@ -1040,154 +1429,16 @@ export function ManagedJobsTable({
                   {paginatedData.map((item) => (
                     <React.Fragment key={item.task_job_id}>
                       <TableRow>
-                        <TableCell>
-                          <Link
-                            href={`/jobs/${item.id}`}
-                            className="text-blue-600"
-                          >
-                            {item.id}
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <Link
-                            href={`/jobs/${item.id}`}
-                            className="text-blue-600"
-                          >
-                            {item.name}
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <UserDisplay
-                            username={item.user}
-                            userHash={item.user_hash}
-                          />
-                        </TableCell>
-                        {shouldShowWorkspace && (
-                          <TableCell>
-                            <Link
-                              href="/workspaces"
-                              className="text-gray-700 hover:text-blue-600 hover:underline"
-                            >
-                              {item.workspace || 'default'}
-                            </Link>
-                          </TableCell>
+                        {visibleColumns.map((col) =>
+                          React.cloneElement(col.renderCell(item), {
+                            key: col.id,
+                          })
                         )}
-                        <TableCell>
-                          {formatSubmittedTime(item.submitted_at)}
-                        </TableCell>
-                        <TableCell>
-                          {formatDuration(item.job_duration)}
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge status={item.status} />
-                        </TableCell>
-                        <TableCell>
-                          {item.infra && item.infra !== '-' ? (
-                            <NonCapitalizedTooltip
-                              content={item.full_infra || item.infra}
-                              className="text-sm text-muted-foreground"
-                            >
-                              <span>
-                                <Link
-                                  href="/infra"
-                                  className="text-blue-600 hover:underline"
-                                >
-                                  {item.cloud ||
-                                    item.infra.split('(')[0].trim()}
-                                </Link>
-                                {item.infra.includes('(') && (
-                                  <span>
-                                    {' ' +
-                                      (() => {
-                                        const NAME_TRUNCATE_LENGTH =
-                                          UI_CONFIG.NAME_TRUNCATE_LENGTH;
-                                        const fullRegionPart =
-                                          item.infra.substring(
-                                            item.infra.indexOf('(')
-                                          );
-                                        const regionContent =
-                                          fullRegionPart.substring(
-                                            1,
-                                            fullRegionPart.length - 1
-                                          );
-
-                                        if (
-                                          regionContent.length <=
-                                          NAME_TRUNCATE_LENGTH
-                                        ) {
-                                          return fullRegionPart;
-                                        }
-
-                                        const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
-                                        return `(${truncatedRegion})`;
-                                      })()}
-                                  </span>
-                                )}
-                              </span>
-                            </NonCapitalizedTooltip>
-                          ) : (
-                            <span>{item.infra || '-'}</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <NonCapitalizedTooltip
-                            content={
-                              item.resources_str_full || item.resources_str
-                            }
-                            className="text-sm text-muted-foreground"
-                          >
-                            <span>{item.resources_str}</span>
-                          </NonCapitalizedTooltip>
-                        </TableCell>
-                        <TableCell>{item.recoveries}</TableCell>
-                        {shouldShowPool && (
-                          <TableCell>
-                            <div
-                              className={
-                                poolsLoading
-                                  ? 'blur-sm transition-all duration-300'
-                                  : ''
-                              }
-                            >
-                              {poolsLoading
-                                ? '-'
-                                : renderPoolLink(
-                                    item.pool,
-                                    item.pool_hash,
-                                    poolsData
-                                  )}
-                            </div>
-                          </TableCell>
-                        )}
-                        <TableCell>
-                          {item.details ? (
-                            <TruncatedDetails
-                              text={item.details}
-                              rowId={item.id}
-                              expandedRowId={expandedRowId}
-                              setExpandedRowId={setExpandedRowId}
-                            />
-                          ) : (
-                            '-'
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Status2Actions
-                            jobParent="/jobs"
-                            jobId={item.id}
-                            managed={true}
-                            workspace={item.workspace}
-                          />
-                        </TableCell>
                       </TableRow>
                       {expandedRowId === item.id && (
                         <ExpandedDetailsRow
                           text={item.details}
-                          colSpan={
-                            11 +
-                            (shouldShowWorkspace ? 1 : 0) +
-                            (shouldShowPool ? 1 : 0)
-                          }
+                          colSpan={totalColSpan}
                           innerRef={expandedRowRef}
                         />
                       )}
@@ -1823,10 +2074,13 @@ function ExpandedDetailsRow({ text, colSpan, innerRef }) {
 
 function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
   const safeText = text || '';
-  const isTruncated = safeText.length > 50;
+  const lines = safeText.split('\n');
+  const isMultiLine = lines.length > 1;
   const isExpanded = expandedRowId === rowId;
-  // Always show truncated text in the table cell
-  const displayText = isTruncated ? `${safeText.substring(0, 50)}` : safeText;
+  // Always show first line in the table cell
+  let displayText = lines[0] || '';
+  const isTruncated = displayText.length > 50;
+  displayText = isTruncated ? `${displayText.substring(0, 50)}` : displayText;
   const buttonRef = useRef(null);
 
   const handleClick = (e) => {
@@ -1838,7 +2092,7 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
   return (
     <div className="truncated-details relative max-w-full flex items-center">
       <span className="truncate">{displayText}</span>
-      {isTruncated && (
+      {(isTruncated || isMultiLine) && (
         <button
           ref={buttonRef}
           type="button"
@@ -1846,7 +2100,7 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
           className="text-blue-600 hover:text-blue-800 font-medium ml-1 flex-shrink-0"
           data-button-type="show-more-less"
         >
-          {isExpanded ? '... show less' : '... show more'}
+          {isExpanded ? '  show less' : '  show more'}
         </button>
       )}
     </div>

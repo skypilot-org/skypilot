@@ -47,6 +47,15 @@ from common_test_fixtures import skyignore_dir
 
 from sky.server import common as server_common
 
+
+@pytest.fixture(autouse=True)
+def _clear_request_level_cache():
+    """Keep request-scoped caches from leaking between tests."""
+    annotations.clear_request_level_cache()
+    yield
+    annotations.clear_request_level_cache()
+
+
 # Usage: use
 #   @pytest.mark.slow
 # to mark a test as slow and to skip by default.
@@ -68,7 +77,7 @@ all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
     'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace',
     'primeintellect', 'runpod', 'vast', 'nebius', 'hyperbolic', 'seeweb',
-    'shadeform', 'coreweave'
+    'shadeform', 'coreweave', 'slurm'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -99,6 +108,7 @@ cloud_to_pytest_keyword = {
     'shadeform': 'shadeform',
     'seeweb': 'seeweb',
     'coreweave': 'coreweave',
+    'slurm': 'slurm',
 }
 
 
@@ -215,6 +225,20 @@ def pytest_addoption(parser):
         type=str,
         default=None,
         help='Path to the env file to override the default env file',
+    )
+    parser.addoption(
+        '--plugin-yaml',
+        type=str,
+        default=None,
+        help=('Plugin YAML file (configured in Buildkite pipeline; '
+              'has no effect when running locally)'),
+    )
+    parser.addoption(
+        '--submodule-base-branch',
+        type=str,
+        default=None,
+        help=('Base branch for submodule tests (configured in Buildkite '
+              'pipeline; has no effect when running locally)'),
     )
     parser.addoption(
         '--backend-test-cluster',

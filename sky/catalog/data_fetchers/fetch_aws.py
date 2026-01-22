@@ -60,6 +60,7 @@ ALL_REGIONS = [
     'ap-northeast-2',
     'ap-southeast-1',
     'ap-southeast-2',
+    'ap-southeast-4',
     'ap-northeast-1',
 ]
 US_REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
@@ -270,21 +271,22 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
 
         def get_additional_columns(row) -> pd.Series:
             acc_name, acc_count = get_acc_info(row)
-            # AWS p3dn.24xlarge offers a different V100 GPU.
+            # AWS instance type workarounds for incorrect/missing GPU info.
             # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/ # pylint: disable=line-too-long
             if row['InstanceType'] == 'p3dn.24xlarge':
                 acc_name = 'V100-32GB'
-            if row['InstanceType'] == 'p4de.24xlarge':
+            elif row['InstanceType'] == 'p4de.24xlarge':
                 acc_name = 'A100-80GB'
                 acc_count = 8
-            if row['InstanceType'] == 'p5en.48xlarge':
+            elif row['InstanceType'] in ('p5e.48xlarge', 'p5en.48xlarge'):
                 # TODO(andyl): Check if this workaround still needed after
                 # v0.10.0 released. Currently, the acc_name returned by the
                 # AWS API is 'NVIDIA', which is incorrect. See #4652.
+                # Both p5e.48xlarge and p5en.48xlarge have 8x H200 GPUs.
                 acc_name = 'H200'
                 acc_count = 8
-            if (row['InstanceType'].startswith('g6f') or
-                    row['InstanceType'].startswith('gr6f')):
+            elif (row['InstanceType'].startswith('g6f') or
+                  row['InstanceType'].startswith('gr6f')):
                 # These instance actually have only fractional GPUs, but the API
                 # returns Count: 1 or Count: 0 under GpuInfo. We need to
                 # directly check the GPU memory to get the actual fraction of
@@ -296,7 +298,7 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 fraction = row['GpuInfo']['Gpus'][0]['MemoryInfo'][
                     'SizeInMiB'] / L4_GPU_MEMORY
                 acc_count = round(fraction, 3)
-            if row['InstanceType'] == 'p5.4xlarge':
+            elif row['InstanceType'] == 'p5.4xlarge':
                 acc_count = 1
             return pd.Series({
                 'AcceleratorName': acc_name,

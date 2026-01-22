@@ -3,9 +3,75 @@ import { CLOUDS_LIST, COMMON_GPUS } from '@/data/connectors/constants';
 // Importing from the same directory
 import { apiClient } from '@/data/connectors/client';
 import { getErrorMessageFromResponse } from '@/data/utils';
+import dashboardCache from '@/lib/cache';
+import { buildContextStatsKeyFromCloud } from '@/utils/infraUtils';
+
+/**
+ * Fast function to get just the list of enabled clouds (without counts).
+ * Used for progressive loading - display cloud rows immediately, then overlay counts.
+ */
+export async function getEnabledCloudsList() {
+  const { getWorkspaces, getEnabledClouds } = await import(
+    '@/data/connectors/workspaces'
+  );
+
+  try {
+    // Get workspaces (fast - cached)
+    const workspacesData = await dashboardCache
+      .get(getWorkspaces)
+      .catch(() => ({}));
+    const workspaceNames = Object.keys(workspacesData || {});
+
+    if (workspaceNames.length === 0) {
+      return { clouds: [], totalClouds: CLOUDS_LIST.length, enabledClouds: 0 };
+    }
+
+    // Fetch enabled clouds for each workspace and aggregate
+    const enabledCloudsSet = new Set();
+
+    await Promise.all(
+      workspaceNames.map(async (workspaceName) => {
+        try {
+          const workspaceClouds = await dashboardCache.get(getEnabledClouds, [
+            workspaceName,
+            false,
+          ]);
+          if (Array.isArray(workspaceClouds)) {
+            workspaceClouds.forEach((cloud) => {
+              if (cloud) {
+                enabledCloudsSet.add(cloud.toLowerCase());
+              }
+            });
+          }
+        } catch (error) {
+          console.error(
+            `Error fetching enabled clouds for workspace ${workspaceName}:`,
+            error
+          );
+        }
+      })
+    );
+
+    // Build cloud objects with just name and enabled status (no counts)
+    const enabledCloudsList = Array.from(enabledCloudsSet);
+    const clouds = CLOUDS_LIST.filter((cloud) =>
+      enabledCloudsList.includes(cloud.toLowerCase())
+    )
+      .map((name) => ({ name, enabled: true }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return {
+      clouds,
+      totalClouds: CLOUDS_LIST.length,
+      enabledClouds: clouds.length,
+    };
+  } catch (error) {
+    console.error('Error fetching enabled clouds list:', error);
+    return { clouds: [], totalClouds: CLOUDS_LIST.length, enabledClouds: 0 };
+  }
+}
 
 export async function getCloudInfrastructure(forceRefresh = false) {
-  const dashboardCache = (await import('@/lib/cache')).default;
   const { getClusters } = await import('@/data/connectors/clusters');
   const { getManagedJobs } = await import('@/data/connectors/jobs');
   const { getWorkspaces, getEnabledClouds } = await import(
@@ -13,101 +79,67 @@ export async function getCloudInfrastructure(forceRefresh = false) {
   );
 
   try {
-    let jobsData = { jobs: [] };
-    try {
-      jobsData = await dashboardCache.get(getManagedJobs, [
-        { allUsers: true, skipFinished: true, fields: ['cloud', 'region'] },
-      ]);
-    } catch (error) {
-      console.error('Error fetching managed jobs:', error);
-    }
-    const jobs = jobsData?.jobs || [];
-    let clustersData = [];
-    try {
-      clustersData = await dashboardCache.get(getClusters);
-    } catch (error) {
-      console.error('Error fetching clusters:', error);
-    }
-    const clusters = clustersData || [];
+    // Fetch jobs, clusters, and workspaces in parallel for better performance
+    const [jobsResult, clustersResult, workspacesData] = await Promise.all([
+      // Use shared cache key (no field filtering) - preloader uses same args
+      dashboardCache
+        .get(getManagedJobs, [{ allUsers: true, skipFinished: true }])
+        .catch((error) => {
+          console.error('Error fetching managed jobs:', error);
+          return { jobs: [] };
+        }),
+      dashboardCache.get(getClusters).catch((error) => {
+        console.error('Error fetching clusters:', error);
+        return [];
+      }),
+      dashboardCache.get(getWorkspaces).catch((error) => {
+        console.error('Error fetching workspaces:', error);
+        return {};
+      }),
+    ]);
+
+    const jobs = jobsResult?.jobs || [];
+    const clusters = clustersResult || [];
 
     // Get enabled clouds by aggregating across all workspaces
     let enabledCloudsList = [];
-    try {
-      // If forceRefresh is true, first run sky check to refresh cloud status
-      if (forceRefresh) {
-        console.log('Force refreshing clouds by running sky check...');
-        try {
-          const checkResponse = await apiClient.post('/check', {});
-          if (!checkResponse.ok) {
-            const msg = `Failed to run sky check with status ${checkResponse.status}`;
-            throw new Error(msg);
-          }
-          const checkId = checkResponse.headers.get('X-Skypilot-Request-ID');
-          if (!checkId) {
-            const msg = 'No request ID received from server for sky check';
-            throw new Error(msg);
-          }
+    const workspaceNames = Object.keys(workspacesData || {});
 
-          // Wait for the check to complete
-          const checkResult = await apiClient.get(
-            `/api/get?request_id=${checkId}`
-          );
-          if (!checkResult.ok) {
-            const msg = `Failed to get sky check result with status ${checkResult.status}, error: ${checkResult.statusText}`;
-            throw new Error(msg);
-          }
-          const checkData = await checkResult.json();
-          console.log('Sky check completed:', checkData);
-        } catch (checkError) {
-          console.error('Error running sky check:', checkError);
-          // Continue anyway - we'll still try to get the cached enabled clouds
-        }
-      }
-
-      // Get all accessible workspaces
-      const workspacesData = await dashboardCache.get(getWorkspaces);
-      const workspaceNames = Object.keys(workspacesData || {});
-
-      if (workspaceNames.length === 0) {
-        console.warn('No accessible workspaces found');
-        enabledCloudsList = [];
-      } else {
-        // Fetch enabled clouds for each workspace and aggregate
-        const enabledCloudsSet = new Set();
-
-        await Promise.all(
-          workspaceNames.map(async (workspaceName) => {
-            try {
-              const workspaceClouds = await dashboardCache.get(
-                getEnabledClouds,
-                [workspaceName, false]
-              );
-              if (Array.isArray(workspaceClouds)) {
-                workspaceClouds.forEach((cloud) => {
-                  if (cloud) {
-                    enabledCloudsSet.add(cloud.toLowerCase());
-                  }
-                });
-              }
-            } catch (error) {
-              console.error(
-                `Error fetching enabled clouds for workspace ${workspaceName}:`,
-                error
-              );
-            }
-          })
-        );
-
-        enabledCloudsList = Array.from(enabledCloudsSet);
-        console.log(
-          'Aggregated enabled clouds across all workspaces:',
-          enabledCloudsList
-        );
-      }
-    } catch (error) {
-      console.error('Error fetching enabled clouds:', error);
-      // If there's an error, we'll use clusters and jobs to determine enabled clouds
+    if (workspaceNames.length === 0) {
+      console.warn('No accessible workspaces found');
       enabledCloudsList = [];
+    } else {
+      // Fetch enabled clouds for each workspace and aggregate
+      const enabledCloudsSet = new Set();
+
+      await Promise.all(
+        workspaceNames.map(async (workspaceName) => {
+          try {
+            const workspaceClouds = await dashboardCache.get(getEnabledClouds, [
+              workspaceName,
+              false,
+            ]);
+            if (Array.isArray(workspaceClouds)) {
+              workspaceClouds.forEach((cloud) => {
+                if (cloud) {
+                  enabledCloudsSet.add(cloud.toLowerCase());
+                }
+              });
+            }
+          } catch (error) {
+            console.error(
+              `Error fetching enabled clouds for workspace ${workspaceName}:`,
+              error
+            );
+          }
+        })
+      );
+
+      enabledCloudsList = Array.from(enabledCloudsSet);
+      console.log(
+        'Aggregated enabled clouds across all workspaces:',
+        enabledCloudsList
+      );
     }
 
     // Create a map to store cloud data
@@ -182,10 +214,10 @@ export async function getWorkspaceInfrastructure() {
   try {
     console.log('[DEBUG] Starting workspace-aware infrastructure fetch');
 
-    // Step 1: Get all accessible workspaces for the user
+    // Step 1: Get all accessible workspaces for the user (use cache for performance)
     const { getWorkspaces } = await import('@/data/connectors/workspaces');
-    console.log('[DEBUG] About to call getWorkspaces()');
-    const workspacesData = await getWorkspaces();
+    console.log('[DEBUG] About to call getWorkspaces() via cache');
+    const workspacesData = await dashboardCache.get(getWorkspaces);
     console.log('[DEBUG] Workspaces data received:', workspacesData);
     console.log(
       '[DEBUG] Number of accessible workspaces:',
@@ -203,6 +235,9 @@ export async function getWorkspaceInfrastructure() {
         allGPUs: [],
         perContextGPUs: [],
         perNodeGPUs: [],
+        allSlurmGPUs: [],
+        perClusterSlurmGPUs: [],
+        perNodeSlurmGPUs: [],
         contextStats: {},
         contextWorkspaceMap: {},
         contextErrors: {},
@@ -223,11 +258,14 @@ export async function getWorkspaceInfrastructure() {
           );
 
           try {
-            // Get enabled clouds with expanded infrastructure for this workspace
+            // Get enabled clouds with expanded infrastructure for this workspace (use cache for performance)
             console.log(
-              `[DEBUG] Fetching enabled clouds for workspace: ${workspaceName}`
+              `[DEBUG] Fetching enabled clouds for workspace: ${workspaceName} via cache`
             );
-            const expandedClouds = await getEnabledClouds(workspaceName, true);
+            const expandedClouds = await dashboardCache.get(getEnabledClouds, [
+              workspaceName,
+              true,
+            ]);
             console.log(
               `[DEBUG] Expanded clouds for ${workspaceName}:`,
               expandedClouds
@@ -299,7 +337,6 @@ export async function getWorkspaceInfrastructure() {
 
     // Step 3: Get detailed GPU information for all contexts
     const { getClusters } = await import('@/data/connectors/clusters');
-    const dashboardCache = (await import('@/lib/cache')).default;
     let clustersData = [];
     try {
       clustersData = await dashboardCache.get(getClusters);
@@ -332,6 +369,9 @@ export async function getWorkspaceInfrastructure() {
       console.error('Error fetching Kubernetes GPUs:', error);
     }
 
+    // Note: Slurm GPU data is now fetched separately via getSlurmInfrastructure()
+    // This allows Slurm to load in parallel with Kubernetes/SSH data
+
     const finalResult = {
       workspaces: workspaceInfraData,
       allContextNames: [...new Set(allContextsAcrossWorkspaces)].sort(),
@@ -352,6 +392,186 @@ export async function getWorkspaceInfrastructure() {
     console.error('[DEBUG] Failed to fetch workspace infrastructure:', error);
     console.error('[DEBUG] Error stack:', error.stack);
     throw error;
+  }
+}
+
+// Lightweight function to get just context names quickly (without GPU data)
+// This allows the UI to show contexts immediately while GPU data loads progressively
+export async function getWorkspaceContexts() {
+  try {
+    // Step 1: Get all accessible workspaces for the user (use cache for performance)
+    const { getWorkspaces } = await import('@/data/connectors/workspaces');
+    const workspacesData = await dashboardCache.get(getWorkspaces);
+
+    if (!workspacesData || Object.keys(workspacesData).length === 0) {
+      return {
+        workspaces: {},
+        allContextNames: [],
+        contextWorkspaceMap: {},
+      };
+    }
+
+    // Step 2: For each workspace, fetch enabled clouds with expanded infrastructure
+    const { getEnabledClouds } = await import('@/data/connectors/workspaces');
+    const workspaceInfraData = {};
+    const allContextsAcrossWorkspaces = [];
+    const contextWorkspaceMap = {};
+
+    await Promise.allSettled(
+      Object.entries(workspacesData).map(
+        async ([workspaceName, workspaceConfig]) => {
+          try {
+            // Get enabled clouds with expanded infrastructure for this workspace
+            const expandedClouds = await dashboardCache.get(getEnabledClouds, [
+              workspaceName,
+              true,
+            ]);
+
+            workspaceInfraData[workspaceName] = {
+              config: workspaceConfig,
+              clouds: expandedClouds,
+              contexts: [],
+            };
+
+            // Extract contexts from expanded cloud data
+            if (expandedClouds && Array.isArray(expandedClouds)) {
+              expandedClouds.forEach((infraItem) => {
+                if (infraItem.toLowerCase().startsWith('kubernetes/')) {
+                  const context = infraItem.replace(/^kubernetes\//i, '');
+                  allContextsAcrossWorkspaces.push(context);
+                  if (!contextWorkspaceMap[context]) {
+                    contextWorkspaceMap[context] = [];
+                  }
+                  if (!contextWorkspaceMap[context].includes(workspaceName)) {
+                    contextWorkspaceMap[context].push(workspaceName);
+                  }
+                  workspaceInfraData[workspaceName].contexts.push(context);
+                } else if (infraItem.toLowerCase().startsWith('ssh/')) {
+                  const poolName = infraItem.replace(/^ssh\//i, '');
+                  const sshContextName = `ssh-${poolName}`;
+                  allContextsAcrossWorkspaces.push(sshContextName);
+                  if (!contextWorkspaceMap[sshContextName]) {
+                    contextWorkspaceMap[sshContextName] = [];
+                  }
+                  if (
+                    !contextWorkspaceMap[sshContextName].includes(workspaceName)
+                  ) {
+                    contextWorkspaceMap[sshContextName].push(workspaceName);
+                  }
+                  workspaceInfraData[workspaceName].contexts.push(
+                    sshContextName
+                  );
+                }
+              });
+            }
+          } catch (error) {
+            console.error(
+              `Failed to fetch infrastructure for workspace ${workspaceName}:`,
+              error
+            );
+          }
+        }
+      )
+    );
+
+    return {
+      workspaces: workspaceInfraData,
+      allContextNames: [...new Set(allContextsAcrossWorkspaces)].sort(),
+      contextWorkspaceMap: contextWorkspaceMap,
+    };
+  } catch (error) {
+    console.error('Failed to fetch workspace contexts:', error);
+    throw error;
+  }
+}
+
+// Fetch GPU data for a single context - used for progressive loading
+// Returns processed GPU data for one context that can be merged into state
+export async function getContextGPUData(context) {
+  try {
+    const nodeInfoDict = await getKubernetesPerNodeGPUs(context);
+
+    // Process node info into GPU summaries
+    const gpuToData = {};
+    const perNodeGPUs = [];
+
+    if (nodeInfoDict && Object.keys(nodeInfoDict).length > 0) {
+      for (const nodeName in nodeInfoDict) {
+        const nodeData = nodeInfoDict[nodeName];
+        if (!nodeData) continue;
+
+        const gpuName = nodeData['accelerator_type'] || '-';
+        const totalCount = nodeData['total']?.['accelerator_count'] || 0;
+        const freeCount = nodeData['free']?.['accelerators_available'] || 0;
+        const isReady = nodeData['is_ready'] !== false;
+        // Check if node is cordoned (defaults to false for backward compatibility)
+        const isCordoned = nodeData['is_cordoned'] === true;
+        // Check if node has taints (defaults to empty for backward compatibility)
+        const taints = nodeData['taints'] || [];
+        const isTainted = taints.length > 0;
+        // Node is considered not ready if it's not ready, cordoned, or tainted
+        const isNodeNotReady = !isReady || isCordoned || isTainted;
+
+        // Per-node data - use same field names as original getKubernetesGPUsFromContexts
+        perNodeGPUs.push({
+          node_name: nodeData['name'] || nodeName,
+          gpu_name: gpuName,
+          gpu_total: totalCount,
+          gpu_free: freeCount,
+          is_ready: isReady,
+          is_cordoned: isCordoned,
+          taints: taints,
+          context: context,
+          ip_address: nodeData['ip_address'] || null,
+          cpu_count: nodeData['cpu_count'] ?? null,
+          memory_gb: nodeData['memory_gb'] ?? null,
+          cpu_free: nodeData['cpu_free'] ?? null,
+          memory_free_gb: nodeData['memory_free_gb'] ?? null,
+        });
+
+        // Aggregate GPU data per context
+        if (totalCount > 0) {
+          if (!gpuToData[gpuName]) {
+            gpuToData[gpuName] = {
+              gpu_name: gpuName,
+              gpu_requestable_qty_per_node: 0,
+              gpu_total: 0,
+              gpu_free: 0,
+              gpu_not_ready: 0,
+              context: context,
+            };
+          }
+          gpuToData[gpuName].gpu_total += totalCount;
+          gpuToData[gpuName].gpu_free += freeCount;
+          if (isNodeNotReady) {
+            gpuToData[gpuName].gpu_not_ready += totalCount;
+          }
+          gpuToData[gpuName].gpu_requestable_qty_per_node = totalCount;
+        }
+      }
+    }
+
+    return {
+      context,
+      perContextGPUs: Object.values(gpuToData),
+      perNodeGPUs: perNodeGPUs,
+      error: null,
+    };
+  } catch (error) {
+    const errorMessage =
+      error?.message ||
+      (typeof error === 'string' && error) ||
+      'Context may be unavailable or timed out';
+    console.warn(
+      `Failed to get GPU data for context ${context}:`,
+      errorMessage
+    );
+    return {
+      context,
+      perContextGPUs: [],
+      perNodeGPUs: [],
+      error: errorMessage,
+    };
   }
 }
 
@@ -383,6 +603,11 @@ async function getKubernetesGPUsFromContexts(contextNames) {
       const result = contextNodeInfoResults[i];
       if (result.status === 'fulfilled') {
         contextToNodeInfo[contextNames[i]] = result.value;
+        console.log(
+          '[CONTEXT_DEBUG] Context node info result:',
+          contextNames[i],
+          result.value
+        );
       } else {
         // Log the error but continue with other contexts
         const errorMessage =
@@ -391,7 +616,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           'Context may be unavailable or timed out';
         console.warn(
           `Failed to get node info for context ${contextNames[i]}:`,
-          result.reason
+          errorMessage
         );
         contextToNodeInfo[contextNames[i]] = {};
         contextErrors[contextNames[i]] = errorMessage;
@@ -412,9 +637,18 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             continue;
           }
 
-          const gpuName = nodeData['accelerator_type'];
+          const gpuName = nodeData['accelerator_type'] || '-';
           const totalCount = nodeData['total']?.['accelerator_count'] || 0;
           const freeCount = nodeData['free']?.['accelerators_available'] || 0;
+          // Check if node is ready (defaults to true for backward compatibility)
+          const isReady = nodeData['is_ready'] !== false;
+          // Check if node is cordoned (defaults to false for backward compatibility)
+          const isCordoned = nodeData['is_cordoned'] === true;
+          // Check if node has taints (defaults to empty for backward compatibility)
+          const taints = nodeData['taints'] || [];
+          const isTainted = taints.length > 0;
+          // Node is considered not ready if it's not ready, cordoned, or tainted
+          const isNodeNotReady = !isReady || isCordoned || isTainted;
 
           if (totalCount > 0) {
             if (!gpuToData[gpuName]) {
@@ -423,11 +657,15 @@ async function getKubernetesGPUsFromContexts(contextNames) {
                 gpu_requestable_qty_per_node: 0,
                 gpu_total: 0,
                 gpu_free: 0,
+                gpu_not_ready: 0,
                 context: context,
               };
             }
             gpuToData[gpuName].gpu_total += totalCount;
             gpuToData[gpuName].gpu_free += freeCount;
+            if (isNodeNotReady) {
+              gpuToData[gpuName].gpu_not_ready += totalCount;
+            }
             gpuToData[gpuName].gpu_requestable_qty_per_node = totalCount;
           }
         }
@@ -436,10 +674,13 @@ async function getKubernetesGPUsFromContexts(contextNames) {
           if (gpuName in allGPUsSummary) {
             allGPUsSummary[gpuName].gpu_total += gpuToData[gpuName].gpu_total;
             allGPUsSummary[gpuName].gpu_free += gpuToData[gpuName].gpu_free;
+            allGPUsSummary[gpuName].gpu_not_ready +=
+              gpuToData[gpuName].gpu_not_ready;
           } else {
             allGPUsSummary[gpuName] = {
               gpu_total: gpuToData[gpuName].gpu_total,
               gpu_free: gpuToData[gpuName].gpu_free,
+              gpu_not_ready: gpuToData[gpuName].gpu_not_ready,
               gpu_name: gpuName,
             };
           }
@@ -469,6 +710,18 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             nodeData['total']?.['accelerator_count'] ?? 0;
           const freeAccelerators =
             nodeData['free']?.['accelerators_available'] ?? 0;
+          // Check if node is ready (defaults to true for backward compatibility)
+          const nodeIsReady = nodeData['is_ready'] !== false;
+          // Check if node is cordoned (defaults to false for backward compatibility)
+          const nodeIsCordoned = nodeData['is_cordoned'] === true;
+          // Get taints (defaults to empty for backward compatibility)
+          const nodeTaints = nodeData['taints'] || [];
+
+          // Extract CPU and memory information
+          const cpuCount = nodeData['cpu_count'] ?? null;
+          const memoryGb = nodeData['memory_gb'] ?? null;
+          const cpuFree = nodeData['cpu_free'] ?? null;
+          const memoryFreeGb = nodeData['memory_free_gb'] ?? null;
 
           perNodeGPUs_dict[`${context}/${nodeName}`] = {
             node_name: nodeData['name'] || nodeName,
@@ -477,6 +730,13 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             gpu_free: freeAccelerators,
             ip_address: nodeData['ip_address'] || null,
             context: context,
+            cpu_count: cpuCount,
+            memory_gb: memoryGb,
+            cpu_free: cpuFree,
+            memory_free_gb: memoryFreeGb,
+            is_ready: nodeIsReady,
+            is_cordoned: nodeIsCordoned,
+            taints: nodeTaints,
           };
 
           // If this node provides a GPU type not found via GPU availability,
@@ -492,6 +752,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
               allGPUsSummary[acceleratorType] = {
                 gpu_total: 0,
                 gpu_free: 0,
+                gpu_not_ready: 0,
                 gpu_name: acceleratorType,
               };
             }
@@ -501,6 +762,7 @@ async function getKubernetesGPUsFromContexts(contextNames) {
             if (!existingGpuEntry) {
               perContextGPUsData[context].push({
                 gpu_name: acceleratorType,
+                gpu_not_ready: 0,
                 gpu_requestable_qty_per_node: '-',
                 gpu_total: 0,
                 gpu_free: 0,
@@ -512,22 +774,26 @@ async function getKubernetesGPUsFromContexts(contextNames) {
       }
     }
 
+    console.log('[CONTEXT_DEBUG] All GPUs summary:', allGPUsSummary);
+    console.log('[CONTEXT_DEBUG] Per context GPUs data:', perContextGPUsData);
+    console.log('[CONTEXT_DEBUG] Per node GPUs data:', perNodeGPUs_dict);
+    console.log('[CONTEXT_DEBUG] Context errors:', contextErrors);
     return {
       allGPUs: Object.values(allGPUsSummary).sort((a, b) =>
-        a.gpu_name.localeCompare(b.gpu_name)
+        (a.gpu_name || '').localeCompare(b.gpu_name || '')
       ),
       perContextGPUs: Object.values(perContextGPUsData)
         .flat()
         .sort(
           (a, b) =>
-            a.context.localeCompare(b.context) ||
-            a.gpu_name.localeCompare(b.gpu_name)
+            (a.context || '').localeCompare(b.context || '') ||
+            (a.gpu_name || '').localeCompare(b.gpu_name || '')
         ),
       perNodeGPUs: Object.values(perNodeGPUs_dict).sort(
         (a, b) =>
-          a.context.localeCompare(b.context) ||
-          a.node_name.localeCompare(b.node_name) ||
-          a.gpu_name.localeCompare(b.gpu_name)
+          (a.context || '').localeCompare(b.context || '') ||
+          (a.node_name || '').localeCompare(b.node_name || '') ||
+          (a.gpu_name || '').localeCompare(b.gpu_name || '')
       ),
       contextErrors: contextErrors,
     };
@@ -572,33 +838,12 @@ async function getKubernetesPerNodeGPUs(context) {
 
 export async function getContextJobs(jobs) {
   try {
-    // Count jobs per k8s context/ssh node pool
+    // Count jobs per k8s context/ssh node pool/slurm cluster
     const contextStats = {};
 
     // Process jobs
     jobs.forEach((job) => {
-      let contextKey = null;
-
-      // Check if it's a Kubernetes job
-      if (job.cloud === 'Kubernetes') {
-        // For Kubernetes jobs, the context name is in job.region
-        contextKey = job.region;
-        if (contextKey) {
-          contextKey = `kubernetes/${contextKey}`;
-        }
-      }
-      // Check if it's an SSH Node Pool job
-      else if (job.cloud === 'SSH') {
-        // For SSH jobs, the node pool name is in job.region
-        contextKey = job.region;
-        if (contextKey) {
-          // Remove 'ssh-' prefix if present for display
-          const poolName = contextKey.startsWith('ssh-')
-            ? contextKey.substring(4)
-            : contextKey;
-          contextKey = `ssh/${poolName}`;
-        }
-      }
+      const contextKey = buildContextStatsKeyFromCloud(job.cloud, job.region);
 
       if (contextKey) {
         if (!contextStats[contextKey]) {
@@ -617,31 +862,13 @@ export async function getContextJobs(jobs) {
 
 export async function getContextClusters(clusters) {
   try {
-    // Count clusters per k8s context/ssh node pool
+    // Count clusters per k8s context/ssh node pool/slurm cluster
     const contextStats = {};
     clusters.forEach((cluster) => {
-      let contextKey = null;
-
-      // Check if it's a Kubernetes cluster
-      if (cluster.cloud === 'Kubernetes') {
-        // For Kubernetes clusters, the context name is in cluster.region
-        contextKey = cluster.region;
-        if (contextKey) {
-          contextKey = `kubernetes/${contextKey}`;
-        }
-      }
-      // Check if it's an SSH Node Pool cluster
-      else if (cluster.cloud === 'SSH') {
-        // For SSH clusters, the node pool name is in cluster.region
-        contextKey = cluster.region;
-        if (contextKey) {
-          // Remove 'ssh-' prefix if present for display
-          const poolName = contextKey.startsWith('ssh-')
-            ? contextKey.substring(4)
-            : contextKey;
-          contextKey = `ssh/${poolName}`;
-        }
-      }
+      const contextKey = buildContextStatsKeyFromCloud(
+        cluster.cloud,
+        cluster.region
+      );
 
       if (contextKey) {
         if (!contextStats[contextKey]) {
@@ -902,5 +1129,194 @@ export async function getDetailedGpuInfo(filter) {
   } catch (error) {
     console.error('Outer error in getDetailedGpuInfo:', error);
     throw error;
+  }
+}
+
+async function getSlurmClusterGPUs() {
+  try {
+    const response = await apiClient.post(`/slurm_gpu_availability`, {});
+    if (!response.ok) {
+      const msg = `Failed to get slurm cluster GPUs with status ${response.status}`;
+      throw new Error(msg);
+    }
+    const id =
+      response.headers.get('X-Skypilot-Request-ID') ||
+      response.headers.get('x-request-id');
+    if (!id) {
+      const msg = 'No request ID received from server for slurm cluster GPUs';
+      throw new Error(msg);
+    }
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    if (fetchedData.status === 500) {
+      try {
+        const data = await fetchedData.json();
+        if (data.detail && data.detail.error) {
+          try {
+            const error = JSON.parse(data.detail.error);
+            console.error('Error fetching Slurm cluster GPUs:', error.message);
+          } catch (jsonError) {
+            console.error('Error parsing JSON for Slurm error:', jsonError);
+          }
+        }
+      } catch (parseError) {
+        console.error('Error parsing JSON for Slurm 500 response:', parseError);
+      }
+      return [];
+    }
+    if (!fetchedData.ok) {
+      const msg = `Failed to get slurm cluster GPUs result with status ${fetchedData.status}`;
+      throw new Error(msg);
+    }
+    const data = await fetchedData.json();
+    const clusterGPUs = data.return_value ? JSON.parse(data.return_value) : [];
+    return clusterGPUs;
+  } catch (error) {
+    console.error('Error fetching Slurm cluster GPUs:', error);
+    return [];
+  }
+}
+
+async function getSlurmPerNodeGPUs() {
+  try {
+    const response = await apiClient.post(`/slurm_node_info`, {});
+    if (!response.ok) {
+      const msg = `Failed to get slurm node info with status ${response.status}`;
+      throw new Error(msg);
+    }
+    const id =
+      response.headers.get('X-Skypilot-Request-ID') ||
+      response.headers.get('x-request-id');
+    if (!id) {
+      const msg = 'No request ID received from server for slurm node info';
+      throw new Error(msg);
+    }
+    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    if (fetchedData.status === 500) {
+      try {
+        const data = await fetchedData.json();
+        if (data.detail && data.detail.error) {
+          try {
+            const error = JSON.parse(data.detail.error);
+            console.error('Error fetching Slurm per node GPUs:', error.message);
+          } catch (jsonError) {
+            console.error(
+              'Error parsing JSON for Slurm node error:',
+              jsonError
+            );
+          }
+        }
+      } catch (parseError) {
+        console.error(
+          'Error parsing JSON for Slurm node 500 response:',
+          parseError
+        );
+      }
+      return [];
+    }
+    if (!fetchedData.ok) {
+      const msg = `Failed to get slurm node info result with status ${fetchedData.status}`;
+      throw new Error(msg);
+    }
+    const data = await fetchedData.json();
+    const nodeInfo = data.return_value ? JSON.parse(data.return_value) : [];
+    return nodeInfo;
+  } catch (error) {
+    console.error('Error fetching Slurm per node GPUs:', error);
+    return [];
+  }
+}
+
+// Export Slurm infrastructure fetching for parallel loading
+export async function getSlurmInfrastructure() {
+  return await getSlurmServiceGPUs();
+}
+
+async function getSlurmServiceGPUs() {
+  try {
+    // Fetch cluster GPUs and node GPUs in parallel for better performance
+    const [clusterGPUsRaw, nodeGPUsRaw] = await Promise.all([
+      getSlurmClusterGPUs(),
+      getSlurmPerNodeGPUs(),
+    ]);
+
+    const allSlurmGPUs = {};
+    const perClusterSlurmGPUs = {}; // Similar to perContextGPUs for Kubernetes
+    const perNodeSlurmGPUs = {}; // { 'cluster/node_name': { ... } }
+
+    // Process cluster GPUs (similar to Kubernetes context GPUs)
+    // clusterGPUsRaw is expected to be like: [ [cluster_name, [ [gpu_name, counts, capacity, available], ... ] ], ... ]
+    for (const clusterData of clusterGPUsRaw) {
+      const clusterName = clusterData[0];
+      const gpusInCluster = clusterData[1];
+
+      for (const gpuRaw of gpusInCluster) {
+        const gpuName = gpuRaw[0];
+        // gpuRaw[1] is counts (list of requestable quantities), e.g., [1, 2, 4]
+        const gpuRequestableQtyPerNode = gpuRaw[1].join(', ');
+        const gpuTotal = gpuRaw[2]; // capacity
+        const gpuFree = gpuRaw[3]; // available
+
+        // Aggregate for allSlurmGPUs
+        if (gpuName in allSlurmGPUs) {
+          allSlurmGPUs[gpuName].gpu_total += gpuTotal;
+          allSlurmGPUs[gpuName].gpu_free += gpuFree;
+        } else {
+          allSlurmGPUs[gpuName] = {
+            gpu_total: gpuTotal,
+            gpu_free: gpuFree,
+            gpu_name: gpuName,
+          };
+        }
+
+        // Store for perClusterSlurmGPUs (similar to perContextGPUs)
+        const clusterGpuKey = `${clusterName}#${gpuName}`; // Unique key for cluster-gpu combo
+        perClusterSlurmGPUs[clusterGpuKey] = {
+          gpu_name: gpuName,
+          gpu_requestable_qty_per_node: gpuRequestableQtyPerNode,
+          gpu_total: gpuTotal,
+          gpu_free: gpuFree,
+          cluster: clusterName,
+        };
+      }
+    }
+
+    // Process node GPUs
+    // nodeGPUsRaw is expected to be like: [ {node_name, slurm_cluster_name, partition, gpu_type, total_gpus, free_gpus}, ... ]
+    for (const node of nodeGPUsRaw) {
+      const clusterName = node.slurm_cluster_name || 'default';
+      const key = `${clusterName}/${node.node_name}/${node.gpu_type || '-'}`;
+      perNodeSlurmGPUs[key] = {
+        node_name: node.node_name,
+        gpu_name: node.gpu_type || '-', // gpu_type might be null
+        gpu_total: node.total_gpus || 0,
+        gpu_free: node.free_gpus || 0,
+        cluster: clusterName,
+        partition: node.partition || 'default', // partition might be null
+      };
+    }
+
+    return {
+      allSlurmGPUs: Object.values(allSlurmGPUs).sort((a, b) =>
+        a.gpu_name.localeCompare(b.gpu_name)
+      ),
+      perClusterSlurmGPUs: Object.values(perClusterSlurmGPUs).sort(
+        (a, b) =>
+          a.cluster.localeCompare(b.cluster) ||
+          a.gpu_name.localeCompare(b.gpu_name)
+      ),
+      perNodeSlurmGPUs: Object.values(perNodeSlurmGPUs).sort(
+        (a, b) =>
+          (a.cluster || '').localeCompare(b.cluster || '') ||
+          (a.node_name || '').localeCompare(b.node_name || '') ||
+          (a.gpu_name || '').localeCompare(b.gpu_name || '')
+      ),
+    };
+  } catch (error) {
+    console.error('Error fetching Slurm GPUs:', error);
+    return {
+      allSlurmGPUs: [],
+      perClusterSlurmGPUs: [],
+      perNodeSlurmGPUs: [],
+    };
   }
 }

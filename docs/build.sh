@@ -2,10 +2,29 @@
 
 # Function to check if file exists and is less than 24 hours old
 check_file_age() {
-    if [ -f "$1" ] && [ $(( $(date +%s) - $(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null) )) -lt 86400 ]; then
+    if [ ! -f "$1" ]; then
+        echo "File $1 does not exist" >&2
+        return 1  # File doesn't exist
+    fi
+
+    current_time=$(date +%s)
+
+    # Try MacOS stat format first
+    mtime=$(stat -f %m "$1" 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        # If MacOS format fails, try Linux format
+        mtime=$(stat -c %Y "$1" 2>/dev/null)
+        if [ $? -ne 0 ]; then
+            echo "Failed to get modification time for $1" >&2
+            return 1  # Could not get modification time
+        fi
+    fi
+
+    if [ $(( current_time - mtime )) -lt 86400 ]; then
+        echo "File $1 is recent (less than 24 hours old)"
         return 0  # File exists and is recent
     fi
-    return 1  # File doesn't exist or is old
+    return 1  # File is old
 }
 
 # Only run sky show-gpus commands if output files don't exist or are old
@@ -35,11 +54,12 @@ done
 
 if [ "$AUTO_BUILD" = true ]; then
     # Use sphinx-autobuild for automatic rebuilding
-    # Ignore gallery directory to prevent unnecessary rebuilds
+    # Ignore gallery directory and llms.txt to prevent unnecessary rebuilds
     export SPHINX_BUILD_LOCAL=true
     export SPHINX_PORT=${PORT:-8000}
     sphinx-autobuild source build/html \
         --ignore "*.md" \
+        --ignore "**/llms.txt" \
         --port ${PORT:-8000}
 else
     rm -rf build docs

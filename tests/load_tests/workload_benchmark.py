@@ -340,6 +340,14 @@ Examples:
         default='workloads/baisc.sh',
         help='Name of the workload script to run (default: workloads/basic.sh)')
 
+    parser.add_argument('--check',
+                        action='store_true',
+                        help='Exit with non-zero status on failed runs')
+    parser.add_argument(
+        '--detail',
+        action='store_true',
+        help='Print logs of failed runs after the benchmark finishes')
+
     parser.add_argument('-c',
                         '--cloud',
                         type=str,
@@ -376,12 +384,30 @@ Examples:
 
         # Exit with appropriate code
         stats = benchmark_result['statistics']
-        if stats['failed_runs'] > 0:
-            logger.warning(f"{stats['failed_runs']} runs failed")
-            sys.exit(1)
-        else:
-            logger.info("All runs completed successfully")
-            sys.exit(0)
+        results = benchmark_result['results']
+        failed_runs = stats.get('failed_runs', 0) if stats else 0
+
+        if args.detail and failed_runs:
+            failed_results = [r for r in results if not r['success']]
+            for result in failed_results:
+                logger.info(
+                    f"===== Failed run log: thread {result['thread_id']}, "
+                    f"repeat {result['repeat_id']}, id {result['unique_id']} ====="
+                )
+                try:
+                    with open(result['log_file'], 'r') as log_f:
+                        print(log_f.read())
+                except Exception as e:
+                    logger.error(
+                        f"Could not read log {result['log_file']}: {e}")
+
+        if failed_runs > 0:
+            logger.warning(f"{failed_runs} runs failed")
+            if args.check:
+                sys.exit(1)
+
+        logger.info("All runs completed")
+        sys.exit(0)
 
     except KeyboardInterrupt:
         logger.info("Benchmark interrupted by user")

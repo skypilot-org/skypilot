@@ -7,6 +7,7 @@ import textwrap
 from typing import Optional
 
 from sky import exceptions
+from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import command_runner
 
@@ -223,7 +224,10 @@ def get_gcs_mount_cmd(bucket_name: str,
     """Returns a command to mount a GCS bucket using gcsfuse."""
     bucket_sub_path_arg = f'--only-dir {_bucket_sub_path} '\
         if _bucket_sub_path else ''
-    mount_cmd = ('gcsfuse -o allow_other '
+    log_file = '$(mktemp -t gcsfuse.XXXX.log)'
+    mount_cmd = (f'gcsfuse --log-file {log_file} '
+                 '--debug_fuse_errors '
+                 '-o allow_other '
                  '--implicit-dirs '
                  f'--stat-cache-capacity {_STAT_CACHE_CAPACITY} '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
@@ -470,6 +474,13 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
                                  f'{hashed_mount_path}.log')
     create_log_cmd = (f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} && '
                       f'touch {log_file_path}')
+
+    # Check if sequential upload is enabled via config.
+    # Default is False (parallel uploads for better performance).
+    sequential_upload = skypilot_config.get_nested(
+        ('data', 'mount_cached', 'sequential_upload'), False)
+    transfers_flag = '--transfers 1 ' if sequential_upload else ''
+
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
     # not necessary to specify separate cache directories.
@@ -488,13 +499,11 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # interval allows for faster detection of new or updated files on the
         # remote, but increases the frequency of metadata lookups.
         '--allow-other --vfs-cache-mode full --dir-cache-time 10s '
-        # '--transfers 1' guarantees the files written at the local mount point
-        # to be uploaded to the backend storage in the order of creation.
         # '--vfs-cache-poll-interval' specifies the frequency of how often
         # rclone checks the local mount point for stale objects in cache.
         # '--vfs-write-back' defines the time to write files on remote storage
         # after last use of the file in local mountpoint.
-        '--transfers 1 --vfs-cache-poll-interval 10s --vfs-write-back 1s '
+        f'{transfers_flag}--vfs-cache-poll-interval 10s --vfs-write-back 1s '
         # Have rclone evict files if the cache size exceeds 10G.
         # This is to prevent cache from growing too large and
         # using up all the disk space. Note that files that opened
@@ -502,6 +511,9 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         '--vfs-cache-max-size 10G '
         # give each mount its own cache directory
         f'--cache-dir {constants.RCLONE_CACHE_DIR}/{hashed_mount_path} '
+        # Use a faster fingerprint algorithm to detect changes in files.
+        # Recommended by rclone documentation for buckets like s3.
+        '--vfs-fast-fingerprint '
         # This command produces children processes, which need to be
         # detached from the current process's terminal. The command doesn't
         # produce any output, so we aren't dropping any logs.
@@ -646,8 +658,35 @@ def get_mounting_script(
                 else
                     echo "No goofys log file found in /tmp"
                 fi
+            elif [ "$MOUNT_BINARY" = "gcsfuse" ]; then
+                echo "Looking for gcsfuse log files..."
+                # Find gcsfuse log files in /tmp (created by mktemp -t gcsfuse.XXXX.log)
+                GCSFUSE_LOGS=$(ls -t /tmp/gcsfuse.*.log 2>/dev/null | head -1)
+                if [ -n "$GCSFUSE_LOGS" ]; then
+                    echo "=== GCSFuse log file contents ==="
+                    cat "$GCSFUSE_LOGS"
+                    echo "=== End of gcsfuse log file ==="
+                else
+                    echo "No gcsfuse log file found in /tmp"
+                fi
+            elif [ "$MOUNT_BINARY" = "rclone" ]; then
+                echo "Looking for rclone log files..."
+                # Find rclone log files in ~/.sky/rclone_log/ (for MOUNT_CACHED mode)
+                RCLONE_LOG_DIR={constants.RCLONE_MOUNT_CACHED_LOG_DIR}
+                if [ -d "$RCLONE_LOG_DIR" ]; then
+                    RCLONE_LOGS=$(ls -t "$RCLONE_LOG_DIR"/*.log 2>/dev/null | head -1)
+                    if [ -n "$RCLONE_LOGS" ]; then
+                        echo "=== Rclone log file contents ==="
+                        tail -50 "$RCLONE_LOGS"
+                        echo "=== End of rclone log file ==="
+                    else
+                        echo "No rclone log file found in $RCLONE_LOG_DIR"
+                    fi
+                else
+                    echo "Rclone log directory $RCLONE_LOG_DIR not found"
+                fi
             fi
-            # TODO(kevin): Print logs from rclone, etc too for observability.
+            # TODO(kevin): Print logs from blobfuse2, etc too for observability.
             exit $MOUNT_EXIT_CODE
         fi
         echo "Mounting done."

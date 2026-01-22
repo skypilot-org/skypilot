@@ -7,6 +7,7 @@ import resource
 import shlex
 import subprocess
 import sys
+import termios
 import threading
 import time
 import typing
@@ -450,3 +451,19 @@ def slow_start_processes(processes: List[Startable],
             break
         batch_size = min(batch_size * 2, max_batch_size)
         time.sleep(delay)
+
+
+def is_echo_disabled(fd: int) -> bool:
+    """Check if terminal ECHO is disabled on the given fd.
+
+    When a subprocess wants password/sensitive input, it disables ECHO.
+    This is how pexpect's waitnoecho() works. See:
+    https://pexpect.readthedocs.io/en/stable/api/pexpect.html#pexpect.spawn.waitnoecho
+    """
+    assert os.isatty(fd), 'fd is not connected to a terminal'
+    try:
+        attr = termios.tcgetattr(fd)
+        echo_on = bool(attr[3] & termios.ECHO)
+        return not echo_on
+    except (termios.error, OSError):
+        return False

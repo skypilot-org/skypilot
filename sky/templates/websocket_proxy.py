@@ -9,13 +9,11 @@
 This script is useful for users who do not have local Kubernetes credentials.
 """
 import asyncio
-from http.cookiejar import MozillaCookieJar
 import os
 import struct
 import sys
 import time
 from typing import Dict, Optional
-from urllib.request import Request
 
 import requests
 import websockets
@@ -24,46 +22,19 @@ from websockets.asyncio.client import connect
 
 from sky import exceptions
 from sky.client import service_account_auth
+from sky.server import common as server_common
 from sky.server import constants
-from sky.server.server import KubernetesSSHMessageType
+from sky.server.server import SSHMessageType
 from sky.skylet import constants as skylet_constants
 
 BUFFER_SIZE = 2**16  # 64KB
 HEARTBEAT_INTERVAL_SECONDS = 10
-
-# Environment variable for a file path to the API cookie file.
-# Keep in sync with server/constants.py
-API_COOKIE_FILE_ENV_VAR = 'SKYPILOT_API_COOKIE_FILE'
-# Default file if unset.
-# Keep in sync with server/constants.py
-API_COOKIE_FILE_DEFAULT_LOCATION = '~/.sky/cookies.txt'
-
 MAX_UNANSWERED_PINGS = 100
-
-
-def _get_cookie_header(url: str) -> Dict[str, str]:
-    """Extract Cookie header value from a cookie jar for a specific URL"""
-    cookie_path = os.environ.get(API_COOKIE_FILE_ENV_VAR)
-    if cookie_path is None:
-        cookie_path = API_COOKIE_FILE_DEFAULT_LOCATION
-    cookie_path = os.path.expanduser(cookie_path)
-    if not os.path.exists(cookie_path):
-        return {}
-
-    request = Request(url)
-    cookie_jar = MozillaCookieJar(os.path.expanduser(cookie_path))
-    cookie_jar.load(ignore_discard=True, ignore_expires=True)
-    cookie_jar.add_cookie_header(request)
-    cookie_header = request.get_header('Cookie')
-    # if cookie file is empty, return empty dict
-    if cookie_header is None:
-        return {}
-    return {'Cookie': cookie_header}
 
 
 async def main(url: str, timestamps_supported: bool, login_url: str) -> None:
     headers = {}
-    headers.update(_get_cookie_header(url))
+    headers.update(server_common.get_cookie_header_for_url(url))
     headers.update(service_account_auth.get_service_account_headers())
     try:
         async with connect(url, ping_interval=None,
@@ -142,8 +113,9 @@ async def latency_monitor(websocket: ClientConnection,
             ping_time = time.time()
             next_id += 1
             last_ping_time_dict[next_id] = ping_time
-            message_header_bytes = struct.pack(
-                '!BI', KubernetesSSHMessageType.PINGPONG.value, next_id)
+            message_header_bytes = struct.pack('!BI',
+                                               SSHMessageType.PINGPONG.value,
+                                               next_id)
             try:
                 async with websocket_lock:
                     await websocket.send(message_header_bytes)
@@ -176,7 +148,7 @@ async def stdin_to_websocket(reader: asyncio.StreamReader,
             if timestamps_supported:
                 # Send message with type 0 to indicate data.
                 message_type_bytes = struct.pack(
-                    '!B', KubernetesSSHMessageType.REGULAR_DATA.value)
+                    '!B', SSHMessageType.REGULAR_DATA.value)
                 data = message_type_bytes + data
             async with websocket_lock:
                 await websocket.send(data)
@@ -201,10 +173,10 @@ async def websocket_to_stdout(websocket: ClientConnection,
             if (timestamps_supported and len(message) > 0 and
                     last_ping_time_dict is not None):
                 message_type = struct.unpack('!B', message[:1])[0]
-                if message_type == KubernetesSSHMessageType.REGULAR_DATA.value:
+                if message_type == SSHMessageType.REGULAR_DATA.value:
                     # Regular data - strip type byte and write to stdout
                     message = message[1:]
-                elif message_type == KubernetesSSHMessageType.PINGPONG.value:
+                elif message_type == SSHMessageType.PINGPONG.value:
                     # PONG response - calculate latency and send measurement
                     if not len(message) == struct.calcsize('!BI'):
                         raise ValueError(
@@ -222,8 +194,7 @@ async def websocket_to_stdout(websocket: ClientConnection,
 
                     # Send latency measurement (type 2)
                     message_type_bytes = struct.pack(
-                        '!B',
-                        KubernetesSSHMessageType.LATENCY_MEASUREMENT.value)
+                        '!B', SSHMessageType.LATENCY_MEASUREMENT.value)
                     latency_bytes = struct.pack('!Q', latency_ms)
                     message = message_type_bytes + latency_bytes
                     # Send to server.
@@ -255,7 +226,7 @@ if __name__ == '__main__':
         # TODO(aylei): remove the separate /api/health call and use the header
         # during websocket handshake to determine the server version.
         health_url = f'{server_url}/api/health'
-        cookie_hdr = _get_cookie_header(health_url)
+        cookie_hdr = server_common.get_cookie_header_for_url(health_url)
         health_response = requests.get(health_url, headers=cookie_hdr)
         health_data = health_response.json()
         timestamps_are_supported = int(health_data.get('api_version', 0)) > 21
@@ -272,7 +243,13 @@ if __name__ == '__main__':
     client_version_str = (f'&client_version={constants.API_VERSION}'
                           if timestamps_are_supported else '')
 
-    websocket_url = (f'{server_url}/kubernetes-pod-ssh-proxy'
+    # For backwards compatibility, fallback to kubernetes-pod-ssh-proxy if
+    # no endpoint is provided.
+    endpoint = sys.argv[3] if len(sys.argv) > 3 else 'kubernetes-pod-ssh-proxy'
+    # Worker index for Slurm.
+    worker_idx = sys.argv[4] if len(sys.argv) > 4 else '0'
+    websocket_url = (f'{server_url}/{endpoint}'
                      f'?cluster_name={sys.argv[2]}'
+                     f'&worker={worker_idx}'
                      f'{client_version_str}')
     asyncio.run(main(websocket_url, timestamps_are_supported, _login_url))

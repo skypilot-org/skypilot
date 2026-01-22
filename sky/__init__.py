@@ -140,8 +140,10 @@ Cudo = clouds.Cudo
 GCP = clouds.GCP
 Lambda = clouds.Lambda
 SCP = clouds.SCP
+Slurm = clouds.Slurm
 Kubernetes = clouds.Kubernetes
 K8s = Kubernetes
+SSH = clouds.SSH
 OCI = clouds.OCI
 Paperspace = clouds.Paperspace
 PrimeIntellect = clouds.PrimeIntellect
@@ -163,6 +165,7 @@ __all__ = [
     'IBM',
     'Kubernetes',
     'K8s',
+    'SSH',
     'Lambda',
     'OCI',
     'Paperspace',
@@ -170,6 +173,7 @@ __all__ = [
     'RunPod',
     'Vast',
     'SCP',
+    'Slurm',
     'Vsphere',
     'Fluidstack',
     'Nebius',

@@ -127,12 +127,9 @@ def list_accelerator_realtime(
     case_sensitive: bool = True,
 ) -> Tuple[Dict[str, List[int]], Dict[str, int], Dict[str, int]]:
     """Lists all accelerators offered by Sky with their realtime availability.
-
     Realtime availability is the total number of accelerators in the cluster
     and number of accelerators available at the time of the call.
-
     Used for fixed size cluster settings, such as Kubernetes.
-
     Returns:
         A tuple of three dictionaries mapping canonical accelerator names to:
         - A list of available counts. (e.g., [1, 2, 4])
@@ -153,7 +150,7 @@ def list_accelerator_realtime(
     for gpu, items in qtys_map.items():
         for item in items:
             accelerator_counts[gpu].append(item.accelerator_count)
-        accelerator_counts[gpu] = sorted(accelerator_counts[gpu])
+        accelerator_counts[gpu] = sorted(set(accelerator_counts[gpu]))
     return (accelerator_counts, total_accelerators_capacity,
             total_accelerators_available)
 

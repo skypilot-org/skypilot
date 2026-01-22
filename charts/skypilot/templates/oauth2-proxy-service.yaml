@@ -1,11 +1,12 @@
 {{- if or .Values.auth.oauth.enabled (and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled")) }}
+{{- $fullName := include "skypilot.fullname" . -}}
 apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app: {{ .Release.Name }}-oauth2-proxy
+    app: {{ $fullName }}-oauth2-proxy
     skypilot.co/component: oauth2-proxy
-  name: {{ .Release.Name }}-oauth2-proxy
+  name: {{ $fullName }}-oauth2-proxy
   namespace: {{ .Release.Namespace }}
 spec:
   ports:
@@ -14,5 +15,5 @@ spec:
     protocol: TCP
     targetPort: 4180
   selector:
-    app: {{ .Release.Name }}-oauth2-proxy
+    app: {{ $fullName }}-oauth2-proxy
 {{- end }}

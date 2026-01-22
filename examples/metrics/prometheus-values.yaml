@@ -1,0 +1,16 @@
+server:
+  persistentVolume:
+    enabled: true
+    size: 50Gi
+  retention: "1000d"
+  retentionSize: "43GB"
+kube-state-metrics:
+  enabled: true
+  metricLabelsAllowlist:
+    - pods=[skypilot-cluster,skypilot-cluster-name]
+prometheus-node-exporter:
+  enabled: false
+prometheus-pushgateway:
+  enabled: false
+alertmanager:
+  enabled: false

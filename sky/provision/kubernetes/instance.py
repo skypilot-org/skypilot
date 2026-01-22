@@ -162,6 +162,85 @@ def _lack_resource_msg(resource: str,
     return msg
 
 
+def _format_pvc_binding_error(pvc_details: Optional[str], pvc_names: List[str],
+                              namespace: str) -> str:
+    """Format a PVC binding error message.
+
+    Args:
+        pvc_details: Optional details about the PVC issue (e.g., event messages)
+            If None, a generic message is used.
+        pvc_names: List of PVC names that have binding issues.
+        namespace: Kubernetes namespace.
+
+    Returns:
+        Formatted error message with debug instructions.
+    """
+    if pvc_details:
+        header = f'PVC binding issue detected: {pvc_details}.'
+    else:
+        header = 'PVC binding issue detected.'
+    debug_lines = ['To debug, run:', '  sky volumes ls']
+    if pvc_names:
+        # kubectl describe pvc can take multiple PVC names as args
+        pvc_names_str = ' '.join(pvc_names)
+        debug_lines.append(
+            f'  kubectl describe pvc {pvc_names_str} -n {namespace}')
+    return (f'{header}\n'
+            'Check if the storage class supports the requested access '
+            'mode and if there is sufficient storage capacity.\n' +
+            '\n'.join(debug_lines))
+
+
+def _get_pvc_binding_status(namespace: str, context: Optional[str],
+                            pod: Any) -> Optional[str]:
+    """Check if any PVCs used by a pod are pending/unbound.
+
+    Returns an error message if any PVC is pending, None otherwise.
+    """
+    if pod.spec.volumes is None:
+        return None
+
+    pending_pvcs = []  # List of (pvc_name, details_string)
+    for vol in pod.spec.volumes:
+        pvc_claim = vol.persistent_volume_claim
+        if pvc_claim is None:
+            continue
+        pvc_name = pvc_claim.claim_name
+        try:
+            pvc = kubernetes.core_api(
+                context).read_namespaced_persistent_volume_claim(
+                    name=pvc_name,
+                    namespace=namespace,
+                    _request_timeout=kubernetes.API_TIMEOUT)
+            if pvc.status.phase == 'Pending':
+                # Get events for the PVC to understand why it's pending
+                sorted_events = kubernetes_utils.get_pvc_events(context,
+                                                                namespace,
+                                                                pvc_name,
+                                                                reverse=False)
+                event_messages = []
+                for event in sorted_events:
+                    if event.type == 'Warning' or event.reason in (
+                            'ProvisioningFailed', 'WaitForFirstConsumer'):
+                        msg = event.message or ''
+                        if msg:
+                            event_messages.append(f'{event.reason}: {msg}')
+                pending_info = f'{pvc_name} (phase: Pending)'
+                if event_messages:
+                    # Take the most recent event message
+                    pending_info += f' - {event_messages[-1]}'
+                pending_pvcs.append((pvc_name, pending_info))
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to get PVC {pvc_name} status: {e}')
+            continue
+
+    if pending_pvcs:
+        pvc_names = [pvc[0] for pvc in pending_pvcs]
+        pvc_details = ', '.join(pvc[1] for pvc in pending_pvcs)
+        return _format_pvc_binding_error(pvc_details, pvc_names, namespace)
+    return None
+
+
 def _raise_pod_scheduling_errors(namespace, context, new_nodes):
     """Raise pod scheduling failure reason.
 
@@ -294,9 +373,24 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                     insufficent_resources=nice_names,
                 )
 
-            raise config_lib.KubernetesError(f'{timeout_err_msg} '
-                                             f'Pod status: {pod_status} '
-                                             f'Details: \'{event_message}\' ')
+        # Check for PVC binding issues
+        pvc_error = _get_pvc_binding_status(namespace, context, pod)
+        has_pvc_issue = (event_message is not None and
+                         'unbound immediate PersistentVolumeClaims'
+                         in event_message)
+        if pvc_error is not None or has_pvc_issue:
+            pvc_msg = pvc_error if pvc_error else (_format_pvc_binding_error(
+                pvc_details=None, pvc_names=[], namespace=namespace))
+            err_msg = f'{pvc_msg}\nPod status: {pod_status}'
+            if event_message:
+                err_msg += f' Details: \'{event_message}\''
+            raise config_lib.KubernetesError(err_msg)
+
+        err_msg = f'{timeout_err_msg} Pod status: {pod_status}'
+        if event_message:
+            err_msg += f' Details: \'{event_message}\''
+        raise config_lib.KubernetesError(err_msg)
+
     raise config_lib.KubernetesError(f'{timeout_err_msg}')
 
 
@@ -388,6 +482,15 @@ def _cluster_maybe_autoscaling(namespace, context, search_start) -> bool:
         return False
 
 
+def _update_spinner_message(*, iteration: int, pods: List[Any],
+                            context: Optional[str], namespace: str,
+                            cluster_name_on_cloud: str,
+                            cluster_name: str) -> None:
+    del iteration, pods, context, namespace  #unused
+    del cluster_name_on_cloud, cluster_name  #unused
+    pass
+
+
 @timeline.event
 def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                                cluster_name: str,
@@ -428,6 +531,7 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
             return True
         return time.time() - start_time < timeout
 
+    iteration = 0
     while _evaluate_timeout():
         # Get all pods in a single API call using the cluster name label
         # which all pods in new_nodes should share
@@ -480,7 +584,15 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
                 rich_utils.force_update_status(
                     ux_utils.spinner_message(f'Launching ({msg})',
                                              cluster_name=cluster_name))
+        if not is_autoscaling:
+            _update_spinner_message(iteration=iteration,
+                                    pods=pods,
+                                    context=context,
+                                    namespace=namespace,
+                                    cluster_name_on_cloud=cluster_name_on_cloud,
+                                    cluster_name=cluster_name)
 
+        iteration += 1
         time.sleep(1)
 
     # Handle pod scheduling errors
@@ -609,10 +721,13 @@ def _wait_for_pods_to_run(namespace, context, cluster_name, new_pods):
             # TODO(kevin): Should we take provision_timeout into account here,
             # instead of hardcoding the number of retries?
             if missing_pods_retry >= _MAX_MISSING_PODS_RETRIES:
+                first_pod = True
                 for pod_name in missing_pod_names:
                     reason = _get_pod_missing_reason(context, namespace,
-                                                     cluster_name, pod_name)
+                                                     cluster_name, pod_name,
+                                                     first_pod)
                     logger.warning(f'Pod {pod_name} missing: {reason}')
+                    first_pod = False
                 raise config_lib.KubernetesError(
                     f'Failed to get all pods after {missing_pods_retry} '
                     f'retries. Some pods may have been terminated or failed '
@@ -954,6 +1069,14 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         pod_spec['metadata']['labels'] = tags
     pod_spec['metadata']['labels'].update(
         {constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud})
+    # Add the cluster name as an annotation to the pod spec.
+    # We cannot use a label because label values have both
+    # a length limit and charset limit (i.e no special chars).
+    # Annotations are not subject to these limits.
+    # This annotation is used to identify the cluster name from the pod
+    pod_spec['metadata'].setdefault('annotations', {}).update({
+        'skypilot-cluster-name': cluster_name,
+    })
 
     ephemeral_volumes = provider_config.get('ephemeral_volume_infos')
     if ephemeral_volumes:
@@ -1290,8 +1413,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     try:
         return _create_pods(region, cluster_name, cluster_name_on_cloud, config)
     except (kubernetes.api_exception(), config_lib.KubernetesError) as e:
-        e_msg = common_utils.format_exception(e).replace('\n', ' ')
-        logger.warning('run_instances: Error occurred when creating pods: '
+        e_msg = common_utils.format_exception(e)
+        logger.warning('run_instances: Error occurred when creating pods:\n'
                        f'{e_msg}')
         raise
 
@@ -1532,7 +1655,8 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
     Checks both pod conditions (for preemption/disruption) and
     container statuses (for exit codes/errors).
     """
-    latest_timestamp = pod.status.start_time or datetime.datetime.min
+    utc_min_time = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+    latest_timestamp = (pod.status.start_time or utc_min_time)
     ready_state = 'Unknown'
     termination_reason = 'Terminated unexpectedly'
     container_reasons = []
@@ -1645,8 +1769,35 @@ def _get_pod_pending_reason(context: Optional[str], namespace: str,
     return None
 
 
+def _format_pod_missing_reason(
+        *, context: Optional[str], pod_name: str, event: Any, cluster_name: str,
+        transitioned_at: int,
+        first_pod: bool) -> Tuple[str, global_user_state.ClusterEventType]:
+    """Format pod missing reason.
+
+    Args:
+        context: The context of the Kubernetes cluster.
+        pod_name: The name of the pod.
+        event: The event object.
+        cluster_name: The name of the cluster.
+        transitioned_at: The timestamp of the event.
+        first_pod: Whether this is the first pod.
+                   Used in cases where some logic only needs to be run
+                   for one pod in the cluster.
+
+    Returns:
+        A tuple of the formatted event string and the event type.
+    """
+    del first_pod, context, cluster_name, transitioned_at  #unused
+    event_str = (f'[kubernetes pod {pod_name}] '
+                 f'{event.reason} {event.message}')
+    event_type = global_user_state.ClusterEventType.DEBUG
+    return event_str, event_type
+
+
 def _get_pod_missing_reason(context: Optional[str], namespace: str,
-                            cluster_name: str, pod_name: str) -> Optional[str]:
+                            cluster_name: str, pod_name: str,
+                            first_pod: bool) -> Optional[str]:
     """Get events for missing pod and write to cluster events."""
     logger.debug(f'Analyzing events for pod {pod_name}')
     pod_events = _get_pod_events(context, namespace, pod_name)
@@ -1666,14 +1817,21 @@ def _get_pod_missing_reason(context: Optional[str], namespace: str,
             # Try inserting the latest events first. If the event is a
             # duplicate, it means the event (and any previous events) have
             # already been inserted - so do not insert further events.
+            transitioned_at = int(event.metadata.creation_timestamp.timestamp())
+            event_str, event_type = _format_pod_missing_reason(
+                context=context,
+                pod_name=pod_name,
+                event=event,
+                first_pod=first_pod,
+                cluster_name=cluster_name,
+                transitioned_at=transitioned_at)
             try:
                 global_user_state.add_cluster_event(
                     cluster_name,
-                    None, f'[kubernetes pod {pod_name}] '
-                    f'{event.reason} {event.message}',
-                    global_user_state.ClusterEventType.DEBUG,
-                    transitioned_at=int(
-                        event.metadata.creation_timestamp.timestamp()),
+                    None,
+                    event_str,
+                    event_type,
+                    transitioned_at=transitioned_at,
                     expose_duplicate_error=True)
                 logger.debug(f'[pod {pod_name}] encountered new pod event: '
                              f'{event.metadata.creation_timestamp} '
@@ -1912,13 +2070,15 @@ def query_instances(
             for service in provider_config.get('services', [])
         ]))
 
+    first_pod = True
     for target_pod_name in target_pod_names:
         if target_pod_name not in cluster_status:
             # If the pod is not in the cluster_status, it means it's not
             # running.
             # Analyze what happened to the pod based on events.
             reason = _get_pod_missing_reason(context, namespace, cluster_name,
-                                             target_pod_name)
+                                             target_pod_name, first_pod)
+            first_pod = False
             reason = (f'{target_pod_name}: {reason}'
                       if reason is not None else None)
             if not non_terminated_only:

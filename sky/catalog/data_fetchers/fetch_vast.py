@@ -50,7 +50,7 @@ if __name__ == '__main__':
                    ('num_gpus', 'AcceleratorCount'), ('cpu_cores', 'vCPUs'),
                    ('cpu_ram', 'MemoryGiB'), ('gpu_name', 'GpuInfo'),
                    ('search.totalHour', 'Price'), ('min_bid', 'SpotPrice'),
-                   ('geolocation', 'Region'))
+                   ('geolocation', 'Region'), ('hosting_type', 'HostingType'))
 
     # Vast has a wide variety of machines, some of
     # which will have less diskspace and network
@@ -138,7 +138,9 @@ if __name__ == '__main__':
 
         maxBid = max([x.get('SpotPrice') for x in toList])
         for instance in toList:
-            stub = f'{instance["InstanceType"]} {instance["Region"][-2:]}'
+            hosting_type = instance.get('HostingType', 0)
+            stub = (f'{instance["InstanceType"]} '
+                    f'{instance["Region"][-2:]} {hosting_type}')
             if stub in seen:
                 printstub = f'{stub}#print'
                 if printstub not in seen:

@@ -20,6 +20,7 @@ from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as sky_cloud
 from sky.usage import usage_lib
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import registry
@@ -781,7 +782,7 @@ class Optimizer:
         def _instance_type_str(resources: 'resources_lib.Resources') -> str:
             instance_type = resources.instance_type
             assert instance_type is not None, 'Instance type must be specified'
-            if isinstance(resources.cloud, clouds.Kubernetes):
+            if isinstance(resources.cloud, (clouds.Kubernetes, clouds.Slurm)):
                 instance_type = '-'
                 if resources.use_spot:
                     instance_type = ''
@@ -865,11 +866,12 @@ class Optimizer:
                 'use_spot': resources.use_spot
             }
 
-            # Handle special case for Kubernetes and SSH clouds
-            if isinstance(resources.cloud, clouds.Kubernetes):
+            # Handle special case for Kubernetes, SSH, and SLURM clouds
+            if isinstance(resources.cloud, (clouds.Kubernetes, clouds.Slurm)):
                 # Region for Kubernetes-like clouds (SSH, Kubernetes) is the
-                # context name, i.e. different Kubernetes clusters. We add
-                # region to the key to show all the Kubernetes clusters in the
+                # context name, i.e. different Kubernetes clusters.
+                # Region for SLURM is the cluster name.
+                # We add region to the key to show all the clusters in the
                 # optimizer table for better UX.
 
                 if resources.cloud.__class__.__name__ == 'SSH':
@@ -1289,7 +1291,7 @@ def _check_specified_regions(task: task_lib.Task) -> None:
         msg = f'Task{task_name} requires '
         if region not in existing_contexts:
             if is_ssh:
-                infra_str = f'SSH/{region.lstrip("ssh-")}'
+                infra_str = f'SSH/{common_utils.removeprefix(region, "ssh-")}'
             else:
                 infra_str = f'Kubernetes/{region}'
             logger.warning(f'{infra_str} is not enabled.')

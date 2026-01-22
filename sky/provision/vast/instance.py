@@ -1,9 +1,11 @@
 """Vast instance provisioning."""
+from pathlib import Path
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.provision import common
+from sky.provision import docker_utils
 from sky.provision.vast import utils
 from sky.utils import common_utils
 from sky.utils import status_lib
@@ -50,6 +52,37 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     del cluster_name  # unused
     pending_status = ['CREATED', 'RESTARTING']
 
+    create_instance_kwargs = config.provider_config.get(
+        'create_instance_kwargs', {})
+    logger.debug(f'provider_config: {config.provider_config}')
+    logger.debug(f'create_instance_kwargs from provider_config: '
+                 f'{create_instance_kwargs}')
+
+    # Get SSH public key path and read the content for vast.ai key injection
+    ssh_public_key_path = config.authentication_config.get('ssh_public_key')
+    ssh_public_key = None
+    if ssh_public_key_path:
+        try:
+            expanded_path = Path(ssh_public_key_path).expanduser()
+            with open(expanded_path, 'r', encoding='utf-8') as f:
+                ssh_public_key = f.read().strip()
+            logger.debug(f'Read SSH public key from {expanded_path}')
+        except OSError as e:
+            logger.warning(f'Failed to read SSH public key from '
+                           f'{ssh_public_key_path}: {e}')
+
+    docker_login_config = config.docker_config.get('docker_login_config')
+    login_args = None
+    image_name = config.node_config['ImageId']
+    if docker_login_config:
+        login_config = (docker_login_config if isinstance(
+            docker_login_config, docker_utils.DockerLoginConfig) else
+                        docker_utils.DockerLoginConfig(**docker_login_config))
+        login_args = (f'-u {login_config.username} '
+                      f'-p {login_config.password} '
+                      f'{login_config.server}')
+        image_name = login_config.format_image(image_name)
+
     created_instance_ids = []
     instances: Dict[str, Any] = {}
 
@@ -89,6 +122,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                           resumed_instance_ids=[],
                                           created_instance_ids=[])
 
+        secure_only = config.provider_config.get('secure_only', False)
         for _ in range(to_start_count):
             node_type = 'head' if head_instance_id is None else 'worker'
             try:
@@ -98,8 +132,14 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     region=region,
                     disk_size=config.node_config['DiskSize'],
                     preemptible=config.node_config['Preemptible'],
-                    image_name=config.node_config['ImageId'],
-                    ports=config.ports_to_open_on_launch)
+                    image_name=image_name,
+                    ports=config.ports_to_open_on_launch,
+                    secure_only=secure_only,
+                    private_docker_registry=docker_login_config is not None,
+                    login=login_args,
+                    create_instance_kwargs=create_instance_kwargs,
+                    ssh_public_key=ssh_public_key,
+                )
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(f'run_instances error: {e}')
                 raise

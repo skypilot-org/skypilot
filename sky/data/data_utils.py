@@ -676,18 +676,32 @@ class Rclone:
                 assert bucket_name is not None
                 rclone_profile_name = self.get_profile_name(bucket_name)
             if self is Rclone.RcloneStores.S3:
-                aws_credentials = (
-                    aws.session().get_credentials().get_frozen_credentials())
-                access_key_id = aws_credentials.access_key
-                secret_access_key = aws_credentials.secret_key
-                config = textwrap.dedent(f"""\
-                    [{rclone_profile_name}]
-                    type = s3
-                    provider = AWS
-                    access_key_id = {access_key_id}
-                    secret_access_key = {secret_access_key}
-                    acl = private
-                    """)
+                if clouds.AWS.should_use_env_auth_for_s3():
+                    # Use environment-based auth for SSO, IAM roles, etc.
+                    # This allows rclone to use the AWS SDK credential chain
+                    # which properly handles temporary credentials and
+                    # container credentials (Pod Identity, IRSA, etc.)
+                    config = textwrap.dedent(f"""\
+                        [{rclone_profile_name}]
+                        type = s3
+                        provider = AWS
+                        env_auth = true
+                        acl = private
+                        """)
+                else:
+                    # Use static credentials for shared-credentials-file
+                    aws_credentials = (aws.session().get_credentials().
+                                       get_frozen_credentials())
+                    access_key_id = aws_credentials.access_key
+                    secret_access_key = aws_credentials.secret_key
+                    config = textwrap.dedent(f"""\
+                        [{rclone_profile_name}]
+                        type = s3
+                        provider = AWS
+                        access_key_id = {access_key_id}
+                        secret_access_key = {secret_access_key}
+                        acl = private
+                        """)
             elif self is Rclone.RcloneStores.GCS:
                 config = textwrap.dedent(f"""\
                     [{rclone_profile_name}]

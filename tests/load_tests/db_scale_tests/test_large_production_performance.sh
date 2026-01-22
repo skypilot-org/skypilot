@@ -302,9 +302,30 @@ echo "✓ Minimal sky launch verified - found expected echo content in logs"
 # Clean up immediately
 sky down "$MINIMAL_CLUSTER_NAME" -y || true
 
-# Step 9: Verify dashboard pages in browser
-echo "Step 9: Verifying dashboard pages in browser..."
+# Step 9: Build dashboard before verification
+echo "Step 9: Building dashboard..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKYPILOT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+DASHBOARD_DIR="${SKYPILOT_ROOT}/sky/dashboard"
+
+if [ -d "$DASHBOARD_DIR" ]; then
+    if command -v npm &> /dev/null; then
+        echo "Installing dashboard dependencies..."
+        npm --prefix "$DASHBOARD_DIR" install
+        echo "Building dashboard..."
+        npm --prefix "$DASHBOARD_DIR" run build
+        echo "✓ Dashboard built successfully"
+    else
+        echo "ERROR: npm not found, cannot build dashboard. Please install Node.js and npm."
+        exit 1
+    fi
+else
+    echo "ERROR: Dashboard directory not found at $DASHBOARD_DIR"
+    exit 1
+fi
+
+# Step 10: Verify dashboard pages in browser
+echo "Step 10: Verifying dashboard pages in browser..."
 VERIFY_SCRIPT="${SCRIPT_DIR}/verify_dashboard_browser.py"
 
 # Get API server endpoint
@@ -325,11 +346,10 @@ fi
 echo "Using API endpoint: $API_ENDPOINT"
 
 if [ -f "$VERIFY_SCRIPT" ]; then
-    python3 "$VERIFY_SCRIPT" --endpoint "$API_ENDPOINT" || {
-        echo "WARNING: Dashboard verification failed, but continuing..."
-    }
+    python3 "$VERIFY_SCRIPT" --endpoint "$API_ENDPOINT"
 else
-    echo "WARNING: Dashboard verification script not found at $VERIFY_SCRIPT, skipping browser verification"
+    echo "ERROR: Dashboard verification script not found at $VERIFY_SCRIPT"
+    exit 1
 fi
 
 echo ""

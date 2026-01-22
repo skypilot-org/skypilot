@@ -43,6 +43,7 @@ QUEUE_GENERIC_CLOUD = 'generic_cloud'
 QUEUE_EKS = 'eks'
 QUEUE_GKE = 'gke'
 QUEUE_KIND = 'kind'
+QUEUE_BENCHMARK = 'single_container'
 # We use a separate queue for generic cloud tests on remote servers because:
 # - generic_cloud queue has high concurrency on a single VM
 # - remote-server requires launching a docker container per test
@@ -63,6 +64,7 @@ CLOUD_QUEUE_MAP = {
     'nebius': QUEUE_GENERIC_CLOUD,
     'lambda': QUEUE_GENERIC_CLOUD,
     'runpod': QUEUE_GENERIC_CLOUD,
+    'slurm': QUEUE_GENERIC_CLOUD,
     'kubernetes': QUEUE_KIND
 }
 
@@ -71,8 +73,11 @@ GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
                        'edit directly.\n')
 
 
-def _get_buildkite_queue(cloud: str, remote_server: bool,
-                         run_on_cloud_kube_backend: bool, args: str) -> str:
+def _get_buildkite_queue(cloud: str,
+                         remote_server: bool,
+                         run_on_cloud_kube_backend: bool,
+                         args: str,
+                         benchmark_test: bool = False) -> str:
     """Get the Buildkite queue for a given cloud.
 
     We use a separate queue for generic cloud tests on remote servers because:
@@ -82,10 +87,16 @@ def _get_buildkite_queue(cloud: str, remote_server: bool,
 
     Kubernetes has low concurrency on a single VM originally,
     so remote-server won't drain VM resources, we can reuse the same queue.
+
+    For benchmark test, we use a dedicated benchmark queue that has guaranteed
+    resources offering to get reliable performance results.
     """
     env_queue = os.environ.get('BUILDKITE_QUEUE', None)
     if env_queue:
         return env_queue
+
+    if benchmark_test:
+        return QUEUE_BENCHMARK
 
     if '--env-file' in args:
         # TODO(zeping): Remove this when test requirements become more varied.
@@ -134,6 +145,8 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--jobs-consolidation', action="store_true")
     parser.add_argument('--grpc', action="store_true")
     parser.add_argument('--env-file')
+    parser.add_argument('--plugin-yaml')
+    parser.add_argument('--submodule-base-branch')
     parser.add_argument('--dependency', nargs='?', const='', default='all')
 
     parsed_args, _ = parser.parse_known_args(args_list)
@@ -178,6 +191,11 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append('--grpc')
     if parsed_args.env_file:
         extra_args.append(f'--env-file {parsed_args.env_file}')
+    if parsed_args.plugin_yaml:
+        extra_args.append(f'--plugin-yaml {parsed_args.plugin_yaml}')
+    if parsed_args.submodule_base_branch:
+        extra_args.append(
+            f'--submodule-base-branch {parsed_args.submodule_base_branch}')
     if parsed_args.dependency != 'all':
         space = ' ' if parsed_args.dependency else ''
         extra_args.append(f'--dependency{space}{parsed_args.dependency}')
@@ -246,6 +264,7 @@ def _extract_marked_tests(
         clouds_to_include = []
         run_on_cloud_kube_backend = ('resource_heavy' in marks and
                                      'kubernetes' in default_clouds_to_run)
+        benchmark_test = 'benchmark' in marks
 
         for mark in marks:
             if mark not in PYTEST_TO_CLOUD_KEYWORD:
@@ -284,7 +303,8 @@ def _extract_marked_tests(
                           ] * (len(final_clouds_to_include) - len(param_list))
         function_cloud_map[function_name] = (final_clouds_to_include, [
             _get_buildkite_queue(cloud, remote_server,
-                                 run_on_cloud_kube_backend, args)
+                                 run_on_cloud_kube_backend, args,
+                                 benchmark_test)
             for cloud in final_clouds_to_include
         ], param_list, [
             extra_args for _ in range(len(final_clouds_to_include))

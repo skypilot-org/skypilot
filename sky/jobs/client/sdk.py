@@ -7,6 +7,7 @@ import click
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.backends import backend_utils
 from sky.client import common as client_common
 from sky.client import sdk
 from sky.schemas.api import responses
@@ -100,9 +101,13 @@ def launch(
                 pool_statuses = sdk.get(pool_status_request_id)
                 if not pool_statuses:
                     raise click.UsageError(f'Pool {pool!r} not found.')
-                resources = pool_statuses[0]['requested_resources_str']
-                click.secho(f'Use resources from pool {pool!r}: {resources}.',
-                            fg='green')
+                # Show the job's requested resources, not the pool worker
+                # resources
+                job_resources_str = backend_utils.get_task_resources_str(
+                    dag.tasks[0], is_managed_job=True)
+                click.secho(
+                    f'Use resources from pool {pool!r}: {job_resources_str}.',
+                    fg='green')
                 if num_jobs is not None:
                     job_identity = f'{num_jobs} managed jobs'
             prompt = f'Launching {job_identity} {dag.name!r}. Proceed?'
@@ -138,6 +143,8 @@ def queue_v2(
     job_ids: Optional[List[int]] = None,
     limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
 ) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
         str, int], int]]:
     """Gets statuses of managed jobs.
@@ -151,6 +158,8 @@ def queue_v2(
         job_ids: IDs of the managed jobs to show.
         limit: Number of jobs to show.
         fields: Fields to get for the managed jobs.
+        sort_by: Field to sort by (e.g., 'job_id', 'name', 'submitted_at').
+        sort_order: Sort direction ('asc' or 'desc').
 
     Returns:
         The request ID of the queue request.
@@ -193,6 +202,8 @@ def queue_v2(
         job_ids=job_ids,
         limit=limit,
         fields=fields,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
     path = '/jobs/queue/v2'
     response = server_common.make_authenticated_request(

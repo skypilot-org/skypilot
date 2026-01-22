@@ -23,6 +23,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import common_utils
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
@@ -65,6 +66,7 @@ class JobInfoLoc(enum.IntEnum):
     PID = 9
     LOG_PATH = 10
     METADATA = 11
+    EXIT_CODES = 12
 
 
 def create_table(cursor, conn):
@@ -123,6 +125,8 @@ def create_table(cursor, conn):
                                  'metadata',
                                  'TEXT DEFAULT \'{}\'',
                                  value_to_replace_existing_entries='{}')
+    db_utils.add_column_to_table(cursor, conn, 'jobs', 'exit_codes',
+                                 'TEXT DEFAULT NULL')
     conn.commit()
 
 
@@ -141,7 +145,7 @@ def init_db(func):
 
         with _db_init_lock:
             if _DB is None:
-                db_path = os.path.expanduser('~/.sky/jobs.db')
+                db_path = runtime_utils.get_runtime_dir_path('.sky/jobs.db')
                 os.makedirs(pathlib.Path(db_path).parents[0], exist_ok=True)
                 _DB = db_utils.SQLiteConn(db_path, create_table)
         return func(*args, **kwargs)
@@ -387,10 +391,16 @@ def add_job(job_name: str,
     assert _DB is not None
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
-    _DB.cursor.execute(
-        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)',
-        (job_name, username, job_submitted_at, JobStatus.INIT.value,
-         run_timestamp, None, resources_str, metadata))
+    if int(constants.SKYLET_VERSION) >= 28:
+        _DB.cursor.execute(
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?, null)',  # pylint: disable=line-too-long
+            (job_name, username, job_submitted_at, JobStatus.INIT.value,
+             run_timestamp, None, resources_str, metadata))
+    else:
+        _DB.cursor.execute(
+            'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0, null, ?)',  # pylint: disable=line-too-long
+            (job_name, username, job_submitted_at, JobStatus.INIT.value,
+             run_timestamp, None, resources_str, metadata))
     _DB.conn.commit()
     rows = _DB.cursor.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                               (run_timestamp,))
@@ -468,6 +478,41 @@ def set_status(job_id: int, status: JobStatus) -> None:
 
 
 @init_db
+def set_exit_codes(job_id: int, exit_codes: List[int]) -> None:
+    """Set exit codes for a job as comma-separated string.
+
+    Args:
+        job_id: The job ID to update.
+        exit_codes: A list of exit codes to store.
+    """
+    assert _DB is not None
+    exit_codes_str = ','.join(str(code) for code in exit_codes)
+    with filelock.FileLock(_get_lock_path(job_id)):
+        _DB.cursor.execute('UPDATE jobs SET exit_codes=(?) WHERE job_id=(?)',
+                           (exit_codes_str, job_id))
+        _DB.conn.commit()
+
+
+@init_db
+def get_exit_codes(job_id: int) -> Optional[List[int]]:
+    """Get exit codes for a job from comma-separated string.
+
+    Args:
+        job_id: The job ID to retrieve exit codes for.
+
+    Returns:
+        A list of exit codes, or None if not found.
+    """
+    assert _DB is not None
+    rows = _DB.cursor.execute('SELECT exit_codes FROM jobs WHERE job_id=(?)',
+                              (job_id,))
+    row = rows.fetchone()
+    if row is None or row[0] is None:
+        return None
+    return [int(code) for code in row[0].split(',')]
+
+
+@init_db
 def set_job_started(job_id: int) -> None:
     # TODO(mraheja): remove pylint disabling when filelock version updated.
     # pylint: disable=abstract-class-instantiated
@@ -503,6 +548,20 @@ def get_status(job_id: int) -> Optional[JobStatus]:
     # pylint: disable=abstract-class-instantiated
     with filelock.FileLock(_get_lock_path(job_id)):
         return get_status_no_lock(job_id)
+
+
+def wait_for_job_completion(job_id: int, poll_interval: float = 1.0) -> None:
+    """Wait for a job to reach a terminal state.
+
+    Args:
+        job_id: The job ID to wait for.
+        poll_interval: How often to poll the job status in seconds.
+    """
+    while True:
+        status = get_status(job_id)
+        if status is None or status.is_terminal():
+            break
+        time.sleep(poll_interval)
 
 
 @init_db
@@ -631,7 +690,8 @@ def get_ray_port():
     If the port file does not exist, the cluster was launched before #1790,
     return the default port.
     """
-    port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
+    port_path = runtime_utils.get_runtime_dir_path(
+        constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 6379
     port = json.load(open(port_path, 'r', encoding='utf-8'))['ray_port']
@@ -644,7 +704,8 @@ def get_job_submission_port():
     If the port file does not exist, the cluster was launched before #1790,
     return the default port.
     """
-    port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
+    port_path = runtime_utils.get_runtime_dir_path(
+        constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 8265
     port = json.load(open(port_path, 'r',
@@ -671,6 +732,14 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
             'pid': row[JobInfoLoc.PID.value],
             'metadata': json.loads(row[JobInfoLoc.METADATA.value]),
         })
+        if int(constants.SKYLET_VERSION) >= 28:
+            exit_code_str = row[JobInfoLoc.EXIT_CODES.value]
+            if not isinstance(exit_code_str, str):
+                records[-1]['exit_codes'] = None
+            else:
+                records[-1]['exit_codes'] = ([
+                    int(code) for code in exit_code_str.split(',')
+                ])
     return records
 
 
@@ -762,7 +831,7 @@ def update_job_status(job_ids: List[int],
     statuses = []
     for job_id in job_ids:
         # Per-job status lock is required because between the job status
-        # query and the job status update, the job status in the databse
+        # query and the job status update, the job status in the database
         # can be modified by the generated ray program.
         with filelock.FileLock(_get_lock_path(job_id)):
             status = None
@@ -1150,6 +1219,15 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
+    def wait_for_job(cls, job_id: int) -> str:
+        code = [
+            # TODO(kevin): backward compatibility, remove in 0.13.0.
+            (f'job_lib.wait_for_job_completion({job_id!r}) if '
+             'hasattr(job_lib, "wait_for_job_completion") else None'),
+        ]
+        return cls._build(code)
+
+    @classmethod
     def update_status(cls) -> str:
         code = ['job_lib.update_status()']
         return cls._build(code)
@@ -1267,7 +1345,18 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
+    def get_job_exit_codes(cls, job_id: Optional[int] = None) -> str:
+        """Generate shell command to retrieve exit codes."""
+        code = [
+            f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',  # pylint: disable=line-too-long
+            'exit_codes = job_lib.get_exit_codes(job_id) if job_id is not None and int(constants.SKYLET_VERSION) >= 28 else {}',  # pylint: disable=line-too-long
+            'print(exit_codes, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         code = ';'.join(code)
-        return f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(code)}'
+        return (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
+                f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(code)}')

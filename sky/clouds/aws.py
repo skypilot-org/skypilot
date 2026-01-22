@@ -12,6 +12,7 @@ import typing
 from typing import (Any, Callable, Dict, Iterator, List, Literal, Optional, Set,
                     Tuple, TypeVar, Union)
 
+import colorama
 from typing_extensions import ParamSpec
 
 from sky import catalog
@@ -84,6 +85,7 @@ _EFA_INSTANCE_TYPE_PREFIXES = [
     'p5e.',
     'p5en.',
     'p6-b200.',
+    'p6-b300.',
 ]
 
 # Docker run options for EFA.
@@ -758,6 +760,36 @@ class AWS(clouds.Cloud):
             max_efa_interfaces = 0
             enable_efa = False
 
+        use_internal_ips = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('use_internal_ips',),
+            default_value=False)
+        if max_efa_interfaces > 1 and not use_internal_ips:
+            logger.warning(
+                f'{colorama.Fore.YELLOW}'
+                f'Instance type {resources.instance_type} supports up to '
+                f'{max_efa_interfaces} EFA interfaces, but '
+                '`use_internal_ips` is not enabled.\nLaunching with the '
+                'current configuration will use only 1 EFA interface.\n'
+                f'To use all {max_efa_interfaces} EFA interfaces, enable '
+                'internal IPs by adding one of the following '
+                'configurations to SkyPilot config:\n'
+                'Option 1 (with SSM):\n'
+                '  aws:\n'
+                '    use_internal_ips: true\n'
+                '    use_ssm: true\n'
+                'Option 2 (with SSH proxy):\n'
+                '  aws:\n'
+                '    use_internal_ips: true\n'
+                '    ssh_proxy_command: ssh -W %h:%p -i <ssh key path> '
+                '-o StrictHostKeyChecking=no <user>@<jump server public'
+                ' ip>\n'
+                'Refer to '
+                'https://docs.skypilot.co/en/latest/reference/config.html'
+                '#aws-use-internal-ips for more details.'
+                f'{colorama.Style.RESET_ALL}')
+
         docker_run_options = []
         if resources.extract_docker_image() is not None:
             image_id_to_use = None
@@ -1005,8 +1037,10 @@ class AWS(clouds.Cloud):
             hints = 'AWS SSO is set.'
             if static_credential_exists:
                 hints += (
-                    ' To ensure multiple clouds work correctly, please use SkyPilot '
-                    'with static credentials (e.g., ~/.aws/credentials) by unsetting '
+                    ' To ensure S3 mounting and other features work correctly '
+                    'on Kubernetes and other clouds, '
+                    'please use SkyPilot with static AWS credentials '
+                    '(e.g., ~/.aws/credentials) by unsetting '
                     'the AWS_PROFILE environment variable.')
             else:
                 hints += single_cloud_hint
@@ -1080,6 +1114,31 @@ class AWS(clouds.Cloud):
             if _is_access_key_of_type(identity_type.value):
                 return identity_type
         return AWSIdentityType.SHARED_CREDENTIALS_FILE
+
+    @classmethod
+    def should_use_env_auth_for_s3(cls) -> bool:
+        """Returns True if S3 should use environment-based auth.
+
+        When using non-static AWS credentials (SSO, IAM role, container role),
+        we should not embed credentials into rclone config. Instead, we should
+        use env_auth=true so that rclone uses the AWS SDK credential chain,
+        which properly handles temporary credentials and IAM roles.
+
+        Returns:
+            True if environment-based auth should be used, False for static
+            credentials that can be embedded.
+        """
+        identity_type = cls._current_identity_type()
+        if identity_type is None:
+            return False
+        # These credential types use temporary credentials that should not be
+        # embedded in config files. They rely on the AWS SDK credential chain.
+        non_static_types = {
+            AWSIdentityType.SSO,
+            AWSIdentityType.IAM_ROLE,
+            AWSIdentityType.CONTAINER_ROLE,
+        }
+        return identity_type in non_static_types
 
     @classmethod
     @aws_profile_aware_lru_cache(scope='request',

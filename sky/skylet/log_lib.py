@@ -171,8 +171,9 @@ def run_with_log(
     line_processor: Optional[log_utils.LineProcessor] = None,
     streaming_prefix: Optional[str] = None,
     log_cmd: bool = False,
+    timeout: Optional[int] = None,
     **kwargs,
-) -> Union[int, Tuple[int, str, str]]:
+) -> Union[int, Tuple[int, str, str], Tuple[int, int]]:
     """Runs a command and logs its output to a file.
 
     Args:
@@ -183,9 +184,17 @@ def run_with_log(
         process_stream: Whether to post-process the stdout/stderr of the
             command, such as replacing or skipping lines on the fly. If
             enabled, lines are printed only when '\r' or '\n' is found.
+        streaming_prefix: Optional prefix for each log line. Can contain {pid}
+            placeholder which will be replaced with the subprocess PID.
+        timeout: Optional timeout in seconds. If the command does not complete
+            within this time, it will be terminated and TimeoutExpired will be
+            raised. None means no timeout (default).
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
+
+    Raises:
+        subprocess.TimeoutExpired: If the command times out.
     """
     assert process_stream or not require_outputs, (
         process_stream, require_outputs,
@@ -228,6 +237,13 @@ def run_with_log(
                 # For backward compatibility, do not specify use_kill_pg by
                 # default.
                 subprocess_utils.kill_process_daemon(proc.pid)
+
+            # Format streaming_prefix with subprocess PID if it contains {pid}
+            formatted_streaming_prefix = streaming_prefix
+            if streaming_prefix and '{pid}' in streaming_prefix:
+                formatted_streaming_prefix = streaming_prefix.format(
+                    pid=proc.pid)
+
             stdout = ''
             stderr = ''
             stdout_stream_handler = None
@@ -256,7 +272,7 @@ def run_with_log(
                     line_processor=line_processor,
                     # Replace CRLF when the output is logged to driver by ray.
                     replace_crlf=with_ray,
-                    streaming_prefix=streaming_prefix,
+                    streaming_prefix=formatted_streaming_prefix,
                 )
                 stdout_stream_handler = functools.partial(
                     _handle_io_stream,
@@ -269,24 +285,65 @@ def run_with_log(
                         _handle_io_stream,
                         args=err_args,
                     )
-            if ctx is not None:
-                # When runs in a coroutine, always process the subprocess
-                # stream to:
-                # 1. handle context cancellation
-                # 2. redirect subprocess stdout/stderr to the contextual
-                #    stdout/stderr of current coroutine.
-                stdout, stderr = context_utils.pipe_and_wait_process(
-                    ctx,
-                    proc,
-                    stdout_stream_handler=stdout_stream_handler,
-                    stderr_stream_handler=stderr_stream_handler)
-            elif process_stream:
-                # When runs in a process, only process subprocess stream if
-                # necessary to avoid unnecessary stream handling overhead.
-                stdout, stderr = process_subprocess_stream(
-                    proc, stdout_stream_handler, stderr_stream_handler)
+            # Use a timer to enforce timeout during stream processing.
+            # Without this, process_subprocess_stream blocks until the process
+            # finishes, making the timeout at proc.wait() ineffective.
+            timeout_triggered = False
+            timer = None
+
+            def _timeout_handler():
+                nonlocal timeout_triggered
+                timeout_triggered = True
+                subprocess_utils.kill_children_processes(proc.pid)
+
+            if timeout is not None:
+                timer = threading.Timer(timeout, _timeout_handler)
+                timer.start()
+
+            try:
+                if ctx is not None:
+                    # When runs in a coroutine, always process the subprocess
+                    # stream to:
+                    # 1. handle context cancellation
+                    # 2. redirect subprocess stdout/stderr to the contextual
+                    #    stdout/stderr of current coroutine.
+                    stdout, stderr = context_utils.pipe_and_wait_process(
+                        ctx,
+                        proc,
+                        stdout_stream_handler=stdout_stream_handler,
+                        stderr_stream_handler=stderr_stream_handler)
+                elif process_stream:
+                    # When runs in a process, only process subprocess stream if
+                    # necessary to avoid unnecessary stream handling overhead.
+                    stdout, stderr = process_subprocess_stream(
+                        proc, stdout_stream_handler, stderr_stream_handler)
+            finally:
+                if timer is not None:
+                    timer.cancel()
+
+            # Check if timeout was triggered during stream processing
+            if timeout_triggered:
+                logger.error(
+                    f'Command timed out after {timeout} seconds: {cmd}')
+                raise subprocess.TimeoutExpired(cmd, timeout)
+
             # Ensure returncode is set.
-            proc.wait()
+            if ctx is not None or process_stream:
+                # Stream processing already waited for process completion, so
+                # proc.wait() will return immediately. We still call it to
+                # ensure proc.returncode is set.
+                proc.wait()
+            else:
+                # No stream processing - use proc.wait with timeout as primary
+                # timeout mechanism.
+                try:
+                    proc.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    # Kill the process and all its children
+                    subprocess_utils.kill_children_processes(proc.pid)
+                    logger.error(
+                        f'Command timed out after {timeout} seconds: {cmd}')
+                    raise
             if require_outputs:
                 return proc.returncode, stdout, stderr
             return proc.returncode
@@ -349,7 +406,8 @@ def run_bash_command_with_log(bash_command: str,
                               log_path: str,
                               env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
-                              with_ray: bool = False):
+                              with_ray: bool = False,
+                              streaming_prefix: Optional[str] = None):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
         bash_command = make_task_bash_script(bash_command, env_vars=env_vars)
@@ -364,6 +422,7 @@ def run_bash_command_with_log(bash_command: str,
                             log_path,
                             stream_logs=stream_logs,
                             with_ray=with_ray,
+                            streaming_prefix=streaming_prefix,
                             shell=True)
 
 
@@ -372,9 +431,14 @@ def run_bash_command_with_log_and_return_pid(
         log_path: str,
         env_vars: Optional[Dict[str, str]] = None,
         stream_logs: bool = False,
-        with_ray: bool = False):
-    return_code = run_bash_command_with_log(bash_command, log_path, env_vars,
-                                            stream_logs, with_ray)
+        with_ray: bool = False,
+        streaming_prefix: Optional[str] = None):
+    return_code = run_bash_command_with_log(bash_command,
+                                            log_path,
+                                            env_vars,
+                                            stream_logs,
+                                            with_ray,
+                                            streaming_prefix=streaming_prefix)
     return {'return_code': return_code, 'pid': os.getpid()}
 
 

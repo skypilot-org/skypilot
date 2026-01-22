@@ -1,16 +1,38 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import {
-  ENDPOINT,
   CLUSTER_NOT_UP_ERROR,
   CLUSTER_DOES_NOT_EXIST,
   NOT_SUPPORTED_ERROR,
 } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
 import { apiClient } from './client';
+import { applyEnhancements } from '@/plugins/dataEnhancement';
+
+// ============ Pagination Plugin Integration ============
+
+/**
+ * Check if the jobs pagination plugin is available.
+ * The plugin sets window.__skyJobsPaginationFetch when loaded.
+ * With requires_early_init=True, the plugin is guaranteed to be
+ * loaded before any API calls complete.
+ */
+function isJobsPaginationPluginAvailable() {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.__skyJobsPaginationFetch === 'function'
+  );
+}
+
+/**
+ * Get the jobs pagination plugin fetch function
+ */
+function getJobsPaginationFetch() {
+  return typeof window !== 'undefined' ? window.__skyJobsPaginationFetch : null;
+}
 
 // Configuration
-const DEFAULT_TAIL_LINES = 10000;
+const DEFAULT_TAIL_LINES = 5000;
 const DEFAULT_FIELDS = [
   'job_id',
   '_job_id',
@@ -32,6 +54,7 @@ const DEFAULT_FIELDS = [
   'pool_hash',
   'details',
   'failure_reason',
+  'links',
 ];
 
 export async function getManagedJobs(options = {}) {
@@ -215,16 +238,25 @@ export async function getManagedJobs(options = {}) {
         dag_yaml: job.user_yaml,
         entrypoint: job.entrypoint,
         git_commit: job.metadata?.git_commit || '-',
+        links: job.links || {},
         pool: job.pool,
         pool_hash: job.pool_hash,
         current_cluster_name: job.current_cluster_name,
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
         accelerators: job.accelerators, // Include accelerators field
+        labels: job.labels || {}, // Include labels field
       };
     });
 
+    // Apply plugin data enhancements
+    // Pass raw backend data so enhancements can extract fields directly
+    const enhancedJobs = await applyEnhancements(jobData, 'jobs', {
+      dashboardCache,
+      rawData: managedJobs, // Raw backend response for field extraction
+    });
+
     return {
-      jobs: jobData,
+      jobs: enhancedJobs,
       total,
       totalNoFilter,
       controllerStopped: false,
@@ -506,8 +538,6 @@ export async function streamManagedJobLogs({
   };
 
   const timeoutPromise = createTimeoutPromise();
-  const baseUrl = window.location.origin;
-  const fullEndpoint = `${baseUrl}${ENDPOINT}`;
 
   // Create the fetch promise
   const fetchPromise = (async () => {
@@ -519,15 +549,12 @@ export async function streamManagedJobLogs({
         tail: DEFAULT_TAIL_LINES,
       };
 
-      const response = await fetch(`${fullEndpoint}/jobs/logs`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-        // Only use the signal if it's provided
-        ...(signal ? { signal } : {}),
-      });
+      const response = await apiClient.fetchImmediate(
+        '/jobs/logs',
+        requestBody,
+        'POST',
+        { signal }
+      );
 
       // Stream the logs
       const reader = response.body.getReader();
@@ -619,18 +646,12 @@ export async function handleJobAction(action, jobId, cluster) {
   // Show initial notification
   showToast(`${logStarter} job ${jobId}...`, 'info');
 
-  const baseUrl = window.location.origin;
-  const fullEndpoint = `${baseUrl}${ENDPOINT}`;
-
   try {
     try {
-      const response = await fetch(`${fullEndpoint}/${apiPath}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
+      const response = await apiClient.fetchImmediate(
+        `/${apiPath}`,
+        requestBody
+      );
       if (!response.ok) {
         console.error(
           `Initial API request ${apiPath} failed with status ${response.status}`
@@ -651,8 +672,10 @@ export async function handleJobAction(action, jobId, cluster) {
         );
         return;
       }
-      const finalResponse = await fetch(
-        `${fullEndpoint}/api/get?request_id=${id}`
+      const finalResponse = await apiClient.fetchImmediate(
+        `/api/get?request_id=${id}`,
+        undefined,
+        'GET'
       );
 
       // Check the status code of the final response
@@ -755,12 +778,8 @@ export async function downloadManagedJobLogs({
     }
 
     // Step 2: request the zip and trigger browser download
-    const baseUrl = window.location.origin;
-    const fullUrl = `${baseUrl}${ENDPOINT}/download`;
-    const resp = await fetch(`${fullUrl}?relative=items`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ folder_paths: folderPaths }),
+    const resp = await apiClient.fetchImmediate('/download?relative=items', {
+      folder_paths: folderPaths,
     });
     if (!resp.ok) {
       const text = await resp.text();
@@ -782,4 +801,243 @@ export async function downloadManagedJobLogs({
     console.error('Error downloading managed job logs:', error);
     showToast(`Error downloading managed job logs: ${error.message}`, 'error');
   }
+}
+
+// ============ useJobsData Hook ============
+
+/**
+ * Hook for jobs data with pagination support.
+ * If the pagination plugin is available, uses server-side pagination.
+ * Otherwise, falls back to client-side pagination with getManagedJobs.
+ *
+ * With requires_early_init=True, the plugin is guaranteed to be loaded
+ * before the first API call completes, so we just need a simple check.
+ *
+ * @param {Object} options - Hook options
+ * @param {number} [options.refreshInterval] - Auto-refresh interval in ms
+ * @param {Object} [options.sortConfig] - Sort configuration { key, direction }
+ * @param {Array} [options.filters] - Array of filter objects
+ * @param {Array} [options.statuses] - Array of status strings to filter by
+ * @param {number} [options.initialPage=1] - Initial page number
+ * @param {number} [options.initialLimit=10] - Initial page size/limit
+ * @returns {Object} Jobs data with pagination state and actions
+ */
+export function useJobsData(options = {}) {
+  const {
+    refreshInterval = null,
+    sortConfig = { key: null, direction: 'ascending' },
+    filters = [],
+    statuses = [],
+    initialPage = 1,
+    initialLimit = 10,
+  } = options;
+
+  // Convert sortConfig to API format
+  // Default to submitted_at desc (newest first) when no sort is specified
+  const sortBy = sortConfig.key || 'submitted_at';
+  const sortOrder = sortConfig.key
+    ? sortConfig.direction === 'ascending'
+      ? 'asc'
+      : 'desc'
+    : 'desc';
+
+  // Serialize filters for stable dependency comparison
+  const filtersKey = JSON.stringify(filters);
+  const statusesKey = JSON.stringify(statuses);
+
+  const [data, setData] = useState([]);
+  const [fullData, setFullData] = useState([]); // Full dataset for client-side filtering
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(initialPage);
+  const [limit, setLimit] = useState(initialLimit);
+  const [total, setTotal] = useState(0);
+  const [totalNoFilter, setTotalNoFilter] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [hasNext, setHasNext] = useState(false);
+  const [hasPrev, setHasPrev] = useState(false);
+  const [error, setError] = useState(null);
+  const [isServerPagination, setIsServerPagination] = useState(false);
+  const [controllerStopped, setControllerStopped] = useState(false);
+  const [statusCounts, setStatusCounts] = useState({});
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [filtersKey, statusesKey]);
+
+  /**
+   * Fetch jobs using server-side pagination (plugin path)
+   */
+  const fetchServerSide = useCallback(async () => {
+    console.log('[useJobsData] Using server-side pagination');
+    const pluginFetch = getJobsPaginationFetch();
+
+    const result = await dashboardCache.get(pluginFetch, [
+      {
+        page,
+        limit,
+        sortBy,
+        sortOrder,
+        filters,
+        statuses,
+      },
+    ]);
+
+    // Handle controller stopped
+    if (result.controllerStopped) {
+      setControllerStopped(true);
+      setData([]);
+      setFullData([]);
+      setTotal(0);
+      setTotalPages(0);
+      return;
+    }
+
+    const resultTotal = result.total || 0;
+    const resultTotalNoFilter = result.totalNoFilter || resultTotal;
+    const resultTotalPages = result.totalPages || result.total_pages || 1;
+    const resultHasNext = result.hasNext || result.has_next || false;
+    const resultHasPrev = result.hasPrev || result.has_prev || false;
+    const resultData = result.items || result.data || [];
+
+    setData(resultData);
+    setFullData(resultData);
+    setTotal(resultTotal);
+    setTotalNoFilter(resultTotalNoFilter);
+    setTotalPages(resultTotalPages);
+    setHasNext(resultHasNext);
+    setHasPrev(resultHasPrev);
+    setIsServerPagination(true);
+    setControllerStopped(false);
+    setStatusCounts(result.statusCounts || {});
+
+    // Prefetch next page in background if there is one
+    if (resultHasNext) {
+      const nextPageOptions = {
+        page: page + 1,
+        limit,
+        sortBy,
+        sortOrder,
+        filters,
+        statuses,
+      };
+      dashboardCache
+        .get(pluginFetch, [nextPageOptions])
+        .then(() => console.log('[useJobsData] Prefetched page', page + 1))
+        .catch((err) => console.warn('[useJobsData] Prefetch failed:', err));
+    }
+  }, [page, limit, sortBy, sortOrder, filters, statuses]);
+
+  /**
+   * Fetch jobs using client-side pagination (default path)
+   */
+  const fetchClientSide = useCallback(async () => {
+    console.log('[useJobsData] Using client-side pagination');
+
+    const response = await dashboardCache.get(getManagedJobs, [
+      { allUsers: true },
+    ]);
+
+    // Handle controller stopped
+    if (response.controllerStopped) {
+      setControllerStopped(true);
+      setData([]);
+      setFullData([]);
+      setTotal(0);
+      setTotalPages(0);
+      return;
+    }
+
+    const allJobs = response.jobs || [];
+
+    // Client-side pagination
+    const clientTotal = allJobs.length;
+    const clientTotalPages = Math.ceil(clientTotal / limit) || 1;
+    const startIndex = (page - 1) * limit;
+    const paginatedData = allJobs.slice(startIndex, startIndex + limit);
+
+    setData(paginatedData);
+    setFullData(allJobs);
+    setTotal(clientTotal);
+    setTotalNoFilter(response.totalNoFilter || clientTotal);
+    setTotalPages(clientTotalPages);
+    setHasNext(page < clientTotalPages);
+    setHasPrev(page > 1);
+    setIsServerPagination(false);
+    setControllerStopped(false);
+    setStatusCounts(response.statusCounts || {});
+  }, [page, limit]);
+
+  /**
+   * Main fetch function - chooses server or client path
+   */
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      if (isJobsPaginationPluginAvailable()) {
+        await fetchServerSide();
+      } else {
+        await fetchClientSide();
+      }
+    } catch (fetchError) {
+      console.error('[useJobsData] Error fetching jobs:', fetchError);
+      setError(fetchError);
+      setData([]);
+      setFullData([]);
+    }
+
+    setLoading(false);
+  }, [fetchServerSide, fetchClientSide]);
+
+  // Fetch data on mount and when dependencies change
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Auto-refresh
+  useEffect(() => {
+    if (!refreshInterval) return;
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchData();
+      }
+    }, refreshInterval);
+    return () => clearInterval(interval);
+  }, [refreshInterval, fetchData]);
+
+  // Handle limit change - reset to page 1
+  const handleSetLimit = useCallback((newLimit) => {
+    setLimit(newLimit);
+    setPage(1);
+  }, []);
+
+  return {
+    // Data - current page slice (paginated)
+    data,
+    // allData - full dataset for client-side filtering (in server mode, same as data)
+    allData: fullData,
+    total,
+    totalNoFilter,
+    statusCounts,
+
+    // Pagination state
+    page,
+    limit,
+    totalPages,
+    hasNext,
+    hasPrev,
+
+    // Pagination actions
+    setPage,
+    setLimit: handleSetLimit,
+
+    // Other
+    loading,
+    error,
+    refresh: fetchData,
+    isServerPagination,
+    controllerStopped,
+  };
 }

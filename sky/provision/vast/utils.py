@@ -5,6 +5,8 @@
 # python sdk.
 #
 """Vast library wrapper for SkyPilot."""
+from pathlib import Path
+import shlex
 from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
@@ -33,61 +35,83 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
     return instance_dict
 
 
-def launch(name: str, instance_type: str, region: str, disk_size: int,
-           image_name: str, ports: Optional[List[int]],
-           preemptible: bool) -> str:
+def launch(name: str,
+           instance_type: str,
+           region: str,
+           disk_size: int,
+           image_name: str,
+           ports: Optional[List[int]],
+           preemptible: bool,
+           secure_only: bool,
+           private_docker_registry: Optional[bool] = None,
+           login: Optional[str] = None,
+           create_instance_kwargs: Optional[Dict[str, Any]] = None,
+           ssh_public_key: Optional[str] = None) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the Vast GPU name, finds the specs for the
-    GPU, and launches the instance.
+    GPU, and launches the instance. User-provided parameters in
+    create_instance_kwargs are passed through to the Vast API, allowing full
+    access to Vast's instance creation options.
+
+    Supported Vast API parameters (via create_instance_kwargs):
+      - image: Docker image to use
+      - env: Environment variables (e.g., "-e KEY=value -p 8080:8080")
+      - price/bid_price: Bid price for the instance
+      - disk: Disk size in GB
+      - label: Instance label
+      - extra: Extra docker run arguments
+      - onstart_cmd: Command to run on instance start
+      - onstart: Path to a local script file to run on start
+      - login: Docker registry login (e.g., "-u user -p pass registry")
+      - python_utf8: Enable Python UTF-8 mode
+      - lang_utf8: Enable system UTF-8 locale
+      - jupyter_lab: Use JupyterLab instead of Jupyter
+      - jupyter_dir: Jupyter notebook directory
+      - force: Force creation even if warnings
+      - cancel_unavail: Cancel if unavailable
+      - template_hash/template_hash_id: Use a template
+      - args: Custom docker command arguments as list of strings
+      - user: Run as specific user
 
     Notes:
-
       *  `georegion`: This is a feature flag to provide an additional
          scope of geographical specificy while maintaining backward
          compatibility.
-
       *  `chunked`: This is a feature flag to give breadth to the
          snowflake nature of the vast catalog marketplace. It rounds
          down various specifications of machines to emulate an instance
          type and make them more interchangeable.
-
       *  `disk_size`: We look for instances that are of the requested
          size or greater than it. For instance, `disk_size=100` might
          return something with `disk_size` at 102 or even 1000.
-
          The disk size {xx} GB is not exactly matched the requested
          size {yy} GB. It is possible to charge extra cost on disk.
-
       *  `ports`: This is a feature flag to expose ports to the internet.
-
       *  `geolocation`: Geolocation on Vast can be as specific as the
          host chooses to be. They can say, for instance, "Yutakachō,
          Shinagawa District, Tokyo, JP." Such a specific geolocation
          as ours would fail to return this host in a simple string
          comparison if a user searched for "JP".
-
          Since regardless of specificity, all our geolocations end
          in two-letter country codes we just snip that to conform
          to how many providers state their geolocation.
-
       *  Since the catalog is cached, we can't gaurantee availability
          of any machine at the point of inquiry.  As a consequence we
          search for the machine again and potentially return a failure
          if there is no availability.
-
 	  *  We pass in the cpu_ram here as a guarantor to make sure the
 		 instance we match with will be compliant with the requested
 		 amount of memory.
-
       *  Vast instance types are an invention for skypilot. Refer to
          catalog/vast_catalog.py for the current construction
-         of the type."""
+         of the type.
+    """
     cpu_ram = float(instance_type.split('-')[-1]) / 1024
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
 
-    query = ' '.join([
+    query = [
         'chunked=true',
         'georegion=true',
         f'geolocation="{region[-2:]}"',
@@ -95,34 +119,117 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
         f'num_gpus={num_gpus}',
         f'gpu_name="{gpu_name}"',
         f'cpu_ram>="{cpu_ram}"',
-    ])
+    ]
+    if secure_only:
+        query.append('datacenter=true')
+        query.append('hosting_type>=1')
+    query_str = ' '.join(query)
 
-    instance_list = vast.vast().search_offers(query=query)
+    instance_list = vast.vast().search_offers(query=query_str)
 
     if isinstance(instance_list, int) or len(instance_list) == 0:
         raise RuntimeError('Failed to create instances, could not find an '
-                           f'offer that satisfies the requirements "{query}".')
+                           'offer that satisfies the requirements '
+                           f'"{query_str}".')
 
     instance_touse = instance_list[0]
 
+    # Start with user-provided kwargs as the base
+    launch_params: Dict[str, Any] = dict(create_instance_kwargs or {})
+    # Remove None values to avoid overriding defaults
+    launch_params = {k: v for k, v in launch_params.items() if v is not None}
+
+    # Required skypilot parameters
+    launch_params['id'] = instance_touse['id']
+    launch_params['direct'] = True
+    launch_params['ssh'] = True
+    # Use user's label if provided, otherwise use skypilot name
+    if 'label' not in launch_params:
+        launch_params['label'] = name
+
+    # Handle template - normalize both key names
+    template_hash_id = launch_params.pop('template_hash_id', None)
+    if template_hash_id is None:
+        template_hash_id = launch_params.pop('template_hash', None)
+    use_template = template_hash_id is not None
+
+    if use_template:
+        launch_params['template_hash'] = template_hash_id
+        launch_params['template_hash_id'] = template_hash_id
+
+    # Handle image - user can override, but required if no template
+    if 'image' not in launch_params and not use_template:
+        launch_params['image'] = image_name
+
+    # Handle disk - user can override
+    if 'disk' not in launch_params and not use_template:
+        launch_params['disk'] = disk_size
+
+    # Handle login - from function arg or user kwargs
+    if login and 'login' not in launch_params:
+        launch_params['login'] = login
+    if private_docker_registry and 'login' not in launch_params:
+        raise RuntimeError(
+            'Private docker registry requested but no login credentials '
+            'were provided.')
+
+    # Handle price/bid_price - user can override
+    if 'price' in launch_params:
+        # Normalize to bid_price for SDK compatibility
+        launch_params['bid_price'] = launch_params.pop('price')
+    if 'bid_price' not in launch_params and preemptible:
+        launch_params['bid_price'] = instance_touse.get('min_bid')
+
+    # Handle onstart_cmd - read from file if onstart path provided
+    user_onstart_cmd = launch_params.pop('onstart_cmd', None)
+    onstart_path = launch_params.pop('onstart', None)
+    if onstart_path is not None:
+        try:
+            onstart_from_file = Path(onstart_path).read_text(encoding='utf-8')
+        except OSError as e:
+            raise RuntimeError(
+                f'Failed to read onstart script {onstart_path}: {e}') from e
+        if user_onstart_cmd:
+            user_onstart_cmd = f'{user_onstart_cmd};{onstart_from_file}'
+        else:
+            user_onstart_cmd = onstart_from_file
+
+    # Build onstart command - always prepend skypilot requirements
+    # These commands are critical for SkyPilot operation and must always run,
+    # even when using a template
+    skypilot_onstart = [
+        'touch ~/.no_auto_tmux',
+        f'echo "{vast.vast().api_key_access}" > ~/.vast_api_key',
+    ]
+
+    # Inject SSH public key into authorized_keys if provided
+    if ssh_public_key:
+        # Add commands to inject SSH key into authorized_keys
+        skypilot_onstart.extend([
+            'mkdir -p ~/.ssh',
+            'chmod 700 ~/.ssh',
+            # Add a newline first to ensure keys are on separate lines
+            'echo "" >> ~/.ssh/authorized_keys',
+            (f'echo "{shlex.quote(ssh_public_key.strip())}" >> '
+             '~/.ssh/authorized_keys'),
+            'chmod 600 ~/.ssh/authorized_keys',
+        ])
+        logger.debug('Added SSH key injection to onstart_cmd')
+
+    if user_onstart_cmd:
+        skypilot_onstart.append(user_onstart_cmd)
+    launch_params['onstart_cmd'] = ';'.join(skypilot_onstart)
+
+    # Handle env - merge port mappings and user env
+    # Always include __SOURCE=skypilot for instance tracking
+    user_env = launch_params.pop('env', None)
     port_map = ' '.join([f'-p {p}:{p}' for p in ports]) if ports else ''
-
-    launch_params = {
-        'id': instance_touse['id'],
-        'direct': True,
-        'ssh': True,
-        'env': f'-e __SOURCE=skypilot {port_map}',
-        'onstart_cmd': ';'.join([
-            'touch ~/.no_auto_tmux',
-            f'echo "{vast.vast().api_key_access}" > ~/.vast_api_key',
-        ]),
-        'label': name,
-        'image': image_name,
-        'disk': disk_size
-    }
-
-    if preemptible:
-        launch_params['min_bid'] = instance_touse['min_bid']
+    env_parts = ['-e __SOURCE=skypilot']
+    if port_map:
+        env_parts.append(port_map)
+    if user_env:
+        env_parts.append(user_env)
+    launch_params['env'] = ' '.join(env_parts).strip()
 
     new_instance_contract = vast.vast().create_instance(**launch_params)
 

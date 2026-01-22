@@ -6,7 +6,7 @@ providers supported by SkyPilot need to follow.
 import functools
 import inspect
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
 from sky import models
 from sky import sky_logging
@@ -29,6 +29,7 @@ from sky.provision import runpod
 from sky.provision import scp
 from sky.provision import seeweb
 from sky.provision import shadeform
+from sky.provision import slurm
 from sky.provision import ssh
 from sky.provision import vast
 from sky.provision import vsphere
@@ -149,18 +150,34 @@ def get_volume_usedby(
 
 
 @_route_to_cloud_impl
-def get_all_volumes_usedby(
-    provider_name: str, configs: List[models.VolumeConfig]
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Get the usedby of a volume.
+def refresh_volume_config(
+    provider_name: str,
+    volume_config: models.VolumeConfig,
+) -> Tuple[bool, models.VolumeConfig]:
+    """Whether need to refresh the volume config in the cloud.
 
     Returns:
-        usedby_pods: List of dictionaries, each containing the config keys for
-                     a volume and a key containing pods using the volume.
-                     These may include pods not created by SkyPilot.
-        usedby_clusters: List of dictionaries, each containing the config keys
-                         for a volume and a key containing clusters using
-                         the volume.
+        need_refresh: Whether need to refresh the volume config.
+        volume_config: The volume config to be refreshed.
+    """
+    return False, volume_config
+
+
+@_route_to_cloud_impl
+def get_all_volumes_usedby(
+    provider_name: str, configs: List[models.VolumeConfig]
+) -> Tuple[Dict[str, Any], Dict[str, Any], Set[str]]:
+    """Get the usedby of all volumes.
+
+    Args:
+        provider_name: Name of the provider.
+        configs: List of VolumeConfig objects.
+
+    Returns:
+        usedby_pods: Dict of usedby pods.
+        usedby_clusters: Dict of usedby clusters.
+        failed_volume_names: Set of volume names whose usedby info
+          failed to fetch.
     """
     raise NotImplementedError
 
@@ -172,6 +189,27 @@ def map_all_volumes_usedby(
         config: models.VolumeConfig) -> Tuple[List[str], List[str]]:
     """Map the usedby resources of a volume."""
     raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def get_all_volumes_errors(
+        provider_name: str,
+        configs: List[models.VolumeConfig]) -> Dict[str, Optional[str]]:
+    """Get error messages for all volumes.
+
+    Checks if volumes have errors (e.g., pending state due to
+    misconfiguration) and returns appropriate error messages.
+
+    Args:
+        provider_name: Name of the provider.
+        configs: List of VolumeConfig objects.
+
+    Returns:
+        Dictionary mapping volume name to error message (None if no error).
+    """
+    # Default implementation returns empty dict (no error checking)
+    del provider_name, configs
+    return {}
 
 
 @_route_to_cloud_impl

@@ -9,6 +9,7 @@ This test ensures that:
 import os
 import tempfile
 
+from pydantic import SecretStr
 import pytest
 
 from sky import dag as dag_lib
@@ -267,11 +268,14 @@ class TestManagedJobSecrets:
             loaded_task = loaded_dag.tasks[0]
 
             # The loaded task must have real secrets for execution
-            assert loaded_task.secrets['API_KEY'] == 'sk-prod-api-key-12345'
-            assert loaded_task.secrets[
-                'DB_PASSWORD'] == 'prod-database-secret-password'
-            assert loaded_task.secrets[
-                'WANDB_API_KEY'] == 'wandb-secret-key-67890'
+            assert task_lib.get_plaintext_secrets(
+                loaded_task.secrets)['API_KEY'] == 'sk-prod-api-key-12345'
+            assert task_lib.get_plaintext_secrets(
+                loaded_task.secrets
+            )['DB_PASSWORD'] == 'prod-database-secret-password'
+            assert task_lib.get_plaintext_secrets(
+                loaded_task.secrets
+            )['WANDB_API_KEY'] == 'wandb-secret-key-67890'
 
             # Environment variables should be preserved
             assert loaded_task.envs['MODEL_NAME'] == 'my-model'
@@ -334,11 +338,14 @@ class TestManagedJobSecrets:
         loaded_tasks = loaded_dag.tasks
 
         assert len(loaded_tasks) == 2
-        assert loaded_tasks[0].secrets['DATA_API_KEY'] == 'data-api-secret-key'
-        assert loaded_tasks[0].secrets['S3_SECRET'] == 's3-access-secret'
-        assert loaded_tasks[1].secrets[
-            'MODEL_API_KEY'] == 'model-api-secret-key'
-        assert loaded_tasks[1].secrets['WANDB_KEY'] == 'wandb-logging-secret'
+        assert task_lib.get_plaintext_secrets(
+            loaded_tasks[0].secrets)['DATA_API_KEY'] == 'data-api-secret-key'
+        assert task_lib.get_plaintext_secrets(
+            loaded_tasks[0].secrets)['S3_SECRET'] == 's3-access-secret'
+        assert task_lib.get_plaintext_secrets(
+            loaded_tasks[1].secrets)['MODEL_API_KEY'] == 'model-api-secret-key'
+        assert task_lib.get_plaintext_secrets(
+            loaded_tasks[1].secrets)['WANDB_KEY'] == 'wandb-logging-secret'
 
     def test_mixed_envs_and_secrets_job_execution(self):
         """Test that envs and secrets are handled correctly for job execution.

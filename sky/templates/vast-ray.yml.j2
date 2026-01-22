@@ -10,6 +10,10 @@ provider:
   module: sky.provision.vast
   region: "{{region}}"
   disable_launch_config_check: true
+  secure_only: {{secure_only}}
+  {%- if create_instance_kwargs %}
+  create_instance_kwargs: {{create_instance_kwargs | tojson}}
+  {%- endif %}
 
 auth:
   ssh_user: root

@@ -104,6 +104,10 @@ Multi-cloud access with SSO login
 
 SSO login has limited functionality *across multiple clouds*. If you use multiple clouds, you can :ref:`set up a dedicated IAM user and access key <dedicated-aws-user>` so that instances launched on other clouds can use AWS resources.
 
+.. tip::
+
+    If you are running SkyPilot on an EKS cluster and need S3 access without static credentials, see :ref:`aws-eks-iam-roles` for setting up IAM roles for EKS pods.
+
 .. list-table::
    :header-rows: 1
 
@@ -459,10 +463,43 @@ These are the minimal policy rules required by SkyPilot:
            {
                 "Effect": "Allow",
                 "Action": [
-                    "s3:*"
+                    "s3:GetObject",
+                    "s3:PutObject",
+                    "s3:DeleteObject"
                 ],
+                "Resource": "arn:aws:s3:::*/*"
+            },
+            {
+                "Effect": "Allow",
+                "Action": [
+                    "s3:ListBucket",
+                    "s3:GetBucketLocation"
+                ],
+                "Resource": "arn:aws:s3:::*"
+            },
+            {
+                "Effect": "Allow",
+                "Action": "s3:ListAllMyBuckets",
                 "Resource": "*"
             }
+
+**Optional**: If you also want to allow SkyPilot to create and delete S3 buckets (for ``sky storage`` commands), add these additional permissions:
+
+.. code-block:: json
+
+           {
+                "Effect": "Allow",
+                "Action": [
+                    "s3:CreateBucket",
+                    "s3:DeleteBucket",
+                    "s3:PutBucketTagging"
+                ],
+                "Resource": "arn:aws:s3:::*"
+            }
+
+.. tip::
+
+    If you are using EKS and want to set up S3 access with IAM roles, see :ref:`aws-eks-iam-roles`.
 
 **Once you have added all needed policies, click Next** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
 
@@ -609,3 +646,9 @@ Common issues
       # .bashrc / .zshrc
       # Enable AWS profile named "AWSPowerUserAccess-123456789012"
       export AWS_PROFILE='AWSPowerUserAccess-123456789012'
+
+
+.. toctree::
+   :hidden:
+
+   aws-eks-iam-roles

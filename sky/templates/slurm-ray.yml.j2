@@ -1,0 +1,115 @@
+cluster_name: {{cluster_name_on_cloud}}
+
+# The maximum number of workers nodes to launch in addition to the head node.
+max_workers: {{num_nodes - 1}}
+upscaling_speed: {{num_nodes - 1}}
+idle_timeout_minutes: 60
+
+provider:
+  type: external
+  module: sky.provision.slurm
+
+  cluster: {{slurm_cluster}}
+  partition: {{slurm_partition}}
+
+  ssh:
+    hostname: {{ssh_hostname}}
+    port: {{ssh_port}}
+    user: {{ssh_user}}
+    private_key: {{slurm_private_key}}
+{% if slurm_proxy_command is not none %}
+    proxycommand: {{slurm_proxy_command | tojson }}
+{% endif %}
+{% if slurm_proxy_jump is not none %}
+    proxyjump: {{slurm_proxy_jump | tojson }}
+{% endif %}
+
+auth:
+  ssh_user: {{ssh_user}}
+  # TODO(jwj,kevin): Modify this tmp workaround.
+  # Right now there's a chicken-and-egg problem:
+  # 1. ssh_credential_from_yaml reads from the auth.ssh_private_key: ~/.sky/clients/.../ssh/sky-key
+  # 2. This is SkyPilot's generated key, not the Slurm cluster's key
+  # 3. The internal_file_mounts stage tries to rsync using sky-key, but its public key isn't on the remote yet
+  # 4. The public key only gets added by setup_commands, which runs AFTER file_mounts
+  # ssh_private_key: {{ssh_private_key}}
+  ssh_private_key: {{slurm_private_key}}
+  ssh_proxy_command: {{slurm_proxy_command | tojson }}
+
+available_node_types:
+  ray_head_default:
+    resources: {}
+    node_config:
+      # From clouds/slurm.py::Slurm.make_deploy_resources_variables.
+      instance_type: {{instance_type}}
+      disk_size: {{disk_size}}
+      cpus: {{cpus}}
+      memory: {{memory}}
+      accelerator_type: {{accelerator_type}}
+      accelerator_count: {{accelerator_count}}
+
+      # TODO: more configs that is required by the provisioner to create new
+      # instances on the FluffyCloud:
+      # sky/provision/fluffycloud/instance.py::run_instances
+
+head_node_type: ray_head_default
+
+# Format: `REMOTE_PATH : LOCAL_PATH`
+file_mounts: {
+  "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
+  "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
+{%- for remote_path, local_path in credentials.items() %}
+  "{{remote_path}}": "{{local_path}}",
+{%- endfor %}
+}
+
+rsync_exclude: []
+
+initialization_commands: []
+
+# List of shell commands to run to set up nodes.
+# NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
+# connection, which is expensive. Try your best to co-locate commands into fewer
+# items!
+#
+# Increment the following for catching performance bugs easier:
+#   current num items (num SSH connections): 1
+setup_commands:
+  - |
+    {%- for initial_setup_command in initial_setup_commands %}
+    {{ initial_setup_command }}
+    {%- endfor %}
+    # Generate host key for sshd -i if not exists
+    mkdir -p ~{{ssh_user}}/.ssh && chmod 700 ~{{ssh_user}}/.ssh
+    [ -f ~{{ssh_user}}/.ssh/{{slurm_sshd_host_key_filename}} ] || ssh-keygen -t ed25519 -f ~{{ssh_user}}/.ssh/{{slurm_sshd_host_key_filename}} -N "" -q
+    # Add public key to user's authorized_keys if not already present
+    grep -qF 'skypilot:ssh_public_key_content' ~{{ssh_user}}/.ssh/authorized_keys 2>/dev/null || cat >> ~{{ssh_user}}/.ssh/authorized_keys <<'SKYPILOT_SSH_KEY_EOF'
+    skypilot:ssh_public_key_content
+    SKYPILOT_SSH_KEY_EOF
+    chmod 600 ~{{ssh_user}}/.ssh/authorized_keys
+
+    mkdir -p ~{{ssh_user}}/.sky
+    cat > ~{{ssh_user}}/.sky_ssh_rc <<'SKYPILOT_SSH_RC'
+    # Added by SkyPilot: override HOME for Slurm interactive sessions
+    if [ -n "${{slurm_cluster_name_env_var}}" ]; then
+        CLUSTER_DIR=~/.sky_clusters/${{slurm_cluster_name_env_var}}
+        if [ -d "$CLUSTER_DIR" ]; then
+            cd "$CLUSTER_DIR"
+            export HOME=$(pwd)
+        fi
+    fi
+    SKYPILOT_SSH_RC
+    grep -q "source ~/.sky_ssh_rc" ~{{ssh_user}}/.bashrc 2>/dev/null || (echo "" >> ~{{ssh_user}}/.bashrc && echo "source ~/.sky_ssh_rc" >> ~{{ssh_user}}/.bashrc)
+    {{ setup_sky_dirs_commands }}
+    {{ conda_installation_commands }}
+    {{ skypilot_wheel_installation_commands }}
+    {{ copy_skypilot_templates_commands }}
+
+head_node: {}
+worker_nodes: {}
+
+# These fields are required for external cloud providers.
+head_setup_commands: []
+worker_setup_commands: []
+cluster_synced_files: []
+file_mounts_sync_continuously: False

@@ -1,0 +1,60 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: prometheus_extra_scrape_configs_test
+templates:
+  - charts/prometheus/templates/cm.yaml
+tests:
+  - it: should render extraScrapeConfigs with resolved service target
+    set:
+      prometheus.enabled: true
+      prometheus.useDedicatedScrapeConfig: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: ConfigMap
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "RELEASE-NAME-api-service\\.NAMESPACE\\.svc\\.cluster\\.local:9090"
+
+  - it: should render extraScrapeConfigs using fullnameOverride for service name
+    set:
+      prometheus.enabled: true
+      prometheus.useDedicatedScrapeConfig: true
+      fullnameOverride: custom-name
+      prometheus.fullnameOverride: custom-name
+    asserts:
+      - hasDocuments:
+          count: 1
+      - matchRegex:
+          path: data["prometheus.yml"]
+          pattern: "custom-name-api-service\\.NAMESPACE\\.svc\\.cluster\\.local:9090"
+
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: grafana_ingress_annotations_test
+templates:
+  - templates/grafana-ingress.yaml
+tests:
+  - it: should render custom annotations when grafana.ingress.annotations is set
+    set:
+      ingress:
+        unified: false
+      grafana:
+        enabled: true
+        ingress:
+          enableAuthedIngress: true
+          ingressClassName: nginx
+          annotations:
+            example.com/foo: "bar"
+            example.com/baz: "qux"
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Ingress
+      - equal:
+          path: metadata.annotations["example.com/foo"]
+          value: "bar"
+      - equal:
+          path: metadata.annotations["example.com/baz"]
+          value: "qux"

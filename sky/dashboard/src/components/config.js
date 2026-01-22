@@ -9,7 +9,10 @@ import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { CircularProgress } from '@mui/material';
 import { SaveIcon } from 'lucide-react';
 import yaml from 'js-yaml';
-import { VersionDisplay } from '@/components/elements/version-display';
+import {
+  VersionDisplay,
+  NewVersionAvailable,
+} from '@/components/elements/version-display';
 import { apiClient } from '@/data/connectors/client';
 import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
 
@@ -199,6 +202,7 @@ export function Config() {
               View API Server Metrics
             </button>
           )}
+          <NewVersionAvailable />
           <VersionDisplay />
         </div>
       </div>

@@ -1,0 +1,39 @@
+# Check that instance links are present in a managed job record.
+# This script is used by the test_managed_jobs_instance_links smoke test.
+# It polls the jobs queue until instance links are found or timeout.
+#
+# Template variables:
+#   name: The job name to search for
+#   generic_cloud: The cloud provider (aws, gcp, azure)
+import time
+
+import sky
+from sky import jobs
+
+name = '{{ name }}'
+generic_cloud = '{{ generic_cloud }}'
+
+for attempt in range(30):
+    req_id = jobs.queue_v2(refresh=True, fields=['links', 'job_name'])
+    job_records, _, _, _ = sky.stream_and_get(req_id)
+
+    for record in job_records:
+        if record.get('job_name') == name:
+            links = record.get('links')
+            print(f'Attempt {attempt + 1}: links = {links}')
+            if links:
+                if generic_cloud == 'aws' and 'AWS Instances' in links:
+                    print('Found AWS Instances link!')
+                    exit(0)
+                elif generic_cloud == 'gcp' and 'GCP Instances' in links:
+                    print('Found GCP Instances link!')
+                    exit(0)
+                elif generic_cloud == 'azure' and 'Azure Resource Group' in links:
+                    print('Found Azure Resource Group link!')
+                    exit(0)
+            break
+    time.sleep(10)
+
+print('Instance links not found after 5 minutes')
+exit(1)
+

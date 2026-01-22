@@ -34,6 +34,11 @@ enum ManagedJobStatus {
 
 enum ManagedJobScheduleState {
   MANAGED_JOB_SCHEDULE_STATE_UNSPECIFIED = 0;
+  // Old servers mapped `None` to INVALID, instead of omitting the field. Keep
+  // the enum value so we can deserialize the response properly. On the client,
+  // this should be mapped to `None` / missing field. See #8105.
+  // TODO(cooperc): Remove in 0.13.0
+  DEPRECATED_MANAGED_JOB_SCHEDULE_STATE_INVALID = 1 [deprecated = true];
   MANAGED_JOB_SCHEDULE_STATE_INACTIVE = 2;
   MANAGED_JOB_SCHEDULE_STATE_WAITING = 3;
   MANAGED_JOB_SCHEDULE_STATE_ALIVE_WAITING = 4;
@@ -82,6 +87,9 @@ message GetJobTableRequest {
   optional Statuses statuses = 10;
   bool show_jobs_without_user_hash = 11;
   optional Fields fields = 12;
+  // Sorting parameters, added in ManagedJobsService v14.
+  optional string sort_by = 13;
+  optional string sort_order = 14;
 }
 
 message ManagedJobInfo {
@@ -116,6 +124,8 @@ message ManagedJobInfo {
   // The `spot.job_id`, which can be used to identify different tasks
   // for the same job
   optional int64 _job_id = 29;
+  // Links (e.g., instance console URLs) as key-value pairs
+  map<string, string> links = 30;
 }
 
 message GetJobTableResponse {

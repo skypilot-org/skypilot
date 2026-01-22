@@ -15,7 +15,8 @@ from sky.utils import env_options
 from sky.utils import rich_utils
 
 # UX: Should we show logging prefixes and some extra information in optimizer?
-_FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s'
+_FORMAT = ('%(levelname).1s %(asctime)s.%(msecs)03d PID=%(process)d '
+           '%(filename)s:%(lineno)d] %(message)s')
 _DATE_FORMAT = '%m-%d %H:%M:%S'
 _SENSITIVE_LOGGER = ['sky.provisioner', 'sky.optimizer']
 

@@ -445,7 +445,7 @@ class IBMVPCNodeProvider(NodeProvider):
         """returns the worker's node private ip address"""
         node = self._get_cached_node(node_id)
 
-        # if a bug ocurred, or node data was fetched before primary_ip
+        # if a bug occurred, or node data was fetched before primary_ip
         # was assigned, refetch node data from cloud.
         try:
             primary_ip = node["network_interfaces"][0].get("primary_ip")["address"]

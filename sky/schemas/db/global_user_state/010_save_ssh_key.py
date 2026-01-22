@@ -21,7 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    """Add last_activity_time and launched_at columns to cluster history."""
+    """Add ssh keys if it was not already added to global user state."""
     connection = op.get_bind()
 
     match_dirs = glob.glob(os.path.expanduser('~/.sky/clients/*/ssh'))

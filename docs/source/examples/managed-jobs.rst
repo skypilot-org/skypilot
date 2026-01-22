@@ -324,6 +324,34 @@ can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the 
 
 This will restart the job, up to 3 times (for a total of 4 attempts), if your code has any non-zero exit code. Each restart runs on a newly provisioned temporary cluster.
 
+Recovering on specific exit codes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You can also specify a list of exit codes that should always trigger recovery, regardless of the :code:`max_restarts_on_errors` limit. This is useful when certain exit codes indicate transient errors that should always be retried (e.g., NCCL timeouts, specific GPU driver issues).
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100:8
+    job_recovery:
+      max_restarts_on_errors: 3
+      # Always recover if the job exits with code 33 or 34.
+      # In a multi-node job, recovery is triggered if any node exits with a code in [33, 34].
+      # Can also use a single integer: recover_on_exit_codes: 33
+      recover_on_exit_codes: [33, 34]
+
+In this configuration:
+
+- If the job exits with code 33 or 34, it will be recovered. Restarts triggered by these specific exit codes do not count towards the `max_restarts_on_errors` limit.
+- For any other non-zero exit code, the job will be recovered up to 3 times (as specified by :code:`max_restarts_on_errors`)
+
+.. note::
+  For multi-node jobs, recovery is triggered if **any** node exits with a code in :code:`recover_on_exit_codes`.
+
+.. warning::
+
+  You should **not** use exit code 137 in :code:`recover_on_exit_codes`. This code is used internally by SkyPilot and including it may interfere with proper recovery behavior.
+
 
 When will my job be recovered?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -335,7 +363,7 @@ Here's how various kinds of failures will be handled by SkyPilot:
    :header-rows: 0
 
    * - User code fails (:code:`setup` or :code:`run` commands have non-zero exit code):
-     - If :code:`max_restarts_on_errors` is set, restart up to that many times. If :code:`max_restarts_on_errors` is not set, or we run out of restarts, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
+     - If the exit code is in :code:`recover_on_exit_codes`, always restart. Otherwise, if :code:`max_restarts_on_errors` is set, restart up to that many times. If neither condition is met, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
    * - Instances are preempted or underlying hardware fails:
      - Tear down the old temporary cluster and provision a new one in another region, then restart the job.
    * - Can't find available resources due to cloud quota or capacity restrictions:
@@ -522,11 +550,14 @@ The jobs controller is a small on-demand CPU VM or pod created by SkyPilot to ma
 It is automatically launched when the first managed job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all managed jobs finish and no new managed job is submitted in that duration).
 Thus, **no user action is needed** to manage its lifecycle.
 
-You can see the controller with :code:`sky status` and refresh its status by using the :code:`-r/--refresh` flag.
+.. note::
+  If you are using a SkyPilot API server, you can run the controller within the same pod as your API server by enabling :ref:`consolidation mode <jobs-consolidation-mode>`.
+
+You can see the controller with :code:`sky status -u` and refresh its status by using the :code:`-r/--refresh` flag.
 
 While the cost of the jobs controller is negligible (~$0.25/hour when running and less than $0.004/hour when stopped),
 you can still tear it down manually with
-:code:`sky down <job-controller-name>`, where the ``<job-controller-name>`` can be found in the output of :code:`sky status`.
+:code:`sky down <job-controller-name>`, where the ``<job-controller-name>`` can be found in the output of :code:`sky status -u`.
 
 .. note::
   Tearing down the jobs controller loses all logs and status information for the finished managed jobs. It is only allowed when there are no in-progress managed jobs to ensure no resource leakage.
@@ -611,11 +642,11 @@ The :code:`resources` field has the same spec as a normal SkyPilot job; see `her
   stopped or live).  For them to take effect, tear down the existing controller
   first, which requires all in-progress jobs to finish or be canceled.
 
-To see your current jobs controller, use :code:`sky status`.
+To see your current jobs controller, use :code:`sky status -u`.
 
 .. code-block:: console
 
-  $ sky status --refresh
+  $ sky status -u --refresh
 
   Clusters
   NAME                          INFRA             RESOURCES                                  STATUS   AUTOSTOP  LAUNCHED
@@ -715,3 +746,58 @@ For absolute maximum parallelism, the following per-cloud configurations are rec
   Remember to tear down your controller to apply these changes, as described above.
 
 With this configuration, you can launch up to 512 jobs at once. Once the jobs are launched, up to 2000 jobs can be running in parallel.
+
+.. _jobs-consolidation-mode:
+
+Run the controller within the API server
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you have deployed a :ref:`remote API server <sky-api-server>`, you can avoid needing to launch a separate VM/pod for the controller. We call this deployment mode "consolidation mode", as the API server and jobs controller are consolidated onto the same pod.
+
+.. warning::
+  Because the jobs controller must stay alive to manage running jobs, it's required to use an external API server to enable consolidation mode.
+
+.. image:: ../images/jobs-consolidation-mode.svg
+  :width: 800
+  :alt: Architecture diagram of SkyPilot remote API server with and without consolidation mode
+  :align: center
+
+Consolidating the API server and the jobs controller has a few advantages:
+
+- 6x faster job submission.
+- Consistent cloud/Kubernetes credentials across the API server and jobs controller.
+- Persistent managed job state using the same database as the API server, e.g., PostgreSQL.
+- No extra VM/pod is needed for the jobs controller, saving cost.
+
+To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml-jobs-controller-consolidation-mode>` in the API server config.
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      consolidation_mode: true
+      # any specified resources will be ignored
+
+.. note::
+  You must **restart the API server** after making this change for it to take effect.
+
+  .. code-block:: bash
+
+     # Update NAMESPACE / RELEASE_NAME if you are using custom values.
+     NAMESPACE=skypilot
+     RELEASE_NAME=skypilot
+     # Restart the API server to pick up the config change
+     kubectl -n $NAMESPACE rollout restart deployment $RELEASE_NAME-api-server
+
+  See :ref:`more about the Kubernetes upgrade strategy of the API server <sky-api-server-graceful-upgrade>`.
+
+.. warning::
+
+  When using consolidation mode with a remote  :ref:`SkyPilot API server with RollingUpdate upgrade strategy <sky-api-server-upgrade-strategy>`, any file mounts or workdirs that upload local files/folders of the managed jobs will be lost during a rolling update. To address that, use :ref:`bucket <sky-storage>`, :ref:`volume <volumes-on-kubernetes>`, or :ref:`git <sync-code-and-project-files-git>`; or, configure a cloud bucket for all local files via :ref:`config-yaml-jobs-bucket` in your :ref:`SkyPilot config <config-yaml>` to persist them.
+
+  .. code-block::
+    
+    jobs:
+      bucket: s3://xxx
+
+The jobs controller will use a bit of overhead - it reserves an extra 2GB of memory for itself, which may reduce the amount of requests your API server can handle. To counteract, you can increase the amount of CPU and memory allocated to the API server: See :ref:`sky-api-server-resources-tuning`.

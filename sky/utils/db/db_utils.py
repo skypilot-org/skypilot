@@ -17,6 +17,7 @@ from sqlalchemy.ext import asyncio as sqlalchemy_async
 
 from sky import sky_logging
 from sky.skylet import constants
+from sky.skylet import runtime_utils
 
 logger = sky_logging.init_logger(__name__)
 if typing.TYPE_CHECKING:
@@ -72,6 +73,18 @@ def safe_cursor(db_path: str):
         cursor.close()
         conn.commit()
         conn.close()
+
+
+@contextlib.contextmanager
+def safe_cursor_on_connection(conn: 'sqlite3.Connection'):
+    """A auto-committing, auto-closing cursor on an existing connection."""
+    # Ensure commit() is called when the context is exited.
+    with conn:
+        cursor = conn.cursor()
+        try:
+            yield cursor
+        finally:
+            cursor.close()
 
 
 def add_column_to_table(
@@ -285,6 +298,11 @@ def drop_column_from_table_alembic(
             raise
 
 
+def fault_point():
+    """For test fault injection."""
+    pass
+
+
 class SQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database."""
 
@@ -344,8 +362,8 @@ class SQLiteConn(threading.local):
 
         def exec_and_commit(sql: str, parameters: Optional[Iterable[Any]]):
             # pylint: disable=protected-access
-            conn._conn.execute(sql, parameters)
-            conn._conn.commit()
+            with safe_cursor_on_connection(conn._conn) as cursor:
+                cursor.execute(sql, parameters)
 
         # pylint: disable=protected-access
         await conn._execute(exec_and_commit, sql, parameters)
@@ -356,7 +374,20 @@ class SQLiteConn(threading.local):
                                      parameters: Optional[Iterable[Any]] = None
                                     ) -> Iterable[sqlite3.Row]:
         conn = await self._get_async_conn()
-        return await conn.execute_fetchall(sql, parameters)
+        if parameters is None:
+            parameters = []
+
+        def exec_fetch_all(sql: str, parameters: Optional[Iterable[Any]]):
+            # pylint: disable=protected-access
+            with safe_cursor_on_connection(conn._conn) as cursor:
+                cursor.execute(sql, parameters)
+                # Note(dev): sqlite3.Connection cannot be patched, keep
+                # fault_point here to test the integrity of exec_fetch_all()
+                fault_point()
+                return cursor.fetchall()
+
+        # pylint: disable=protected-access
+        return await conn._execute(exec_fetch_all, sql, parameters)
 
     async def execute_get_returning_value_async(
             self,
@@ -371,9 +402,9 @@ class SQLiteConn(threading.local):
         def exec_and_get_returning_value(sql: str,
                                          parameters: Optional[Iterable[Any]]):
             # pylint: disable=protected-access
-            row = conn._conn.execute(sql, parameters).fetchone()
-            conn._conn.commit()
-            return row
+            with safe_cursor_on_connection(conn._conn) as cursor:
+                cursor.execute(sql, parameters)
+                return cursor.fetchone()
 
         # pylint: disable=protected-access
         return await conn._execute(exec_and_get_returning_value, sql,
@@ -470,7 +501,7 @@ def get_engine(
             engine = _postgres_engine_cache[conn_string]
     else:
         assert db_name is not None, 'db_name must be provided for SQLite'
-        db_path = os.path.expanduser(f'~/.sky/{db_name}.db')
+        db_path = runtime_utils.get_runtime_dir_path(f'.sky/{db_name}.db')
         pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
         if async_engine:
             # This is an AsyncEngine, instead of a (normal, synchronous) Engine,

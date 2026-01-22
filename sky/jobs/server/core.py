@@ -25,6 +25,7 @@ from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.catalog import common as service_catalog_common
+from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
@@ -93,6 +94,62 @@ _MANAGED_JOB_FIELDS_FOR_QUEUE_KUBERNETES = [
 ]
 
 
+def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
+    """Warn if local file mounts or workdir may be lost during rolling update.
+
+    When rolling update is enabled with consolidation mode but no jobs bucket
+    is configured, local file mounts and workdirs are stored locally on the API
+    server pod and will be lost during a rolling update.
+    """
+    # If rolling update is not enabled, don't warn.
+    if os.environ.get(skylet_constants.SKYPILOT_ROLLING_UPDATE_ENABLED) is None:
+        return
+
+    # If persistent storage is enabled (via Helm storage.enabled=true or by
+    # default for local deployments), file mounts are persisted and will
+    # survive rolling updates. Default to True if not explicitly set to False.
+    storage_enabled_str = os.environ.get(
+        skylet_constants.SKYPILOT_API_SERVER_STORAGE_ENABLED, 'true')
+    if storage_enabled_str.lower() == 'true':
+        return
+
+    # If consolidation mode is not enabled, don't warn.
+    if not managed_job_utils.is_consolidation_mode():
+        return
+
+    # If a jobs bucket is configured, don't warn.
+    if skypilot_config.get_nested(('jobs', 'bucket'), None) is not None:
+        return
+
+    # Check if any task has local file_mounts (not cloud store URLs) or workdir
+    has_local_file_mounts = False
+    has_local_workdir = False
+    for task_ in dag.tasks:
+        if task_.file_mounts:
+            for src in task_.file_mounts.values():
+                if not data_utils.is_cloud_store_url(src):
+                    has_local_file_mounts = True
+                    break
+        if task_.workdir and isinstance(task_.workdir, str):
+            has_local_workdir = True
+            break
+        if has_local_file_mounts:
+            break
+
+    if not has_local_file_mounts and not has_local_workdir:
+        return
+
+    logger.warning(
+        f'{colorama.Fore.YELLOW}WARNING: Local file mounts or workdir detected '
+        'with rolling update enabled for API server. To persist files'
+        ' across API server restarts/update, use buckets, volumes, or git '
+        'for your file mounts; or, configure a bucket in your SkyPilot config '
+        'under `jobs.bucket`; or, enable persistent storage in Helm with '
+        '`storage.enabled=true`. See: https://docs.skypilot.co/en/latest/'
+        'reference/kubernetes/kubernetes-deployment.html'
+        f'{colorama.Style.RESET_ALL}')
+
+
 def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     """Upload files to the controller.
 
@@ -103,14 +160,21 @@ def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
     """
     local_to_controller_file_mounts: Dict[str, str] = {}
 
-    # For consolidation mode, we don't need to use cloud storage,
-    # as uploading to the controller is only a local copy.
+    # Check if user has explicitly configured a bucket for jobs.
+    # If so, we should use cloud storage even in consolidation mode to persist
+    # files across rolling updates and pod restarts.
+    has_explicit_bucket = skypilot_config.get_nested(('jobs', 'bucket'),
+                                                     None) is not None
     storage_clouds = (
         storage_lib.get_cached_enabled_storage_cloud_names_or_refresh())
     force_disable_cloud_bucket = skypilot_config.get_nested(
         ('jobs', 'force_disable_cloud_bucket'), False)
-    if (not managed_job_utils.is_consolidation_mode() and storage_clouds and
-            not force_disable_cloud_bucket):
+    # Use cloud storage if:
+    # 1. Not in consolidation mode, OR
+    # 2. In consolidation mode BUT user has explicit bucket configured
+    # AND storage clouds are available AND cloud bucket is not force-disabled
+    if ((not managed_job_utils.is_consolidation_mode() or has_explicit_bucket)
+            and storage_clouds and not force_disable_cloud_bucket):
         for task_ in dag.tasks:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                 task_, task_type='jobs')
@@ -346,6 +410,9 @@ def launch(
                         f'with:\n\n`sky down {cluster_name} --purge`\n\n'
                         f'Reason: {common_utils.format_exception(e)}')
 
+    # Warn if file mounts may be lost during rolling update
+    _warn_file_mounts_rolling_update(dag)
+
     local_to_controller_file_mounts = _upload_files_to_controller(dag)
     controller = controller_utils.Controllers.JOBS_CONTROLLER
     controller_name = controller.value.cluster_name
@@ -468,15 +535,19 @@ def launch(
                     # intermediate bucket and newly created bucket should be in
                     # workspace A.
                     if consolidation_mode_job_id is None:
-                        return execution.launch(
-                            task=controller_task,
-                            cluster_name=controller_name,
-                            stream_logs=stream_logs,
-                            retry_until_up=True,
-                            fast=True,
-                            _request_name=request_names.AdminPolicyRequestName.
-                            JOBS_LAUNCH_CONTROLLER,
-                            _disable_controller_check=True)
+                        # Job controller is not placed in kueue, as the
+                        # controller pod is considered a "system" pod
+                        # and is not subject to queue limits or preemption.
+                        with skypilot_config.remove_queue_name_from_config():
+                            return execution.launch(
+                                task=controller_task,
+                                cluster_name=controller_name,
+                                stream_logs=stream_logs,
+                                retry_until_up=True,
+                                fast=True,
+                                _request_name=request_names.
+                                AdminPolicyRequestName.JOBS_LAUNCH_CONTROLLER,
+                                _disable_controller_check=True)
                     # Manually launch the scheduler in consolidation mode.
                     local_handle = backend_utils.is_controller_accessible(
                         controller=controller, stopped_message='')
@@ -501,16 +572,18 @@ def launch(
                         for k, v in controller_task.envs.items()
                     ]
                     run_script = '\n'.join(env_cmds + [run_script])
-                    log_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
-                                           'managed_jobs')
+                    log_dir = os.path.expanduser(
+                        os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
+                                     'managed_jobs'))
                     os.makedirs(log_dir, exist_ok=True)
                     log_path = os.path.join(
                         log_dir, f'submit-job-{consolidation_mode_job_id}.log')
                     backend.run_on_head(local_handle,
                                         run_script,
                                         log_path=log_path)
-                    ux_utils.starting_message(
-                        f'Job submitted, ID: {consolidation_mode_job_id}')
+                    logger.info(
+                        ux_utils.starting_message(
+                            f'Job submitted, ID: {consolidation_mode_job_id}'))
                     return consolidation_mode_job_id, local_handle
 
     if pool is None:
@@ -747,12 +820,15 @@ def queue_v2_api(
     limit: Optional[int] = None,
     statuses: Optional[List[str]] = None,
     fields: Optional[List[str]] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
     """Gets statuses of managed jobs and parse the
     jobs to responses.ManagedJobRecord."""
     jobs, total, status_counts, total_no_filter = queue_v2(
         refresh, skip_finished, all_users, job_ids, user_match, workspace_match,
-        name_match, pool_match, page, limit, statuses, fields)
+        name_match, pool_match, page, limit, statuses, fields, sort_by,
+        sort_order)
     return [responses.ManagedJobRecord(**job) for job in jobs
            ], total, status_counts, total_no_filter
 
@@ -771,6 +847,8 @@ def queue_v2(
     limit: Optional[int] = None,
     statuses: Optional[List[str]] = None,
     fields: Optional[List[str]] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs with filtering.
@@ -865,6 +943,8 @@ def queue_v2(
                 fields=managed_jobsv1_pb2.Fields(
                     fields=fields) if fields is not None else None,
                 show_jobs_without_user_hash=show_jobs_without_user_hash,
+                sort_by=sort_by,
+                sort_order=sort_order,
             )
             response = backend_utils.invoke_skylet_with_retries(
                 lambda: cloud_vm_ray_backend.SkyletClient(
@@ -878,7 +958,8 @@ def queue_v2(
     with metrics_lib.time_it('jobs.queue.generate_code', group='jobs'):
         code = managed_job_utils.ManagedJobCodeGen.get_job_table(
             skip_finished, accessible_workspaces, job_ids, workspace_match,
-            name_match, pool_match, page, limit, user_hashes, statuses, fields)
+            name_match, pool_match, page, limit, user_hashes, statuses, fields,
+            sort_by, sort_order)
     with metrics_lib.time_it('jobs.queue.run_on_head', group='jobs'):
         returncode, job_table_payload, stderr = backend.run_on_head(
             handle,
@@ -1216,3 +1297,24 @@ def pool_sync_down_logs(
                                replica_ids=worker_ids,
                                tail=tail,
                                pool=True)
+
+
+@usage_lib.entrypoint
+def get_job_events(
+    job_id: int,
+    task_id: Optional[int] = None,
+    limit: Optional[int] = 10,
+) -> List[Dict[str, Any]]:
+    """Get task events for a managed job.
+
+    Args:
+        job_id: The job ID to get task events for.
+        task_id: Optional task ID to filter by.
+        limit: Optional limit on number of task events to return (default 10).
+
+    Returns:
+        List of task event records.
+    """
+    return managed_job_state.get_job_events(job_id=job_id,
+                                            task_id=task_id,
+                                            limit=limit)

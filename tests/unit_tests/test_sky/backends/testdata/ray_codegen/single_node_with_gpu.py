@@ -94,7 +94,6 @@ def get_or_fail(futures, pg) -> List[int]:
     sys.stdout.flush()
     return returncodes, pids
 
-run_fn = None
 futures = []
 
 class _ProcessingArgs:
@@ -217,8 +216,9 @@ def run_with_log(
     line_processor: Optional[log_utils.LineProcessor] = None,
     streaming_prefix: Optional[str] = None,
     log_cmd: bool = False,
+    timeout: Optional[int] = None,
     **kwargs,
-) -> Union[int, Tuple[int, str, str]]:
+) -> Union[int, Tuple[int, str, str], Tuple[int, int]]:
     """Runs a command and logs its output to a file.
 
     Args:
@@ -229,9 +229,17 @@ def run_with_log(
         process_stream: Whether to post-process the stdout/stderr of the
             command, such as replacing or skipping lines on the fly. If
             enabled, lines are printed only when '\r' or '\n' is found.
+        streaming_prefix: Optional prefix for each log line. Can contain {pid}
+            placeholder which will be replaced with the subprocess PID.
+        timeout: Optional timeout in seconds. If the command does not complete
+            within this time, it will be terminated and TimeoutExpired will be
+            raised. None means no timeout (default).
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
+
+    Raises:
+        subprocess.TimeoutExpired: If the command times out.
     """
     assert process_stream or not require_outputs, (
         process_stream, require_outputs,
@@ -274,6 +282,13 @@ def run_with_log(
                 # For backward compatibility, do not specify use_kill_pg by
                 # default.
                 subprocess_utils.kill_process_daemon(proc.pid)
+
+            # Format streaming_prefix with subprocess PID if it contains {pid}
+            formatted_streaming_prefix = streaming_prefix
+            if streaming_prefix and '{pid}' in streaming_prefix:
+                formatted_streaming_prefix = streaming_prefix.format(
+                    pid=proc.pid)
+
             stdout = ''
             stderr = ''
             stdout_stream_handler = None
@@ -302,7 +317,7 @@ def run_with_log(
                     line_processor=line_processor,
                     # Replace CRLF when the output is logged to driver by ray.
                     replace_crlf=with_ray,
-                    streaming_prefix=streaming_prefix,
+                    streaming_prefix=formatted_streaming_prefix,
                 )
                 stdout_stream_handler = functools.partial(
                     _handle_io_stream,
@@ -315,24 +330,65 @@ def run_with_log(
                         _handle_io_stream,
                         args=err_args,
                     )
-            if ctx is not None:
-                # When runs in a coroutine, always process the subprocess
-                # stream to:
-                # 1. handle context cancellation
-                # 2. redirect subprocess stdout/stderr to the contextual
-                #    stdout/stderr of current coroutine.
-                stdout, stderr = context_utils.pipe_and_wait_process(
-                    ctx,
-                    proc,
-                    stdout_stream_handler=stdout_stream_handler,
-                    stderr_stream_handler=stderr_stream_handler)
-            elif process_stream:
-                # When runs in a process, only process subprocess stream if
-                # necessary to avoid unnecessary stream handling overhead.
-                stdout, stderr = process_subprocess_stream(
-                    proc, stdout_stream_handler, stderr_stream_handler)
+            # Use a timer to enforce timeout during stream processing.
+            # Without this, process_subprocess_stream blocks until the process
+            # finishes, making the timeout at proc.wait() ineffective.
+            timeout_triggered = False
+            timer = None
+
+            def _timeout_handler():
+                nonlocal timeout_triggered
+                timeout_triggered = True
+                subprocess_utils.kill_children_processes(proc.pid)
+
+            if timeout is not None:
+                timer = threading.Timer(timeout, _timeout_handler)
+                timer.start()
+
+            try:
+                if ctx is not None:
+                    # When runs in a coroutine, always process the subprocess
+                    # stream to:
+                    # 1. handle context cancellation
+                    # 2. redirect subprocess stdout/stderr to the contextual
+                    #    stdout/stderr of current coroutine.
+                    stdout, stderr = context_utils.pipe_and_wait_process(
+                        ctx,
+                        proc,
+                        stdout_stream_handler=stdout_stream_handler,
+                        stderr_stream_handler=stderr_stream_handler)
+                elif process_stream:
+                    # When runs in a process, only process subprocess stream if
+                    # necessary to avoid unnecessary stream handling overhead.
+                    stdout, stderr = process_subprocess_stream(
+                        proc, stdout_stream_handler, stderr_stream_handler)
+            finally:
+                if timer is not None:
+                    timer.cancel()
+
+            # Check if timeout was triggered during stream processing
+            if timeout_triggered:
+                logger.error(
+                    f'Command timed out after {timeout} seconds: {cmd}')
+                raise subprocess.TimeoutExpired(cmd, timeout)
+
             # Ensure returncode is set.
-            proc.wait()
+            if ctx is not None or process_stream:
+                # Stream processing already waited for process completion, so
+                # proc.wait() will return immediately. We still call it to
+                # ensure proc.returncode is set.
+                proc.wait()
+            else:
+                # No stream processing - use proc.wait with timeout as primary
+                # timeout mechanism.
+                try:
+                    proc.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    # Kill the process and all its children
+                    subprocess_utils.kill_children_processes(proc.pid)
+                    logger.error(
+                        f'Command timed out after {timeout} seconds: {cmd}')
+                    raise
             if require_outputs:
                 return proc.returncode, stdout, stderr
             return proc.returncode
@@ -392,7 +448,8 @@ def run_bash_command_with_log(bash_command: str,
                               log_path: str,
                               env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
-                              with_ray: bool = False):
+                              with_ray: bool = False,
+                              streaming_prefix: Optional[str] = None):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
         bash_command = make_task_bash_script(bash_command, env_vars=env_vars)
@@ -407,6 +464,7 @@ def run_bash_command_with_log(bash_command: str,
                             log_path,
                             stream_logs=stream_logs,
                             with_ray=with_ray,
+                            streaming_prefix=streaming_prefix,
                             shell=True)
 
 def run_bash_command_with_log_and_return_pid(
@@ -414,22 +472,25 @@ def run_bash_command_with_log_and_return_pid(
         log_path: str,
         env_vars: Optional[Dict[str, str]] = None,
         stream_logs: bool = False,
-        with_ray: bool = False):
-    return_code = run_bash_command_with_log(bash_command, log_path, env_vars,
-                                            stream_logs, with_ray)
+        with_ray: bool = False,
+        streaming_prefix: Optional[str] = None):
+    return_code = run_bash_command_with_log(bash_command,
+                                            log_path,
+                                            env_vars,
+                                            stream_logs,
+                                            with_ray,
+                                            streaming_prefix=streaming_prefix)
     return {'return_code': return_code, 'pid': os.getpid()}
 
 run_bash_command_with_log = run_bash_command_with_log
 run_bash_command_with_log_and_return_pid =                 ray.remote(run_bash_command_with_log_and_return_pid)
-if hasattr(autostop_lib, 'set_last_active_time_to_now'):
-    autostop_lib.set_last_active_time_to_now()
-
+autostop_lib.set_last_active_time_to_now()
 job_lib.set_status(2, job_lib.JobStatus.PENDING)
 pg = ray_util.placement_group([{"CPU": 4.0, "GPU": 1.0}], 'STRICT_SPREAD')
 plural = 's' if 1 > 1 else ''
 node_str = f'1 node{plural}'
 message = ('[2m├── [0m[2m'
-            'Waiting for task resources on '
+           'Waiting for task resources on '
            f'{node_str}.[0m')
 print(message, flush=True)
 # FIXME: This will print the error message from autoscaler if
@@ -437,7 +498,6 @@ print(message, flush=True)
 # error message.
 ray.get(pg.ready())
 print('\x1b[2m└── \x1b[0mJob started. Streaming logs... \x1b[2m(Ctrl-C to exit log streaming; job will not be killed)\x1b[0m', flush=True)
-
 setup_cmd = 'pip install torch'
 _SETUP_CPUS = 0.0001
 # The setup command will be run as a ray task with num_cpus=_SETUP_CPUS as the
@@ -489,6 +549,8 @@ if not success:
     msg += f'Failed workers: ' + ', '.join([f'(pid={pid}, returncode={returncode})' for pid, returncode in failed_workers_and_returncodes])
     msg += f'. See error logs above for more details.[0m'
     print(msg, flush=True)
+    if int(constants.SKYLET_VERSION) >= 28:
+        job_lib.set_exit_codes(2, setup_returncodes)
     job_lib.set_status(2, job_lib.JobStatus.FAILED_SETUP)
     # This waits for all streaming logs to finish.
     time.sleep(1)
@@ -521,9 +583,7 @@ sky_env_vars_dict['SKYPILOT_NUM_NODES'] = len(job_ip_rank_list)
 sky_env_vars_dict['SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000001-cluster-2'
 sky_env_vars_dict['MODEL_NAME'] = 'resnet50'
 script = 'python train.py'
-rclone_flush_script = '\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                echo "skypilot: cached mount is still uploading to remote"\n                flushed=0\n                break\n            fi\n        done\n    done\n    echo "skypilot: cached mount uploaded complete"\nfi'
-if run_fn is not None:
-    script = run_fn(0, gang_scheduling_id_to_ip)
+rclone_flush_script = '\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    FLUSH_START_TIME=$(date +%s)\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                ELAPSED=$(($(date +%s) - FLUSH_START_TIME))\n                # Extract the last vfs cache status line to show what we\'re waiting for\n                CACHE_STATUS=$(tac $file | grep "vfs cache: cleaned:" -m 1 | sed \'s/.*vfs cache: cleaned: //\' 2>/dev/null)\n                # Extract currently uploading files from recent log lines (show up to 2 files)\n                UPLOADING_FILES=$(tac $file | head -30 | grep -E "queuing for upload" | head -2 | sed \'s/.*INFO  : //\' | sed \'s/: vfs cache:.*//\' | tr \'\\n\' \',\' | sed \'s/,$//\' | sed \'s/,/, /g\' 2>/dev/null)\n                # Build status message with available info\n                if [ -n "$CACHE_STATUS" ] && [ -n "$UPLOADING_FILES" ]; then\n                    echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) [${CACHE_STATUS}] uploading: ${UPLOADING_FILES}"\n                elif [ -n "$CACHE_STATUS" ]; then\n                    echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) [${CACHE_STATUS}]"\n                else\n                    # Fallback: show last non-empty line from log\n                    LAST_LINE=$(tac $file | grep -v "^$" | head -1 | sed \'s/.*INFO  : //\' | sed \'s/.*ERROR : //\' | sed \'s/.*NOTICE: //\' 2>/dev/null)\n                    if [ -n "$LAST_LINE" ]; then\n                        echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) ${LAST_LINE}"\n                    else\n                        echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s)"\n                    fi\n                fi\n                flushed=0\n                break\n            fi\n        done\n    done\n    TOTAL_FLUSH_TIME=$(($(date +%s) - FLUSH_START_TIME))\n    echo "skypilot: cached mount upload complete (took ${TOTAL_FLUSH_TIME}s)"\nfi'
 
 if script is not None:
     script=f'unset RAY_RAYLET_PID; {script}'
@@ -559,6 +619,9 @@ if script is not None:
             ))
 returncodes, _ = get_or_fail(futures, pg)
 if sum(returncodes) != 0:
+    # Save exit codes to job metadata for potential recovery logic
+    if int(constants.SKYLET_VERSION) >= 28:
+        job_lib.set_exit_codes(2, returncodes)
     job_lib.set_status(2, job_lib.JobStatus.FAILED)
     # Schedule the next pending job immediately to make the job
     # scheduling more efficient.

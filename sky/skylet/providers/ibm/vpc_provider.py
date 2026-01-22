@@ -346,7 +346,7 @@ class IBMVPCProvider:
                     return True
                 tries -= 1
                 time.sleep(sleep_interval)
-            logger.error("Failed to delete instance within the alloted time\n")
+            logger.error("Failed to delete instance within the allotted time\n")
             return False
 
         for subnet_id in self.get_vpc_subnets(vpc_data, region, field="id"):

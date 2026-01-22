@@ -5,6 +5,9 @@
         "apiService": {
             "type": "object",
             "properties": {
+                "affinity": {
+                    "type": "object"
+                },
                 "annotations": {
                     "type": [
                         "object",
@@ -113,6 +116,9 @@
                         }
                     }
                 },
+                "nodeSelector": {
+                    "type": "object"
+                },
                 "preDeployHook": {
                     "type": "string"
                 },
@@ -121,6 +127,15 @@
                 },
                 "resources": {
                     "type": "object"
+                },
+                "sidecarContainers": {
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "items": {
+                        "type": "object"
+                    }
                 },
                 "skipResourceCheck": {
                     "type": "boolean"
@@ -142,6 +157,9 @@
                 },
                 "terminationGracePeriodSeconds": {
                     "type": "integer"
+                },
+                "tolerations": {
+                    "type": "array"
                 },
                 "upgradeStrategy": {
                     "type": "string"
@@ -257,6 +275,28 @@
                 }
             }
         },
+        "coreweaveCredentials": {
+            "type": "object",
+            "properties": {
+                "coreweaveSecretName": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "digitaloceanCredentials": {
+            "type": "object",
+            "properties": {
+                "digitaloceanSecretName": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
         "extraInitContainers": {
             "type": [
                 "array",
@@ -265,6 +305,12 @@
             "items": {
                 "type": "object"
             }
+        },
+        "fullnameOverride": {
+            "type": [
+                "string",
+                "null"
+            ]
         },
         "gcpCredentials": {
             "type": "object",
@@ -425,6 +471,9 @@
                             "type": "boolean"
                         }
                     }
+                },
+                "unified": {
+                    "type": "boolean"
                 }
             }
         },

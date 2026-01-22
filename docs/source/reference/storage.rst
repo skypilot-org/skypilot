@@ -161,17 +161,6 @@ its performance requirements and size of the data.
     the symbolic links are directly copied, not their target data.
     The targets must be separately mounted or else the symlinks may break.
 
-.. note::
-    **Architecture compatibility**: S3 storage mounting (including S3-compatible services like
-    Cloudflare R2, CoreWeave Object Storage, and Nebius) works on all architectures including ARM64 (e.g., Apple Silicon,
-    AWS Graviton). SkyPilot automatically uses the optimal mounting tool for each architecture:
-    goofys for x86_64 and rclone for ARM64.
-
-.. note::
-    CoreWeave buckets may take a long time to become accessible after creation.
-    Therefore, SkyPilot does not automatically create them.
-    Please manually create your CoreWeave bucket and verify its accessibility before using it.
-
 .. _mount_cached_mode_in_detail:
 
 MOUNT_CACHED mode in detail
@@ -326,6 +315,37 @@ To manage buckets created by SkyPilot, the sky CLI provides two commands:
     :code:`sky storage ls` only shows storage that were created
     by SkyPilot. Externally created buckets or public buckets are not listed
     in :code:`sky storage ls` and cannot be managed through SkyPilot.
+
+
+FAQ
+---
+
+* **Are AWS SSO credentials supported?**
+
+  AWS SSO credentials are only supported when accessing S3 from EC2 or EKS clusters with ``mode: MOUNT_CACHED``.
+  ``mode: MOUNT`` is not supported when using AWS SSO credentials.
+  
+  On EKS clusters, you must set up IAM roles (via Pod Identity or IRSA) to 
+  allow SkyPilot pods to access S3 buckets without static AWS credentials. 
+  See :ref:`aws-eks-iam-roles` for setup instructions. 
+
+  When accessing S3 buckets outside of EC2 or EKS, static AWS credentials
+  (e.g., ``~/.aws/credentials``) are required.
+
+* **Which architectures are supported?**
+
+  S3 storage mounting (including S3-compatible services like Cloudflare R2,
+  CoreWeave Object Storage, and Nebius) works on all architectures including
+  ARM64 (e.g., Apple Silicon, AWS Graviton). SkyPilot automatically uses the
+  optimal mounting tool for each architecture: goofys for x86_64 and rclone for
+  ARM64.
+
+* **I am unable to create buckets on CoreWeave CAIOS.**
+
+  CoreWeave buckets may take a long time to become accessible after creation.
+  Therefore, SkyPilot does not automatically create them. Please manually create
+  your CoreWeave bucket and verify its accessibility before using it with SkyPilot.
+
 
 Storage YAML reference
 ----------------------

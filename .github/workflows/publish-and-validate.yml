@@ -44,6 +44,8 @@ jobs:
       - name: Validate published package
         run: |
           export SKYPILOT_DISABLE_USAGE_COLLECTION=1
+
+          # fastapi has some broken package info on test PyPI, so manually install it from real PyPI.
           pip install fastapi
 
           # Set up variables for package check
@@ -66,12 +68,13 @@ jobs:
             pip uninstall -y ${{ inputs.package_name }} || true
 
             # Install the package with no cache
+            # Use --pre so that pre-release versions (e.g. rcs) will be selected
             if [ "${{ inputs.repository_type }}" == "test-pypi" ]; then
               echo "Installing from Test PyPI..."
-              pip install --no-cache-dir --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple ${{ inputs.package_name }}
+              pip install --no-cache-dir --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple ${{ inputs.package_name }}[server]
             else
               echo "Installing from PyPI..."
-              pip install --no-cache-dir ${{ inputs.package_name }}
+              pip install --no-cache-dir --pre ${{ inputs.package_name }}[server]
             fi
 
             # Check the version

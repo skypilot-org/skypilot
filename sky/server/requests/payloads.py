@@ -82,7 +82,7 @@ def request_body_env_vars() -> dict:
         if common.is_api_server_local() and env_var in EXTERNAL_LOCAL_ENV_VARS:
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
-    env_vars[constants.USER_ENV_VAR] = common_utils.get_current_user_name()
+    env_vars[constants.USER_ENV_VAR] = common_utils.get_local_user_name()
     env_vars[
         usage_constants.USAGE_RUN_ID_ENV_VAR] = usage_lib.messages.usage.run_id
     if not common.is_api_server_local():
@@ -346,6 +346,8 @@ class AutostopBody(RequestBody):
     idle_minutes: int
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     down: bool = False
+    hook: Optional[str] = None
+    hook_timeout: Optional[int] = None
 
 
 class QueueBody(RequestBody):
@@ -376,6 +378,13 @@ class ProvisionLogsBody(RequestBody):
     """Cluster node."""
     cluster_name: str
     worker: Optional[int] = None
+
+
+class AutostopLogsBody(RequestBody):
+    """Autostop logs request body."""
+    cluster_name: str
+    follow: bool = True
+    tail: int = 0
 
 
 class ClusterJobBody(RequestBody):
@@ -482,11 +491,12 @@ class VolumeApplyBody(RequestBody):
 class VolumeDeleteBody(RequestBody):
     """The request body for the volume delete endpoint."""
     names: List[str]
+    purge: bool = False
 
 
 class VolumeListBody(RequestBody):
     """The request body for the volume list endpoint."""
-    pass
+    refresh: bool = False
 
 
 class VolumeValidateBody(RequestBody):
@@ -555,6 +565,9 @@ class JobsQueueV2Body(RequestBody):
     # The fields to return in the response.
     # Refer to the fields in the `class ManagedJobRecord` in `response.py`
     fields: Optional[List[str]] = None
+    # Sorting parameters, added in ManagedJobsService v14.
+    sort_by: Optional[str] = None  # Field to sort by (e.g., 'job_id', 'name')
+    sort_order: Optional[str] = None  # 'asc' or 'desc'
 
 
 class JobsCancelBody(RequestBody):
@@ -668,6 +681,11 @@ class RealtimeGpuAvailabilityRequestBody(RequestBody):
 class KubernetesNodeInfoRequestBody(RequestBody):
     """The request body for the kubernetes node info endpoint."""
     context: Optional[str] = None
+
+
+class SlurmNodeInfoRequestBody(RequestBody):
+    """The request body for the slurm node info endpoint."""
+    slurm_cluster_name: Optional[str] = None
 
 
 class ListAcceleratorsBody(RequestBody):
@@ -854,3 +872,27 @@ class RequestPayload(BasePayload):
     status_msg: Optional[str] = None
     should_retry: bool = False
     finished_at: Optional[float] = None
+
+
+class SlurmGpuAvailabilityRequestBody(RequestBody):
+    """Request body for getting Slurm real-time GPU availability."""
+    slurm_cluster_name: Optional[str] = None
+    name_filter: Optional[str] = None
+    quantity_filter: Optional[int] = None
+
+
+class ClusterEventsBody(RequestBody):
+    """The request body for the cluster events endpoint."""
+    cluster_name: Optional[str] = None
+    cluster_hash: Optional[str] = None
+    event_type: str  # 'STATUS_CHANGE' or 'DEBUG'
+    include_timestamps: bool = False
+    limit: Optional[
+        int] = None  # If specified, returns at most this many events
+
+
+class GetJobEventsBody(RequestBody):
+    """The request body for the get job task events endpoint."""
+    job_id: int
+    task_id: Optional[int] = None
+    limit: Optional[int] = 10  # Default to 10 most recent task events

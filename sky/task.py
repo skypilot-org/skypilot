@@ -7,6 +7,7 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
 import colorama
+from pydantic import SecretStr
 
 from sky import clouds
 from sky import dag as dag_lib
@@ -112,7 +113,7 @@ def _fill_in_env_vars(
 
 
 def _check_docker_login_config(task_envs: Dict[str, str],
-                               task_secrets: Dict[str, str]) -> bool:
+                               task_secrets: Dict[str, SecretStr]) -> bool:
     """Validates a valid docker login config in task_envs and task_secrets.
 
     Docker login variables must be specified together either in envs OR secrets,
@@ -173,12 +174,13 @@ def _with_docker_login_config(
     resources: Union[Set['resources_lib.Resources'],
                      List['resources_lib.Resources']],
     task_envs: Dict[str, str],
-    task_secrets: Dict[str, str],
+    task_secrets: Dict[str, SecretStr],
 ) -> Union[Set['resources_lib.Resources'], List['resources_lib.Resources']]:
     if not _check_docker_login_config(task_envs, task_secrets):
         return resources
     envs = task_envs.copy()
-    envs.update(task_secrets)
+    for key, value in task_secrets.items():
+        envs[key] = value.get_secret_value()
     docker_login_config = docker_utils.DockerLoginConfig.from_env_vars(envs)
 
     def _add_docker_login_config(resources: 'resources_lib.Resources'):
@@ -207,10 +209,11 @@ def _with_docker_username_for_runpod(
     resources: Union[Set['resources_lib.Resources'],
                      List['resources_lib.Resources']],
     task_envs: Dict[str, str],
-    task_secrets: Dict[str, str],
+    task_secrets: Dict[str, SecretStr],
 ) -> Union[Set['resources_lib.Resources'], List['resources_lib.Resources']]:
     envs = task_envs.copy()
-    envs.update(task_secrets)
+    for key, value in task_secrets.items():
+        envs[key] = value.get_secret_value()
     docker_username_for_runpod = envs.get(
         constants.RUNPOD_DOCKER_USERNAME_ENV_VAR)
 
@@ -221,6 +224,18 @@ def _with_docker_username_for_runpod(
     return (type(resources)(
         r.copy(_docker_username_for_runpod=docker_username_for_runpod)
         for r in resources))
+
+
+def get_plaintext_envs_and_secrets(
+    envs_and_secrets: Dict[str, Union[str, SecretStr]],) -> Dict[str, str]:
+    return {
+        k: v.get_secret_value() if isinstance(v, SecretStr) else v
+        for k, v in envs_and_secrets.items()
+    }
+
+
+def get_plaintext_secrets(secrets: Dict[str, SecretStr]) -> Dict[str, str]:
+    return {k: v.get_secret_value() for k, v in secrets.items()}
 
 
 class Task:
@@ -343,7 +358,9 @@ class Task:
         self.storage_plans: Dict[storage_lib.Storage,
                                  storage_lib.StoreType] = {}
         self._envs = envs or {}
-        self._secrets = secrets or {}
+        self._secrets = {}
+        if secrets is not None:
+            self._secrets = {k: SecretStr(v) for k, v in secrets.items()}
         self._volumes = volumes or {}
 
         # concatenate commands if given as list
@@ -875,9 +892,9 @@ class Task:
                         raise exceptions.VolumeTopologyConflictError(
                             f'Volume {vol.volume_name} can only be attached on '
                             f'{key}:{req}, which conflicts with another volume '
-                            f'{vol_name} that requires {key}:{previous_req}.'
+                            f'{vol_name} that requires {key}:{previous_req}. '
                             f'Please use different volumes and retry.')
-                    topology[key] = (vol_name, req)
+                    topology[key] = (vol.volume_name, req)
         # Now we have the topology requirements from the intersection of all
         # volumes. Check if there is topology conflict with the resources.
         # Volume must have no conflict with ALL resources even if user
@@ -935,7 +952,7 @@ class Task:
         return self._envs
 
     @property
-    def secrets(self) -> Dict[str, str]:
+    def secrets(self) -> Dict[str, SecretStr]:
         return self._secrets
 
     @property
@@ -1042,7 +1059,8 @@ class Task:
                 raise ValueError(
                     'secrets must be List[Tuple[str, str]] or Dict[str, str]: '
                     f'{secrets}')
-        self._secrets.update(secrets)
+        for key, value in secrets.items():
+            self._secrets[key] = SecretStr(value)
         # Validate Docker login configuration if needed
         if _check_docker_login_config(self._envs, self._secrets):
             self.resources = _with_docker_login_config(self.resources,
@@ -1057,7 +1075,7 @@ class Task:
         return any(r.use_spot for r in self.resources)
 
     @property
-    def envs_and_secrets(self) -> Dict[str, str]:
+    def envs_and_secrets(self) -> Dict[str, Union[str, SecretStr]]:
         envs = self.envs.copy()
         envs.update(self.secrets)
         return envs
@@ -1100,6 +1118,22 @@ class Task:
     def get_estimated_outputs_size_gigabytes(self) -> Optional[float]:
         return self.estimated_outputs_size_gigabytes
 
+    @staticmethod
+    def _ensure_consistent_priority(
+        resources: Union[List['resources_lib.Resources'],
+                         Set['resources_lib.Resources']]
+    ) -> None:
+        priority = None
+        for r in resources:
+            if r.priority is None:
+                continue
+            if priority is None:
+                priority = r.priority
+            else:
+                if priority != r.priority:
+                    raise ValueError('Priority is not consistent '
+                                     f'across resources: {resources}')
+
     def set_resources(
         self, resources: Union['resources_lib.Resources',
                                List['resources_lib.Resources'],
@@ -1121,6 +1155,7 @@ class Task:
             resources = resources_lib.Resources.from_yaml_config(resources)
         elif isinstance(resources, resources_lib.Resources):
             resources = {resources}
+        self._ensure_consistent_priority(resources)
         # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs,
                                                    self.secrets)
@@ -1643,9 +1678,11 @@ class Task:
             if clone_info.token is None and clone_info.ssh_key is None:
                 return self
             if clone_info.token is not None:
-                self.secrets[git.GIT_TOKEN_ENV_VAR] = clone_info.token
+                self.secrets[git.GIT_TOKEN_ENV_VAR] = SecretStr(
+                    clone_info.token)
             if clone_info.ssh_key is not None:
-                self.secrets[git.GIT_SSH_KEY_ENV_VAR] = clone_info.ssh_key
+                self.secrets[git.GIT_SSH_KEY_ENV_VAR] = SecretStr(
+                    clone_info.ssh_key)
         except exceptions.GitError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'{str(e)}') from None
@@ -1703,8 +1740,10 @@ class Task:
         add_if_not_none('envs', self.envs, no_empty=True)
 
         secrets = self.secrets
-        if secrets and redact_secrets:
-            secrets = {k: '<redacted>' for k in secrets}
+        if secrets and not redact_secrets:
+            secrets = {k: v.get_secret_value() for k, v in secrets.items()}
+        elif secrets and redact_secrets:
+            secrets = {k: '<redacted>' for k, v in secrets.items()}
         add_if_not_none('secrets', secrets, no_empty=True)
 
         add_if_not_none('file_mounts', {})

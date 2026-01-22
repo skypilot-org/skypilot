@@ -180,7 +180,7 @@ def _write_preset_prices(presets: List[PresetInfo], output_file: str) -> None:
         presets (List[PresetInfo]): A list of PresetInfo objects to write.
         output_file (str): The path to the output CSV file.
     """
-    os.makedirs(os.path.dirname(output_file))
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
     # Set up the CSV writer to output to stdout
     with open(output_file, 'w', encoding='utf-8') as out:
         header = [

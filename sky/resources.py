@@ -70,6 +70,8 @@ class AutostopConfig:
     idle_minutes: int = 0
     down: bool = False
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None
+    hook: Optional[str] = None
+    hook_timeout: Optional[int] = None
 
     def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
         if not self.enabled:
@@ -80,6 +82,10 @@ class AutostopConfig:
         }
         if self.wait_for is not None:
             config['wait_for'] = self.wait_for.value
+        if self.hook is not None:
+            config['hook'] = self.hook
+        if self.hook_timeout is not None:
+            config['hook_timeout'] = self.hook_timeout
         return config
 
     @classmethod
@@ -111,6 +117,10 @@ class AutostopConfig:
             if 'wait_for' in config:
                 autostop_config.wait_for = (
                     autostop_lib.AutostopWaitFor.from_str(config['wait_for']))
+            if 'hook' in config:
+                autostop_config.hook = config['hook']
+            if 'hook_timeout' in config:
+                autostop_config.hook_timeout = config['hook_timeout']
             return autostop_config
 
         return None
@@ -219,6 +229,9 @@ class Resources:
             - strategy: the recovery strategy to use.
             - max_restarts_on_errors: the max number of restarts on user code
               errors.
+            - recover_on_exit_codes: a list of exit codes that should trigger
+              job recovery. If any task exits with a code in this list, the job
+              will be recovered regardless of max_restarts_on_errors limit.
 
           region: the region to use. Deprecated. Use `infra` instead.
           zone: the zone to use. Deprecated. Use `infra` instead.
@@ -569,7 +582,8 @@ class Resources:
         if self.cloud is not None and self._instance_type is not None:
             vcpus, _ = self.cloud.get_vcpus_mem_from_instance_type(
                 self._instance_type)
-            return str(vcpus)
+            if vcpus is not None:
+                return str(vcpus)
         return None
 
     @property
@@ -579,12 +593,15 @@ class Resources:
         For example, memory='16' means each instance must have exactly 16GB
         memory; memory='16+' means each instance must have at least 16GB
         memory.
-
-        (Developer note: The memory field is only used to select the instance
-        type at launch time. Thus, Resources in the backend's ResourceHandle
-        will always have the memory field set to None.)
         """
-        return self._memory
+        if self._memory is not None:
+            return self._memory
+        if self.cloud is not None and self._instance_type is not None:
+            _, memory = self.cloud.get_vcpus_mem_from_instance_type(
+                self._instance_type)
+            if memory is not None:
+                return str(memory)
+        return None
 
     @property
     @annotations.lru_cache(scope='global', maxsize=1)
@@ -1645,6 +1662,7 @@ class Resources:
         other: Union[List['Resources'], 'Resources'],
         requested_num_nodes: int = 1,
         check_ports: bool = False,
+        check_cloud: bool = True,
     ) -> bool:
         """Returns whether this resources is less demanding than the other.
 
@@ -1654,24 +1672,29 @@ class Resources:
             requested_num_nodes: Number of nodes that the current task
               requests from the cluster.
             check_ports: Whether to check the ports field.
+            check_cloud: Whether we check the cloud/region/zone fields. Useful
+              for resources that don't have cloud specified, like some launched
+              resources.
         """
         if isinstance(other, list):
             resources_list = [self.less_demanding_than(o) for o in other]
             return requested_num_nodes <= sum(resources_list)
 
-        assert other.cloud is not None, 'Other cloud must be specified'
+        if check_cloud:
+            assert other.cloud is not None, 'Other cloud must be specified'
 
-        if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
-            return False
-        # self.cloud <= other.cloud
+            if self.cloud is not None and not self.cloud.is_same_cloud(
+                    other.cloud):
+                return False
+            # self.cloud <= other.cloud
 
-        if self.region is not None and self.region != other.region:
-            return False
-        # self.region <= other.region
+            if self.region is not None and self.region != other.region:
+                return False
+            # self.region <= other.region
 
-        if self.zone is not None and self.zone != other.zone:
-            return False
-        # self.zone <= other.zone
+            if self.zone is not None and self.zone != other.zone:
+                return False
+            # self.zone <= other.zone
 
         if self.image_id is not None:
             if other.image_id is None:
@@ -1743,8 +1766,10 @@ class Resources:
             # On Kubernetes, we can't launch a task that requires FUSE on a pod
             # that wasn't initialized with FUSE support at the start.
             # Other clouds don't have this limitation.
-            if other.cloud.is_same_cloud(clouds.Kubernetes()):
-                return False
+            if check_cloud:
+                assert other.cloud is not None
+                if other.cloud.is_same_cloud(clouds.Kubernetes()):
+                    return False
 
         # self <= other
         return True
@@ -1792,6 +1817,101 @@ class Resources:
             self._docker_login_config is None,
         ])
 
+    def __add__(self, other: Optional['Resources']) -> Optional['Resources']:
+        """Add two Resources objects together.
+
+        Args:
+            other: Another Resources object to add (may be None)
+
+        Returns:
+            New Resources object with summed resources, or None if other is None
+        """
+        if other is None:
+            return self
+
+        # Sum CPUs
+        self_cpus = _parse_value(self.cpus)
+        other_cpus = _parse_value(other.cpus)
+        total_cpus = None
+        if self_cpus is not None or other_cpus is not None:
+            total_cpus = (self_cpus or 0) + (other_cpus or 0)
+
+        # Sum memory
+        self_memory = _parse_value(self.memory)
+        other_memory = _parse_value(other.memory)
+        total_memory = None
+        if self_memory is not None or other_memory is not None:
+            total_memory = (self_memory or 0) + (other_memory or 0)
+
+        # Sum accelerators
+        total_accelerators = {}
+        if self.accelerators:
+            for acc_type, count in self.accelerators.items():
+                total_accelerators[acc_type] = float(count)
+        if other.accelerators:
+            for acc_type, count in other.accelerators.items():
+                if acc_type not in total_accelerators:
+                    total_accelerators[acc_type] = 0
+                total_accelerators[acc_type] += float(count)
+
+        return Resources(
+            cpus=str(total_cpus) if total_cpus is not None else None,
+            memory=str(total_memory) if total_memory is not None else None,
+            accelerators=total_accelerators if total_accelerators else None)
+
+    def __sub__(self, other: Optional['Resources']) -> 'Resources':
+        """Subtract another Resources object from this one.
+
+        Args:
+            other: Resources to subtract (may be None)
+
+        Returns:
+            New Resources object with subtracted resources. If the result for a
+            resource is negative, it will be set to 0.
+        """
+        if other is None:
+            return self
+
+        # Subtract CPUs
+        self_cpus = _parse_value(self.cpus)
+        other_cpus = _parse_value(other.cpus)
+        free_cpus = None
+        if self_cpus is not None:
+            if other_cpus is not None:
+                free_cpus = max(0, self_cpus - other_cpus)
+            else:
+                free_cpus = self_cpus
+
+        # Subtract memory
+        self_memory = _parse_value(self.memory)
+        other_memory = _parse_value(other.memory)
+        free_memory = None
+        if self_memory is not None:
+            if other_memory is not None:
+                free_memory = max(0, self_memory - other_memory)
+            else:
+                free_memory = self_memory
+
+        # Subtract accelerators
+        free_accelerators = {}
+        if self.accelerators:
+            for acc_type, total_count in self.accelerators.items():
+                used_count = (other.accelerators.get(acc_type, 0)
+                              if other.accelerators else 0)
+                free_count = max(0, float(total_count) - float(used_count))
+                if free_count > 0:
+                    free_accelerators[acc_type] = free_count
+
+        # If all resources are exhausted, return None
+        # Check if we have any free resources
+        free_cpus = None if free_cpus == 0 else free_cpus
+        free_memory = None if free_memory == 0 else free_memory
+        free_accelerators = None if not free_accelerators else free_accelerators
+
+        return Resources(cpus=free_cpus,
+                         memory=free_memory,
+                         accelerators=free_accelerators)
+
     def copy(self, **override) -> 'Resources':
         """Returns a copy of the given Resources."""
         use_spot = self.use_spot if self._use_spot_specified else None
@@ -1819,8 +1939,11 @@ class Resources:
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
             cpus=override.pop('cpus', self._cpus),
-            memory=override.pop('memory', self.memory),
-            accelerators=override.pop('accelerators', self.accelerators),
+            memory=override.pop('memory', self._memory),
+            # Need to pass `self._accelerators` instead of `self.accelerators`
+            # as the latter can auto-infer, causing potential conflicts with
+            # instance_type override.
+            accelerators=override.pop('accelerators', self._accelerators),
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', use_spot),
@@ -2456,3 +2579,18 @@ def _maybe_add_docker_prefix_to_image_id(
     for k, v in image_id_dict.items():
         if not v.startswith('docker:'):
             image_id_dict[k] = f'docker:{v}'
+
+
+def _parse_value(val):
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        # Remove '+' suffix if present
+        val = val.rstrip('+')
+        try:
+            return float(val)
+        except ValueError:
+            return None
+    return None

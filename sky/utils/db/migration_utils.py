@@ -3,6 +3,7 @@
 import contextlib
 import logging
 import os
+from typing import Optional
 
 from alembic import command as alembic_command
 from alembic.config import Config
@@ -18,23 +19,23 @@ logger = sky_logging.init_logger(__name__)
 DB_INIT_LOCK_TIMEOUT_SECONDS = 10
 
 GLOBAL_USER_STATE_DB_NAME = 'state_db'
-GLOBAL_USER_STATE_VERSION = '011'
+GLOBAL_USER_STATE_VERSION = '013'  # add cloud/region/zone columns to clusters
 GLOBAL_USER_STATE_LOCK_PATH = f'~/.sky/locks/.{GLOBAL_USER_STATE_DB_NAME}.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
-SPOT_JOBS_VERSION = '007'
+SPOT_JOBS_VERSION = '012'  # add cloud/region/zone columns for infra sorting
 SPOT_JOBS_LOCK_PATH = f'~/.sky/locks/.{SPOT_JOBS_DB_NAME}.lock'
 
 SERVE_DB_NAME = 'serve_db'
-SERVE_VERSION = '002'
+SERVE_VERSION = '002'  # add yaml_content column to version_specs
 SERVE_LOCK_PATH = f'~/.sky/locks/.{SERVE_DB_NAME}.lock'
 
 SKYPILOT_CONFIG_DB_NAME = 'sky_config_db'
-SKYPILOT_CONFIG_VERSION = '001'
+SKYPILOT_CONFIG_VERSION = '001'  # initial alembic for config_yaml table
 SKYPILOT_CONFIG_LOCK_PATH = f'~/.sky/locks/.{SKYPILOT_CONFIG_DB_NAME}.lock'
 
 KV_CACHE_DB_NAME = 'kv_cache_db'
-KV_CACHE_VERSION = '001'
+KV_CACHE_VERSION = '001'  # initial kv_cache table for AWS AMIs
 KV_CACHE_LOCK_PATH = f'~/.sky/locks/.{KV_CACHE_DB_NAME}.lock'
 
 
@@ -52,12 +53,22 @@ def db_lock(db_name: str):
                            f'file if you believe it is stale.') from e
 
 
-def get_alembic_config(engine: sqlalchemy.engine.Engine, section: str):
-    """Get Alembic configuration for the given section"""
-    # From sky/utils/db/migration_utils.py -> sky/setup_files/alembic.ini
-    alembic_ini_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-        'setup_files', 'alembic.ini')
+def get_alembic_config(engine: sqlalchemy.engine.Engine,
+                       section: str,
+                       alembic_ini_path: Optional[str] = None):
+    """Get Alembic configuration for the given section.
+
+    Args:
+        engine: SQLAlchemy engine for the database.
+        section: Alembic section name (e.g., 'state_db' or 'spot_jobs_db').
+        alembic_ini_path: Optional path to a custom alembic.ini file.
+            If not provided, uses the default SkyPilot alembic.ini.
+    """
+    if alembic_ini_path is None:
+        # Default to SkyPilot's alembic.ini
+        alembic_ini_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            'setup_files', 'alembic.ini')
     alembic_cfg = Config(alembic_ini_path, ini_section=section)
 
     # Override the database URL to match SkyPilot's current connection
@@ -73,19 +84,23 @@ def get_alembic_config(engine: sqlalchemy.engine.Engine, section: str):
     return alembic_cfg
 
 
-def needs_upgrade(engine: sqlalchemy.engine.Engine, section: str,
-                  target_revision: str):
+def needs_upgrade(engine: sqlalchemy.engine.Engine,
+                  section: str,
+                  target_revision: str,
+                  alembic_ini_path: Optional[str] = None):
     """Check if the database needs to be upgraded.
 
     Args:
-        engine: SQLAlchemy engine for the database
-        section: Alembic section to upgrade (e.g., 'state_db' or 'spot_jobs_db')
-        target_revision: Target revision to upgrade to (e.g., '001')
+        engine: SQLAlchemy engine for the database.
+        section: Alembic section to upgrade (e.g., 'state_db' or
+        'spot_jobs_db').
+        target_revision: Target revision to upgrade to (e.g., '001').
+        alembic_ini_path: Optional path to a custom alembic.ini file.
     """
     current_rev = None
 
     # get alembic config for the given section
-    alembic_config = get_alembic_config(engine, section)
+    alembic_config = get_alembic_config(engine, section, alembic_ini_path)
     version_table = alembic_config.get_section_option(
         alembic_config.config_ini_section, 'version_table', 'alembic_version')
 
@@ -112,26 +127,31 @@ def needs_upgrade(engine: sqlalchemy.engine.Engine, section: str,
     return current_rev_num < target_rev_num
 
 
-def safe_alembic_upgrade(engine: sqlalchemy.engine.Engine, section: str,
-                         target_revision: str):
+def safe_alembic_upgrade(engine: sqlalchemy.engine.Engine,
+                         section: str,
+                         target_revision: str,
+                         alembic_ini_path: Optional[str] = None):
     """Upgrade the database if needed. Uses a file lock to ensure
     that only one process tries to upgrade the database at a time.
 
     Args:
-        engine: SQLAlchemy engine for the database
-        section: Alembic section to upgrade (e.g., 'state_db' or 'spot_jobs_db')
-        target_revision: Target revision to upgrade to (e.g., '001')
+        engine: SQLAlchemy engine for the database.
+        section: Alembic section to upgrade (e.g., 'state_db' or
+        'spot_jobs_db').
+        target_revision: Target revision to upgrade to (e.g., '001').
+        alembic_ini_path: Optional path to a custom alembic.ini file.
     """
     # set alembic logger to warning level
     alembic_logger = logging.getLogger('alembic')
     alembic_logger.setLevel(logging.WARNING)
 
-    alembic_config = get_alembic_config(engine, section)
+    alembic_config = get_alembic_config(engine, section, alembic_ini_path)
 
     # only acquire lock if db needs upgrade
-    if needs_upgrade(engine, section, target_revision):
+    if needs_upgrade(engine, section, target_revision, alembic_ini_path):
         with db_lock(section):
             # check again if db needs upgrade in case another
             # process upgraded it while we were waiting for the lock
-            if needs_upgrade(engine, section, target_revision):
+            if needs_upgrade(engine, section, target_revision,
+                             alembic_ini_path):
                 alembic_command.upgrade(alembic_config, target_revision)

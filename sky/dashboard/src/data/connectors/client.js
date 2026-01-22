@@ -3,24 +3,72 @@
 import { getErrorMessageFromResponse } from '@/data/utils';
 import { ENDPOINT } from './constants';
 
+// Wait for plugins that need early initialization (e.g., fetch interceptors)
+// Such plugins are marked with data-requires-early-init="true" and set
+// window.__skyPluginsReady = true when ready
+let pluginsReadyPromise = null;
+
+async function waitForPlugins() {
+  if (window.__skyPluginsReady) return;
+  if (pluginsReadyPromise) return pluginsReadyPromise;
+
+  // Check if any plugin needs early init
+  const needsWait = document.querySelector(
+    'script[src*="/plugins/"][data-requires-early-init="true"]'
+  );
+  if (!needsWait) return;
+
+  // Wait for plugin to signal ready (max 1s)
+  pluginsReadyPromise = new Promise((resolve) => {
+    const start = Date.now();
+    const check = setInterval(() => {
+      if (window.__skyPluginsReady || Date.now() - start >= 1000) {
+        clearInterval(check);
+        resolve();
+      }
+    }, 50);
+  });
+  return pluginsReadyPromise;
+}
+
 export const apiClient = {
+  fetchImmediate: async (path, body, method = 'POST', options = {}) => {
+    // Wait for plugins to be ready before making API calls
+    await waitForPlugins();
+
+    // Call a skypilot API and get the result
+    const headers =
+      method === 'POST'
+        ? {
+            'Content-Type': 'application/json',
+            ...(options.headers || {}),
+          }
+        : { ...(options.headers || {}) };
+
+    const baseUrl = window.location.origin;
+    const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
+
+    if (body !== undefined) {
+      body.env_vars = {
+        ...(body.env_vars || {}),
+        SKYPILOT_IS_FROM_DASHBOARD: 'true',
+        SKYPILOT_USER_ID: 'dashboard',
+        SKYPILOT_USER: 'dashboard',
+      };
+    }
+
+    return await fetch(fullUrl, {
+      method,
+      headers,
+      body: method === 'POST' ? JSON.stringify(body) : undefined,
+      signal: options.signal,
+    });
+  },
   fetch: async (path, body, method = 'POST') => {
+    // Call the server API and get the result via /api/get, the API must return a request ID
     try {
-      const headers =
-        method === 'POST'
-          ? {
-              'Content-Type': 'application/json',
-            }
-          : {};
-
       const baseUrl = window.location.origin;
-      const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
-
-      const response = await fetch(fullUrl, {
-        method,
-        headers,
-        body: method === 'POST' ? JSON.stringify(body) : undefined,
-      });
+      const response = await apiClient.fetchImmediate(path, body, method);
 
       // Check if initial request succeeded
       if (!response.ok) {
@@ -58,9 +106,10 @@ export const apiClient = {
   },
 
   // Helper method for POST requests
-  post: async (path, body) => {
+  post: async (path, body, options = {}) => {
     const headers = {
       'Content-Type': 'application/json',
+      ...(options.headers || {}),
     };
 
     const baseUrl = window.location.origin;
@@ -70,12 +119,13 @@ export const apiClient = {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
+      signal: options.signal,
     });
   },
 
   // Helper method for streaming responses
-  stream: async (path, body, onData) => {
-    const response = await apiClient.post(path, body);
+  stream: async (path, body, onData, options = {}) => {
+    const response = await apiClient.post(path, body, options);
     if (!response.ok) {
       const msg = `API request ${path} failed with status ${response.status}`;
       console.error(msg);

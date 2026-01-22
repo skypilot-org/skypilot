@@ -1,7 +1,8 @@
+{{- $fullName := include "skypilot.fullname" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-api-server
+  name: {{ $fullName }}-api-server
   namespace: {{ .Release.Namespace }}
 spec:
   # Note: replicas > 1 is not well tested.
@@ -10,8 +11,8 @@ spec:
   {{- if and (not .Values.apiService.dbConnectionSecretName) (not .Values.apiService.dbConnectionString) }}
   {{- fail "External database must be configured via .apiService.dbConnectionSecretName or .apiService.dbConnectionString when using RollingUpdate strategy" }}
   {{- end }}
-  {{- if .Values.storage.enabled }}
-  {{- fail "Local storage is not supported when using RollingUpdate strategy. Use recreate upgrade strategy or set storage.enabled to false." }}
+  {{- if and .Values.storage.enabled (ne .Values.storage.accessMode "ReadWriteMany") }}
+  {{- fail "Local storage with ReadWriteOnce access mode is not supported when using RollingUpdate strategy. Either use Recreate upgrade strategy, set storage.enabled to false, or use ReadWriteMany access mode with a compatible storage class (e.g., NFS-backed storage like Google Filestore)." }}
   {{- end }}
   strategy:
     type: RollingUpdate
@@ -24,7 +25,7 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-api
+      app: {{ $fullName }}-api
   template:
     metadata:
       annotations:
@@ -44,7 +45,7 @@ spec:
         {{- toYaml .Values.apiService.annotations | nindent 8 }}
         {{- end }}
       labels:
-        app: {{ .Release.Name }}-api
+        app: {{ $fullName }}-api
         # This label indicates that the API server is ready to serve requests.
         skypilot.co/ready: "true"
     spec:
@@ -80,7 +81,7 @@ spec:
         - name: SKYPILOT_DEV
           value: {{ .Values.apiService.skypilotDev | quote }}
         - name: SKYPILOT_RELEASE_NAME
-          value: {{ .Release.Name | quote }}
+          value: {{ $fullName | quote }}
         {{- if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }}
         - name: SKYPILOT_INITIAL_BASIC_AUTH
           valueFrom:
@@ -118,7 +119,7 @@ spec:
         - name: SKYPILOT_DB_CONNECTION_URI
           valueFrom:
             secretKeyRef:
-              name: {{ .Release.Name }}-db-connection
+              name: {{ $fullName }}-db-connection
               key: connection_string
         {{- end }}
         {{- if .Values.apiService.authUserHeaderName }}
@@ -132,6 +133,12 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.uid
+        - name: SKYPILOT_ROLLING_UPDATE_ENABLED
+          value: "true"
+        {{- end }}
+        {{- if .Values.storage.enabled }}
+        - name: SKYPILOT_API_SERVER_STORAGE_ENABLED
+          value: "true"
         {{- end }}
         {{- if .Values.apiService.metrics.enabled }}
         - name: SKY_API_SERVER_METRICS_ENABLED
@@ -188,13 +195,9 @@ spec:
           fi
           {{- if .Values.apiService.sshNodePools }}
           mkdir -p /root/.sky
-          # The PVC serves as the ground truth for the ssh_node_pools.yaml file, if it already exists we don't overwrite it
-          if [ ! -s /root/.sky/ssh_node_pools.yaml ]; then
-            echo "ssh_node_pools.yaml not found in /root/.sky, copying from ConfigMap \`skypilot-ssh-node-pools\`"
-            cp /var/skypilot/ssh_node_pool/ssh_node_pools.yaml /root/.sky/ssh_node_pools.yaml
-          else
-            echo "ssh_node_pools.yaml already exists in /root/.sky, skipping copy"
-          fi
+          echo "Linking ssh_node_pools.yaml from secret to /root/.sky/ssh_node_pools.yaml"
+          # The secret serves as the ground truth for the ssh_node_pools.yaml file, read-only
+          ln -sf /var/skypilot/ssh_node_pool/ssh_node_pools.yaml /root/.sky/ssh_node_pools.yaml
           # ~/.kube/config is required to be persistent when sshNodePools is enabled, init it if it is empty to avoid parsing error.
           if [ ! -s /root/.kube/config ]; then
             echo "{}" > /root/.kube/config
@@ -257,13 +260,33 @@ spec:
           periodSeconds: 5
           initialDelaySeconds: 5
         volumeMounts:
+        {{- if and .Values.storage.enabled (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
+        # For RollingUpdate with storage enabled, use emptyDir for ~/.sky to avoid
+        # running SQLite on NFS. Only persist the clients directory for file mounts.
+        # An ephemeral volume is still required since we have to share ~/.sky between
+        # containers.
+        - name: sky-ephemeral
+          mountPath: /root/.sky
+        - name: state-volume
+          mountPath: /root/.sky/api_server/clients
+          subPath: api_server/clients
+        {{- else }}
         - name: state-volume
           mountPath: /root/.sky
           subPath: .sky
+        {{- end }}
         {{- if .Values.storage.enabled }}
         - name: state-volume
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
           subPath: .ssh
+        # Mount only the specific subdirectories needed for managed job logs, not the entire sky_logs folder
+        # This avoids persisting transient cluster logs (sky-*) and api_server logs
+        - name: state-volume
+          mountPath: /root/sky_logs/jobs_controller # Controller logs for `sky jobs logs --controller`
+          subPath: sky_logs/jobs_controller
+        - name: state-volume
+          mountPath: /root/sky_logs/managed_jobs # Task execution logs for managed jobs
+          subPath: sky_logs/managed_jobs
         {{- end }}
         - name: skypilot-config
           mountPath: /var/skypilot/config
@@ -294,6 +317,11 @@ spec:
           mountPath: /root/.cloudflare
           readOnly: true
         {{- end }}
+        {{- if .Values.coreweaveCredentials.enabled }}
+        - name: coreweave-config
+          mountPath: /root/.coreweave
+          readOnly: true
+        {{- end }}
         {{- if .Values.gcpCredentials.enabled }}
         - name: gcp-config
           mountPath: /root/.config/gcloud
@@ -318,6 +346,11 @@ spec:
         {{- if .Values.runpodCredentials.enabled }}
         - name: runpod-config
           mountPath: /root/.runpod
+          readOnly: true
+        {{- end }}
+        {{- if .Values.digitaloceanCredentials.enabled }}
+        - name: digitalocean-config
+          mountPath: /root/.config/doctl
           readOnly: true
         {{- end }}
         {{- if .Values.lambdaCredentials.enabled }}
@@ -365,9 +398,17 @@ spec:
             sleep 60;
           done
         volumeMounts:
+        {{- if and .Values.storage.enabled (eq .Values.apiService.upgradeStrategy "RollingUpdate") }}
+        - name: sky-ephemeral
+          mountPath: /root/.sky
+        {{- else }}
         - name: state-volume
           mountPath: /root/.sky
           subPath: .sky
+        {{- end }}
+      {{- end }}
+      {{- with .Values.apiService.sidecarContainers }}
+      {{- toYaml . | nindent 6 }}
       {{- end }}
       initContainers:
       {{- if and .Values.awsCredentials.enabled (not .Values.awsCredentials.useCredentialsFile) }}
@@ -388,6 +429,7 @@ spec:
             echo "Credentials file created successfully."
           else
             echo "AWS credentials not found in environment variables. Skipping credentials setup."
+            echo "Sleeping for 10 minutes before exiting for debugging purposes."
             sleep 600
           fi
         env:
@@ -483,6 +525,29 @@ spec:
         - name: gcp-config
           mountPath: /root/.config/gcloud
       {{- end }}
+      {{- if .Values.coreweaveCredentials.enabled }}
+      - name: setup-coreweave-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
+        command: ["/bin/sh", "-c"]
+        {{- if $.Values.global.extraEnvs }}
+        env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- end }}
+        args:
+        - |
+          cp /root/.coreweave_credentials/* /root/.coreweave/
+        volumeMounts:
+        - name: coreweave-credentials
+          mountPath: /root/.coreweave_credentials
+        - name: coreweave-config
+          mountPath: /root/.coreweave
+      {{- end }}
       {{- if .Values.runpodCredentials.enabled }}
       - name: create-runpod-credentials
         {{- with .Values.securityContext }}
@@ -501,6 +566,7 @@ spec:
             echo "api_key = \"$RUNPOD_API_KEY\"" >> /root/.runpod/config.toml
           else
             echo "RunPod credentials not found in environment variables. Skipping credentials setup."
+            echo "Sleeping for 10 minutes before exiting for debugging purposes."
             sleep 600
           fi
         env:
@@ -515,6 +581,38 @@ spec:
         volumeMounts:
         - name: runpod-config
           mountPath: /root/.runpod
+      {{- end }}
+      {{- if .Values.digitaloceanCredentials.enabled }}
+      - name: create-digitalocean-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        image: {{ .Values.apiService.image }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Setting up Digital Ocean credentials..."
+          if [ -n "$DIGITALOCEAN_CREDENTIALS" ]; then
+            echo "Digital Ocean credentials found in environment variable."
+            mkdir -p /.config/doctl
+            cat > /.config/doctl/config.yaml <<EOF
+          access-token: $DIGITALOCEAN_CREDENTIALS
+          EOF
+          else
+            echo "Digital Ocean credentials not found in environment variables. Skipping credentials setup."
+            echo "Sleeping for 10 minutes before exiting for debugging purposes."
+            sleep 600
+          fi
+        env:
+        - name: DIGITALOCEAN_CREDENTIALS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.digitaloceanCredentials.digitaloceanSecretName }}
+              key: api_key
+        volumeMounts:
+        - name: digitalocean-config
+          mountPath: /.config/doctl
       {{- end }}
       {{- if .Values.lambdaCredentials.enabled }}
       - name: create-lambda-credentials
@@ -533,6 +631,7 @@ spec:
             echo "api_key = $LAMBDA_API_KEY" > /root/.lambda_cloud/lambda_keys
           else
             echo "Lambda credentials not found in environment variables. Skipping credentials setup."
+            echo "Sleeping for 10 minutes before exiting for debugging purposes."
             sleep 600
           fi
         env:
@@ -565,6 +664,7 @@ spec:
             echo "$VAST_API_KEY" > /root/.config/vastai/vast_api_key
           else
             echo "Vast credentials not found in environment variables. Skipping credentials setup."
+            echo "Sleeping for 10 minutes before exiting for debugging purposes."
             sleep 600
           fi
         env:
@@ -588,7 +688,14 @@ spec:
       {{- if .Values.storage.enabled }}
       - name: state-volume
         persistentVolumeClaim:
-          claimName: {{ .Release.Name }}-state
+          claimName: {{ $fullName }}-state
+      {{- if eq .Values.apiService.upgradeStrategy "RollingUpdate" }}
+      # When using RollingUpdate with storage enabled, use a separate emptyDir
+      # for ~/.sky to avoid running SQLite on NFS. Only specific subdirectories
+      # like api_server/clients are persisted to the PVC.
+      - name: sky-ephemeral
+        emptyDir: {}
+      {{- end }}
       {{- else }}
       - name: state-volume
         emptyDir: {}
@@ -612,8 +719,19 @@ spec:
       - name: gcp-config
         emptyDir: {}
       {{- end }}
+      {{- if .Values.coreweaveCredentials.enabled }}
+      - name: coreweave-credentials
+        secret:
+          secretName: {{ .Values.coreweaveCredentials.coreweaveSecretName }}
+      - name: coreweave-config
+        emptyDir: {}
+      {{- end }}
       {{- if .Values.runpodCredentials.enabled }}
       - name: runpod-config
+        emptyDir: {}
+      {{- end }}
+      {{- if .Values.digitaloceanCredentials.enabled }}
+      - name: digitalocean-config
         emptyDir: {}
       {{- end }}
       {{- if .Values.lambdaCredentials.enabled }}
@@ -636,11 +754,11 @@ spec:
       {{- end }}
       - name: skypilot-config
         configMap:
-          name: {{ .Release.Name }}-config
+          name: {{ $fullName }}-config
       {{- if .Values.apiService.sshNodePools }}
       - name: skypilot-ssh-node-pools
         secret:
-          secretName: {{ .Release.Name }}-ssh-node-pools
+          secretName: {{ $fullName }}-ssh-node-pools
       {{- end }}
       {{- if .Values.apiService.sshKeySecret }}
       - name: skypilot-ssh-identity
@@ -654,4 +772,16 @@ spec:
       {{- if .Values.r2Credentials.enabled }}
       - name: r2-config
         emptyDir: {}
+      {{- end }}
+      {{- with .Values.apiService.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.apiService.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.apiService.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
       {{- end }}

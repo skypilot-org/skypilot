@@ -15,9 +15,7 @@ import starlette.middleware.base
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky.jobs import utils as managed_job_utils
 from sky.server import middleware_utils
-from sky.server.auth import authn
 from sky.server.auth import loopback
 from sky.users import permission
 from sky.utils import common_utils
@@ -112,8 +110,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # Already authenticated
             return await call_next(request)
 
-        if managed_job_utils.is_consolidation_mode(
-        ) and loopback.is_loopback_request(request):
+        if loopback.is_loopback_request(request):
             return await call_next(request)
 
         async with aiohttp.ClientSession() as session:
@@ -161,8 +158,6 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     permission.permission_service.add_user_if_not_exists(
                         auth_user.id)
                 request.state.auth_user = auth_user
-                await authn.override_user_info_in_request_body(
-                    request, auth_user)
                 return await call_next(request)
             elif auth_response.status == http.HTTPStatus.UNAUTHORIZED:
                 # For /api/health, we should allow unauthenticated requests to
@@ -170,6 +165,13 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 # TODO(aylei): remove this to an aggregated login middleware
                 # in favor of the unified authentication.
                 if request.url.path.startswith('/api/health'):
+                    request.state.anonymous_user = True
+                    return await call_next(request)
+
+                # Allow unauthenticated access to the polling auth endpoint.
+                # This endpoint is used by the CLI to poll for auth tokens
+                # during the login flow before authentication is complete.
+                if request.url.path == '/api/v1/auth/token':
                     request.state.anonymous_user = True
                     return await call_next(request)
 

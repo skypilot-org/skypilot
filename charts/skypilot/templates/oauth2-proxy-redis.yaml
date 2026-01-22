@@ -4,23 +4,24 @@
 {{- $oauth2 = index .Values.ingress "oauth2-proxy" -}}
 {{- end -}}
 {{- if and (eq (index $oauth2 "session-store-type" | default "redis") "redis") (not (index $oauth2 "redis-url")) (not (index $oauth2 "redis-secret")) -}}
+{{- $fullName := include "skypilot.fullname" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-oauth2-proxy-redis
+  name: {{ $fullName }}-oauth2-proxy-redis
   namespace: {{ .Release.Namespace }}
   labels:
-    app: {{ .Release.Name }}-oauth2-proxy-redis
+    app: {{ $fullName }}-oauth2-proxy-redis
     skypilot.co/component: oauth2-proxy-redis
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-oauth2-proxy-redis
+      app: {{ $fullName }}-oauth2-proxy-redis
   template:
     metadata:
       labels:
-        app: {{ .Release.Name }}-oauth2-proxy-redis
+        app: {{ $fullName }}-oauth2-proxy-redis
         skypilot.co/component: oauth2-proxy-redis
     spec:
       {{- with .Values.global.imagePullSecrets }}
@@ -47,10 +48,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-oauth2-proxy-redis
+  name: {{ $fullName }}-oauth2-proxy-redis
   namespace: {{ .Release.Namespace }}
   labels:
-    app: {{ .Release.Name }}-oauth2-proxy-redis
+    app: {{ $fullName }}-oauth2-proxy-redis
     skypilot.co/component: oauth2-proxy-redis
 spec:
   type: ClusterIP
@@ -60,6 +61,6 @@ spec:
     protocol: TCP
     name: redis
   selector:
-    app: {{ .Release.Name }}-oauth2-proxy-redis
+    app: {{ $fullName }}-oauth2-proxy-redis
 {{- end -}}
 {{- end -}}

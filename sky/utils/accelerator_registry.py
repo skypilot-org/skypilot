@@ -3,6 +3,7 @@ import typing
 from typing import List, Optional
 
 from sky import catalog
+from sky.catalog import common as catalog_common
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -34,8 +35,8 @@ if typing.TYPE_CHECKING:
 
 # Use a cached version of accelerators to cloud mapping, so that we don't have
 # to download and read the catalog file for every cloud locally.
-_accelerator_df = catalog.common.read_catalog('common/accelerators.csv')
-_memory_df = catalog.common.read_catalog('common/metadata.csv')
+_accelerator_df = catalog_common.read_catalog('common/accelerators.csv')
+_memory_df = catalog_common.read_catalog('common/metadata.csv')
 
 # List of non-GPU accelerators that are supported by our backend for job queue
 # scheduling.

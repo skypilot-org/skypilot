@@ -528,8 +528,9 @@ def _print_checked_cloud(
         # `dict` reasons for K8s and SSH will be printed in detail in
         # _format_enabled_cloud. Skip here unless the cloud is disabled.
         if not isinstance(reason, str):
-            if not ok and isinstance(cloud_tuple[1],
-                                     (sky_clouds.SSH, sky_clouds.Kubernetes)):
+            if not ok and isinstance(
+                    cloud_tuple[1],
+                (sky_clouds.SSH, sky_clouds.Kubernetes, sky_clouds.Slurm)):
                 if reason is not None:
                     reason_str = _format_context_details(cloud_tuple[1],
                                                          show_details=True,
@@ -555,7 +556,9 @@ def _print_checked_cloud(
         capability_string = f'[{", ".join(enabled_capabilities)}]'
         if verbose and cloud is not cloudflare and cloud is not coreweave:
             activated_account = cloud.get_active_user_identity_str()
-        if isinstance(cloud_tuple[1], (sky_clouds.SSH, sky_clouds.Kubernetes)):
+        if isinstance(
+                cloud_tuple[1],
+            (sky_clouds.SSH, sky_clouds.Kubernetes, sky_clouds.Slurm)):
             detail_string = _format_context_details(cloud_tuple[1],
                                                     show_details=True,
                                                     ctx2text=ctx2text)
@@ -586,6 +589,9 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
     if isinstance(cloud_type, sky_clouds.SSH):
         # Get the cluster names by reading from the node pools file
         contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
+    elif isinstance(cloud_type, sky_clouds.Slurm):
+        # Get the cluster names from SLURM config
+        contexts = sky_clouds.Slurm.existing_allowed_clusters()
     else:
         assert isinstance(cloud_type, sky_clouds.Kubernetes)
         contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
@@ -650,15 +656,19 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
                                               'configuration.'))
                 else:
                     # Default case - not set up
-                    text_suffix = (': ' + _red_color('disabled. ') +
-                                   _dim_color('Reason: Not set up. Use '
-                                              '`sky ssh up --infra '
-                                              f'{context.lstrip("ssh-")}` '
-                                              'to set up.'))
+                    text_suffix = (': ' + _red_color('disabled. ') + _dim_color(
+                        'Reason: Not set up. Use '
+                        '`sky ssh up --infra '
+                        f'{common_utils.removeprefix(context, "ssh-")}` '
+                        'to set up.'))
         contexts_formatted.append(
             f'\n    {symbol}{cleaned_context}{text_suffix}')
-    identity_str = ('SSH Node Pools' if isinstance(cloud_type, sky_clouds.SSH)
-                    else 'Allowed contexts')
+    if isinstance(cloud_type, sky_clouds.SSH):
+        identity_str = 'SSH Node Pools'
+    elif isinstance(cloud_type, sky_clouds.Slurm):
+        identity_str = 'Allowed clusters'
+    else:
+        identity_str = 'Allowed contexts'
     return f'\n    {identity_str}:{"".join(contexts_formatted)}'
 
 
@@ -677,7 +687,11 @@ def _format_enabled_cloud(cloud_name: str,
     cloud_and_capabilities = f'{cloud_name} [{", ".join(capabilities)}]'
     title = _green_color(cloud_and_capabilities)
 
-    if cloud_name in [repr(sky_clouds.Kubernetes()), repr(sky_clouds.SSH())]:
+    if cloud_name in [
+            repr(sky_clouds.Kubernetes()),
+            repr(sky_clouds.SSH()),
+            repr(sky_clouds.Slurm())
+    ]:
         return (f'{title}' + _format_context_details(
             cloud_name, show_details=False, ctx2text=ctx2text))
     return _green_color(cloud_and_capabilities)

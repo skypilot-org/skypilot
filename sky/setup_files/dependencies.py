@@ -36,8 +36,10 @@ install_requires = [
     'python-dotenv',
     'rich',
     'tabulate',
-    # Light weight requirement, can be replaced with "typing" once
-    # we deprecate Python 3.7 (this will take a while).
+    # Light weight requirement, can be removed after we deprecate Python 3.9.
+    # ParamSpec is available in typing module starting from Python 3.10, so
+    # we can replace "from typing_extensions import ParamSpec" with
+    # "from typing import ParamSpec" once we require Python >= 3.10.
     'typing_extensions',
     # filelock 3.15.0 or higher is required for async file locking.
     'filelock >= 3.15.0',
@@ -55,7 +57,7 @@ install_requires = [
     # uvicorn, so we need to pin uvicorn version to avoid potential break
     # changes.
     # Notes for current version check:
-    # - uvicorn 0.33.0 is the latest version that supports Python 3.8
+    # - uvicorn 0.33.0 is the latest version that supports Python 3.9
     # - uvicorn 0.36.0 removes setup_event_loop thus breaks SkyPilot's custom
     #   behavior.
     'uvicorn[standard] >=0.33.0, <0.36.0',
@@ -70,7 +72,7 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
-    'sqlalchemy',
+    'sqlalchemy>=2.0.0',
     'psycopg2-binary',
     'aiosqlite',
     'asyncpg',
@@ -84,8 +86,9 @@ install_requires = [
     'bcrypt==4.0.1',
     'pyjwt',
     'gitpython',
+    'paramiko',
     'types-paramiko',
-    'alembic',
+    'alembic>=1.8.0',
     'aiohttp',
     'anyio',
 ]
@@ -143,9 +146,11 @@ aws_dependencies = [
     'awscli>=1.27.10',
     'botocore>=1.29.10',
     'boto3>=1.26.1',
-    # NOTE: required by awscli. To avoid ray automatically installing
-    # the latest version.
-    'colorama < 0.4.5',
+    # NOTE: colorama is a dependency of awscli. We pin it to match the
+    # version constraint in awscli (<0.4.7) to prevent potential conflicts
+    # with other packages like ray, which might otherwise install a newer
+    # version.
+    'colorama<0.4.7',
 ]
 
 # Kubernetes 32.0.0 has an authentication bug:
@@ -203,12 +208,21 @@ cloud_dependencies: Dict[str, List[str]] = {
     'ssh': kubernetes_dependencies,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1
-    # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python 3.11+
-    # stdlib provides tomllib; on lower versions we depend on tomli explicitly.
-    # Instead of installing tomli conditionally, we install it explicitly.
-    # This is because the conditional installation of tomli does not work
-    # with controller package installation code.
-    'runpod': ['runpod>=1.6.1', 'tomli'],
+    'runpod': [
+        # For the container registry auth api. Reference:
+        # https://github.com/runpod/runpod-python/releases/tag/1.6.1
+        'runpod>=1.6.1',
+        # RunPod needs a TOML parser to read ~/.runpod/config.toml. On Python
+        # 3.11+ stdlib provides tomllib; on lower versions we depend on tomli
+        # explicitly. Instead of installing tomli conditionally, we install it
+        # explicitly. This is because the conditional installation of tomli does
+        # not work with controller package installation code.
+        'tomli',
+        # runpod installs aiodns (via aiohttp[speedups]), which is incompatible
+        # with pycares 5.0.0 due to deprecations.
+        # See https://github.com/aio-libs/aiodns/issues/214
+        'pycares<5',
+    ],
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
@@ -234,6 +248,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi==0.4.0'],
     'shadeform': [],  # No dependencies needed for shadeform
+    'slurm': ['python-hostlist'],
 }
 
 # Calculate which clouds should be included in the [all] installation.

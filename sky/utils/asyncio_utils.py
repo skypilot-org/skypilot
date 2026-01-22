@@ -10,7 +10,7 @@ _background_tasks: Set[asyncio.Task] = set()
 def shield(func):
     """Shield the decorated async function from cancellation.
 
-    If the outter coroutine is cancelled, the inner decorated function
+    If the outer coroutine is cancelled, the inner decorated function
     will be protected from cancellation by asyncio.shield(). And we will
     maintain a reference to the the inner task to avoid it get GCed before
     it is done.

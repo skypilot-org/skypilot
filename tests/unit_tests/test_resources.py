@@ -1319,6 +1319,178 @@ def test_ssh_end_to_end_make_deploy_variables(mock_check_deps,
     importlib.reload(skypilot_config)
 
 
+def test_resources_add_subtract_cpu_only():
+    """Test adding and subtracting Resources with only CPU."""
+    r1 = Resources(cpus='2')
+    r2 = Resources(cpus='3')
+
+    # Test addition
+    result = r1 + r2
+    assert result is not None
+    assert result.cpus == '5.0'
+    assert result.memory is None
+    assert result.accelerators is None
+
+    # Test subtraction
+    result = r2 - r1
+    assert result is not None
+    assert result.cpus == '1.0'
+    assert result.memory is None
+    assert result.accelerators is None
+
+    # Test subtraction that results in 0
+    result = r1 - r1
+    assert result is not None
+    assert result.cpus is None  # 0 becomes None
+    assert result.memory is None
+    assert result.accelerators is None
+
+    # Test subtraction that would be negative (should clamp to 0/None)
+    result = r1 - r2
+    assert result is not None
+    assert result.cpus is None  # -1 becomes None (0 clamped)
+    assert result.memory is None
+    assert result.accelerators is None
+
+
+def test_resources_add_subtract_cpu_memory():
+    """Test adding and subtracting Resources with CPU and memory."""
+    r1 = Resources(cpus='2', memory='8')
+    r2 = Resources(cpus='3', memory='16')
+
+    # Test addition
+    result = r1 + r2
+    assert result is not None
+    assert result.cpus == '5.0'
+    assert result.memory == '24.0'
+    assert result.accelerators is None
+
+    # Test subtraction
+    result = r2 - r1
+    assert result is not None
+    assert result.cpus == '1.0'
+    assert result.memory == '8.0'
+    assert result.accelerators is None
+
+    # Test with None in one operand
+    r3 = Resources(cpus='2')
+    result = r1 + r3
+    assert result is not None
+    assert result.cpus == '4.0'
+    assert result.memory == '8.0'  # Preserved from r1
+    assert result.accelerators is None
+
+
+def test_resources_add_subtract_accelerators():
+    """Test adding and subtracting Resources with accelerators."""
+    r1 = Resources(accelerators={'V100': 2})
+    r2 = Resources(accelerators={'V100': 3})
+
+    # Test addition
+    result = r1 + r2
+    assert result is not None
+    assert result.cpus is None
+    assert result.memory is None
+    assert result.accelerators == {'V100': 5.0}
+
+    # Test subtraction
+    result = r2 - r1
+    assert result is not None
+    assert result.cpus is None
+    assert result.memory is None
+    assert result.accelerators == {'V100': 1.0}
+
+    # Test subtraction that results in 0 (should be removed)
+    result = r1 - r1
+    assert result is not None
+    assert result.cpus is None
+    assert result.memory is None
+    assert result.accelerators is None
+
+    # Test with different accelerator types
+    r3 = Resources(accelerators={'A100': 1})
+    result = r1 + r3
+    assert result is not None
+    assert result.accelerators == {'V100': 2.0, 'A100': 1.0}
+
+    # Test subtraction with different accelerator types
+    result = r1 - r3
+    assert result is not None
+    assert result.accelerators == {'V100': 2.0}  # A100 not in r1, so unchanged
+
+
+def test_resources_add_subtract_mixed():
+    """Test adding Resources with different combinations."""
+    # Start with all 3 resource types
+    r_base = Resources(cpus='4', memory='16', accelerators={'V100': 2})
+
+    # Add one with only memory
+    r_memory = Resources(memory='8')
+    result = r_base + r_memory
+    assert result is not None
+    assert result.cpus == '4.0'  # Preserved from r_base
+    assert result.memory == '24.0'  # 16 + 8
+    assert result.accelerators == {'V100': 2.0}  # Preserved from r_base
+
+    # Add one with only accelerator
+    r_accel = Resources(accelerators={'A100': 1})
+    result = result + r_accel
+    assert result is not None
+    assert result.cpus == '4.0'  # Still preserved
+    assert result.memory == '24.0'  # Still preserved
+    assert result.accelerators == {
+        'V100': 2.0,
+        'A100': 1.0
+    }  # Both accelerators
+
+    # Test subtraction with mixed resources
+    r_subtract = Resources(cpus='2', memory='8', accelerators={'V100': 1})
+    result = r_base - r_subtract
+    assert result is not None
+    assert result.cpus == '2.0'  # 4 - 2
+    assert result.memory == '8.0'  # 16 - 8
+    assert result.accelerators == {'V100': 1.0}  # 2 - 1
+
+    # Test subtracting None
+    result = r_base - None
+    assert result is not None
+    assert result.cpus == '4'
+    assert result.memory == '16'
+    assert result.accelerators == {'V100': 2.0}
+
+
+def test_resources_add_subtract_with_none():
+    """Test adding and subtracting with None operands."""
+    r1 = Resources(cpus='2', memory='8', accelerators={'V100': 1})
+
+    # Adding None should return self
+    result = r1 + None
+    assert result is not None
+    assert result.cpus == '2'
+    assert result.memory == '8'
+    assert result.accelerators == {'V100': 1.0}
+
+    # Subtracting None should return self
+    result = r1 - None
+    assert result is not None
+    assert result.cpus == '2'
+    assert result.memory == '8'
+    assert result.accelerators == {'V100': 1.0}
+
+
+def test_inferred_resource_not_copied():
+    """Test that when accelerator is None and only inferred by machine type,
+    the inferred accelerator values are not copied."""
+    r1 = Resources(instance_type='a2-highgpu-1g', cloud=clouds.GCP())
+    assert r1.accelerators == {'A100': 1}
+    assert r1._accelerators is None
+
+    override = {'instance_type': 'g2-standard-4'}
+    r2 = r1.copy(**override)
+    assert r2.accelerators == {'L4': 1}
+    assert r2._accelerators is None
+
+
 @mock.patch(
     'sky.provision.kubernetes.utils.check_port_forward_mode_dependencies')
 def test_kubernetes_end_to_end_make_deploy_variables(mock_check_deps,

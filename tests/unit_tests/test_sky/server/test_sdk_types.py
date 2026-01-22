@@ -1,18 +1,16 @@
 """Tests to verify that SDK function return types match their corresponding server functions."""
 
-from typing import Callable, ForwardRef
+from typing import Callable
 
 from sky import catalog
 from sky import check
 from sky import core
-from sky import execution
 from sky.client import sdk
 from sky.jobs.client import sdk as jobs_sdk
 from sky.jobs.server import core as jobs_core
-from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve.client import sdk as serve_sdk
 from sky.serve.server import core as serve_core
-from sky.ssh_node_pools import server as ssh_node_pools_server
+from sky.ssh_node_pools import core as ssh_node_pools_core
 from sky.volumes.client import sdk as volume_sdk
 from sky.volumes.server import core as volume_core
 from sky.volumes.server import server as volume_server
@@ -176,9 +174,9 @@ def test_local_down_return_type():
 
 def test_ssh_up_down_return_type():
     """Test that sdk.ssh_up / sky.ssh_down and core.ssh_up return types match."""
-    _check_return_type(sdk.ssh_up, core.ssh_up)
+    _check_return_type(sdk.ssh_up, ssh_node_pools_core.ssh_up)
     # ssh_down is a wrapper around ssh_up with cleanup=True
-    _check_return_type(sdk.ssh_down, core.ssh_up)
+    _check_return_type(sdk.ssh_down, ssh_node_pools_core.ssh_up)
 
 
 # tests for sky.jobs.client.sdk
