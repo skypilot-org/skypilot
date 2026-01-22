@@ -1979,7 +1979,8 @@ async def _get_cluster_and_validate(
         cluster_records = await context_utils.to_thread_with_executor(
             thread_pool_executor, core.status, cluster_name, all_users=True)
     cluster_record = cluster_records[0]
-    if cluster_record['status'] not in (status_lib.ClusterStatus.UP,
+    if cluster_record['status'] not in (status_lib.ClusterStatus.INIT,
+                                        status_lib.ClusterStatus.UP,
                                         status_lib.ClusterStatus.AUTOSTOPPING):
         raise fastapi.HTTPException(
             status_code=400, detail=f'Cluster {cluster_name} is not running')
