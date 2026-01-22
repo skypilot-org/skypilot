@@ -726,7 +726,8 @@ def write_cluster_config(
         cloud=str(cloud).lower(),
         region=region.name,
         keys=('remote_identity',),
-        default_value=None)
+        default_value=None,
+        override_configs=to_provision.cluster_config_overrides)
     remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
     if isinstance(remote_identity_config, str):
         remote_identity = remote_identity_config
