@@ -318,14 +318,20 @@ def _async_call_or_wait(request_id: server_common.RequestId[T],
 
 
 def _merge_cli_and_file_vars(
-        env_dict: Optional[Dict[str, str]],
+        env_dicts: List[Dict[str, str]],
         env_list: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
-    """Merges all values from env_list into env_dict."""
-    if not env_dict:
-        return env_list
-    for (key, value) in env_list:
-        env_dict[key] = value
-    return list(env_dict.items())
+    """Merges all values from env_list and env_dicts. Priority is
+    as follows: env_list has highest priority, and env_dict with
+    higher index has more priority than that of lower index."""
+    final_env_dict = {}
+    for env_dict in env_dicts:
+        if env_dict is None:
+            continue
+        for k, v in env_dict.items():
+            final_env_dict[k] = v
+    for k, v in env_list:
+        final_env_dict[k] = v
+    return list(final_env_dict.items())
 
 
 def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
@@ -1095,8 +1101,8 @@ def launch(
     # job can take up resources on the API server. When there are a lot of
     # `launch` submitted asynchronously, the log tailing may overwhelm the API
     # server, if the jobs are long running.
-    env = _merge_cli_and_file_vars(env_file, env)
-    secret = _merge_cli_and_file_vars(secret_file, secret)
+    env = _merge_cli_and_file_vars([env_file], env)
+    secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
@@ -1331,8 +1337,8 @@ def exec(
         raise click.UsageError('Missing argument \'[ENTRYPOINT]...\'')
     assert cluster is not None, (cluster, cluster_option, entrypoint)
 
-    env = _merge_cli_and_file_vars(env_file, env)
-    secret = _merge_cli_and_file_vars(secret_file, secret)
+    env = _merge_cli_and_file_vars([env_file], env)
+    secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Executing task on it')
 
@@ -5027,8 +5033,8 @@ def jobs_launch(
             raise click.UsageError('Cannot specify both --name and --cluster. '
                                    'Use one of the flags as they are alias.')
         name = cluster
-    env = _merge_cli_and_file_vars(env_file, env)
-    secret = _merge_cli_and_file_vars(secret_file, secret)
+    env = _merge_cli_and_file_vars([env_file], env)
+    secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
@@ -6018,8 +6024,8 @@ def _generate_task_with_service(
     yaml_name = 'SERVICE_YAML' if not pool else 'POOL_YAML'
     if not is_yaml:
         raise click.UsageError(f'{yaml_name} must be a valid YAML file.')
-    env = _merge_cli_and_file_vars(env_file, env)
-    secret = _merge_cli_and_file_vars(secret_file, secret)
+    env = _merge_cli_and_file_vars([env_file], env)
+    secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     # We keep nargs=-1 in service_yaml argument to reuse this function.
     task = _make_task_or_dag_from_entrypoint_with_overrides(
         service_yaml_args,

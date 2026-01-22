@@ -155,7 +155,11 @@ TASK_OPTIONS = [
         node.
 
         If any values from ``--env-file`` conflict with values set by
-        ``--env``, the ``--env`` value will be preferred."""),
+        ``--env``, the ``--env`` value will be preferred.
+
+        Values from ``--env-file`` will also load to secrets with lower
+        preference compared to ``--secret`` or ``--secret-file``.
+        """),
     click.option(
         '--env',
         required=False,

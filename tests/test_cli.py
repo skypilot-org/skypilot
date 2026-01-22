@@ -13,7 +13,6 @@ from sky import server
 from sky.client.cli import command
 from sky.schemas.api import responses
 from sky.utils import status_lib
-from sky.utils import ux_utils
 
 CLOUDS_TO_TEST = [
     'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius'
@@ -604,6 +603,20 @@ class TestHelperFunctions:
         assert '1, 2, 4, 8' in output, f"Expected '1, 2, 4, 8' in output, got: {output}"
         # Ensure it doesn't contain the problematic float format
         assert '1.0, 2.0, 4.0, 8.0' not in output, f"Found float format in output: {output}"
+
+    def test_env_secret_file_merger(self):
+        """"""
+        cli = [('hello', 'world'), ('one', 'two')]
+        env_file = {'hello': 'notthis', 'something': 'different', 'secret': 'notsosecure'}
+        secret_file = {'secret': 'supersecret', 'secret2': 'verysecret'}
+
+        final_envs = command._merge_cli_and_file_vars([None, env_file, None, secret_file], cli)
+        final_envs = dict(final_envs)
+        assert final_envs['hello'] == 'world'
+        assert final_envs['one'] == 'two'
+        assert final_envs['something'] == 'different'
+        assert final_envs['secret'] == 'supersecret'
+        assert final_envs['secret2'] == 'verysecret'
 
 
 def strip_ansi(s: str) -> str:
