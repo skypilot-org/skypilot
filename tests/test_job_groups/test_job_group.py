@@ -22,7 +22,6 @@ class TestJobGroupYamlParsing:
         yaml_content = """
 ---
 name: test-group
-placement: SAME_INFRA
 execution: parallel
 ---
 name: job1
@@ -59,7 +58,7 @@ run: echo world
             f.flush()
 
             try:
-                # Chain DAG has name-only header, no placement/execution
+                # Chain DAG has name-only header (no execution: parallel)
                 assert dag_utils.is_job_group_yaml(f.name) is False
             finally:
                 os.unlink(f.name)
@@ -85,7 +84,6 @@ run: echo hello
         yaml_content = """
 ---
 name: test-group
-placement: SAME_INFRA
 execution: parallel
 ---
 name: job1
@@ -104,7 +102,6 @@ run: echo world
 
                 assert dag.is_job_group() is True
                 assert dag.name == 'test-group'
-                assert dag.placement == dag_lib.DagPlacement.SAME_INFRA
                 assert dag.execution == dag_lib.DagExecution.PARALLEL
                 assert len(dag.tasks) == 2
                 assert dag.tasks[0].name == 'job1'
@@ -117,7 +114,7 @@ run: echo world
         yaml_content = """
 ---
 name: test-group
-placement: SAME_INFRA
+execution: parallel
 ---
 run: echo hello
 """
@@ -138,7 +135,7 @@ run: echo hello
         yaml_content = """
 ---
 name: test-group
-placement: SAME_INFRA
+execution: parallel
 ---
 name: job1
 run: echo hello
@@ -157,27 +154,6 @@ run: echo world
             finally:
                 os.unlink(f.name)
 
-    def test_load_job_group_invalid_placement(self):
-        """Test that invalid placement mode raises error."""
-        yaml_content = """
----
-name: test-group
-placement: INVALID_MODE
----
-name: job1
-run: echo hello
-"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            f.write(yaml_content)
-            f.flush()
-
-            try:
-                with pytest.raises(ValueError, match='Invalid placement mode'):
-                    dag_utils.load_job_group_from_yaml(f.name)
-            finally:
-                os.unlink(f.name)
-
 
 class TestPrimaryJobsParsing:
     """Tests for primary_tasks and termination_delay parsing."""
@@ -187,7 +163,6 @@ class TestPrimaryJobsParsing:
         yaml_content = """
 ---
 name: test-rl
-placement: SAME_INFRA
 execution: parallel
 primary_tasks: [trainer]
 ---
@@ -214,7 +189,6 @@ run: python replay_buffer.py
         yaml_content = """
 ---
 name: test-rl
-placement: SAME_INFRA
 execution: parallel
 primary_tasks: [trainer]
 termination_delay: 30s
@@ -243,7 +217,6 @@ run: echo buffer
         yaml_content = """
 ---
 name: test-rl
-placement: SAME_INFRA
 execution: parallel
 primary_tasks: [trainer]
 termination_delay:
@@ -281,7 +254,7 @@ run: echo eval
         yaml_content = """
 ---
 name: test-group
-placement: SAME_INFRA
+execution: parallel
 primary_tasks: [nonexistent]
 ---
 name: job1
@@ -305,7 +278,7 @@ run: echo hello
         yaml_content = """
 ---
 name: test-group
-placement: SAME_INFRA
+execution: parallel
 primary_tasks: [job1]
 termination_delay: invalid
 ---
@@ -328,7 +301,7 @@ run: echo hello
         yaml_content = """
 ---
 name: test-group
-placement: SAME_INFRA
+execution: parallel
 primary_tasks: [job1]
 termination_delay:
   unknown-job: 30s
@@ -378,8 +351,7 @@ run: echo hello
         """Test dumping JobGroup with primary_tasks to YAML."""
         dag = dag_lib.Dag()
         dag.name = 'test-group'
-        dag.set_dag_config(dag_lib.DagPlacement.SAME_INFRA,
-                           dag_lib.DagExecution.PARALLEL)
+        dag.set_execution(dag_lib.DagExecution.PARALLEL)
         dag.primary_tasks = ['job1']
         dag.termination_delay = '30s'
 
@@ -437,13 +409,11 @@ class TestDagJobGroup:
         dag = dag_lib.Dag()
         assert dag.is_job_group() is False
 
-    def test_set_dag_config(self):
-        """Test setting DAG placement and execution mode."""
+    def test_set_execution(self):
+        """Test setting DAG execution mode."""
         dag = dag_lib.Dag()
-        dag.set_dag_config(dag_lib.DagPlacement.SAME_INFRA,
-                           dag_lib.DagExecution.PARALLEL)
+        dag.set_execution(dag_lib.DagExecution.PARALLEL)
         assert dag.is_job_group() is True
-        assert dag.placement == dag_lib.DagPlacement.SAME_INFRA
         assert dag.execution == dag_lib.DagExecution.PARALLEL
 
     def test_primary_tasks_default(self):
@@ -940,7 +910,6 @@ class TestPrimaryAuxiliaryLogic:
         yaml_content = """
 ---
 name: multi-primary
-placement: SAME_INFRA
 execution: parallel
 primary_tasks: [trainer, evaluator]
 termination_delay: 30s
@@ -983,7 +952,6 @@ run: echo data
         yaml_content = """
 ---
 name: all-primary
-placement: SAME_INFRA
 execution: parallel
 primary_tasks: []
 ---
@@ -1010,7 +978,6 @@ run: echo job2
         yaml_content = """
 ---
 name: default-all-primary
-placement: SAME_INFRA
 execution: parallel
 ---
 name: job1
@@ -1039,7 +1006,6 @@ run: echo job2
         yaml_content = """
 ---
 name: delay-no-primary
-placement: SAME_INFRA
 execution: parallel
 termination_delay: 30s
 ---
@@ -1068,7 +1034,6 @@ run: echo job2
         yaml_content = """
 ---
 name: single-primary
-placement: SAME_INFRA
 execution: parallel
 primary_tasks: [trainer]
 ---
@@ -1097,7 +1062,6 @@ run: echo aux2
         yaml_content = """
 ---
 name: partial-delays
-placement: SAME_INFRA
 execution: parallel
 primary_tasks: [trainer]
 termination_delay:
@@ -1131,7 +1095,6 @@ run: echo data
         yaml_content = """
 ---
 name: zero-delay
-placement: SAME_INFRA
 execution: parallel
 primary_tasks: [trainer]
 termination_delay: 0s
@@ -1158,7 +1121,6 @@ run: echo aux
         yaml_content = """
 ---
 name: large-delay
-placement: SAME_INFRA
 execution: parallel
 primary_tasks: [trainer]
 termination_delay: 1h
@@ -1184,8 +1146,7 @@ run: echo aux
         """Test that primary_tasks survives YAML round-trip."""
         dag = dag_lib.Dag()
         dag.name = 'round-trip-test'
-        dag.set_dag_config(dag_lib.DagPlacement.SAME_INFRA,
-                           dag_lib.DagExecution.PARALLEL)
+        dag.set_execution(dag_lib.DagExecution.PARALLEL)
         dag.primary_tasks = ['primary1', 'primary2']
         dag.termination_delay = {'default': '30s', 'aux1': '1m'}
 

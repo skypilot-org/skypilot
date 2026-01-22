@@ -329,14 +329,14 @@ def launch(
     # pre-mount operations when submitting jobs.
     dag.pre_mount_volumes()
 
-    # Optimize JobGroup placement before sending to controller
-    # This pre-determines cloud+region for SAME_INFRA, enabling parallel launch
+    # Optimize JobGroup before sending to controller
+    # This pre-determines cloud+region for all tasks, enabling parallel launch
     if dag.is_job_group():
         dag = optimizer_lib.Optimizer.optimize_job_group(dag)
         # Apply optimized cloud/region to task resources so they persist
         # through serialization. Without this, each task would be re-optimized
         # independently on the controller, potentially ending up on different
-        # infras even with SAME_INFRA placement.
+        # infrastructure.
         # TODO(zhwu): make the optimizer aware of multiple jobs directly during
         # the re-optimization, instead of independently.
         for task_ in dag.tasks:

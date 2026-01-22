@@ -4,7 +4,6 @@
 # Resource-scaled version for smoke testing
 ---
 name: {{name}}
-placement: SAME_INFRA
 execution: parallel
 ---
 name: trainer

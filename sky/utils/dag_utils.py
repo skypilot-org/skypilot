@@ -16,7 +16,7 @@ logger = sky_logging.init_logger(__name__)
 
 # JobGroup header fields
 _JOB_GROUP_HEADER_FIELDS = {
-    'name', 'placement', 'execution', 'primary_tasks', 'termination_delay'
+    'name', 'execution', 'primary_tasks', 'termination_delay'
 }
 _JOB_GROUP_REQUIRED_HEADER_FIELDS = {'name'}
 
@@ -368,7 +368,7 @@ def is_job_group_yaml(path: str) -> bool:
     """Check if a YAML file defines a JobGroup.
 
     A JobGroup YAML is a multi-document YAML where the first document
-    contains JobGroup header fields like 'placement' or 'execution'.
+    contains JobGroup header fields like 'execution'.
 
     Args:
         path: Path to the YAML file.
@@ -389,8 +389,8 @@ def is_job_group_yaml_str(yaml_str: str) -> bool:
 def get_job_group_config_from_yaml_str(yaml_str: str) -> Dict[str, Any]:
     """Get the JobGroup config (header) from a YAML string.
 
-    Returns the header config dict containing fields like 'placement',
-    'execution', 'name', etc. Returns empty dict if not a JobGroup YAML.
+    Returns the header config dict containing fields like 'execution',
+    'name', etc. Returns empty dict if not a JobGroup YAML.
     """
     configs = yaml_utils.read_yaml_all_str(yaml_str)
     if not _is_job_group_configs(configs):
@@ -430,7 +430,6 @@ def load_job_group_from_yaml(
     JobGroup YAML format:
         ---
         name: my-job-group
-        placement: SAME_INFRA
         execution: parallel
         ---
         name: trainer
@@ -520,19 +519,9 @@ def _load_job_group(
                 'Name must contain only alphanumeric characters, hyphens, '
                 'and underscores.')
 
-    placement_str = header.get('placement', 'SAME_INFRA')
     execution_str = header.get('execution', dag_lib.DagExecution.PARALLEL.value)
 
-    # Parse placement and execution modes
-    try:
-        placement = dag_lib.DagPlacement(placement_str)
-    except ValueError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'Invalid placement mode: {placement_str}. '
-                f'Valid options: {[p.value for p in dag_lib.DagPlacement]}'
-            ) from e
-
+    # Parse execution mode
     try:
         execution = dag_lib.DagExecution(execution_str)
     except ValueError as e:
@@ -582,9 +571,9 @@ def _load_job_group(
                                                   secrets_overrides)
             task.name = job_name
 
-    # Set DAG placement and execution properties after context manager
+    # Set DAG execution properties after context manager
     dag.name = group_name
-    dag.set_dag_config(placement, execution)
+    dag.set_execution(execution)
 
     # Parse and validate primary_tasks
     primary_tasks = header.get('primary_tasks')
@@ -685,8 +674,6 @@ def dump_job_group_to_yaml_str(dag: dag_lib.Dag,
     header: Dict[str, Any] = {
         'name': dag.name,
     }
-    if dag.placement is not None:
-        header['placement'] = dag.placement.value
     if dag.execution is not None:
         header['execution'] = dag.execution.value
     if dag.primary_tasks is not None:

@@ -241,13 +241,12 @@ run: echo world
         assert dag.is_job_group() is False
         assert dag.execution == dag_lib.DagExecution.SERIAL
 
-    def test_job_group_with_placement(self):
-        """Test job group with both execution and placement fields."""
+    def test_job_group_with_execution(self):
+        """Test job group with execution field."""
         yaml_str = """
 ---
 name: my-job-group
 execution: parallel
-placement: SAME_INFRA
 ---
 name: trainer
 run: echo hello
@@ -256,7 +255,6 @@ run: echo hello
         dag = dag_utils.load_dag_from_yaml_str(yaml_str)
         assert dag.is_job_group() is True
         assert dag.execution == dag_lib.DagExecution.PARALLEL
-        assert dag.placement == dag_lib.DagPlacement.SAME_INFRA
 
     def test_single_task_yaml_is_pipeline(self):
         """Test that single task YAML is detected as pipeline."""
@@ -290,7 +288,6 @@ run: echo hello
 ---
 name: my-job-group
 execution: parallel
-placement: SAME_INFRA
 primary_tasks:
   - trainer
 ---
@@ -335,26 +332,3 @@ run: echo world
         assert dag2.execution == dag_lib.DagExecution.SERIAL
         assert dag2.name == 'my-pipeline'
         assert len(dag2.tasks) == 2
-
-    def test_placement_alone_does_not_make_job_group(self):
-        """Test that placement field alone doesn't make a YAML a job group."""
-        # This YAML has placement but no execution: parallel.
-        # It's not detected as a job group.
-        yaml_str = """
----
-name: my-dag
-placement: SAME_INFRA
----
-name: task1
-run: echo hello
-"""
-        # placement without execution: parallel means this is not a job group
-        assert dag_utils.is_job_group_yaml_str(yaml_str) is False
-
-        # When loaded as pipeline, the first doc is NOT treated as a header
-        # (it has 'placement' which is not a valid pipeline header field).
-        # Both docs are treated as task configs, and 'placement' is an
-        # invalid task field, so it raises an error.
-        with pytest.raises(ValueError) as exc_info:
-            dag_utils.load_dag_from_yaml_str(yaml_str)
-        assert 'placement' in str(exc_info.value).lower()

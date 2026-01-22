@@ -8,21 +8,18 @@ Architecture:
         - SKYPILOT_JOBGROUP_NAME = <job_group_name>
 
     Layer 2: JobAddressResolver
-        - Resolves task addresses based on placement mode
-        - Supports internal (SAME_INFRA) and external (future) addresses
+        - Resolves task addresses for internal networking
+        - All tasks run on same infrastructure (cloud + region or K8s cluster)
 
     Layer 3: NetworkConfigurator
         - Configures network infrastructure (e.g., /etc/hosts injection)
         - Handles platform-specific differences (K8s vs SSH clouds)
 
 Design Goals:
-    - Future-proof: Currently implements SAME_INFRA, but architecture supports
-      CROSS_INFRA and mixed cloud scenarios
     - Unified interface: All tasks access addresses via environment variables
     - Platform abstraction: K8s uses native DNS, SSH clouds use /etc/hosts
 """
 import asyncio
-import enum
 import os
 import tempfile
 import textwrap
@@ -41,13 +38,6 @@ logger = sky_logging.init_logger(__name__)
 
 # Environment variable for JobGroup name, injected into all jobs
 SKYPILOT_JOBGROUP_NAME_ENV_VAR = 'SKYPILOT_JOBGROUP_NAME'
-
-
-class PlacementMode(enum.Enum):
-    """Placement mode for JobGroup networking."""
-    SAME_INFRA = 'same_infra'  # All jobs on same K8s cluster or cloud AZ
-    # Future: CROSS_INFRA = 'cross_infra'  # Jobs on different infras
-
 
 # ============================================================================
 # Layer 2: JobAddressResolver - Address resolution abstraction
@@ -438,22 +428,16 @@ class NetworkConfigurator:
         job_group_name: str,
         tasks_handles: List[Tuple[
             'task_lib.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
-        placement: PlacementMode = PlacementMode.SAME_INFRA,
     ) -> bool:
         """Set up network configuration for JobGroup.
 
         Args:
             job_group_name: Name of the JobGroup.
             tasks_handles: List of (Task, ResourceHandle) tuples.
-            placement: Placement mode.
 
         Returns:
             True if all configuration succeeded, False otherwise.
         """
-        if placement != PlacementMode.SAME_INFRA:
-            logger.warning(f'Unsupported placement mode: {placement}')
-            return False
-
         return await NetworkConfigurator._inject_etc_hosts(
             job_group_name, tasks_handles)
 
@@ -557,7 +541,6 @@ async def setup_job_group_networking(
     job_group_name: str,
     tasks_handles: List[Tuple['task_lib.Task',
                               'cloud_vm_ray_backend.CloudVmRayResourceHandle']],
-    placement: PlacementMode = PlacementMode.SAME_INFRA,
 ) -> bool:
     """Set up networking for all tasks in a JobGroup.
 
@@ -566,14 +549,12 @@ async def setup_job_group_networking(
     Args:
         job_group_name: Name of the JobGroup.
         tasks_handles: List of (Task, ResourceHandle) tuples for each task.
-        placement: Placement mode (default: SAME_INFRA).
 
     Returns:
         True if setup succeeded, False otherwise.
     """
     logger.info(f'Setting up networking for JobGroup: {job_group_name}')
-    return await NetworkConfigurator.setup(job_group_name, tasks_handles,
-                                           placement)
+    return await NetworkConfigurator.setup(job_group_name, tasks_handles)
 
 
 def get_job_group_env_vars(
@@ -583,7 +564,6 @@ def get_job_group_env_vars(
               'cloud_vm_ray_backend.CloudVmRayResourceHandle']]] = None,
     tasks: Optional[List['task_lib.Task']] = None,
     job_id: Optional[int] = None,
-    placement: PlacementMode = PlacementMode.SAME_INFRA,
 ) -> Dict[str, str]:
     """Get environment variables for JobGroup tasks.
 
@@ -595,12 +575,11 @@ def get_job_group_env_vars(
         tasks_handles: List of (Task, ResourceHandle) tuples.
         tasks: List of tasks (alternative to tasks_handles).
         job_id: Job ID (unused, kept for backward compatibility).
-        placement: Placement mode (unused, kept for backward compatibility).
 
     Returns:
         Dict of environment variable name to value.
     """
-    del job_id, placement  # Unused, reserved for future use
+    del job_id  # Unused, reserved for future use
 
     env_vars: Dict[str, str] = {
         SKYPILOT_JOBGROUP_NAME_ENV_VAR: job_group_name,

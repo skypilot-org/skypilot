@@ -1070,7 +1070,7 @@ class JobController:
         """Run a JobGroup with parallel execution.
 
         Phases:
-        1. Launch clusters (with SAME_INFRA placement if configured)
+        1. Launch clusters (all on same infrastructure)
         2. Barrier sync - wait for all clusters to be ready
         3. Set up networking (/etc/hosts injection)
         4. Monitor all jobs in parallel with recovery support

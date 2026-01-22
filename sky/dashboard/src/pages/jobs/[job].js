@@ -216,18 +216,12 @@ function JobDetails() {
     detailJobData?.is_job_group ||
     allTasks.length > 1;
 
-  // For placement and execution, check stored values first, then apply defaults for multi-task jobs
+  // For execution, check stored values first, then apply defaults for multi-task jobs
   // Older jobs may not have these fields stored, so provide sensible defaults
-  const storedPlacement =
-    allTasks.find((t) => t.placement)?.placement || detailJobData?.placement;
   const storedExecution =
     allTasks.find((t) => t.execution)?.execution || detailJobData?.execution;
   // Default execution to 'parallel' for multi-task jobs without stored value
   const jobExecution = storedExecution || (isMultiTask ? 'parallel' : null);
-
-  // For job groups, default to SAME_INFRA since that's the most common placement mode
-  // Only show the badge if this is actually a job group (multi-task job)
-  const jobPlacement = storedPlacement || (jobIsJobGroup ? 'SAME_INFRA' : null);
 
   // Enhanced job data with fields from any task
   const enhancedJobData = detailJobData
@@ -235,7 +229,6 @@ function JobDetails() {
         ...detailJobData,
         dag_yaml: jobYaml,
         entrypoint: jobEntrypoint,
-        placement: jobPlacement,
         execution: jobExecution,
         is_job_group: jobIsJobGroup,
       }
@@ -333,16 +326,6 @@ function JobDetails() {
                       <span className="ml-2 text-sm font-normal text-gray-500">
                         ({allTasks.length} tasks)
                       </span>
-                      {jobPlacement === 'SAME_INFRA' && (
-                        <Tooltip
-                          content="All tasks in this job group are co-located on the same infrastructure"
-                          className="text-muted-foreground"
-                        >
-                          <span className="ml-3 px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 cursor-help">
-                            Same Infra
-                          </span>
-                        </Tooltip>
-                      )}
                     </h3>
                   </div>
                   <div className="p-4">
@@ -833,14 +816,12 @@ function JobDetailsContent({
   const copyYamlToClipboard = async () => {
     try {
       const yamlDocs = formatJobYaml(jobData.dag_yaml);
-      // Build JobGroup header with name, execution, and placement
-      const hasJobGroupConfig =
-        jobData.name || jobData.placement || jobData.execution;
+      // Build JobGroup header with name and execution
+      const hasJobGroupConfig = jobData.name || jobData.execution;
       const jobGroupHeader = hasJobGroupConfig
         ? [
             jobData.name ? `name: ${jobData.name}` : null,
             jobData.execution ? `execution: ${jobData.execution}` : null,
-            jobData.placement ? `placement: ${jobData.placement}` : null,
           ]
             .filter(Boolean)
             .join('\n') + '\n---\n'
@@ -1357,17 +1338,14 @@ function JobDetailsContent({
                   <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
                     {(() => {
                       const yamlDocs = formatJobYaml(jobData.dag_yaml);
-                      // Build JobGroup header with name, execution, and placement
+                      // Build JobGroup header with name and execution
                       const hasJobGroupConfig =
-                        jobData.name || jobData.placement || jobData.execution;
+                        jobData.name || jobData.execution;
                       const jobGroupHeader = hasJobGroupConfig
                         ? [
                             jobData.name ? `name: ${jobData.name}` : null,
                             jobData.execution
                               ? `execution: ${jobData.execution}`
-                              : null,
-                            jobData.placement
-                              ? `placement: ${jobData.placement}`
                               : null,
                           ]
                             .filter(Boolean)

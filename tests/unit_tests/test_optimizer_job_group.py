@@ -18,8 +18,8 @@ from sky.utils import common
 class TestJobGroupOptimizer:
     """Tests for JobGroup optimization in sky.optimizer.
 
-    These tests verify the optimization logic for JobGroups with different
-    placement constraints (SAME_INFRA vs independent).
+    These tests verify the optimization logic for JobGroups where all
+    tasks are co-located on the same infrastructure.
     """
 
     @pytest.fixture
@@ -265,27 +265,10 @@ class TestOptimizeJobGroup:
         return dag
 
     @pytest.fixture
-    def mock_dag_job_group_same_infra(self):
-        """Create a mock JobGroup DAG with SAME_INFRA placement."""
+    def mock_dag_job_group(self):
+        """Create a mock JobGroup DAG."""
         dag = MagicMock(spec=dag_lib.Dag)
         dag.is_job_group = MagicMock(return_value=True)
-        dag.placement = dag_lib.DagPlacement.SAME_INFRA
-        dag.name = 'test-job-group'
-
-        task1 = MagicMock(spec=task_lib.Task)
-        task1.name = 'task-1'
-        task2 = MagicMock(spec=task_lib.Task)
-        task2.name = 'task-2'
-        dag.tasks = [task1, task2]
-
-        return dag
-
-    @pytest.fixture
-    def mock_dag_job_group_independent(self):
-        """Create a mock JobGroup DAG with independent placement."""
-        dag = MagicMock(spec=dag_lib.Dag)
-        dag.is_job_group = MagicMock(return_value=True)
-        dag.placement = None  # Default placement
         dag.name = 'test-job-group'
 
         task1 = MagicMock(spec=task_lib.Task)
@@ -308,29 +291,17 @@ class TestOptimizeJobGroup:
             mock_optimize.assert_called_once()
             assert result == mock_dag_non_job_group
 
-    def test_optimize_job_group_same_infra_calls_optimize_same_infra(
-            self, mock_dag_job_group_same_infra):
-        """Test SAME_INFRA placement calls _optimize_same_infra."""
+    def test_optimize_job_group_calls_optimize_same_infra(
+            self, mock_dag_job_group):
+        """Test JobGroup optimization calls _optimize_same_infra."""
         with patch.object(optimizer.Optimizer,
                           '_optimize_same_infra') as mock_same_infra:
-            mock_same_infra.return_value = mock_dag_job_group_same_infra
+            mock_same_infra.return_value = mock_dag_job_group
 
-            result = optimizer.Optimizer.optimize_job_group(
-                mock_dag_job_group_same_infra, quiet=True)
+            result = optimizer.Optimizer.optimize_job_group(mock_dag_job_group,
+                                                            quiet=True)
 
             mock_same_infra.assert_called_once()
-
-    def test_optimize_job_group_independent_calls_optimize_independent(
-            self, mock_dag_job_group_independent):
-        """Test default placement calls _optimize_independent."""
-        with patch.object(optimizer.Optimizer,
-                          '_optimize_independent') as mock_independent:
-            mock_independent.return_value = mock_dag_job_group_independent
-
-            result = optimizer.Optimizer.optimize_job_group(
-                mock_dag_job_group_independent, quiet=True)
-
-            mock_independent.assert_called_once()
 
 
 class TestOptimizeIndependent:

@@ -1,6 +1,5 @@
 ---
 name: test-job-group
-placement: SAME_INFRA
 execution: parallel
 ---
 name: job-a

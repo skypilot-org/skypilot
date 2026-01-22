@@ -5,7 +5,6 @@
 # - After primary task completes, auxiliary should be terminated with delay
 ---
 name: {{name}}
-placement: SAME_INFRA
 execution: parallel
 primary_tasks: [trainer]
 termination_delay: {{delay}}

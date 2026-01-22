@@ -35,7 +35,6 @@ const DEFAULT_FIELDS = [
   'user_yaml',
   'entrypoint',
   'is_job_group',
-  'placement',
   'execution',
   'primary_tasks',
   // Note: 'links' field removed - it may not exist in older database schemas
@@ -282,7 +281,6 @@ export async function getManagedJobs(options = {}) {
         labels: job.labels || {}, // Include labels field
         // JobGroup fields
         is_job_group: job.is_job_group,
-        placement: job.placement,
         execution: job.execution,
         primary_tasks: job.primary_tasks,
       };

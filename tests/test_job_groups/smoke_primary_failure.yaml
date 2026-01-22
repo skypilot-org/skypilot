@@ -3,7 +3,6 @@
 # (without waiting for termination_delay)
 ---
 name: {{name}}
-placement: SAME_INFRA
 execution: parallel
 primary_tasks: [failing-trainer]
 termination_delay: 60s

@@ -9,16 +9,6 @@ if typing.TYPE_CHECKING:
     from sky import task
 
 
-class DagPlacement(enum.Enum):
-    """Placement mode for DAGs with multiple tasks.
-
-    This controls where tasks in a multi-task DAG are placed relative to
-    each other.
-    """
-    # All tasks run on same K8s/Slurm cluster or cloud AZ
-    SAME_INFRA = 'SAME_INFRA'
-
-
 class DagExecution(enum.Enum):
     """Execution mode for DAGs with multiple tasks.
 
@@ -56,8 +46,7 @@ class Dag:
         self.policy_applied: bool = False
         self.pool: Optional[str] = None
 
-        # Placement and execution mode for multi-task DAGs
-        self.placement: Optional[DagPlacement] = None
+        # Execution mode for multi-task DAGs
         self.execution: Optional[DagExecution] = None
 
         # Primary/auxiliary task support for job groups
@@ -107,10 +96,8 @@ class Dag:
         """
         return self.execution == DagExecution.PARALLEL
 
-    def set_dag_config(self, placement: 'DagPlacement',
-                       execution: 'DagExecution') -> None:
-        """Configure this DAG with the given placement and execution mode."""
-        self.placement = placement
+    def set_execution(self, execution: 'DagExecution') -> None:
+        """Configure this DAG with the given execution mode."""
         self.execution = execution
 
     def get_termination_delay_secs(self, task_name: str) -> int:

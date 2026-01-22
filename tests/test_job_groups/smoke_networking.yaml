@@ -1,7 +1,6 @@
 # JobGroup networking smoke test - verifies cross-job hostname resolution
 ---
 name: {{name}}
-placement: SAME_INFRA
 execution: parallel
 ---
 name: server

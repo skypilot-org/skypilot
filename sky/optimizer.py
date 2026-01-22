@@ -1040,7 +1040,7 @@ class Optimizer:
             blocked_resources: Optional[Iterable[
                 resources_lib.Resources]] = None,
             quiet: bool = False) -> 'dag_lib.Dag':
-        """Optimize a JobGroup DAG with SAME_INFRA constraint.
+        """Optimize a JobGroup DAG.
 
         This method optimizes all tasks in a JobGroup to run on the same
         infrastructure (cloud + region/zone or K8s cluster).
@@ -1062,23 +1062,15 @@ class Optimizer:
             # Fall back to normal optimization for non-JobGroup DAGs
             return Optimizer.optimize(dag, minimize, blocked_resources, quiet)
 
-        placement = dag.placement
         tasks = dag.tasks
 
         if not quiet:
             logger.info(
                 f'Optimizing JobGroup "{dag.name}" with {len(tasks)} jobs')
-            logger.info(
-                f'Placement: {placement.value if placement else "default"}')
 
-        # For SAME_INFRA, find common infrastructure
-        if placement == dag_lib.DagPlacement.SAME_INFRA:
-            return Optimizer._optimize_same_infra(dag, minimize,
-                                                  blocked_resources, quiet)
-        else:
-            # Default: optimize each task independently
-            return Optimizer._optimize_independent(dag, minimize,
-                                                   blocked_resources, quiet)
+        # Find common infrastructure for all tasks in the JobGroup
+        return Optimizer._optimize_same_infra(dag, minimize, blocked_resources,
+                                              quiet)
 
     @staticmethod
     def _optimize_independent(dag: 'dag_lib.Dag',

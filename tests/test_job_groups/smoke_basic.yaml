@@ -1,7 +1,6 @@
 # Basic JobGroup smoke test - 2 parallel jobs
 ---
 name: {{name}}
-placement: SAME_INFRA
 execution: parallel
 ---
 name: job-a

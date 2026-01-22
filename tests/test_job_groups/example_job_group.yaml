@@ -3,9 +3,6 @@
 
 name: rl-experiment
 
-# Placement mode: all jobs run on the same infra (K8s/Slurm cluster or cloud AZ)
-placement: SAME_INFRA
-
 # Execution mode: all jobs start in parallel
 execution: parallel
 
