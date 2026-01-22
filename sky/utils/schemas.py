@@ -1202,7 +1202,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'type': 'boolean',
         }, {
             'type': 'number',
-            'exclusiveMinimum': 0,
+            'minimum': 1,
         }],
     },
 }
