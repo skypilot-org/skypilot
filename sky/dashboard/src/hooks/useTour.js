@@ -1726,6 +1726,7 @@ export function TourProvider({ children }) {
         tourRef.current.complete();
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isFirstVisit]);
 
   // Block navigation during tour
