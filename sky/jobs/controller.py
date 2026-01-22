@@ -1088,9 +1088,8 @@ class JobController:
                     f'{len(tasks)} jobs: {[t.name for t in tasks]}')
 
         # Inject JobGroup environment variables into all tasks
-        # Use pre-launch prediction mode with tasks and job_id
         job_group_env_vars = job_group_networking.get_job_group_env_vars(
-            job_group_name, tasks=tasks, job_id=self._job_id)
+            job_group_name, tasks=tasks)
         for task in tasks:
             task_envs = task.envs or {}
             task_envs.update(job_group_env_vars)

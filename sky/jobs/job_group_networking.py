@@ -101,23 +101,6 @@ def _construct_k8s_internal_svc(cluster_name_on_cloud: str, namespace: str,
             f'{namespace}.svc.cluster.local')
 
 
-def _get_k8s_external_ip(
-        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
-) -> Optional[str]:
-    """Get Kubernetes external IP (LoadBalancer/Ingress).
-
-    This is for future CROSS_INFRA support.
-
-    Returns:
-        External IP or hostname, or None if not available.
-    """
-    # TODO: Implement for CROSS_INFRA support
-    # Need to check port_mode and get LoadBalancer/Ingress IP accordingly
-    if handle is None or handle.head_ip is None:
-        return None
-    return handle.head_ip
-
-
 def _get_job_address(job_name: str,
                      job_group_name: str,
                      node_idx: int = 0) -> str:
@@ -486,7 +469,9 @@ class NetworkConfigurator:
                     coro = _start_k8s_dns_updater_on_node(
                         runner, k8s_dns_mappings, job_group_name)
                     setup_tasks.append((coro, task.name, node_idx, True))
-                elif ssh_hosts_content:
+                else:
+                    # ssh_hosts_content is always truthy (has header comment)
+                    assert ssh_hosts_content, 'unreachable'
                     coro = _inject_hosts_on_node(runner, ssh_hosts_content,
                                                  job_group_name)
                     setup_tasks.append((coro, task.name, node_idx, False))
@@ -563,7 +548,6 @@ def get_job_group_env_vars(
         Tuple['task_lib.Task',
               'cloud_vm_ray_backend.CloudVmRayResourceHandle']]] = None,
     tasks: Optional[List['task_lib.Task']] = None,
-    job_id: Optional[int] = None,
 ) -> Dict[str, str]:
     """Get environment variables for JobGroup tasks.
 
@@ -574,12 +558,10 @@ def get_job_group_env_vars(
         job_group_name: Name of the JobGroup.
         tasks_handles: List of (Task, ResourceHandle) tuples.
         tasks: List of tasks (alternative to tasks_handles).
-        job_id: Job ID (unused, kept for backward compatibility).
 
     Returns:
         Dict of environment variable name to value.
     """
-    del job_id  # Unused, reserved for future use
 
     env_vars: Dict[str, str] = {
         SKYPILOT_JOBGROUP_NAME_ENV_VAR: job_group_name,
