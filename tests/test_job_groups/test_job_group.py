@@ -426,15 +426,12 @@ class TestDagJobGroup:
 class TestJobGroupNetworking:
     """Tests for JobGroup networking utilities."""
 
-    def test_generate_hosts_entries(self):
-        """Test generation of /etc/hosts entries."""
-        from sky.jobs import job_group_networking
+    def test_jobgroup_name_env_var_constant(self):
+        """Test that the JobGroup name env var constant is correctly defined."""
+        from sky.jobs import constants as jobs_constants
 
-        # This test is more of a unit test for the function logic
-        # Full integration test would require actual ResourceHandles
-        env_vars = job_group_networking.get_job_group_env_vars('test-group')
-        assert 'SKYPILOT_JOBGROUP_NAME' in env_vars
-        assert env_vars['SKYPILOT_JOBGROUP_NAME'] == 'test-group'
+        assert jobs_constants.SKYPILOT_JOBGROUP_NAME_ENV_VAR == (
+            'SKYPILOT_JOBGROUP_NAME')
 
     def test_get_k8s_namespace_logs_on_exception(self):
         """Test that _get_k8s_namespace_from_handle logs debug message on error.

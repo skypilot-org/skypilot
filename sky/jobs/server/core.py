@@ -355,6 +355,19 @@ def launch(
                         override_params['region'] = best_region
                     task_.set_resources_override(override_params)
 
+        # Warn if job group is not running on Kubernetes (networking won't work)
+        first_task = dag.tasks[0]
+        if first_task.best_resources is not None:
+            best_cloud = first_task.best_resources.cloud
+            if best_cloud is not None and str(
+                    best_cloud).lower() != 'kubernetes':
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Job group service discovery '
+                    f'(hostname-based networking) is only supported on '
+                    f'Kubernetes. Tasks will run on {best_cloud} but cannot '
+                    f'communicate with each other using hostnames.'
+                    f'{colorama.Style.RESET_ALL}')
+
     # If there is a local postgres db, when the api server tries launching on
     # the remote jobs controller it will fail. therefore, we should remove this
     # before sending the config to the jobs controller.

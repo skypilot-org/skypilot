@@ -1088,11 +1088,10 @@ class JobController:
                     f'{len(tasks)} jobs: {[t.name for t in tasks]}')
 
         # Inject JobGroup environment variables into all tasks
-        job_group_env_vars = job_group_networking.get_job_group_env_vars(
-            job_group_name, tasks=tasks)
         for task in tasks:
             task_envs = task.envs or {}
-            task_envs.update(job_group_env_vars)
+            task_envs[jobs_constants.SKYPILOT_JOBGROUP_NAME_ENV_VAR] = (
+                job_group_name)
             task.update_envs(task_envs)
 
         # Collect task statuses and determine which tasks need launch vs resume.

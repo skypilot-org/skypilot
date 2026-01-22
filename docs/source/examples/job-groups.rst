@@ -88,6 +88,18 @@ The header document supports the following fields:
    * - ``execution``
      - Required
      - Must be ``parallel`` to indicate this is a Job Group
+   * - ``primary_tasks``
+     - None
+     - List of task names that are "primary". Tasks not in this list are
+       "auxiliary" - long-running services (e.g., data servers, replay buffers)
+       that wait for a signal to terminate. When all primary tasks complete,
+       auxiliary tasks are terminated. If not set, all tasks are primary.
+   * - ``termination_delay``
+     - None
+     - Delay before terminating auxiliary tasks when primary tasks complete,
+       allowing them to finish pending work (e.g., flushing data). Can be a
+       string (e.g., ``"30s"``, ``"5m"``) or a dict with per-task delays
+       (e.g., ``{"default": "30s", "replay-buffer": "1m"}``).
 
 Each task document after the header follows the standard :ref:`SkyPilot task YAML format <yaml-spec>`.
 
@@ -136,17 +148,12 @@ SkyPilot injects the following environment variables into all tasks:
      - Description
    * - ``SKYPILOT_JOBGROUP_NAME``
      - Name of the Job Group
-   * - ``SKYPILOT_JOBGROUP_HOST_{TASK_NAME}``
-     - Address of each task's head node (uppercase, hyphens become underscores)
 
 Example usage in a task:
 
 .. code-block:: bash
 
-    # Access the trainer task from the evaluator
-    curl http://${SKYPILOT_JOBGROUP_HOST_TRAINER}:8000/status
-
-    # Or use the hostname directly
+    # Access the trainer task from the evaluator using the hostname
     curl http://trainer-0.${SKYPILOT_JOBGROUP_NAME}:8000/status
 
 
@@ -256,6 +263,42 @@ This example demonstrates a distributed RL post-training architecture with 5 tas
 
 See the full RL post-training example at ``llm/rl-post-training-jobgroup/`` in the SkyPilot repository.
 
+Primary and auxiliary tasks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In many distributed workloads, you have a main task (e.g., trainer) and supporting
+services (e.g., data servers, replay buffers) that run indefinitely until the main
+task signals completion. These supporting services are "auxiliary tasks" - they
+don't have a natural termination point and need to be told when to shut down.
+
+Use ``primary_tasks`` to designate which tasks drive the job's lifecycle. Auxiliary
+tasks (those not listed) will be automatically terminated when all primary tasks
+complete:
+
+.. code-block:: yaml
+
+    ---
+    name: train-with-services
+    execution: parallel
+    primary_tasks: [trainer]      # Only trainer is primary
+    termination_delay: 30s        # Give services 30s to finish after trainer completes
+    ---
+    name: trainer
+    resources:
+      accelerators: A100:1
+    run: |
+      python train.py             # Primary task: job completes when this finishes
+    ---
+    name: data-server
+    resources:
+      cpus: 4+
+    run: |
+      python data_server.py       # Auxiliary: terminated 30s after trainer completes
+
+When the trainer task finishes, the data-server (auxiliary) task will receive a
+termination signal after the 30-second delay, allowing it to flush pending data
+or perform cleanup.
+
 
 Current limitations
 -------------------
@@ -263,8 +306,9 @@ Current limitations
 - **Co-location**: All tasks in a Job Group run on the same infrastructure
   (same Kubernetes cluster or cloud region).
 
-- **Recovery**: Job Groups do not currently support automatic preemption recovery.
-  If a task is preempted, the entire group fails.
+- **Networking**: Service discovery (hostname-based communication between tasks)
+  currently only works on Kubernetes. On other clouds, tasks can run in parallel
+  but cannot communicate with each other using the hostname format.
 
 .. note::
 

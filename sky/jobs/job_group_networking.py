@@ -4,7 +4,6 @@ This module provides functions to set up networking between tasks in a JobGroup.
 
 Architecture:
     Layer 1: User Interface (environment variables)
-        - SKYPILOT_JOBGROUP_HOST_{TASK_NAME} = <address>
         - SKYPILOT_JOBGROUP_NAME = <job_group_name>
 
     Layer 2: JobAddressResolver
@@ -35,9 +34,6 @@ if TYPE_CHECKING:
     from sky.utils import command_runner
 
 logger = sky_logging.init_logger(__name__)
-
-# Environment variable for JobGroup name, injected into all jobs
-SKYPILOT_JOBGROUP_NAME_ENV_VAR = 'SKYPILOT_JOBGROUP_NAME'
 
 # ============================================================================
 # Layer 2: JobAddressResolver - Address resolution abstraction
@@ -540,53 +536,6 @@ async def setup_job_group_networking(
     """
     logger.info(f'Setting up networking for JobGroup: {job_group_name}')
     return await NetworkConfigurator.setup(job_group_name, tasks_handles)
-
-
-def get_job_group_env_vars(
-    job_group_name: str,
-    tasks_handles: Optional[List[
-        Tuple['task_lib.Task',
-              'cloud_vm_ray_backend.CloudVmRayResourceHandle']]] = None,
-    tasks: Optional[List['task_lib.Task']] = None,
-) -> Dict[str, str]:
-    """Get environment variables for JobGroup tasks.
-
-    This function generates environment variables that allow tasks to discover
-    each other's addresses using the consistent hostname format.
-
-    Args:
-        job_group_name: Name of the JobGroup.
-        tasks_handles: List of (Task, ResourceHandle) tuples.
-        tasks: List of tasks (alternative to tasks_handles).
-
-    Returns:
-        Dict of environment variable name to value.
-    """
-
-    env_vars: Dict[str, str] = {
-        SKYPILOT_JOBGROUP_NAME_ENV_VAR: job_group_name,
-    }
-
-    task_list: List['task_lib.Task'] = []
-    if tasks_handles:
-        task_list = [task for task, _ in tasks_handles]
-    elif tasks:
-        task_list = tasks
-
-    for task in task_list:
-        if task.name is None:
-            continue
-        address = _get_job_address(task.name, job_group_name, node_idx=0)
-        env_var_name = _make_env_var_name(task.name)
-        env_vars[env_var_name] = address
-
-    return env_vars
-
-
-def _make_env_var_name(job_name: str) -> str:
-    """Generate environment variable name for a job's address."""
-    safe_name = job_name.upper().replace('-', '_')
-    return f'SKYPILOT_JOBGROUP_HOST_{safe_name}'
 
 
 def get_network_ready_marker_path(job_group_name: str) -> str:
