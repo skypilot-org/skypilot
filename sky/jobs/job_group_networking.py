@@ -23,12 +23,13 @@ import os
 import tempfile
 import textwrap
 import traceback
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+import typing
+from typing import List, Tuple
 
 from sky import clouds as sky_clouds
 from sky import sky_logging
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.utils import command_runner
