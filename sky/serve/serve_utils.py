@@ -1040,6 +1040,18 @@ def get_next_cluster_name(
 
         managed_job_state.set_current_cluster_name(job_id,
                                                    replica_info.cluster_name)
+
+        # Set infrastructure info for sorting/filtering
+        handle = replica_info.handle()
+        if handle is not None and handle.launched_resources is not None:
+            lr = handle.launched_resources
+            managed_job_state.set_job_infra(
+                job_id,
+                cloud=str(lr.cloud) if lr.cloud is not None else None,
+                region=lr.region,
+                zone=lr.zone,
+            )
+
         return replica_info.cluster_name
 
 

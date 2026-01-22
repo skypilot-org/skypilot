@@ -85,6 +85,7 @@ _EFA_INSTANCE_TYPE_PREFIXES = [
     'p5e.',
     'p5en.',
     'p6-b200.',
+    'p6-b300.',
 ]
 
 # Docker run options for EFA.

@@ -143,6 +143,8 @@ def queue_v2(
     job_ids: Optional[List[int]] = None,
     limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
 ) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
         str, int], int]]:
     """Gets statuses of managed jobs.
@@ -156,6 +158,8 @@ def queue_v2(
         job_ids: IDs of the managed jobs to show.
         limit: Number of jobs to show.
         fields: Fields to get for the managed jobs.
+        sort_by: Field to sort by (e.g., 'job_id', 'name', 'submitted_at').
+        sort_order: Sort direction ('asc' or 'desc').
 
     Returns:
         The request ID of the queue request.
@@ -194,7 +198,7 @@ def queue_v2(
     # Filter out fields not supported by older servers
     remote_api_version = versions.get_remote_api_version()
     if fields is not None and (remote_api_version is None or
-                               remote_api_version < 30):
+                               remote_api_version < 31):
         fields = [f for f in fields if f != 'is_primary_in_job_group']
 
     body = payloads.JobsQueueV2Body(
@@ -204,6 +208,8 @@ def queue_v2(
         job_ids=job_ids,
         limit=limit,
         fields=fields,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
     path = '/jobs/queue/v2'
     response = server_common.make_authenticated_request(

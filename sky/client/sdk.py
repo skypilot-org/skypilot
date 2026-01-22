@@ -36,6 +36,7 @@ from sky.jobs import scheduler
 from sky.jobs import utils as managed_job_utils
 from sky.schemas.api import responses
 from sky.server import common as server_common
+from sky.server import constants as server_constants
 from sky.server import rest
 from sky.server import versions
 from sky.server.requests import payloads
@@ -65,6 +66,7 @@ if typing.TYPE_CHECKING:
     import binascii
     import io
     import pathlib
+    import secrets
     import time
     import webbrowser
 
@@ -82,6 +84,8 @@ else:
     base64 = adaptors_common.LazyImport('base64')
     binascii = adaptors_common.LazyImport('binascii')
     pathlib = adaptors_common.LazyImport('pathlib')
+    requests = adaptors_common.LazyImport('requests')
+    secrets = adaptors_common.LazyImport('secrets')
     time = adaptors_common.LazyImport('time')
     # only used in dashboard() and api_login()
     webbrowser = adaptors_common.LazyImport('webbrowser')
@@ -2538,6 +2542,117 @@ def _check_endpoint_in_env_var(is_login: bool) -> None:
                                'clear the environment variable.')
 
 
+def _try_polling_auth(endpoint: str) -> Optional[str]:
+    """Try the polling-based authentication flow."""
+    try:
+        # Generate code verifier (random secret) and challenge (hash)
+        code_verifier = common_utils.base64_url_encode(secrets.token_bytes(32))
+        code_challenge = common_utils.compute_code_challenge(code_verifier)
+
+        # Open browser to authorization page
+        auth_url = f'{endpoint}/auth/authorize?code_challenge={code_challenge}'
+        if not webbrowser.open(auth_url):
+            logger.debug('Failed to open browser.')
+            return None
+
+        click.echo(f'{colorama.Fore.GREEN}Browser opened at {auth_url}'
+                   f'{colorama.Style.RESET_ALL}\n'
+                   f'Please click "Authorize" to complete login.\n'
+                   f'{colorama.Style.DIM}Press ctrl+c to fall back to legacy '
+                   f'auth method.{colorama.Style.RESET_ALL}')
+
+        # Poll for token
+        start_time = time.time()
+        while time.time(
+        ) - start_time < server_constants.AUTH_SESSION_TIMEOUT_SECONDS:
+            time.sleep(1)
+            resp = requests.get(f'{endpoint}/api/v1/auth/token',
+                                params={'code_verifier': code_verifier},
+                                timeout=10)
+
+            if resp.status_code == 200:
+                data = resp.json()
+                if 'token' in data:
+                    return data['token']
+            elif resp.status_code != 404:
+                # 404 means user hasn't clicked Authorize yet, keep polling
+                logger.debug(f'Poll failed: {resp.status_code}')
+                return None
+
+        click.echo(f'{colorama.Fore.YELLOW}Authentication timed out.'
+                   f'{colorama.Style.RESET_ALL}')
+        return None
+
+    except KeyboardInterrupt:
+        click.echo(f'\n{colorama.Style.DIM}Interrupted.'
+                   f'{colorama.Style.RESET_ALL}')
+        return None
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Polling auth failed: {e}')
+        return None
+
+
+def _try_localhost_callback_auth(endpoint: str) -> Optional[str]:
+    """Try the localhost callback authentication flow (legacy)."""
+    server: Optional[oauth_lib.HTTPServer] = None
+    try:
+        callback_port = common_utils.find_free_port(8000)
+        token_container: Dict[str, Optional[str]] = {'token': None}
+        server = oauth_lib.start_local_auth_server(callback_port,
+                                                   token_container, endpoint)
+
+        token_url = f'{endpoint}/token?local_port={callback_port}'
+        if not webbrowser.open(token_url):
+            return None
+
+        click.echo(f'{colorama.Fore.GREEN}Browser opened at {token_url}'
+                   f'{colorama.Style.RESET_ALL}\n'
+                   f'{colorama.Style.DIM}Press ctrl+c to enter token manually.'
+                   f'{colorama.Style.RESET_ALL}')
+
+        start_time = time.time()
+        while (token_container['token'] is None and time.time() - start_time <
+               server_constants.AUTH_SESSION_TIMEOUT_SECONDS):
+            time.sleep(1)
+
+        if token_container['token'] is None:
+            click.echo(f'{colorama.Fore.YELLOW}Authentication timed out.'
+                       f'{colorama.Style.RESET_ALL}')
+            return None
+        return token_container['token']
+
+    except KeyboardInterrupt:
+        click.echo(f'\n{colorama.Style.DIM}Interrupted.'
+                   f'{colorama.Style.RESET_ALL}')
+        return None
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Localhost callback failed: {e}')
+        return None
+    finally:
+        if server is not None:
+            try:
+                server.server_close()
+            except Exception:  # pylint: disable=broad-except
+                pass
+
+
+def _try_manual_token_entry(endpoint: str) -> Optional[str]:
+    """Fall back to manual token entry."""
+    try:
+        token_url = f'{endpoint}/token'
+        click.echo(
+            f'Visit this URL to get the token:\n\n'
+            f'{colorama.Style.BRIGHT}{token_url}{colorama.Style.RESET_ALL}\n')
+        return click.prompt('Paste the token') or None
+    except (KeyboardInterrupt, click.Abort):
+        click.echo(
+            f'\n{colorama.Style.DIM}Cancelled.{colorama.Style.RESET_ALL}')
+        return None
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Manual token entry failed: {e}')
+        return None
+
+
 @usage_lib.entrypoint
 @annotations.client_api
 def api_login(endpoint: Optional[str] = None,
@@ -2640,59 +2755,26 @@ def api_login(endpoint: Optional[str] = None,
     if server_status == server_common.ApiServerStatus.NEEDS_AUTH or relogin:
         # We detected an auth proxy, so go through the auth proxy cookie flow.
         token: Optional[str] = None
-        server: Optional[oauth_lib.HTTPServer] = None
-        try:
-            callback_port = common_utils.find_free_port(8000)
 
-            token_container: Dict[str, Optional[str]] = {'token': None}
-            logger.debug('Starting local authentication server...')
-            server = oauth_lib.start_local_auth_server(callback_port,
-                                                       token_container,
-                                                       endpoint)
+        # Try methods in order:
+        # 1. New polling-based flow - only on servers >= API v30
+        # 2. Old localhost callback flow
+        # 3. Manual token entry
+        remote_api_version = versions.get_remote_api_version()
+        if remote_api_version is not None and remote_api_version >= 30:
+            token = _try_polling_auth(endpoint)
 
-            token_url = (f'{endpoint}/token?local_port={callback_port}')
-            if webbrowser.open(token_url):
-                click.echo(f'{colorama.Fore.GREEN}A web browser has been '
-                           f'opened at {token_url}. Please continue the login '
-                           f'in the web browser.{colorama.Style.RESET_ALL}\n'
-                           f'{colorama.Style.DIM}To manually copy the token, '
-                           f'press ctrl+c.{colorama.Style.RESET_ALL}')
-            else:
-                raise ValueError('Failed to open browser.')
+        if token is None:
+            # Polling auth not available or failed, try localhost callback
+            token = _try_localhost_callback_auth(endpoint)
 
-            start_time = time.time()
+        if token is None:
+            # All automatic methods failed, fall back to manual entry
+            token = _try_manual_token_entry(endpoint)
 
-            while (token_container['token'] is None and
-                   time.time() - start_time < oauth_lib.AUTH_TIMEOUT):
-                time.sleep(1)
-
-            if token_container['token'] is None:
-                click.echo(f'{colorama.Fore.YELLOW}Authentication timed out '
-                           f'after {oauth_lib.AUTH_TIMEOUT} seconds.')
-            else:
-                token = token_container['token']
-
-        except (Exception, KeyboardInterrupt) as e:  # pylint: disable=broad-except
-            logger.debug(f'Automatic authentication failed: {e}, '
-                         'falling back to manual token entry.')
-            if isinstance(e, KeyboardInterrupt):
-                click.echo(f'\n{colorama.Style.DIM}Interrupted. Press ctrl+c '
-                           f'again to exit.{colorama.Style.RESET_ALL}')
-            # Fall back to manual token entry
-            token_url = f'{endpoint}/token'
-            click.echo('Authentication is needed. Please visit this URL '
-                       f'to set up the token:{colorama.Style.BRIGHT}\n\n'
-                       f'{token_url}\n{colorama.Style.RESET_ALL}')
-            token = click.prompt('Paste the token')
-        finally:
-            if server is not None:
-                try:
-                    server.server_close()
-                except Exception:  # pylint: disable=broad-except
-                    pass
-            if not token:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Authentication failed.')
+        if not token:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Authentication failed.')
 
         # Parse the token.
         # b64decode will ignore invalid characters, but does some length and
@@ -2701,7 +2783,6 @@ def api_login(endpoint: Optional[str] = None,
             data = base64.b64decode(token)
         except binascii.Error as e:
             raise ValueError(f'Malformed token: {token}') from e
-        logger.debug(f'Token data: {data!r}')
         try:
             json_data = json.loads(data)
         except (json.JSONDecodeError, UnicodeDecodeError) as e:

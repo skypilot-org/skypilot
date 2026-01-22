@@ -87,6 +87,9 @@ message GetJobTableRequest {
   optional Statuses statuses = 10;
   bool show_jobs_without_user_hash = 11;
   optional Fields fields = 12;
+  // Sorting parameters, added in ManagedJobsService v14.
+  optional string sort_by = 13;
+  optional string sort_order = 14;
 }
 
 message ManagedJobInfo {

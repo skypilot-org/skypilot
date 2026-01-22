@@ -36,12 +36,6 @@ class User:
     def to_dict(self) -> Dict[str, Any]:
         return {'id': self.id, 'name': self.name}
 
-    def to_env_vars(self) -> Dict[str, Any]:
-        return {
-            constants.USER_ID_ENV_VAR: self.id,
-            constants.USER_ENV_VAR: self.name,
-        }
-
     @classmethod
     def get_current_user(cls) -> 'User':
         """Returns the current user."""

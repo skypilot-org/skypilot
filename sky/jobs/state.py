@@ -162,6 +162,10 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('execution',
                       sqlalchemy.Text,
                       server_default=DagExecution.SERIAL.value),
+    # Infrastructure columns for efficient filtering/sorting
+    sqlalchemy.Column('cloud', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('region', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
 )
 
 # TODO(cooperc): drop the table in a migration
@@ -422,6 +426,10 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'is_primary_in_job_group': r.get('is_primary_in_job_group'),
         # Execution mode: 'parallel' (job group) or 'serial' (pipeline/single)
         'execution': r.get('execution'),
+        # Infrastructure columns for filtering/sorting
+        'cloud': r.get('cloud'),
+        'region': r.get('region'),
+        'zone': r.get('zone'),
     }
 
 
@@ -1558,17 +1566,45 @@ def get_managed_jobs_with_filters(
     skip_finished: bool = False,
     page: Optional[int] = None,
     limit: Optional[int] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
     """Get managed jobs from the database with filters.
 
     Pagination is by unique jobs (spot_job_id), not by tasks. This means
     if you request page 1 with limit 10, you get all tasks for 10 unique jobs.
 
+    Args:
+        sort_by: Field to sort by. Valid values: 'job_id', 'id', 'job_name',
+            'name', 'submitted_at', 'status', 'job_duration', 'duration',
+            'recovery_count', 'recoveries', 'resources', 'user_hash', 'user',
+            'cloud', 'infra'.
+        sort_order: Sort direction, 'asc' or 'desc'. Defaults to 'desc'.
+
     Returns:
         A tuple containing
          - the list of managed jobs (all tasks for the paginated jobs)
          - the total number of unique jobs (not tasks)
     """
+    # Column mapping for sorting
+    sort_field_map = {
+        'job_id': spot_table.c.spot_job_id,
+        'id': spot_table.c.spot_job_id,
+        'job_name': spot_table.c.job_name,
+        'name': spot_table.c.job_name,
+        'submitted_at': spot_table.c.submitted_at,
+        'status': spot_table.c.status,
+        'job_duration': spot_table.c.job_duration,
+        'duration': spot_table.c.job_duration,
+        'recovery_count': spot_table.c.recovery_count,
+        'recoveries': spot_table.c.recovery_count,
+        'resources': spot_table.c.resources,
+        'user_hash': job_info_table.c.user_hash,
+        'user': job_info_table.c.user_hash,
+        'cloud': job_info_table.c.cloud,
+        'infra': job_info_table.c.cloud,  # Sort by cloud for infra
+    }
+
     assert _SQLALCHEMY_ENGINE is not None
 
     # Count unique jobs (by spot_job_id), not tasks
@@ -1639,8 +1675,19 @@ def get_managed_jobs_with_filters(
             skip_finished=skip_finished,
         )
 
-    query = query.order_by(spot_table.c.spot_job_id.desc(),
-                           spot_table.c.task_id.asc())
+    # Apply sorting
+    if sort_by and sort_by in sort_field_map:
+        sort_column = sort_field_map[sort_by]
+        if sort_order == 'asc':
+            query = query.order_by(sort_column.asc(),
+                                   spot_table.c.task_id.asc())
+        else:
+            query = query.order_by(sort_column.desc(),
+                                   spot_table.c.task_id.asc())
+    else:
+        # Default sort: job_id desc, task_id asc
+        query = query.order_by(spot_table.c.spot_job_id.desc(),
+                               spot_table.c.task_id.asc())
     rows = None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.execute(query).fetchall()
@@ -1793,6 +1840,37 @@ def set_current_cluster_name(job_id: int, current_cluster_name: str) -> None:
             job_info_table.c.spot_job_id == job_id).update(
                 {job_info_table.c.current_cluster_name: current_cluster_name})
         session.commit()
+
+
+@_init_db
+def set_job_infra(job_id: int,
+                  cloud: Optional[str] = None,
+                  region: Optional[str] = None,
+                  zone: Optional[str] = None) -> None:
+    """Update the infrastructure info for a job.
+
+    This is called after a job is launched to record the cloud/region/zone
+    for sorting and filtering purposes.
+
+    Args:
+        job_id: The job ID to update.
+        cloud: The cloud provider (e.g., 'GCP', 'AWS').
+        region: The region (e.g., 'us-central1').
+        zone: The zone (e.g., 'us-central1-a').
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        update_values = {}
+        if cloud is not None:
+            update_values[job_info_table.c.cloud] = cloud
+        if region is not None:
+            update_values[job_info_table.c.region] = region
+        if zone is not None:
+            update_values[job_info_table.c.zone] = zone
+        if update_values:
+            session.query(job_info_table).filter(
+                job_info_table.c.spot_job_id == job_id).update(update_values)
+            session.commit()
 
 
 @_init_db
