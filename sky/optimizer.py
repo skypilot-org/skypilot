@@ -1145,7 +1145,7 @@ class Optimizer:
 
         if not quiet:
             cloud, region = best_infra
-            # Format infra as lowercase cloud/region (e.g., kubernetes/coreweave)
+            # Format infra as lowercase cloud/region
             infra_str = f'{str(cloud).lower()}/{region}'
             logger.info(f'Selected infrastructure: {infra_str}')
             # Hint user about other available infras
@@ -1162,13 +1162,21 @@ class Optimizer:
 
         # Step 4: Assign resources for each task on the selected infra
         cloud, region = best_infra
+        cloud_name = str(cloud)
         for task in tasks:
             candidates = task_launchables[task]
-            if cloud not in candidates:
+            # Find the cloud object in candidates that matches (by name)
+            # since different tasks may have different Cloud instances
+            matching_cloud = None
+            for cand_cloud in candidates.keys():
+                if str(cand_cloud) == cloud_name:
+                    matching_cloud = cand_cloud
+                    break
+            if matching_cloud is None:
                 continue
 
             # Find resources in this cloud+region
-            for resources in candidates[cloud]:
+            for resources in candidates[matching_cloud]:
                 if resources.region == region:
                     # Set best_resources on the task
                     task.best_resources = resources
@@ -1215,8 +1223,9 @@ class Optimizer:
             vcpus = '-'
             mem = '-'
             if best_resources.cloud is not None and instance_type != '-':
-                vcpus_, mem_ = best_resources.cloud.get_vcpus_mem_from_instance_type(
-                    best_resources.instance_type)
+                cloud = best_resources.cloud
+                vcpus_, mem_ = cloud.get_vcpus_mem_from_instance_type(
+                    instance_type)
                 if vcpus_ is not None:
                     vcpus = (str(int(vcpus_))
                              if vcpus_.is_integer() else f'{vcpus_:.1f}')

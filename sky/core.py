@@ -89,6 +89,14 @@ def optimize(
             request_name=request_names.AdminPolicyRequestName.OPTIMIZE,
             request_options=request_options) as dag:
         dag.resolve_and_validate_volumes()
+        # Use job group optimizer for job groups to properly handle
+        # co-location constraints and show the combined optimizer table
+        if dag.is_job_group():
+            return optimizer.Optimizer.optimize_job_group(
+                dag=dag,
+                minimize=minimize,
+                blocked_resources=blocked_resources,
+                quiet=quiet)
         return optimizer.Optimizer.optimize(dag=dag,
                                             minimize=minimize,
                                             blocked_resources=blocked_resources,
