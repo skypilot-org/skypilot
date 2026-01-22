@@ -463,10 +463,43 @@ These are the minimal policy rules required by SkyPilot:
            {
                 "Effect": "Allow",
                 "Action": [
-                    "s3:*"
+                    "s3:GetObject",
+                    "s3:PutObject",
+                    "s3:DeleteObject"
                 ],
+                "Resource": "arn:aws:s3:::*/*"
+            },
+            {
+                "Effect": "Allow",
+                "Action": [
+                    "s3:ListBucket",
+                    "s3:GetBucketLocation"
+                ],
+                "Resource": "arn:aws:s3:::*"
+            },
+            {
+                "Effect": "Allow",
+                "Action": "s3:ListAllMyBuckets",
                 "Resource": "*"
             }
+
+**Optional**: If you also want to allow SkyPilot to create and delete S3 buckets (for ``sky storage`` commands), add these additional permissions:
+
+.. code-block:: json
+
+           {
+                "Effect": "Allow",
+                "Action": [
+                    "s3:CreateBucket",
+                    "s3:DeleteBucket",
+                    "s3:PutBucketTagging"
+                ],
+                "Resource": "arn:aws:s3:::*"
+            }
+
+.. tip::
+
+    If you are using EKS and want to set up S3 access with IAM roles, see :ref:`aws-eks-iam-roles`.
 
 **Once you have added all needed policies, click Next** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
 
