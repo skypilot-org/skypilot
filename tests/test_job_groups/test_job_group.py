@@ -593,6 +593,7 @@ class TestOptimizerSelectBestInfra:
         mock_task.name = name
         mock_task.num_nodes = num_nodes
         mock_task.estimate_runtime = mock.MagicMock(return_value=3600)
+        mock_task.time_estimator_func = mock.MagicMock()
         return mock_task
 
     def test_select_best_infra_single_option(self):
