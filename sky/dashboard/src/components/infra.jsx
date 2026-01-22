@@ -25,6 +25,7 @@ import {
 import {
   formatCpu,
   formatMemory,
+  formatMemoryValue,
   calculateAggregatedResource,
 } from '@/utils/resourceUtils';
 import { buildContextStatsKey } from '@/utils/infraUtils';
@@ -794,17 +795,18 @@ export function ContextDetails({
 
                       // Format memory display: "X of Y free" or just "Y" if free is unknown
                       // (GB is in column header, so don't include it in values)
+                      // Matches CLI format_float with precision=0: removes .0 for whole numbers
                       let memoryDisplay = '-';
                       if (
                         node.memory_gb !== null &&
                         node.memory_gb !== undefined
                       ) {
-                        const memoryTotal = node.memory_gb.toFixed(1);
+                        const memoryTotal = formatMemoryValue(node.memory_gb);
                         if (
                           node.memory_free_gb !== null &&
                           node.memory_free_gb !== undefined
                         ) {
-                          const memoryFree = node.memory_free_gb.toFixed(1);
+                          const memoryFree = formatMemoryValue(node.memory_free_gb);
                           memoryDisplay = `${memoryFree} of ${memoryTotal} free`;
                         } else {
                           memoryDisplay = memoryTotal;

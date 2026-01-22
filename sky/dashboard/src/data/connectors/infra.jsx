@@ -1081,9 +1081,7 @@ export async function getDetailedGpuInfo(filter) {
             : '-';
         const cpuCount =
           cpu_val !== null && !isNaN(cpu_val)
-            ? Number.isInteger(cpu_val)
-              ? cpu_val
-              : parseFloat(cpu_val).toFixed(1)
+            ? Math.round(parseFloat(cpu_val)).toString()
             : '-';
         const memory =
           mem_val !== null && !isNaN(mem_val)
