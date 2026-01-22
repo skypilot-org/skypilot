@@ -607,10 +607,15 @@ class TestHelperFunctions:
     def test_env_secret_file_merger(self):
         """"""
         cli = [('hello', 'world'), ('one', 'two')]
-        env_file = {'hello': 'notthis', 'something': 'different', 'secret': 'notsosecure'}
+        env_file = {
+            'hello': 'notthis',
+            'something': 'different',
+            'secret': 'notsosecure'
+        }
         secret_file = {'secret': 'supersecret', 'secret2': 'verysecret'}
 
-        final_envs = command._merge_cli_and_file_vars([None, env_file, None, secret_file], cli)
+        final_envs = command._merge_cli_and_file_vars(
+            [None, env_file, None, secret_file], cli)
         final_envs = dict(final_envs)
         assert final_envs['hello'] == 'world'
         assert final_envs['one'] == 'two'

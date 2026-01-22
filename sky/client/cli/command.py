@@ -318,7 +318,7 @@ def _async_call_or_wait(request_id: server_common.RequestId[T],
 
 
 def _merge_cli_and_file_vars(
-        env_dicts: List[Dict[str, str]],
+        env_dicts: List[Optional[Dict[str, str]]],
         env_list: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
     """Merges all values from env_list and env_dicts. Priority is
     as follows: env_list has highest priority, and env_dict with
