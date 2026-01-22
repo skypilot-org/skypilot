@@ -92,8 +92,10 @@ def _load_credentials() -> Tuple[str, str]:
 
 def get_ssh_port(instance):
     # get ssh port example:
-    # {"port":22,"proxyPort":30003,"protocol":"SSH",
-    # "host":"127.0.0.1","privateHost":"127.0.0.1","healthy":true}
+    # {'port': 22, 'proxyPort': 30035, 'protocol': 'SSH',
+    # 'host': '127.0.0.1', 'healthy': True,
+    # 'ingressUrl': 'ssh root@127.0.0.1 -p 30035 -i <private key file>',
+    # 'serviceName': 'SSH Port'}
     expose = instance.get('expose', [])
     for port in expose:
         if port.get('protocol') == 'SSH':
