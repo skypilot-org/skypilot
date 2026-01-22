@@ -22,7 +22,7 @@ Common use cases include:
 - **RL post-training**: Separate tasks for trainer, reward modeling, rollout server, and data serving
 - **Parallel train-eval**: Training and evaluation running in parallel with shared storage
 
-.. figure:: ../images/job-groups-rl-architecture.svg
+.. figure:: ../images/job-groups-rl-architecture.jpg
    :width: 90%
    :align: center
    :alt: RL Post-Training Architecture with Job Groups
@@ -189,6 +189,14 @@ Parallel train-eval with shared storage
 
 This example runs training and evaluation in parallel, sharing checkpoints via
 a Kubernetes PVC volume:
+
+.. figure:: ../images/job-groups-train-eval-architecture.png
+   :width: 80%
+   :align: center
+   :alt: Parallel Train-Eval Architecture with Job Groups
+
+   Parallel training and evaluation with shared storage. The trainer saves checkpoints
+   to a shared volume while the evaluator monitors and evaluates new checkpoints on-the-fly.
 
 .. code-block:: yaml
 

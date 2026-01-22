@@ -7,7 +7,7 @@ This example demonstrates a distributed RL post-training architecture using SkyP
 The example consists of 5 task types that communicate over HTTP, with built-in load balancing for scaling inference:
 
 <p align="center">
-  <img src="./diagram.jpg" width="80%">
+  <img src="../../docs/source/images/job-groups-rl-architecture.jpg" width="80%">
 </p>
 
 ### Components

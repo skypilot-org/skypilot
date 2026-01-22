@@ -4,7 +4,9 @@ This example demonstrates SkyPilot job groups with parallel training and evaluat
 
 ## Architecture
 
-![](./diagram.png)
+<p align="center">
+  <img src="../../docs/source/images/job-groups-train-eval-architecture.png" width="80%">
+</p>
 
 ### Components
 
