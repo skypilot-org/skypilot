@@ -1,4 +1,5 @@
 import React, {
+  useCallback,
   useEffect,
   useRef,
   createContext,
@@ -45,7 +46,7 @@ export function TourProvider({ children }) {
   const [tourJustStarted, setTourJustStarted] = useState(false);
   const tourNavigatingRef = useRef(false);
 
-  const startTour = () => {
+  const startTour = useCallback(() => {
     if (tourRef.current) {
       setIsTourActive(true);
       setTourJustStarted(true);
@@ -57,7 +58,7 @@ export function TourProvider({ children }) {
         setTourJustStarted(false);
       }, 1000);
     }
-  };
+  }, []);
 
   useEffect(() => {
     // Initialize the tour only once
@@ -1726,8 +1727,9 @@ export function TourProvider({ children }) {
         tourRef.current.complete();
       }
     };
+    // markTourCompleted/router/tourAutoStarted used in step callbacks, not as effect deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isFirstVisit]);
+  }, [isFirstVisit, startTour]);
 
   // Block navigation during tour
   useEffect(() => {
