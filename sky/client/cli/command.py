@@ -1568,12 +1568,15 @@ def _handle_services_request(
             # print the original error.
             pass
         if not msg:
-            msg = (f'Failed to fetch {noun} statuses due to connection issues. '
-                   'Please try again later. Details: '
-                   f'{common_utils.format_exception(e, use_bracket=True)}')
-    except Exception as e:  # pylint: disable=broad-except
-        msg = (f'Failed to fetch {noun} statuses: '
-               f'{common_utils.format_exception(e, use_bracket=True)}')
+            # This is an actual error (connection issues), not a normal state.
+            # Format the error message and raise a new exception.
+            # Use 'from None' to suppress the exception chain and only show
+            # the formatted message.
+            error_msg = (
+                f'Failed to fetch {noun} statuses due to connection issues. '
+                'Please try again later. Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+            raise RuntimeError(error_msg) from None
     else:
         if show_endpoint:
             if len(service_records) != 1:
@@ -2024,6 +2027,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     sdk.api_cancel(pool_status_request_id, silent=True)
                     num_pools = -1
                     msg = 'KeyboardInterrupt'
+                except Exception as e:  # pylint: disable=broad-except
+                    # For internal calls, handle exceptions gracefully by
+                    # printing the error message instead of crashing.
+                    num_pools = None
+                    msg = str(e)
         if num_pools is not None:
             if num_pools > 0:
                 click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
@@ -2052,6 +2060,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     sdk.api_cancel(service_status_request_id, silent=True)
                     num_services = -1
                     msg = 'KeyboardInterrupt'
+                except Exception as e:  # pylint: disable=broad-except
+                    # For internal calls, handle exceptions gracefully by
+                    # printing the error message instead of crashing.
+                    num_services = None
+                    msg = str(e)
         click.echo(msg)
         if num_services is not None:
             hints.append(
