@@ -16,7 +16,6 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky.server import middleware_utils
-from sky.server.auth import authn
 from sky.server.auth import loopback
 from sky.users import permission
 from sky.utils import common_utils
@@ -159,8 +158,6 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     permission.permission_service.add_user_if_not_exists(
                         auth_user.id)
                 request.state.auth_user = auth_user
-                await authn.override_user_info_in_request_body(
-                    request, auth_user)
                 return await call_next(request)
             elif auth_response.status == http.HTTPStatus.UNAUTHORIZED:
                 # For /api/health, we should allow unauthenticated requests to
